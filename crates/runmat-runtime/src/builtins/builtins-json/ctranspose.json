@@ -62,7 +62,7 @@
     {
       "description": "Conjugate transpose of a complex scalar",
       "input": "z = 2 + 3i;\nresult = ctranspose(z)",
-      "output": "result = 2 - 3i;"
+      "output": "result = 2 - 3i"
     },
     {
       "description": "Conjugate transpose of text data preserves characters",

@@ -32,9 +32,9 @@
     "unit": "builtins::math::elementwise::gamma::tests",
     "integration": "builtins::math::elementwise::gamma::tests::gamma_gpu_provider_fallback"
   },
-  "description": "`Y = gamma(X)` evaluates the Euler gamma function element-by-element. For positive integers the result is `(n-1)!`, half-integers map to scaled square-roots of \u03c0, and complex arguments follow the analytic continuation `\u0393(z) = \u222b_0^\u221e t^{z-1} e^{-t} dt`.",
+  "description": "`Y = gamma(X)` evaluates the Euler gamma function element-by-element. For positive integers the result is `(n-1)!`, half-integers map to scaled square-roots of π, and complex arguments follow the analytic continuation `Γ(z) = ∫_0^∞ t^{z-1} e^{-t} dt`.",
   "behaviors": [
-    "Respects MATLAB\u2019s broadcasting rules for all dense tensor inputs.",
+    "Respects MATLAB’s broadcasting rules for all dense tensor inputs.",
     "Promotes logical and integer values to double precision before evaluation; character arrays are converted through their Unicode code points.",
     "Computes complex values with a Lanczos approximation and the reflection identity so results match MATLAB for every quadrant.",
     "Returns `Inf` at non-positive integers, mirroring the poles in the analytic definition.",
@@ -87,7 +87,7 @@
     },
     {
       "question": "Do complex inputs work?",
-      "answer": "Absolutely. RunMat evaluates the analytic continuation using the reflection identity `\u0393(z) = \u03c0 / (sin(\u03c0z) \u0393(1-z))` for `Re(z) < 0.5`, so complex arguments behave the same as in MATLAB."
+      "answer": "Absolutely. RunMat evaluates the analytic continuation using the reflection identity `Γ(z) = π / (sin(πz) Γ(1-z))` for `Re(z) < 0.5`, so complex arguments behave the same as in MATLAB."
     },
     {
       "question": "Can I keep results on the GPU?",
@@ -128,8 +128,8 @@
     "label": "`crates/runmat-runtime/src/builtins/math/elementwise/gamma.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/elementwise/gamma.rs"
   },
-  "gpu_residency": "Usually not. Accelerate keeps tensors on the GPU when the provider exposes a `unary_gamma` kernel (the default WGPU backend does). Otherwise RunMat gathers the tensor, evaluates the gamma function on the CPU, and uploads the result again only when you explicitly request GPU residency via `'like', gpuArray(...)`. Complex results remain on the host because today\u2019s GPU providers operate on real buffers.",
+  "gpu_residency": "Usually not. Accelerate keeps tensors on the GPU when the provider exposes a `unary_gamma` kernel (the default WGPU backend does). Otherwise RunMat gathers the tensor, evaluates the gamma function on the CPU, and uploads the result again only when you explicitly request GPU residency via `'like', gpuArray(...)`. Complex results remain on the host because today’s GPU providers operate on real buffers.",
   "gpu_behavior": [
-    "RunMat Accelerate first calls the active provider\u2019s `unary_gamma` hook. With the WGPU backend this kernel runs entirely on device using a Lanczos approximation. Providers that decline the hook trigger an automatic gather to the host. After computing the double-precision result, RunMat re-uploads the tensor when you pass `'like', gpuArray(...)`. Complex outputs always stay on the host because current providers expose real-valued buffers only."
+    "RunMat Accelerate first calls the active provider’s `unary_gamma` hook. With the WGPU backend this kernel runs entirely on device using a Lanczos approximation. Providers that decline the hook trigger an automatic gather to the host. After computing the double-precision result, RunMat re-uploads the tensor when you pass `'like', gpuArray(...)`. Complex outputs always stay on the host because current providers expose real-valued buffers only."
   ]
 }

@@ -45,7 +45,7 @@
     {
       "description": "Fitting a straight line through noisy samples",
       "input": "x = 0:5;\ny = 2.5 * x + 1 + 0.05 * randn(size(x));\np = polyfit(x, y, 1)",
-      "output": "p \u2248 [2.5 1.0];   % slope and intercept recovered from noisy data"
+      "output": "p ≈ [2.5 1.0];   % slope and intercept recovered from noisy data"
     },
     {
       "description": "Computing a quadratic fit and reusing `mu`",
@@ -122,6 +122,6 @@
     "url": "https://github.com/runmat-org/runmat/issues/new/choose"
   },
   "gpu_behavior": [
-    "RunMat\u2019s acceleration layer exposes a dedicated `polyfit` provider hook. The WGPU provider routes requests through this hook, gathers inputs to the host, executes the shared Householder QR solver, and returns MATLAB-compatible outputs while preserving residency metadata. Providers that have not implemented the hook yet fall back to the same host code path automatically, so results stay correct even when the inputs originated on the GPU."
+    "RunMat’s acceleration layer exposes a dedicated `polyfit` provider hook. The WGPU provider routes requests through this hook, gathers inputs to the host, executes the shared Householder QR solver, and returns MATLAB-compatible outputs while preserving residency metadata. Providers that have not implemented the hook yet fall back to the same host code path automatically, so results stay correct even when the inputs originated on the GPU."
   ]
 }

@@ -35,11 +35,11 @@
   "description": "`linspace(a, b, n)` returns `n` linearly spaced points between the start point `a` and the end point `b`, inclusive. When `n` is omitted, MATLAB (and RunMat) default to 100 points. The result is always a row vector.",
   "behaviors": [
     "`linspace(a, b)` is equivalent to `linspace(a, b, 100)`.",
-    "`linspace(a, b, 0)` returns a `1\u00d70` empty double row vector.",
+    "`linspace(a, b, 0)` returns a `1×0` empty double row vector.",
     "`linspace(a, b, 1)` returns `b`.",
     "`linspace(a, b, 2)` returns `[a b]`.",
     "Complex end points are supported; the real and imaginary parts are interpolated independently.",
-    "Inputs may be scalars, `1\u00d71` tensors, or GPU scalars (`gpuArray` handles).",
+    "Inputs may be scalars, `1×1` tensors, or GPU scalars (`gpuArray` handles).",
     "The third argument must be a finite, non-negative integer."
   ],
   "examples": [
@@ -51,7 +51,7 @@
     {
       "description": "Sampling 100 points when the third argument is omitted",
       "input": "t = linspace(-pi, pi)",
-      "output": "% t is a 1x100 row vector spanning [-pi, pi]\ndisp(t(1));\ndisp(t(end));"
+      "output": "% t is a 1x100 row vector spanning [-pi, pi]\ndisp(t(1));\ndisp(t(end))"
     },
     {
       "description": "Constructing complex breakpoints",
@@ -61,7 +61,7 @@
     {
       "description": "Staying on the GPU automatically",
       "input": "a = gpuArray(0);\nb = gpuArray(2*pi);\ntheta = linspace(a, b, 1024);\nwave = sin(theta)",
-      "output": "% theta and wave remain on the GPU when an acceleration provider is active.\ndisp(gather(theta(1:5)));"
+      "output": "% theta and wave remain on the GPU when an acceleration provider is active.\ndisp(gather(theta(1:5)))"
     }
   ],
   "faqs": [
@@ -75,7 +75,7 @@
     },
     {
       "question": "Can I request zero points?",
-      "answer": "Yes. `linspace(a, b, 0)` returns a `1\u00d70` empty row vector."
+      "answer": "Yes. `linspace(a, b, 0)` returns a `1×0` empty row vector."
     },
     {
       "question": "Does the third argument need to be an integer?",

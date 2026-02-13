@@ -46,33 +46,33 @@
     {
       "description": "Counting nonzero elements in a dense matrix",
       "input": "A = [1 0 3; 0 0 5];\ncount = nnz(A)",
-      "output": "count = 3;"
+      "output": "count = 3"
     },
     {
       "description": "Counting nonzero entries in each column",
       "input": "A = [1 0 3; 0 7 5];\nperColumn = nnz(A, 1)",
-      "output": "perColumn = [1 1 2];"
+      "output": "perColumn = [1 1 2]"
     },
     {
       "description": "Counting nonzero entries in each row",
       "input": "A = [1 0 3; 0 7 0];\nperRow = nnz(A, 2)",
-      "output": "perRow = [2; 1];"
+      "output": "perRow = [2; 1]"
     },
     {
       "description": "Recognising `NaN` values as nonzero",
       "input": "values = [0 NaN 5];\nnanCount = nnz(values)",
-      "output": "nanCount = 2;"
+      "output": "nanCount = 2"
     },
     {
       "description": "Counting GPU-resident values without manual gathers",
       "input": "G = gpuArray([1 0 2 0 3]);\ngpuCount = nnz(G)",
-      "output": "gpuCount = 3;"
+      "output": "gpuCount = 3"
     }
   ],
   "faqs": [
     {
       "question": "When should I use the `nnz` function?",
-      "answer": "Use `nnz` whenever you need a quick count of nonzero elements\u2014for example when measuring sparsity or validating that an algorithm produced the expected number of nonzeros."
+      "answer": "Use `nnz` whenever you need a quick count of nonzero elements—for example when measuring sparsity or validating that an algorithm produced the expected number of nonzeros."
     },
     {
       "question": "What data types does `nnz` support?",
@@ -84,7 +84,7 @@
     },
     {
       "question": "How can I count nonzeros along a dimension?",
-      "answer": "Use `nnz(X, dim)`\u2014it behaves like `sum(X ~= 0, dim)` and returns a tensor whose size in the specified dimension becomes `1`."
+      "answer": "Use `nnz(X, dim)`—it behaves like `sum(X ~= 0, dim)` and returns a tensor whose size in the specified dimension becomes `1`."
     },
     {
       "question": "What does `nnz` return for logical arrays?",

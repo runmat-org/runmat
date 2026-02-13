@@ -50,7 +50,7 @@
     {
       "description": "Returning matched substrings ignoring case",
       "input": "matches = regexpi('abcXYZ123', '[a-z]{3}', 'match')",
-      "output": "matches =\n  1\u00d72 cell array\n    {'abc'}    {'XYZ'}"
+      "output": "matches =\n  1×2 cell array\n    {'abc'}    {'XYZ'}"
     },
     {
       "description": "Extracting capture tokens case-insensitively",
@@ -65,7 +65,7 @@
     {
       "description": "Splitting a string array without worrying about letter case",
       "input": "parts = regexpi([\"Color:Red\"; \"COLOR:Blue\"], 'color:', 'split')",
-      "output": "parts =\n  2\u00d71 cell array\n    {1\u00d72 cell}\n    {1\u00d72 cell}\n\nparts{2}{2}\nans =\n    'Blue'"
+      "output": "parts =\n  2×1 cell array\n    {1×2 cell}\n    {1×2 cell}\n\nparts{2}{2}\nans =\n    'Blue'"
     },
     {
       "description": "Enforcing case-sensitive matches with `'matchcase'`",
@@ -76,7 +76,7 @@
   "faqs": [
     {
       "question": "How are the outputs ordered when I request several?",
-      "answer": "If you do not specify explicit output flags, the default order is match starts, match ends, and matched substrings\u2014identical to MATLAB. Providing flags such as `'match'` or `'tokens'` returns only the requested outputs."
+      "answer": "If you do not specify explicit output flags, the default order is match starts, match ends, and matched substrings—identical to MATLAB. Providing flags such as `'match'` or `'tokens'` returns only the requested outputs."
     },
     {
       "question": "Can I make `regexpi` behave like `regexp` with case sensitivity?",

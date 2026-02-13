@@ -46,32 +46,32 @@
     {
       "description": "Compute power-of-two for scalar exponents",
       "input": "y = pow2(3)",
-      "output": "y = 8;"
+      "output": "y = 8"
     },
     {
       "description": "Apply `pow2` to a vector of exponents",
       "input": "exponents = [-1 0 1 2];\nvalues = pow2(exponents)",
-      "output": "values = [0.5 1 2 4];"
+      "output": "values = [0.5 1 2 4]"
     },
     {
       "description": "Scale mantissas by binary exponents",
       "input": "mantissa = [0.75 1.5];\nexponent = [4 5];\nscaled = pow2(mantissa, exponent)",
-      "output": "scaled = [12 48];"
+      "output": "scaled = [12 48]"
     },
     {
       "description": "Use complex exponents with `pow2`",
       "input": "z = pow2(1 + 2i)",
-      "output": "z = -0.3667 + 0.8894i;"
+      "output": "z = -0.3667 + 0.8894i"
     },
     {
       "description": "Run `pow2` on GPU arrays",
       "input": "G = gpuArray([1 2 3]);\nresult_gpu = pow2(G);\nresult = gather(result_gpu)",
-      "output": "result = [2 4 8];"
+      "output": "result = [2 4 8]"
     },
     {
       "description": "Convert characters to power-of-two values",
       "input": "codes = pow2('ABC')",
-      "output": "codes = [5.9874e+41 1.2946e+42 2.7992e+42];"
+      "output": "codes = [3.6893e+19 7.3787e+19 1.4757e+20]"
     }
   ],
   "faqs": [
@@ -81,7 +81,7 @@
     },
     {
       "question": "How are logical inputs handled?",
-      "answer": "Logical values convert to doubles (`true \u2192 1`, `false \u2192 0`) before applying the power."
+      "answer": "Logical values convert to doubles (`true → 1`, `false → 0`) before applying the power."
     },
     {
       "question": "Can I mix scalars and arrays?",
@@ -89,7 +89,7 @@
     },
     {
       "question": "What happens with complex inputs?",
-      "answer": "Complex exponents and/or mantissas produce complex outputs using `exp((re + i\u00b7im) * ln(2))`."
+      "answer": "Complex exponents and/or mantissas produce complex outputs using `exp((re + i·im) * ln(2))`."
     },
     {
       "question": "Will GPU and CPU results differ?",

@@ -38,13 +38,13 @@
     "Lower form (`chol(A, 'lower')`): Returns a lower-triangular factor `L` such that `L * L' = A`. The two-output variant `[L, p] = chol(A, 'lower')` follows the same failure semantics.",
     "The option `'upper'` is accepted for completeness and matches the default behaviour.",
     "Real logical inputs are promoted to double precision. Complex inputs must be Hermitian positive definite (HPD); the factor preserves complex values.",
-    "Scalar and `0\u00d70` inputs are supported. `chol([])` returns an empty matrix with `p = 0`."
+    "Scalar and `0×0` inputs are supported. `chol([])` returns an empty matrix with `p = 0`."
   ],
   "examples": [
     {
       "description": "Upper-triangular Cholesky factor of a symmetric positive-definite matrix",
       "input": "A = [4 12 -16; 12 37 -43; -16 -43 98];\nR = chol(A)",
-      "output": "R =\n     2     6    -8\n     0     1    -5\n     0     0     3"
+      "output": "R =\n     2     6    -8\n     0     1     5\n     0     0     3"
     },
     {
       "description": "Lower-triangular factor using the `'lower'` option",
@@ -54,7 +54,7 @@
     {
       "description": "Detecting a non-positive-definite matrix with the two-output form",
       "input": "A = [1 2; 2 1];\n[R, p] = chol(A)",
-      "output": "p =\n     2\n\nR =\n     1     2\n     0     0"
+      "output": "R =\n     1     2\n     0     0\n\np =\n     2"
     },
     {
       "description": "Using the Cholesky factor to solve linear systems",
@@ -63,12 +63,12 @@
     {
       "description": "Cholesky factor of a complex Hermitian positive-definite matrix",
       "input": "A = [5 1-2i; 1+2i 4];\n[R, p] = chol(A)",
-      "output": "p =\n     0\n\nR =\n    2.2361   0.2236 -0.8944i\n         0   1.9849 +0.5046i"
+      "output": "R =\n    2.2361   0.4472 -0.8944i\n         0   1.7321\n\np =\n     0"
     },
     {
       "description": "Running `chol` on a `gpuArray`",
       "input": "G = gpuArray([6 2; 2 5]);\n[R, p] = chol(G);\nclass(R)",
-      "output": "p =\n     0\n\nans =\n    'gpuArray'"
+      "output": "ans =\n    'gpuArray'"
     }
   ],
   "faqs": [
@@ -98,7 +98,7 @@
     },
     {
       "question": "How should I interpret the result when `p > 0`?",
-      "answer": "Only the leading `(p-1)` columns/rows of the factor are valid. The remaining portions are zeros, mirroring MATLAB\u2019s contract."
+      "answer": "Only the leading `(p-1)` columns/rows of the factor are valid. The remaining portions are zeros, mirroring MATLAB’s contract."
     },
     {
       "question": "Does the GPU path return the same flag `p`?",
@@ -110,7 +110,7 @@
     },
     {
       "question": "How should I choose between `chol` and `lu`/`qr`?",
-      "answer": "Use `chol` when the matrix is Hermitian positive definite\u2014its triangular factors are cheaper to compute and exploit symmetry. Use `lu` or `qr` for more general matrices."
+      "answer": "Use `chol` when the matrix is Hermitian positive definite—its triangular factors are cheaper to compute and exploit symmetry. Use `lu` or `qr` for more general matrices."
     }
   ],
   "links": [

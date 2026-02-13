@@ -143,7 +143,7 @@
     "label": "`crates/runmat-runtime/src/builtins/io/filetext/fwrite.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/filetext/fwrite.rs"
   },
-  "gpu_residency": "You rarely need to move data with `gpuArray` purely for `fwrite`. RunMat keeps tensors on the GPU while compute stays in fused expressions, but explicit file I/O always happens on the host. If your data already lives on the device, `fwrite` performs an automatic gather, writes the bytes, and leaves residency unchanged for the rest of the program. You can still call `gpuArray` manually when porting MATLAB code verbatim\u2014the builtin will gather it for you automatically.",
+  "gpu_residency": "You rarely need to move data with `gpuArray` purely for `fwrite`. RunMat keeps tensors on the GPU while compute stays in fused expressions, but explicit file I/O always happens on the host. If your data already lives on the device, `fwrite` performs an automatic gather, writes the bytes, and leaves residency unchanged for the rest of the program. You can still call `gpuArray` manually when porting MATLAB code verbatim—the builtin will gather it for you automatically.",
   "gpu_behavior": [
     "`fwrite` never launches GPU kernels. If any input value (file identifier, data, or optional arguments) is backed by a GPU tensor, RunMat gathers the value to host memory before performing the write. This mirrors MATLAB's own behaviour when working with `gpuArray` objects: data is moved to the CPU for I/O. When a provider is available, the gather occurs via the provider's `download` path; otherwise the builtin emits an informative error."
   ]

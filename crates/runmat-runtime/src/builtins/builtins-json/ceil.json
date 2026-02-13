@@ -37,9 +37,9 @@
     "Works on scalars, vectors, matrices, and higher-dimensional tensors with MATLAB broadcasting semantics.",
     "`ceil(X, N)` rounds toward positive infinity with `N` decimal digits (positive `N`) or powers of ten (negative `N`).",
     "`ceil(X, N, 'significant')` rounds to `N` significant digits; `N` must be a positive integer.",
-    "Logical inputs are promoted to doubles (`false \u2192 0`, `true \u2192 1`) before applying the ceiling operation.",
+    "Logical inputs are promoted to doubles (`false → 0`, `true → 1`) before applying the ceiling operation.",
     "Character arrays are interpreted numerically (their Unicode code points) and return dense double tensors.",
-    "Complex inputs are rounded component-wise: `ceil(a + bi) = ceil(a) + i\u00b7ceil(b)`.",
+    "Complex inputs are rounded component-wise: `ceil(a + bi) = ceil(a) + i·ceil(b)`.",
     "Non-finite values (`NaN`, `Inf`, `-Inf`) propagate unchanged.",
     "Empty arrays return empty arrays of the appropriate shape.",
     "Appending `'like', prototype` forces the result to match the residency of `prototype` (CPU or GPU). Prototypes must currently be numeric."
@@ -48,12 +48,12 @@
     {
       "description": "Rounding values up to the next integer",
       "input": "x = [-2.7, -0.3, 0, 0.8, 3.2];\ny = ceil(x)",
-      "output": "y = [-2, 0, 0, 1, 4];"
+      "output": "y = [-2, 0, 0, 1, 4]"
     },
     {
       "description": "Rounding a matrix up element-wise",
       "input": "A = [1.2 4.7; -3.4 5.0];\nB = ceil(A)",
-      "output": "B = [2 5; -3 5];"
+      "output": "B = [2 5; -3 5]"
     },
     {
       "description": "Rounding fractions upward in a tensor",
@@ -63,17 +63,17 @@
     {
       "description": "Rounding up to two decimal places",
       "input": "temps = [21.452 19.991 22.501];\nrounded = ceil(temps, 2)",
-      "output": "rounded = [21.46 20 22.51];"
+      "output": "rounded = [21.46 20 22.51]"
     },
     {
       "description": "Rounding to significant digits",
       "input": "measurements = [0.001234 12.3456 98765];\nsig2 = ceil(measurements, 2, 'significant')",
-      "output": "sig2 = [0.0013 13.0 99000];"
+      "output": "sig2 = [0.0013 13.0 99000]"
     },
     {
       "description": "Rounding complex numbers toward positive infinity",
       "input": "z = [1.2 + 2.1i, -0.2 - 3.9i];\nresult = ceil(z)",
-      "output": "result = [2 + 3i, 0 - 3i];"
+      "output": "result = [2 + 3i, 0 - 3i]"
     },
     {
       "description": "Keeping GPU results on-device with `unary_ceil`",
@@ -89,7 +89,7 @@
   "faqs": [
     {
       "question": "Does `ceil` always round toward positive infinity?",
-      "answer": "Yes\u2014positive values round up away from zero, while negative values round toward zero (e.g., `ceil(-0.1) = 0`)."
+      "answer": "Yes—positive values round up away from zero, while negative values round toward zero (e.g., `ceil(-0.1) = 0`)."
     },
     {
       "question": "How are complex numbers handled?",
@@ -148,6 +148,6 @@
   },
   "gpu_residency": "```matlab:runnable\nA = [1.8 -0.2; 2.7 3.4];\nproto = gpuArray(0);\nG = ceil(A, 'like', proto);   % Result remains on the GPU\nresult = gather(G);\n```\n\nExpected output:\n\n```matlab\nresult =\n    [ 2  0;\n      3  4]\n```",
   "gpu_behavior": [
-    "When tensors already reside on the GPU, RunMat consults the active acceleration provider. If the provider implements the `unary_ceil` hook, `ceil(X)` executes entirely on the device and keeps tensors resident. When decimal or significant-digit rounding is requested\u2014or when the provider lacks `unary_ceil`\u2014RunMat gathers the tensor to host memory, applies the CPU implementation, and honours any `'like'` GPU prototype by uploading the result back to the device. This maintains MATLAB-compatible behaviour while exposing GPU acceleration whenever it is available."
+    "When tensors already reside on the GPU, RunMat consults the active acceleration provider. If the provider implements the `unary_ceil` hook, `ceil(X)` executes entirely on the device and keeps tensors resident. When decimal or significant-digit rounding is requested—or when the provider lacks `unary_ceil`—RunMat gathers the tensor to host memory, applies the CPU implementation, and honours any `'like'` GPU prototype by uploading the result back to the device. This maintains MATLAB-compatible behaviour while exposing GPU acceleration whenever it is available."
   ]
 }

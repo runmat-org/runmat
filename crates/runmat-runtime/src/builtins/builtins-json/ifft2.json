@@ -33,7 +33,7 @@
     "unit": "builtins::math::fft::ifft2::tests",
     "integration": "builtins::math::fft::ifft2::tests::ifft2_gpu_roundtrip_matches_cpu"
   },
-  "description": "`ifft2(X)` computes the two-dimensional inverse discrete Fourier transform (IDFT) of `X`. It undoes the effect of `fft2` by applying `ifft` along the first dimension and then along the second dimension, preserving MATLAB\u2019s column-major semantics.",
+  "description": "`ifft2(X)` computes the two-dimensional inverse discrete Fourier transform (IDFT) of `X`. It undoes the effect of `fft2` by applying `ifft` along the first dimension and then along the second dimension, preserving MATLAB’s column-major semantics.",
   "behaviors": [
     "`ifft2(X)` transforms along the first two dimensions whose sizes exceed one.",
     "`ifft2(X, M, N)` zero-pads or truncates the spectrum to `M` rows and `N` columns before the inverse.",
@@ -100,7 +100,7 @@
     },
     {
       "question": "Can I pass `gpuArray` size vectors or symmetry flags?",
-      "answer": "No. Length arguments must be host scalars or vectors, and the symmetry flag must be a host string, mirroring MATLAB\u2019s restrictions."
+      "answer": "No. Length arguments must be host scalars or vectors, and the symmetry flag must be a host string, mirroring MATLAB’s restrictions."
     },
     {
       "question": "How are higher-dimensional arrays handled?",
@@ -137,5 +137,5 @@
     "label": "Open a ticket",
     "url": "https://github.com/runmat-org/runmat/issues/new/choose"
   },
-  "gpu_residency": "You usually do **not** need to call `gpuArray` manually. RunMat\u2019s native acceleration layer keeps intermediate tensors on the GPU whenever the provider implements `ifft_dim`. If the provider lacks that hook (or detects an unsupported length), RunMat gathers the input once, executes the inverse transform on the CPU with `rustfft`, and returns a MATLAB-compatible result automatically."
+  "gpu_residency": "You usually do **not** need to call `gpuArray` manually. RunMat’s native acceleration layer keeps intermediate tensors on the GPU whenever the provider implements `ifft_dim`. If the provider lacks that hook (or detects an unsupported length), RunMat gathers the input once, executes the inverse transform on the CPU with `rustfft`, and returns a MATLAB-compatible result automatically."
 }

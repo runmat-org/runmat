@@ -94,7 +94,7 @@
     "label": "`crates/runmat-runtime/src/builtins/timing/toc.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/timing/toc.rs"
   },
-  "gpu_residency": "No. Timing utilities never touch GPU memory. You can freely combine `toc` with code that produces or consumes `gpuArray` values\u2014the stopwatch itself still executes on the CPU.",
+  "gpu_residency": "No. Timing utilities never touch GPU memory. You can freely combine `toc` with code that produces or consumes `gpuArray` values—the stopwatch itself still executes on the CPU.",
   "gpu_behavior": [
     "The stopwatch lives entirely on the host. `toc` never transfers tensors or consults acceleration providers, so there are no GPU hooks to implement. Expressions that combine `toc` with GPU-resident data gather any numeric operands back to the CPU before evaluating the timer logic, and the builtin is excluded from fusion plans entirely."
   ]

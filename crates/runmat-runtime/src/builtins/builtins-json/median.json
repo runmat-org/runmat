@@ -34,12 +34,12 @@
   },
   "description": "`median(x)` returns the middle value of scalars, vectors, matrices, and higher-dimensional tensors. When no dimension is supplied, the reduction runs along the first non-singleton dimension.",
   "behaviors": [
-    "`median(X)` on an `m \u00d7 n` matrix returns a row vector (`1 \u00d7 n`) containing the column medians.",
-    "`median(X, 2)` returns a column vector (`m \u00d7 1`) containing the row medians.",
+    "`median(X)` on an `m × n` matrix returns a row vector (`1 × n`) containing the column medians.",
+    "`median(X, 2)` returns a column vector (`m × 1`) containing the row medians.",
     "`median(X, 'all')` reduces across every element in `X` and returns a scalar.",
     "`median(X, vecdim)` accepts a row or column vector of dimensions (for example `[1 3]`) and reduces each listed axis in a single call while preserving the others.",
     "Even-length slices return the average of the two center elements after sorting.",
-    "Logical inputs are promoted to double precision (`true \u2192 1.0`, `false \u2192 0.0`) before computing the median.",
+    "Logical inputs are promoted to double precision (`true → 1.0`, `false → 0.0`) before computing the median.",
     "`median(..., 'omitnan')` ignores `NaN` values; if every element is `NaN`, the result is `NaN`.",
     "`median(..., 'includenan')` (default) propagates `NaN` when any value in the slice is `NaN`.",
     "Empty slices return `NaN` values that preserve MATLAB-compatible shape semantics.",
@@ -49,27 +49,27 @@
     {
       "description": "Finding the median of an odd-length vector",
       "input": "x = [7 2 9 4 5];\nm = median(x)",
-      "output": "m = 5;"
+      "output": "m = 5"
     },
     {
       "description": "Computing the median of an even-length vector with averaging",
       "input": "x = [1 4 9 10];\nm = median(x)",
-      "output": "m = 6.5;"
+      "output": "m = 6.5"
     },
     {
       "description": "Column-wise median of a matrix",
       "input": "A = [1 3 5; 7 9 11; 2 4 6];\ncolMedians = median(A)",
-      "output": "colMedians = [2 4 6];"
+      "output": "colMedians = [2 4 6]"
     },
     {
       "description": "Row medians while ignoring NaN values",
       "input": "A = [1 NaN 3; 4 5 NaN];\nrowMedians = median(A, 2, 'omitnan')",
-      "output": "rowMedians = [2; 4.5];"
+      "output": "rowMedians = [2; 4.5]"
     },
     {
       "description": "Median of all elements in a matrix",
       "input": "A = reshape(1:6, [3 2]);\noverall = median(A, 'all')",
-      "output": "overall = 3.5;"
+      "output": "overall = 3.5"
     },
     {
       "description": "Median of all elements on a GPU-backed tensor",

@@ -100,7 +100,7 @@
     },
     {
       "question": "Can I force the result to stay on the GPU?",
-      "answer": "Yes\u2014pass `'like', gpuArrayPrototype`. The runtime mirrors the residency of the prototype and uploads the result when necessary."
+      "answer": "Yes—pass `'like', gpuArrayPrototype`. The runtime mirrors the residency of the prototype and uploads the result when necessary."
     }
   ],
   "links": [

@@ -37,7 +37,7 @@
     "RunMat currently represents cell arrays as 2-D grids. The first dimension tiles rows, the second tiles columns, and any higher dimensions inside each element must agree exactly across all cells.",
     "Empty cells contribute zero extent in their tiling dimension while preserving type information.",
     "The output array uses column-major layout for numeric, logical, and complex data, and matches MATLAB character array semantics for text.",
-    "Calling `cell2mat` on an empty cell array returns the empty double matrix `0\u00d70`."
+    "Calling `cell2mat` on an empty cell array returns the empty double matrix `0×0`."
   ],
   "examples": [
     {
@@ -53,7 +53,7 @@
     {
       "description": "Converting logical cell contents into a logical matrix",
       "input": "C = {true(2,1), false(2,1)};\nM = cell2mat(C)",
-      "output": "M =\n  2\u00d72 logical array\n     1     0\n     1     0"
+      "output": "M =\n  2×2 logical array\n     1     0\n     1     0"
     },
     {
       "description": "Handling complex-valued blocks",
@@ -96,7 +96,7 @@
     },
     {
       "question": "What happens with empty cells?",
-      "answer": "Empty cells contribute zero extent along their tiling dimension. For example, if every element in a row is empty, the resulting matrix has zero rows for that block. Completely empty cell arrays produce the `0\u00d70` empty double matrix."
+      "answer": "Empty cells contribute zero extent along their tiling dimension. For example, if every element in a row is empty, the resulting matrix has zero rows for that block. Completely empty cell arrays produce the `0×0` empty double matrix."
     },
     {
       "question": "Does `cell2mat` return GPU arrays when inputs are gpuArray elements?",

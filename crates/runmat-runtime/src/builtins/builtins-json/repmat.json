@@ -34,7 +34,7 @@
   "description": "`repmat(A, reps)` tiles the array `A` so that it repeats according to `reps`. RunMat mirrors MATLAB semantics, supporting scalars, matrices, tensors, logical, string, char, cell, and GPU-resident arrays.",
   "behaviors": [
     "`repmat(A, m, n)` or `repmat(A, [m n])` repeats `A` `m` times along rows and `n` times along columns.",
-    "A size vector `[r1 r2 \u2026 rN]` can be given as a row or column; trailing dimensions default to `1`, letting you replicate only the axes you care about.",
+    "A size vector `[r1 r2 … rN]` can be given as a row or column; trailing dimensions default to `1`, letting you replicate only the axes you care about.",
     "Supplying a scalar replication factor (e.g., `repmat(A, k)`) duplicates `A` across every dimension, ensuring the first two dimensions are replicated even when the input is a row vector.",
     "Zero replication factors produce empty dimensions, e.g., `repmat(A, 0, 3)` yields an empty array with shape `[0 size(A,2)]`.",
     "Char and cell arrays follow MATLAB by supporting row/column tiling; additional dimensions must be `1`, while numeric, logical, complex, and string arrays support full N-D replication.",

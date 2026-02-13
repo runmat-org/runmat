@@ -258,7 +258,12 @@ fn read_csv_rows(
             skipped_rows += 1;
             continue;
         }
-        let parsed = parse_csv_row(&buffer, line_index)?;
+        let parse_start_col = if options.range.is_none() {
+            options.start_col
+        } else {
+            0
+        };
+        let parsed = parse_csv_row(&buffer, line_index, parse_start_col)?;
         max_cols = max_cols.max(parsed.len());
         rows.push(parsed);
     }
@@ -266,9 +271,15 @@ fn read_csv_rows(
     Ok((rows, max_cols, skipped_rows))
 }
 
-fn parse_csv_row(line: &str, line_index: usize) -> BuiltinResult<Vec<f64>> {
+fn parse_csv_row(line: &str, line_index: usize, parse_start_col: usize) -> BuiltinResult<Vec<f64>> {
     let mut values = Vec::new();
     for (col_index, raw_field) in line.split(',').enumerate() {
+        if col_index < parse_start_col {
+            // Respect csvread(..., row, col) offsets by skipping validation for
+            // columns that will be dropped before materializing the output.
+            values.push(0.0);
+            continue;
+        }
         let trimmed = raw_field.trim();
         if trimmed.is_empty() {
             values.push(0.0);
@@ -377,7 +388,7 @@ fn parse_range_numeric(value: &Value) -> BuiltinResult<RangeSpec> {
         _ => {
             return Err(csvread_error(
                 "csvread: numeric Range must be provided as a vector with 2 or 4 elements",
-            ))
+            ));
         }
     };
     if elements.len() != 2 && elements.len() != 4 {
@@ -797,6 +808,23 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 2]);
                 assert_eq!(t.data, vec![1.0, 2.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+        fs::remove_file(path).ok();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn csvread_with_header_and_row_labels_using_offsets() {
+        let path = write_temp_file(&["Name,Jan,Feb", "alpha,1,2", "beta,3,4"]);
+        let args = vec![Value::Int(IntValue::I32(1)), Value::Int(IntValue::I32(1))];
+        let result =
+            csvread_builtin(Value::from(path.to_string_lossy().to_string()), args).expect("csv");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.data, vec![1.0, 3.0, 2.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }

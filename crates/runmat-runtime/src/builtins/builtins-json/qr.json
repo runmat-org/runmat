@@ -30,12 +30,12 @@
     "unit": "builtins::math::linalg::factor::qr::tests",
     "integration": "builtins::math::linalg::factor::qr::tests::qr_three_outputs_reconstructs_input"
   },
-  "description": "`qr(A)` computes an orthogonal (or unitary)\u2013upper-triangular factorization of a real or complex matrix `A`. It matches MATLAB\u2019s dense semantics, supporting full-size, economy-size, and column-pivoted variants.",
+  "description": "`qr(A)` computes an orthogonal (or unitary)–upper-triangular factorization of a real or complex matrix `A`. It matches MATLAB’s dense semantics, supporting full-size, economy-size, and column-pivoted variants.",
   "behaviors": [
     "Single output: `R = qr(A)` returns the upper-triangular (or upper-trapezoidal) factor. Column pivoting is applied implicitly for numerical stability.",
     "Two outputs: `[Q, R] = qr(A)` yields the orthonormal/unitary factor `Q` and the upper-triangular `R` such that `Q * R = A * E`, where `E` is the column permutation matrix selected during factorization. When you omit `E`, the columns of `R` already appear in that permuted order.",
     "Three outputs: `[Q, R, E] = qr(A)` additionally returns the column permutation so that `A * E = Q * R`. Use the `'vector'` option to receive a pivot vector instead of a permutation matrix.",
-    "Economy size: `qr(A, 0)` or `qr(A, 'econ')` returns the reduced-size factors, mirroring MATLAB\u2019s behaviour: when `m \u2265 n`, `Q` is `m \u00d7 n` and `R` is `n \u00d7 n`. For wide matrices (`m < n`) the economy form equals the full form.",
+    "Economy size: `qr(A, 0)` or `qr(A, 'econ')` returns the reduced-size factors, mirroring MATLAB’s behaviour: when `m ≥ n`, `Q` is `m × n` and `R` is `n × n`. For wide matrices (`m < n`) the economy form equals the full form.",
     "Logical inputs are promoted to double precision. Scalars and vectors are treated as 1-D or 2-D dense arrays."
   ],
   "examples": [
@@ -83,7 +83,7 @@
     },
     {
       "question": "What precision do the returned factors use?",
-      "answer": "The builtin always produces double-precision (or complex double) outputs, matching MATLAB\u2019s dense QR behaviour."
+      "answer": "The builtin always produces double-precision (or complex double) outputs, matching MATLAB’s dense QR behaviour."
     },
     {
       "question": "Can I call `qr` on logical arrays?",

@@ -18,6 +18,84 @@ fn reshape_and_index_3d_element() {
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
 }
 
+/// MATLAB only drops *trailing* singleton dimensions. A(:, 2, :) on 3×4×5 → [3, 1, 5].
+#[test]
+fn slice_3d_non_trailing_singleton_shape() {
+    let ast = parse("A = reshape(1:60, 3, 4, 5); S = A(:, 2, :);").unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    let s = vars
+        .iter()
+        .rev()
+        .find(|v| matches!(v, runmat_builtins::Value::Tensor(_)))
+        .unwrap();
+    if let runmat_builtins::Value::Tensor(t) = s {
+        assert_eq!(
+            t.shape,
+            vec![3, 1, 5],
+            "A(:,2,:) on 3×4×5 should be [3, 1, 5]"
+        );
+    }
+}
+
+/// A(1, 1, :) on 3×4×5 → [1, 1, 5], not [5, 1].
+#[test]
+fn slice_3d_leading_scalars_shape() {
+    let ast = parse("A = reshape(1:60, 3, 4, 5); S = A(1, 1, :);").unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    let s = vars
+        .iter()
+        .rev()
+        .find(|v| matches!(v, runmat_builtins::Value::Tensor(_)))
+        .unwrap();
+    if let runmat_builtins::Value::Tensor(t) = s {
+        assert_eq!(
+            t.shape,
+            vec![1, 1, 5],
+            "A(1,1,:) on 3×4×5 should be [1, 1, 5]"
+        );
+    }
+}
+
+#[test]
+fn slice_3d_trailing_singleton_kept_for_vector_index() {
+    let ast = parse("A = reshape(1:24, 3, 4, 2); S = A(:, :, [2]);").unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    let s = vars
+        .iter()
+        .rev()
+        .find(|v| matches!(v, runmat_builtins::Value::Tensor(_)))
+        .unwrap();
+    if let runmat_builtins::Value::Tensor(t) = s {
+        assert_eq!(
+            t.shape,
+            vec![3, 4, 1],
+            "A(:,:,[2]) should keep trailing singleton"
+        );
+    }
+}
+
+#[test]
+fn slice_3d_trailing_singleton_dropped_for_scalar_index() {
+    let ast = parse("A = reshape(1:24, 3, 4, 2); S = A(:, :, 2);").unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    let s = vars
+        .iter()
+        .rev()
+        .find(|v| matches!(v, runmat_builtins::Value::Tensor(_)))
+        .unwrap();
+    if let runmat_builtins::Value::Tensor(t) = s {
+        assert_eq!(
+            t.shape,
+            vec![3, 4],
+            "A(:,:,2) should drop trailing singleton"
+        );
+    }
+}
+
 #[test]
 fn mixed_selectors_basic_2d_range() {
     let ast = parse("A=[1 2 3; 4 5 6; 7 8 9]; sub = A(1:2, 2);").unwrap();

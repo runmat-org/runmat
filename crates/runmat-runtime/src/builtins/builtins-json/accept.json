@@ -34,7 +34,7 @@
   "behaviors": [
     "The first argument must be the struct returned from `tcpserver`. RunMat validates that the struct contains a `__tcpserver_id` field and raises `MATLAB:accept:InvalidTcpServer` when the identifier is missing or no longer points to an active listener.",
     "By default, `accept` uses the timeout configured when the server was created (`Timeout` name-value pair on `tcpserver`). You can override it per call with `accept(server, \"Timeout\", seconds)`. The timeout must be non-negative; the builtin raises `MATLAB:accept:InvalidNameValue` when the value is NaN, negative, or non-scalar.",
-    "Successful calls return immediately with a struct whose fields mirror MATLAB\u2019s `tcpclient` properties (`Address`, `Port`, `NumBytesAvailable`, `BytesAvailableFcn`, `ByteOrder`, `Timeout`, `UserData`, and `Connected`). The struct also contains hidden fields `__tcpserver_id` and `__tcpclient_id` so higher-level builtins can operate on the live socket.",
+    "Successful calls return immediately with a struct whose fields mirror MATLAB’s `tcpclient` properties (`Address`, `Port`, `NumBytesAvailable`, `BytesAvailableFcn`, `ByteOrder`, `Timeout`, `UserData`, and `Connected`). The struct also contains hidden fields `__tcpserver_id` and `__tcpclient_id` so higher-level builtins can operate on the live socket.",
     "If no client connects before the timeout expires, the builtin raises `MATLAB:accept:Timeout`.",
     "When the underlying OS reports an accept failure (for example, because the socket closed), the builtin raises `MATLAB:accept:AcceptFailed` with the platform error message.",
     "Networking occurs on the host CPU. If the server struct or timeout value lives on the GPU, RunMat gathers it to the host automatically before waiting for connections."
@@ -81,7 +81,7 @@
     },
     {
       "question": "Does RunMat support IPv6 clients?",
-      "answer": "Yes. The builtin accepts IPv4 or IPv6 clients and records their string representation in the returned struct\u2019s `Address` field."
+      "answer": "Yes. The builtin accepts IPv4 or IPv6 clients and records their string representation in the returned struct’s `Address` field."
     },
     {
       "question": "Is there a queue limit for pending connections?",
@@ -101,7 +101,7 @@
     },
     {
       "question": "Does the builtin support TLS?",
-      "answer": "Not yet. TLS will be layered on top of the same client identifier once RunMat\u2019s TLS provider lands."
+      "answer": "Not yet. TLS will be layered on top of the same client identifier once RunMat’s TLS provider lands."
     }
   ],
   "links": [

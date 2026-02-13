@@ -35,37 +35,37 @@
   "description": "`Y = log10(X)` computes the base-10 logarithm of every element in `X`, following MATLAB's numeric semantics for real, logical, character, and complex inputs. Negative real values promote to complex results so that you can analyze magnitudes without losing phase information.",
   "behaviors": [
     "`log10` operates element-wise with MATLAB broadcasting rules.",
-    "Logical inputs convert to doubles (`true \u2192 1.0`, `false \u2192 0.0`) before the logarithm is applied.",
+    "Logical inputs convert to doubles (`true → 1.0`, `false → 0.0`) before the logarithm is applied.",
     "Character arrays are interpreted as their numeric code points and return dense double tensors.",
     "`log10(0)` returns `-Inf`, matching MATLAB's handling of the logarithm singularity at zero.",
-    "Negative real values promote to complex results: `log10(-10)` returns `1 + i\u00b7\u03c0/ln(10)`.",
+    "Negative real values promote to complex results: `log10(-10)` returns `1 + i·π/ln(10)`.",
     "Complex inputs follow MATLAB's definition: `log10(z) = log(z) / ln(10)`."
   ],
   "examples": [
     {
       "description": "Finding the order of magnitude of a number",
       "input": "value = log10(1000)",
-      "output": "value = 3;"
+      "output": "value = 3"
     },
     {
       "description": "Computing base-10 logarithms of a matrix",
       "input": "A = [1 10 100; 0.1 0.01 0.001];\nB = log10(A)",
-      "output": "B = [0 1 2; -1 -2 -3];"
+      "output": "B = [0 1 2; -1 -2 -3]"
     },
     {
       "description": "Understanding how `log10` handles zero",
       "input": "z = log10(0)",
-      "output": "z = -Inf;"
+      "output": "z = -Inf"
     },
     {
       "description": "Working with negative inputs using complex results",
       "input": "neg = [-10 -100];\nout = log10(neg)",
-      "output": "out = [1.0000 + 1.3644i, 2.0000 + 1.3644i];"
+      "output": "out = [1.0000 + 1.3644i, 2.0000 + 1.3644i]"
     },
     {
       "description": "Running `log10` on GPU-resident data",
       "input": "G = gpuArray([1 10 1000]);\nresult = log10(G);\nhost = gather(result)",
-      "output": "host = [0 1 3];"
+      "output": "host = [0 1 3]"
     }
   ],
   "faqs": [
@@ -79,7 +79,7 @@
     },
     {
       "question": "How does `log10` handle negative real numbers?",
-      "answer": "Negative values promote to complex numbers with an imaginary component of `\u03c0/ln(10)`. This preserves phase information instead of producing `NaN`."
+      "answer": "Negative values promote to complex numbers with an imaginary component of `π/ln(10)`. This preserves phase information instead of producing `NaN`."
     },
     {
       "question": "Can I pass complex inputs to `log10`?",

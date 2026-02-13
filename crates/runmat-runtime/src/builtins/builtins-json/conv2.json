@@ -42,15 +42,16 @@
   "behaviors": [
     "`conv2(A, B)` returns the full 2-D convolution of `A` and `B`.",
     "`conv2(A, B, 'same')` slices the central part of the full convolution so the output matches the shape of `A`.",
+    "For even-sized kernels with `'same'`, alignment follows MATLAB's top-left convention in each even dimension.",
     "`conv2(A, B, 'valid')` returns only those points where `B` overlaps `A` completely.",
     "`conv2(hcol, hrow, A)` is syntactic sugar for `conv2(hcol(:) * hrow(:)', A)`.",
-    "Scalars are treated as `1\u00d71` matrices and preserve the orientation of the other input.",
-    "Empty inputs follow MATLAB\u2019s rules: `conv2([], X)` and `conv2(X, [])` return empty matrices (or zero-sized slices for `'same'`).",
+    "Scalars are treated as `1×1` matrices and preserve the orientation of the other input.",
+    "Empty inputs follow MATLAB’s rules: `conv2([], X)` and `conv2(X, [])` return empty matrices (or zero-sized slices for `'same'`).",
     "Logical inputs are promoted to double precision before computation; complex inputs preserve their imaginary part throughout the convolution."
   ],
   "examples": [
     {
-      "description": "Smoothing an image patch with a 3\u00d73 averaging kernel",
+      "description": "Smoothing an image patch with a 3×3 averaging kernel",
       "input": "A = [1 2 3; 4 5 6; 7 8 9];\nh = ones(3) / 9;\nsmoothed = conv2(A, h, 'same')",
       "output": "smoothed =\n    1.3333    2.3333    1.7778\n    3.0000    5.0000    3.6667\n    2.6667    4.3333    3.1111"
     },
@@ -72,7 +73,7 @@
     {
       "description": "Using the separable form with column and row vectors",
       "input": "hcol = [1; 2; 1];\nhrow = [1 0 -1];\nA = [3 4 5; 6 7 8; 9 10 11];\ngx = conv2(hcol, hrow, A, 'same')",
-      "output": "gx =\n   -15    -6    15\n   -28    -8    28\n   -27    -6    27"
+      "output": "gx =\n    27    -6   -27\n    28    -8   -28\n    15    -6   -15"
     },
     {
       "description": "Convolving gpuArray inputs with transparent fallbacks",
@@ -82,7 +83,7 @@
   "faqs": [
     {
       "question": "Does `conv2` support the three MATLAB shape modes?",
-      "answer": "Yes. Pass `'full'`, `'same'`, or `'valid'` as the final argument and RunMat will mirror MATLAB\u2019s output sizes and edge handling precisely."
+      "answer": "Yes. Pass `'full'`, `'same'`, or `'valid'` as the final argument and RunMat will mirror MATLAB’s output sizes and edge handling precisely."
     },
     {
       "question": "How do I use the separable form?",
@@ -90,7 +91,7 @@
     },
     {
       "question": "What happens if one input is empty?",
-      "answer": "An empty input produces an empty output (or a zero-sized slice for `'same'`). This follows MATLAB\u2019s behaviour and avoids surprising dimension growth."
+      "answer": "An empty input produces an empty output (or a zero-sized slice for `'same'`). This follows MATLAB’s behaviour and avoids surprising dimension growth."
     },
     {
       "question": "Do logical inputs work?",

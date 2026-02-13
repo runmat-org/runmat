@@ -37,12 +37,12 @@
   "description": "`movefile` renames files and folders or moves them to a new location. It mirrors MATLAB by returning status information instead of throwing errors for filesystem failures and by accepting the optional `'f'` flag to overwrite destinations.",
   "behaviors": [
     "`status = movefile(source, destination)` moves or renames `source`. `status` is a double scalar that is `1` on success and `0` on failure.",
-    "`[status, message, messageID] = movefile(...)` also returns MATLAB-style diagnostic text. Successful operations populate both strings with empty character arrays (`1\u00d70`).",
+    "`[status, message, messageID] = movefile(...)` also returns MATLAB-style diagnostic text. Successful operations populate both strings with empty character arrays (`1×0`).",
     "`movefile(source, destination, 'f')` forces the move, overwriting an existing destination file or folder. Without the flag, `movefile` refuses to overwrite existing targets.",
     "Wildcards in `source` (such as `*.m`) expand to matching filesystem entries. When the pattern resolves to multiple items, `destination` must be an existing folder and `movefile` moves each match into that folder.",
     "Inputs accept character vectors or string scalars. Other types raise MATLAB-style errors before any filesystem work occurs.",
     "Paths are resolved relative to the current working directory (`pwd`) and expand a leading `~` into the user's home directory.",
-    "Filesystem failures\u2014including missing files, permission errors, or read-only destinations\u2014return `status = 0` plus descriptive diagnostics; only invalid inputs raise immediate errors."
+    "Filesystem failures—including missing files, permission errors, or read-only destinations—return `status = 0` plus descriptive diagnostics; only invalid inputs raise immediate errors."
   ],
   "examples": [
     {

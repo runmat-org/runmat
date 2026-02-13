@@ -79,7 +79,7 @@
     },
     {
       "question": "Does `rng` affect GPU random numbers?",
-      "answer": "Yes\u2014if the active acceleration provider implements `set_rng_state`. The bundled in-process reference provider and the WGPU backend both honour this hook."
+      "answer": "Yes—if the active acceleration provider implements `set_rng_state`. The bundled in-process reference provider and the WGPU backend both honour this hook."
     },
     {
       "question": "How do I restore a saved state structure?",
@@ -87,7 +87,7 @@
     },
     {
       "question": "What is stored in the `State` field?",
-      "answer": "RunMat serialises the 64-bit internal state into a 1\u00d72 double tensor containing the low and high 32-bit words. Feeding that tensor back to `rng` recreates the exact state."
+      "answer": "RunMat serialises the 64-bit internal state into a 1×2 double tensor containing the low and high 32-bit words. Feeding that tensor back to `rng` recreates the exact state."
     },
     {
       "question": "Can I create independent streams?",
@@ -124,5 +124,5 @@
     "label": "`crates/runmat-runtime/src/builtins/stats/random/rng.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/stats/random/rng.rs"
   },
-  "gpu_residency": "RunMat pushes the configured seed to the active acceleration provider whenever `rng` changes the host generator. Providers that expose `set_rng_state` (`runmat-accelerate`'s in-process and WGPU backends) therefore produce the same sequences as CPU `rand`/`randn` when seeded via `rng`. If a provider omits this hook, RunMat logs a debug message and continues with the provider's internal seed stream; in that case GPU draws may differ from CPU draws even after calling `rng`. You do not need to call `gpuArray` explicitly for residency purposes\u2014RunMat keeps GPU streams in sync automatically whenever the provider supports RNG state injection."
+  "gpu_residency": "RunMat pushes the configured seed to the active acceleration provider whenever `rng` changes the host generator. Providers that expose `set_rng_state` (`runmat-accelerate`'s in-process and WGPU backends) therefore produce the same sequences as CPU `rand`/`randn` when seeded via `rng`. If a provider omits this hook, RunMat logs a debug message and continues with the provider's internal seed stream; in that case GPU draws may differ from CPU draws even after calling `rng`. You do not need to call `gpuArray` explicitly for residency purposes—RunMat keeps GPU streams in sync automatically whenever the provider supports RNG state injection."
 }

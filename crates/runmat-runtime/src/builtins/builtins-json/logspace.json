@@ -33,46 +33,46 @@
     "integration": "builtins::array::creation::logspace::tests::logspace_gpu_roundtrip",
     "wgpu": "builtins::array::creation::logspace::tests::logspace_wgpu_matches_cpu"
   },
-  "description": "`logspace(a, b, n)` returns `n` points that are equally spaced on a logarithmic scale between `10^a` and `10^b`. When `n` is omitted, MATLAB (and RunMat) default to 50 points. The result is always a `1 \u00d7 n` row vector.",
+  "description": "`logspace(a, b, n)` returns `n` points that are equally spaced on a logarithmic scale between `10^a` and `10^b`. When `n` is omitted, MATLAB (and RunMat) default to 50 points. The result is always a `1 × n` row vector.",
   "behaviors": [
     "`logspace(a, b)` is equivalent to `logspace(a, b, 50)`.",
-    "`logspace(a, b, 0)` returns a `1 \u00d7 0` empty double row vector.",
+    "`logspace(a, b, 0)` returns a `1 × 0` empty double row vector.",
     "`logspace(a, b, 1)` returns `10^b`.",
     "`logspace(a, b, 2)` returns `[10^a 10^b]`.",
     "Endpoints may be real or complex scalars. Complex inputs produce complex outputs using the analytic definition `10^z = e^{z ln 10}`.",
-    "Scalar inputs may be numeric literals, `1\u00d71` tensors, or gathered GPU scalars (`gpuArray` handles). Non-scalar inputs raise an error.",
+    "Scalar inputs may be numeric literals, `1×1` tensors, or gathered GPU scalars (`gpuArray` handles). Non-scalar inputs raise an error.",
     "The third argument must be a finite, non-negative integer."
   ],
   "examples": [
     {
       "description": "Creating decades between 10 and 1000",
       "input": "x = logspace(1, 3, 3)",
-      "output": "x = [10 100 1000];"
+      "output": "x = [10 100 1000]"
     },
     {
       "description": "Generating logarithmic spacing with the default 50 points",
       "input": "f = logspace(1, 4)",
-      "output": "% f is a 1x50 row vector spanning [10, 10^4]\ndisp(f(1));\ndisp(f(end));"
+      "output": "% f is a 1x50 row vector spanning [10, 10^4]\ndisp(f(1));\ndisp(f(end))"
     },
     {
       "description": "Requesting a single logarithmic sample",
       "input": "edge = logspace(-3, 2, 1)",
-      "output": "edge = 100;"
+      "output": "edge = 100"
     },
     {
       "description": "Building a swept frequency vector on the GPU",
       "input": "lo = gpuArray(0);\nhi = gpuArray(3);\nfreq = logspace(lo, hi, 256);\nresp = sin(2*pi*freq)",
-      "output": "% freq and resp remain on the GPU when an acceleration provider is active.\ndisp(gather(freq(1:5)));"
+      "output": "% freq and resp remain on the GPU when an acceleration provider is active.\ndisp(gather(freq(1:5)))"
     },
     {
       "description": "Producing complex logarithmic spacing",
       "input": "z = logspace(1+1i, 2+2i, 4)",
-      "output": "% Complex row vector with magnitudes and phases progressing logarithmically\ndisp(z);"
+      "output": "% Complex row vector with magnitudes and phases progressing logarithmically\ndisp(z)"
     },
     {
       "description": "Matching MATLAB's legacy `logspace(a, pi, n)` syntax",
       "input": "theta = logspace(-1, pi, 5)",
-      "output": "% Interprets pi literally: theta(end) == 10^pi\ndisp(theta(end));"
+      "output": "% Interprets pi literally: theta(end) == 10^pi\ndisp(theta(end))"
     }
   ],
   "faqs": [
@@ -86,7 +86,7 @@
     },
     {
       "question": "Can I request zero points?",
-      "answer": "Yes. `logspace(a, b, 0)` returns a `1 \u00d7 0` empty row vector."
+      "answer": "Yes. `logspace(a, b, 0)` returns a `1 × 0` empty row vector."
     },
     {
       "question": "What happens when `a` equals `b`?",
@@ -106,7 +106,7 @@
     },
     {
       "question": "How accurate is the last element?",
-      "answer": "The implementation explicitly overwrites the final element with `10^b` to match MATLAB\u2019s behavior and avoid floating-point drift."
+      "answer": "The implementation explicitly overwrites the final element with `10^b` to match MATLAB’s behavior and avoid floating-point drift."
     },
     {
       "question": "How does `logspace` differ from `linspace`?",

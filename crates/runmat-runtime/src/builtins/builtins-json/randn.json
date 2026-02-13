@@ -32,14 +32,14 @@
     "unit": "builtins::array::creation::randn::tests",
     "integration": "builtins::array::creation::randn::tests::randn_gpu_like_roundtrip"
   },
-  "description": "`randn` draws pseudorandom samples from the standard normal distribution (`\u03bc = 0`, `\u03c3 = 1`). RunMat matches MATLAB call patterns for scalars, explicit dimension lists, size vectors, and `'like'` prototypes while honouring GPU residency whenever an acceleration provider is active.",
+  "description": "`randn` draws pseudorandom samples from the standard normal distribution (`μ = 0`, `σ = 1`). RunMat matches MATLAB call patterns for scalars, explicit dimension lists, size vectors, and `'like'` prototypes while honouring GPU residency whenever an acceleration provider is active.",
   "behaviors": [
-    "`randn()` returns a scalar double drawn from `\ud835\udca9(0, 1)`.",
-    "`randn(n)` returns an `n \u00d7 n` dense double matrix.",
+    "`randn()` returns a scalar double drawn from `𝒩(0, 1)`.",
+    "`randn(n)` returns an `n × n` dense double matrix.",
     "`randn(m, n, ...)` accepts an arbitrary number of dimension arguments.",
     "`randn(sz)` accepts a size vector (row or column) and returns an array with shape `sz`.",
     "`randn(A)` or `randn(___, 'like', A)` matches both the shape and residency of `A`, including GPU tensors and complex prototypes.",
-    "Complex prototypes yield complex Gaussian samples with independent `\ud835\udca9(0, 1)` real and imaginary parts.",
+    "Complex prototypes yield complex Gaussian samples with independent `𝒩(0, 1)` real and imaginary parts.",
     "Class specifiers currently support `'double'`; other classes (e.g., `'single'`) emit descriptive errors until native representations land."
   ],
   "examples": [
@@ -89,7 +89,7 @@
     },
     {
       "question": "Does `randn(___, 'like', A)` work with complex prototypes?",
-      "answer": "Yes. When `A` is complex, RunMat emits complex Gaussian samples whose real and imaginary parts are independent `\ud835\udca9(0, 1)` variates."
+      "answer": "Yes. When `A` is complex, RunMat emits complex Gaussian samples whose real and imaginary parts are independent `𝒩(0, 1)` variates."
     },
     {
       "question": "What happens if I request `'single'` precision?",
@@ -130,7 +130,7 @@
     "label": "`crates/runmat-runtime/src/builtins/array/creation/randn.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/randn.rs"
   },
-  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly in RunMat. The fusion planner keeps results on the GPU when downstream work benefits from device residency. However, for MATLAB compatibility\u2014and when you want deterministic control\u2014you can still use `gpuArray` to seed GPU execution manually.\n\nMathWorks MATLAB lacks an integrated fusion planner and ships GPU acceleration as a separate toolbox, so MATLAB users move data manually. RunMat automates this to streamline accelerated workflows.",
+  "gpu_residency": "You usually do **not** need to call `gpuArray` explicitly in RunMat. The fusion planner keeps results on the GPU when downstream work benefits from device residency. However, for MATLAB compatibility—and when you want deterministic control—you can still use `gpuArray` to seed GPU execution manually.\n\nMathWorks MATLAB lacks an integrated fusion planner and ships GPU acceleration as a separate toolbox, so MATLAB users move data manually. RunMat automates this to streamline accelerated workflows.",
   "gpu_behavior": [
     "When the output or `'like'` prototype lives on the GPU, RunMat calls into the active acceleration provider via `random_normal` / `random_normal_like`. Providers without these hooks fall back to host generation followed by a single upload, ensuring the resulting tensor still resides on device even if samples were produced on the CPU."
   ]

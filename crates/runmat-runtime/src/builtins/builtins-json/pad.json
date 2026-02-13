@@ -36,41 +36,41 @@
     "Without a target length, `pad` extends each element to match the longest text in the input.",
     "Providing a numeric target guarantees a minimum length; existing text that already meets or exceeds the target is returned unchanged.",
     "Direction keywords (`'left'`, `'right'`, `'both'`) are case-insensitive; `'right'` is the default. When an odd number of pad characters is required for `'both'`, the extra character is appended to the end.",
-    "`padChar` must be a single character (string scalar or 1\u00d71 char array). The default is a space.",
-    "Character arrays remain rectangular. Each row is padded independently and then widened with spaces so the array keeps MATLAB\u2019s column-major layout.",
-    "Cell arrays preserve their structure. Elements must be string scalars or 1\u00d7N character vectors and are padded while keeping their original type.",
+    "`padChar` must be a single character (string scalar or 1×1 char array). The default is a space.",
+    "Character arrays remain rectangular. Each row is padded independently and then widened with spaces so the array keeps MATLAB’s column-major layout.",
+    "Cell arrays preserve their structure. Elements must be string scalars or 1×N character vectors and are padded while keeping their original type.",
     "Missing strings (`string(missing)`) and empty character vectors pass through unchanged, preserving metadata."
   ],
   "examples": [
     {
       "description": "Pad Strings To A Common Width",
       "input": "labels = [\"GPU\"; \"Accelerate\"; \"RunMat\"];\naligned = pad(labels)",
-      "output": "aligned =\n  3\u00d71 string\n    \"GPU       \"\n    \"Accelerate\"\n    \"RunMat    \""
+      "output": "aligned =\n  3×1 string\n    \"GPU       \"\n    \"Accelerate\"\n    \"RunMat    \""
     },
     {
       "description": "Pad Strings On The Left With Zeros",
       "input": "ids = [\"42\"; \"7\"; \"512\"];\nzero_padded = pad(ids, 4, 'left', '0')",
-      "output": "zero_padded =\n  3\u00d71 string\n    \"0042\"\n    \"0007\"\n    \"0512\""
+      "output": "zero_padded =\n  3×1 string\n    \"0042\"\n    \"0007\"\n    \"0512\""
     },
     {
       "description": "Center Text With Both-Sided Padding",
       "input": "titles = [\"core\"; \"planner\"];\ncentered = pad(titles, 10, 'both', '*')",
-      "output": "centered =\n  2\u00d71 string\n    \"***core***\"\n    \"*planner**\""
+      "output": "centered =\n  2×1 string\n    \"***core***\"\n    \"*planner**\""
     },
     {
       "description": "Pad Character Array Rows",
       "input": "chars = char(\"GPU\", \"RunMat\");\nout = pad(chars, 8)",
-      "output": "out =\n\n  2\u00d78 char array\n\n    'GPU     '\n    'RunMat  '"
+      "output": "out =\n\n  2×8 char array\n\n    'GPU     '\n    'RunMat  '"
     },
     {
       "description": "Pad A Cell Array Of Character Vectors",
       "input": "C = {'solver', \"planner\", 'jit'};\ncell_out = pad(C, 'right', '.')",
-      "output": "cell_out = 1\u00d73 cell array\n    {'solver.'}    {\"planner\"}    {'jit....'}"
+      "output": "cell_out = 1×3 cell array\n    {'solver.'}    {\"planner\"}    {'jit....'}"
     },
     {
       "description": "Leave Missing Strings Unchanged",
       "input": "values = [\"RunMat\", \"<missing>\", \"GPU\"];\nkept = pad(values, 8)",
-      "output": "kept =\n  1\u00d73 string\n    \"RunMat  \"    <missing>    \"GPU     \""
+      "output": "kept =\n  1×3 string\n    \"RunMat  \"    <missing>    \"GPU     \""
     }
   ],
   "faqs": [
@@ -96,7 +96,7 @@
     },
     {
       "question": "How are cell array elements returned?",
-      "answer": "Each cell retains its type: string scalars remain strings and character vectors remain 1\u00d7N character arrays after padding."
+      "answer": "Each cell retains its type: string scalars remain strings and character vectors remain 1×N character arrays after padding."
     },
     {
       "question": "Does `pad` change the orientation of row or column string arrays?",

@@ -32,9 +32,9 @@
     "unit": "builtins::array::shape::squeeze::tests",
     "integration": "builtins::array::shape::squeeze::tests::squeeze_gpu_roundtrip"
   },
-  "description": "`squeeze(A)` removes singleton (dimension size equal to one) dimensions from `A`. The result keeps MATLAB's row/column vector semantics\u20142-D matrices stay 2-D, and higher-rank arrays collapse down until only meaningful axes remain.",
+  "description": "`squeeze(A)` removes singleton (dimension size equal to one) dimensions from `A`. The result keeps MATLAB's row/column vector semantics—2-D matrices stay 2-D, and higher-rank arrays collapse down until only meaningful axes remain.",
   "behaviors": [
-    "Dimensions greater than two drop all size-one axes. If exactly one dimension remains, the output becomes an `N \u00d7 1` column vector.",
+    "Dimensions greater than two drop all size-one axes. If exactly one dimension remains, the output becomes an `N × 1` column vector.",
     "Two-dimensional inputs (row/column vectors and matrices) are returned unchanged.",
     "Zero-length dimensions are preserved; only length-one axes are removed.",
     "Scalar values remain scalars.",
@@ -79,7 +79,7 @@
     },
     {
       "question": "What happens when every dimension is singleton?",
-      "answer": "The result becomes a `1 \u00d7 1` array. Scalars (e.g., plain doubles) remain scalars."
+      "answer": "The result becomes a `1 × 1` array. Scalars (e.g., plain doubles) remain scalars."
     },
     {
       "question": "Does `squeeze` affect zero-length dimensions?",

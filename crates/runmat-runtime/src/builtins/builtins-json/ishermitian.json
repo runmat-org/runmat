@@ -96,11 +96,11 @@
     },
     {
       "question": "Do I need to reshape vectors before calling `ishermitian`?",
-      "answer": "Vectors are treated as matrices; column vectors are `n\u00d71` matrices and row vectors are `1\u00d7n` matrices. Non-square shapes always return `false`."
+      "answer": "Vectors are treated as matrices; column vectors are `n×1` matrices and row vectors are `1×n` matrices. Non-square shapes always return `false`."
     },
     {
       "question": "What happens with empty matrices?",
-      "answer": "Empty square matrices (`0\u00d70`) return `true`, whereas empty rectangular matrices return `false`."
+      "answer": "Empty square matrices (`0×0`) return `true`, whereas empty rectangular matrices return `false`."
     },
     {
       "question": "Do I need to call `gpuArray` to use `ishermitian` on the GPU?",

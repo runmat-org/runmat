@@ -33,7 +33,7 @@
     "`numel(A)` counts every stored element; for matrices this is `prod(size(A))`.",
     "`numel(A, dim1, dim2, ...)` multiplies the extents of the requested dimensions. Each dimension argument must be a positive integer. Dimensions beyond the array rank contribute a factor of `1`.",
     "Passing a numeric vector of dimensions (for example `numel(A, [1 3])`) is equivalent to listing them separately.",
-    "Scalars return `1`, character arrays report `rows \u00d7 cols`, and cell arrays count the number of cells.",
+    "Scalars return `1`, character arrays report `rows × cols`, and cell arrays count the number of cells.",
     "Empty arrays return `0` when any dimension is zero.",
     "GPU-resident arrays use metadata stored on the device handle; when unavailable, RunMat gathers the data to maintain correctness."
   ],
@@ -41,27 +41,27 @@
     {
       "description": "Counting elements in a matrix",
       "input": "A = [1 2 3; 4 5 6];\nn = numel(A)",
-      "output": "n = 6;"
+      "output": "n = 6"
     },
     {
       "description": "Checking the number of elements in a cell array",
       "input": "C = {1, 2, 3; 4, 5, 6};\ncells = numel(C)",
-      "output": "cells = 6;"
+      "output": "cells = 6"
     },
     {
       "description": "Getting the number of elements along selected dimensions",
       "input": "T = rand(4, 3, 2);\nplane = numel(T, 1, 2);   % product of the first two dimensions",
-      "output": "plane = 12;"
+      "output": "plane = 12"
     },
     {
       "description": "Using `numel` with gpuArray data",
       "input": "G = gpuArray(ones(256, 4));\ncount = numel(G)",
-      "output": "count = 1024;"
+      "output": "count = 1024"
     },
     {
       "description": "Confirming the number of characters in a char array",
       "input": "name = ['R' 'u' 'n' 'M' 'a' 't'];\nchars = numel(name)",
-      "output": "chars = 6;"
+      "output": "chars = 6"
     }
   ],
   "faqs": [
@@ -83,7 +83,7 @@
     },
     {
       "question": "Can I use `numel` on strings and character arrays?",
-      "answer": "Yes. Character arrays return the total number of characters (`rows \u00d7 cols`). String arrays are treated as ordinary arrays with MATLAB-compatible dimensions."
+      "answer": "Yes. Character arrays return the total number of characters (`rows × cols`). String arrays are treated as ordinary arrays with MATLAB-compatible dimensions."
     },
     {
       "question": "Is `numel` safe inside fused GPU expressions?",

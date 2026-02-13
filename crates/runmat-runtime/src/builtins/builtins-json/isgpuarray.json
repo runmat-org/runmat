@@ -1,0 +1,87 @@
+{
+  "title": "isgpuarray",
+  "category": "logical/tests",
+  "keywords": [
+    "isgpuarray",
+    "gpuarray predicate",
+    "gpu type check",
+    "logical test",
+    "MATLAB isgpuarray"
+  ],
+  "summary": "Return true when a value is stored as a gpuArray handle.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "none",
+    "notes": "Answers using value metadata; no device gather is required."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::logical::tests::isgpuarray::tests"
+  },
+  "description": "`tf = isgpuarray(x)` returns a logical scalar that is `true` when `x` is a gpuArray handle. All other value kinds, including numeric arrays, logical arrays, characters, structs, and objects, return `false`.",
+  "behaviors": [
+    "gpuArray values return `true` without gathering device buffers.",
+    "Numeric, logical, complex, string, character, struct, cell, and object inputs return `false`.",
+    "The result is always a logical scalar."
+  ],
+  "examples": [
+    {
+      "description": "Checking a gpuArray handle",
+      "input": "G = gpuArray(reshape(1:12, [3 4]));\ntf = isgpuarray(G)",
+      "output": "tf =\n     1"
+    },
+    {
+      "description": "Host arrays are not gpuArray values",
+      "input": "A = [1 2 3];\ntf = isgpuarray(A)",
+      "output": "tf =\n     0"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `isgpuarray` gather data back to the host?",
+      "answer": "No. It inspects value metadata and returns a logical scalar without triggering a device transfer."
+    },
+    {
+      "question": "What happens if no acceleration provider is registered?",
+      "answer": "`isgpuarray` still reports accurately for values that are already gpuArray handles. If a value is not a gpuArray handle, it returns `false`."
+    }
+  ],
+  "links": [
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    },
+    {
+      "label": "islogical",
+      "url": "./islogical"
+    },
+    {
+      "label": "isa",
+      "url": "./isa"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/logical/tests/isgpuarray.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/tests/isgpuarray.rs"
+  },
+  "gpu_residency": "RunMat keeps data on the GPU when a provider is active, and `isgpuarray` lets you verify residency boundaries in MATLAB-style code.",
+  "gpu_behavior": [
+    "The builtin only checks whether the value is a gpuArray handle. It never gathers device buffers or inspects the underlying data contents."
+  ]
+}

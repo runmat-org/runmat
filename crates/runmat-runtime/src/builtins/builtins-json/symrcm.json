@@ -91,7 +91,7 @@
     },
     {
       "question": "What output shape should I expect?",
-      "answer": "The permutation is returned as a row vector (`1 \u00d7 n`). The empty matrix returns the empty row vector `[]`."
+      "answer": "The permutation is returned as a row vector (`1 × n`). The empty matrix returns the empty row vector `[]`."
     }
   ],
   "links": [

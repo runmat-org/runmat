@@ -37,33 +37,33 @@
     "`who('-regexp', expr1, expr2, ...)` keeps names that match any of the supplied regular expressions.",
     "`who('global')` lists only global variables in the active workspace.",
     "`who('-file', filename, ...)` inspects the variables stored in a MAT-file. You can combine this option with explicit names or `-regexp` selectors.",
-    "The result is a column cell array of character vectors (consistent with MATLAB). Empty results return a `0\u00d71` cell array so that idioms like `isempty(who(...))` work as expected."
+    "The result is a column cell array of character vectors (consistent with MATLAB). Empty results return a `0×1` cell array so that idioms like `isempty(who(...))` work as expected."
   ],
   "examples": [
     {
       "description": "List All Workspace Variables",
       "input": "a = 42;\nb = rand(3, 2);\nnames = who",
-      "output": "names =\n  2\u00d71 cell array\n    {\"a\"}\n    {\"b\"}"
+      "output": "names =\n  2×1 cell array\n    {\"a\"}\n    {\"b\"}"
     },
     {
       "description": "Filter With Wildcard Patterns",
       "input": "alpha = 1;\nbeta = 2;\nnames = who(\"a*\")",
-      "output": "names =\n  1\u00d71 cell array\n    {\"alpha\"}"
+      "output": "names =\n  1×1 cell array\n    {\"alpha\"}"
     },
     {
       "description": "Use Regular Expressions",
       "input": "x1 = rand;\nx2 = rand;\nmatches = who('-regexp', '^x\\d$')",
-      "output": "matches =\n  2\u00d71 cell array\n    {\"x1\"}\n    {\"x2\"}"
+      "output": "matches =\n  2×1 cell array\n    {\"x1\"}\n    {\"x2\"}"
     },
     {
       "description": "Inspect Variables Stored In A MAT-File",
       "input": "save('snapshot.mat', 'alpha', 'beta')\nfile_names = who('-file', 'snapshot.mat')",
-      "output": "file_names =\n  2\u00d71 cell array\n    {\"alpha\"}\n    {\"beta\"}"
+      "output": "file_names =\n  2×1 cell array\n    {\"alpha\"}\n    {\"beta\"}"
     },
     {
       "description": "List Only Global Variables",
       "input": "global shared;\nlocal = 1;\nglobals = who('global')",
-      "output": "globals =\n  1\u00d71 cell array\n    {\"shared\"}"
+      "output": "globals =\n  1×1 cell array\n    {\"shared\"}"
     }
   ],
   "faqs": [
@@ -81,7 +81,7 @@
     },
     {
       "question": "What happens if no variables match?",
-      "answer": "You receive a `0\u00d71` cell array. You can call `isempty` on it to check for an empty result."
+      "answer": "You receive a `0×1` cell array. You can call `isempty` on it to check for an empty result."
     },
     {
       "question": "Can I call `who('-file', ...)` on large MAT-files?",

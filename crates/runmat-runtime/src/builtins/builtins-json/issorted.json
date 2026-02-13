@@ -104,7 +104,7 @@
     },
     {
       "question": "Can I control where NaN values appear?",
-      "answer": "Yes. `'MissingPlacement','first'` requires missing values to precede finite ones, `'last'` requires them to trail, and `'auto'` follows MATLAB\u2019s default (end for ascending checks, start for descending)."
+      "answer": "Yes. `'MissingPlacement','first'` requires missing values to precede finite ones, `'last'` requires them to trail, and `'auto'` follows MATLAB’s default (end for ascending checks, start for descending)."
     },
     {
       "question": "Is `'ComparisonMethod'` relevant for real data?",

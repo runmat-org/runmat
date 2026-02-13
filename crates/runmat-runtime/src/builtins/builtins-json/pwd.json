@@ -29,7 +29,7 @@
     "unit": "builtins::io::repl_fs::pwd::tests",
     "integration": "builtins::io::repl_fs::pwd::tests::pwd_reflects_directory_changes"
   },
-  "description": "`pwd` returns the absolute path of the folder where RunMat is executing. The result is a character row vector (`1\u00d7N`) so existing MATLAB code that expects traditional character output keeps working.",
+  "description": "`pwd` returns the absolute path of the folder where RunMat is executing. The result is a character row vector (`1×N`) so existing MATLAB code that expects traditional character output keeps working.",
   "behaviors": [
     "Always returns the current working folder of the RunMat process.",
     "Output is a character vector using the platform-native path separators.",

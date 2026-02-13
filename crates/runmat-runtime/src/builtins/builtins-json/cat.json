@@ -31,13 +31,13 @@
     "unit": "builtins::array::shape::cat::tests",
     "integration": "builtins::array::shape::cat::tests::cat_gpu_roundtrip"
   },
-  "description": "`cat(dim, A1, A2, \u2026)` concatenates arrays along the dimension `dim`, producing a new array whose slices along that dimension are the input arrays. The result preserves column-major ordering and shares MATLAB's rules for implicit singleton expansion.",
+  "description": "`cat(dim, A1, A2, …)` concatenates arrays along the dimension `dim`, producing a new array whose slices along that dimension are the input arrays. The result preserves column-major ordering and shares MATLAB's rules for implicit singleton expansion.",
   "behaviors": [
     "`dim` is 1-based and must be a positive integer.",
     "All inputs must be the same class (double, logical, complex, char, string, or cell).",
     "Dimensions other than `dim` must match exactly; missing higher dimensions are treated as size `1` automatically.",
     "The size along `dim` becomes the sum of the corresponding sizes from each input.",
-    "Empty inputs participate naturally\u2014if any dimension is zero, the result is empty.",
+    "Empty inputs participate naturally—if any dimension is zero, the result is empty.",
     "`gpuArray` inputs stay on the device when an acceleration provider is registered.",
     "Append an optional `'like', prototype` pair to request output that matches the prototype's device residency; numeric prototypes may be host tensors or `gpuArray` handles, while logical prototypes must remain on the CPU."
   ],
@@ -119,6 +119,6 @@
     "url": "crates/runmat-runtime/src/builtins/array/shape/cat.rs"
   },
   "gpu_behavior": [
-    "When every input is a `gpuArray`, RunMat first calls the active provider's `AccelProvider::cat` hook to concatenate the buffers directly on the device. Providers that do not expose this hook trigger a transparent fallback: the operands are gathered to the host, concatenated with the same rules as CPU arrays, and uploaded back to the originating device so downstream work still sees a `gpuArray`. The `'like'` prototype is honoured during fallback, ensuring the final residency matches your request. Mixing host arrays with `gpuArray` inputs is not supported\u2014convert explicitly with `gpuArray` / `gather` to control residency."
+    "When every input is a `gpuArray`, RunMat first calls the active provider's `AccelProvider::cat` hook to concatenate the buffers directly on the device. Providers that do not expose this hook trigger a transparent fallback: the operands are gathered to the host, concatenated with the same rules as CPU arrays, and uploaded back to the originating device so downstream work still sees a `gpuArray`. The `'like'` prototype is honoured during fallback, ensuring the final residency matches your request. Mixing host arrays with `gpuArray` inputs is not supported—convert explicitly with `gpuArray` / `gather` to control residency."
   ]
 }

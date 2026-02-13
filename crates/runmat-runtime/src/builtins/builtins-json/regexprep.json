@@ -53,7 +53,7 @@
     {
       "description": "Performing case-insensitive replacements",
       "input": "names = regexprep([\"Alpha\"; \"beta\"; \"GaMmA\"], 'a', '_', 'ignorecase')",
-      "output": "names =\n  3\u00d71 string array\n    \"_lph_\"\n    \"bet_\"\n    \"G__mM_\""
+      "output": "names =\n  3×1 string array\n    \"_lph_\"\n    \"bet_\"\n    \"G__mM_\""
     },
     {
       "description": "Preserving case of the original match",
@@ -68,7 +68,7 @@
     {
       "description": "Using element-wise patterns for a string array",
       "input": "expr = [\"foo\", \"bar\"];\npat = [\"f\", \"ar\"];\nrep = [\"F\", \"AR\"];\nexact = regexprep(expr, pat, rep)",
-      "output": "exact = 1\u00d72 string\n    \"Foo\"    \"bAR\""
+      "output": "exact = 1×2 string\n    \"Foo\"    \"bAR\""
     }
   ],
   "faqs": [
@@ -82,7 +82,7 @@
     },
     {
       "question": "What if my replacement needs capture-group text?",
-      "answer": "Use `$1`, `$2`, \u2026 for numbered groups or `${name}` for named groups inside the replacement text. These tokens expand to the corresponding captured substrings."
+      "answer": "Use `$1`, `$2`, … for numbered groups or `${name}` for named groups inside the replacement text. These tokens expand to the corresponding captured substrings."
     },
     {
       "question": "Does `regexprep` support case-insensitive matching?",

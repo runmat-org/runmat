@@ -42,12 +42,12 @@
     {
       "description": "Centering the spectrum of a 1-D FFT result with even length",
       "input": "x = [0 1 2 3 4 5 6 7];\nfx = fft(x);\ny = fftshift(fx)",
-      "output": "y = [4 5 6 7 0 1 2 3];"
+      "output": "y = [4 5 6 7 0 1 2 3]"
     },
     {
       "description": "Handling odd-length vectors",
       "input": "x = 1:5;\ny = fftshift(x)",
-      "output": "y = [4 5 1 2 3];"
+      "output": "y = [4 5 1 2 3]"
     },
     {
       "description": "Centering both axes of a 2-D FFT",
@@ -62,7 +62,7 @@
     {
       "description": "Applying `fftshift` to a gpuArray spectrum",
       "input": "G = gpuArray(0:7);\ncentered = fftshift(G);\nH = gather(centered)",
-      "output": "H = [4 5 6 7 0 1 2 3];"
+      "output": "H = [4 5 6 7 0 1 2 3]"
     }
   ],
   "faqs": [
@@ -125,7 +125,7 @@
     "label": "`crates/runmat-runtime/src/builtins/math/fft/fftshift.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/fft/fftshift.rs"
   },
-  "gpu_residency": "RunMat's auto-offload keeps FFT spectra on the GPU whenever the active provider exposes the `circshift` hook. In that case `fftshift` runs entirely on the device and downstream fused operations continue without a gather. If no GPU provider is registered\u2014or it does not expose `circshift`\u2014RunMat gathers the data once, performs the host shift, and uploads the result back to the device so subsequent work can still benefit from acceleration. You can always call `gpuArray` explicitly when you need MATLAB compatibility or want to guarantee a specific residency boundary.",
+  "gpu_residency": "RunMat's auto-offload keeps FFT spectra on the GPU whenever the active provider exposes the `circshift` hook. In that case `fftshift` runs entirely on the device and downstream fused operations continue without a gather. If no GPU provider is registered—or it does not expose `circshift`—RunMat gathers the data once, performs the host shift, and uploads the result back to the device so subsequent work can still benefit from acceleration. You can always call `gpuArray` explicitly when you need MATLAB compatibility or want to guarantee a specific residency boundary.",
   "gpu_behavior": [
     "RunMat asks the active acceleration provider to execute `fftshift` via the `circshift` hook (with predetermined offsets). If the provider cannot satisfy the request, the tensor is gathered exactly once, shifted on the host, and optionally re-uploaded. Scalars remain on their existing device."
   ]

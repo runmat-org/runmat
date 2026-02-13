@@ -91,7 +91,7 @@
     },
     {
       "question": "Can I combine `\"reverse\"` and `\"omitnan\"`?",
-      "answer": "Yes. You can specify both options (in any order) and RunMat mirrors MATLAB\u2019s results."
+      "answer": "Yes. You can specify both options (in any order) and RunMat mirrors MATLAB’s results."
     },
     {
       "question": "Does the GPU path respect `\"omitnan\"`?",

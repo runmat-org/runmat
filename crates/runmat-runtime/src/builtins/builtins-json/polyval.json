@@ -34,7 +34,7 @@
     "unit": "builtins::math::poly::polyval::tests",
     "integration": "builtins::math::poly::polyval::tests::polyval_gpu_roundtrip"
   },
-  "description": "`polyval(p, x)` evaluates the polynomial defined by the coefficient vector `p` at every element of `x`. Coefficients follow MATLAB\u2019s convention: `p(1)` is the highest-order term, `p(end)` is the constant term. Both real and complex inputs are supported, and the output matches the shape of `x`.",
+  "description": "`polyval(p, x)` evaluates the polynomial defined by the coefficient vector `p` at every element of `x`. Coefficients follow MATLAB’s convention: `p(1)` is the highest-order term, `p(end)` is the constant term. Both real and complex inputs are supported, and the output matches the shape of `x`.",
   "behaviors": [
     "Accepts scalar, vector, or N-D coefficient inputs that have at most one non-singleton dimension.",
     "Logical and integer coefficients are promoted to double precision; complex coefficients are kept exactly.",
@@ -48,12 +48,12 @@
     {
       "description": "Evaluating a polynomial at scalar points",
       "input": "p = [2 -3 5];   % 2x^2 - 3x + 5\ny = polyval(p, 4)",
-      "output": "y = 21;"
+      "output": "y = 21"
     },
     {
       "description": "Evaluating across a vector of inputs",
       "input": "p = [1 0 -2 1];\nx = linspace(-2, 2, 5);\ny = polyval(p, x)",
-      "output": "y = [ -3   2   1   0   5 ];"
+      "output": "y = [ -3   2   1   0   5 ]"
     },
     {
       "description": "Evaluating a polynomial over a matrix grid",
@@ -68,7 +68,7 @@
     {
       "description": "Computing prediction intervals with polyfit output",
       "input": "[p, S, mu] = polyfit((0:10)', exp((0:10)'/10), 3);\n[y, delta] = polyval(p, 5, S, mu)",
-      "output": "% y is the fitted value at x = 5\n% delta is the 1\u03c3 prediction interval (standard error)"
+      "output": "% y is the fitted value at x = 5\n% delta is the 1σ prediction interval (standard error)"
     },
     {
       "description": "Handling complex coefficients and inputs",
@@ -142,6 +142,6 @@
     "url": "https://github.com/runmat-org/runmat/issues/new/choose"
   },
   "gpu_behavior": [
-    "When a GPU provider is active, RunMat first attempts to evaluate the polynomial in device memory using a dedicated Horner kernel. Coefficients and inputs are uploaded automatically when required. If the call requests complex arithmetic, prediction intervals, or otherwise falls outside the GPU kernel\u2019s contract, RunMat gathers to the host, executes the CPU implementation, and (for real-valued results) pushes the output back to the GPU so downstream kernels retain residency."
+    "When a GPU provider is active, RunMat first attempts to evaluate the polynomial in device memory using a dedicated Horner kernel. Coefficients and inputs are uploaded automatically when required. If the call requests complex arithmetic, prediction intervals, or otherwise falls outside the GPU kernel’s contract, RunMat gathers to the host, executes the CPU implementation, and (for real-valued results) pushes the output back to the GPU so downstream kernels retain residency."
   ]
 }

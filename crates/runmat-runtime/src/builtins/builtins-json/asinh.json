@@ -34,7 +34,7 @@
   "description": "`Y = asinh(X)` evaluates the inverse hyperbolic sine of every element in `X`. Results match MATLAB semantics for real, logical, character, and complex inputs, including branch cut handling for complex numbers.",
   "behaviors": [
     "Accepts scalars, vectors, matrices, and N-D tensors and applies the operation element-wise using MATLAB's broadcasting rules.",
-    "Logical inputs are promoted to doubles (`true \u2192 1.0`, `false \u2192 0.0`) before the inverse hyperbolic sine is applied.",
+    "Logical inputs are promoted to doubles (`true → 1.0`, `false → 0.0`) before the inverse hyperbolic sine is applied.",
     "Character arrays are interpreted as numeric code points and return dense double arrays with the same shape.",
     "Real inputs produce real outputs for all finite values. Complex inputs follow MATLAB's principal branch definition `asinh(z) = log(z + sqrt(z^2 + 1))`.",
     "NaNs and infinities propagate according to IEEE arithmetic and match MATLAB's special-case tables."

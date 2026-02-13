@@ -35,7 +35,7 @@
   "behaviors": [
     "Works with scalars, vectors (treated as matrices), and higher-rank arrays whose trailing dimensions are singleton (MATLAB-compatible matrix semantics). An error is raised when the input has more than two non-singleton dimensions.",
     "Non-square matrices immediately return `false`.",
-    "Logical inputs are promoted to double precision (`true \u2192 1.0`, `false \u2192 0.0`) before testing.",
+    "Logical inputs are promoted to double precision (`true → 1.0`, `false → 0.0`) before testing.",
     "Complex inputs are compared without conjugation; use `ishermitian` for conjugate symmetry.",
     "Floating-point tolerance can be supplied to account for numerical noise.",
     "Pass `'skew'` to test skew-symmetry (`A == -A.'`). Diagonal entries must be zero (within the tolerance) when `skew` mode is active."

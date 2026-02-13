@@ -35,7 +35,7 @@
   "description": "`Y = sqrt(X)` computes the principal square root of every element in `X`. Results follow MATLAB semantics for scalars, vectors, matrices, logical arrays, character arrays, and complex inputs. Negative real values automatically promote to complex results so that the output remains exact.",
   "behaviors": [
     "`sqrt(X)` applies the operation element-wise with MATLAB broadcasting rules.",
-    "Logical values convert to doubles (`true \u2192 1.0`, `false \u2192 0.0`) before the square root is taken.",
+    "Logical values convert to doubles (`true → 1.0`, `false → 0.0`) before the square root is taken.",
     "Character arrays are interpreted as their numeric code points and return dense double tensors.",
     "Negative real inputs yield purely imaginary outputs: `sqrt([-1 4])` returns `[0 + 1i, 2]`.",
     "Complex inputs follow MATLAB's definition and stay on the principal branch of the complex square root, ensuring continuity across the negative real axis.",
@@ -45,32 +45,32 @@
     {
       "description": "Taking the square root of a positive scalar",
       "input": "y = sqrt(9)",
-      "output": "y = 3;"
+      "output": "y = 3"
     },
     {
       "description": "Square roots of a matrix",
       "input": "A = [1 4 9; 16 25 36];\nR = sqrt(A)",
-      "output": "R = [1 2 3; 4 5 6];"
+      "output": "R = [1 2 3; 4 5 6]"
     },
     {
       "description": "Square roots of negative inputs produce complex results",
       "input": "values = [-1 -4 9];\nroots = sqrt(values)",
-      "output": "roots = [0.0000 + 1.0000i, 0.0000 + 2.0000i, 3.0000 + 0.0000i];"
+      "output": "roots = [0.0000 + 1.0000i, 0.0000 + 2.0000i, 3.0000 + 0.0000i]"
     },
     {
       "description": "Element-wise square root on GPU data",
       "input": "G = gpuArray([0 1; 4 9]);\nout = sqrt(G);\nresult = gather(out)",
-      "output": "result = [0 1; 2 3];"
+      "output": "result = [0 1; 2 3]"
     },
     {
       "description": "Square root of complex numbers",
       "input": "z = [3 + 4i, -1 + 2i];\nw = sqrt(z)",
-      "output": "w = [2 + 1i, 0.7862 + 1.2720i];"
+      "output": "w = [2 + 1i, 0.7862 + 1.2720i]"
     },
     {
       "description": "Square root of character codes",
       "input": "C = 'AB';\nnumericRoots = sqrt(C)",
-      "output": "numericRoots = [8.0623 8.2462];"
+      "output": "numericRoots = [8.0623 8.2462]"
     }
   ],
   "faqs": [
@@ -92,7 +92,7 @@
     },
     {
       "question": "How are NaNs and infinities treated?",
-      "answer": "They follow IEEE rules: `sqrt(NaN)` is `NaN`, `sqrt(Inf)` is `Inf`, and `sqrt(-Inf)` is `0 + Inf\u00b7i`."
+      "answer": "They follow IEEE rules: `sqrt(NaN)` is `NaN`, `sqrt(Inf)` is `Inf`, and `sqrt(-Inf)` is `0 + Inf·i`."
     },
     {
       "question": "What about complex inputs with small imaginary parts?",

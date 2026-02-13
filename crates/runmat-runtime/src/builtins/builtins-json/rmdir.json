@@ -36,10 +36,10 @@
   "description": "`rmdir` removes folders from the filesystem. Like MATLAB, it can optionally delete the folder's contents when you pass the `'s'` flag and returns diagnostic status information instead of throwing exceptions.",
   "behaviors": [
     "`status = rmdir(folder)` deletes `folder` only when it exists, is a directory, and is empty. Status outputs are `double` scalars (`1` for success, `0` for failure).",
-    "`[status, message, messageID] = rmdir(folder)` returns the diagnostic message and MATLAB-style message identifier. Successful deletions populate both outputs with empty character arrays (`1\u00d70`).",
+    "`[status, message, messageID] = rmdir(folder)` returns the diagnostic message and MATLAB-style message identifier. Successful deletions populate both outputs with empty character arrays (`1×0`).",
     "`rmdir(folder, 's')` removes the folder and all descendants recursively. The flag is case-insensitive and accepts either a char vector or a string scalar with the text `\"s\"`.",
     "Passing a path that does not exist or that resolves to a file returns `status = 0` together with descriptive diagnostics. Paths are resolved relative to the current working directory and expand a leading `~` into the user's home directory.",
-    "Invalid inputs\u2014including numeric arrays, logical values, multi-element string arrays, or empty character vectors\u2014raise MATLAB-style errors before any filesystem work occurs.",
+    "Invalid inputs—including numeric arrays, logical values, multi-element string arrays, or empty character vectors—raise MATLAB-style errors before any filesystem work occurs.",
     "`rmdir` automatically gathers GPU-resident path strings (for example, `gpuArray(\"logs\")`) to host memory before evaluating the filesystem operation. There is no device-side acceleration."
   ],
   "examples": [

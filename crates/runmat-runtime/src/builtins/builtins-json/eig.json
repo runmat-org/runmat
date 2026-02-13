@@ -30,14 +30,14 @@
     "unit": "builtins::math::linalg::factor::eig::tests",
     "integration": "builtins::math::linalg::factor::eig::tests::eig_three_outputs_biorthogonality"
   },
-  "description": "`eig(A)` computes the eigenvalues of a square matrix `A`. With additional outputs it also returns right and left eigenvectors, matching MATLAB\u2019s multi-output semantics (`A*V = V*D` and `W'*A = D*W'`).",
+  "description": "`eig(A)` computes the eigenvalues of a square matrix `A`. With additional outputs it also returns right and left eigenvectors, matching MATLAB’s multi-output semantics (`A*V = V*D` and `W'*A = D*W'`).",
   "behaviors": [
-    "Single output `d = eig(A)` returns the eigenvalues as an `n \u00d7 1` column vector (values may be complex even when `A` is real).",
+    "Single output `d = eig(A)` returns the eigenvalues as an `n × 1` column vector (values may be complex even when `A` is real).",
     "Two outputs `[V,D] = eig(A)` return the eigenvectors (columns of `V`) and the diagonal eigenvalue matrix `D`.",
     "Three outputs `[V,D,W] = eig(A)` additionally return the left eigenvectors `W` satisfying `W' * A = D * W'`.",
     "The selector `'vector'` may be supplied (`eig(A,'vector')`, `[V,d] = eig(A,'vector')`) to request the eigenvalues as a column vector even when two outputs are requested. `'matrix'` resets the second output to the diagonal-matrix form.",
     "Logical and integer inputs are promoted to double precision. Complex inputs remain complex throughout the factorisation.",
-    "Empty and scalar matrices follow MATLAB\u2019s shape conventions (`eig([])` returns `[]`, `eig(5)` returns `5`).",
+    "Empty and scalar matrices follow MATLAB’s shape conventions (`eig([])` returns `[]`, `eig(5)` returns `5`).",
     "Generalised problems `eig(A,B)` are not yet implemented; RunMat emits a clear error if you pass the second matrix argument.",
     "Optional balancing keywords (`'balance'`, `'nobalance'`) are accepted. Balancing defaults to on; the current implementation leaves balancing as a no-op while retaining the option for forward compatibility."
   ],
@@ -45,7 +45,7 @@
     {
       "description": "Computing Eigenvalues of a 2x2 Matrix",
       "input": "A = [2 1; 0 3];\nd = eig(A)",
-      "output": "d = [2; 3];"
+      "output": "d = [2; 3]"
     },
     {
       "description": "Diagonalizing a Matrix with Two Outputs",
@@ -83,7 +83,7 @@
   "faqs": [
     {
       "question": "What shapes does `eig` support?",
-      "answer": "`eig` requires a square matrix. Scalars are treated as `1\u00d71` matrices, and empty inputs return empty outputs. Non-square inputs raise an error, matching MATLAB."
+      "answer": "`eig` requires a square matrix. Scalars are treated as `1×1` matrices, and empty inputs return empty outputs. Non-square inputs raise an error, matching MATLAB."
     },
     {
       "question": "Do I always get complex outputs?",
@@ -103,7 +103,7 @@
     },
     {
       "question": "How are left eigenvectors normalised?",
-      "answer": "RunMat scales left eigenvectors so that `W' * V = I` (bi-orthonormal columns), matching MATLAB\u2019s conventions. When a provider supplies the GPU implementation the same normalisation is expected."
+      "answer": "RunMat scales left eigenvectors so that `W' * V = I` (bi-orthonormal columns), matching MATLAB’s conventions. When a provider supplies the GPU implementation the same normalisation is expected."
     },
     {
       "question": "Does `eig` participate in fusion or auto-offload?",
@@ -111,11 +111,11 @@
     },
     {
       "question": "How can I continue on the GPU after calling `eig` today?",
-      "answer": "When the active provider implements the `eig` hook (the WGPU backend does for real spectra), the outputs remain on the GPU automatically. If the decomposition falls back to the CPU\u2014because the spectrum is complex or `'nobalance'` was requested\u2014call `gpuArray` on whichever results you need on the device."
+      "answer": "When the active provider implements the `eig` hook (the WGPU backend does for real spectra), the outputs remain on the GPU automatically. If the decomposition falls back to the CPU—because the spectrum is complex or `'nobalance'` was requested—call `gpuArray` on whichever results you need on the device."
     },
     {
       "question": "What happens if the eigenvector matrix is singular?",
-      "answer": "When the right eigenvectors form a singular matrix, RunMat falls back to computing left eigenvectors from the conjugate-transposed problem. If that fails, requesting the third output raises an error, matching MATLAB\u2019s failure behaviour."
+      "answer": "When the right eigenvectors form a singular matrix, RunMat falls back to computing left eigenvectors from the conjugate-transposed problem. If that fails, requesting the third output raises an error, matching MATLAB’s failure behaviour."
     }
   ],
   "links": [

@@ -33,7 +33,7 @@
     "unit": "builtins::math::fft::fft2::tests",
     "integration": "builtins::math::fft::fft2::tests::fft2_gpu_roundtrip_matches_cpu"
   },
-  "description": "`fft2(X)` computes the two-dimensional discrete Fourier transform (DFT) of `X`. It is equivalent to applying `fft` along the first dimension and then along the second dimension, preserving MATLAB\u2019s column-major ordering and output shape semantics.",
+  "description": "`fft2(X)` computes the two-dimensional discrete Fourier transform (DFT) of `X`. It is equivalent to applying `fft` along the first dimension and then along the second dimension, preserving MATLAB’s column-major ordering and output shape semantics.",
   "behaviors": [
     "`fft2(X)` transforms along the first and second dimensions that have size greater than one.",
     "`fft2(X, M, N)` zero-pads or truncates `X` to `M` rows and `N` columns before evaluating the 2-D transform.",

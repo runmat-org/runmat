@@ -32,8 +32,8 @@
   },
   "description": "`isa(x, T)` returns logical `true` when the value `x` is a member of the MATLAB class or abstract category identified by `T`. Use it to branch on numeric vs integer data, handle objects, GPU arrays, function handles, and user-defined classes.",
   "behaviors": [
-    "Exact class names (such as `\"double\"`, `\"cell\"`, `\"struct\"`, `\"event.listener\"`) match the value\u2019s dynamic class. Comparisons are case-insensitive.",
-    "Abstract categories (`\"numeric\"`, `\"float\"`, `\"integer\"`, `\"handle\"`, `\"function_handle\"`, `\"gpuArray\"`, `\"listener\"`) mirror MATLAB\u2019s grouping rules.",
+    "Exact class names (such as `\"double\"`, `\"cell\"`, `\"struct\"`, `\"event.listener\"`) match the value’s dynamic class. Comparisons are case-insensitive.",
+    "Abstract categories (`\"numeric\"`, `\"float\"`, `\"integer\"`, `\"handle\"`, `\"function_handle\"`, `\"gpuArray\"`, `\"listener\"`) mirror MATLAB’s grouping rules.",
     "Logical scalars, logical arrays, and logical gpuArray masks satisfy `\"logical\"` and do not register as `\"numeric\"`. RunMat consults handle metadata rather than downloading device buffers.",
     "Handle inheritance is respected: if a class derives from `handle`, `isa(obj, \"handle\")` returns `true` even when `class(obj)` reports a subclass name.",
     "`isa` accepts either a string scalar or a character row vector as the class designator.",
@@ -52,7 +52,7 @@
     },
     {
       "description": "Confirming that gpuArray data counts as numeric",
-      "input": "G = gpuArray(rand(1024, 1024));\ntf_numeric = isa(G, \"numeric\");\ntf_double = isa(G, \"double\");   % false \u2014 the class reports gpuArray",
+      "input": "G = gpuArray(rand(1024, 1024));\ntf_numeric = isa(G, \"numeric\");\ntf_double = isa(G, \"double\");   % false — the class reports gpuArray",
       "output": "tf_numeric = logical(1)\ntf_double = logical(0)"
     },
     {
@@ -83,7 +83,7 @@
     },
     {
       "question": "How do I check for integer types?",
-      "answer": "Use the `\"integer\"` category. It matches MATLAB\u2019s native integer classes (`int8`, `uint16`, and so on). For example `isa(int32(5), \"integer\")` returns `true` while `isa(5, \"integer\")` returns `false`."
+      "answer": "Use the `\"integer\"` category. It matches MATLAB’s native integer classes (`int8`, `uint16`, and so on). For example `isa(int32(5), \"integer\")` returns `true` while `isa(5, \"integer\")` returns `false`."
     },
     {
       "question": "Does `isa` understand handle inheritance?",

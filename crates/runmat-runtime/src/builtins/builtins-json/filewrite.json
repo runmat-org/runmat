@@ -34,7 +34,7 @@
   "description": "`filewrite(filename, data)` writes text or raw byte content to a file, returning the number of bytes written. The builtin honours MATLAB semantics for overwrite versus append behaviour and supports the same encoding keywords that `fileread` recognises.",
   "behaviors": [
     "Accepts file names supplied as character vectors, string scalars, or scalar string arrays.",
-    "Accepts data supplied as character vectors, string scalars, string arrays, or numeric arrays of bytes (`uint8`/`double` values in the range 0\u2013255). Logical arrays map to bytes `0` and `1`.",
+    "Accepts data supplied as character vectors, string scalars, string arrays, or numeric arrays of bytes (`uint8`/`double` values in the range 0–255). Logical arrays map to bytes `0` and `1`.",
     "By default the file is truncated (overwrite mode). Pass `'WriteMode','append'` to add to an existing file.",
     "Encoding is optional. Provide either a positional encoding argument or the `'Encoding', value` keyword pair. Supported encodings mirror `fileread`: `auto` (default), `utf-8`, `ascii`, `latin1`, and `raw`.",
     "When writing text data with `filewrite` and `Encoding` set to `ascii` or `latin1`, an error is raised if any characters fall outside the permitted code page.",
@@ -70,7 +70,7 @@
     {
       "description": "Handle Invalid ASCII Characters",
       "input": "try\n    filewrite(\"ascii.txt\", ['c' 'a' 'f' char(233)], 'Encoding', 'ascii');\ncatch err\n    disp(err.message);\nend",
-      "output": "filewrite: character '\u00e9' (U+00E9) cannot be encoded as ASCII"
+      "output": "filewrite: character 'é' (U+00E9) cannot be encoded as ASCII"
     }
   ],
   "faqs": [
@@ -80,7 +80,7 @@
     },
     {
       "question": "How are string arrays written?",
-      "answer": "Each element of the string array is written sequentially (column-major order), separated by newline characters. This mirrors MATLAB\u2019s `filewrite` behaviour and matches what most users expect when exporting string arrays."
+      "answer": "Each element of the string array is written sequentially (column-major order), separated by newline characters. This mirrors MATLAB’s `filewrite` behaviour and matches what most users expect when exporting string arrays."
     },
     {
       "question": "Does `filewrite` add a newline automatically?",
@@ -88,7 +88,7 @@
     },
     {
       "question": "How can I write binary data?",
-      "answer": "Provide a numeric array with values in the range 0\u2013255 (for example `uint8`). Use `'Encoding','raw'` (or rely on the default) to bypass text encoding."
+      "answer": "Provide a numeric array with values in the range 0–255 (for example `uint8`). Use `'Encoding','raw'` (or rely on the default) to bypass text encoding."
     },
     {
       "question": "What happens if the file cannot be opened?",

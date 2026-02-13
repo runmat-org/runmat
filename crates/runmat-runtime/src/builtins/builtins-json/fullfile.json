@@ -1,0 +1,111 @@
+{
+  "title": "fullfile",
+  "category": "io/repl_fs",
+  "keywords": [
+    "fullfile",
+    "join paths",
+    "path assembly",
+    "filesystem",
+    "filesep"
+  ],
+  "summary": "Build a platform-correct file path from multiple path segments.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/fullfile.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host CPU. GPU-resident text inputs are gathered before path assembly."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 16,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::repl_fs::fullfile::tests",
+    "integration": "builtins::io::repl_fs::fullfile::tests::fullfile_joins_segments"
+  },
+  "description": "`fullfile` joins path segments using the platform-specific file separator, producing a single path string that matches MATLAB semantics. It accepts any number of path segments and returns a character row vector (`1xN`).",
+  "behaviors": [
+    "`fullfile(part1, part2, ...)` joins the inputs with the platform file separator (`/` on macOS and Linux, `\\` on Windows).",
+    "Absolute path segments reset the accumulated path, mirroring MATLAB and OS path rules.",
+    "Empty segments are ignored, so `fullfile(\"\", \"data\")` returns `data`.",
+    "Inputs must be character vectors or string scalars. Single-element string arrays are accepted. Other input types raise `fullfile: arguments must be character vectors or string scalars`.",
+    "The output is a character vector. Wrap the result with `string(...)` if you prefer string scalars."
+  ],
+  "examples": [
+    {
+      "description": "Join Relative Path Segments",
+      "input": "p = fullfile(\"data\", \"raw\", \"sample.dat\")",
+      "output": "p =\n    data/raw/sample.dat"
+    },
+    {
+      "description": "Use `fullfile` With `pwd`",
+      "input": "root = pwd;\nconfig = fullfile(root, \"config\", \"settings.json\")",
+      "output": "% Returns a full path rooted at the current working folder"
+    },
+    {
+      "description": "Build A Subfolder Path",
+      "input": "logDir = fullfile(\"logs\", \"2026\");\nstatus = mkdir(logDir)",
+      "output": "status =\n     1"
+    },
+    {
+      "description": "Create A File In A Nested Folder",
+      "input": "mkdir(fullfile(\"data\", \"raw\"));\nfid = fopen(fullfile(\"data\", \"raw\", \"sample.dat\"), \"w\");\nfclose(fid)",
+      "output": "% Creates data/raw/sample.dat"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why does `fullfile` return a character vector instead of a string?",
+      "answer": "MATLAB returns character vectors for `fullfile`. RunMat mirrors that behavior for compatibility; use `string(fullfile(...))` if you prefer string scalars."
+    },
+    {
+      "question": "Does `fullfile` expand `~` to the home directory?",
+      "answer": "No. `fullfile` performs string assembly only. Use `cd` or filesystem APIs that expand `~` when you need home expansion."
+    },
+    {
+      "question": "What happens if a segment is absolute?",
+      "answer": "Absolute segments reset the accumulated path, matching MATLAB and OS path rules."
+    },
+    {
+      "question": "Can I pass numeric character codes?",
+      "answer": "Yes. Numeric arrays that represent character codes are accepted as long as they form a row vector, just like other RunMat text inputs."
+    },
+    {
+      "question": "Does `fullfile` run on the GPU?",
+      "answer": "No. It is a host-only utility and gathers GPU-resident inputs before processing."
+    }
+  ],
+  "links": [
+    {
+      "label": "mkdir",
+      "url": "./mkdir"
+    },
+    {
+      "label": "pwd",
+      "url": "./pwd"
+    },
+    {
+      "label": "tempdir",
+      "url": "./tempdir"
+    },
+    {
+      "label": "dir",
+      "url": "./dir"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/fullfile.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/fullfile.rs"
+  },
+  "gpu_residency": "No. `fullfile` is a host-side path builder. GPU-resident text inputs are gathered automatically, so there is no benefit to keeping path strings on the GPU.",
+  "gpu_behavior": [
+    "`fullfile` performs string manipulation on the CPU only. Any GPU-resident inputs are gathered to the host before path assembly so the resulting character vector is always in CPU memory."
+  ]
+}

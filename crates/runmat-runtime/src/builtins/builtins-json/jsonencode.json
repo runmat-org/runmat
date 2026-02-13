@@ -40,7 +40,7 @@
   },
   "description": "Convert `NaN`, `Inf`, `-Inf` to `null`. Set `false` to raise an error when these values are encountered.",
   "behaviors": [
-    "Returns a 1\u00d7N character array containing UTF-8 encoded JSON text.",
+    "Returns a 1×N character array containing UTF-8 encoded JSON text.",
     "Numeric and logical arrays become JSON arrays, preserving MATLAB column-major ordering.",
     "Scalars encode as bare numbers/strings rather than single-element arrays.",
     "Struct scalars become JSON objects; struct arrays become JSON arrays of objects.",
@@ -156,7 +156,7 @@
       "description": "Convert `NaN`, `Inf`, `-Inf` to `null`. Set `false` to raise an error when these values are encountered."
     }
   ],
-  "gpu_residency": "For most workflows you do not need to call `gpuArray` explicitly before using `jsonencode`. The auto-offload planner and fusion system keep track of residency, so any GPU-backed tensors that flow into `jsonencode` are gathered automatically as part of this sink operation. If you prefer to control residency manually\u2014or need MATLAB parity\u2014you can still wrap data with `gpuArray` and call `gather` explicitly before serialising.",
+  "gpu_residency": "For most workflows you do not need to call `gpuArray` explicitly before using `jsonencode`. The auto-offload planner and fusion system keep track of residency, so any GPU-backed tensors that flow into `jsonencode` are gathered automatically as part of this sink operation. If you prefer to control residency manually—or need MATLAB parity—you can still wrap data with `gpuArray` and call `gather` explicitly before serialising.",
   "gpu_behavior": [
     "`jsonencode` never launches GPU kernels. When the input contains `gpuArray` data, RunMat gathers those values back to host memory via the active acceleration provider and then serialises on the CPU. If no provider is registered, the builtin propagates the same gather error used by other residency sinks (`gather: no acceleration provider registered`)."
   ]

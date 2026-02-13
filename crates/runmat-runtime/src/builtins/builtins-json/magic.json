@@ -1,0 +1,91 @@
+{
+  "title": "magic",
+  "category": "array/creation",
+  "keywords": [
+    "magic",
+    "magic square",
+    "matrix",
+    "array"
+  ],
+  "summary": "Generate an n-by-n magic square.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/magic.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Computed on the host CPU. GPU inputs are gathered and results are returned as host tensors."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::magic::tests",
+    "integration": null
+  },
+  "description": "`magic(n)` returns an `n x n` matrix filled with the integers `1:n^2` such that every row, column, and main diagonal has the same sum. RunMat follows MATLAB's construction rules for odd, doubly-even, and singly-even orders.",
+  "behaviors": [
+    "`magic(n)` requires a single non-negative integer scalar `n`.",
+    "`magic(1)` returns `1`, while `magic(0)` returns an empty `0 x 0` matrix.",
+    "`magic(2)` is undefined and raises an error (no 2x2 magic square exists).",
+    "Odd, doubly-even (`n % 4 == 0`), and singly-even (`n % 4 == 2`) orders each use MATLAB's standard construction so results match MATLAB outputs."
+  ],
+  "examples": [
+    {
+      "description": "A 3x3 magic square",
+      "input": "M = magic(3)",
+      "output": "M =\n     8     1     6\n     3     5     7\n     4     9     2"
+    },
+    {
+      "description": "A 4x4 magic square",
+      "input": "M = magic(4)",
+      "output": "M =\n    16     2     3    13\n     5    11    10     8\n     9     7     6    12\n     4    14    15     1"
+    },
+    {
+      "description": "Use magic squares as structured input",
+      "input": "A = magic(5);\nresult = A * A'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why does `magic(2)` fail?",
+      "answer": "No 2x2 magic square exists, so MATLAB (and RunMat) report an error for order 2."
+    },
+    {
+      "question": "Does `magic` accept a size vector?",
+      "answer": "No. `magic` accepts a single scalar order. Use `ones`, `zeros`, or `eye` when you need a size vector form."
+    },
+    {
+      "question": "How do I move the result to the GPU?",
+      "answer": "Call `gpuArray(magic(n))` if you need the output on the GPU. RunMat computes `magic` on the host today."
+    }
+  ],
+  "links": [
+    {
+      "label": "ones",
+      "url": "./ones"
+    },
+    {
+      "label": "eye",
+      "url": "./eye"
+    },
+    {
+      "label": "conv2",
+      "url": "./conv2"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/magic.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/magic.rs"
+  },
+  "gpu_residency": "`magic` always runs on the host CPU today. If you need the result on the GPU, wrap the call in `gpuArray(...)`.",
+  "gpu_behavior": [
+    "RunMat gathers any GPU-resident inputs before evaluating `magic` and returns a host tensor. No acceleration provider hooks are defined for this builtin yet."
+  ]
+}

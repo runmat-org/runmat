@@ -36,7 +36,7 @@
     "Works on numeric, logical, and complex arrays.",
     "Operates on the first two dimensions; trailing dimensions act as independent pages.",
     "Preserves logical types and complex-valued elements.",
-    "Scalars are treated as `1\u00d71` matrices and honour diagonal offsets (for example `triu(5, 1)` returns `0`).",
+    "Scalars are treated as `1×1` matrices and honour diagonal offsets (for example `triu(5, 1)` returns `0`).",
     "gpuArray inputs stay on the device when an acceleration provider supplies a native `triu` hook; otherwise the runtime gathers, masks on the host, and uploads the result back to the GPU."
   ],
   "examples": [
@@ -122,6 +122,6 @@
   "gpu_behavior": [
     "If the active acceleration provider implements a `triu` kernel the entire operation executes on the GPU.",
     "Without a provider hook, RunMat gathers the tensor to host memory once, applies the mask, uploads the result, and returns a gpuArray so residency is preserved for downstream kernels.",
-    "Fallbacks never affect numerical results\u2014only where the computation runs."
+    "Fallbacks never affect numerical results—only where the computation runs."
   ]
 }

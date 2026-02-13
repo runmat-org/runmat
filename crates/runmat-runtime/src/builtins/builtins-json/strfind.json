@@ -43,32 +43,32 @@
     {
       "description": "Find substring positions in a character vector",
       "input": "idx = strfind('abracadabra', 'abra')",
-      "output": "idx = [1 8];"
+      "output": "idx = [1 8]"
     },
     {
       "description": "Locate overlapping matches",
       "input": "idx = strfind(\"aaaa\", \"aa\")",
-      "output": "idx = [1 2 3];"
+      "output": "idx = [1 2 3]"
     },
     {
       "description": "Return matches for each element of a string array",
       "input": "words = [\"hydrogen\"; \"helium\"; \"lithium\"];\nidx = strfind(words, \"i\")",
-      "output": "idx = 3\u00d71 cell array\n    {[]}\n    {[4]}\n    {[2 5]}"
+      "output": "idx = 3×1 cell array\n    {[]}\n    {[4]}\n    {[2 5]}"
     },
     {
       "description": "Search with multiple patterns against one subject",
       "input": "idx = strfind(\"saturn\", [\"sat\", \"turn\", \"moon\"])",
-      "output": "idx = 1\u00d73 cell array\n    {[1]}    {[3]}    {[]}"
+      "output": "idx = 1×3 cell array\n    {[1]}    {[3]}    {[]}"
     },
     {
       "description": "Force cell output for scalar inputs",
       "input": "idx = strfind('mission', 's', 'ForceCellOutput', true)",
-      "output": "idx = 1\u00d71 cell array\n    {[3 4]}"
+      "output": "idx = 1×1 cell array\n    {[3 4]}"
     },
     {
       "description": "Handle empty patterns and missing strings",
       "input": "idxEmpty = strfind(\"abc\", \"\");\nidxMissing = strfind(\"<missing>\", \"abc\")",
-      "output": "idxEmpty = [1 2 3 4];\nidxMissing = [];"
+      "output": "idxEmpty = [1 2 3 4];\nidxMissing = []"
     }
   ],
   "faqs": [
@@ -78,7 +78,7 @@
     },
     {
       "question": "How are the results formatted?",
-      "answer": "When both inputs are scalar text (character vectors or string scalars) and `'ForceCellOutput'` is `false`, `strfind` returns a numeric row vector with the starting indices. In all other cases \u2014 for example, if either input is a cell array or the broadcasted size exceeds one element \u2014 the result is a cell array whose shape matches the broadcasted size, with each cell containing a row vector of doubles."
+      "answer": "When both inputs are scalar text (character vectors or string scalars) and `'ForceCellOutput'` is `false`, `strfind` returns a numeric row vector with the starting indices. In all other cases — for example, if either input is a cell array or the broadcasted size exceeds one element — the result is a cell array whose shape matches the broadcasted size, with each cell containing a row vector of doubles."
     },
     {
       "question": "Do matches overlap?",

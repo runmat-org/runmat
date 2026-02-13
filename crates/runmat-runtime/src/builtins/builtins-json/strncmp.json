@@ -50,17 +50,17 @@
     {
       "description": "Comparing string arrays with implicit expansion",
       "input": "names = [\"north\" \"south\" \"east\"];\ntf = strncmp(names, \"no\", 2)",
-      "output": "tf = 1\u00d73 logical array\n   1   0   0"
+      "output": "tf = 1×3 logical array\n   1   0   0"
     },
     {
       "description": "Comparing rows of a character array",
       "input": "animals = char(\"cat\", \"camel\", \"cow\");\ntf = strncmp(animals, \"ca\", 2)",
-      "output": "tf = 3\u00d71 logical array\n   1\n   1\n   0"
+      "output": "tf = 3×1 logical array\n   1\n   1\n   0"
     },
     {
       "description": "Comparing cell arrays element-wise",
       "input": "C1 = {'red', 'green', 'blue'};\nC2 = {'rose', 'grey', 'black'};\ntf = strncmp(C1, C2, 2)",
-      "output": "tf = 1\u00d73 logical array\n   1   0   0"
+      "output": "tf = 1×3 logical array\n   1   0   0"
     },
     {
       "description": "Handling zero-length comparisons",
@@ -91,7 +91,7 @@
     },
     {
       "question": "Does `strncmp` produce logical results?",
-      "answer": "Yes. Scalar comparisons yield logical scalars; array inputs produce logical arrays that follow MATLAB\u2019s column-major ordering."
+      "answer": "Yes. Scalar comparisons yield logical scalars; array inputs produce logical arrays that follow MATLAB’s column-major ordering."
     }
   ],
   "links": [

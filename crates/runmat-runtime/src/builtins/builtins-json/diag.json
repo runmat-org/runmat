@@ -38,11 +38,11 @@
     "`diag(A)` with a matrix `A` returns a column vector containing the main diagonal of `A`.",
     "`diag(A, k)` extracts the `k`-th diagonal. When the requested diagonal does not exist, an empty column vector is returned.",
     "`diag(v, 'vector')` always returns a column vector copy of `v`, even when `v` is already a vector.",
-    "`diag(v, m)` forces an `m \u00d7 m` square result, while `diag(v, [m n])` creates an explicit rectangular size. You can combine both with offsets (e.g. `diag(v, k, [m n])`) when you need a wider diagonal band.",
+    "`diag(v, [m n])` creates an explicit rectangular size. You can combine it with offsets (e.g. `diag(v, k, [m n])`) when you need a wider diagonal band.",
     "`diag(___, 'logical')` converts the result to a logical array. `diag(___, 'double')` forces a double-precision result when inputs are logical.",
     "`diag(___, 'like', prototype)` matches the numeric flavour and residency of `prototype` (including GPU handles).",
     "Logical inputs stay logical; complex inputs stay complex; character arrays preserve padding with spaces off the diagonal.",
-    "Higher-dimensional inputs are accepted when trailing dimensions are singleton\u2014only the leading 2-D slice participates in the diagonal operation."
+    "Higher-dimensional inputs are accepted when trailing dimensions are singleton—only the leading 2-D slice participates in the diagonal operation."
   ],
   "examples": [
     {
@@ -92,7 +92,7 @@
     },
     {
       "question": "What happens if I request a diagonal outside the matrix bounds?",
-      "answer": "You receive an empty column vector (size `0 \u00d7 0`), matching MATLAB's behaviour."
+      "answer": "You receive an empty column vector (size `0 × 0`), matching MATLAB's behaviour."
     },
     {
       "question": "Can I use `diag` with logical or character arrays?",
@@ -108,15 +108,15 @@
     },
     {
       "question": "Can I place a diagonal inside a non-square matrix?",
-      "answer": "No. MATLAB (and RunMat) always produces a square matrix when building from a vector."
+      "answer": "Yes. Pass an explicit size vector such as `diag(v, [m n])`, and optionally combine it with an offset via `diag(v, k, [m n])`."
     },
     {
       "question": "What if the vector is empty?",
-      "answer": "`diag([])` returns a `0 \u00d7 0` matrix. `diag([], k)` returns a square matrix of size `abs(k)` filled with zeros."
+      "answer": "`diag([])` returns a `0 × 0` matrix. `diag([], k)` returns a square matrix of size `abs(k)` filled with zeros."
     },
     {
       "question": "Do GPU results stay on the device?",
-      "answer": "Yes\u2014providers with diag hooks operate entirely on the GPU. Providers without hooks perform a single host gather and upload, so downstream fused expressions still see a GPU handle. When you request `'like'` with a GPU prototype, the result is uploaded back to the device even if a host fallback was required."
+      "answer": "Yes—providers with diag hooks operate entirely on the GPU. Providers without hooks perform a single host gather and upload, so downstream fused expressions still see a GPU handle. When you request `'like'` with a GPU prototype, the result is uploaded back to the device even if a host fallback was required."
     },
     {
       "question": "Is the offset argument required to be an integer?",

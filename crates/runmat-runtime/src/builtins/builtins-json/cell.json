@@ -29,12 +29,12 @@
     "unit": "builtins::cells::core::cell::tests",
     "integration": "builtins::cells::core::cell::tests::cell_like_gpu_prototype_falls_back_to_host"
   },
-  "description": "`cell` constructs cell arrays\u2014containers that can hold heterogeneous values in each element. Every cell starts out containing an empty value: by default the empty double array `[]`, or an empty value that matches a `'like'` prototype when the prototype lives on the host. GPU-backed prototypes currently fall back to empty double arrays on the host. RunMat mirrors MATLAB's behaviour for scalar and arbitrary size forms (`cell`, `cell(n)`, `cell(m, n, p, ...)`, `cell([m n p ...])`, `cell(size(A))`, and `cell(___, 'like', prototype)`).",
+  "description": "`cell` constructs cell arrays—containers that can hold heterogeneous values in each element. Every cell starts out containing an empty value: by default the empty double array `[]`, or an empty value that matches a `'like'` prototype when the prototype lives on the host. GPU-backed prototypes currently fall back to empty double arrays on the host. RunMat mirrors MATLAB's behaviour for scalar and arbitrary size forms (`cell`, `cell(n)`, `cell(m, n, p, ...)`, `cell([m n p ...])`, `cell(size(A))`, and `cell(___, 'like', prototype)`).",
   "behaviors": [
-    "`cell` (with no arguments) returns a `0\u00d70` empty cell array.",
-    "`cell(n)` returns an `n\u00d7n` cell array whose elements default to the empty value.",
+    "`cell` (with no arguments) returns a `0×0` empty cell array.",
+    "`cell(n)` returns an `n×n` cell array whose elements default to the empty value.",
     "`cell(m, n, p, ...)` accepts any number of size scalars and returns an N-D cell array whose dimensions match the arguments.",
-    "`cell(sz)` or `cell(size(A))` accepts a numeric size vector of any length. A single-element vector produces an `m\u00d71` cell array; longer vectors create higher-dimensional cell arrays matching the provided extents.",
+    "`cell(sz)` or `cell(size(A))` accepts a numeric size vector of any length. A single-element vector produces an `m×1` cell array; longer vectors create higher-dimensional cell arrays matching the provided extents.",
     "`cell(___, 'like', prototype)` copies the prototype's size when no explicit dimensions are supplied and fills each element with the empty value that matches the prototype's class (for example logical empty arrays, complex empties, or empty strings). When the prototype is a `gpuArray`, RunMat keeps the host-empty double fallback until GPU-resident cell storage ships.",
     "Size arguments must be finite, non-negative integers that are representable in double precision."
   ],

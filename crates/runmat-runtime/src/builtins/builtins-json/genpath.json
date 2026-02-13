@@ -85,7 +85,7 @@
     },
     {
       "question": "Can I call `genpath` on a GPU array?",
-      "answer": "Yes\u2014the input is gathered to the CPU before processing, and the result is returned as a standard character vector."
+      "answer": "Yes—the input is gathered to the CPU before processing, and the result is returned as a standard character vector."
     },
     {
       "question": "Is the result always absolute paths?",
@@ -122,7 +122,7 @@
     "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/genpath.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/genpath.rs"
   },
-  "gpu_residency": "No. `genpath` manipulates host-side strings and filesystem metadata. Supplying `gpuArray` values provides no benefit\u2014RunMat gathers the data automatically.",
+  "gpu_residency": "No. `genpath` manipulates host-side strings and filesystem metadata. Supplying `gpuArray` values provides no benefit—RunMat gathers the data automatically.",
   "gpu_behavior": [
     "`genpath` operates entirely on the host filesystem. Any string inputs that reside on the GPU are gathered back to the CPU before processing. No acceleration provider hooks are invoked and no device kernels are launched."
   ]

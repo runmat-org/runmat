@@ -41,7 +41,7 @@
     {
       "description": "Creating a 2x3 logical array of true values",
       "input": "mask = true(2, 3)",
-      "output": "mask = [1 1 1; 1 1 1];"
+      "output": "mask = [1 1 1; 1 1 1]"
     },
     {
       "description": "Creating a logical array from a size vector",

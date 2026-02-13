@@ -90,7 +90,7 @@
     },
     {
       "question": "What happens when no variables match?",
-      "answer": "A `0\u00d71` struct array is returned, just like MATLAB, so idioms such as `isempty(whos('foo'))` work."
+      "answer": "A `0×1` struct array is returned, just like MATLAB, so idioms such as `isempty(whos('foo'))` work."
     },
     {
       "question": "Does `whos('-file', ...)` read the entire MAT-file?",

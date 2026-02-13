@@ -35,7 +35,7 @@
     "gpu": "builtins::math::linalg::solve::norm::tests::norm_gpu_roundtrip_matches_cpu",
     "wgpu": "builtins::math::linalg::solve::norm::tests::norm_wgpu_matches_cpu"
   },
-  "description": "`norm(X)` returns the magnitude of vectors and matrices. For vectors it defaults to the Euclidean 2-norm. For matrices it defaults to the spectral norm (largest singular value). Alternate norms \u2014 such as the 1-norm, infinity norm, Frobenius norm, and nuclear norm \u2014 are selected with the second argument.\n\n- `norm(X)` and `norm(X, 2)` compute the Euclidean norm for vectors and the largest singular value for matrices. - `norm(X, 1)` is the maximum absolute column sum of `X`. - `norm(X, Inf)` is the maximum absolute row sum of `X`; `norm(x, -Inf)` returns the minimum absolute element for vectors. - `norm(X, 'fro')` is the Frobenius norm, equivalent to treating the matrix as a vector and applying the 2-norm. - `norm(X, 'nuc')` is the nuclear norm (sum of singular values) for matrices. - `norm(x, p)` accepts any real scalar `p \u2265 1` for vectors (plus the special cases `0`, `Inf`, `-Inf`), matching MATLAB\u2019s behavior. - Inputs must be vectors or 2-D matrices. Higher-dimensional arrays raise an error. - Empty inputs (e.g., `[]` or matrices with a zero dimension) return `0`. - Logical and integer inputs are promoted to double precision before the norm is computed. - Complex values use the magnitude of each entry, and the final result is always a non-negative real scalar.",
+  "description": "`norm(X)` returns the magnitude of vectors and matrices. For vectors it defaults to the Euclidean 2-norm. For matrices it defaults to the spectral norm (largest singular value). Alternate norms — such as the 1-norm, infinity norm, Frobenius norm, and nuclear norm — are selected with the second argument.\n\n- `norm(X)` and `norm(X, 2)` compute the Euclidean norm for vectors and the largest singular value for matrices. - `norm(X, 1)` is the maximum absolute column sum of `X`. - `norm(X, Inf)` is the maximum absolute row sum of `X`; `norm(x, -Inf)` returns the minimum absolute element for vectors. - `norm(X, 'fro')` is the Frobenius norm, equivalent to treating the matrix as a vector and applying the 2-norm. - `norm(X, 'nuc')` is the nuclear norm (sum of singular values) for matrices. - `norm(x, p)` accepts any real scalar `p ≥ 1` for vectors (plus the special cases `0`, `Inf`, `-Inf`), matching MATLAB’s behavior. - Inputs must be vectors or 2-D matrices. Higher-dimensional arrays raise an error. - Empty inputs (e.g., `[]` or matrices with a zero dimension) return `0`. - Logical and integer inputs are promoted to double precision before the norm is computed. - Complex values use the magnitude of each entry, and the final result is always a non-negative real scalar.",
   "behaviors": [],
   "examples": [
     {
@@ -76,7 +76,7 @@
     },
     {
       "question": "Does `norm` support fractional powers?",
-      "answer": "Yes. For vectors you can pass any non-zero real scalar `p`, including fractional values. MATLAB\u2019s special cases (`p = 0`, `Inf`, `-Inf`) are also supported."
+      "answer": "Yes. For vectors you can pass any non-zero real scalar `p`, including fractional values. MATLAB’s special cases (`p = 0`, `Inf`, `-Inf`) are also supported."
     },
     {
       "question": "Can I use `norm` on complex matrices?",
@@ -88,7 +88,7 @@
     },
     {
       "question": "Why does `norm` of an empty matrix return `0`?",
-      "answer": "That matches MATLAB\u2019s convention: the sum over an empty set is zero, so every supported norm returns `0` for empty inputs."
+      "answer": "That matches MATLAB’s convention: the sum over an empty set is zero, so every supported norm returns `0` for empty inputs."
     },
     {
       "question": "Can the norm overflow or underflow?",

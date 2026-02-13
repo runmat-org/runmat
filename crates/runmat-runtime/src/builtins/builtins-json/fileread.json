@@ -35,7 +35,7 @@
     "Accepts paths provided as character vectors or string scalars. String arrays must contain exactly one element.",
     "Supports an optional encoding argument: `fileread(filename, encoding)` or `fileread(filename, 'Encoding', encoding)`. Recognised values include `auto` (default), `utf-8`, `ascii`, `latin1`, and `raw`.",
     "Resolves relative paths with respect to the current working directory of the RunMat process, just like MATLAB.",
-    "Returns a `1\u00d7N` character array. Empty files yield a `1\u00d70` character vector.",
+    "Returns a `1×N` character array. Empty files yield a `1×0` character vector.",
     "Leaves line endings untouched (`\\r`, `\\n`, or `\\r\\n`) so scripts can inspect original formatting.",
     "When `auto` decoding detects invalid UTF-8 sequences, RunMat maps each byte to the corresponding extended-ASCII code point so that callers can recover the raw data.",
     "Throws a descriptive error when the file cannot be opened or read."
@@ -75,7 +75,7 @@
   "faqs": [
     {
       "question": "What does `fileread` return?",
-      "answer": "It returns a `1\u00d7N` character vector containing every byte from the file. Convert it to a string with `string(...)` when you prefer string scalars."
+      "answer": "It returns a `1×N` character vector containing every byte from the file. Convert it to a string with `string(...)` when you prefer string scalars."
     },
     {
       "question": "Does `fileread` change line endings?",

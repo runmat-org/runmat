@@ -45,12 +45,12 @@
     {
       "description": "Checking if any column in a matrix is nonzero",
       "input": "A = [0 2 0; 0 0 0];\ncolHasData = any(A)",
-      "output": "colHasData = [0 1 0];"
+      "output": "colHasData = [0 1 0]"
     },
     {
       "description": "Detecting whether any row contains a nonzero entry",
       "input": "B = [0 4 0; 1 0 0; 0 0 0];\nrowHasData = any(B, 2)",
-      "output": "rowHasData = [1; 1; 0];"
+      "output": "rowHasData = [1; 1; 0]"
     },
     {
       "description": "Reducing across multiple dimensions with `vecdim`",
@@ -60,7 +60,7 @@
     {
       "description": "Checking all elements with the `'all'` option",
       "input": "D = [0 0; 0 5];\nanyNonZero = any(D, 'all')",
-      "output": "anyNonZero = true;"
+      "output": "anyNonZero = true"
     },
     {
       "description": "Ignoring `NaN` values when probing slices",

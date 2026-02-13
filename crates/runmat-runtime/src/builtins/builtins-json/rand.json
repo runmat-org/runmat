@@ -34,7 +34,7 @@
   "description": "`rand` produces uniformly distributed pseudorandom numbers over the open interval (0, 1). RunMat mirrors MATLAB semantics across scalar, vector, matrix, and N-D invocations, including `'like'` prototypes that control data type and device residency.",
   "behaviors": [
     "`rand()` returns a scalar double drawn from `U(0, 1)`.",
-    "`rand(n)` returns an `n \u00d7 n` double matrix.",
+    "`rand(n)` returns an `n × n` double matrix.",
     "`rand(m, n, ...)` returns a dense double array of the requested dimensions.",
     "`rand(sz)` accepts a size vector (row or column) and returns a tensor whose shape is `sz`.",
     "`rand(A)` or `rand(___, 'like', A)` matches the shape and residency of `A`, including GPU tensors when an acceleration provider is active.",
@@ -44,17 +44,17 @@
     {
       "description": "Creating a 3x3 matrix of random numbers",
       "input": "R = rand(3);         % 3x3 doubles in (0, 1)",
-      "output": "R = [0.8147 0.9134 0.1270; 0.9058 0.6324 0.0975; 0.1270 0.0975 0.2785];"
+      "output": "R = [0.8147 0.9134 0.1270; 0.9058 0.6324 0.0975; 0.1270 0.0975 0.2785]"
     },
     {
       "description": "Creating a 2x4x3 matrix of random numbers",
       "input": "sz = [2 4 3];\nT = rand(sz)",
-      "output": "T = [0.8147 0.9134 0.1270 0.9058 0.6324 0.0975 0.1270 0.0975 0.2785; 0.9134 0.6324 0.0975 0.2785 0.0975 0.1270 0.9058 0.6324 0.0975];"
+      "output": "T = [0.8147 0.9134 0.1270 0.9058 0.6324 0.0975 0.1270 0.0975 0.2785; 0.9134 0.6324 0.0975 0.2785 0.0975 0.1270 0.9058 0.6324 0.0975]"
     },
     {
       "description": "Creating a 128x128 matrix of random numbers on a GPU",
       "input": "G = rand(128, 128)",
-      "output": "H = [0.8147 0.9134 0.1270 0.9058 0.6324 0.0975 0.1270 0.0975 0.2785; 0.9134 0.6324 0.0975 0.2785 0.0975 0.1270 0.9058 0.6324 0.0975];"
+      "output": "H = [0.8147 0.9134 0.1270 0.9058 0.6324 0.0975 0.1270 0.0975 0.2785; 0.9134 0.6324 0.0975 0.2785 0.0975 0.1270 0.9058 0.6324 0.0975]"
     }
   ],
   "faqs": [
@@ -68,7 +68,7 @@
     },
     {
       "question": "What does `rand(n)` return?",
-      "answer": "`rand(n)` returns an `n \u00d7 n` dense double-precision matrix filled with random numbers over the open interval (0, 1). For example, `rand(3)` yields a 3-by-3 matrix of random numbers."
+      "answer": "`rand(n)` returns an `n × n` dense double-precision matrix filled with random numbers over the open interval (0, 1). For example, `rand(3)` yields a 3-by-3 matrix of random numbers."
     },
     {
       "question": "How do I create a single precision array of random numbers?",
@@ -80,7 +80,7 @@
     },
     {
       "question": "Can I create N-dimensional arrays with `rand`?",
-      "answer": "Yes! Pass more than two dimension arguments (or a size vector):\n```matlab:runnable\nT = rand(2, 3, 4);\n```\nThis creates a 2\u00d73\u00d74 tensor of random numbers."
+      "answer": "Yes! Pass more than two dimension arguments (or a size vector):\n```matlab:runnable\nT = rand(2, 3, 4);\n```\nThis creates a 2×3×4 tensor of random numbers."
     },
     {
       "question": "How does `rand(A)` behave?",

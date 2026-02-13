@@ -38,7 +38,7 @@
     "By default, folders are added to the top of the search path. Use `'-end'` to append or `'-begin'` to force prepending explicitly. Only one position flag is permitted.",
     "The `'-frozen'` flag is accepted for MATLAB compatibility. RunMat does not currently track frozen entries separately; the flag simply suppresses incompatibility warnings.",
     "Duplicate entries are removed automatically so each folder appears at most once. On Windows, comparisons are case-insensitive.",
-    "Inputs are resolved to absolute, canonicalised paths. Relative inputs are interpreted relative to the current working directory, and `~` expands to the user\u2019s home directory.",
+    "Inputs are resolved to absolute, canonicalised paths. Relative inputs are interpreted relative to the current working directory, and `~` expands to the user’s home directory.",
     "Folders must exist. RunMat raises `addpath: folder '<name>' not found` when a directory is missing or `addpath: '<name>' is not a folder` when the target is not a directory."
   ],
   "examples": [
@@ -143,7 +143,7 @@
     "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/addpath.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/addpath.rs"
   },
-  "gpu_residency": "No. `addpath` operates entirely on CPU-side strings. Supplying `gpuArray` text inputs offers no benefit\u2014RunMat gathers them automatically.",
+  "gpu_residency": "No. `addpath` operates entirely on CPU-side strings. Supplying `gpuArray` text inputs offers no benefit—RunMat gathers them automatically.",
   "gpu_behavior": [
     "`addpath` manipulates host-side configuration. If any input value resides on the GPU, RunMat gathers it back to the host before parsing. No acceleration provider hooks or kernels are involved."
   ]

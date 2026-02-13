@@ -34,12 +34,12 @@
   "description": "`svd(A)` computes the singular value decomposition of a real or complex matrix `A`. It factors `A` into the product `U * S * V'`, where `U` and `V` are orthogonal/unitary matrices and `S` is diagonal (or rectangular diagonal) with non-negative, descending singular values.",
   "behaviors": [
     "Single output `s = svd(A)` returns the singular values as a column vector sorted in descending order.",
-    "Three outputs `[U,S,V] = svd(A)` return the full-sized factors with `U` square `m\u00d7m`, `S` shaped `m\u00d7n`, and `V` square `n\u00d7n` (`m = size(A,1)`, `n = size(A,2)`).",
+    "Three outputs `[U,S,V] = svd(A)` return the full-sized factors with `U` square `m×m`, `S` shaped `m×n`, and `V` square `n×n` (`m = size(A,1)`, `n = size(A,2)`).",
     "Economy form `[U,S,V] = svd(A,'econ')` (or `svd(A,0)`) reduces the shapes to the rank-defining dimension so that `U` and `V` drop the redundant orthogonal columns.",
     "Vector form `[U,s,V] = svd(A,'vector')` supplies the singular values as a vector instead of a diagonal matrix. You can combine `'vector'` with `'econ'`.",
     "Logical and integer inputs are promoted to double precision before factorisation.",
     "Complex inputs yield unitary `U` and `V` (conjugate-transpose preserves orthogonality) with real, non-negative singular values.",
-    "Empty matrices, row/column vectors, and scalars are all supported and follow MATLAB\u2019s shape conventions."
+    "Empty matrices, row/column vectors, and scalars are all supported and follow MATLAB’s shape conventions."
   ],
   "examples": [
     {
@@ -74,11 +74,11 @@
   "faqs": [
     {
       "question": "How are the singular values ordered?",
-      "answer": "They are returned in non-increasing order. MATLAB\u2019s sign conventions are followed: values are non-negative and appear on the diagonal of `S` (or inside the vector form)."
+      "answer": "They are returned in non-increasing order. MATLAB’s sign conventions are followed: values are non-negative and appear on the diagonal of `S` (or inside the vector form)."
     },
     {
       "question": "What is the difference between full and economy forms?",
-      "answer": "Full SVD returns square `U` and `V` (`m\u00d7m` and `n\u00d7n`). Economy SVD trims them to `m\u00d7min(m,n)` and `n\u00d7min(m,n)`. The `S` factor keeps the same column dimension as the input; it is `min(m,n)\u00d7min(m,n)` when `m \u2265 n` and `min(m,n)\u00d7n` when `m < n`. Use economy when you do not need the redundant orthogonal columns."
+      "answer": "Full SVD returns square `U` and `V` (`m×m` and `n×n`). Economy SVD trims them to `m×min(m,n)` and `n×min(m,n)`. The `S` factor keeps the same column dimension as the input; it is `min(m,n)×min(m,n)` when `m ≥ n` and `min(m,n)×n` when `m < n`. Use economy when you do not need the redundant orthogonal columns."
     },
     {
       "question": "What does the `\"vector\"` option change?",
@@ -86,7 +86,7 @@
     },
     {
       "question": "Can I mix `'econ'` and `'vector'`?",
-      "answer": "Yes. Any order of the options is accepted (`svd(A,'vector','econ')` and `svd(A,'econ','vector')` both work), and the returned dimensions mirror MATLAB\u2019s behaviour."
+      "answer": "Yes. Any order of the options is accepted (`svd(A,'vector','econ')` and `svd(A,'econ','vector')` both work), and the returned dimensions mirror MATLAB’s behaviour."
     },
     {
       "question": "What happens with scalars or empty matrices?",
@@ -134,6 +134,6 @@
   "gpu_behavior": [
     "RunMat reserves a dedicated `svd` provider hook; once a backend implements it, the factors can stay on the device as `gpuTensor` handles without round-tripping through host memory.",
     "Today no provider ships that hook, so `gpuArray` inputs are gathered to the host, the CPU SVD executes, and the factors are returned as host tensors. You can re-establish residency with `gpuArray(s)` if you need to continue on the GPU.",
-    "Because SVD is a residency sink, the fusion planner treats it as a barrier\u2014preceding GPU tensors are gathered and subsequent ops run on the host unless you manually promote them again."
+    "Because SVD is a residency sink, the fusion planner treats it as a barrier—preceding GPU tensors are gathered and subsequent ops run on the host unless you manually promote them again."
   ]
 }

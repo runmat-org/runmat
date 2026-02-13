@@ -34,7 +34,7 @@
     "The callback may be supplied as a function handle (`@sin`), an anonymous function, or one of MATLAB's short string identifiers (for example `'isempty'` or `'isclass'`).",
     "With `'UniformOutput', true` (default) the callback must return scalars (numeric, logical, or complex). The results are packed into an array that mirrors the cell array shape. Mixed real/complex outputs automatically promote to complex.",
     "With `'UniformOutput', false` the callback may return arbitrary values; RunMat stores them in a new cell array that matches the input dimensions.",
-    "`'ErrorHandler', handler` intercepts runtime errors. When the callback throws, RunMat calls `handler(errStruct, cellValue1, cellValue2, ..., extraArg1, extraArg2, ...)`. The structure contains the fields `identifier`, `message`, `index` (1-based linear index), and `indices` (1\u00d7N vector of subscripts). The handler's return value is inserted into the result.",
+    "`'ErrorHandler', handler` intercepts runtime errors. When the callback throws, RunMat calls `handler(errStruct, cellValue1, cellValue2, ..., extraArg1, extraArg2, ...)`. The structure contains the fields `identifier`, `message`, `index` (1-based linear index), and `indices` (1×N vector of subscripts). The handler's return value is inserted into the result.",
     "GPU values inside the cells are gathered to host memory before the callback runs so that uniform outputs can be materialised in CPU tensors today."
   ],
   "examples": [
@@ -51,7 +51,7 @@
     {
       "description": "Keeping non-scalar outputs as cells",
       "input": "names = {'Ada', 'Linus', 'Katherine'};\nupper = cellfun(@upper, names, 'UniformOutput', false)",
-      "output": "upper =\n  1\u00d73 cell array\n    {'ADA'}    {'LINUS'}    {'KATHERINE'}"
+      "output": "upper =\n  1×3 cell array\n    {'ADA'}    {'LINUS'}    {'KATHERINE'}"
     },
     {
       "description": "Supplying additional arguments alongside each cell",
@@ -71,7 +71,7 @@
     {
       "description": "Returning rich metadata in the error handler",
       "input": "cells = {1, 'two', 3};\neh = @(err, value) sprintf('%s @ %d', err.identifier, err.index);\nresults = cellfun(@(x) x + 1, cells, 'UniformOutput', false, 'ErrorHandler', eh)",
-      "output": "results =\n  1\u00d73 cell array\n    {[2]}    {[117 120 112]}    {[4]}"
+      "output": "results =\n  1×3 cell array\n    {[2]}    {[117 120 112]}    {[4]}"
     }
   ],
   "faqs": [

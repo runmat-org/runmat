@@ -30,10 +30,10 @@
     "unit": "builtins::math::linalg::factor::lu::tests",
     "integration": "builtins::math::linalg::factor::lu::tests::lu_three_outputs_matches_factorization"
   },
-  "description": "`lu(A)` computes the LU factorization of a real or complex matrix `A` using partial pivoting. It exposes the same calling forms as MATLAB:\n\n- Single output: `lu(A)` returns a single matrix whose strictly lower-triangular entries encode `L` (with an implicit unit diagonal) and whose upper-triangular part encodes `U`. - Two outputs: `[L, U] = lu(A)` returns the explicit unit-lower-triangular factor `L` and the upper-triangular factor `U`. - Three outputs: `[L, U, P] = lu(A)` additionally returns a permutation so that `P * A = L * U`. Use the option `'vector'` to receive the permutation as a pivot vector instead of a matrix.\n\nThe implementation follows MATLAB\u2019s dense behaviour for full matrices and supports rectangular inputs.",
+  "description": "`lu(A)` computes the LU factorization of a real or complex matrix `A` using partial pivoting. It exposes the same calling forms as MATLAB:\n\n- Single output: `lu(A)` returns a single matrix whose strictly lower-triangular entries encode `L` (with an implicit unit diagonal) and whose upper-triangular part encodes `U`. - Two outputs: `[L, U] = lu(A)` returns the explicit unit-lower-triangular factor `L` and the upper-triangular factor `U`. - Three outputs: `[L, U, P] = lu(A)` additionally returns a permutation so that `P * A = L * U`. Use the option `'vector'` to receive the permutation as a pivot vector instead of a matrix.\n\nThe implementation follows MATLAB’s dense behaviour for full matrices and supports rectangular inputs.",
   "behaviors": [
     "Partial pivoting is applied to improve numerical stability. The permutation is encoded either as a dense matrix (`'matrix'`, default) or as a pivot vector (`'vector'`).",
-    "Rectangular inputs are supported. `L` is always `m \u00d7 m` (unit lower-triangular), and `U` is `m \u00d7 n`, where `m` and `n` are the row and column counts of `A`.",
+    "Rectangular inputs are supported. `L` is always `m × m` (unit lower-triangular), and `U` is `m × n`, where `m` and `n` are the row and column counts of `A`.",
     "Singular matrices are permitted. Zero pivots propagate into the `U` factor just as in MATLAB; MATLAB-compatible warnings are not yet emitted.",
     "Only the first three outputs are implemented today. Column permutations (`Q`) and scaling (`R`) for the five-output sparse form are not yet available."
   ],
@@ -72,10 +72,10 @@
   "faqs": [
     {
       "question": "Why does RunMat currently stop at three outputs?",
-      "answer": "Column pivoting (`Q`) and scaling (`R`) from MATLAB\u2019s five-output sparse form are planned but not yet implemented. The dense three-output contract mirrors MATLAB\u2019s default dense behaviour."
+      "answer": "Column pivoting (`Q`) and scaling (`R`) from MATLAB’s five-output sparse form are planned but not yet implemented. The dense three-output contract mirrors MATLAB’s default dense behaviour."
     },
     {
-      "question": "Does the permutation vector use MATLAB\u2019s 1-based indexing?",
+      "question": "Does the permutation vector use MATLAB’s 1-based indexing?",
       "answer": "Yes. When you request `'vector'`, the returned pivot vector contains 1-based row indices so that `A(p, :) = L * U`."
     },
     {
@@ -88,7 +88,7 @@
     },
     {
       "question": "Will the factors stay on the GPU when I pass a `gpuArray`?",
-      "answer": "Yes. When the active acceleration provider exposes the `lu` hook (WGPU today), the combined factor, `L`, `U`, and the permutation outputs remain `gpuArray` values\u2014the provider currently performs the decomposition on the host once and reuploads the results to preserve residency. Without provider support, RunMat gathers to host memory before returning the factors."
+      "answer": "Yes. When the active acceleration provider exposes the `lu` hook (WGPU today), the combined factor, `L`, `U`, and the permutation outputs remain `gpuArray` values—the provider currently performs the decomposition on the host once and reuploads the results to preserve residency. Without provider support, RunMat gathers to host memory before returning the factors."
     },
     {
       "question": "Can I call `lu` on logical arrays?",
@@ -96,11 +96,11 @@
     },
     {
       "question": "Is pivoting deterministic?",
-      "answer": "Yes. Partial pivoting always chooses the first maximal entry in each column, mirroring MATLAB\u2019s behaviour for dense matrices."
+      "answer": "Yes. Partial pivoting always chooses the first maximal entry in each column, mirroring MATLAB’s behaviour for dense matrices."
     },
     {
       "question": "How accurate is the factorization?",
-      "answer": "The implementation uses standard double-precision arithmetic (or complex double when needed). Numerical properties therefore match MATLAB\u2019s dense fallback (without iterative refinement)."
+      "answer": "The implementation uses standard double-precision arithmetic (or complex double when needed). Numerical properties therefore match MATLAB’s dense fallback (without iterative refinement)."
     },
     {
       "question": "What happens if I pass more than one option argument?",

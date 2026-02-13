@@ -34,9 +34,9 @@
   },
   "description": "`factorial(X)` computes `X!` (the product of the integers from `1` to `X`) for every element of `X`. Inputs must be non-negative integers; MATLAB semantics dictate that non-integers return `NaN`, and integers larger than `170` overflow to `Inf` in double precision.",
   "behaviors": [
-    "Scalars, vectors, matrices, and N-D tensors are processed element-by-element with MATLAB\u2019s implicit expansion rules.",
-    "Logical inputs promote to double precision (`true \u2192 1`, `false \u2192 0`) before evaluation; integer classes are cast to double.",
-    "Non-integer or negative inputs yield `NaN`; large integers (`n \u2265 171`) overflow to `Inf`, matching MATLAB\u2019s overflow handling in double precision.",
+    "Scalars, vectors, matrices, and N-D tensors are processed element-by-element with MATLAB’s implicit expansion rules.",
+    "Logical inputs promote to double precision (`true → 1`, `false → 0`) before evaluation; integer classes are cast to double.",
+    "Non-integer or negative inputs yield `NaN`; large integers (`n ≥ 171`) overflow to `Inf`, matching MATLAB’s overflow handling in double precision.",
     "`factorial(0)` and `factorial(-0.0)` both return `1`, in accordance with the definition `0! = 1`.",
     "Results are real doubles. Passing `'like', prototype` lets you retain host or GPU residency to integrate with existing pipelines.",
     "GPU tensors remain on device when the active provider implements `unary_factorial`; otherwise RunMat gathers to the host, computes the result, and re-uploads only when you explicitly request GPU residency via `'like'`."
@@ -136,7 +136,7 @@
   },
   "gpu_residency": "You do **not** need to call `gpuArray` manually to get correct results. When the provider supports `unary_factorial`, tensors stay on the GPU automatically. If the provider does not, RunMat gathers to the host and computes the answer there. Provide `'like', gpuArray(...)` if you want the fallback path to re-upload the result automatically.",
   "gpu_behavior": [
-    "RunMat Accelerate first tries the provider\u2019s `unary_factorial` hook. Simple in-process providers can satisfy this by mirroring the CPU calculation.",
+    "RunMat Accelerate first tries the provider’s `unary_factorial` hook. Simple in-process providers can satisfy this by mirroring the CPU calculation.",
     "When the hook is unavailable (currently the WGPU backend), RunMat transparently gathers the tensor, evaluates `factorial` on the CPU, and returns the host result.",
     "Provide `'like', gpuArray(...)` to force the fallback path to re-upload the result so downstream GPU code keeps working.",
     "Fusion currently bypasses factorial because the operation is not polynomial; element-wise kernels fall back to the scalar implementation."

@@ -19,7 +19,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Uses the provider's unary_acosh hook when every element stays within the real domain (x \u2265 1); gathers to the host when complex promotion is required or hooks are unavailable."
+    "notes": "Uses the provider's unary_acosh hook when every element stays within the real domain (x ≥ 1); gathers to the host when complex promotion is required or hooks are unavailable."
   },
   "fusion": {
     "elementwise": true,
@@ -35,12 +35,12 @@
   "description": "`Y = acosh(X)` evaluates the inverse hyperbolic cosine of each element in `X`. Real inputs greater than or equal to `1` stay real; values below `1` automatically promote to complex results that match MATLAB's principal branch.",
   "behaviors": [
     "Accepts scalars, vectors, matrices, and N-D tensors with MATLAB broadcasting semantics.",
-    "Logical inputs are promoted to double precision (`true \u2192 1`, `false \u2192 0`) before evaluation.",
+    "Logical inputs are promoted to double precision (`true → 1`, `false → 0`) before evaluation.",
     "Character arrays are interpreted as their numeric code points. If any element is less than `1`, the result becomes a complex array, mirroring MATLAB.",
-    "Real values in `[1, \u221e)` return real outputs computed by `acosh`.",
-    "Real values in `(-\u221e, 1)` produce complex results: the runtime returns `Value::Complex` or `Value::ComplexTensor` so that downstream code sees the same behaviour as MATLAB.",
+    "Real values in `[1, ∞)` return real outputs computed by `acosh`.",
+    "Real values in `(-∞, 1)` produce complex results: the runtime returns `Value::Complex` or `Value::ComplexTensor` so that downstream code sees the same behaviour as MATLAB.",
     "Complex inputs follow MATLAB's definition `acosh(z) = \\log(z + \\sqrt{z-1}\\sqrt{z+1})`, including NaN/Inf handling on branch cuts.",
-    "Special values propagate exactly like MATLAB: `acosh(NaN) = NaN`, `acosh(Inf) = Inf`, and `acosh(-Inf) = Inf + i\u00b7\u03c0`."
+    "Special values propagate exactly like MATLAB: `acosh(NaN) = NaN`, `acosh(Inf) = Inf`, and `acosh(-Inf) = Inf + i·π`."
   ],
   "examples": [
     {
@@ -77,15 +77,15 @@
   "faqs": [
     {
       "question": "Why does `acosh` sometimes return complex numbers?",
-      "answer": "The real-valued inverse hyperbolic cosine is only defined for `x \u2265 1`. Inputs below that range require complex results, so RunMat (like MATLAB) promotes them automatically."
+      "answer": "The real-valued inverse hyperbolic cosine is only defined for `x ≥ 1`. Inputs below that range require complex results, so RunMat (like MATLAB) promotes them automatically."
     },
     {
       "question": "Can `acosh` run entirely on the GPU?",
-      "answer": "Yes\u2014when all elements are \u2265 1 and the provider implements `unary_acosh`, the runtime executes the operation on the GPU. Otherwise, it falls back to the host transparently."
+      "answer": "Yes—when all elements are ≥ 1 and the provider implements `unary_acosh`, the runtime executes the operation on the GPU. Otherwise, it falls back to the host transparently."
     },
     {
       "question": "How are NaN or Inf values handled?",
-      "answer": "`acosh(NaN)` returns `NaN`. Positive infinity stays real infinity. Negative infinity produces the same complex result as MATLAB (`Inf + i\u00b7\u03c0`)."
+      "answer": "`acosh(NaN)` returns `NaN`. Positive infinity stays real infinity. Negative infinity produces the same complex result as MATLAB (`Inf + i·π`)."
     },
     {
       "question": "Do logical and integer inputs work?",
@@ -136,6 +136,6 @@
   },
   "gpu_residency": "You usually do **not** need to call `gpuArray` manually. The auto-offload planner keeps tensors on the GPU whenever the provider exposes `unary_acosh` and the input stays within the real domain. When complex promotion is needed, RunMat gathers automatically and still returns MATLAB-compatible results. Manual `gpuArray` / `gather` remains available for workflows that require explicit residency control.",
   "gpu_behavior": [
-    "RunMat Accelerate keeps tensors on the GPU when:\n\n1. A provider is registered and implements the `unary_acosh` hook. 2. Every element is provably within the real domain (that is, all elements \u2265 1). 3. All inputs are finite; NaN or `-Inf` values force a host fallback so complex promotion and branch-cut semantics remain correct.\n\nThe runtime calls `reduce_min` on the active provider to perform this domain check. If the provider does not expose the hook, the reduction fails, or any element violates the conditions above, RunMat falls back to the host, evaluates `acosh` with the CPU reference implementation, and returns results identical to MATLAB. This ensures correctness without forcing users to manually `gather` tensors."
+    "RunMat Accelerate keeps tensors on the GPU when:\n\n1. A provider is registered and implements the `unary_acosh` hook. 2. Every element is provably within the real domain (that is, all elements ≥ 1). 3. All inputs are finite; NaN or `-Inf` values force a host fallback so complex promotion and branch-cut semantics remain correct.\n\nThe runtime calls `reduce_min` on the active provider to perform this domain check. If the provider does not expose the hook, the reduction fails, or any element violates the conditions above, RunMat falls back to the host, evaluates `acosh` with the CPU reference implementation, and returns results identical to MATLAB. This ensures correctness without forcing users to manually `gather` tensors."
   ]
 }

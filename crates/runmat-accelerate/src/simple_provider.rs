@@ -693,9 +693,12 @@ fn conv2d_full_real(
             }
             for kc in 0..kernel_cols {
                 let out_c = sc + kc;
+                let kcol = kernel_cols - 1 - kc;
                 for kr in 0..kernel_rows {
                     let out_r = sr + kr;
-                    let kval = kernel[kc * kernel_rows + kr];
+                    let krow = kernel_rows - 1 - kr;
+                    // Convolution flips the kernel (rotate 180°).
+                    let kval = kernel[kcol * kernel_rows + krow];
                     out[out_c * full_rows + out_r] += aval * kval;
                 }
             }
@@ -3546,7 +3549,6 @@ impl AccelProvider for InProcessProvider {
         full_rows
             .checked_mul(full_cols)
             .ok_or_else(|| anyhow!("conv2d: output size overflow"))?;
-
         let full = conv2d_full_real(
             &signal_data,
             signal_rows,

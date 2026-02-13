@@ -62,7 +62,7 @@
     {
       "description": "Pairwise correlation with staggered NaNs",
       "input": "X = [ 1  2  3;\n     NaN 5  1;\n      4 NaN 6;\n      5  8 NaN];\nR = corrcoef(X, 'rows', 'pairwise')",
-      "output": "R =\n     1     1     1\n     1     1   NaN\n     1   NaN     1"
+      "output": "R =\n     1     1     1\n     1     1    -1\n     1    -1     1"
     },
     {
       "description": "Using biased normalisation (`flag = 1`)",

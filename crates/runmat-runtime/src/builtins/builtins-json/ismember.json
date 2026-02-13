@@ -36,7 +36,7 @@
   },
   "description": "`ismember(A, B)` compares the elements (or rows) of `A` against `B` and returns a logical array marking which members of `A` are present in `B`. The optional second output reports the index in `B` of the first matched element. RunMat follows MATLAB semantics for numeric, logical, complex, string, and character arrays.",
   "behaviors": [
-    "The first output `tf` has the same shape as `A` (or `size(A,1) \u00d7 1` when using `'rows'`).",
+    "The first output `tf` has the same shape as `A` (or `size(A,1) × 1` when using `'rows'`).",
     "The optional second output `loc` contains one-based indices into `B`, with `0` for values that are not found.",
     "Duplicate values in `A` return the index of the first occurrence in `B` every time they match.",
     "`NaN` values are treated as identical so they match other `NaN` entries in `B`.",
@@ -68,7 +68,7 @@
     {
       "description": "Working with string arrays",
       "input": "A = [\"apple\" \"pear\" \"banana\"];\nB = [\"pear\" \"orange\" \"apple\"];\n[tf, loc] = ismember(A, B)",
-      "output": "tf =\n  1\u00d73 logical array\n   1   1   0\nloc =\n  1\u00d73 double\n   3   1   0"
+      "output": "tf =\n  1×3 logical array\n   1   1   0\nloc =\n  1×3 double\n   3   1   0"
     },
     {
       "description": "Using `ismember` with `gpuArray` inputs",
@@ -91,7 +91,7 @@
     },
     {
       "question": "How does the `'rows'` option change the output shape?",
-      "answer": "`'rows'` compares entire rows and returns outputs of size `size(A,1) \u00d7 1`, regardless of how many columns the input matrices contain."
+      "answer": "`'rows'` compares entire rows and returns outputs of size `size(A,1) × 1`, regardless of how many columns the input matrices contain."
     },
     {
       "question": "Are the legacy flags supported?",

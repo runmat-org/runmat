@@ -37,7 +37,7 @@
     "`orderfields(S, {'b','a','c'})` or `orderfields(S, string(['b','a','c']))` uses the supplied list of field names.",
     "`orderfields(S, [2 1 3])` reorders fields using a permutation vector that references the current field order.",
     "`[T, P] = orderfields(S, ___)` returns the reordered struct (or struct array) `T` and a permutation vector `P` whose elements are the original 1-based field positions. Reuse `P` to apply the same order to other structs that share the field set.",
-    "The function never copies field contents unnecessarily\u2014values (including GPU handles) are re-used and remain resident.",
+    "The function never copies field contents unnecessarily—values (including GPU handles) are re-used and remain resident.",
     "Errors are raised when requested field names do not match the struct, when indices are invalid, or when the input is not a struct."
   ],
   "examples": [

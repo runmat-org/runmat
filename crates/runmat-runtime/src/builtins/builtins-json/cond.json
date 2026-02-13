@@ -61,7 +61,7 @@
     },
     {
       "description": "Using a different norm specification",
-      "input": "A = [4 -1; 2 3];\nk1 = cond(A, 1);\nkInf = cond(A, Inf)",
+      "input": "A = [4 -1; 2 3];\nk1 = cond(A, 1)\nkInf = cond(A, Inf)",
       "output": "k1   = 2.1429\nkInf = 2.1429"
     },
     {

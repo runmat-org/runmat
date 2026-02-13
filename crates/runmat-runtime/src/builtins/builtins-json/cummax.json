@@ -65,8 +65,8 @@
     },
     {
       "description": "Capturing running maxima and indices on the GPU",
-      "input": "G = gpuArray([3 1 4 1 5]);\n[Y, I] = cummax(G);\nhostY = gather(Y);\nhostI = gather(I)",
-      "output": "hostY = [3 3 4 4 5];\nhostI = [1 1 3 3 5];"
+      "input": "G = gpuArray([3 1 4 1 5]);\n[Y, I] = cummax(G);\nhostY = gather(Y)\nhostI = gather(I)",
+      "output": "hostY = [3 3 4 4 5];\nhostI = [1 1 3 3 5]"
     }
   ],
   "faqs": [
@@ -123,6 +123,6 @@
   },
   "gpu_residency": "Manual `gpuArray` calls are optional. The planner keeps tensors on the GPU when profitable, and the cummax builtin preserves residency whenever the provider implements `cummax_scan`. If the hook is unavailable, RunMat gathers to the host transparently and still returns MATLAB-compatible maxima and indices. You can still use `gpuArray` to match MATLAB scripts or force residency ahead of a tight GPU loop.",
   "gpu_behavior": [
-    "When the input already resides on the GPU, RunMat calls the acceleration provider's `cummax_scan` hook. Providers that implement this hook return GPU handles for both the running maxima and their indices. If the hook is missing\u2014or if it rejects the requested options (such as `\"omitnan\"` or `\"reverse\"`)\u2014RunMat gathers the data to the host, computes the MATLAB-compatible result, and returns dense tensors on the CPU. Residency metadata is cleared so downstream kernels can re-promote values when profitable."
+    "When the input already resides on the GPU, RunMat calls the acceleration provider's `cummax_scan` hook. Providers that implement this hook return GPU handles for both the running maxima and their indices. If the hook is missing—or if it rejects the requested options (such as `\"omitnan\"` or `\"reverse\"`)—RunMat gathers the data to the host, computes the MATLAB-compatible result, and returns dense tensors on the CPU. Residency metadata is cleared so downstream kernels can re-promote values when profitable."
   ]
 }

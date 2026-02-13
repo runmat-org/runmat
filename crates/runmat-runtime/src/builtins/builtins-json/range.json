@@ -50,22 +50,22 @@
     {
       "description": "Measuring column-wise range of a matrix",
       "input": "A = [1 4 2; 3 7 5];\nspread = range(A)",
-      "output": "% Each column's maximum minus minimum\nspread = [2 3 3];"
+      "output": "% Each column's maximum minus minimum\nspread = [2 3 3]"
     },
     {
       "description": "Selecting a dimension explicitly",
       "input": "A = [1 4 2; 3 7 5];\nrow_spread = range(A, 2)",
-      "output": "row_spread = [3; 4];"
+      "output": "row_spread = [3; 4]"
     },
     {
       "description": "Collapsing all elements with 'all'",
       "input": "temperatures = [68 72 75; 70 74 78];\noverall = range(temperatures, 'all')",
-      "output": "overall = 10;"
+      "output": "overall = 10"
     },
     {
       "description": "Ignoring NaNs when computing range",
       "input": "samples = [2 NaN 5; 4 6 NaN];\nspread = range(samples, 1, 'omitnan')",
-      "output": "spread = [2 0 0];"
+      "output": "spread = [2 0 0]"
     },
     {
       "description": "Keeping gpuArray results on the device",

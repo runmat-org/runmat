@@ -40,7 +40,7 @@
     "`atan2` treats `y` as the numerator and `x` as the denominator: `atan2(Y, X)` equals `atan(Y ./ X)` but keeps the correct quadrant and handles zero denominators.",
     "Logical inputs are cast to `double`, character arrays use their Unicode code points, and integer inputs are promoted to `double`, mirroring MATLAB promotion rules.",
     "Complex inputs are **not** supported; MATLAB raises an error and RunMat matches that behaviour.",
-    "`atan2(0, 0)` returns `0`. `atan2(\u00b10, -0)` follows IEEE-754 semantics, matching MATLAB for signed zeros and infinities.",
+    "`atan2(0, 0)` returns `0`. `atan2(±0, -0)` follows IEEE-754 semantics, matching MATLAB for signed zeros and infinities.",
     "`atan2(NaN, x)` or `atan2(y, NaN)` returns `NaN`; inputs containing `Inf` combinations follow IEEE-754 quadrant semantics exactly like MATLAB.",
     "The output always has double precision and the same size as the broadcasted inputs."
   ],
@@ -136,7 +136,7 @@
     "label": "`crates/runmat-runtime/src/builtins/math/trigonometry/atan2.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/atan2.rs"
   },
-  "gpu_residency": "RunMat's planner keeps tensors on the GPU whenever profitable. Explicit `gpuArray` calls are optional\u2014use them only when you need to control residency for interoperability. When `elem_atan2` is unavailable, RunMat automatically gathers data to the CPU, performs the computation, and re-uploads results only when downstream consumers demand GPU residency.",
+  "gpu_residency": "RunMat's planner keeps tensors on the GPU whenever profitable. Explicit `gpuArray` calls are optional—use them only when you need to control residency for interoperability. When `elem_atan2` is unavailable, RunMat automatically gathers data to the CPU, performs the computation, and re-uploads results only when downstream consumers demand GPU residency.",
   "gpu_behavior": [
     "When both operands already reside on the GPU and the active provider implements the `elem_atan2` hook, RunMat executes the operation entirely on the device without reformatting buffers.",
     "If shapes require implicit expansion or the provider lacks `elem_atan2`, RunMat transparently gathers both tensors to the host, computes the result with the reference CPU implementation, and continues execution.",

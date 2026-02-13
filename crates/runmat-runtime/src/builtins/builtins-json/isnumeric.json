@@ -83,7 +83,7 @@
     },
     {
       "question": "Does `isnumeric` gather GPU data back to the host?",
-      "answer": "Only when residency metadata is unavailable. Providers that expose type metadata let RunMat answer the query without host\u2194device transfers."
+      "answer": "Only when residency metadata is unavailable. Providers that expose type metadata let RunMat answer the query without host↔device transfers."
     },
     {
       "question": "Do logical masks return `true`?",

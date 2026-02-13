@@ -35,9 +35,9 @@
     "Folder arguments may be character vectors, string scalars, string arrays, or cell arrays of character vectors or strings. Multi-row char arrays contribute one folder per row (trailing padding is stripped).",
     "Multiple folders can be passed inside a single argument using the platform path separator (`:` on Linux/macOS, `;` on Windows); this is compatible with `genpath` output.",
     "RunMat accepts any ordering of arguments. Each requested folder is removed at most once even if it appears repeatedly.",
-    "Inputs are resolved to absolute, normalised paths. Relative inputs are interpreted relative to the current working directory, and `~` expands to the user\u2019s home directory.",
+    "Inputs are resolved to absolute, normalised paths. Relative inputs are interpreted relative to the current working directory, and `~` expands to the user’s home directory.",
     "Folders must exist and must currently be present on the MATLAB path. RunMat raises `rmpath: folder '<name>' not found` when a directory cannot be located, or `rmpath: folder '<name>' not on search path` when the directory exists locally but is absent from the current search path.",
-    "`rmpath` returns the previous path so callers can restore it later via `path(old)`, matching RunMat\u2019s `addpath` and `path` builtins."
+    "`rmpath` returns the previous path so callers can restore it later via `path(old)`, matching RunMat’s `addpath` and `path` builtins."
   ],
   "examples": [
     {
@@ -97,7 +97,7 @@
     },
     {
       "question": "What happens if the folder exists locally but is not on the search path?",
-      "answer": "RunMat raises `rmpath: folder '<name>' not on search path`, matching MATLAB\u2019s expectation that only active path entries are removed."
+      "answer": "RunMat raises `rmpath: folder '<name>' not on search path`, matching MATLAB’s expectation that only active path entries are removed."
     },
     {
       "question": "Does `rmpath` return the new or previous path?",
@@ -134,7 +134,7 @@
     "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/rmpath.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/rmpath.rs"
   },
-  "gpu_residency": "No. `rmpath` operates entirely on CPU-side strings. Supplying `gpuArray` text inputs offers no benefit\u2014RunMat gathers them automatically before processing.",
+  "gpu_residency": "No. `rmpath` operates entirely on CPU-side strings. Supplying `gpuArray` text inputs offers no benefit—RunMat gathers them automatically before processing.",
   "gpu_behavior": [
     "`rmpath` manipulates host-side configuration. If any input value resides on the GPU, RunMat gathers it back to the host before parsing. No acceleration provider hooks or kernels are involved."
   ]

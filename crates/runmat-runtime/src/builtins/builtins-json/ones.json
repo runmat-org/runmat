@@ -34,7 +34,7 @@
   "description": "`ones` creates arrays filled with ones. RunMat mirrors MATLAB semantics across the scalar, vector, matrix, and N-D forms, including `'like'` and `'logical'` options.",
   "behaviors": [
     "`ones()` returns the scalar `1`.",
-    "`ones(n)` returns an `n \u00d7 n` double array.",
+    "`ones(n)` returns an `n × n` double array.",
     "`ones(m, n, ...)` returns a dense double array with the requested dimensions.",
     "`ones(sz)` accepts a size vector (row or column) and returns an array with `prod(sz)` elements arranged using MATLAB column-major ordering.",
     "`ones(A)` returns an array of ones with the same size (and device residency) as `A`.",
@@ -45,17 +45,17 @@
     {
       "description": "Creating a 3x3 matrix of ones",
       "input": "B = ones(3)",
-      "output": "B = [1 1 1; 1 1 1; 1 1 1];"
+      "output": "B = [1 1 1; 1 1 1; 1 1 1]"
     },
     {
       "description": "Creating a 4x1 logical matrix of ones",
       "input": "mask = ones(4, 1, 'logical')",
-      "output": "mask = [1 1 1 1];"
+      "output": "mask = [1 1 1 1]"
     },
     {
       "description": "Creating a 64x64 matrix of ones on a GPU",
       "input": "H = ones(64, 64)",
-      "output": "H = [1 1 1 ... 1; 1 1 1 ... 1; ...; 1 1 1 ... 1];"
+      "output": "H = [1 1 1 ... 1; 1 1 1 ... 1; ...; 1 1 1 ... 1]"
     }
   ],
   "faqs": [
@@ -69,7 +69,7 @@
     },
     {
       "question": "What does `ones(n)` return?",
-      "answer": "`ones(n)` returns an `n \u00d7 n` dense double-precision matrix filled with ones. For example, `ones(3)` yields a 3-by-3 matrix of all ones."
+      "answer": "`ones(n)` returns an `n × n` dense double-precision matrix filled with ones. For example, `ones(3)` yields a 3-by-3 matrix of all ones."
     },
     {
       "question": "How do I create a logical array of ones?",
@@ -81,7 +81,7 @@
     },
     {
       "question": "Can I create N-dimensional arrays with ones?",
-      "answer": "Yes! Pass more than two dimension arguments (or a size vector):\n```matlab:runnable\nT = ones(2, 3, 4);\n```\nThis creates a 2\u00d73\u00d74 tensor of ones."
+      "answer": "Yes! Pass more than two dimension arguments (or a size vector):\n```matlab:runnable\nT = ones(2, 3, 4);\n```\nThis creates a 2×3×4 tensor of ones."
     },
     {
       "question": "How does `ones(A)` behave?",

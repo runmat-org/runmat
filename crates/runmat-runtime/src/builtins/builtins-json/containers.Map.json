@@ -58,12 +58,12 @@
     {
       "description": "Query keys, values, and membership",
       "input": "allKeys = keys(fruit);\nallVals = values(fruit);\nmask = isKey(fruit, {'apple', 'durian'})",
-      "output": "allKeys =\n  1\u00d74 cell array\n    {'apple'}    {'pear'}    {'banana'}    {'peach'}\n\nallVals =\n  1\u00d74 cell array\n    {[99]}    {[1 2 3]}    {[1]}    {1\u00d71 struct}\n\nmask =\n  1\u00d72 logical array\n     1     0"
+      "output": "allKeys =\n  1×4 cell array\n    {'apple'}    {'pear'}    {'banana'}    {'peach'}\n\nallVals =\n  1×4 cell array\n    {[99]}    {[1 2 3]}    {[1]}    {1×1 struct}\n\nmask =\n  1×2 logical array\n     1     0"
     },
     {
       "description": "Remove keys and inspect the map length",
       "input": "remove(fruit, {'pear', 'banana'});\nn = length(fruit);\nremaining = keys(fruit)",
-      "output": "n =\n     2\nremaining =\n  1\u00d72 cell array\n    {'apple'}    {'peach'}"
+      "output": "n =\n     2\nremaining =\n  1×2 cell array\n    {'apple'}    {'peach'}"
     }
   ],
   "faqs": [

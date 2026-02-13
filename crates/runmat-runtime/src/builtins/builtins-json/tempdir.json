@@ -33,7 +33,7 @@
   "description": "`tempdir` returns the absolute path of the operating system's temporary folder. The returned path always ends with the platform-specific file separator (`/` on macOS and Linux, `\\` on Windows) so it is safe to concatenate file names directly, matching MATLAB behaviour.",
   "behaviors": [
     "The builtin accepts no input arguments; providing any arguments raises `tempdir: too many input arguments`.",
-    "The output is a character row vector (`1\u00d7N`) for compatibility with historical MATLAB code. Convert it with `string(tempdir)` if you prefer string scalars.",
+    "The output is a character row vector (`1×N`) for compatibility with historical MATLAB code. Convert it with `string(tempdir)` if you prefer string scalars.",
     "The path reflects the process environment, honouring variables such as `TMPDIR` (macOS/Linux) or `TMP`/`TEMP` (Windows).",
     "When the OS reports a temporary folder that lacks a trailing separator, RunMat appends one automatically to mirror MATLAB.",
     "The directory is not created or cleaned automatically; RunMat relies on the operating system to manage the folder lifecycle.",
@@ -106,11 +106,11 @@
     },
     {
       "question": "Does `tempdir` normalize path separators?",
-      "answer": "RunMat preserves the operating system\u2019s separators (backslash on Windows, slash elsewhere) to maintain MATLAB compatibility."
+      "answer": "RunMat preserves the operating system’s separators (backslash on Windows, slash elsewhere) to maintain MATLAB compatibility."
     },
     {
       "question": "What if I pass arguments to `tempdir` by mistake?",
-      "answer": "RunMat raises `tempdir: too many input arguments`, matching MATLAB\u2019s diagnostic."
+      "answer": "RunMat raises `tempdir: too many input arguments`, matching MATLAB’s diagnostic."
     }
   ],
   "links": [
@@ -141,6 +141,6 @@
   },
   "gpu_residency": "No. `tempdir` is always a host operation. There is nothing to gain by moving data to the GPU, and no acceleration provider needs to implement hooks for this builtin.",
   "gpu_behavior": [
-    "`tempdir` performs no GPU work. It queries the host environment and surfaces the result as a character array. The builtin registers a CPU-only GPU spec so the fusion planner treats it as a host-side operation. Scripts that accidentally store paths on the GPU have nothing to worry about\u2014`tempdir` has no inputs to gather."
+    "`tempdir` performs no GPU work. It queries the host environment and surfaces the result as a character array. The builtin registers a CPU-only GPU spec so the fusion planner treats it as a host-side operation. Scripts that accidentally store paths on the GPU have nothing to worry about—`tempdir` has no inputs to gather."
   ]
 }

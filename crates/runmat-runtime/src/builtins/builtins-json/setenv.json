@@ -33,7 +33,7 @@
   "description": "`setenv` updates the process environment. Provide a variable name and value to create or modify an entry, or pass an empty value to remove the variable. The builtin mirrors MATLAB by returning a status code and optional diagnostic message instead of throwing for platform-defined failures.",
   "behaviors": [
     "`status = setenv(name, value)` returns `0` when the update succeeds and `1` when the operating system rejects the request. The status output is a double scalar, matching MATLAB.",
-    "`[status, message] = setenv(name, value)` returns the status plus a character vector describing failures. On success, `message` is an empty `1\u00d70` character array.",
+    "`[status, message] = setenv(name, value)` returns the status plus a character vector describing failures. On success, `message` is an empty `1×0` character array.",
     "Set `value` to an empty string (`\"\"`) or empty character vector (`''`) to remove the variable from the current process environment.",
     "Names must be string scalars or character vectors containing only valid environment variable characters. MATLAB raises an error when `name` is not text; RunMat mirrors this check.",
     "Character vector inputs trim trailing padding spaces (common with MATLAB character matrices). To retain trailing spaces, pass a string scalar instead.",
@@ -133,6 +133,6 @@
   },
   "gpu_residency": "No. `setenv` is a host-side operation. GPU residency offers no benefit, and RunMat gathers GPU-backed values automatically if they appear as inputs.",
   "gpu_behavior": [
-    "`setenv` always runs on the CPU. If a caller stores the arguments on the GPU\u2014for instance via an accelerated string builtin\u2014RunMat gathers them to host memory automatically before mutating the environment. Acceleration providers do not implement hooks for this builtin."
+    "`setenv` always runs on the CPU. If a caller stores the arguments on the GPU—for instance via an accelerated string builtin—RunMat gathers them to host memory automatically before mutating the environment. Acceleration providers do not implement hooks for this builtin."
   ]
 }

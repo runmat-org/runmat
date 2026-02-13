@@ -46,12 +46,12 @@
     {
       "description": "Testing multiple field names at once",
       "input": "s = struct(\"name\", \"Ada\", \"score\", 42);\nnames = {\"name\", \"department\"; \"score\", \"email\"};\nmask = isfield(s, names)",
-      "output": "mask =\n  2\u00d72 logical array\n     1     0\n     1     0"
+      "output": "mask =\n  2×2 logical array\n     1     0\n     1     0"
     },
     {
       "description": "Inspecting a struct array that shares a common schema",
       "input": "people = struct(\"name\", {\"Ada\", \"Grace\"}, \"id\", {101, 102});\nidxMask = isfield(people, [\"id\", \"department\"])",
-      "output": "idxMask =\n  1\u00d72 logical array\n     1     0"
+      "output": "idxMask =\n  1×2 logical array\n     1     0"
     },
     {
       "description": "Using `isfield` before accessing optional configuration fields",

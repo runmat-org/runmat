@@ -34,41 +34,41 @@
   "description": "`Y = cosh(X)` computes the hyperbolic cosine of every element in `X`, extending naturally to complex values.",
   "behaviors": [
     "Works on scalars, vectors, matrices, and N-D tensors with MATLAB broadcasting semantics for scalar expansion.",
-    "Logical inputs are converted to double precision (`true \u2192 1.0`, `false \u2192 0.0`) before applying `cosh`.",
-    "Complex inputs follow the analytic rule `cosh(a + bi) = cosh(a)cos(b) + i\u00b7sinh(a)sin(b)`, propagating `NaN`/`Inf` components independently.",
+    "Logical inputs are converted to double precision (`true → 1.0`, `false → 0.0`) before applying `cosh`.",
+    "Complex inputs follow the analytic rule `cosh(a + bi) = cosh(a)cos(b) + i·sinh(a)sin(b)`, propagating `NaN`/`Inf` components independently.",
     "Character arrays are converted to their numeric code points prior to evaluation, with double-precision outputs that preserve the input shape.",
-    "Empty arrays return empty results that respect MATLAB\u2019s shape semantics."
+    "Empty arrays return empty results that respect MATLAB’s shape semantics."
   ],
   "examples": [
     {
       "description": "Hyperbolic cosine of a scalar",
       "input": "y = cosh(2)",
-      "output": "y = 3.7622;"
+      "output": "y = 3.7622"
     },
     {
       "description": "Applying `cosh` elementwise to a vector",
       "input": "x = linspace(-2, 2, 5);\ny = cosh(x)",
-      "output": "y = [3.7622 1.5431 1.0000 1.5431 3.7622];"
+      "output": "y = [3.7622 1.5431 1.0000 1.5431 3.7622]"
     },
     {
       "description": "Evaluating `cosh` on a matrix",
       "input": "A = [0 0.5; 1.0 1.5];\nB = cosh(A)",
-      "output": "B = [1.0000 1.1276; 1.5431 2.3524];"
+      "output": "B = [1.0000 1.1276; 1.5431 2.3524]"
     },
     {
       "description": "Executing `cosh` on a GPU tensor",
       "input": "G = gpuArray([0.25 0.75; 1.25 1.75]);\nresult_gpu = cosh(G);\nresult = gather(result_gpu)",
-      "output": "result = [1.0314 1.2947; 1.8884 2.9642];"
+      "output": "result = [1.0314 1.2947; 1.8884 2.9642]"
     },
     {
       "description": "Working with complex inputs",
       "input": "z = 1 + 2i;\nw = cosh(z)",
-      "output": "w = -0.6421 + 1.0686i;"
+      "output": "w = -0.6421 + 1.0686i"
     },
     {
       "description": "Hyperbolic cosine for character codes",
       "input": "chars = 'AZ';\ncodes = cosh(chars)",
-      "output": "codes = [8.4744e27 6.1020e38];"
+      "output": "codes = [8.4744e27 6.1020e38]"
     }
   ],
   "faqs": [
@@ -78,7 +78,7 @@
     },
     {
       "question": "Does `cosh` work with complex inputs?",
-      "answer": "Yes. Real and imaginary components are evaluated using the analytic continuation, matching MATLAB\u2019s `cosh` semantics."
+      "answer": "Yes. Real and imaginary components are evaluated using the analytic continuation, matching MATLAB’s `cosh` semantics."
     },
     {
       "question": "What happens if the GPU provider lacks `unary_cosh`?",

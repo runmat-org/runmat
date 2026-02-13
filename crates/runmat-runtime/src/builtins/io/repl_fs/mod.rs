@@ -6,6 +6,7 @@ pub mod copyfile;
 pub mod delete;
 pub mod dir;
 pub mod exist;
+pub mod fullfile;
 pub mod genpath;
 pub mod getenv;
 pub mod ls;

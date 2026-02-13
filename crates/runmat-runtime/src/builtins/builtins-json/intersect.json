@@ -62,7 +62,7 @@
     {
       "description": "Working with strings and character arrays",
       "input": "names1 = [\"apple\" \"orange\" \"pear\"];\nnames2 = [\"pear\" \"grape\" \"orange\"];\n[common, IA, IB] = intersect(names1, names2, 'stable')",
-      "output": "common =\n  1\u00d72 string array\n    \"orange\"    \"pear\"\nIA =\n     2\n     3\nIB =\n     3\n     1"
+      "output": "common =\n  1×2 string array\n    \"orange\"    \"pear\"\nIA =\n     2\n     3\nIB =\n     3\n     1"
     },
     {
       "description": "Using `intersect` on GPU arrays",

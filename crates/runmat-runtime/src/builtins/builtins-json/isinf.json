@@ -8,7 +8,7 @@
     "gpuArray isinf",
     "MATLAB isinf"
   ],
-  "summary": "Return a logical mask indicating which elements of the input are \u00b1Inf.",
+  "summary": "Return a logical mask indicating which elements of the input are ±Inf.",
   "references": [],
   "gpu_support": {
     "elementwise": true,
@@ -52,22 +52,22 @@
     {
       "description": "Detecting infinities after division by zero",
       "input": "A = [1 0; 2 0];\nquot = 1 ./ A;\nmask = isinf(quot)",
-      "output": "mask =\n  2\u00d72 logical array\n     0     1\n     0     1"
+      "output": "mask =\n  2×2 logical array\n     0     1\n     0     1"
     },
     {
       "description": "Flagging infinite components of a complex array",
       "input": "Z = [Inf+0i 1-Inf*1i 2+3i];\nmask = isinf(Z)",
-      "output": "mask =\n  1\u00d73 logical array\n     1     1     0"
+      "output": "mask =\n  1×3 logical array\n     1     1     0"
     },
     {
       "description": "Applying `isinf` to character data",
       "input": "chars = ['R' 'u' 'n'];\nmask = isinf(chars)",
-      "output": "mask =\n  1\u00d73 logical array\n     0     0     0"
+      "output": "mask =\n  1×3 logical array\n     0     0     0"
     },
     {
       "description": "Running `isinf` directly on the GPU",
       "input": "G = gpuArray([1 -Inf Inf]);\nmask_gpu = isinf(G);\nmask = gather(mask_gpu)",
-      "output": "mask =\n  1\u00d73 logical array\n     0     1     1"
+      "output": "mask =\n  1×3 logical array\n     0     1     1"
     }
   ],
   "faqs": [

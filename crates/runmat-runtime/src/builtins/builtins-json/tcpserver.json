@@ -31,10 +31,10 @@
     "unit": "builtins::io::net::tcpserver::tests",
     "integration": "builtins::io::net::tcpserver::tests::tcpserver_accepts_loopback_connection"
   },
-  "description": "`tcpserver(address, port)` creates a TCP/IP listener that waits for clients and exposes MATLAB-compatible properties describing the socket. RunMat mirrors this behaviour: addresses may be IPv4, IPv6, or hostnames, and the function returns a handle-like struct whose fields match MATLAB\u2019s `tcpserver` object (including `ServerAddress`, `ServerPort`, `Timeout`, `UserData`, and `BytesAvailableFcn` metadata). The builtin validates inputs, binds the socket, records configuration, and raises MATLAB-style diagnostics on failure.",
+  "description": "`tcpserver(address, port)` creates a TCP/IP listener that waits for clients and exposes MATLAB-compatible properties describing the socket. RunMat mirrors this behaviour: addresses may be IPv4, IPv6, or hostnames, and the function returns a handle-like struct whose fields match MATLAB’s `tcpserver` object (including `ServerAddress`, `ServerPort`, `Timeout`, `UserData`, and `BytesAvailableFcn` metadata). The builtin validates inputs, binds the socket, records configuration, and raises MATLAB-style diagnostics on failure.",
   "behaviors": [
     "`tcpserver(address, port)` binds to the requested interface; pass `\"0.0.0.0\"` or `\"::\"` to listen on every IPv4 or IPv6 adapter respectively.",
-    "Ports must be in the range `0\u201365535`. Passing `0` requests an ephemeral OS-assigned port that RunMat reports in the returned struct.",
+    "Ports must be in the range `0–65535`. Passing `0` requests an ephemeral OS-assigned port that RunMat reports in the returned struct.",
     "Supported name-value pairs mirror MATLAB defaults: `Timeout` (non-negative seconds, default `10`), `UserData` (stored verbatim), `Name` (defaults to `\"tcpserver:<address>:<port>\"`), and `ByteOrder` (`\"little-endian\"` or `\"big-endian\"`). Unsupported options raise `MATLAB:tcpserver:InvalidNameValue`.",
     "The returned struct mirrors MATLAB properties, including connection state, callback metadata, and an internal `__tcpserver_id` identifier that future networking builtins use to locate the listener.",
     "GPU-resident scalars are gathered automatically before binding so that socket setup always executes on the host CPU.",
@@ -69,13 +69,13 @@
     {
       "description": "Handling invalid ports with MATLAB-style diagnostics",
       "input": "try\n    srv = tcpserver(\"127.0.0.1\", 99999);\ncatch err\n    disp(err.identifier)\n    disp(err.message)\nend",
-      "output": "MATLAB:tcpserver:InvalidPort\nMATLAB:tcpserver:InvalidPort: tcpserver: port 99999 is outside the valid range 0\u201365535"
+      "output": "MATLAB:tcpserver:InvalidPort\nMATLAB:tcpserver:InvalidPort: tcpserver: port 99999 is outside the valid range 0–65535"
     }
   ],
   "faqs": [
     {
       "question": "What range of ports can I use?",
-      "answer": "Valid ports are `0\u201365535`. Port `0` lets the OS choose an available ephemeral port, which RunMat reports in the returned struct."
+      "answer": "Valid ports are `0–65535`. Port `0` lets the OS choose an available ephemeral port, which RunMat reports in the returned struct."
     },
     {
       "question": "How do I discover which clients are connected?",
@@ -90,7 +90,7 @@
       "answer": "Not yet. The current builtin records the timeout value for future builtins. A forthcoming setter will update the listener configuration."
     },
     {
-      "question": "Does `tcpserver` fire callbacks like MATLAB\u2019s `BytesAvailableFcn`?",
+      "question": "Does `tcpserver` fire callbacks like MATLAB’s `BytesAvailableFcn`?",
       "answer": "Callback-related properties are present for compatibility, and future updates will allow callers to configure them. They currently act as placeholders while connection management matures."
     },
     {
@@ -99,7 +99,7 @@
     },
     {
       "question": "Can I use GPU arrays for address or port?",
-      "answer": "Yes\u2014RunMat gathers them automatically before binding."
+      "answer": "Yes—RunMat gathers them automatically before binding."
     },
     {
       "question": "What happens if the port is already in use?",

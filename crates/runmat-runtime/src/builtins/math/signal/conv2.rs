@@ -70,16 +70,20 @@ async fn conv2_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinRe
             }
             let left = convert_matrix(a, "conv2", "A").await?;
             let right = convert_matrix(b, "conv2", "B").await?;
+            if mode == Conv2Mode::Full && left.cols == 1 && right.rows == 1 {
+                let result = outer_product(&left.data, &right.data);
+                return matrix_to_value(result);
+            }
             let result = conv2_matrices(&left, &right, mode);
-            Ok(matrix_to_value(result)?)
+            matrix_to_value(result)
         }
         1 => {
             let signal = convert_matrix(extras.remove(0), "conv2", "A").await?;
             let column = convert_vector(a, "conv2", "H column").await?;
             let row = convert_vector(b, "conv2", "H row").await?;
             let kernel = outer_product(&column, &row);
-            let result = conv2_matrices(&signal, &kernel, mode);
-            Ok(matrix_to_value(result)?)
+            let result = conv2_matrices(&kernel, &signal, mode);
+            matrix_to_value(result)
         }
         _ => Err(runtime_error_for(
             "conv2: expected at most four input arguments",
@@ -114,14 +118,20 @@ fn try_conv2_gpu(a: &Value, b: &Value, mode: Conv2Mode) -> BuiltinResult<Option<
         }
     }
 
-    let _lhs_dims = match conv2_dimensions(&lhs.shape) {
+    let lhs_dims = match conv2_dimensions(&lhs.shape) {
         Some(dims) => dims,
         None => return Ok(None),
     };
-    let _rhs_dims = match conv2_dimensions(&rhs.shape) {
+    let rhs_dims = match conv2_dimensions(&rhs.shape) {
         Some(dims) => dims,
         None => return Ok(None),
     };
+
+    // Keep the explicit full-mode vector kernel path on the host so it can
+    // return an outer-product kernel that matches MATLAB's separable identity.
+    if mode == Conv2Mode::Full && lhs_dims.1 == 1 && rhs_dims.0 == 1 {
+        return Ok(None);
+    }
 
     // If either operand is effectively empty we can still defer to the provider, which will
     // honour MATLAB's shape rules. No additional guarding is required here.
@@ -350,15 +360,16 @@ fn conv2_matrices(a: &Matrix, b: &Matrix, mode: Conv2Mode) -> Matrix {
     let rows = a.rows + b.rows - 1;
     let cols = a.cols + b.cols - 1;
     let mut full = Matrix::zeros(rows, cols);
-
     for ac in 0..a.cols {
         for ar in 0..a.rows {
             let aval = a.get(ar, ac);
             for bc in 0..b.cols {
                 let out_c = ac + bc;
+                let bcol = b.cols - 1 - bc;
                 for br in 0..b.rows {
                     let out_r = ar + br;
-                    let bval = b.get(br, bc);
+                    let brow = b.rows - 1 - br;
+                    let bval = b.get(brow, bcol);
                     full.add_assign(out_r, out_c, aval * bval);
                 }
             }
@@ -500,6 +511,31 @@ pub(crate) mod tests {
                     3,
                     3,
                     &[12.0, 21.0, 16.0, 27.0, 45.0, 33.0, 24.0, 39.0, 28.0],
+                );
+                assert_eq!(t.data, expected.data);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn conv2_same_flips_kernel() {
+        let a = tensor_from_rows(3, 3, &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0]);
+        let b = tensor_from_rows(3, 3, &[1.0, 0.0, -1.0, 1.0, 0.0, -1.0, 1.0, 0.0, -1.0]);
+        let result = conv2_builtin(
+            Value::Tensor(a),
+            Value::Tensor(b),
+            vec![Value::from("same")],
+        )
+        .expect("conv2 same");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![3, 3]);
+                let expected = tensor_from_rows(
+                    3,
+                    3,
+                    &[-7.0, -4.0, 7.0, -15.0, -6.0, 15.0, -13.0, -4.0, 13.0],
                 );
                 assert_eq!(t.data, expected.data);
             }
@@ -672,9 +708,9 @@ pub(crate) mod tests {
                     3,
                     3,
                     &[
-                        1.0, 4.0, 7.0, //
-                        7.0, 23.0, 33.0, //
-                        19.0, 53.0, 63.0,
+                        4.0, 11.0, 18.0, //
+                        18.0, 37.0, 47.0, //
+                        36.0, 67.0, 77.0,
                     ],
                 );
                 assert_eq!(t.data, expected.data);

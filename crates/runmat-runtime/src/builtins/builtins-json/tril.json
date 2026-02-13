@@ -37,8 +37,8 @@
     "Operates on the first two dimensions; trailing dimensions are handled as independent pages.",
     "Accepts scalar, vector, matrix, or paged inputs of any size, including empty dimensions.",
     "Logical inputs remain logical, and complex values keep their real/imaginary components.",
-    "Scalars are treated as `1\u00d71` matrices and honour negative offsets (`k < 0` yields zero).",
-    "gpuArray inputs stay on the device when the provider exposes a native `tril` hook; otherwise RunMat performs a gather \u2192 compute \u2192 upload cycle."
+    "Scalars are treated as `1×1` matrices and honour negative offsets (`k < 0` yields zero).",
+    "gpuArray inputs stay on the device when the provider exposes a native `tril` hook; otherwise RunMat performs a gather → compute → upload cycle."
   ],
   "examples": [
     {

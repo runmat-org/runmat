@@ -8,7 +8,7 @@
     "svd",
     "gpu"
   ],
-  "summary": "Compute the Moore\u2013Penrose pseudoinverse of a matrix using SVD with MATLAB-compatible tolerance handling.",
+  "summary": "Compute the Moore–Penrose pseudoinverse of a matrix using SVD with MATLAB-compatible tolerance handling.",
   "references": [
     "https://www.mathworks.com/help/matlab/ref/pinv.html"
   ],
@@ -33,14 +33,14 @@
     "unit": "builtins::math::linalg::solve::pinv::tests",
     "gpu": "builtins::math::linalg::solve::pinv::tests::pinv_gpu_round_trip_matches_cpu"
   },
-  "description": "`X = pinv(A)` returns the Moore\u2013Penrose pseudoinverse of `A`. For full-rank square matrices this matches `inv(A)`, while rank-deficient or rectangular inputs produce the minimum-norm solution that satisfies the four Moore\u2013Penrose conditions. RunMat mirrors MATLAB's tolerance logic: `tol = max(size(A)) * eps(max(s))`, where `s` are the singular values returned by the internal SVD.",
+  "description": "`X = pinv(A)` returns the Moore–Penrose pseudoinverse of `A`. For full-rank square matrices this matches `inv(A)`, while rank-deficient or rectangular inputs produce the minimum-norm solution that satisfies the four Moore–Penrose conditions. RunMat mirrors MATLAB's tolerance logic: `tol = max(size(A)) * eps(max(s))`, where `s` are the singular values returned by the internal SVD.",
   "behaviors": [
     "Supports scalars, vectors, and higher-dimensional inputs that behave like matrices (trailing singleton dimensions are allowed; other higher ranks must be reshaped first).",
     "Logical and integer inputs are promoted to `double` before the SVD, matching MATLAB semantics.",
-    "Optional second argument `pinv(A, tol)` treats values in `tol` as the user-specified cutoff for singular values. Entries \u2264 `tol` contribute zeros in the diagonal of `\u03a3\u207a`.",
-    "Complex matrices are handled in full complex arithmetic via `A = U * \u03a3 * V\u1d34`.",
+    "Optional second argument `pinv(A, tol)` treats values in `tol` as the user-specified cutoff for singular values. Entries ≤ `tol` contribute zeros in the diagonal of `Σ⁺`.",
+    "Complex matrices are handled in full complex arithmetic via `A = U * Σ * Vᴴ`.",
     "Empty matrices return the appropriately sized zero matrix (`size(pinv(A)) == fliplr(size(A))`).",
-    "The result always has size `n \u00d7 m` if the input is `m \u00d7 n`."
+    "The result always has size `n × m` if the input is `m × n`."
   ],
   "examples": [
     {
@@ -76,7 +76,7 @@
     },
     {
       "question": "What tolerance does `pinv` use by default?",
-      "answer": "RunMat matches MATLAB: `max(size(A)) * eps(max(s))`, where `s` are the singular values. Values below this threshold are treated as zero when forming `\u03a3\u207a`."
+      "answer": "RunMat matches MATLAB: `max(size(A)) * eps(max(s))`, where `s` are the singular values. Values below this threshold are treated as zero when forming `Σ⁺`."
     },
     {
       "question": "Can I recover the rank from the pseudoinverse?",

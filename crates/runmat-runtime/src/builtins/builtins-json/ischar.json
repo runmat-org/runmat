@@ -36,7 +36,7 @@
     "Character vectors such as `'RunMat'` and char matrices created with `['A'; 'B']` return `true`.",
     "Empty char arrays (including `''` and `char.empty(...)`) still count as character arrays.",
     "String scalars, string arrays, cell arrays, numeric values, and logical masks all return `false`.",
-    "gpuArray inputs return `false` unless they are explicitly stored as char arrays (which RunMat does not currently support), matching MATLAB\u2019s behaviour where gpuArray does not host char data.",
+    "gpuArray inputs return `false` unless they are explicitly stored as char arrays (which RunMat does not currently support), matching MATLAB’s behaviour where gpuArray does not host char data.",
     "The result is always a host logical scalar (`logical(0)` or `logical(1)`), so it can be used in branching, masking, or validation code without additional conversions."
   ],
   "examples": [
@@ -81,7 +81,7 @@
     },
     {
       "question": "Can gpuArray hold char data in RunMat?",
-      "answer": "Not currently. gpuArray values in RunMat contain numeric or logical tensors, so `ischar` reports `false` for all gpuArray inputs, mirroring MATLAB\u2019s behaviour."
+      "answer": "Not currently. gpuArray values in RunMat contain numeric or logical tensors, so `ischar` reports `false` for all gpuArray inputs, mirroring MATLAB’s behaviour."
     },
     {
       "question": "How do I convert a string to a char array if `ischar` returns false?",
@@ -89,7 +89,7 @@
     },
     {
       "question": "Is there any performance cost when checking large arrays?",
-      "answer": "No. `ischar` only inspects the value\u2019s metadata; it does not copy or iterate over the array elements, so the cost is constant regardless of array size."
+      "answer": "No. `ischar` only inspects the value’s metadata; it does not copy or iterate over the array elements, so the cost is constant regardless of array size."
     }
   ],
   "links": [
@@ -120,6 +120,6 @@
   },
   "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nIn RunMat, the fusion planner keeps residency on GPU in branches of fused expressions. As such, calling `ischar` on a gpuArray result preserves the device buffer, and `ischar` answers the query using metadata only.\n\nTo preserve backwards compatibility with MathWorks MATLAB, and for when you want to explicitly bootstrap GPU residency, you can call `gpuArray` explicitly to move data to the GPU if you want to be explicit about the residency.\n\nSince MathWorks MATLAB does not have a fusion planner, and they kept their parallel execution toolbox separate from the core language, as their toolbox is a separate commercial product, MathWorks MATLAB users need to call `gpuArray` to move data to the GPU manually whereas RunMat users can rely on the fusion planner to keep data on the GPU automatically.",
   "gpu_behavior": [
-    "`ischar` never launches GPU kernels. When you pass a gpuArray value, RunMat inspects the residency metadata and simply reports `false` because device-resident buffers are numeric or logical. This matches MATLAB\u2019s semantics and avoids unnecessary host\u2194device transfers."
+    "`ischar` never launches GPU kernels. When you pass a gpuArray value, RunMat inspects the residency metadata and simply reports `false` because device-resident buffers are numeric or logical. This matches MATLAB’s semantics and avoids unnecessary host↔device transfers."
   ]
 }

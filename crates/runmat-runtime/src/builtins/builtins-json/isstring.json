@@ -36,7 +36,7 @@
     "String scalars such as `\"RunMat\"` and string arrays like `[\"alpha\", \"beta\"]` both return `logical(1)`.",
     "Empty string arrays produced by `strings(0)` or `string.empty(...)` are still recognised as the string type, so they return `logical(1)`.",
     "Character arrays created with single quotes (`'text'`), cell arrays of character vectors, numeric tensors, logical masks, structs, tables, and other non-string containers return `logical(0)`.",
-    "gpuArray inputs currently store numeric or logical tensors in RunMat, so `isstring(gpuArray(...))` returns `logical(0)`, matching MATLAB\u2019s behaviour.",
+    "gpuArray inputs currently store numeric or logical tensors in RunMat, so `isstring(gpuArray(...))` returns `logical(0)`, matching MATLAB’s behaviour.",
     "The result is always a host logical scalar, making it easy to use for argument validation, control-flow guards, or input parsing."
   ],
   "examples": [
@@ -88,7 +88,7 @@
     },
     {
       "question": "How is `isstring` different from `ischar`?",
-      "answer": "`isstring` recognises MATLAB\u2019s modern string type introduced in R2016b. `ischar` recognises legacy character arrays created with single quotes. Only `isstring` returns `true` for double-quoted values."
+      "answer": "`isstring` recognises MATLAB’s modern string type introduced in R2016b. `ischar` recognises legacy character arrays created with single quotes. Only `isstring` returns `true` for double-quoted values."
     },
     {
       "question": "What about string arrays stored inside cell arrays?",
@@ -100,7 +100,7 @@
     },
     {
       "question": "Does `isstring` inspect array contents element by element?",
-      "answer": "No. It only checks the value\u2019s type metadata, so the cost is constant regardless of array size."
+      "answer": "No. It only checks the value’s type metadata, so the cost is constant regardless of array size."
     }
   ],
   "links": [
@@ -127,6 +127,6 @@
   },
   "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nIn RunMat, the fusion planner keeps residency on GPU in branches of fused expressions. As such, calling `isstring` on a gpuArray result leaves the device allocation untouched while still answering the question using metadata only.\n\nTo preserve backwards compatibility with MathWorks MATLAB, and for when you want to explicitly bootstrap GPU residency, you can call `gpuArray` explicitly to move data to the GPU if you want to be explicit about the residency.\n\nSince MathWorks MATLAB does not have a fusion planner, and they kept their parallel execution toolbox separate from the core language, as their toolbox is a separate commercial product, MathWorks MATLAB users need to call `gpuArray` to move data to the GPU manually whereas RunMat users can rely on the fusion planner to keep data on the GPU automatically.",
   "gpu_behavior": [
-    "`isstring` runs entirely from metadata. When you pass a gpuArray, RunMat inspects the handle and returns `logical(0)` because device buffers do not yet store string data. No kernels are launched, and no host\u2194device transfers occur, so the device allocation remains resident for subsequent operations."
+    "`isstring` runs entirely from metadata. When you pass a gpuArray, RunMat inspects the handle and returns `logical(0)` because device buffers do not yet store string data. No kernels are launched, and no host↔device transfers occur, so the device allocation remains resident for subsequent operations."
   ]
 }

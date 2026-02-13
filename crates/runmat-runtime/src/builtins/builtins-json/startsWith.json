@@ -60,27 +60,27 @@
     {
       "description": "Apply a scalar prefix to every element of a string array",
       "input": "labels = [\"alpha\" \"beta\" \"gamma\"];\ntf = startsWith(labels, \"a\")",
-      "output": "tf = 1\u00d73 logical array\n   1   0   0"
+      "output": "tf = 1×3 logical array\n   1   0   0"
     },
     {
       "description": "Match element-wise prefixes with implicit expansion",
       "input": "names = [\"hydrogen\"; \"helium\"; \"lithium\"];\nprefixes = [\"hyd\"; \"hel\"; \"lit\"];\ntf = startsWith(names, prefixes)",
-      "output": "tf = 3\u00d71 logical array\n   1\n   1\n   1"
+      "output": "tf = 3×1 logical array\n   1\n   1\n   1"
     },
     {
       "description": "Test prefixes for a cell array of character vectors",
       "input": "C = {'Mercury', 'Venus', 'Mars'};\ntf = startsWith(C, 'M')",
-      "output": "tf = 1\u00d73 logical array\n   1   0   1"
+      "output": "tf = 1×3 logical array\n   1   0   1"
     },
     {
       "description": "Provide multiple prefixes as a column vector",
       "input": "tf = startsWith(\"saturn\", ['s'; 'n'; 'x'])",
-      "output": "tf = 3\u00d71 logical array\n   1\n   0\n   0"
+      "output": "tf = 3×1 logical array\n   1\n   0\n   0"
     },
     {
       "description": "Handle empty and missing values",
       "input": "texts = [\"\", \"<missing>\"];\ntf = startsWith(texts, \"\")",
-      "output": "tf = 1\u00d72 logical array\n   1   0"
+      "output": "tf = 1×2 logical array\n   1   0"
     }
   ],
   "faqs": [

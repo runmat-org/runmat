@@ -32,51 +32,51 @@
     "integration": "builtins::math::elementwise::log::tests::log_gpu_provider_roundtrip",
     "gpu": "builtins::math::elementwise::log::tests::log_wgpu_matches_cpu_elementwise"
   },
-  "description": "`Y = log(X)` computes the natural logarithm of every element in `X`, extending MATLAB semantics to real, logical, character, and complex inputs. Negative real values are promoted to complex results so that `log(-1)` yields `0 + i\u03c0`.",
+  "description": "`Y = log(X)` computes the natural logarithm of every element in `X`, extending MATLAB semantics to real, logical, character, and complex inputs. Negative real values are promoted to complex results so that `log(-1)` yields `0 + iπ`.",
   "behaviors": [
     "`log(X)` applies the operation element-wise with MATLAB broadcasting rules.",
-    "Logical values convert to doubles (`true \u2192 1.0`, `false \u2192 0.0`) before the logarithm is taken.",
+    "Logical values convert to doubles (`true → 1.0`, `false → 0.0`) before the logarithm is taken.",
     "Character arrays are interpreted as their numeric code points and return dense double tensors.",
-    "Negative real values produce complex results: `log([-1 1])` returns `[0 + i\u03c0, 0]`.",
-    "Complex inputs follow MATLAB's definition: `log(a + bi) = log(|a + bi|) + i\u00b7atan2(b, a)`.",
+    "Negative real values produce complex results: `log([-1 1])` returns `[0 + iπ, 0]`.",
+    "Complex inputs follow MATLAB's definition: `log(a + bi) = log(|a + bi|) + i·atan2(b, a)`.",
     "`log(0)` returns `-Inf`, matching MATLAB's handling of the logarithm singularity at zero."
   ],
   "examples": [
     {
       "description": "Natural log of a positive scalar",
       "input": "y = log(exp(3))",
-      "output": "y = 3;"
+      "output": "y = 3"
     },
     {
       "description": "Understanding log of zero",
       "input": "value = log(0)",
-      "output": "value = -Inf;"
+      "output": "value = -Inf"
     },
     {
       "description": "Taking the logarithm of negative values",
       "input": "data = [-1 -2 -4];\nresult = log(data)",
-      "output": "result = [0.0000 + 3.1416i, 0.6931 + 3.1416i, 1.3863 + 3.1416i];"
+      "output": "result = [0.0000 + 3.1416i, 0.6931 + 3.1416i, 1.3863 + 3.1416i]"
     },
     {
       "description": "Applying log to complex numbers",
       "input": "z = [1+2i, -1+pi*i];\nw = log(z)",
-      "output": "w = [0.8047 + 1.1071i, 1.1447 + 1.2626i];"
+      "output": "w = [0.8047 + 1.1071i, 1.1447 + 1.2626i]"
     },
     {
       "description": "Element-wise log on a matrix living on the GPU",
       "input": "G = gpuArray([1 2; 4 8]);\nout = log(G);\nresult = gather(out)",
-      "output": "result = [0.0000 0.6931; 1.3863 2.0794];"
+      "output": "result = [0.0000 0.6931; 1.3863 2.0794]"
     },
     {
       "description": "Logging character codes from a string",
       "input": "C = 'ABC';\nvalues = log(C)",
-      "output": "values = [4.1744 4.1897 4.2047];"
+      "output": "values = [4.1744 4.1897 4.2047]"
     }
   ],
   "faqs": [
     {
       "question": "When should I use the `log` function?",
-      "answer": "Use `log` whenever you need the natural logarithm of your data\u2014for example, to linearize exponential growth, compute likelihoods, or transform multiplicative relationships into additive ones."
+      "answer": "Use `log` whenever you need the natural logarithm of your data—for example, to linearize exponential growth, compute likelihoods, or transform multiplicative relationships into additive ones."
     },
     {
       "question": "What happens if the input contains zeros?",
@@ -84,7 +84,7 @@
     },
     {
       "question": "How are negative real numbers handled?",
-      "answer": "Negative values automatically promote to complex results: `log(-x)` returns `log(x) + i\u03c0`. This matches MATLAB behaviour and avoids losing information compared with returning `NaN`."
+      "answer": "Negative values automatically promote to complex results: `log(-x)` returns `log(x) + iπ`. This matches MATLAB behaviour and avoids losing information compared with returning `NaN`."
     },
     {
       "question": "What about tiny floating-point noise producing small negative numbers?",
@@ -96,7 +96,7 @@
     },
     {
       "question": "Does `log` accept complex inputs directly?",
-      "answer": "Yes. Complex scalars and tensors follow the MATLAB definition using magnitude and phase (`log(|z|) + i\u00b7angle(z)`)."
+      "answer": "Yes. Complex scalars and tensors follow the MATLAB definition using magnitude and phase (`log(|z|) + i·angle(z)`)."
     }
   ],
   "links": [

@@ -1,6 +1,6 @@
 #[cfg(target_arch = "wasm32")]
 wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
-use runmat_builtins::{IntValue, Value};
+use runmat_builtins::{IntValue, Tensor, Value};
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[test]
@@ -57,5 +57,19 @@ fn integer_class_and_string() {
         assert_eq!(sa.data[0], "42");
     } else {
         panic!();
+    }
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[test]
+fn uint16_builtin_dispatches_and_casts_array() {
+    let input = Value::Tensor(Tensor::new(vec![3.49, -2.0, 70000.0], vec![1, 3]).unwrap());
+    let output = runmat_runtime::call_builtin("uint16", &[input]).expect("uint16 builtin");
+    match output {
+        Value::Tensor(tensor) => {
+            assert_eq!(tensor.shape, vec![1, 3]);
+            assert_eq!(tensor.data, vec![3.0, 0.0, u16::MAX as f64]);
+        }
+        other => panic!("expected tensor output, got {other:?}"),
     }
 }

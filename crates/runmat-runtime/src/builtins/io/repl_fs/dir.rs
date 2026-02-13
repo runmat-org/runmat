@@ -21,6 +21,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::console::{record_console_output, ConsoleStream};
+use crate::output_context::requested_output_count;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::dir")]
@@ -87,7 +88,9 @@ async fn dir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         2 => list_with_folder_and_pattern(&gathered[0], &gathered[1])?,
         _ => return Err(dir_error("dir: too many input arguments")),
     };
-    emit_dir_stdout(&records);
+    if should_emit_stdout() {
+        emit_dir_stdout(&records);
+    }
     records_to_value(records)
 }
 
@@ -351,6 +354,14 @@ fn emit_dir_stdout(records: &[DirRecord]) {
         lines.push(format!("{:<20} {:>10} {}", record.date, size_field, name));
     }
     record_console_output(ConsoleStream::Stdout, lines.join("\n"));
+}
+
+fn should_emit_stdout() -> bool {
+    match requested_output_count() {
+        Some(0) => true,
+        Some(_) => false,
+        None => true,
+    }
 }
 
 fn scalar_text(value: &Value, error: &str) -> BuiltinResult<String> {

@@ -36,8 +36,8 @@
   },
   "description": "`rc = rcond(A)` returns an estimate of the reciprocal of the condition number of a square matrix `A` in the 1-norm. Well-conditioned matrices yield values close to `1`, whereas singular or numerically singular matrices yield values near zero. The estimate mirrors MATLAB: it is based on the ratio of the smallest to largest singular values.",
   "behaviors": [
-    "Inputs must be square matrices (scalars count as `1 \u00d7 1`). Non-square inputs trigger the MATLAB error `\"rcond: input must be a square matrix.\"`",
-    "For the empty matrix (`0 \u00d7 0`) the reciprocal condition number is `Inf`.",
+    "Inputs must be square matrices (scalars count as `1 × 1`). Non-square inputs trigger the MATLAB error `\"rcond: input must be a square matrix.\"`",
+    "For the empty matrix (`0 × 0`) the reciprocal condition number is `Inf`.",
     "`rcond(0)` returns `0`. Non-zero scalars return `1`.",
     "Logical and integer arrays are promoted to double precision before analysis.",
     "Complex matrices are supported; the singular values are computed in complex arithmetic.",

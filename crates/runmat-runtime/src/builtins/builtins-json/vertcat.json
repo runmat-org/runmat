@@ -34,11 +34,11 @@
       "builtins::array::shape::vertcat::tests::vertcat_like_gpu_from_host_inputs"
     ]
   },
-  "description": "`vertcat(A1, A2, \u2026)` vertically concatenates its inputs, matching the behavior of MATLAB's semicolon array construction `[A1; A2; \u2026]`. It is the standard way to stack matrices, vectors, or higher-dimensional slices on top of each other.",
+  "description": "`vertcat(A1, A2, …)` vertically concatenates its inputs, matching the behavior of MATLAB's semicolon array construction `[A1; A2; …]`. It is the standard way to stack matrices, vectors, or higher-dimensional slices on top of each other.",
   "behaviors": [
     "Hard-codes `dim = 1`. All inputs must agree on every dimension except the first.",
     "Accepts numeric, logical, complex, character, string, and cell arrays with MATLAB-compatible type checking. Mixing classes is an error.",
-    "Scalars are treated as `1\u00d71`, enabling concise row-building such as `vertcat(1, 2, 3)`.",
+    "Scalars are treated as `1×1`, enabling concise row-building such as `vertcat(1, 2, 3)`.",
     "Empty inputs participate naturally. If any shared dimension is zero, the result is empty with the expected shape.",
     "The optional trailing `'like', prototype` pair forces the output to match the prototype's data residency (CPU vs GPU) and numeric flavour.",
     "Mixing `gpuArray` inputs with host inputs is disallowed. Convert explicitly via `gpuArray` or `gather` to control residency."
@@ -115,6 +115,6 @@
     "url": "crates/runmat-runtime/src/builtins/array/shape/vertcat.rs"
   },
   "gpu_behavior": [
-    "`vertcat` delegates to `cat(dim = 1, \u2026)`. When the active acceleration provider implements the `cat` hook, concatenation happens entirely on the GPU, keeping `gpuArray` inputs resident and avoiding costly round-trips. Providers that lack this hook trigger a transparent fallback: RunMat gathers the operands to the host, concatenates them with MATLAB semantics, and uploads the result back to the originating device so downstream code still sees a `gpuArray`. This mirrors MATLAB's explicit GPU workflows while keeping RunMat's auto-offload planner informed."
+    "`vertcat` delegates to `cat(dim = 1, …)`. When the active acceleration provider implements the `cat` hook, concatenation happens entirely on the GPU, keeping `gpuArray` inputs resident and avoiding costly round-trips. Providers that lack this hook trigger a transparent fallback: RunMat gathers the operands to the host, concatenates them with MATLAB semantics, and uploads the result back to the originating device so downstream code still sees a `gpuArray`. This mirrors MATLAB's explicit GPU workflows while keeping RunMat's auto-offload planner informed."
   ]
 }

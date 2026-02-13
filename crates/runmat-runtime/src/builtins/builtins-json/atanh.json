@@ -19,7 +19,7 @@
       "f64"
     ],
     "broadcasting": "matlab",
-    "notes": "Uses the provider's unary_atanh hook when every element satisfies |x| \u2264 1; gathers to the host when complex promotion is required or hooks are unavailable."
+    "notes": "Uses the provider's unary_atanh hook when every element satisfies |x| ≤ 1; gathers to the host when complex promotion is required or hooks are unavailable."
   },
   "fusion": {
     "elementwise": true,
@@ -32,11 +32,11 @@
     "unit": "builtins::math::trigonometry::atanh::tests",
     "integration": "builtins::math::trigonometry::atanh::tests::atanh_gpu_provider_roundtrip"
   },
-  "description": "`Y = atanh(X)` evaluates the inverse hyperbolic tangent of every element in `X`. Real inputs inside the open interval `(-1, 1)` remain real. Values with `|x| > 1` (including `\u00b1Inf`) automatically promote to complex results that match MATLAB's principal branch.",
+  "description": "`Y = atanh(X)` evaluates the inverse hyperbolic tangent of every element in `X`. Real inputs inside the open interval `(-1, 1)` remain real. Values with `|x| > 1` (including `±Inf`) automatically promote to complex results that match MATLAB's principal branch.",
   "behaviors": [
     "Accepts scalars, vectors, matrices, and N-D tensors using MATLAB broadcasting semantics.",
-    "Logical values are promoted to double precision (`true \u2192 1`, `false \u2192 0`) before evaluation. The results follow MATLAB's rules for infinities at the endpoints (`atanh(1) = Inf`, `atanh(-1) = -Inf`).",
-    "Real values with magnitude greater than `1` return complex numbers whose imaginary part is `\u00b1\u03c0/2`. The runtime automatically promotes the entire tensor to `Value::ComplexTensor` so downstream consumers see the MATLAB-compatible complex result.",
+    "Logical values are promoted to double precision (`true → 1`, `false → 0`) before evaluation. The results follow MATLAB's rules for infinities at the endpoints (`atanh(1) = Inf`, `atanh(-1) = -Inf`).",
+    "Real values with magnitude greater than `1` return complex numbers whose imaginary part is `±π/2`. The runtime automatically promotes the entire tensor to `Value::ComplexTensor` so downstream consumers see the MATLAB-compatible complex result.",
     "Complex inputs are evaluated with MATLAB's definition `atanh(z) = 0.5 * log((1 + z) / (1 - z))`, including correct handling of branch cuts, NaNs, and infinities.",
     "Character arrays are treated as their numeric code points and converted to doubles before the inverse hyperbolic tangent is applied.",
     "Empty arrays return empty outputs with matching shape and type."
@@ -53,7 +53,7 @@
       "output": "y = [-1.4722  -0.4847   0    0.4847   1.4722]"
     },
     {
-      "description": "Dealing with values near \u00b11 in atanh",
+      "description": "Dealing with values near ±1 in atanh",
       "input": "A = [0.99  1.0  -1.0; 0.0  0.5  -0.5];\nB = atanh(A)",
       "output": "B =\n    2.6467        Inf       -Inf\n         0    0.5493    -0.5493"
     },
@@ -76,10 +76,10 @@
   "faqs": [
     {
       "question": "When does `atanh` return complex numbers?",
-      "answer": "Whenever an element has magnitude strictly greater than `1`, including `\u00b1Inf`, MATLAB defines the result as complex with an imaginary component of `\u00b1\u03c0/2`. RunMat mirrors that behaviour exactly."
+      "answer": "Whenever an element has magnitude strictly greater than `1`, including `±Inf`, MATLAB defines the result as complex with an imaginary component of `±π/2`. RunMat mirrors that behaviour exactly."
     },
     {
-      "question": "How are the endpoints `\u00b11` handled?",
+      "question": "How are the endpoints `±1` handled?",
       "answer": "`atanh(1)` returns positive infinity and `atanh(-1)` returns negative infinity, matching MATLAB. These values still count as real outputs, so the GPU path can handle them without falling back."
     },
     {
@@ -137,8 +137,8 @@
     "label": "`crates/runmat-runtime/src/builtins/math/trigonometry/atanh.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/trigonometry/atanh.rs"
   },
-  "gpu_residency": "You usually do **not** need to call `gpuArray` manually. The auto-offload planner keeps tensors on the GPU whenever the provider exposes a working `unary_atanh` hook and every element satisfies `|x| \u2264 1`. If any element requires complex promotion or the provider lacks native support, RunMat automatically gathers to the host and still returns MATLAB-compatible results. Manual `gpuArray` / `gather` remains available for workflows that demand explicit residency control.",
+  "gpu_residency": "You usually do **not** need to call `gpuArray` manually. The auto-offload planner keeps tensors on the GPU whenever the provider exposes a working `unary_atanh` hook and every element satisfies `|x| ≤ 1`. If any element requires complex promotion or the provider lacks native support, RunMat automatically gathers to the host and still returns MATLAB-compatible results. Manual `gpuArray` / `gather` remains available for workflows that demand explicit residency control.",
   "gpu_behavior": [
-    "RunMat Accelerate keeps tensors on the GPU when:\n\n1. A provider is registered and implements the `unary_atanh` hook. 2. Every element satisfies `|x| \u2264 1` (allowing the endpoints for the \u00b1Inf behaviour).\n\nThe runtime first calls the provider's `reduce_min`/`reduce_max` hooks to prove that the entire operand stays within the real domain `[-1, 1]`. If those hooks are missing, return an error, or detect a value outside the domain, RunMat gathers the tensor to the host, performs the computation with the CPU reference implementation, and returns MATLAB-accurate complex results. Users do not need to micromanage residency with `gpuArray`/`gather`; the runtime transparently falls back only when necessary."
+    "RunMat Accelerate keeps tensors on the GPU when:\n\n1. A provider is registered and implements the `unary_atanh` hook. 2. Every element satisfies `|x| ≤ 1` (allowing the endpoints for the ±Inf behaviour).\n\nThe runtime first calls the provider's `reduce_min`/`reduce_max` hooks to prove that the entire operand stays within the real domain `[-1, 1]`. If those hooks are missing, return an error, or detect a value outside the domain, RunMat gathers the tensor to the host, performs the computation with the CPU reference implementation, and returns MATLAB-accurate complex results. Users do not need to micromanage residency with `gpuArray`/`gather`; the runtime transparently falls back only when necessary."
   ]
 }

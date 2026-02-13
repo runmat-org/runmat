@@ -32,7 +32,7 @@
   },
   "description": "`cd` displays the current working folder or switches RunMat to a different folder. It mirrors MATLAB so scripts and interactive sessions can rely on the same workspace layout when loading files, saving artifacts, or invoking other builtins that reference relative paths.",
   "behaviors": [
-    "`cd` with no input returns the absolute path of the current folder as a character row vector (`1\u00d7N`).",
+    "`cd` with no input returns the absolute path of the current folder as a character row vector (`1×N`).",
     "`cd(newFolder)` changes the working folder and returns the previous folder, enabling the classic MATLAB pattern `old = cd(new); ...; cd(old);`.",
     "Accepts character vectors and string scalars. String arrays must contain exactly one element. Other types raise `cd: folder name must be a character vector or string scalar`.",
     "Supports relative paths (for example `cd('..')`), absolute paths, and the shell-style `~` expansion to jump to the user home folder.",
@@ -94,7 +94,7 @@
     },
     {
       "question": "Can I change to folders whose names include spaces?",
-      "answer": "Yes. Provide them as strings or character vectors\u2014RunMat preserves whitespace exactly."
+      "answer": "Yes. Provide them as strings or character vectors—RunMat preserves whitespace exactly."
     }
   ],
   "links": [

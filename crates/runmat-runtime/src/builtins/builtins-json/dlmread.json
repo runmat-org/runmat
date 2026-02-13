@@ -38,7 +38,7 @@
     "`dlmread(filename, range)` and `dlmread(filename, delimiter, range)` accept a numeric vector `[r1 c1 r2 c2]` or `[r1 c1]` describing a rectangular slice. The indices are zero-based and inclusive. Excel-style addresses such as `\"B2:D6\"` are also accepted for compatibility with `csvread`.",
     "Empty fields (for example two adjacent delimiters) are interpreted as `0`. Tokens such as `NaN`, `Inf`, and `-Inf` are accepted (case-insensitive).",
     "Any other nonnumeric token raises an error that identifies the offending row and column using one-based indices (matching MATLAB diagnostic messages).",
-    "Results are dense double-precision tensors laid out in column-major order. Empty files yield a `0\u00d70` tensor.",
+    "Results are dense double-precision tensors laid out in column-major order. Empty files yield a `0×0` tensor.",
     "Leading UTF-8 byte order marks (BOM) are stripped automatically to match MATLAB's handling of spreadsheets that emit BOM-prefixed text files.",
     "Paths may include `~` to reference the home directory; RunMat expands the token before opening the file."
   ],

@@ -34,11 +34,11 @@
   "description": "`eraseBetween(text, start, stop)` removes the portion of `text` that appears between two boundary markers. Boundaries can be substrings or numeric positions. The builtin mirrors MATLAB semantics, including support for string arrays, character arrays, cell arrays, implicit expansion, and the `'Boundaries'` name-value argument that toggles inclusive or exclusive behaviour.",
   "behaviors": [
     "Accepts **string scalars**, **string arrays**, **character arrays** (row-by-row), and **cell arrays** containing string scalars or character vectors; the output keeps the same container type.",
-    "Boundary arguments can be text or numeric positions. Both boundaries in a call must use the same representation\u2014mixing text and numeric markers raises a size/type error.",
+    "Boundary arguments can be text or numeric positions. Both boundaries in a call must use the same representation—mixing text and numeric markers raises a size/type error.",
     "Text boundaries are **exclusive** by default: the markers are preserved while the enclosed text is deleted. Numeric positions are **inclusive** by default: characters at `startPos` and `endPos` are deleted together with the interior.",
     "`'Boundaries','inclusive'` removes the markers themselves; `'Boundaries','exclusive'` keeps them. The option is case-insensitive and must be supplied as name-value pairs.",
     "Missing string scalars propagate (the MATLAB `missing` placeholder in either boundary or text yields `<missing>` in the result). When a boundary cannot be located, `eraseBetween` returns the original element unchanged.",
-    "Numeric positions are validated as positive integers, clamped to the string length, and interpreted using MATLAB\u2019s 1-based indexing rules."
+    "Numeric positions are validated as positive integers, clamped to the string length, and interpreted using MATLAB’s 1-based indexing rules."
   ],
   "examples": [
     {
@@ -49,7 +49,7 @@
     {
       "description": "Deleting substrings across a string array",
       "input": "str = [\"The quick brown fox jumps\"; \"over the lazy dog\"];\nstarts = [\"quick\"; \"the\"];\nends = [\" fox\"; \" dog\"];\ntrimmed = eraseBetween(str, starts, ends)",
-      "output": "trimmed = 2\u00d71 string\n    \"The quick fox jumps\"\n    \"over the dog\""
+      "output": "trimmed = 2×1 string\n    \"The quick fox jumps\"\n    \"over the dog\""
     },
     {
       "description": "Removing characters between numeric positions",
@@ -64,17 +64,17 @@
     {
       "description": "Operating on character arrays while preserving padding",
       "input": "chars = char(\"Server<GPU>\", \"Engine<CPU>\");\ntrimmed = eraseBetween(chars, \"<\", \">\", \"Boundaries\", \"inclusive\")",
-      "output": "trimmed =\n\n  2\u00d76 char array\n\n    \"Server\"\n    \"Engine\""
+      "output": "trimmed =\n\n  2×6 char array\n\n    \"Server\"\n    \"Engine\""
     },
     {
       "description": "Preserving element types in cell arrays",
       "input": "C = {'alpha<1>', \"beta<2>\";\n     'gamma<3>', \"delta<4>\"};\nclean = eraseBetween(C, \"<\", \">\", \"Boundaries\", \"inclusive\")",
-      "output": "clean =\n  2\u00d72 cell array\n    {'alpha'}    {\"beta\"}\n    {'gamma'}    {\"delta\"}"
+      "output": "clean =\n  2×2 cell array\n    {'alpha'}    {\"beta\"}\n    {'gamma'}    {\"delta\"}"
     },
     {
       "description": "Handling missing strings safely",
       "input": "texts = [missing, \"Planner<GPU>\"];\nresult = eraseBetween(texts, \"<\", \">\")",
-      "output": "result = 1\u00d72 string\n    \"<missing>\"    \"Planner\""
+      "output": "result = 1×2 string\n    \"<missing>\"    \"Planner\""
     }
   ],
   "faqs": [
@@ -100,7 +100,7 @@
     },
     {
       "question": "Does `eraseBetween` validate numeric positions?",
-      "answer": "Yes. Positions are parsed as positive integers using MATLAB\u2019s 1-based indexing. Stops are clamped to the string length, and start positions that lie beyond the text leave the element unchanged."
+      "answer": "Yes. Positions are parsed as positive integers using MATLAB’s 1-based indexing. Stops are clamped to the string length, and start positions that lie beyond the text leave the element unchanged."
     }
   ],
   "links": [

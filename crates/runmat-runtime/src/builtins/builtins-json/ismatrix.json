@@ -31,11 +31,11 @@
   "description": "`ismatrix(A)` returns logical `true` when the input has two dimensions (`m`-by-`n`) and logical `false` otherwise. Scalars and vectors are considered matrices because they occupy a 1-by-1 or 1-by-`n` grid. The builtin mirrors MATLAB semantics across numeric, logical, character, string, cell, struct, and GPU-resident data.",
   "behaviors": [
     "Returns `true` for scalars, row vectors, column vectors, and ordinary 2-D matrices.",
-    "Returns `false` for arrays whose rank exceeds two, even if trailing dimensions are singleton (for example, `1\u00d71\u00d71`).",
-    "Empty arrays such as `0\u00d70`, `1\u00d70`, and `0\u00d71` are matrices; higher-rank empties such as `0\u00d70\u00d73` are not.",
+    "Returns `false` for arrays whose rank exceeds two, even if trailing dimensions are singleton (for example, `1×1×1`).",
+    "Empty arrays such as `0×0`, `1×0`, and `0×1` are matrices; higher-rank empties such as `0×0×3` are not.",
     "Character arrays, string arrays, and cell arrays honor their reported MATLAB dimensions.",
     "GPU tensors rely on their `GpuTensorHandle` metadata; if a provider omits the shape, RunMat gathers once to inspect it.",
-    "Objects, structs, numeric scalars, and logical scalars behave like their underlying dimensions (`1\u00d71`)."
+    "Objects, structs, numeric scalars, and logical scalars behave like their underlying dimensions (`1×1`)."
   ],
   "examples": [
     {
@@ -85,11 +85,11 @@
     },
     {
       "question": "Do trailing singleton dimensions change the result?",
-      "answer": "Yes. Any array whose rank exceeds two returns `false`, even if the extra dimensions are size one (for example, `1\u00d71\u00d71`)."
+      "answer": "Yes. Any array whose rank exceeds two returns `false`, even if the extra dimensions are size one (for example, `1×1×1`)."
     },
     {
       "question": "How are empty arrays handled?",
-      "answer": "Empty arrays with at most two dimensions (such as `0\u00d70`, `1\u00d70`, or `0\u00d71`) return `true`. Higher-rank empties return `false`."
+      "answer": "Empty arrays with at most two dimensions (such as `0×0`, `1×0`, or `0×1`) return `true`. Higher-rank empties return `false`."
     },
     {
       "question": "What about character, string, or cell arrays?",
