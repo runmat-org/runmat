@@ -33,8 +33,8 @@
   },
   "description": "`close` releases TCP clients and servers that were created with `tcpclient`, `tcpserver`, or `accept`. It mirrors MATLAB semantics for network connections while adopting the familiar `status = close(obj)` pattern used elsewhere in MATLAB: the function returns `1` when one or more handles are closed and `0` when nothing needed to be released.",
   "behaviors": [
-    "`close(t)` closes the TCP client struct `t` that was previously returned by `tcpclient` or `accept`. Subsequent socket operations on that client raise MATLAB-style \u201cnot connected\u201d diagnostics.",
-    "`close(s)` closes the TCP server struct `s` that was returned by `tcpserver`. Any clients that were accepted from that server are also disconnected to match MATLAB\u2019s lifecycle rules.",
+    "`close(t)` closes the TCP client struct `t` that was previously returned by `tcpclient` or `accept`. Subsequent socket operations on that client raise MATLAB-style “not connected” diagnostics.",
+    "`close(s)` closes the TCP server struct `s` that was returned by `tcpserver`. Any clients that were accepted from that server are also disconnected to match MATLAB’s lifecycle rules.",
     "`close('clients')` closes every registered TCP client (including those produced by `accept`). Likewise, `close('servers')` closes every TCP server, and `close('all')` closes both clients and servers.",
     "Multiple inputs are processed from left to right. The return value is `1` when at least one handle was closed and `0` otherwise.",
     "Invalid arguments raise `MATLAB:close:InvalidArgument`. Structs that do not contain the hidden RunMat networking identifiers raise `MATLAB:close:InvalidHandle`.",

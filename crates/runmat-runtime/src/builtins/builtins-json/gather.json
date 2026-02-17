@@ -41,7 +41,7 @@
     "Downloads gpuArray tensors via the active acceleration provider, producing dense double-precision matrices. Logical gpuArray inputs return logical arrays with MATLAB-compatible 0/1 encoding.",
     "Recursively descends into cells, structs, and objects, gathering every nested gpuArray handle. This mirrors MATLAB's behaviour when you gather composite data structures.",
     "Clears residency metadata so the auto-offload planner treats the gathered value as host-resident.",
-    "Supports multiple inputs: in a single-output context it returns a `1\u00d7N` cell array preserving the original order; in a multi-output assignment the number of inputs and outputs must match, mirroring MATLAB's requirement.",
+    "Supports multiple inputs: in a single-output context it returns a `1×N` cell array preserving the original order; in a multi-output assignment the number of inputs and outputs must match, mirroring MATLAB's requirement.",
     "Raises `gather: no acceleration provider registered` when you attempt to download gpuArray data without an active provider, and propagates provider-specific download errors verbatim."
   ],
   "examples": [
@@ -58,22 +58,22 @@
     {
       "description": "Preserving logical values when gathering",
       "input": "mask = gpuArray(logical([1 0 1 0]));\nhostMask = gather(mask)",
-      "output": "hostMask =\n  1\u00d74 logical array\n   1   0   1   0"
+      "output": "hostMask =\n  1×4 logical array\n   1   0   1   0"
     },
     {
       "description": "Gathering gpuArray values stored inside a cell array",
       "input": "C = {gpuArray([1 2]), 42};\nhostC = gather(C)",
-      "output": "hostC =\n  1\u00d72 cell array\n    {[1 2]}    {[42]}"
+      "output": "hostC =\n  1×2 cell array\n    {[1 2]}    {[42]}"
     },
     {
       "description": "Gathering struct fields that live on the GPU",
       "input": "S.data = gpuArray(magic(3));\nS.label = \"gpu result\";\nS_host = gather(S)",
-      "output": "S_host =\n  struct with fields:\n     data: [3\u00d73 double]\n    label: \"gpu result\""
+      "output": "S_host =\n  struct with fields:\n     data: [3×3 double]\n    label: \"gpu result\""
     },
     {
       "description": "Gathering multiple gpuArrays into one cell result",
       "input": "A = gpuArray(eye(3));\nB = gpuArray(ones(3));\ncellOut = gather(A, B)",
-      "output": "cellOut =\n  1\u00d72 cell array\n    {[3\u00d73 double]}    {[3\u00d73 double]}"
+      "output": "cellOut =\n  1×2 cell array\n    {[3×3 double]}    {[3×3 double]}"
     },
     {
       "description": "Gathering results at the end of a GPU pipeline",
@@ -88,7 +88,7 @@
     },
     {
       "question": "What happens if the input does not live on the GPU?",
-      "answer": "Nothing changes\u2014the value is returned as-is. This makes `gather` safe to sprinkle into code paths that may or may not run on the GPU."
+      "answer": "Nothing changes—the value is returned as-is. This makes `gather` safe to sprinkle into code paths that may or may not run on the GPU."
     },
     {
       "question": "How are logical gpuArray values represented after gathering?",
@@ -100,7 +100,7 @@
     },
     {
       "question": "What happens when I pass multiple inputs but capture a single output?",
-      "answer": "RunMat follows MATLAB: it gathers each input and returns a `1\u00d7N` cell array so you can unpack values later. In multi-output assignments you must request the same number of outputs as inputs."
+      "answer": "RunMat follows MATLAB: it gathers each input and returns a `1×N` cell array so you can unpack values later. In multi-output assignments you must request the same number of outputs as inputs."
     },
     {
       "question": "What if no acceleration provider is registered?",

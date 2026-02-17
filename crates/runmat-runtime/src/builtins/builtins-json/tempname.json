@@ -32,7 +32,7 @@
   },
   "description": "`tempname` returns a unique path that you can reserve for a temporary file or folder. By default it chooses the system temporary directory. When you provide a folder argument, the path is generated inside that folder instead.",
   "behaviors": [
-    "`tempname()` returns a character row vector (`1\u00d7N`) containing an absolute path inside the system temporary directory.",
+    "`tempname()` returns a character row vector (`1×N`) containing an absolute path inside the system temporary directory.",
     "`tempname(folder)` returns a path inside `folder`, which can be absolute or relative. RunMat expands leading `~` to the home directory for convenience.",
     "The returned path never corresponds to an existing file or directory at the time of the call.",
     "`tempname` does not create files or directories. Use the returned value with builtins such as `fopen`, `mkdir`, or `movefile`.",
@@ -78,7 +78,7 @@
     },
     {
       "question": "Can I call `tempname` with relative folders?",
-      "answer": "Yes. RunMat honours relative paths and joins the generated token using the platform\u2019s path separator."
+      "answer": "Yes. RunMat honours relative paths and joins the generated token using the platform’s path separator."
     },
     {
       "question": "What happens if the target folder does not exist yet?",

@@ -47,32 +47,32 @@
     {
       "description": "Counting paired values with explicit edges",
       "input": "X = [0.5 1.5 2.5 3.5];\nY = [0.2 0.9 1.4 2.8];\n[N, Xedges, Yedges] = histcounts2(X, Y, [0 1 2 3 4], [0 1 2 3])",
-      "output": "N = [1 0 0; 1 0 0; 0 1 0; 0 0 1];\nXedges = [0 1 2 3 4];\nYedges = [0 1 2 3];"
+      "output": "N = [1 0 0; 1 0 0; 0 1 0; 0 0 1];\nXedges = [0 1 2 3 4];\nYedges = [0 1 2 3]"
     },
     {
       "description": "Specifying separate bin counts for each axis",
       "input": "X = [1 2 3 4];\nY = [1 2 3 4];\nN = histcounts2(X, Y, 2, 4)",
-      "output": "size(N) = [2 4];\nsum(N, \"all\") = 4;"
+      "output": "size(N) = [2 4];\nsum(N, \"all\") = 4"
     },
     {
       "description": "Using different bin widths for X and Y",
       "input": "X = [1 1.5 2.4 3.7];\nY = [2 2.2 2.9 3.1];\n[N, Xedges, Yedges] = histcounts2(X, Y, 'XBinWidth', 1, 'YBinWidth', 0.5)",
-      "output": "diff(Xedges) = [1 1 1];\ndiff(Yedges(1:3)) = [0.5 0.5];\nsum(N, \"all\") = 4;"
+      "output": "diff(Xedges) = [1 1 1];\ndiff(Yedges(1:3)) = [0.5 0.5];\nsum(N, \"all\") = 4"
     },
     {
       "description": "Normalizing a 2-D histogram to probabilities",
       "input": "X = [0.2 0.4 1.1 1.5];\nY = [0.1 0.8 1.2 1.9];\nN = histcounts2(X, Y, [0 1 2], [0 1 2], 'Normalization', 'probability')",
-      "output": "N = [0.5 0.0; 0.0 0.5];"
+      "output": "N = [0.5 0.0; 0.0 0.5]"
     },
     {
       "description": "Ignoring NaN values in paired data",
       "input": "X = [1 2 NaN 3];\nY = [2 2 2 NaN];\nN = histcounts2(X, Y, [0 1 2 3], [0 1 2 3])",
-      "output": "sum(N, \"all\") = 2;"
+      "output": "sum(N, \"all\") = 2"
     },
     {
       "description": "Histogramming gpuArray inputs without manual gather",
       "input": "Gx = gpuArray([0.5 1.5 2.5]);\nGy = gpuArray([1.0 1.1 2.9]);\n[counts, Xedges, Yedges] = histcounts2(Gx, Gy, [0 1 2 3], [0 2 3])",
-      "output": "isa(counts, 'double')      % counts are returned on the CPU\ncounts = [1 0; 1 0; 0 1];"
+      "output": "isa(counts, 'double')      % counts are returned on the CPU\ncounts = [1 0; 1 0; 0 1]"
     }
   ],
   "faqs": [

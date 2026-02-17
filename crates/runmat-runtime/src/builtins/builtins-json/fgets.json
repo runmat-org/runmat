@@ -31,7 +31,7 @@
   "description": "`fgets(fid)` returns the next line from the text file associated with `fid`, preserving any newline characters that terminate the line. It mirrors MATLAB's behaviour for optional length limits, line-terminator reporting, and end-of-file handling so existing scripts work without modification.",
   "behaviors": [
     "`tline = fgets(fid)` reads from the current position to the next newline (including the newline) or to end-of-file when no terminator is found. The result is a character row vector with MATLAB's column-major semantics.",
-    "`tline = fgets(fid, nchar)` limits the read to at most `nchar` characters (rounded toward zero). The call stops early if a newline is encountered before the limit. When the newline appears beyond the limit, the delimiter is left unread for the next call.",
+    "`tline = fgets(fid, nchar)` limits the read to at most `nchar-1` characters (with `nchar` rounded toward zero), matching MATLAB. The call stops early if a newline is encountered before the limit. When the newline appears beyond the limit, the delimiter is left unread for the next call.",
     "`[tline, ltout] = fgets(___)` additionally returns the line terminators as a row vector of doubles. For Windows newlines (`\\r\\n`) the second output is `[13 10]`, for Unix newlines (`\\n`) it is `10`, and it is empty when the line has no terminator.",
     "When the file is empty or the file position indicator is already at end-of-file, `tline` (and `ltout`, if requested) return `-1`.",
     "Lines are decoded using the text encoding recorded by `fopen`. UTF-8, US-ASCII, ISO-8859-1 (`latin1`), Windows-1252, Shift_JIS, and binary mode are recognised without additional user work."
@@ -64,8 +64,8 @@
     },
     {
       "description": "Read Latin-1 encoded text",
-      "input": "fname = tempname;\nfid = fopen(fname, 'w', 'n', 'latin1');\nfprintf(fid, 'Espa\u00f1ol\\n');\nfclose(fid);\n\nfid = fopen(fname, 'r', 'n', 'latin1');\nline = fgets(fid);\nfclose(fid);\ndelete(fname);\n\ntext = line(1:end-1);\ncodes = double(text);\n\ntext\ncodes",
-      "output": "text =\n    'Espa\u00f1ol'\ncodes =\n    69   115   112    97   241   111   108"
+      "input": "fname = tempname;\nfid = fopen(fname, 'w', 'n', 'latin1');\nfprintf(fid, 'Español\\n');\nfclose(fid);\n\nfid = fopen(fname, 'r', 'n', 'latin1');\nline = fgets(fid);\nfclose(fid);\ndelete(fname);\n\ntext = line(1:end-1);\ncodes = double(text);\n\ntext\ncodes",
+      "output": "text =\n    'Español'\ncodes =\n    69   115   112    97   241   111   108"
     }
   ],
   "faqs": [
@@ -83,7 +83,7 @@
     },
     {
       "question": "What happens if I specify an `nchar` limit?",
-      "answer": "RunMat reads at most `nchar` characters. If the newline characters appear before reaching the limit, they are included in the output. If the limit is reached first, the newline remains unread and `ltout` is empty."
+      "answer": "RunMat reads at most `nchar-1` characters (MATLAB-compatible). If the newline characters appear before reaching the limit, they are included in the output. If the limit is reached first, the newline remains unread and `ltout` is empty."
     },
     {
       "question": "Which encodings are supported?",

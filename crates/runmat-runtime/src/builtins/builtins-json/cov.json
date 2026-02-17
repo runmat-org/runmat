@@ -93,7 +93,7 @@
     },
     {
       "question": "Can I call `cov` on logical inputs?",
-      "answer": "Yes. Logical arrays are converted to double precision (`true \u2192 1.0`, `false \u2192 0.0`) before the covariance is computed, matching MATLAB's behaviour."
+      "answer": "Yes. Logical arrays are converted to double precision (`true → 1.0`, `false → 0.0`) before the covariance is computed, matching MATLAB's behaviour."
     }
   ],
   "links": [

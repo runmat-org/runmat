@@ -43,7 +43,7 @@
   "behaviors": [
     "Accepts numeric tensors, logical arrays, booleans, character vectors, and existing gpuArray handles. Other input types raise descriptive errors so callers can gather or convert first.",
     "Optional leading size arguments (`gpuArray(data, m, n, ...)` or `gpuArray(data, [m n ...])`) reshape the uploaded value. The element count must match the requested size.",
-    "Class strings such as `'single'`, `'double'`, `'int32'`, `'uint8'`, and `'logical'` convert the data before upload, matching MATLAB casting semantics (round-to-nearest with saturation for integers, `NaN`\u21920 for integer classes, and errors when converting `NaN` to logical).",
+    "Class strings such as `'single'`, `'double'`, `'int32'`, `'uint8'`, and `'logical'` convert the data before upload, matching MATLAB casting semantics (round-to-nearest with saturation for integers, `NaN`→0 for integer classes, and errors when converting `NaN` to logical).",
     "`'like', prototype` infers the dtype (and logical state) from `prototype`. Explicit class strings override the inference when both are supplied.",
     "`\"gpuArray\"` strings are accepted as no-ops so call-sites that forward arguments from constructors such as `zeros(..., 'gpuArray')` remain compatible.",
     "Inputs that are already gpuArray handles pass through by default. When a class change is requested, RunMat gathers the data, performs the conversion, uploads a fresh buffer, and frees the old handle.",
@@ -53,7 +53,7 @@
     {
       "description": "Moving a matrix to the GPU for elementwise work",
       "input": "A = [1 2 3; 4 5 6];\nG = gpuArray(A);\nout = gather(sin(G))",
-      "output": "out =\n  2\u00d73\n\n    0.8415    0.9093    0.1411\n   -0.7568   -0.9589   -0.2794"
+      "output": "out =\n  2×3\n\n    0.8415    0.9093    0.1411\n   -0.7568   -0.9589   -0.2794"
     },
     {
       "description": "Uploading a scalar with dtype conversion",
@@ -63,7 +63,7 @@
     {
       "description": "Converting host data to a logical gpuArray",
       "input": "mask = gpuArray([0 2 -5 0], 'logical');\ngather(mask)",
-      "output": "ans =\n  1\u00d74 logical array\n\n   0   1   1   0"
+      "output": "ans =\n  1×4 logical array\n\n   0   1   1   0"
     },
     {
       "description": "Matching an existing prototype with `'like'`",
@@ -112,8 +112,8 @@
     "label": "crates/runmat-runtime/src/builtins/acceleration/gpu/gpuarray.rs",
     "url": "crates/runmat-runtime/src/builtins/acceleration/gpu/gpuarray.rs"
   },
-  "gpu_residency": "RunMat\u2019s auto-offload planner transparently moves and keeps tensors on the GPU when it predicts a benefit. You typically call `gpuArray` to honour MATLAB scripts that opt-in explicitly, to enforce residency before a long computation, or when you need MATLAB-style dtype conversion alongside the upload. The builtin never forces a host copy once the handle has been created.",
+  "gpu_residency": "RunMat’s auto-offload planner transparently moves and keeps tensors on the GPU when it predicts a benefit. You typically call `gpuArray` to honour MATLAB scripts that opt-in explicitly, to enforce residency before a long computation, or when you need MATLAB-style dtype conversion alongside the upload. The builtin never forces a host copy once the handle has been created.",
   "gpu_behavior": [
-    "`gpuArray` itself runs on the CPU. For host inputs it prepares a `HostTensorView` and forwards it to the provider\u2019s `upload` hook. For gpuArray inputs that require dtype conversion, the builtin gathers the existing buffer, casts the result on the host, uploads a replacement, and frees the original handle. Providers that do not yet implement `upload` should report an informative error; the builtin surface mirrors MATLAB\u2019s message by prefixing it with `gpuArray:`."
+    "`gpuArray` itself runs on the CPU. For host inputs it prepares a `HostTensorView` and forwards it to the provider’s `upload` hook. For gpuArray inputs that require dtype conversion, the builtin gathers the existing buffer, casts the result on the host, uploads a replacement, and frees the original handle. Providers that do not yet implement `upload` should report an informative error; the builtin surface mirrors MATLAB’s message by prefixing it with `gpuArray:`."
   ]
 }

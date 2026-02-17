@@ -36,11 +36,11 @@
   "behaviors": [
     "`status = mkdir(folder)` creates `folder`, returning `1` when the directory is created or already exists, and `0` on failure. Status outputs are `double` scalars for MATLAB compatibility.",
     "`[status, message, messageID] = mkdir(parent, child)` creates the directory `fullfile(parent, child)`. When the directory is created during this call, the message outputs are empty. If the directory already exists, MATLAB populates them with `'Directory already exists.'` and `'MATLAB:MKDIR:DirectoryExists'`. Failures return the system error text and message identifier.",
-    "The optional `message` and `messageID` outputs are character arrays (with size `1\u00d70` when empty), matching MATLAB\u2019s behaviour. Callers that prefer string scalars can wrap them with `string(message)`.",
+    "The optional `message` and `messageID` outputs are character arrays (with size `1×0` when empty), matching MATLAB’s behaviour. Callers that prefer string scalars can wrap them with `string(message)`.",
     "Passing a parent folder that does not exist leaves the filesystem unchanged and returns `status = 0`.",
     "If the target path already exists as a file, `mkdir` fails gracefully with `status = 0` and a diagnostic message; it does not overwrite files.",
     "Path arguments accept character vectors or string scalars. Other input types raise `mkdir: folder name must be a character vector or string scalar` (or the equivalent message for the parent argument).",
-    "The builtin expands `~` to the user\u2019s home directory and honours relative paths with respect to the current working folder (`pwd`)."
+    "The builtin expands `~` to the user’s home directory and honours relative paths with respect to the current working folder (`pwd`)."
   ],
   "examples": [
     {
@@ -90,7 +90,7 @@
     },
     {
       "question": "Can I create multiple levels of folders at once?",
-      "answer": "Yes when you provide a single path, because RunMat mirrors MATLAB\u2019s behaviour of creating intermediate directories. When using the two-argument form, the parent folder must already exist."
+      "answer": "Yes when you provide a single path, because RunMat mirrors MATLAB’s behaviour of creating intermediate directories. When using the two-argument form, the parent folder must already exist."
     },
     {
       "question": "Does `mkdir` support string scalars and character vectors?",
@@ -143,7 +143,7 @@
     "label": "`crates/runmat-runtime/src/builtins/io/repl_fs/mkdir.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/repl_fs/mkdir.rs"
   },
-  "gpu_residency": "No. `mkdir` executes entirely on the host\u2014GPU residency provides no benefit. However, if a script accidentally stores path strings on the GPU, RunMat automatically gathers them before accessing the filesystem so the call still succeeds.",
+  "gpu_residency": "No. `mkdir` executes entirely on the host—GPU residency provides no benefit. However, if a script accidentally stores path strings on the GPU, RunMat automatically gathers them before accessing the filesystem so the call still succeeds.",
   "gpu_behavior": [
     "`mkdir` performs host-side filesystem operations. When callers supply GPU-resident scalars (for example, `gpuArray(\"logs\")`), RunMat gathers the value back to the CPU before resolving the path. Acceleration providers do not publish hooks for this builtin, so there is no device-side implementation to enable."
   ]

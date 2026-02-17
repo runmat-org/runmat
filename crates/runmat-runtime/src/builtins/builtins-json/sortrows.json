@@ -151,7 +151,7 @@
   },
   "gpu_behavior": [
     "`sortrows` is registered as a sink builtin. When the input tensor already lives on the GPU and the active provider exposes a `sortrows` hook, the runtime delegates to that hook; the current provider contract returns host buffers, so the sorted rows and permutation indices are materialised on the CPU before being returned.",
-    "When the provider lacks the hook\u2014or cannot honour a specific combination of options such as `'MissingPlacement','first'` or `'MissingPlacement','last'`\u2014RunMat gathers the tensor and performs the sort on the host while preserving MATLAB semantics.",
+    "When the provider lacks the hook—or cannot honour a specific combination of options such as `'MissingPlacement','first'` or `'MissingPlacement','last'`—RunMat gathers the tensor and performs the sort on the host while preserving MATLAB semantics.",
     "Name-value options that the provider does not advertize fall back automatically; callers do not need to special-case GPU vs CPU execution.",
     "The permutation indices are emitted as double-precision column vectors so they can be reused directly for MATLAB-style indexing."
   ]

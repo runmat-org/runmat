@@ -30,11 +30,11 @@
   "tested": {
     "unit": "builtins::io::net::write::tests"
   },
-  "description": "`write(t, data)` transmits binary or textual data over the TCP/IP client returned by `tcpclient` (or `accept`). The builtin mirrors MATLAB\u2019s `write` behaviour so existing socket code continues working without modification. It honours the client\u2019s configured `Timeout`, applies the `ByteOrder` property when encoding multi-byte values, and accepts the optional `datatype` argument used throughout MATLAB\u2019s I/O APIs.",
+  "description": "`write(t, data)` transmits binary or textual data over the TCP/IP client returned by `tcpclient` (or `accept`). The builtin mirrors MATLAB’s `write` behaviour so existing socket code continues working without modification. It honours the client’s configured `Timeout`, applies the `ByteOrder` property when encoding multi-byte values, and accepts the optional `datatype` argument used throughout MATLAB’s I/O APIs.",
   "behaviors": [
     "`write(t, data)` converts `data` to unsigned 8-bit integers (the MATLAB default) and sends the bytes to the peer. The return value is the number of elements written when the caller requests an output argument.",
     "`write(t, data, datatype)` encodes the payload using the supplied MATLAB datatype token. Supported values mirror MATLAB: `\"uint8\"` (default), `\"int8\"`, `\"uint16\"`, `\"int16\"`, `\"uint32\"`, `\"int32\"`, `\"uint64\"`, `\"int64\"`, `\"single\"`, `\"double\"`, `\"char\"`, and `\"string\"`. Numeric conversions saturate to the destination range just like MATLAB cast operations. `\"char\"` treats values as single-byte character codes and `\"string\"` encodes UTF-8 text.",
-    "The client\u2019s `ByteOrder` property controls how multi-byte numeric values are serialised. `\"little-endian\"` is the default, while `\"big-endian\"` matches the traditional network byte order.",
+    "The client’s `ByteOrder` property controls how multi-byte numeric values are serialised. `\"little-endian\"` is the default, while `\"big-endian\"` matches the traditional network byte order.",
     "When the socket cannot send the entire payload before the timeout expires, `write` raises `MATLAB:write:Timeout`. If the peer closes the connection before or during the transfer the builtin raises `MATLAB:write:ConnectionClosed` and marks the client as disconnected.",
     "Inputs that originate on the GPU are gathered back to the host automatically before any bytes are written."
   ],
@@ -54,7 +54,7 @@
     },
     {
       "description": "Sending UTF-8 encoded strings",
-      "input": "client = tcpclient(\"127.0.0.1\", 50003);\nwrite(client, \"\u0394\u03b9\u03b1\u03ba\u03c1\u03b9\u03c4\u03cc\", \"string\")"
+      "input": "client = tcpclient(\"127.0.0.1\", 50003);\nwrite(client, \"Διακριτό\", \"string\")"
     },
     {
       "description": "Handling connection closures",
@@ -65,7 +65,7 @@
   "faqs": [
     {
       "question": "How many output values does `write` return?",
-      "answer": "When the caller requests an output, the builtin returns the number of elements written (after datatype conversion). This mirrors the behaviour of MATLAB\u2019s numeric I/O routines. If no output is requested, the value is discarded."
+      "answer": "When the caller requests an output, the builtin returns the number of elements written (after datatype conversion). This mirrors the behaviour of MATLAB’s numeric I/O routines. If no output is requested, the value is discarded."
     },
     {
       "question": "Does `write` support complex numbers?",
@@ -73,7 +73,7 @@
     },
     {
       "question": "How are values rounded when converting to integer datatypes?",
-      "answer": "Floating-point inputs are rounded to the nearest integer and then saturated to the target range, matching MATLAB casts (for example `uint8(255.7)` becomes `256 \u2192 255`, `int8(-128.2)` becomes `-128`)."
+      "answer": "Floating-point inputs are rounded to the nearest integer and then saturated to the target range, matching MATLAB casts (for example `uint8(255.7)` becomes `256 → 255`, `int8(-128.2)` becomes `-128`)."
     },
     {
       "question": "What happens to GPU-resident tensors?",
@@ -81,7 +81,7 @@
     },
     {
       "question": "Can I stream large payloads?",
-      "answer": "Yes. `write` loops until the entire payload has been sent or an error occurs. Large payloads honour the client\u2019s timeout and byte-order settings."
+      "answer": "Yes. `write` loops until the entire payload has been sent or an error occurs. Large payloads honour the client’s timeout and byte-order settings."
     }
   ],
   "links": [

@@ -1343,6 +1343,19 @@ fn oop_negative_undefined_property_and_missing_subsref() {
 }
 
 #[test]
+fn containers_map_parenthesis_indexing() {
+    let program = r#"
+        fruit = containers.Map({'apple'}, {99});
+        energy = fruit('apple');
+    "#;
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 99.0).abs() < 1e-9)));
+}
+
+#[test]
 fn string_array_literal_concat_index_and_compare() {
     let program = r#"
         A = ["a" "bb"; "ccc" "d"];   % 2x2 string array

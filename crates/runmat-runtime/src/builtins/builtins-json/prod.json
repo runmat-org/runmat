@@ -33,11 +33,11 @@
   },
   "description": "`prod(X)` multiplies the elements of scalars, vectors, matrices, and higher-dimensional tensors. When no dimension is supplied, the reduction runs along the first non-singleton dimension.",
   "behaviors": [
-    "`prod(X)` on an `m \u00d7 n` matrix returns a row vector (`1 \u00d7 n`) with column-wise products.",
-    "`prod(X, 2)` returns a column vector (`m \u00d7 1`) containing row-wise products.",
+    "`prod(X)` on an `m × n` matrix returns a row vector (`1 × n`) with column-wise products.",
+    "`prod(X, 2)` returns a column vector (`m × 1`) containing row-wise products.",
     "`prod(X, dims)` accepts a vector of dimensions (for example `[1 3]`) and collapses each listed axis while leaving the others untouched.",
     "`prod(X, 'all')` flattens every dimension into a single scalar product.",
-    "Logical inputs are promoted to double precision (`true \u2192 1.0`, `false \u2192 0.0`) unless you request `'native'` or `'like'` output classes.",
+    "Logical inputs are promoted to double precision (`true → 1.0`, `false → 0.0`) unless you request `'native'` or `'like'` output classes.",
     "`prod(___, 'omitnan')` ignores `NaN` values; if every element in the slice is `NaN`, the result becomes `1`, the multiplicative identity.",
     "`prod(___, 'includenan')` (default) propagates `NaN` whenever a `NaN` appears in that slice.",
     "`prod(___, outtype)` accepts `'double'`, `'default'`, or `'native'` to control the output class.",
@@ -48,7 +48,7 @@
     {
       "description": "Multiplying the elements of a matrix",
       "input": "A = [1 2 3; 4 5 6];\ncolProd = prod(A);\nrowProd = prod(A, 2)",
-      "output": "colProd = [4 10 18];\nrowProd = [6; 120];"
+      "output": "colProd = [4 10 18];\nrowProd = [6; 120]"
     },
     {
       "description": "Multiplying across multiple dimensions",
@@ -58,7 +58,7 @@
     {
       "description": "Multiplying with NaN values ignored",
       "input": "values = [2 NaN 4];\ncleanProd = prod(values, 'omitnan')",
-      "output": "cleanProd = 8;"
+      "output": "cleanProd = 8"
     },
     {
       "description": "Multiplying on the GPU and matching an existing prototype",
@@ -67,12 +67,12 @@
     {
       "description": "Multiplying all elements of an array into a scalar",
       "input": "P = prod(1:10, 'all')",
-      "output": "P = 3628800;"
+      "output": "P = 3628800"
     },
     {
       "description": "Multiplying with native output type",
       "input": "ints = int16([2 3 4]);\nnativeProd = prod(ints, 'native')",
-      "output": "nativeProd = int16(24);"
+      "output": "nativeProd = int16(24)"
     }
   ],
   "faqs": [
@@ -127,7 +127,7 @@
     "label": "`crates/runmat-runtime/src/builtins/math/reduction/prod.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/prod.rs"
   },
-  "gpu_residency": "You usually do **not** need to call `gpuArray` yourself in RunMat. The fusion planner keeps residency on the GPU for fused expressions, and reduction kernels execute on the device whenever the provider exposes the necessary hooks. To match MathWorks MATLAB behaviour\u2014or to bootstrap GPU residency explicitly\u2014you can still create GPU arrays manually.",
+  "gpu_residency": "You usually do **not** need to call `gpuArray` yourself in RunMat. The fusion planner keeps residency on the GPU for fused expressions, and reduction kernels execute on the device whenever the provider exposes the necessary hooks. To match MathWorks MATLAB behaviour—or to bootstrap GPU residency explicitly—you can still create GPU arrays manually.",
   "gpu_behavior": [
     "When RunMat Accelerate is active, tensors that already reside on the GPU remain on the device. The runtime calls `reduce_prod_dim` (or `reduce_prod` for whole-array products) on the active provider when available. Requests that require `'omitnan'`, multi-axis reductions, or class coercions fall back to the host implementation, compute the correct MATLAB result, and re-upload only when a `'like'` prototype demands GPU residency."
   ]

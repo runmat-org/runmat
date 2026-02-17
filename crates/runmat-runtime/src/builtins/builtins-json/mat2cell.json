@@ -115,6 +115,6 @@
   },
   "gpu_residency": "The current implementation gathers GPU inputs to the host, produces host cell arrays, and returns CPU-resident tensors inside each cell. Explicit `gpuArray` calls are not required; once GPU providers offer block-splitting hooks, mat2cell will keep results on the device automatically.",
   "gpu_behavior": [
-    "When the input is a `gpuArray`, RunMat gathers it back to the host before performing the partition, and the resulting cells contain host tensors. This matches MATLAB semantics except for the residency\u2014providers do not yet offer on-device block-splitting hooks. Once such hooks become available, RunMat can keep results on the GPU with no user code changes."
+    "When the input is a `gpuArray`, RunMat gathers it back to the host before performing the partition, and the resulting cells contain host tensors. This matches MATLAB semantics except for the residency—providers do not yet offer on-device block-splitting hooks. Once such hooks become available, RunMat can keep results on the GPU with no user code changes."
   ]
 }

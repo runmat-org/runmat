@@ -31,7 +31,7 @@
     "unit": "builtins::strings::transform::split::tests",
     "integration": "builtins::strings::transform::split::tests::split_cell_array_mixed_inputs"
   },
-  "description": "`split(text)` breaks text into substrings separated by delimiters. The input can be a string scalar, string array, character array, or a cell array of character vectors\u2014`split` mirrors MATLAB behaviour across each of these representations. When you omit the delimiter argument, `split` collapses whitespace runs and returns the remaining tokens as a string array.",
+  "description": "`split(text)` breaks text into substrings separated by delimiters. The input can be a string scalar, string array, character array, or a cell array of character vectors—`split` mirrors MATLAB behaviour across each of these representations. When you omit the delimiter argument, `split` collapses whitespace runs and returns the remaining tokens as a string array.",
   "behaviors": [
     "The default delimiter is whitespace (`isspace`), and consecutive whitespace is treated as a single separator (equivalent to `'CollapseDelimiters', true`).",
     "When you supply explicit delimiters, they can be a string scalar, string array, character array (rows), or a cell array of character vectors. Delimiters are matched left to right and the longest delimiter wins when several candidates match at the same position.",
@@ -44,37 +44,37 @@
     {
       "description": "Split A String On Whitespace",
       "input": "txt = \"RunMat Accelerate Planner\";\npieces = split(txt)",
-      "output": "pieces = 1\u00d73 string\n    \"RunMat\"    \"Accelerate\"    \"Planner\""
+      "output": "pieces = 1×3 string\n    \"RunMat\"    \"Accelerate\"    \"Planner\""
     },
     {
       "description": "Split A String Using A Custom Delimiter",
       "input": "csv = \"alpha,beta,gamma\";\ntokens = split(csv, \",\")",
-      "output": "tokens = 1\u00d73 string\n    \"alpha\"    \"beta\"    \"gamma\""
+      "output": "tokens = 1×3 string\n    \"alpha\"    \"beta\"    \"gamma\""
     },
     {
       "description": "Include Delimiters In The Output",
       "input": "expr = \"A+B-C\";\nsegments = split(expr, [\"+\", \"-\"], \"IncludeDelimiters\", true)",
-      "output": "segments = 1\u00d75 string\n    \"A\"    \"+\"    \"B\"    \"-\"    \"C\""
+      "output": "segments = 1×5 string\n    \"A\"    \"+\"    \"B\"    \"-\"    \"C\""
     },
     {
       "description": "Preserve Empty Segments When CollapseDelimiters Is False",
       "input": "values = \"one,,three,\";\nparts = split(values, \",\", \"CollapseDelimiters\", false)",
-      "output": "parts = 1\u00d74 string\n    \"one\"    \"\"    \"three\"    \"\""
+      "output": "parts = 1×4 string\n    \"one\"    \"\"    \"three\"    \"\""
     },
     {
       "description": "Split Each Row Of A Character Array",
       "input": "rows = char(\"GPU Accelerate\", \"Ignition Interpreter\");\nresult = split(rows)",
-      "output": "result = 2\u00d72 string\n    \"GPU\"          \"Accelerate\"\n    \"Ignition\"     \"Interpreter\""
+      "output": "result = 2×2 string\n    \"GPU\"          \"Accelerate\"\n    \"Ignition\"     \"Interpreter\""
     },
     {
       "description": "Split Elements Of A Cell Array",
       "input": "C = {'RunMat Snapshot'; \"Fusion Planner\"};\nout = split(C, \" \")",
-      "output": "out = 2\u00d72 string\n    \"RunMat\"    \"Snapshot\"\n    \"Fusion\"    \"Planner\""
+      "output": "out = 2×2 string\n    \"RunMat\"    \"Snapshot\"\n    \"Fusion\"    \"Planner\""
     },
     {
       "description": "Handle Missing String Inputs",
       "input": "names = [\"RunMat\", \"<missing>\", \"Accelerate Engine\"];\nsplit_names = split(names)",
-      "output": "split_names = 3\u00d72 string\n    \"RunMat\"        \"<missing>\"\n    \"<missing>\"     \"<missing>\"\n    \"Accelerate\"    \"Engine\""
+      "output": "split_names = 3×2 string\n    \"RunMat\"        \"<missing>\"\n    \"<missing>\"     \"<missing>\"\n    \"Accelerate\"    \"Engine\""
     }
   ],
   "faqs": [

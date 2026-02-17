@@ -34,7 +34,7 @@
   "description": "`fill(value, size, ...)` constructs dense MATLAB arrays whose entries are all the supplied `value`. It aligns with the MATLAB-compatible RunMat array creation suite (`zeros`, `ones`, `eye`, etc.) while supporting GPU residency, `'like'` prototypes, and logical/complex outputs.",
   "behaviors": [
     "`fill(v)` returns the scalar `v`.",
-    "`fill(v, n)` returns an `n \u00d7 n` matrix with every element equal to `v`.",
+    "`fill(v, n)` returns an `n × n` matrix with every element equal to `v`.",
     "`fill(v, m, n, ...)` supports arbitrary N-D dimensions.",
     "`fill(v, sz)` accepts a size vector (row or column).",
     "`fill(v, A)` uses the shape (and default type) of `A`.",
@@ -46,12 +46,12 @@
     {
       "description": "Creating a 3x3 matrix of 2.5s",
       "input": "A = fill(2.5, 3)",
-      "output": "A = [2.5 2.5 2.5; 2.5 2.5 2.5; 2.5 2.5 2.5];"
+      "output": "A = [2.5 2.5 2.5; 2.5 2.5 2.5; 2.5 2.5 2.5]"
     },
     {
       "description": "Filling a rectangular matrix with -4",
       "input": "B = fill(-4, 2, 5)",
-      "output": "B = [-4 -4 -4 -4 -4; -4 -4 -4 -4 -4];"
+      "output": "B = [-4 -4 -4 -4 -4; -4 -4 -4 -4 -4]"
     },
     {
       "description": "Filling using a size vector",
@@ -61,17 +61,17 @@
     {
       "description": "Creating a logical mask with `fill`",
       "input": "mask = fill(3, 4, 1, 'logical')",
-      "output": "mask = [1; 1; 1; 1];"
+      "output": "mask = [1; 1; 1; 1]"
     },
     {
       "description": "Matching an existing array with `'like'`",
       "input": "prototype = rand(2, 3, 'like', gpuArray(1));\nD = fill(pi, 2, 3, 'like', prototype)",
-      "output": "D is gpuArray\ngather(D) = ones(2, 3) * pi;"
+      "output": "D is gpuArray\ngather(D) = ones(2, 3) * pi"
     },
     {
       "description": "Filling a complex array",
       "input": "E = fill(1 + 2i, 2, 2, 'complex')",
-      "output": "E = [1+2i 1+2i; 1+2i 1+2i];"
+      "output": "E = [1+2i 1+2i; 1+2i 1+2i]"
     },
     {
       "description": "Using a prototype to infer shape automatically",
@@ -91,7 +91,7 @@
     {
       "description": "Filling with boolean semantics",
       "input": "K = fill(false, [2 2], 'logical')",
-      "output": "K = [0 0; 0 0];"
+      "output": "K = [0 0; 0 0]"
     }
   ],
   "faqs": [
@@ -117,7 +117,7 @@
     },
     {
       "question": "What happens when I omit dimensions?",
-      "answer": "If you only pass the value, `fill` returns a scalar. When you pass a prototype (e.g., `fill(v, A)`), the prototype shape is reused. Otherwise RunMat follows MATLAB's default of `1 \u00d7 1`."
+      "answer": "If you only pass the value, `fill` returns a scalar. When you pass a prototype (e.g., `fill(v, A)`), the prototype shape is reused. Otherwise RunMat follows MATLAB's default of `1 × 1`."
     },
     {
       "question": "Are string or char outputs supported?",

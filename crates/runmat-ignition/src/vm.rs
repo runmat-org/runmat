@@ -24,7 +24,9 @@ use runmat_runtime::{
     builtins::common::shape::is_scalar_shape,
     builtins::common::tensor,
     builtins::stats::random::stochastic_evolution::stochastic_evolution_host,
-    gather_if_needed, user_functions,
+    gather_if_needed,
+    output_context::push_output_count,
+    user_functions,
     workspace::{self as runtime_workspace, WorkspaceResolver},
     CallFrame, RuntimeError,
 };
@@ -378,6 +380,13 @@ macro_rules! call_builtin_vm {
 async fn call_builtin_auto(name: &str, args: &[Value]) -> VmResult<Value> {
     let prepared = accel_prepare_args(name, args).await?;
     Ok(call_builtin_vm!(name, &prepared)?)
+}
+
+fn output_hint_for_single_result(bytecode: &Bytecode, pc: usize) -> usize {
+    match bytecode.instructions.get(pc + 1) {
+        Some(Instr::Pop) | Some(Instr::EmitStackTop { .. }) => 0,
+        _ => 1,
+    }
 }
 
 #[cfg(feature = "native-accel")]
@@ -742,6 +751,7 @@ fn build_slice_plan(
 
     let mut selection_lengths = Vec::with_capacity(dims);
     let mut per_dim_lists: Vec<Vec<usize>> = Vec::with_capacity(dims);
+    let mut scalar_mask: Vec<bool> = Vec::with_capacity(dims);
     for (d, sel) in selectors.iter().enumerate().take(dims) {
         let dim_len = base_shape.get(d).copied().unwrap_or(1);
         let idxs = match sel {
@@ -754,17 +764,12 @@ fn build_slice_plan(
         }
         selection_lengths.push(idxs.len());
         per_dim_lists.push(idxs);
+        scalar_mask.push(matches!(sel, SliceSelector::Scalar(_)));
     }
 
+    let mut out_shape = matlab_squeezed_shape(&selection_lengths, &scalar_mask);
     if selection_lengths.contains(&0) {
-        let mut out_shape = selection_lengths.clone();
-        if dims == 2 {
-            if selection_lengths[0] > 1 && selection_lengths[1] == 1 {
-                out_shape = vec![selection_lengths[0], 1];
-            } else if selection_lengths[0] == 1 && selection_lengths[1] > 1 {
-                out_shape = vec![1, selection_lengths[1]];
-            }
-        }
+        let selection_lengths = out_shape.clone();
         return Ok(SlicePlan {
             indices: Vec::new(),
             output_shape: out_shape,
@@ -793,18 +798,11 @@ fn build_slice_plan(
         indices.push(lin as u32);
     });
 
-    let mut out_shape = selection_lengths.clone();
-    if dims == 2 {
-        if selection_lengths[0] > 1 && selection_lengths[1] == 1 {
-            out_shape = vec![selection_lengths[0], 1];
-        } else if selection_lengths[0] == 1 && selection_lengths[1] > 1 {
-            out_shape = vec![1, selection_lengths[1]];
-        }
-    }
     let total_out: usize = selection_lengths.iter().product();
     if total_out == 1 {
         out_shape = vec![1, 1];
     }
+    let selection_lengths = out_shape.clone();
 
     Ok(SlicePlan {
         indices,
@@ -812,6 +810,38 @@ fn build_slice_plan(
         selection_lengths,
         dims,
     })
+}
+
+/// Output shape after indexing:
+/// - preserve non-trailing singleton dimensions
+/// - drop trailing singleton dimensions only when produced by scalar selectors.
+///
+/// E.g. A(:, 2, :) on 3×4×5 -> [3, 1, 5], not [3, 5].
+fn matlab_squeezed_shape(selection_lengths: &[usize], scalar_mask: &[bool]) -> Vec<usize> {
+    let mut dims: Vec<(usize, usize, bool)> = selection_lengths
+        .iter()
+        .enumerate()
+        .map(|(d, &len)| (d, len, scalar_mask.get(d).copied().unwrap_or(false)))
+        .collect();
+    while dims.len() > 2
+        && dims
+            .last()
+            .map(|&(_, len, is_scalar)| len == 1 && is_scalar)
+            .unwrap_or(false)
+    {
+        dims.pop();
+    }
+    if dims.is_empty() {
+        return vec![1, 1];
+    }
+    if dims.len() == 1 {
+        let (dim, len, _) = dims[0];
+        if dim == 1 {
+            return vec![1, len];
+        }
+        return vec![len, 1];
+    }
+    dims.into_iter().map(|(_, len, _)| len).collect()
 }
 
 fn gather_string_slice(sa: &runmat_builtins::StringArray, plan: &SlicePlan) -> VmResult<Value> {
@@ -1322,6 +1352,16 @@ fn ensure_workspace_resolver_registered() {
     });
 }
 
+fn ensure_wasm_builtins_registered() {
+    #[cfg(target_arch = "wasm32")]
+    {
+        static REGISTER: Once = Once::new();
+        REGISTER.call_once(|| {
+            runmat_runtime::builtins::wasm_registry::register_all();
+        });
+    }
+}
+
 pub struct PendingWorkspaceGuard;
 
 impl Drop for PendingWorkspaceGuard {
@@ -1527,6 +1567,7 @@ async fn run_interpreter_inner(
         function = state.current_function_name.as_str()
     );
     let _run_guard = run_span.enter();
+    ensure_wasm_builtins_registered();
     ensure_workspace_resolver_registered();
     #[cfg(feature = "native-accel")]
     activate_fusion_plan(state.fusion_plan.clone());
@@ -2870,6 +2911,49 @@ async fn run_interpreter_inner(
                 let a = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let push_logical =
+                    |data: Vec<u8>, shape: Vec<usize>, stack: &mut Vec<Value>| -> VmResult<()> {
+                        if data.len() == 1 && is_scalar_shape(&shape) {
+                            stack.push(Value::Bool(data[0] != 0));
+                            return Ok(());
+                        }
+                        let logical = runmat_builtins::LogicalArray::new(data, shape)
+                            .map_err(|e| format!("eq: {e}"))?;
+                        stack.push(Value::LogicalArray(logical));
+                        Ok(())
+                    };
+                let logical_eq_scalar = |array: &runmat_builtins::LogicalArray,
+                                         scalar: f64,
+                                         stack: &mut Vec<Value>|
+                 -> VmResult<()> {
+                    let mut out = Vec::with_capacity(array.data.len());
+                    for &bit in &array.data {
+                        let val = if bit != 0 { 1.0 } else { 0.0 };
+                        out.push(if (val - scalar).abs() < 1e-12 { 1 } else { 0 });
+                    }
+                    push_logical(out, array.shape.clone(), stack)
+                };
+                let logical_eq_tensor = |array: &runmat_builtins::LogicalArray,
+                                         tensor: &runmat_builtins::Tensor,
+                                         stack: &mut Vec<Value>|
+                 -> VmResult<()> {
+                    if array.shape != tensor.shape {
+                        return Err(mex(
+                            "ShapeMismatch",
+                            "shape mismatch for element-wise comparison",
+                        ));
+                    }
+                    let mut out = Vec::with_capacity(array.data.len());
+                    for i in 0..array.data.len() {
+                        let val = if array.data[i] != 0 { 1.0 } else { 0.0 };
+                        out.push(if (val - tensor.data[i]).abs() < 1e-12 {
+                            1
+                        } else {
+                            0
+                        });
+                    }
+                    push_logical(out, array.shape.clone(), stack)
+                };
                 match (&a, &b) {
                     (Value::Object(obj), _) => {
                         let args = vec![
@@ -2905,6 +2989,43 @@ async fn run_interpreter_inner(
                         // Delegate to runtime eq builtin which implements identity semantics
                         let v = call_builtin_vm!("eq", &[a.clone(), b.clone()])?;
                         stack.push(v);
+                    }
+                    (Value::LogicalArray(la), Value::LogicalArray(lb)) => {
+                        if la.shape != lb.shape {
+                            return Err(mex(
+                                "ShapeMismatch",
+                                "shape mismatch for element-wise comparison",
+                            ));
+                        }
+                        let mut out = Vec::with_capacity(la.data.len());
+                        for i in 0..la.data.len() {
+                            out.push(if la.data[i] == lb.data[i] { 1 } else { 0 });
+                        }
+                        push_logical(out, la.shape.clone(), &mut stack)?;
+                    }
+                    (Value::LogicalArray(la), Value::Num(n)) => {
+                        logical_eq_scalar(la, *n, &mut stack)?;
+                    }
+                    (Value::LogicalArray(la), Value::Int(i)) => {
+                        logical_eq_scalar(la, i.to_f64(), &mut stack)?;
+                    }
+                    (Value::LogicalArray(la), Value::Bool(flag)) => {
+                        logical_eq_scalar(la, if *flag { 1.0 } else { 0.0 }, &mut stack)?;
+                    }
+                    (Value::Num(n), Value::LogicalArray(lb)) => {
+                        logical_eq_scalar(lb, *n, &mut stack)?;
+                    }
+                    (Value::Int(i), Value::LogicalArray(lb)) => {
+                        logical_eq_scalar(lb, i.to_f64(), &mut stack)?;
+                    }
+                    (Value::Bool(flag), Value::LogicalArray(lb)) => {
+                        logical_eq_scalar(lb, if *flag { 1.0 } else { 0.0 }, &mut stack)?;
+                    }
+                    (Value::LogicalArray(la), Value::Tensor(tb)) => {
+                        logical_eq_tensor(la, tb, &mut stack)?;
+                    }
+                    (Value::Tensor(ta), Value::LogicalArray(lb)) => {
+                        logical_eq_tensor(lb, ta, &mut stack)?;
                     }
                     (Value::Tensor(ta), Value::Tensor(tb)) => {
                         // Element-wise eq; shapes must match
@@ -3266,6 +3387,8 @@ async fn run_interpreter_inner(
                     bytecode.source_id,
                     bytecode.call_arg_spans.get(pc).cloned().flatten(),
                 );
+                let output_hint = output_hint_for_single_result(&bytecode, pc);
+                let _output_guard = push_output_count(output_hint);
 
                 let prepared_primary = accel_prepare_args(&name, &args).await?;
                 let result = match requested_outputs {
@@ -3514,6 +3637,8 @@ async fn run_interpreter_inner(
                 };
                 let mut args = fixed;
                 args.extend(expanded.into_iter());
+                let output_hint = output_hint_for_single_result(&bytecode, pc);
+                let _output_guard = push_output_count(output_hint);
                 match call_builtin_auto(&name, &args).await {
                     Ok(v) => stack.push(v),
                     Err(e) => vm_bail!(e),
@@ -3631,6 +3756,8 @@ async fn run_interpreter_inner(
                 let mut args = before;
                 args.extend(expanded.into_iter());
                 args.extend(after.into_iter());
+                let output_hint = output_hint_for_single_result(&bytecode, pc);
+                let _output_guard = push_output_count(output_hint);
                 match call_builtin_auto(&name, &args).await {
                     Ok(v) => stack.push(v),
                     Err(e) => vm_bail!(e),
@@ -3785,6 +3912,8 @@ async fn run_interpreter_inner(
                 }
                 temp.reverse();
                 args.extend(temp.into_iter());
+                let output_hint = output_hint_for_single_result(&bytecode, pc);
+                let _output_guard = push_output_count(output_hint);
                 match call_builtin_auto(&name, &args).await {
                     Ok(v) => stack.push(v),
                     Err(e) => vm_bail!(e),
@@ -4802,7 +4931,27 @@ async fn run_interpreter_inner(
                             &[
                                 Value::Object(obj),
                                 Value::String("subsref".to_string()),
-                                Value::String("{}".to_string()),
+                                Value::String("()".to_string()),
+                                Value::Cell(cell),
+                            ],
+                        ) {
+                            Ok(v) => stack.push(v),
+                            Err(e) => vm_bail!(e.to_string()),
+                        }
+                    }
+                    Value::HandleObject(handle) => {
+                        let cell = runmat_builtins::CellArray::new(
+                            indices.iter().map(|n| Value::Num(*n)).collect(),
+                            1,
+                            indices.len(),
+                        )
+                        .map_err(|e| format!("subsref build error: {e}"))?;
+                        match call_builtin_vm!(
+                            "call_method",
+                            &[
+                                Value::HandleObject(handle),
+                                Value::String("subsref".to_string()),
+                                Value::String("()".to_string()),
                                 Value::Cell(cell),
                             ],
                         ) {
@@ -4860,7 +5009,24 @@ async fn run_interpreter_inner(
                             &[
                                 Value::Object(obj),
                                 Value::String("subsref".to_string()),
-                                Value::String("{}".to_string()),
+                                Value::String("()".to_string()),
+                                Value::Cell(cell),
+                            ],
+                        ) {
+                            Ok(v) => stack.push(v),
+                            Err(e) => vm_bail!(e.to_string()),
+                        }
+                    }
+                    Value::HandleObject(handle) => {
+                        let cell =
+                            runmat_builtins::CellArray::new(numeric.to_vec(), 1, numeric.len())
+                                .map_err(|e| format!("subsref build error: {e}"))?;
+                        match call_builtin_vm!(
+                            "call_method",
+                            &[
+                                Value::HandleObject(handle),
+                                Value::String("subsref".to_string()),
+                                Value::String("()".to_string()),
                                 Value::Cell(cell),
                             ],
                         ) {
@@ -5157,8 +5323,9 @@ async fn run_interpreter_inner(
                             }
                             {
                                 // Compute output shape and gather
-                                let mut out_dims: Vec<usize> = Vec::new();
+                                let mut selection_lengths: Vec<usize> = Vec::with_capacity(dims);
                                 let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
+                                let mut scalar_mask: Vec<bool> = Vec::with_capacity(dims);
                                 for (d, sel) in selectors.iter().enumerate().take(dims) {
                                     let dim_len = *t.shape.get(d).unwrap_or(&1);
                                     let idxs = match sel {
@@ -5169,37 +5336,12 @@ async fn run_interpreter_inner(
                                     if idxs.iter().any(|&i| i == 0 || i > dim_len) {
                                         return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                                     }
-                                    if idxs.len() > 1 {
-                                        out_dims.push(idxs.len());
-                                    } else {
-                                        out_dims.push(1);
-                                    }
+                                    selection_lengths.push(idxs.len());
                                     per_dim_indices.push(idxs);
+                                    scalar_mask.push(matches!(sel, Sel::Scalar(_)));
                                 }
-                                let mut out_dims: Vec<usize> =
-                                    per_dim_indices.iter().map(|v| v.len()).collect();
-                                // 2D mixed selectors shape correction to match MATLAB:
-                                // (I, scalar) => column vector [len(I), 1]; (scalar, J) => row vector [1, len(J)]
-                                if dims == 2 {
-                                    match (
-                                        &per_dim_indices[0].as_slice(),
-                                        &per_dim_indices[1].as_slice(),
-                                    ) {
-                                        // I (len>1), scalar
-                                        (i_list, j_list)
-                                            if i_list.len() > 1 && j_list.len() == 1 =>
-                                        {
-                                            out_dims = vec![i_list.len(), 1];
-                                        }
-                                        // scalar, J (len>1)
-                                        (i_list, j_list)
-                                            if i_list.len() == 1 && j_list.len() > 1 =>
-                                        {
-                                            out_dims = vec![1, j_list.len()];
-                                        }
-                                        _ => {}
-                                    }
-                                }
+                                let out_dims =
+                                    matlab_squeezed_shape(&selection_lengths, &scalar_mask);
                                 // Strides for column-major order (first dimension fastest)
                                 let mut strides: Vec<usize> = vec![0; dims];
                                 let full_shape: Vec<usize> = if rank < dims {
@@ -5215,11 +5357,10 @@ async fn run_interpreter_inner(
                                     acc *= full_shape[d];
                                 }
                                 // Cartesian product gather
-                                let total_out: usize = out_dims.iter().product();
+                                let total_out: usize =
+                                    per_dim_indices.iter().map(|v| v.len()).product();
                                 let mut out_data: Vec<f64> = Vec::with_capacity(total_out);
-                                if out_dims.contains(&0)
-                                    || per_dim_indices.iter().any(|v| v.is_empty())
-                                {
+                                if per_dim_indices.iter().any(|v| v.is_empty()) {
                                     // Empty selection on some dimension -> empty tensor
                                     let out_tensor =
                                         runmat_builtins::Tensor::new(out_data, out_dims)
@@ -5940,6 +6081,8 @@ async fn run_interpreter_inner(
                         }
                         // Materialize per-dim indices, resolving ranges with end_off
                         let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
+                        let mut selection_lengths: Vec<usize> = Vec::with_capacity(dims);
+                        let mut scalar_mask: Vec<bool> = Vec::with_capacity(dims);
                         let full_shape: Vec<usize> = if rank < dims {
                             let mut s = t.shape.clone();
                             s.resize(dims, 1);
@@ -5988,7 +6131,9 @@ async fn run_interpreter_inner(
                             if idxs.iter().any(|&i| i == 0 || i > full_shape[d]) {
                                 vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
                             }
+                            selection_lengths.push(idxs.len());
                             per_dim_indices.push(idxs);
+                            scalar_mask.push(matches!(sel, Sel::Scalar(_)));
                         }
                         // Strides and gather
                         let mut strides: Vec<usize> = vec![0; dims];
@@ -5999,8 +6144,9 @@ async fn run_interpreter_inner(
                         }
                         let total_out: usize = per_dim_indices.iter().map(|v| v.len()).product();
                         if total_out == 0 {
+                            let shape = matlab_squeezed_shape(&selection_lengths, &scalar_mask);
                             stack.push(Value::Tensor(
-                                runmat_builtins::Tensor::new(Vec::new(), vec![0, 0])
+                                runmat_builtins::Tensor::new(Vec::new(), shape)
                                     .map_err(|e| format!("Slice error: {e}"))?,
                             ));
                             continue;
@@ -6038,8 +6184,7 @@ async fn run_interpreter_inner(
                         if out_data.len() == 1 {
                             stack.push(Value::Num(out_data[0]));
                         } else {
-                            let shape: Vec<usize> =
-                                per_dim_indices.iter().map(|v| v.len().max(1)).collect();
+                            let shape = matlab_squeezed_shape(&selection_lengths, &scalar_mask);
                             let tens = runmat_builtins::Tensor::new(out_data, shape)
                                 .map_err(|e| format!("Slice error: {e}"))?;
                             stack.push(Value::Tensor(tens));
@@ -6617,6 +6762,24 @@ async fn run_interpreter_inner(
                                     Err(e2) => vm_bail!(e2),
                                 }
                             }
+                        }
+                    }
+                    Value::HandleObject(handle) => {
+                        let cell =
+                            runmat_builtins::CellArray::new(numeric.clone(), 1, numeric.len())
+                                .map_err(|e| format!("subsasgn build error: {e}"))?;
+                        match call_builtin_vm!(
+                            "call_method",
+                            &[
+                                Value::HandleObject(handle),
+                                Value::String("subsasgn".to_string()),
+                                Value::String("()".to_string()),
+                                Value::Cell(cell),
+                                rhs,
+                            ],
+                        ) {
+                            Ok(v) => stack.push(v),
+                            Err(e) => vm_bail!(e.to_string()),
                         }
                     }
                     Value::Tensor(mut t) => {
@@ -8740,6 +8903,28 @@ async fn run_interpreter_inner(
                             Err(e) => vm_bail!(e),
                         }
                     }
+                    Value::HandleObject(handle) => {
+                        // Route to subsref(obj, '{}', {indices})
+                        let cell = call_builtin_vm!(
+                            "__make_cell",
+                            &indices
+                                .iter()
+                                .map(|n| Value::Num(*n as f64))
+                                .collect::<Vec<_>>(),
+                        )?;
+                        match call_builtin_vm!(
+                            "call_method",
+                            &[
+                                Value::HandleObject(handle),
+                                Value::String("subsref".to_string()),
+                                Value::String("{}".to_string()),
+                                cell,
+                            ],
+                        ) {
+                            Ok(v) => stack.push(v),
+                            Err(e) => vm_bail!(e),
+                        }
+                    }
                     Value::Cell(ca) => match indices.len() {
                         1 => {
                             let i = indices[0];
@@ -8861,6 +9046,33 @@ async fn run_interpreter_inner(
                             stack.push(Value::Num(0.0));
                         }
                     }
+                    Value::HandleObject(handle) => {
+                        // Defer to subsref; expect a cell back; then expand one element
+                        let cell = call_builtin_vm!(
+                            "__make_cell",
+                            &indices
+                                .iter()
+                                .map(|n| Value::Num(*n as f64))
+                                .collect::<Vec<_>>(),
+                        )?;
+                        let v = match call_builtin_vm!(
+                            "call_method",
+                            &[
+                                Value::HandleObject(handle),
+                                Value::String("subsref".to_string()),
+                                Value::String("{}".to_string()),
+                                cell,
+                            ],
+                        ) {
+                            Ok(v) => v,
+                            Err(e) => vm_bail!(e.to_string()),
+                        };
+                        // Push returned value and pad to out_count
+                        stack.push(v);
+                        for _ in 1..out_count {
+                            stack.push(Value::Num(0.0));
+                        }
+                    }
                     _ => return Err("Cell expansion on non-cell".to_string().into()),
                 }
             }
@@ -8916,6 +9128,7 @@ async fn run_interpreter_inner(
                         .take(6)
                         .map(|v| match v {
                             Value::Object(_) => "Object",
+                            Value::HandleObject(_) => "HandleObject",
                             Value::Tensor(t) => {
                                 debug!(shape = ?t.shape, "[vm] StoreIndex pre-snap tensor");
                                 "Tensor"
@@ -8939,7 +9152,13 @@ async fn run_interpreter_inner(
                 // We will determine indices relative to the base location to avoid RHS temporaries interfering
                 // Select the correct base: scan from top for the first assignable container (Object/Tensor/GpuTensor)
                 let assignable = |v: &Value| {
-                    matches!(v, Value::Object(_) | Value::Tensor(_) | Value::GpuTensor(_))
+                    matches!(
+                        v,
+                        Value::Object(_)
+                            | Value::HandleObject(_)
+                            | Value::Tensor(_)
+                            | Value::GpuTensor(_)
+                    )
                 };
                 let base_idx_opt = (0..stack.len()).rev().find(|&j| assignable(&stack[j]));
                 let base_pos = if let Some(j) = base_idx_opt {
@@ -9055,6 +9274,29 @@ async fn run_interpreter_inner(
                             "call_method",
                             &[
                                 Value::Object(obj),
+                                Value::String("subsasgn".to_string()),
+                                Value::String("()".to_string()),
+                                cell,
+                                rhs,
+                            ],
+                        ) {
+                            Ok(v) => stack.push(v),
+                            Err(e) => vm_bail!(e.to_string()),
+                        }
+                    }
+                    Value::HandleObject(handle) => {
+                        // subsasgn(obj, '()', {indices...}, rhs)
+                        let cell = call_builtin_vm!(
+                            "__make_cell",
+                            &indices
+                                .iter()
+                                .map(|n| Value::Num(*n as f64))
+                                .collect::<Vec<_>>(),
+                        )?;
+                        match call_builtin_vm!(
+                            "call_method",
+                            &[
+                                Value::HandleObject(handle),
                                 Value::String("subsasgn".to_string()),
                                 Value::String("()".to_string()),
                                 cell,
@@ -9295,6 +9537,28 @@ async fn run_interpreter_inner(
                             "call_method",
                             &[
                                 Value::Object(obj),
+                                Value::String("subsasgn".to_string()),
+                                Value::String("{}".to_string()),
+                                Value::Cell(cell),
+                                rhs,
+                            ],
+                        ) {
+                            Ok(v) => stack.push(v),
+                            Err(e) => vm_bail!(e.to_string()),
+                        }
+                    }
+                    Value::HandleObject(handle) => {
+                        // subsasgn(obj, '{}', {indices}, rhs)
+                        let cell = runmat_builtins::CellArray::new(
+                            indices.iter().map(|n| Value::Num(*n as f64)).collect(),
+                            1,
+                            indices.len(),
+                        )
+                        .map_err(|e| format!("subsasgn build error: {e}"))?;
+                        match call_builtin_vm!(
+                            "call_method",
+                            &[
+                                Value::HandleObject(handle),
                                 Value::String("subsasgn".to_string()),
                                 Value::String("{}".to_string()),
                                 Value::Cell(cell),

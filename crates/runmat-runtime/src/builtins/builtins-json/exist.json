@@ -30,7 +30,7 @@
     "unit": "builtins::io::repl_fs::exist::tests",
     "integration": "builtins::io::repl_fs::exist::tests::exist_detects_workspace_variables"
   },
-  "description": "`exist(name)` returns an integer code that identifies which kind of item named `name` is currently available. The codes match MATLAB:\n\n| Code | Meaning                                   | | ---- | ----------------------------------------- | | 0    | Item not found                            | | 1    | Variable in the active workspace          | | 2    | File (including scripts and most data files) | | 3    | MEX-file                                  | | 4    | Simulink\u00ae model (`.slx` / `.mdl`)         | | 5    | Built-in MATLAB function                  | | 6    | P-code (`.p` / `.pp`)                     | | 7    | Folder                                    | | 8    | Class definition                          |\n\nPass a second argument to restrict the lookup (for example, `'file'`, `'dir'`, `'builtin'`, `'class'`, `'mex'`, `'pcode'`, `'method'`, or `'handle'`). The builtin mirrors MATLAB semantics for string handling, search order, and numeric return values.",
+  "description": "`exist(name)` returns an integer code that identifies which kind of item named `name` is currently available. The codes match MATLAB:\n\n| Code | Meaning                                   | | ---- | ----------------------------------------- | | 0    | Item not found                            | | 1    | Variable in the active workspace          | | 2    | File (including scripts and most data files) | | 3    | MEX-file                                  | | 4    | Simulink® model (`.slx` / `.mdl`)         | | 5    | Built-in MATLAB function                  | | 6    | P-code (`.p` / `.pp`)                     | | 7    | Folder                                    | | 8    | Class definition                          |\n\nPass a second argument to restrict the lookup (for example, `'file'`, `'dir'`, `'builtin'`, `'class'`, `'mex'`, `'pcode'`, `'method'`, or `'handle'`). The builtin mirrors MATLAB semantics for string handling, search order, and numeric return values.",
   "behaviors": [
     "Searches follow MATLAB's precedence: variables first, then built-ins, classes, compiled code (MEX/P-code), standard files, and finally folders.",
     "When you omit the type, `exist` returns the first match respecting this precedence.",
@@ -91,7 +91,7 @@
     },
     {
       "question": "What's the search precedence when multiple items share a name?",
-      "answer": "Variables have highest priority, followed by built-ins, classes, compiled code (MEX/P-code), standard files, and folders last\u2014exactly like MATLAB."
+      "answer": "Variables have highest priority, followed by built-ins, classes, compiled code (MEX/P-code), standard files, and folders last—exactly like MATLAB."
     },
     {
       "question": "What happens with unsupported type keywords?",

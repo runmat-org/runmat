@@ -34,22 +34,22 @@
   "description": "`randperm(n)` returns a uniformly random permutation of the integers `1:n`. `randperm(n, k)` selects `k` unique integers from `1:n` without replacement. RunMat mirrors MATLAB's behaviour, including RNG seeding through `rng`, GPU-aware `'like'` prototypes, and deterministic results during testing.",
   "behaviors": [
     "`randperm(n)` produces a row vector whose length is `n` and whose entries are a random ordering of `1:n`.",
-    "`randperm(n, k)` returns the first `k` entries of the permutation without replacement (`0 \u2264 k \u2264 n`). The result is a `1 \u00d7 k` row vector.",
+    "`randperm(n, k)` returns the first `k` entries of the permutation without replacement (`0 ≤ k ≤ n`). The result is a `1 × k` row vector.",
     "`randperm(n, ___, 'like', A)` matches the numeric class and residency of `A` when possible (e.g., GPU tensors).",
     "`randperm(n, ___, 'double')` keeps the default double-precision output.",
     "`randperm` errors when `n` or `k` are non-integers, negative, or exceed the IEEE `double` integer precision limit (`2^53`).",
-    "Empty permutations (e.g., `randperm(0)` or `randperm(n, 0)`) return a `1\u00d70` tensor."
+    "Empty permutations (e.g., `randperm(0)` or `randperm(n, 0)`) return a `1×0` tensor."
   ],
   "examples": [
     {
       "description": "Getting a random permutation of integers 1 through N",
       "input": "rng(0);\np = randperm(6)",
-      "output": "p = [1 6 2 4 3 5];"
+      "output": "p = [1 6 2 4 3 5]"
     },
     {
       "description": "Selecting K unique indices without replacement",
       "input": "rng(0);\nidx = randperm(10, 3)",
-      "output": "idx = [1 10 9];"
+      "output": "idx = [1 10 9]"
     },
     {
       "description": "Generating a reproducible permutation after seeding RNG",
@@ -74,7 +74,7 @@
     },
     {
       "question": "Can `k` be zero?",
-      "answer": "Yes. `randperm(n, 0)` returns a `1\u00d70` empty row vector without consuming any additional random numbers."
+      "answer": "Yes. `randperm(n, 0)` returns a `1×0` empty row vector without consuming any additional random numbers."
     },
     {
       "question": "Does `randperm` support `'single'` or integer output types?",
@@ -90,7 +90,7 @@
     },
     {
       "question": "Does the GPU path stay device-resident?",
-      "answer": "Yes\u2014when a provider is active RunMat uploads the host permutation after it is generated. Providers that later add a dedicated permutation kernel can replace the fallback without changing user code."
+      "answer": "Yes—when a provider is active RunMat uploads the host permutation after it is generated. Providers that later add a dedicated permutation kernel can replace the fallback without changing user code."
     }
   ],
   "links": [
@@ -119,7 +119,7 @@
     "label": "`crates/runmat-runtime/src/builtins/array/creation/randperm.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/randperm.rs"
   },
-  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nIn RunMat, the fusion planner and acceleration layer keep residency on the GPU whenever downstream computation benefits from it. When you request a permutation `'like'` a GPU tensor, RunMat asks the active acceleration provider to generate and shuffle the permutation directly on the device. If the provider does not implement the permutation hook, RunMat falls back to host generation and performs a single upload so later GPU work still sees a device-resident array.\n\nTo preserve backwards compatibility with MathWorks MATLAB\u2014and for situations where you want to be explicit\u2014you can always wrap inputs in `gpuArray`.",
+  "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nIn RunMat, the fusion planner and acceleration layer keep residency on the GPU whenever downstream computation benefits from it. When you request a permutation `'like'` a GPU tensor, RunMat asks the active acceleration provider to generate and shuffle the permutation directly on the device. If the provider does not implement the permutation hook, RunMat falls back to host generation and performs a single upload so later GPU work still sees a device-resident array.\n\nTo preserve backwards compatibility with MathWorks MATLAB—and for situations where you want to be explicit—you can always wrap inputs in `gpuArray`.",
   "gpu_behavior": [
     "When the `'like'` prototype lives on the GPU, RunMat asks the active acceleration provider for a device-side permutation via the dedicated `random_permutation_like` hook. The bundled WGPU provider executes the entire selection and shuffle in a compute kernel, keeping the data resident on the device. Providers that do not advertise this hook fall back to the host implementation and upload the result once, preserving correctness while highlighting the extra transfer cost."
   ]
