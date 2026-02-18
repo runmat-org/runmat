@@ -93,7 +93,17 @@ async fn dlmread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         .map_err(map_control_flow)?;
     let options = parse_arguments(&rest).await?;
     let resolved = resolve_path(&gathered_path)?;
-    let (rows, max_cols) = read_dlm_rows(&resolved, &options.delimiter)?;
+    let (parse_start_row, parse_start_col) = if let Some(range) = options.range {
+        (range.start_row, range.start_col)
+    } else {
+        (options.start_row, options.start_col)
+    };
+    let (rows, max_cols) = read_dlm_rows(
+        &resolved,
+        &options.delimiter,
+        parse_start_row,
+        parse_start_col,
+    )?;
     let subset = if let Some(range) = options.range {
         apply_range(&rows, max_cols, &range, 0.0)
     } else {
@@ -375,7 +385,12 @@ fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
     Ok(Path::new(&expanded).to_path_buf())
 }
 
-fn read_dlm_rows(path: &Path, delimiter: &DelimiterSpec) -> BuiltinResult<(Vec<Vec<f64>>, usize)> {
+fn read_dlm_rows(
+    path: &Path,
+    delimiter: &DelimiterSpec,
+    parse_start_row: usize,
+    parse_start_col: usize,
+) -> BuiltinResult<(Vec<Vec<f64>>, usize)> {
     let file = File::open(path).map_err(|err| {
         dlmread_error_with_source(
             format!("dlmread: unable to open '{}': {err}", path.display()),
@@ -412,7 +427,12 @@ fn read_dlm_rows(path: &Path, delimiter: &DelimiterSpec) -> BuiltinResult<(Vec<V
         if line_index == 0 && view.starts_with('\u{FEFF}') {
             view = &view['\u{FEFF}'.len_utf8()..];
         }
-        let parsed = parse_dlm_row(view, delimiter, line_index)?;
+        if line_index < parse_start_row {
+            rows.push(Vec::new());
+            line_index += 1;
+            continue;
+        }
+        let parsed = parse_dlm_row(view, delimiter, line_index, parse_start_col)?;
         max_cols = max_cols.max(parsed.len());
         rows.push(parsed);
         line_index += 1;
@@ -425,10 +445,17 @@ fn parse_dlm_row(
     line: &str,
     delimiter: &DelimiterSpec,
     line_index: usize,
+    parse_start_col: usize,
 ) -> BuiltinResult<Vec<f64>> {
     let mut values = Vec::new();
     let tokens = delimiter.split(line);
     for (col_index, raw_field) in tokens.into_iter().enumerate() {
+        if col_index < parse_start_col {
+            // Skip validation for columns that will be dropped by row/column
+            // offsets or range start-column semantics.
+            values.push(0.0);
+            continue;
+        }
         let trimmed = raw_field.trim();
         if trimmed.is_empty() {
             values.push(0.0);
@@ -971,6 +998,27 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn dlmread_offsets_skip_nonnumeric_header_row_and_column() {
+        let path = write_temp_file(&["Label,Jan,Feb", "alpha,1,2", "beta,3,4"]);
+        let args = vec![
+            Value::from(","),
+            Value::Int(IntValue::I32(1)),
+            Value::Int(IntValue::I32(1)),
+        ];
+        let result = dlmread_builtin(Value::from(path.to_string_lossy().to_string()), args)
+            .expect("dlmread");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.data, vec![1.0, 3.0, 2.0, 4.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+        fs::remove_file(path).ok();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn dlmread_with_numeric_range() {
         let path = write_temp_file(&["1,2,3", "4,5,6", "7,8,9"]);
         let range = BuiltinTensor::new(vec![1.0, 1.0, 2.0, 2.0], vec![4, 1]).expect("tensor");
@@ -981,6 +1029,24 @@ pub(crate) mod tests {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
                 assert_eq!(t.data, vec![5.0, 8.0, 6.0, 9.0]);
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+        fs::remove_file(path).ok();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn dlmread_range_skips_nonnumeric_header_column() {
+        let path = write_temp_file(&["Label,Jan,Feb", "alpha,1,2", "beta,3,4"]);
+        let range = BuiltinTensor::new(vec![1.0, 1.0, 2.0, 2.0], vec![4, 1]).expect("tensor");
+        let args = vec![Value::from(","), Value::Tensor(range)];
+        let result = dlmread_builtin(Value::from(path.to_string_lossy().to_string()), args)
+            .expect("dlmread");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 2]);
+                assert_eq!(t.data, vec![1.0, 3.0, 2.0, 4.0]);
             }
             other => panic!("expected tensor, got {other:?}"),
         }

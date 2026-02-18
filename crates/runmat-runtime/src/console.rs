@@ -80,7 +80,9 @@ pub fn record_value_output(label: Option<&str>, value: &Value) {
     });
     let value_text = value.to_string();
     let text = if let Some(name) = label {
-        if value_text.contains('\n') {
+        if is_unlabeled_nd_page_display(&value_text) {
+            inject_label_into_nd_page_headers(name, &value_text)
+        } else if value_text.contains('\n') {
             format!("{name} =\n{value_text}")
         } else {
             format!("{name} = {value_text}")
@@ -93,4 +95,26 @@ pub fn record_value_output(label: Option<&str>, value: &Value) {
 
 pub fn take_last_value_output() -> Option<Value> {
     LAST_VALUE_OUTPUT.with(|value| value.borrow_mut().take())
+}
+
+fn is_unlabeled_nd_page_display(text: &str) -> bool {
+    text.lines()
+        .any(|line| line.trim_start().starts_with("(:, :") && line.trim_end().ends_with('='))
+}
+
+fn inject_label_into_nd_page_headers(label: &str, text: &str) -> String {
+    let mut out = String::new();
+    for (idx, line) in text.lines().enumerate() {
+        if idx > 0 {
+            out.push('\n');
+        }
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("(:, :") && trimmed.trim_end().ends_with('=') {
+            out.push_str(label);
+            out.push_str(trimmed);
+        } else {
+            out.push_str(line);
+        }
+    }
+    out
 }
