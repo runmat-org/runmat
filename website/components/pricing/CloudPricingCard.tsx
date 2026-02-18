@@ -27,11 +27,10 @@ const cloudTierConfig: Record<
     features: [
       "Unlimited projects",
       "200MB cloud storage",
-      "Version history",
       "Limited LLM (small models only)",
       "Community support",
     ],
-    ctaLabel: "Start Free",
+    ctaLabel: "Start free",
     ctaHref: "/sandbox",
   },
   pro: {
@@ -43,7 +42,7 @@ const cloudTierConfig: Record<
       "$10/mo LLM credits included",
       "Version history",
     ],
-    ctaLabel: "Get Started",
+    ctaLabel: "Get started",
     ctaHref: "/sandbox",
   },
   team: {
@@ -58,8 +57,8 @@ const cloudTierConfig: Record<
       "Audit logs",
       "Priority support",
     ],
-    ctaLabel: "Contact Sales",
-    ctaHref: "mailto:team@runmat.com?subject=RunMat%20Cloud%20Team",
+    ctaLabel: "Get started",
+    ctaHref: "/sandbox",
   },
 };
 

@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import CloudPricingCard from "@/components/pricing/CloudPricingCard";
-import { CompareProductsTable, CompareCloudTable } from "@/components/pricing/ComparisonTables";
+import { CompareProductsTable } from "@/components/pricing/ComparisonTables";
 
 export const metadata: Metadata = {
   title: "RunMat Pricing | Free, Cloud, and Enterprise",
@@ -24,8 +24,6 @@ const runmatFreeFeatures = [
 
 const serverFeatures = [
   "Self-hosted air-gapped deployment",
-  "Seat/storage/token caps in license",
-  "Isolated network environments",
   "SSO and audit logs",
   "Dedicated support",
 ];
@@ -49,7 +47,7 @@ const pricingFaqItems: { question: string; answer: string }[] = [
   {
     question: "What's included in Cloud Free vs Pro vs Team?",
     answer:
-      "All plans include version history (counts toward storage; you choose how many versions to keep per project). Free: unlimited projects, 200MB storage, limited LLM (small models only). Pro: unlimited projects, 10GB storage, $10/mo LLM credits included ($30/mo per user). Team: SSO / SAML (and SCIM), audit logs, 100GB storage, $25/mo LLM credits included, unlimited seats, priority support ($100/mo per user).",
+      "Free: unlimited projects, 200MB storage, limited LLM (small models only); no built-in version history. Pro: unlimited projects, 10GB storage, version history (counts toward storage), $10/mo LLM credits included ($30/mo per user). Team: SSO / SAML (and SCIM), audit logs, 100GB storage, version history, $25/mo LLM credits included, unlimited seats, priority support ($100/mo per user).",
   },
   {
     question: "How does RunMat Cloud billing work?",
@@ -181,8 +179,6 @@ export default function PricingPage() {
         </section>
 
         <CompareProductsTable />
-
-        <CompareCloudTable />
 
         {/* FAQ */}
         <section className="py-16 md:py-24 lg:py-32">

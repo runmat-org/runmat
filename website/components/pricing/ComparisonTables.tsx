@@ -10,12 +10,11 @@ const columnTints = [
 ] as const;
 
 type ProductRow = [string, string, string, string, string];
-type CloudRow = [string, string, string, string, string];
 
 const productRows: ProductRow[] = [
   ["MATLAB syntax execution", "check", "check", "check", "Execute standard MATLAB-syntax code across all RunMat products."],
   ["GPU acceleration (Metal/Vulkan/DX12)", "check", "check", "check", "Automatic GPU offload with Metal, Vulkan, and DirectX 12 support."],
-  ["JIT compilation and fusion engine", "check", "check", "check", "Just-in-time compilation and operation fusion for faster execution."],
+  ["GPU fusion", "check", "check", "check", "Fuses ops into fewer GPU steps and keeps arrays on device (residency) for less memory traffic and fewer launches."],
   ["Cross-platform (macOS/Linux/Windows)", "check", "check", "check", "Run the same code on macOS, Linux, and Windows."],
   ["Browser sandbox", "check", "check", "check", "Run code in the browser with zero install via the sandbox."],
   ["Desktop app", "check", "check", "check", "Full desktop IDE with local file access and offline use."],
@@ -25,7 +24,9 @@ const productRows: ProductRow[] = [
   ["Cloud file storage", "x", "check", "check", "Persist and sync projects in the cloud."],
   ["Project sharing", "x", "check", "check", "Share projects and collaborate with your team."],
   ["Team workspaces", "x", "check", "check", "Organize work in shared team workspaces."],
-  ["File versioning", "x", "check", "check", "Version history and restore for project files."],
+  ["File versioning", "x", "Pro, Team", "check", "Built-in version history on paid Cloud tiers; counts toward storage. Free Cloud has no version history."],
+  ["Cloud storage", "x", "200 MB (Free); 10 GB (Pro); 100 GB (Team)", "Included", "Total cloud storage for project files. Version history counts toward storage on Pro and Team."],
+  ["Included LLM credits", "x", "Limited (Free); $10/mo (Pro); $25/mo (Team)", "x", "Free: small-model-only, limited tokens. Pro and Team: included credits and pay-as-you-go overage."],
   ["SOC 2 compliance", "x", "check", "check", "Audited security and compliance controls."],
   ["SSO / SAML", "x", "Team plan", "check", "Single sign-on and SAML for enterprise."],
   ["Audit logs", "x", "Team plan", "check", "Audit logging for team and compliance."],
@@ -41,25 +42,7 @@ const productSectionLabels = [
   "Security and Compliance",
   "Support",
 ];
-const productSectionSizes = [4, 5, 4, 4, 2];
-
-const cloudRows: CloudRow[] = [
-  ["Projects", "Unlimited", "Unlimited", "Unlimited", "Number of projects you can create and store."],
-  ["Cloud storage", "200 MB", "10 GB", "100 GB", "Total cloud storage for project files and assets."],
-  ["Version history", "check", "check", "check", "File version history included for all plans; counts toward storage. Configure how many versions to keep per project."],
-  ["Shared workspaces", "x", "check", "check", "Create and use shared team workspaces."],
-  ["Real-time collaboration", "x", "x", "Coming soon", "See edits and presence in real time."],
-  ["LLM-assisted coding", "check", "check", "check", "AI-assisted coding features in the editor."],
-  ["Included LLM credits", "Limited", "$10/mo", "$25/mo", "Free: limited token budgets, small-model-only. Pro: $10/month included credits; Team: $25/month included; pay-as-you-go overage on paid tiers."],
-  ["SOC 2 compliance", "check", "check", "check", "RunMat Cloud is SOC 2 compliant."],
-  ["SSO / SAML", "x", "x", "check", "Single sign-on and SAML on Team plan."],
-  ["Audit logs", "x", "x", "check", "Audit logs for team activity on Team plan."],
-  ["Community support", "check", "check", "check", "Community and documentation support."],
-  ["Priority support", "x", "x", "check", "Priority email support on Team plan."],
-];
-
-const cloudSectionLabels = ["Usage", "Collaboration", "AI and Compute", "Security", "Support"];
-const cloudSectionSizes = [3, 2, 2, 3, 2];
+const productSectionSizes = [4, 5, 6, 4, 2];
 
 function SectionHeaderRow({ label }: { label: string }) {
   return (
@@ -168,65 +151,6 @@ export function CompareProductsTable() {
                     .slice(
                       productSectionSizes.slice(0, sectionIdx).reduce((a, b) => a + b, 0),
                       productSectionSizes.slice(0, sectionIdx + 1).reduce((a, b) => a + b, 0)
-                    )
-                    .map(([label, ...rest]) => {
-                      const cells = rest.slice(0, 3) as [string, string, string];
-                      const description = rest[3] as string;
-                      return (
-                        <ExpandableRow
-                          key={label}
-                          label={label}
-                          cells={cells}
-                          description={description}
-                        />
-                      );
-                    })}
-                </Fragment>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </section>
-  );
-}
-
-export function CompareCloudTable() {
-  return (
-    <section className="pb-20 md:pb-28">
-      <h2 className="font-heading text-2xl font-semibold text-foreground mb-8 text-center sm:text-left">
-        Compare Cloud plans
-      </h2>
-      <div className="rounded-xl border border-border/60 overflow-hidden">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[460px] text-sm">
-            <thead>
-              <tr className="border-b border-border/40">
-                <th className="text-left py-4 px-5 text-sm font-medium text-muted-foreground w-[34%]">
-                  Feature
-                </th>
-                <th className="text-center py-4 px-3 w-[22%]">
-                  <div className="text-sm font-semibold text-foreground">Free</div>
-                  <div className="text-xs font-normal text-muted-foreground mt-0.5">Get started</div>
-                </th>
-                <th className="text-center py-4 px-3 w-[22%]">
-                  <div className="text-sm font-semibold text-foreground">Pro ($30/mo per user)</div>
-                  <div className="text-xs font-normal text-muted-foreground mt-0.5">For individuals and teams</div>
-                </th>
-                <th className="text-center py-4 px-3 w-[22%]">
-                  <div className="text-sm font-semibold text-foreground">Team ($100/mo per user)</div>
-                  <div className="text-xs font-normal text-muted-foreground mt-0.5">Organization-wide</div>
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {cloudSectionLabels.map((sectionLabel, sectionIdx) => (
-                <Fragment key={sectionLabel}>
-                  <SectionHeaderRow label={sectionLabel} />
-                  {cloudRows
-                    .slice(
-                      cloudSectionSizes.slice(0, sectionIdx).reduce((a, b) => a + b, 0),
-                      cloudSectionSizes.slice(0, sectionIdx + 1).reduce((a, b) => a + b, 0)
                     )
                     .map(([label, ...rest]) => {
                       const cells = rest.slice(0, 3) as [string, string, string];
