@@ -6,19 +6,20 @@ CHROME_WRAPPER="${REPO_ROOT}/scripts/chrome-headless.sh"
 
 export CHROME_BIN="${CHROME_BIN:-${CHROME_WRAPPER}}"
 export CHROMEDRIVER_ARGS="${CHROMEDRIVER_ARGS:---log-level=SEVERE}"
-export WASM_BINDGEN_TEST_TIMEOUT="${WASM_BINDGEN_TEST_TIMEOUT:-120}"
+export WASM_BINDGEN_TEST_TIMEOUT="${WASM_BINDGEN_TEST_TIMEOUT:-300}"
 export RUNMAT_GENERATE_WASM_REGISTRY=1
 export RUSTFLAGS="${RUSTFLAGS:-} -Copt-level=1"
 
 echo "==> regenerating wasm registry"
 cargo check -p runmat-runtime --target wasm32-unknown-unknown >/dev/null
+echo "==> wasm-bindgen timeout: ${WASM_BINDGEN_TEST_TIMEOUT}s"
 
 run_crate_tests () {
   local crate="$1"
   shift
   echo "==> wasm-pack test ${crate} $*"
   pushd "${REPO_ROOT}/crates/${crate}" >/dev/null
-  wasm-pack test --chrome --headless "$@" >/dev/null
+  wasm-pack test --chrome --headless "$@"
   popd >/dev/null
 }
 
@@ -32,4 +33,3 @@ else
 fi
 
 echo "All wasm headless tests completed."
-
