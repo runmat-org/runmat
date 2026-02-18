@@ -437,7 +437,7 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "    }",
         "    const session = await module.initRunMat({",
         "      telemetryConsent: false,",
-        "      enableGpu: false,",
+        "      enableGpu: true,",
         "      languageCompat: \"matlab\",",
         "      fsProvider: fsProvider || undefined",
         "    });",
@@ -871,8 +871,11 @@ function normalizeOutput(text) {
     }
     const lines = text.replace(/\r\n/g, "\n").split("\n");
     const stripped = lines.map((line) =>
-        line.replace(/^\s*\d+(?:\s*[x×]\s*\d+)+\s+\w+(?:\s+\w+)*(?:\s+array)?\s*$/i, "")
+        line.replace(/^\s*Columns?\s+\d+\s+through\s+\d+\s*$/i, "")
+            .replace(/^\s*Column\s+\d+\s*$/i, "")
+            .replace(/^\s*\d+(?:\s*[x×]\s*\d+)+\s+\w+(?:\s+\w+)*(?:\s+array)?\s*$/i, "")
             .replace(/^\s*\d+(?:\s*[x×]\s*\d+)+\s*$/i, "")
+            .replace(/^\s*(?:[A-Za-z_]\w*)?\(\s*:\s*,\s*:\s*(?:,\s*\d+\s*)+\)\s*=\s*$/i, "")
             .replace(/^\s*[A-Za-z_]\w*(?:\([^)]*\))?\s*=\s*/, "")
     );
     const joined = stripped.join(" ");
@@ -898,13 +901,12 @@ function normalizeOutput(text) {
     const normalizedConstants = normalizedBooleans
         .replace(/\bpi\b/gi, String(Math.PI));
     const strippedMetadata = normalizedConstants
-        .replace(/GpuTensor\([^)]*\)/g, " ")
-        .replace(/Tensor\(shape=[^)]+\)/g, " ")
+        .replace(/(?:GpuTensor|Tensor|ComplexTensor)\(\s*(?:shape\s*=\s*)?[^)]*\)/g, " ")
         .replace(/\b\d+(?:\s*[x×]\s*\d+)+\s*(?:gpuArray\s*)?(?:logical|double|single|char|string|cell)?\s*array\b/gi, " ")
-        .replace(/\b(?:gpuArray|logical|double|single|string|char|cell)\b/gi, " ");
+        .replace(/\b(?:gpuArray|logical|double|single|string|char|cell|Tensor|ComplexTensor|GpuTensor)\b/gi, " ");
     const normalizedComplex = strippedMetadata
         .replace(/(\d+\.\d+)(\d+\.\d+[ij])/g, "$1+$2")
-        .replace(/(\d)\s*([+-])\s*(?=[^\s]*[ij])/g, "$1$2")
+        .replace(/(\d)\s*([+-])\s*(?=(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?[ij]\b)/g, "$1$2")
         .replace(/\+\s*-/g, "-")
         .replace(/-\s*\+/g, "-")
         .replace(/\+\s*\+/g, "+");

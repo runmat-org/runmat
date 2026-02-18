@@ -34,7 +34,7 @@
   "behaviors": [
     "Accepts text inputs as string scalars/arrays, character vectors/arrays, or cell arrays of character vectors.",
     "Accepts patterns in the same formats; scalar inputs expand across the other argument following MATLAB broadcast rules.",
-    "Missing string scalars (`missing`, displayed as `<missing>`) never match any pattern.",
+    "Missing string scalars (`<missing>`) never match any pattern.",
     "Empty patterns (`\"\"` or `''`) always match non-missing text elements.",
     "Patterns that are `<missing>` never match and therefore return `false`.",
     "Character arrays treat each row as an independent element; zero-row character arrays yield empty outputs.",
@@ -74,7 +74,7 @@
     },
     {
       "description": "Handle empty patterns and missing values",
-      "input": "texts = [\"\", missing];\ntf = endsWith(texts, \"\")",
+      "input": "texts = [\"\", \"<missing>\"];\ntf = endsWith(texts, \"\")",
       "output": "tf = 1×2 logical array\n   1   0"
     }
   ],

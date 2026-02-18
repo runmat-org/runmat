@@ -42,7 +42,7 @@
     {
       "description": "Centering the spectrum of a 1-D FFT result with even length",
       "input": "x = [0 1 2 3 4 5 6 7];\nfx = fft(x);\ny = fftshift(fx)",
-      "output": "y = [4 5 6 7 0 1 2 3]"
+      "output": "y = [-4 -4-1.6569i -4-4i -4-9.6569i 28 -4+9.6569i -4+4i -4+1.6569i]"
     },
     {
       "description": "Handling odd-length vectors",

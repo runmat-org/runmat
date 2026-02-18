@@ -9,6 +9,7 @@ pub(crate) mod factorial;
 pub(crate) mod gamma;
 pub(crate) mod hypot;
 pub(crate) mod imag;
+pub(crate) mod int32;
 pub(crate) mod ldivide;
 pub(crate) mod log;
 pub(crate) mod log10;

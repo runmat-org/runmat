@@ -65,8 +65,8 @@
     },
     {
       "description": "Matching an existing array with `'like'`",
-      "input": "prototype = rand(2, 3, 'like', gpuArray(1));\nD = fill(pi, 2, 3, 'like', prototype)",
-      "output": "D is gpuArray\ngather(D) = ones(2, 3) * pi"
+      "input": "prototype = rand(2, 3, 'like', gpuArray(1));\nD = fill(pi, 2, 3, 'like', prototype);\ngather(D)",
+      "output": "3.1416 3.1416 3.1416 3.1416 3.1416 3.1416"
     },
     {
       "description": "Filling a complex array",

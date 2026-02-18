@@ -1723,10 +1723,12 @@ mod tests {
     fn remote_config_roundtrip() {
         let dir = tempdir().expect("tempdir");
         env::set_var("RUNMAT_CLI_CONFIG_DIR", dir.path());
-        let mut config = RemoteConfig::default();
-        config.server_url = Some("http://localhost".to_string());
-        config.org_id = Some(Uuid::new_v4());
-        config.project_id = Some(Uuid::new_v4());
+        let config = RemoteConfig {
+            server_url: Some("http://localhost".to_string()),
+            org_id: Some(Uuid::new_v4()),
+            project_id: Some(Uuid::new_v4()),
+            ..RemoteConfig::default()
+        };
         config.save().expect("save");
 
         let loaded = RemoteConfig::load().expect("load");

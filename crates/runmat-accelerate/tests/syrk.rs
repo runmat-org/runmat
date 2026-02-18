@@ -5,7 +5,7 @@ use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 #[cfg(feature = "wgpu")]
 use runmat_accelerate_api::{HostTensorView, ProviderPrecision};
 #[cfg(feature = "wgpu")]
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 
 #[cfg(feature = "wgpu")]
 static TEST_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
@@ -53,7 +53,7 @@ fn cpu_syrk_f32(a: &[f32], rows: usize, cols: usize) -> Vec<f32> {
 #[cfg(feature = "wgpu")]
 #[tokio::test]
 async fn syrk_matches_cpu() {
-    let _guard = TEST_MUTEX.lock().unwrap();
+    let _guard = TEST_MUTEX.lock().await;
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
     let p = runmat_accelerate_api::provider().expect("provider");
 
@@ -114,7 +114,7 @@ async fn syrk_matches_cpu() {
 #[cfg(feature = "wgpu")]
 #[tokio::test]
 async fn syrk_large_rows_chunks() {
-    let _guard = TEST_MUTEX.lock().unwrap();
+    let _guard = TEST_MUTEX.lock().await;
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
     let p = runmat_accelerate_api::provider().expect("provider");
 
@@ -155,7 +155,7 @@ async fn syrk_large_rows_chunks() {
 #[cfg(feature = "wgpu")]
 #[tokio::test]
 async fn syrk_vec4_f32_matches_cpu() {
-    let _guard = TEST_MUTEX.lock().unwrap();
+    let _guard = TEST_MUTEX.lock().await;
     std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
     let p = runmat_accelerate_api::provider().expect("provider");

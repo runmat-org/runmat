@@ -6,8 +6,8 @@ use runmat_accelerate_api::GpuTensorHandle;
 use runmat_accelerate_api::HostTensorView;
 
 // Guard tests to avoid provider state races
-static TEST_MUTEX: once_cell::sync::Lazy<std::sync::Mutex<()>> =
-    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(()));
+static TEST_MUTEX: once_cell::sync::Lazy<tokio::sync::Mutex<()>> =
+    once_cell::sync::Lazy::new(|| tokio::sync::Mutex::new(()));
 
 fn upload_matrix(
     provider: &WgpuProvider,
@@ -26,7 +26,7 @@ fn upload_matrix(
 
 #[tokio::test]
 async fn reduce_sum_dim_semantics() {
-    let _guard = TEST_MUTEX.lock().unwrap();
+    let _guard = TEST_MUTEX.lock().await;
     let provider = WgpuProvider::new(WgpuProviderOptions::default()).expect("create provider");
     // 4x3 matrix with simple pattern: M[r,c] = r + 10*c
     let rows = 4usize;
@@ -84,7 +84,7 @@ async fn reduce_sum_dim_semantics() {
 
 #[tokio::test]
 async fn elementwise_broadcast_pxc_times_1xc() {
-    let _guard = TEST_MUTEX.lock().unwrap();
+    let _guard = TEST_MUTEX.lock().await;
     let provider = WgpuProvider::new(WgpuProviderOptions::default()).expect("create provider");
     let rows = 4usize;
     let cols = 3usize;
@@ -123,7 +123,7 @@ async fn elementwise_broadcast_pxc_times_1xc() {
 
 #[tokio::test]
 async fn fused_dot_per_column_matches_manual() {
-    let _guard = TEST_MUTEX.lock().unwrap();
+    let _guard = TEST_MUTEX.lock().await;
     let provider = WgpuProvider::new(WgpuProviderOptions::default()).expect("create provider");
     let rows = 5usize;
     let cols = 4usize;
