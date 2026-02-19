@@ -142,6 +142,22 @@ jobs:
         shell: pwsh
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      # Verify the binary starts without a stack overflow before running the
+      # full suite. This catches regressions where the main-thread stack is
+      # exhausted by Clap's parser (common on Windows with large CLI structs).
+      # Placed before cargo-check so the most fundamental failure fails fast.
+      - name: Binary smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo build -p runmat
+          & target\debug\runmat.exe --help | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "runmat --help failed (exit $LASTEXITCODE) - possible stack overflow"
+            exit 1
+          }
+          Write-Host "Smoke test passed"  
+
       - name: Check (Unix)
         if: runner.os != 'Windows'
         run: cargo check --all-targets --all-features
