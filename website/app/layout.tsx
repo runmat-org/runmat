@@ -66,6 +66,8 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const isDevelopment = process.env.NODE_ENV === "development";
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -165,6 +167,14 @@ export default function RootLayout({
             })
           }}
         />
+        {isDevelopment ? (
+          <style>{`
+            nextjs-portal {
+              left: unset !important;
+              top: unset !important;
+            }
+          `}</style>
+        ) : null}
         <GoogleAnalytics />
       </head>
       <body className={`${inter.className} antialiased`} suppressHydrationWarning>

@@ -53,7 +53,7 @@
 @layer base {
   html {
     scroll-behavior: smooth;
-    overflow-x: hidden;
+    overflow-x: clip;
     width: 100%;
   }
   * {
@@ -62,7 +62,7 @@
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
-    overflow-x: hidden;
+    overflow-x: clip;
     width: 100%;
     word-wrap: break-word;
     overflow-wrap: break-word;
@@ -138,6 +138,8 @@
     border: 1px solid hsl(var(--border));
     background-color: hsl(var(--code-surface));
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .dark .markdown-pre {
@@ -154,6 +156,7 @@
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    min-width: max-content;
   }
 
   @media (max-width: 640px) {
@@ -235,51 +238,34 @@
     }
   }
 
-  /* Tables: wrap header row and first column, keep table width */
+  /* Tables: keep readable columns and allow horizontal scroll on narrow screens */
   .table-mobile-wrap {
+    display: block;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
     table-layout: auto;
     width: 100%;
     max-width: 100%;
-  }
-  /* First column: allow aggressive wrapping to avoid overflow */
-  .table-mobile-wrap td:first-child {
-    white-space: normal;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-    max-width: 0;
-  }
-  /* Body cells: allow wrapping to keep table within container */
-  .table-mobile-wrap td {
-    white-space: normal;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-    max-width: 0;
+    border-collapse: separate;
   }
   /* Header cells: allow wrapping on mobile */
+  .table-mobile-wrap td,
   .table-mobile-wrap th {
     white-space: normal;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     word-break: break-word;
-    hyphens: auto;
+    min-width: 10rem;
+  }
+  .table-mobile-wrap td:first-child,
+  .table-mobile-wrap th:first-child {
+    min-width: 12rem;
   }
   @media (min-width: 640px) {
+    .table-mobile-wrap td,
     .table-mobile-wrap th {
       overflow-wrap: normal;
       word-break: normal;
-      hyphens: none;
     }
-    .table-mobile-wrap th:not(:first-child) {
-      width: min-content;
-    }
-  }
-  /* Ensure table shrinks to container without forcing equal columns */
-  .table-mobile-wrap {
-    border-collapse: separate; /* allow cell widths to adapt naturally */
-  }
-  /* Allow first column to take remaining space */
-  .table-mobile-wrap td:first-child,
-  .table-mobile-wrap th:first-child {
-    width: auto;
   }
 
   /* reactbits RotatingText base styles */

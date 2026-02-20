@@ -35,6 +35,17 @@ export const docsTree: DocsNode[] = [
         },
       },
       {
+        title: "Versioning & History",
+        slug: ["versioning"],
+        file: "docs/VERSIONING.md",
+        seo: {
+          description: "How RunMat's automatic versioning and snapshots work.",
+          keywords: ["version control", "git export", "snapshots", "history", "RunMat versioning"],
+          ogTitle: "Versioning & History",
+          ogDescription: "RunMat versions your work automatically. Learn about snapshots, history, and git export.",
+        },
+      },
+      {
         title: "Design Philosophy",
         slug: ["design-philosophy"],
         file: "docs/DESIGN_PHILOSOPHY.md",
