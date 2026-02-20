@@ -14,9 +14,6 @@ Today’s reality:
 - PyTorch / TensorFlow can use GPUs, but expect you to reason about devices, tensors, and explicit transfers.
 - Engineers lose time either rewriting code for GPU frameworks or waiting for CPU loops to finish.
 
-
-If you use MATLAB with NVIDIA GPUs today, see our [MATLAB GPU setup guide](/blog/how-to-use-gpu-in-matlab).
-
 RunMat’s promise is “write MATLAB-syntax code, let the runtime discover and execute GPU-friendly pieces automatically.” To understand how it works, picture a four-stage pipeline.
 
 ---
@@ -34,7 +31,7 @@ Capturing the graph costs almost nothing, but gives RunMat a full view of what y
 
 For example, the following script:
 
-```matlab:runnable
+```matlab
 x = rand(1024, 1, 'single');
 
 y = sin(x) .* x + 0.5;
