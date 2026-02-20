@@ -10,7 +10,7 @@
   "dependencies": {
     "express": "^4.19.2",
     "morgan": "^1.10.0",
-    "undici": "^6.19.8"
+    "undici": "^6.23.0"
   },
   "devDependencies": {
     "supertest": "^6.3.4",
