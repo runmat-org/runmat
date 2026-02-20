@@ -61,6 +61,13 @@ RunMat can automatically prune old file versions to keep storage lean (configura
 
 Snapshots form a simple, linear chain -- each snapshot has one parent. There's no branching, no merge conflicts, no DAG to reason about. It's a clean timeline of project states.
 
+```mermaid
+graph LR
+  S1["Snapshot 1\nInitial setup"] --> S2["Snapshot 2\nBefore sweep"]
+  S2 --> S3["Snapshot 3\nPost-calibration"]
+  S3 --> S4["Snapshot 4\nFinal results"]
+```
+
 ---
 
 ## Git export
