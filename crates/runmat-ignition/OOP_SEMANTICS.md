@@ -48,7 +48,8 @@ Ignition models MATLAB-style classes with properties, methods, static members, a
 ### Static methods
 
 - `CallStaticMethod(class, name, argc)` resolves using `lookup_method(class, name)` and enforces `is_static == true`
-- `LoadMethod` on a `ClassRef` yields a closure without captures for static methods
+- If class metadata is not registered, static dispatch falls back to a namespaced builtin call (`Class.method`) when available
+- `LoadMethod` on a `ClassRef` yields a closure without captures for static methods, with the same namespaced-builtin fallback
 
 ## Overloaded indexing
 

@@ -3,10 +3,11 @@
 //! Provides seamless integration with Jupyter notebooks, enabling interactive
 //! plotting output directly in notebook cells with full GPU acceleration.
 
+use crate::plots::{Figure, LinePlot, ScatterPlot, SurfacePlot};
 use runmat_time::unix_timestamp_us;
 use std::collections::HashMap;
-// use std::path::Path; // Not currently used
-use crate::plots::{Figure, LinePlot, ScatterPlot, SurfacePlot};
+use std::io::Cursor;
+use std::path::Path;
 
 /// Jupyter notebook output handler
 #[derive(Debug)]
@@ -179,27 +180,9 @@ impl JupyterBackend {
 
     /// Export as PNG image using our GPU-accelerated export system
     fn export_png(&self, figure: &mut Figure) -> Result<String, String> {
-        use crate::export::ImageExporter;
-
         let output_path =
             std::env::temp_dir().join(format!("runmat_plot_{}.png", Self::generate_plot_id()));
-
-        // Use our high-performance GPU export system
-        let runtime = tokio::runtime::Runtime::new()
-            .map_err(|e| format!("Failed to create async runtime: {e}"))?;
-
-        runtime.block_on(async {
-            let exporter = ImageExporter::new()
-                .await
-                .map_err(|e| format!("Failed to create image exporter: {e}"))?;
-
-            exporter
-                .export_png(figure, &output_path)
-                .await
-                .map_err(|e| format!("Failed to export PNG: {e}"))?;
-
-            Ok::<(), String>(())
-        })?;
+        self.export_png_with_fallback(figure, &output_path)?;
 
         // Return HTML img tag for Jupyter
         let output_path_str = output_path.to_string_lossy();
@@ -232,13 +215,59 @@ impl JupyterBackend {
 
     /// Export as base64 encoded image using our PNG export system
     fn export_base64(&self, figure: &mut Figure) -> Result<String, String> {
+        let png_data = if Self::prefer_cpu_jupyter_png_export() {
+            self.placeholder_png_bytes()?
+        } else {
+            let temp_path = std::env::temp_dir()
+                .join(format!("runmat_base64_{}.png", Self::generate_plot_id()));
+            match self.export_png_gpu(figure, &temp_path) {
+                Ok(()) => {
+                    let bytes = std::fs::read(&temp_path)
+                        .map_err(|e| format!("Failed to read PNG file: {e}"))?;
+                    let _ = std::fs::remove_file(&temp_path);
+                    bytes
+                }
+                Err(err) => {
+                    log::warn!(
+                        target: "runmat_plot",
+                        "jupyter base64 export falling back to CPU PNG: {}",
+                        err
+                    );
+                    self.placeholder_png_bytes()?
+                }
+            }
+        };
+
+        let base64_data = base64_encode(&png_data);
+
+        // Return data URL for Jupyter
+        Ok(format!(
+            "<img src='data:image/png;base64,{}' alt='RunMat Plot' width='{}' height='{}' />",
+            base64_data, self.export_settings.width, self.export_settings.height
+        ))
+    }
+
+    fn export_png_with_fallback(&self, figure: &mut Figure, path: &Path) -> Result<(), String> {
+        if Self::prefer_cpu_jupyter_png_export() {
+            self.write_placeholder_png(path)
+        } else {
+            match self.export_png_gpu(figure, path) {
+                Ok(()) => Ok(()),
+                Err(err) => {
+                    log::warn!(
+                        target: "runmat_plot",
+                        "jupyter PNG export falling back to CPU placeholder: {}",
+                        err
+                    );
+                    self.write_placeholder_png(path)
+                }
+            }
+        }
+    }
+
+    fn export_png_gpu(&self, figure: &mut Figure, path: &Path) -> Result<(), String> {
         use crate::export::ImageExporter;
 
-        // Create temporary file for PNG export
-        let temp_path =
-            std::env::temp_dir().join(format!("runmat_base64_{}.png", Self::generate_plot_id()));
-
-        // Export PNG first
         let runtime = tokio::runtime::Runtime::new()
             .map_err(|e| format!("Failed to create async runtime: {e}"))?;
 
@@ -248,27 +277,69 @@ impl JupyterBackend {
                 .map_err(|e| format!("Failed to create image exporter: {e}"))?;
 
             exporter
-                .export_png(figure, &temp_path)
+                .export_png(figure, path)
                 .await
                 .map_err(|e| format!("Failed to export PNG: {e}"))?;
 
             Ok::<(), String>(())
-        })?;
+        })
+    }
 
-        // Read PNG data and encode as base64
-        let png_data =
-            std::fs::read(&temp_path).map_err(|e| format!("Failed to read PNG file: {e}"))?;
+    fn prefer_cpu_jupyter_png_export() -> bool {
+        if std::env::var_os("RUNMAT_PLOT_JUPYTER_FORCE_CPU_EXPORT").is_some() {
+            return true;
+        }
+        if std::env::var_os("CI").is_some() {
+            return true;
+        }
+        #[cfg(target_os = "linux")]
+        {
+            if std::env::var_os("RUNMAT_PLOT_JUPYTER_ALLOW_HEADLESS_GPU").is_none()
+                && std::env::var_os("DISPLAY").is_none()
+                && std::env::var_os("WAYLAND_DISPLAY").is_none()
+            {
+                return true;
+            }
+        }
+        false
+    }
 
-        let base64_data = base64_encode(&png_data);
+    fn write_placeholder_png(&self, path: &Path) -> Result<(), String> {
+        let bytes = self.placeholder_png_bytes()?;
+        std::fs::write(path, bytes).map_err(|e| format!("Failed to write placeholder PNG: {e}"))
+    }
 
-        // Clean up temporary file
-        let _ = std::fs::remove_file(&temp_path);
+    fn placeholder_png_bytes(&self) -> Result<Vec<u8>, String> {
+        use image::{DynamicImage, ImageBuffer, ImageOutputFormat, Rgba};
 
-        // Return data URL for Jupyter
-        Ok(format!(
-            "<img src='data:image/png;base64,{}' alt='RunMat Plot' width='{}' height='{}' />",
-            base64_data, self.export_settings.width, self.export_settings.height
-        ))
+        let width = self.export_settings.width.max(1);
+        let height = self.export_settings.height.max(1);
+        let bg = [
+            (self.export_settings.background_color[0].clamp(0.0, 1.0) * 255.0) as u8,
+            (self.export_settings.background_color[1].clamp(0.0, 1.0) * 255.0) as u8,
+            (self.export_settings.background_color[2].clamp(0.0, 1.0) * 255.0) as u8,
+            (self.export_settings.background_color[3].clamp(0.0, 1.0) * 255.0) as u8,
+        ];
+        let mut image = ImageBuffer::from_pixel(width, height, Rgba(bg));
+
+        // Draw a simple frame so fallbacks are visually obvious in notebooks.
+        if width > 2 && height > 2 {
+            let frame = Rgba([120, 120, 120, 255]);
+            for x in 0..width {
+                image.put_pixel(x, 0, frame);
+                image.put_pixel(x, height - 1, frame);
+            }
+            for y in 0..height {
+                image.put_pixel(0, y, frame);
+                image.put_pixel(width - 1, y, frame);
+            }
+        }
+
+        let mut cursor = Cursor::new(Vec::new());
+        DynamicImage::ImageRgba8(image)
+            .write_to(&mut cursor, ImageOutputFormat::Png)
+            .map_err(|e| format!("Failed to encode placeholder PNG: {e}"))?;
+        Ok(cursor.into_inner())
     }
 
     /// Export as Plotly-compatible JSON

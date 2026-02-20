@@ -1,2 +1,13 @@
 [build]
-rustflags = ["-Dwarnings"] 
+rustflags = ["-Dwarnings"]
+
+# Increase the default main-thread stack on Windows to 64 MB.
+# Clap's generated parser code for large command hierarchies can overflow
+# the OS default of ~1 MB before Rust's own stack-guard kicks in.
+# The async fn run() already spawns a 64 MB thread, but this covers the
+# thin synchronous main() wrapper and any future code added before that spawn.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-Dwarnings", "-C", "link-arg=/STACK:67108864"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-Dwarnings", "-C", "link-arg=/STACK:67108864"]

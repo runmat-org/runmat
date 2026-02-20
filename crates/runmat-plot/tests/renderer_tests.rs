@@ -11,6 +11,26 @@ use glam::{Mat4, Vec3, Vec4};
 use runmat_plot::core::{vertex_utils, PipelineType, Uniforms};
 use runmat_time::Instant;
 
+fn should_run_headless_gpu_tests() -> bool {
+    match std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS") {
+        Ok(value) => matches!(
+            value.trim().to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+        Err(_) => false,
+    }
+}
+
+fn skip_headless_gpu_test(test_name: &str) -> bool {
+    if should_run_headless_gpu_tests() {
+        return false;
+    }
+    eprintln!(
+        "skipping {test_name}; set RUNMAT_PLOT_FORCE_GPU_TESTS=1 to enable headless GPU export tests"
+    );
+    true
+}
+
 #[cfg(test)]
 mod export_subplot_tests {
     #[test]
@@ -74,6 +94,10 @@ mod export_subplot_tests {
     }
     #[tokio::test]
     async fn test_export_two_axes_line_scatter() {
+        if super::skip_headless_gpu_test("export_subplot_tests::test_export_two_axes_line_scatter")
+        {
+            return;
+        }
         let mut fig = runmat_plot::plots::Figure::new();
         fig.set_subplot_grid(2, 1);
         // Top: line
@@ -107,6 +131,10 @@ mod export_subplot_tests {
 
     #[tokio::test]
     async fn test_export_four_axes_bars_imagesc() {
+        if super::skip_headless_gpu_test("export_subplot_tests::test_export_four_axes_bars_imagesc")
+        {
+            return;
+        }
         let mut fig = runmat_plot::plots::Figure::new();
         fig.set_subplot_grid(2, 2);
         // Bars in (0,0)
@@ -169,6 +197,9 @@ mod export_subplot_tests {
 mod clipping_tests {
     #[tokio::test]
     async fn test_clipping_out_of_bounds_line() {
+        if super::skip_headless_gpu_test("clipping_tests::test_clipping_out_of_bounds_line") {
+            return;
+        }
         // Top axes has a line; bottom should remain background (white)
         let mut fig = runmat_plot::plots::Figure::new();
         fig.set_subplot_grid(2, 1);
@@ -198,6 +229,9 @@ mod clipping_tests {
 
     #[tokio::test]
     async fn test_clipping_out_of_bounds_scatter() {
+        if super::skip_headless_gpu_test("clipping_tests::test_clipping_out_of_bounds_scatter") {
+            return;
+        }
         // Bottom axes has scatter; top should remain background
         let mut fig = runmat_plot::plots::Figure::new();
         fig.set_subplot_grid(2, 1);
@@ -232,6 +266,9 @@ mod aesthetics_line_tests {
 
     #[tokio::test]
     async fn test_thick_line_caps_png() {
+        if super::skip_headless_gpu_test("aesthetics_line_tests::test_thick_line_caps_png") {
+            return;
+        }
         let mut fig = runmat_plot::plots::Figure::new();
         let x: Vec<f64> = (0..=50).map(|i| i as f64 * 0.1).collect();
         let y: Vec<f64> = x.iter().map(|v| (v * 1.0).sin()).collect();
@@ -260,6 +297,9 @@ mod aesthetics_line_tests {
 
     #[tokio::test]
     async fn test_dashed_dotted_png() {
+        if super::skip_headless_gpu_test("aesthetics_line_tests::test_dashed_dotted_png") {
+            return;
+        }
         let mut fig = runmat_plot::plots::Figure::new();
         let x: Vec<f64> = (0..=100).map(|i| i as f64 * 0.05).collect();
         let y: Vec<f64> = x.iter().map(|v| (v * 0.7).sin()).collect();
@@ -888,6 +928,11 @@ mod image_export_tests {
 
     #[tokio::test]
     async fn test_headless_imagesc_grayscale_export() {
+        if super::skip_headless_gpu_test(
+            "image_export_tests::test_headless_imagesc_grayscale_export",
+        ) {
+            return;
+        }
         let x = vec![0.0, 1.0, 2.0];
         let y = vec![0.0, 1.0, 2.0];
         let z = vec![
@@ -906,6 +951,9 @@ mod image_export_tests {
 
     #[tokio::test]
     async fn test_headless_imshow_rgb_export() {
+        if super::skip_headless_gpu_test("image_export_tests::test_headless_imshow_rgb_export") {
+            return;
+        }
         let x = vec![0.0, 1.0];
         let y = vec![0.0, 1.0];
         let mut grid: Vec<Vec<glam::Vec4>> = vec![vec![glam::Vec4::ZERO; 2]; 2];
@@ -938,6 +986,10 @@ mod scatter_export_tests {
 
     #[tokio::test]
     async fn test_scatter_marker_size_headless() {
+        if super::skip_headless_gpu_test("scatter_export_tests::test_scatter_marker_size_headless")
+        {
+            return;
+        }
         let x = vec![1.0, 2.0, 3.0, 4.0];
         let y = vec![1.0, 2.0, 1.0, 2.0];
         let sp = ScatterPlot::new(x, y).unwrap().with_style(
@@ -955,6 +1007,9 @@ mod scatter_export_tests {
 
     #[tokio::test]
     async fn test_scatter_edge_color_headless() {
+        if super::skip_headless_gpu_test("scatter_export_tests::test_scatter_edge_color_headless") {
+            return;
+        }
         let x = vec![1.0, 2.0];
         let y = vec![1.0, 2.0];
         let mut sp = ScatterPlot::new(x, y).unwrap().with_style(
@@ -974,6 +1029,11 @@ mod scatter_export_tests {
 
     #[tokio::test]
     async fn test_scatter_square_marker_headless() {
+        if super::skip_headless_gpu_test(
+            "scatter_export_tests::test_scatter_square_marker_headless",
+        ) {
+            return;
+        }
         let x = vec![0.0, 1.0, 2.0];
         let y = vec![0.0, 1.0, 0.5];
         let sp = ScatterPlot::new(x, y).unwrap().with_style(
@@ -991,6 +1051,10 @@ mod scatter_export_tests {
 
     #[tokio::test]
     async fn test_scatter_sizes_array_headless() {
+        if super::skip_headless_gpu_test("scatter_export_tests::test_scatter_sizes_array_headless")
+        {
+            return;
+        }
         let x = vec![0.0, 1.0, 2.0, 3.0, 4.0];
         let y = vec![0.0, 0.5, 1.0, 0.5, 0.0];
         let mut sp = ScatterPlot::new(x, y).unwrap().with_style(
@@ -1009,6 +1073,9 @@ mod scatter_export_tests {
 
     #[tokio::test]
     async fn test_scatter_rgb_colors_headless() {
+        if super::skip_headless_gpu_test("scatter_export_tests::test_scatter_rgb_colors_headless") {
+            return;
+        }
         let x = vec![0.0, 1.0, 2.0];
         let y = vec![0.0, 1.0, 0.5];
         let mut sp = ScatterPlot::new(x, y).unwrap().with_style(
@@ -1032,6 +1099,10 @@ mod scatter_export_tests {
 
     #[tokio::test]
     async fn test_scatter_cdata_scalar_headless() {
+        if super::skip_headless_gpu_test("scatter_export_tests::test_scatter_cdata_scalar_headless")
+        {
+            return;
+        }
         use runmat_plot::plots::surface::ColorMap;
         let x = vec![0.0, 1.0, 2.0, 3.0];
         let y = vec![0.1, 0.2, 0.3, 0.4];
@@ -1066,6 +1137,9 @@ mod export_parity_more_tests {
 
     #[tokio::test]
     async fn test_bar_export_basic() {
+        if super::skip_headless_gpu_test("export_parity_more_tests::test_bar_export_basic") {
+            return;
+        }
         let labels = vec!["A".to_string(), "B".to_string(), "C".to_string()];
         let values = vec![10.0, 20.0, 15.0];
         let bar = BarChart::new(labels, values).unwrap().with_label("Bars");
@@ -1079,6 +1153,9 @@ mod export_parity_more_tests {
 
     #[tokio::test]
     async fn test_barh_export_basic() {
+        if super::skip_headless_gpu_test("export_parity_more_tests::test_barh_export_basic") {
+            return;
+        }
         let labels = vec!["X".to_string(), "Y".to_string()];
         let values = vec![5.0, 8.0];
         let bar = BarChart::new(labels, values)
@@ -1095,6 +1172,9 @@ mod export_parity_more_tests {
 
     #[tokio::test]
     async fn test_errorbar_export_basic() {
+        if super::skip_headless_gpu_test("export_parity_more_tests::test_errorbar_export_basic") {
+            return;
+        }
         let x = vec![0.0, 1.0, 2.0, 3.0];
         let y = vec![1.0, 2.0, 1.5, 2.2];
         let e = vec![0.1, 0.2, 0.15, 0.1];
@@ -1109,6 +1189,9 @@ mod export_parity_more_tests {
 
     #[tokio::test]
     async fn test_area_export_stacked() {
+        if super::skip_headless_gpu_test("export_parity_more_tests::test_area_export_stacked") {
+            return;
+        }
         let x = vec![1.0, 2.0, 3.0, 4.0];
         let y1 = [1.0, 2.0, 1.0, 2.0];
         let y2 = [0.5, 0.5, 0.5, 0.5];
@@ -1135,6 +1218,9 @@ mod export_parity_more_tests {
 
     #[tokio::test]
     async fn test_quiver_export_basic() {
+        if super::skip_headless_gpu_test("export_parity_more_tests::test_quiver_export_basic") {
+            return;
+        }
         let x = vec![0.0, 1.0, 2.0];
         let y = vec![0.0, 1.0, 0.0];
         let u = vec![1.0, 0.0, -1.0];
@@ -1153,6 +1239,9 @@ mod export_parity_more_tests {
 
     #[tokio::test]
     async fn test_pie_export_basic() {
+        if super::skip_headless_gpu_test("export_parity_more_tests::test_pie_export_basic") {
+            return;
+        }
         let vals = vec![1.0, 2.0, 3.0, 4.0];
         let p = runmat_plot::plots::PieChart::new(vals, None)
             .unwrap()
@@ -1193,7 +1282,7 @@ mod gpu_stress {
     }
 
     fn install_context() -> bool {
-        if std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").is_err() {
+        if !super::should_run_headless_gpu_tests() {
             return false;
         }
         match build_shared_context() {

@@ -1,3 +1,8 @@
+// None of these tests use #[wasm_bindgen_test], so they cannot run in the
+// browser via wasm-pack. Excluding them from wasm32 avoids compiling a full
+// runmat-runtime wasm binary per test file with zero executable tests.
+#![cfg(not(target_arch = "wasm32"))]
+
 use futures::executor::block_on;
 use runmat_core::{ExecutionResult, ExecutionStreamKind, RunMatSession};
 use runmat_gc::gc_test_context;

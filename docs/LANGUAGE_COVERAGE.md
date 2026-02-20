@@ -13,7 +13,7 @@ RunMat's goal is to provide a high-performance, modern runtime to execute MATLAB
 | | `global` variables | ✅ | ✅ | Name-based, cross-function binding; write-through semantics. |
 | | `persistent` variables | ✅ | ✅ | Per-function lifetime, name- and slot-based restore. |
 | | Logical scalars/arrays | ✅ | ✅ | First-class logical type: scalar `bool` and N-D `LogicalArray`. `islogical`, `isgpuarray`, `class`, `isa`, `size`, `numel`, `isempty` follow MATLAB; predicates (`isnan`, `isfinite`, `isinf`, comparisons) produce logical arrays; masks are preserved in indexing and assignment. |
-| | Integer scalars (`int8`…`uint64`) | ✅ | ❌ | Per-width scalar types (`int8`…`uint64`) (not a single platform `int`) with `class`/`isa` parity and numeric ops routed through MATLAB-compatible paths; integer arrays are planned. |
+| | Integer scalars (`int8`…`uint64`) | ✅ | ❌ | Per-width scalar types (`int8`…`uint64`) (not a single platform `int`) with `class`/`isa` parity and numeric ops routed through MATLAB-compatible paths. Cast builtins such as `int32(...)`/`uint16(...)` are available for scalars and arrays; packed native integer array storage is still planned. |
 | | Complex numbers | ✅ | ✅ | Complex scalars and arrays with arithmetic, comparisons, transpose (`'` conjugate, `.'` non-conjugate), element-wise power, and matrix power (integer exponents). |
 | **Matrices & Arrays** | Literals `[ … ]` | ✅ | ✅ | Rectangular and ragged cell literals supported; numeric tensors support rectangular construction. |
 | | Empty `[]` | ✅ | ✅ | Shape-consistent behavior. |

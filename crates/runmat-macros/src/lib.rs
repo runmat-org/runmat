@@ -714,11 +714,14 @@ fn initialize_registry_file(path: &Path) {
 }
 
 fn should_generate_wasm_registry() -> bool {
-    // Generate the registry file for all builds by default so that downstream
-    // wasm consumers (which compile proc-macros for the host) still produce the table.
-    // Allow opting out with RUNMAT_DISABLE_WASM_REGISTRY=1.
-    !matches!(
-        std::env::var("RUNMAT_DISABLE_WASM_REGISTRY"),
+    // Only write to the registry file when explicitly requested.  Writing on every build
+    // causes an infinite rebuild loop: proc-macros modify the file → cargo detects the
+    // change → build.rs re-runs → runmat-runtime recompiles → proc-macros run again →
+    // repeat.  Callers (e.g. test-wasm-headless.sh) set RUNMAT_GENERATE_WASM_REGISTRY=1
+    // for the dedicated `cargo check` regeneration step, then unset it before wasm-pack
+    // test so the pre-generated file is used as-is without triggering rebuilds.
+    matches!(
+        std::env::var("RUNMAT_GENERATE_WASM_REGISTRY"),
         Ok(ref value) if value == "1"
     )
 }

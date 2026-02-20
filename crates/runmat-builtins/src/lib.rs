@@ -1837,8 +1837,8 @@ mod display_tests {
 
     #[test]
     fn logical_nd_display_uses_headers_and_fallback_summary() {
-        let logical = LogicalArray::new(vec![1, 0, 0, 1, 1, 0, 0, 1], vec![2, 2, 2])
-            .expect("logical");
+        let logical =
+            LogicalArray::new(vec![1, 0, 0, 1, 1, 0, 0, 1], vec![2, 2, 2]).expect("logical");
         let rendered = logical.to_string();
         assert!(rendered.contains("(:, :, 1) ="));
         assert!(rendered.contains("(:, :, 2) ="));

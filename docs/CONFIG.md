@@ -351,10 +351,17 @@ All `RUNMAT_*` variables map onto the above fields. Notable ones:
 - JIT: `RUNMAT_JIT_ENABLE`, `RUNMAT_JIT_DISABLE`, `RUNMAT_JIT_THRESHOLD`, `RUNMAT_JIT_OPT_LEVEL`
 - GC: `RUNMAT_GC_PRESET`, `RUNMAT_GC_YOUNG_SIZE`, `RUNMAT_GC_THREADS`, `RUNMAT_GC_STATS`
 - Plotting: `RUNMAT_PLOT_MODE`, `RUNMAT_PLOT_HEADLESS`, `RUNMAT_PLOT_BACKEND`
+  Jupyter static export fallbacks: `RUNMAT_PLOT_JUPYTER_FORCE_CPU_EXPORT`,
+  `RUNMAT_PLOT_JUPYTER_ALLOW_HEADLESS_GPU`
 - Logging: `RUNMAT_DEBUG`, `RUNMAT_LOG_LEVEL`
 - Kernel: `RUNMAT_KERNEL_IP`, `RUNMAT_KERNEL_KEY`
 
 Boolean parsing accepts `1/0`, `true/false`, `yes/no`, `on/off`, `enable/disable`.
+
+For Jupyter `png`/`base64` output, RunMat prefers a CPU placeholder export in CI and
+headless Linux environments by default to avoid unstable GPU-driver paths. Set
+`RUNMAT_PLOT_JUPYTER_ALLOW_HEADLESS_GPU=1` to force the GPU export path in those
+environments.
 
 ### Acceleration provider (RunMat Accelerate)
 

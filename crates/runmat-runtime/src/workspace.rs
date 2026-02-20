@@ -18,7 +18,7 @@ pub struct WorkspaceResolver {
 
 mod resolver_storage {
     use super::WorkspaceResolver;
-    
+
     pub(super) fn set(resolver: WorkspaceResolver) {
         imp::set(resolver)
     }
