@@ -93,9 +93,6 @@ function ResourceCard({ item }: { item: ResourceItem }) {
     <Link href={item.href || "#"} className="block h-full group">
       <Card className="h-full border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.04] transition-all rounded-lg p-5 cursor-pointer">
         <CardHeader className="space-y-2 p-0">
-          <div className="text-xs uppercase tracking-wider mb-1" style={{ color: color.text }}>
-            {item.type === "guides" ? sourceLabel(item.source) : resourceTypeLabel(item.type)}
-          </div>
           <CardTitle className="text-base font-semibold leading-snug line-clamp-2 text-white">
             {item.title}
           </CardTitle>
@@ -117,12 +114,6 @@ function normalizeType(input: string, allowed: ResourceType[]) {
   if (!Array.isArray(allowed) || allowed.length === 0) return null;
   const t = input.toLowerCase();
   return allowed.includes(t as ResourceType) ? (t as ResourceType) : null;
-}
-
-function sourceLabel(source: ResourceItem["source"]) {
-  if (source === "blog") return "Blog";
-  if (source === "doc") return "Docs";
-  return "Guide";
 }
 
 function typeColor(type: string) {

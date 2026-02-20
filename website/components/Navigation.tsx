@@ -14,7 +14,7 @@ import {
   navigationMenuTriggerStyle,
 } from "@/components/ui/navigation-menu";
 import { Button } from "@/components/ui/button";
-import { Download, Menu, BookOpen, FileText, Scale, Minus } from "lucide-react";
+import { Download, Menu, BookOpen, FileText, Minus } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -29,6 +29,9 @@ export default function Navigation() {
   };
   const handleDocsClick = () => {
     router.push("/docs");
+  };
+  const handleResourcesClick = () => {
+    router.push("/resources");
   };
 
   return (
@@ -45,7 +48,7 @@ export default function Navigation() {
               priority
             />
           </Link>
-          <NavigationMenu>
+          <NavigationMenu viewport={false}>
             <NavigationMenuList>
               <NavigationMenuItem>
                 <NavigationMenuTrigger
@@ -96,16 +99,6 @@ export default function Navigation() {
                         </Link>
                       </NavigationMenuLink>
                     </li>
-                    <li>
-                      <NavigationMenuLink asChild>
-                        <Link
-                          href="/about"
-                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
-                        >
-                          About RunMat
-                        </Link>
-                      </NavigationMenuLink>
-                    </li>
                     <li className="my-1 h-px bg-gray-700/50" />
                     <li>
                       <NavigationMenuLink asChild>
@@ -121,18 +114,67 @@ export default function Navigation() {
                 </NavigationMenuContent>
               </NavigationMenuItem>
               <NavigationMenuItem>
-                <NavigationMenuLink className={navigationMenuTriggerStyle()} asChild>
-                  <Link href="/blog">
-                    Blog
-                  </Link>
-                </NavigationMenuLink>
-              </NavigationMenuItem>
-              <NavigationMenuItem>
-                <NavigationMenuLink className={navigationMenuTriggerStyle()} asChild>
-                  <Link href="/benchmarks">
-                    Benchmarks
-                  </Link>
-                </NavigationMenuLink>
+                <NavigationMenuTrigger
+                  className={navigationMenuTriggerStyle()}
+                  onClick={handleResourcesClick}
+                >
+                  Resources
+                </NavigationMenuTrigger>
+                <NavigationMenuContent className="w-56 rounded-lg border border-gray-700/60 bg-black/95 backdrop-blur-xl shadow-lg">
+                  <ul className="grid gap-1 p-1">
+                    <li>
+                      <NavigationMenuLink asChild>
+                        <Link
+                          href="/blog"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                        >
+                          Blog
+                        </Link>
+                      </NavigationMenuLink>
+                    </li>
+                    <li>
+                      <NavigationMenuLink asChild>
+                        <Link
+                          href="/resources/guides"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                        >
+                          Guides
+                        </Link>
+                      </NavigationMenuLink>
+                    </li>
+                    <li>
+                      <NavigationMenuLink asChild>
+                        <Link
+                          href="/benchmarks"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                        >
+                          Benchmarks
+                        </Link>
+                      </NavigationMenuLink>
+                    </li>
+                    <li>
+                      <NavigationMenuLink asChild>
+                        <Link
+                          href="/about"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                        >
+                          About RunMat
+                        </Link>
+                      </NavigationMenuLink>
+                    </li>
+                    <li className="my-1 h-px bg-gray-700/50" />
+                    <li>
+                      <NavigationMenuLink asChild>
+                        <Link
+                          href="/resources"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                        >
+                          Resource Hub
+                        </Link>
+                      </NavigationMenuLink>
+                    </li>
+                  </ul>
+                </NavigationMenuContent>
               </NavigationMenuItem>
             </NavigationMenuList>
           </NavigationMenu>
@@ -216,12 +258,44 @@ export default function Navigation() {
           <div className="border-b border-border py-4">
             <div className="grid gap-2">
               <Link
-                href="/blog"
+                href="/resources"
                 className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent"
                 onClick={() => setMobileMenuOpen(false)}
               >
                 <FileText className="mr-2 h-4 w-4" />
+                Resources
+              </Link>
+              <Link
+                href="/blog"
+                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <Minus className="mr-2 h-3 w-3 text-muted-foreground" />
                 Blog
+              </Link>
+              <Link
+                href="/resources/guides"
+                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <Minus className="mr-2 h-3 w-3 text-muted-foreground" />
+                Guides
+              </Link>
+              <Link
+                href="/benchmarks"
+                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <Minus className="mr-2 h-3 w-3 text-muted-foreground" />
+                Benchmarks
+              </Link>
+              <Link
+                href="/about"
+                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <Minus className="mr-2 h-3 w-3 text-muted-foreground" />
+                About RunMat
               </Link>
               <Link
                 href="/docs"
@@ -262,14 +336,6 @@ export default function Navigation() {
               >
                 <Minus className="mr-2 h-3 w-3 text-muted-foreground" />
                 Configuration
-              </Link>
-              <Link
-                href="/benchmarks"
-                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                <Scale className="mr-2 h-4 w-4" />
-                Benchmarks
               </Link>
               <Link
                 href="/download"
