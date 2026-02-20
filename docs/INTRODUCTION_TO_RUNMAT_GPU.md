@@ -15,7 +15,7 @@ Today’s reality:
 - Engineers lose time either rewriting code for GPU frameworks or waiting for CPU loops to finish.
 
 
-If you use MATLAB with NVIDIA GPUs today, see our [gpuArray guide and RunMat integration](/blog/matlab-nvidia-gpu).
+If you use MATLAB with NVIDIA GPUs today, see our [MATLAB GPU setup guide](/blog/how-to-use-gpu-in-matlab).
 
 RunMat’s promise is “write MATLAB-syntax code, let the runtime discover and execute GPU-friendly pieces automatically.” To understand how it works, picture a four-stage pipeline.
 
