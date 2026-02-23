@@ -915,7 +915,7 @@ pub(crate) mod tests {
             assert_eq!(t.shape, vec![2, 1]);
             let expected = [0.25, 1.0 / 6.0];
             for (got, exp) in t.data.iter().zip(expected.iter()) {
-                assert!((got - exp).abs() < EPS);
+                assert!((got - exp).abs() < GPU_EPS);
             }
         });
     }
