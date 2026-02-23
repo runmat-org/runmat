@@ -340,7 +340,7 @@ jobs:
 
   wasm-bindings:
     name: wasm + bindings
-    runs-on: ubuntu-latest
+    runs-on: ["self-hosted", "linux", "gpu"]
     env:
       RUST_BACKTRACE: 1
       # opt-level=1 is required for ALL wasm compilation steps in this job:
