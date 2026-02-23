@@ -1035,25 +1035,28 @@ pub(crate) mod tests {
     #[test]
     fn fspecial_gaussian_default_matches_reference() {
         let result = block_on(fspecial_builtin(Value::from("gaussian"), Vec::new())).unwrap();
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
-                const EXPECTED: [f64; 9] = [
-                    0.011_343_736_558_495,
-                    0.083_819_505_802_211,
-                    0.011_343_736_558_495,
-                    0.083_819_505_802_211,
-                    0.619_347_030_557_177,
-                    0.083_819_505_802_211,
-                    0.011_343_736_558_495,
-                    0.083_819_505_802_211,
-                    0.011_343_736_558_495,
-                ];
-                for (idx, value) in t.data.iter().enumerate() {
-                    assert_close(*value, EXPECTED[idx], 1e-12);
-                }
-            }
+        let (tensor, tol) = match result {
+            Value::Tensor(t) => (t, 1e-12),
+            Value::GpuTensor(h) => (
+                crate::builtins::common::test_support::gather(Value::GpuTensor(h)).expect("gather"),
+                1e-5,
+            ),
             other => panic!("expected tensor, got {other:?}"),
+        };
+        assert_eq!(tensor.shape, vec![3, 3]);
+        const EXPECTED: [f64; 9] = [
+            0.011_343_736_558_495,
+            0.083_819_505_802_211,
+            0.011_343_736_558_495,
+            0.083_819_505_802_211,
+            0.619_347_030_557_177,
+            0.083_819_505_802_211,
+            0.011_343_736_558_495,
+            0.083_819_505_802_211,
+            0.011_343_736_558_495,
+        ];
+        for (idx, value) in tensor.data.iter().enumerate() {
+            assert_close(*value, EXPECTED[idx], tol);
         }
     }
 
