@@ -7,9 +7,6 @@ authors:
   - name: "Fin Watterson"
     url: "https://www.linkedin.com/in/finbarrwatterson/"
 readTime: "14 min read"
-resourceType: "blogs"
-collections:
-  - guides
 slug: "how-to-use-gpu-in-matlab"
 tags: ["matlab", "gpu", "nvidia", "gpuArray", "scientific-computing", "parallel-computing-toolbox"]
 keywords: "how to use nvidia gpus for matlab, matlab gpu setup, gpuArray tutorial, matlab parallel computing toolbox, matlab gpu acceleration, MATLAB GPU, gpuArray, NVIDIA GPU, GPU-shaped"
@@ -151,6 +148,14 @@ If you have an NVIDIA GPU and MATLAB code that operates on large arrays, GPU acc
 
 We'll cover prerequisites, your first GPU computation, which functions support GPU, common performance traps, and how to verify everything is working. If you're looking for GPU acceleration that works on any hardware — not just NVIDIA — without manual device management, skip ahead to [the RunMat section](#beyond-nvidia-gpu-acceleration-on-any-hardware).
 
+## TL;DR
+
+- MATLAB GPU acceleration requires the **Parallel Computing Toolbox** and a **CUDA-capable NVIDIA GPU**.
+- The core performance pattern is: **`gpuArray` once -> run vectorized GPU-enabled operations -> `gather` once**.
+- Most slowdowns come from small arrays, too many tiny kernels, and frequent CPU↔GPU transfers.
+- Start with `single` precision unless your numerics require `double`.
+- If you want automatic CPU/GPU routing without manual device management, RunMat is a cross-platform alternative.
+
 ---
 
 ## **Prerequisites: what you need for MATLAB GPU acceleration**
@@ -188,8 +193,6 @@ gpuDevice
 %   ComputeCapability: '8.9'
 %   ...
 ```
-
-<!-- IMAGE NEEDED: Screenshot of gpuDevice output in MATLAB command window showing GPU name, compute capability, and memory -->
 
 If `gpuDeviceCount` returns 0, check these common causes:
 
@@ -410,8 +413,6 @@ fprintf("cpu=%.6f gpu=%.6f\n", double(m_cpu), double(gather(m_gpu)));
 
 If the GPU isn't helping, it's usually one of three things: the problem is too small, the code is forcing boundaries, or the computation is dominated by something other than array math (I/O, parsing, plotting, scalar loops).
 
-<!-- IMAGE NEEDED: Benchmark chart comparing CPU vs GPU performance at different array sizes (10K, 100K, 1M, 10M elements) -->
-
 ---
 
 ## **Beyond NVIDIA: GPU acceleration on any hardware**
@@ -435,8 +436,6 @@ fprintf("m = %.6f\n", double(m));
 ```
 
 Under the hood, RunMat uses *fusion* — combining multiple array operations into one GPU kernel — to reduce overhead and keep the GPU busy. This happens automatically when the computation is contiguous. For more detail, see the [RunMat Fusion guide](/docs/fusion-guide).
-
-<!-- IMAGE NEEDED: Architecture diagram showing MATLAB's data path (CPU -> gpuArray -> CUDA -> NVIDIA only) vs RunMat's path (automatic routing -> wgpu -> Metal/DX12/Vulkan -> any GPU) -->
 
 ### How automatic routing works
 
