@@ -151,7 +151,7 @@ If you have an NVIDIA GPU and MATLAB-style code, you can often get big speedups.
 
 ---
 
-## What NVIDIA GPUs accelerate in MATLAB (and what they don't)
+## **What NVIDIA GPUs accelerate in MATLAB (and what they don't)**
 
 NVIDIA GPUs are throughput machines. They're great at applying the same operations across huge arrays: elementwise transforms (`sin`, `exp`, `.*`, `./`), reductions (`sum`, `mean`, `std`), and big matrix operations. That's why GPU acceleration tends to shine in image pipelines, Monte Carlo simulation, signal processing, and dense linear algebra. Those workloads naturally operate over millions of values.
 
@@ -195,7 +195,7 @@ Once you recognize a GPU-shaped block, the MATLAB path is straightforward. Same 
 
 ---
 
-## The MATLAB way: gpuArray + gather (and why transfers matter)
+## **The MATLAB way: gpuArray + gather (and why transfers matter)**
 
 In MATLAB, GPU acceleration is usually explicit. You convert or allocate arrays as `gpuArray`, call GPU-enabled functions, and then `gather` results back to the CPU when you need them.
 
@@ -236,7 +236,7 @@ If you like MATLAB's syntax but don't want every script to turn into a residency
 
 ---
 
-## RunMat: automatic GPU routing + fusion (same math, less device plumbing)
+## **RunMat: automatic GPU routing + fusion (same math, less device plumbing)**
 
 If you want the shortest path from "I have MATLAB code" to "I'm seeing GPU acceleration," start with a snippet that's obviously GPU-friendly. Think: a big single array, a chain of elementwise math, and a reduction at the end.
 
@@ -254,7 +254,7 @@ Under the hood, RunMat uses *fusion*—combining multiple array operations into 
 
 ---
 
-## RunMat: browser, desktop, and CLI
+## **RunMat: browser, desktop, and CLI**
 
 The same MATLAB-style code and automatic GPU routing run across three environments. How you access the GPU depends on where you run RunMat.
 
@@ -275,11 +275,11 @@ Run scripts from your terminal with **full native GPU access**: `runmat run scri
 
 ---
 
-## Performance traps that erase speedups (MATLAB and RunMat)
+## **Performance traps that erase speedups (MATLAB and RunMat)**
 
 Most disappointing GPU results come from a small set of patterns. You don't have to become a GPU expert to fix them; you just need to recognize a few shapes.
 
-### 1) Too many CPU↔GPU transfers
+### **1) Too many CPU↔GPU transfers**
 
 Transfers are expensive and they often force synchronization. In MATLAB, that's usually an accidental `gather` (or a CPU-only function that forces one). In any runtime, touching intermediate results can pull you back to the host.
 
@@ -295,7 +295,7 @@ m = mean(y_host, 'all');     % now you're on CPU
 
 The shape that wins: keep the hot block contiguous, and only materialize at the end.
 
-### 2) Lots of tiny kernels instead of one big block
+### **2) Lots of tiny kernels instead of one big block**
 
 Every GPU kernel launch has some fixed overhead; thousands of tiny launches can be slower than one big fused launch. If your program looks like "do a tiny thing 10,000 times," you're often paying overhead more than compute. The fix is usually batching.
 
@@ -316,7 +316,7 @@ X = rand(4096, 2000, 'single');
 acc2 = sum(sin(X) .* X + 0.5, 'all');
 ```
 
-### 3) Precision choices (single vs double)
+### **3) Precision choices (single vs double)**
 
 Precision should be driven by two things: what your **calculation actually needs**, and what your **GPU path supports**.
 
@@ -327,7 +327,7 @@ Precision should be driven by two things: what your **calculation actually needs
 **RunMat today.** The current RunMat GPU path (via wgpu and its backends) has formal support for FP32 on device; FP64 math is executed on the CPU. So to use the GPU in RunMat, you need to use single-precision data. Support for double precision on device may evolve as we add or integrate providers that support it.
 **Practical takeaway:** If you’re testing whether GPU acceleration is working, start with `single` unless you have a clear reason to need `double`.
 
-### 4) Hidden sync points (printing, plotting, inspection)
+### **4) Hidden sync points (printing, plotting, inspection)**
 
 Many workflows accidentally benchmark synchronization. Printing intermediate values, plotting inside loops, or repeatedly checking partial results can turn a smooth GPU pipeline into "compute a little, synchronize, download, repeat."
 
@@ -335,7 +335,7 @@ Many workflows accidentally benchmark synchronization. Printing intermediate val
 
 ---
 
-## When vectorization isn't enough: custom CUDA kernels from MATLAB (what changes)
+## **When vectorization isn't enough: custom CUDA kernels from MATLAB (what changes)**
 
 There are real cases where the fastest approach is a custom kernel: unusual indexing, nonstandard ops, or tight loops that don't map onto GPU-enabled built-ins. MATLAB can support deeper CUDA integration paths, and they can deliver great performance.
 
@@ -352,7 +352,7 @@ This is exactly why an automatic approach is compelling. If your workload is alr
 
 ---
 
-## RunMat: where fusion helps most (and what to change if it doesn't)
+## **RunMat: where fusion helps most (and what to change if it doesn't)**
 
 RunMat tends to shine on the same workloads that are naturally GPU-shaped in MATLAB: long chains of array math and reductions, big elementwise pipelines, and batched workloads. The code itself usually doesn't need to change. Same idea as the mental model in the Performance traps section: make the work big, keep it contiguous, avoid mid-pipeline transfers.
 
@@ -376,7 +376,7 @@ If a script is slower than expected, the first thing to do is usually structural
 
 ---
 
-## Quick checks: "am I actually using the GPU?"
+## **Quick checks: "am I actually using the GPU?"**
 
 A fast way to sanity-check GPU execution is to compare the same calculation at a size where GPUs should win (millions of elements). Don't obsess over one run; warm-up and overhead are real.
 
@@ -410,7 +410,7 @@ If the GPU isn't helping, it's usually one of three things. The problem is too s
 
 ---
 
-## Benchmarking: how to measure GPU speed without fooling yourself
+## **Benchmarking: how to measure GPU speed without fooling yourself**
 
 Good benchmarks do a few boring things consistently:
 
@@ -431,7 +431,7 @@ That's not every real workload, but it's a reliable way to see whether the GPU p
 
 ---
 
-## FAQ: common NVIDIA GPU + MATLAB questions
+## **FAQ: common NVIDIA GPU + MATLAB questions**
 
 **Why is my GPU slower than my CPU?**
 
