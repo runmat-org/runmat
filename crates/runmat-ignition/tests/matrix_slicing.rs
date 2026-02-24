@@ -56,3 +56,52 @@ fn basic_matrix_and_slices() {
         panic!("Expected full slice A(:,:)");
     }
 }
+
+#[test]
+fn empty_slice_from_two_arg_colon() {
+    let program = parse("A = [10 20 30]; B = A(1:0); sz = size(B);").unwrap();
+    let hir = lower(&program).unwrap();
+    let vars = execute(&hir).unwrap();
+    if let Value::Tensor(b) = &vars[1] {
+        assert_eq!(b.rows(), 1);
+        assert_eq!(b.cols(), 0);
+        assert!(b.data.is_empty());
+    } else {
+        panic!("Expected tensor for empty slice result");
+    }
+    if let Value::Tensor(sz) = &vars[2] {
+        assert_eq!(sz.rows(), 1);
+        assert_eq!(sz.cols(), 2);
+        assert_eq!(sz.data, vec![1.0, 0.0]);
+    } else {
+        panic!("Expected size vector for empty slice");
+    }
+}
+
+#[test]
+fn empty_slice_rows_and_columns() {
+    let program = parse(
+        "
+        M = reshape(1:12, 3, 4);
+        R = M(1:0, :);
+        C = M(:, 1:0);
+        ",
+    )
+    .unwrap();
+    let hir = lower(&program).unwrap();
+    let vars = execute(&hir).unwrap();
+    if let Value::Tensor(r) = &vars[1] {
+        assert_eq!(r.rows(), 0);
+        assert_eq!(r.cols(), 4);
+        assert!(r.data.is_empty());
+    } else {
+        panic!("Expected tensor for empty row slice");
+    }
+    if let Value::Tensor(c) = &vars[2] {
+        assert_eq!(c.rows(), 3);
+        assert_eq!(c.cols(), 0);
+        assert!(c.data.is_empty());
+    } else {
+        panic!("Expected tensor for empty column slice");
+    }
+}
