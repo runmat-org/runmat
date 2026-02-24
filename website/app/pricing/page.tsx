@@ -67,7 +67,7 @@ const pricingFaqItems: { question: string; answer: string }[] = [
   {
     question: "Who do I contact for Team or Enterprise pricing?",
     answer:
-      "For Team plans and RunMat Enterprise (custom deployment), contact team@runmat.com or use the Contact Sales option on this page.",
+      "For Team plans and RunMat Enterprise (custom deployment), use the Contact Sales option on this page or visit our contact page.",
   },
 ];
 
@@ -171,7 +171,14 @@ export default function PricingPage() {
                   </ul>
                 </div>
                 <Button asChild variant="outline" className="w-full">
-                  <Link href="mailto:team@runmat.com?subject=RunMat%20Enterprise%20Inquiry">Contact Sales</Link>
+                  <Link
+                    href="/contact?type=enterprise"
+                    data-ph-capture-attribute-destination="contact"
+                    data-ph-capture-attribute-source="pricing-enterprise"
+                    data-ph-capture-attribute-cta="contact-sales"
+                  >
+                    Contact Sales
+                  </Link>
                 </Button>
               </CardContent>
             </Card>
