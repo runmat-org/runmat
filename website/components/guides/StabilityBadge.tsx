@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import anime from "animejs";
+import { motion } from "motion/react";
 import { cn } from "@/lib/utils";
 import type { StabilityStatus } from "./EigenSolver";
 
@@ -14,42 +13,26 @@ const STATUS_CONFIG: Record<
   marginal: { label: "MARGINALLY STABLE", bg: "#eab308" },
 };
 
-const ANIM_DURATION = 300;
-const EASING = "easeOutQuad";
-
 export interface StabilityBadgeProps {
   status: StabilityStatus;
   className?: string;
 }
 
 export function StabilityBadge({ status, className }: StabilityBadgeProps) {
-  const elRef = useRef<HTMLSpanElement>(null);
   const { label, bg } = STATUS_CONFIG[status];
 
-  useEffect(() => {
-    const el = elRef.current;
-    if (!el) return;
-    const anim = anime({
-      targets: el,
-      backgroundColor: bg,
-      duration: ANIM_DURATION,
-      easing: EASING,
-    });
-    return () => anim.pause();
-  }, [bg]);
-
   return (
-    <span
-      ref={elRef}
+    <motion.span
       className={cn(
-        "inline-flex items-center rounded-md border border-transparent px-2 py-1 text-xs font-medium text-white transition-[color,box-shadow]",
+        "inline-flex items-center rounded-md border border-transparent px-2 py-1 text-xs font-medium text-white",
         className
       )}
-      style={{ backgroundColor: bg }}
+      animate={{ backgroundColor: bg }}
+      transition={{ duration: 0.3, ease: "easeOut" }}
       role="status"
       aria-live="polite"
     >
       {label}
-    </span>
+    </motion.span>
   );
 }

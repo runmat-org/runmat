@@ -4,7 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { MatrixInput } from "./MatrixInput";
 import { PresetSelector } from "./PresetSelector";
-import { ComplexPlane } from "./ComplexPlane";
+import { ComplexPlaneMotion as ComplexPlane } from "./ComplexPlaneMotion";
 import { StabilityBadge } from "./StabilityBadge";
 import { EigenvalueLabels } from "./EigenvalueLabels";
 import { RunInRunMatButton } from "./RunInRunMatButton";
