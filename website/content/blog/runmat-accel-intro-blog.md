@@ -119,7 +119,14 @@ jsonLd:
             text: "Yes. The RunMat planner chooses CPU JIT/BLAS or GPU per step automatically. You do not need to write separate code paths."
 ---
 
-### Why a faster way to do math
+## TL;DR
+
+- **RunMat Accelerate** automatically fuses MATLAB-style array math into optimized CPU and GPU kernels — no CUDA, no device flags, no code changes.
+- On a 4K image pipeline benchmark (Apple M2 Max), RunMat is up to 10× faster than NumPy and up to 3.8× faster than PyTorch.
+- Works on any GPU — NVIDIA, AMD, Apple Silicon, Intel — via native APIs (Metal, DirectX 12, Vulkan).
+- One code path: write math, the runtime decides what runs where.
+
+## Why a faster way to do math
 
 Your mathematical code is elegant. It's also 50x slower than it should be. You know GPUs could fix this, but the path there is absurd: rewrite everything in CUDA, manage device memory explicitly, accept vendor lock-in, or pay thousands per seat for accelerators that still require code changes. The gap between "math as we think it" and "math as GPUs want it" has become so normalized that we've forgotten to question why  (A \- mean(A)) / std(A) should require anything more than writing exactly that. 
 
@@ -127,7 +134,7 @@ RunMat eliminates this gap entirely. You write your math in clean, readable MATL
 
 It runs on whatever GPU you have — NVIDIA, AMD, Apple Silicon, Intel — through native APIs (Metal / DirectX 12 / Vulkan). No device flags. No vendor lock-in. No rewrites.
 
-### The performance tradeoff (until now)
+## The performance tradeoff (until now)
 
 Running math fast on a machine means setting up the machine to run a sequence of mathematical operations.
 
@@ -144,7 +151,7 @@ If you want to write CUDA/GPU code yourself, you might write a marginally faster
 
 If you want to focus on the math, our promise is: you write math, and we make it fly.
 
-#### What the best path looks like
+### What the best path looks like
 
 Let's see RunMat in action with a common problem: processing high-resolution images in batches. Whether you're analyzing satellite imagery, medical scans, or camera sensor data, the pipeline is always the same—normalize the data, apply corrections, and enhance the signal. The math is straightforward. 
 
@@ -175,7 +182,7 @@ mse = mean((out - imgs).^2, 'all');  % Reduction stays on GPU until...
 fprintf('Done. MSE=%.6e\n', mse);    % Only here does data return to CPU for printing
 ```
 
-### 4K image pipeline: real benchmark numbers
+## 4K image pipeline: real benchmark numbers
 
 
 
@@ -209,7 +216,7 @@ Run this benchmark yourself: [4K image pipeline script](https://github.com/runma
 
 See your workload accelerated: [Getting Started guide](/docs/getting-started)
 
-### What RunMat does automatically:
+### What RunMat does automatically
 
 1. Detects a GPU and selects the backend automatically (Metal / DirectX 12 / Vulkan). Falls back to CPU when none is available.  
 2. Plans each operation to the best engine (CPU JIT, BLAS, or GPU) based on array sizes and op type.  
@@ -258,7 +265,7 @@ flowchart TD
 	
 ```
 
-### The complexity you're avoiding
+## The complexity you're avoiding
 
 To understand what RunMat eliminates from your workflow, let's look at what GPU acceleration currently requires. PyTorch is the de facto standard for GPU computing in machine learning and scientific computing—it's mature, well-optimized, and widely used. If you want GPU acceleration today, PyTorch is often your best option. 
 
@@ -324,7 +331,7 @@ Look at what those extra lines are doing:
 
 This isn't a criticism of PyTorch—it's an excellent framework that makes GPU programming accessible to millions of developers. But it still requires you to think about hardware details when you want to think about mathematics. RunMat removes that cognitive overhead entirely.
 
-#### Cross-ecosystem comparison at a glance
+### Cross-ecosystem comparison at a glance
 
 A side-by-side of RunMat versus MATLAB+PCT, PyTorch, and Julia+CUDA.jl on six dimensions that matter for numerical computing: code surface, placement (CPU/GPU), fusion, residency, transfers, and learning curve. Scope: dense arrays and scripting—not full ML training stacks. For a guide to MATLAB's gpuArray and how RunMat fits in, see [MATLAB on NVIDIA GPUs](/blog/matlab-nvidia-gpu).
 
@@ -337,13 +344,13 @@ A side-by-side of RunMat versus MATLAB+PCT, PyTorch, and Julia+CUDA.jl on six di
 | **Host↔Device transfers**                                | **Minimized automatically**; device map amortizes copies       | Developer decides when to copy                  | Developer decides; easy to accidentally sync                 | Developer decides                                                 |
 | **Learning curve**                                       | **Low** (keep existing scripts)                                | Medium (GPU types, residency patterns)          | Medium (tensor/device/dtype discipline; optional Triton)     | Medium (GPU array ecosystem)                                      |
 
-#### What you can run today with RunMat
+### What you can run today with RunMat
 
 RunMat covers the core numerical stack so you can keep MATLAB-style code and use the GPU when it helps. Elementwise chains, reductions, filters, and matmul epilogues are fused on GPU; large linear-algebra ops call optimized BLAS/LAPACK on CPU. 
 
 Full list and examples live in the [`benchmarks/`](https://github.com/runmat-org/runmat/tree/main/benchmarks) library.
 
-#### Why MATLAB syntax, not a new language
+### Why MATLAB syntax, not a new language
 
 MATLAB is commonly taught in engineering programs, so many engineers already think in MATLAB-style array math. Keeping that surface lowers switching cost and preserves existing work.
 
@@ -357,13 +364,13 @@ MATLAB is commonly taught in engineering programs, so many engineers already thi
 
 * **Separation of concerns.** The language stays stable; performance comes from the runtime (JIT, Accelerate, Fusion, WGPU). No API churn for users.
 
-#### Try for yourself
+### Try for yourself
 
 ***Download RunMat:** [Download](/download)
 
 * **See benchmarks and examples:** [Benchmarks](/benchmarks)
 
-#### FAQ
+## FAQ
 
 **What is RunMat?**  
 An open-source MATLAB-compatible runtime focused on fast, portable numerical computing. It keeps MATLAB-style syntax and accelerates code on GPU when available.
