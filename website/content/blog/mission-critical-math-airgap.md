@@ -104,19 +104,28 @@ While the rest of the software world moved to the cloud—gaining real-time coll
 
 We don't believe security should require sacrificing capability. That's why we built RunMat to be airgap-native from day one.
 
+## TL;DR
+
+- **RunMat** is a single static binary that runs MATLAB-compatible code entirely offline — no license server, no internet, no dependencies.
+- **RunMat Cloud** deploys as one server binary with local Postgres; licensing uses offline signed payloads.
+- GPU acceleration works via native APIs (Metal, Vulkan, DX12) with no CUDA toolkit required.
+- Built-in structured logging, audit trails, SSO/SCIM, and RBAC align with ITAR and NIST compliance frameworks.
+- Real-time collaboration, AI-assisted analysis (via local LLM endpoints), and automatic versioning all work fully offline.
+
 ## The license server problem
 
+RunMat has zero licensing infrastructure — no daemon, no host ID, no dongle. Copy the binary onto an approved drive, carry it in, and run your code.
 If you've administered a scientific computing environment inside a secure facility, you know the FlexLM ritual. You need a dedicated machine to host the license daemon. You generate a host ID, request a license file from the vendor -- from a different network -- and carry it across the gap on approved media. You configure the daemon, test it, and pray it stays up.
 
 If the license server goes down during a test campaign, your analysts can't work. If the license expires, you're repeating the whole process. If the hardware changes, you're starting from scratch. The license server is a single point of failure in an environment where failure is not an option.
-
-RunMat eliminates this entirely. The open-source runtime has **zero licensing infrastructure**. There is no daemon, no host ID, no dongle. You copy the binary onto an approved drive, carry it in, and run your code.
 
 For teams that need the full RunMat Cloud platform (collaboration, versioning, AI integration), licensing uses **offline signed payloads** -- a small file you carry in on the same media as the binary. The server verifies the signature locally and applies the policy. Renewal means replacing one file. No network calls. No phone-home. Ever.
 
 And if you build RunMat from source, telemetry is off by default. There is nothing to disable, nothing to firewall. The binary makes zero network requests unless you explicitly configure it to.
 
 ## Two binaries, full platform
+
+Two binaries. The open-source runtime is a single static binary; RunMat Cloud is a single server binary paired with Postgres. Copy them onto approved media and you have a complete platform.
 
 Getting software into an airgapped facility means walking it in. Complex installations are the enemy.
 
@@ -125,7 +134,6 @@ Try setting up a Python scientific computing environment offline. You need NumPy
 MATLAB is simpler to install but comes with its own weight: a multi-gigabyte installer, a license server to configure, and toolbox add-ons that each require their own licenses.
 
 RunMat takes a different approach.
-
 **The open-source runtime** is a single static binary, free to use. It contains the full execution engine, the standard library, the LSP language server, and the Jupyter kernel. It has zero external dependencies. Copy it to a machine and it runs. Startup takes 5 milliseconds. This is the engine for individual analysis and scripting -- download it from [GitHub](https://github.com/runmat-org/runmat), carry it in, and go.
 
 **RunMat Cloud** is the commercial platform for teams, also delivered as a single server binary. Pair it with a Postgres instance and local disk for blob storage and you have a complete collaboration environment: multi-user real-time updates, a filesystem with automatic versioning and snapshots, LLM integration, SSO with your on-prem identity provider, role-based access control, and a real-time signal bus. All of it runs entirely offline.
@@ -184,9 +192,7 @@ With RunMat: the runtime starts in 5 milliseconds. The FFT runs on the local GPU
 
 ## Compliance-ready by design
 
-Deploying software in a defense or intelligence environment isn't just about making it work offline. It's about satisfying security reviewers, auditors, and compliance frameworks.
-
-RunMat was designed with this in mind.
+RunMat was designed to satisfy security reviewers, auditors, and compliance frameworks — not just to work offline. Deploying in a defense or intelligence environment demands both.
 
 **Logging and redaction.** The server emits structured JSON logs with a centralized redaction engine. Credentials, file contents, API keys, prompts, and tokens are never logged. Redaction rules are maintained in a single location for easy compliance review. The logging profile is aligned with ITAR and NIST conventions: every mutating operation records the actor, target resource, operation type, and outcome.
 

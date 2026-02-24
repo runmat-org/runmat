@@ -11,7 +11,7 @@ readTime: "8 min read"
 slug: "rust-llm-training-distribution"
 tags: ["Rust", "LLM", "MATLAB", "RunMat", "Programming Languages"]
 keywords: "Rust LLM code generation, training distribution, programming languages, RunMat, scientific computing"
-excerpt: "Training data quality shapes LLM outputs. Rust’s tight distribution and strong compiler feedback make it uniquely suited for reliable model-assisted coding."
+excerpt: "Training data quality shapes LLM outputs. Rust's tight distribution and strong compiler feedback make it uniquely suited for reliable model-assisted coding."
 image: "https://runmat.com/rust-blog-image.png"
 imageAlt: "Why Rust for LLM code gen"
 ogType: "article"
@@ -86,69 +86,74 @@ jsonLd:
 
 ![Why Rust](/rust-blog-image.png)
 
-## 📚 Training distribution: why the corpus matters
+## TL;DR
 
-I’ve been programming for decades and have learned 20+ different languages, varying from C/C++ to Verilog/VHDL, Terraform, and TypeScript. Despite their surface differences, most languages share a common set of core building blocks: loops, functions, variables, and conditionals. Once you’ve learned a few, the patterns are recognizable across all of them. 
+- Rust's public code corpus is more uniform than TypeScript's, producing more reliable LLM-generated code.
+- The compiler's strict type system and borrow checker give LLMs an immediate feedback loop that prunes bad outputs.
+- Clippy and the linting ecosystem provide real-time signals that let models self-correct within seconds.
+- Using Rust with LLM-assisted development, RunMat reached full MATLAB grammar and core semantics parity in weeks — a task that would traditionally take 3–5 engineers multiple years.
+
+## Why does training data quality matter for LLM code generation?
+
+LLMs produce more reliable code when the training corpus for a language is uniform in style and quality. Rust's ecosystem enforces this uniformity through cargo, rustfmt, Clippy, and a culture of CI — making its training distribution tighter than TypeScript's.
+
+I've been programming for decades and have learned 20+ different languages, varying from C/C++ to Verilog/VHDL, Terraform, and TypeScript. Despite their surface differences, most languages share a common set of core building blocks: loops, functions, variables, and conditionals. Once you've learned a few, the patterns are recognizable across all of them. 
 
 Large language models learn in much the same way. They encode the underlying concepts within programming well. A for loop looks different in Python than in Rust, but the underlying idea is consistent, and models encode that reliably. 
 
-Where models struggle is at the last mile of programming, where languages diverge. Style, quality, and correctness vary widely. Models don’t distinguish between good and bad practice; they only reflect the distribution they’ve seen. If that distribution is noisy, as it often is in ecosystems with a lot of inconsistent code, the outputs will be noisy as well. If the distribution is tighter, the outputs are much more reliable.
+Where models struggle is at the last mile of programming, where languages diverge. Style, quality, and correctness vary widely. Models don't distinguish between good and bad practice; they only reflect the distribution they've seen. If that distribution is noisy, as it often is in ecosystems with a lot of inconsistent code, the outputs will be noisy as well. If the distribution is tighter, the outputs are much more reliable.
 
 A couple of weeks ago, I started the most ambitious coding experiment of my career so far. I wanted to push these models to their edge and see what they are really capable of today. Building RunMat — a MATLAB-compatible runtime — meant building a brand new compiler and runtime from scratch. For a project of this kind, the practical choices were Go, C/C++, or Rust. I chose Rust not only because it was well-suited to building a runtime, but also because I wanted to test a hypothesis: given that much of our work at Dystr had recently been in TypeScript, would LLMs prove more productive in Rust than in TypeScript? And because a compiler/runtime has such a large implementation surface, it offered an unusually good way to evaluate that productivity delta.
 
 ---
 
-## 🔑 Three reasons Rust improves model-written code
+## What makes Rust better for LLM-generated code?
 
 Three factors made Rust stand out for building RunMat in an “LLM-as-the-primary-coder” workflow: the quality of its training distribution, the strength of its type system, and the resulting strength of its linting system.
 
 ### Training distribution
 
-TypeScript is one of the most popular languages taught in coding bootcamps, which has made it a dominant presence in public repositories. Rust’s public corpus tends to be more uniform: cargo project layout, rustfmt, Clippy, and a culture of tests and CI narrow the examples models see. TypeScript’s corpus is larger and more heterogeneous, so style and quality vary more widely. Tighter distributions generally yield more reliable, idiomatic generations.
+TypeScript is one of the most popular languages taught in coding bootcamps, which has made it a dominant presence in public repositories. Rust's public corpus tends to be more uniform: cargo project layout, rustfmt, Clippy, and a culture of tests and CI narrow the examples models see. TypeScript's corpus is larger and more heterogeneous, so style and quality vary more widely. Tighter distributions generally yield more reliable, idiomatic generations.
 
 ### Type system and feedback
 
-Rust’s compiler adds another layer of advantage. Its strong typing and borrow checker produce detailed, structured errors at compile time, catching problems before code ever runs. For humans, this is valuable; for LLMs, it’s an immediate feedback loop. Each generated snippet is validated against strict rules, which helps models converge faster on usable solutions. By contrast, TypeScript’s permissive type system leaves more room for ambiguous or deferred errors, giving models less guidance during generation. For LLM workflows, this acts as a fast generate-compile-fix loop that quickly prunes bad branches.
+Rust's compiler adds another layer of advantage. Its strong typing and borrow checker produce detailed, structured errors at compile time, catching problems before code ever runs. For humans, this is valuable; for LLMs, it's an immediate feedback loop. Each generated snippet is validated against strict rules, which helps models converge faster on usable solutions. By contrast, TypeScript's permissive type system leaves more room for ambiguous or deferred errors, giving models less guidance during generation. For LLM workflows, this acts as a fast generate-compile-fix loop that quickly prunes bad branches.
 
 ### Linting system and tooling
 
-Rust’s typing also powers a strong linting ecosystem that provides immediate feedback after each edit, often before the code is even run. Problems that are notoriously hard to debug in other languages, such as tricky memory patterns, appear instantly as red underlines. In practice, using Cursor made this especially effective: the linter’s signals showed up straight away, allowing the model to fix issues within seconds before the broader task context was lost. Tools like Clippy add further refinements, making the feedback loop even tighter. In practice, this provides the model with immediate, localized signals, closing the loop in seconds.
+Rust's typing also powers a strong linting ecosystem that provides immediate feedback after each edit, often before the code is even run. Problems that are notoriously hard to debug in other languages, such as tricky memory patterns, appear instantly as red underlines. In practice, using Cursor made this especially effective: the linter's signals showed up straight away, allowing the model to fix issues within seconds before the broader task context was lost. Tools like Clippy add further refinements, making the feedback loop even tighter. In practice, this provides the model with immediate, localized signals, closing the loop in seconds.
 
 Together, these three factors: higher-quality training data, stronger compiler checks, and immediate linting feedback made Rust uniquely well-suited for testing how far LLMs can be pushed in a serious project. 
 
 
 
-## 📊 Productivity over popularity
+## Does Rust's smaller developer pool matter in the age of LLMs?
 
- A frequent reason organizations choose TypeScript over Rust is the availability of a larger hiring pool. TypeScript is one of the most widely taught and adopted languages, while Rust expertise is less common. On paper, the larger pool appears to be the safer choice. 
- 
- But in the context of LLM-assisted development, the calculation shifts. If models generate more reliable Rust code because of the quality of its training distribution and the strictness of its compiler, the barrier to finding Rust specialists is lower than it once was. Developers can lean on models for a greater share of the routine work, and the compiler provides strong guardrails for learning the rest. 
+Less than it used to. When LLMs generate more reliable Rust code and the compiler provides strong guardrails, the barrier to productive Rust development drops significantly.
+
+A frequent reason organizations choose TypeScript over Rust is the availability of a larger hiring pool. TypeScript is one of the most widely taught and adopted languages, while Rust expertise is less common. On paper, the larger pool appears to be the safer choice. But in the context of LLM-assisted development, the calculation shifts. If models generate more reliable Rust code because of the quality of its training distribution and the strictness of its compiler, the barrier to finding Rust specialists is lower than it once was. Developers can lean on models for a greater share of the routine work, and the compiler provides strong guardrails for learning the rest. 
  
  This does not remove the difficulty of Rust as a language, but it does change the tradeoff. The choice is no longer just about how many developers already know a language, but also how well that language aligns with model capabilities. In that light, the “smaller pool” argument against Rust carries less weight than it did even a few years ago. 
 
 ---
 
-## 🏗️ Engineering benefits beyond the LLM fit
+## What engineering benefits does Rust offer beyond LLM fit?
 
- Beyond its advantages in training distribution and compiler feedback, Rust offered practical benefits that supported the development of RunMat. 
+Beyond its advantages in training distribution and compiler feedback, Rust offered practical benefits that supported the development of RunMat. 
  
- - Cross-platform support. With Cranelift as a JIT backend, targeting x86-64 and AArch64 is straightforward. For WebAssembly targets (e.g., browsers), JIT isn’t available; we run the interpreter or AOT-compiled paths instead. The plotting stack still runs via WGPU/WebGPU. 
+ - Cross-platform support. With Cranelift as a JIT backend, targeting x86-64 and AArch64 is straightforward. For WebAssembly targets (e.g., browsers), JIT isn't available; we run the interpreter or AOT-compiled paths instead. The plotting stack still runs via WGPU/WebGPU. 
  
-- Memory management. Rust’s ownership model eliminated many of the subtle crashes common in C and C++ runtimes, while still allowing fine-grained control needed for numerical workloads. 
+- Memory management. Rust's ownership model eliminated many of the subtle crashes common in C and C++ runtimes, while still allowing fine-grained control needed for numerical workloads. 
  - Simple + powerful GPU abstraction. Through WGPU, RunMat gained a clean abstraction over vendor-specific graphics APIs, enabling GPU acceleration and plotting without fragmented, device-specific code. 
- - Modular design. Rust’s crate ecosystem encouraged a clean separation between the lexer, parser, interpreter, JIT, and runtime components, which improved testability and lowered the barrier for contributors.
+ - Modular design. Rust's crate ecosystem encouraged a clean separation between the lexer, parser, interpreter, JIT, and runtime components, which improved testability and lowered the barrier for contributors.
 
 These were not the primary reasons for choosing Rust, but they made the decision easier. Once the project was underway, they reinforced the sense that Rust was not only a better fit for LLM-assisted coding but also a strong foundation for building a modern scientific runtime. 
 
 ---
 
-## 🚀 Performance at a glance
+## How fast is RunMat compared to GNU Octave?
 
-Direct performance comparisons to MATLAB are not permitted by their license (R2025a, §3.4 prohibits "benchmarking" or publishing performance results), which is at odds with the principles of open science and engineering practice. Independent sources suggest startup times in the range of 2–10 seconds, driven by factors like JVM loading and large runtime initialization, but those numbers can only be cited second-hand. 
-
-Instead, we benchmarked RunMat against GNU Octave, the open-source alternative. Octave is primarily written in C++, with parts in C and Fortran, which makes it a closer architectural peer to MATLAB than most modern languages and therefore a helpful benchmark. 
-
-The results: 
+We benchmarked RunMat against GNU Octave, the open-source alternative. Octave is primarily written in C++, with parts in C and Fortran, which makes it a closer architectural peer to MATLAB than most modern languages and therefore a helpful benchmark. (Direct performance comparisons to MATLAB are not permitted by their license; we cite Octave only.) The results: 
 - Startup: 914 ms in Octave vs. 5 ms in RunMat (183× faster) 
 - Matrix operations: 822 ms in Octave vs. 5 ms in RunMat (164× faster) 
 - Control flow: 876 ms in Octave vs. 5.7 ms in RunMat (154× faster) 
@@ -156,7 +161,7 @@ The results:
 
 Methods: Apple M2 Max (12-core, 32 GB), Octave 9.4.0; one warmup run and three timed runs per script. Wall-clock time was measured externally; scripts are in `benchmarks/` and the YAML report is written to `benchmarks/results/`.
 
-Note: Results reflect this hardware and software stack and Octave’s defaults. Different BLAS backends or settings will change the numbers.
+Note: Results reflect this hardware and software stack and Octave's defaults. Different BLAS backends or settings will change the numbers.
 
 These benchmarks highlight both the efficiency of the runtime and the advantage of a clean, modern architecture. All benchmark scripts are open and can be reviewed or reproduced in the [benchmarks directory](https://github.com/runmat-org/runmat/tree/main/benchmarks). 
 
@@ -169,11 +174,9 @@ By traditional estimates, achieving full MATLAB language grammar and core semant
 
 ---
 
-## 🔤 Language matters less; orchestration matters more 
+## Why does orchestration matter more than language choice?
 
-The biggest surprise was how the workflow itself changed. I wasn’t writing code in the way I had for the last 25 years. I was designing architectures, shaping test cases, curating context, and reviewing thousands of small changes generated by the model. The role shifted from writing every line to steering, supervising, and iterating — a fundamentally different way of building software. 
-
-Language choice is no longer solely about runtime speed or the availability of developers. It is also about how well a language’s ecosystem aligns with the strengths and limitations of large language models. For me, Rust provided that alignment, and it turned what would once have been a multi-year effort into a matter of weeks. 
+Language choice is no longer solely about runtime speed or the availability of developers — it's also about how well a language's ecosystem aligns with the strengths and limitations of large language models. The biggest surprise was how the workflow itself changed. I wasn't writing code in the way I had for the last 25 years. I was designing architectures, shaping test cases, curating context, and reviewing thousands of small changes generated by the model. The role shifted from writing every line to steering, supervising, and iterating — a fundamentally different way of building software. For me, Rust provided that alignment, and it turned what would once have been a multi-year effort into a matter of weeks.
 
 We have a few more updates coming for RunMat over the next few months, including a world-class plotting system, a clean core standard library, and a modern package system and builder. Each is an opportunity to continue experimenting with the edge of what model-driven development can achieve. 
 
