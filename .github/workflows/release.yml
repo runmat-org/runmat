@@ -538,6 +538,7 @@ jobs:
       - name: Run wasm headless tests
         env:
           RUNMAT_CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+          WASM_BINDGEN_TEST_TIMEOUT: "300"
         run: scripts/test-wasm-headless.sh
 
       - name: Build bindings package

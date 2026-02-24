@@ -142,6 +142,22 @@ jobs:
         shell: pwsh
         run: cargo clippy --all-targets --all-features -- -D warnings
 
+      # Verify the binary starts without a stack overflow before running the
+      # full suite. This catches regressions where the main-thread stack is
+      # exhausted by Clap's parser (common on Windows with large CLI structs).
+      # Placed before cargo-check so the most fundamental failure fails fast.
+      - name: Binary smoke test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cargo build -p runmat
+          & target\debug\runmat.exe --help | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "runmat --help failed (exit $LASTEXITCODE) - possible stack overflow"
+            exit 1
+          }
+          Write-Host "Smoke test passed"  
+
       - name: Check (Unix)
         if: runner.os != 'Windows'
         run: cargo check --all-targets --all-features
@@ -324,9 +340,16 @@ jobs:
 
   wasm-bindings:
     name: wasm + bindings
-    runs-on: ubuntu-latest
+    runs-on: ["self-hosted", "linux", "gpu"]
     env:
       RUST_BACKTRACE: 1
+      # opt-level=1 is required for ALL wasm compilation steps in this job:
+      # at opt-level=0 the test binary exceeds the wasm spec limit on locals
+      # per function, which causes wasm-bindgen-test-runner (or Chrome) to
+      # fail/hang. Setting it here ensures both the registry-generation build
+      # step and the wasm-pack test step share the same cache key and both
+      # produce spec-compliant binaries.
+      RUSTFLAGS: "-Copt-level=1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -348,7 +371,7 @@ jobs:
         run: rustup target add wasm32-unknown-unknown
 
       - name: Install wasm-pack
-        run: curl https://drager.github.io/wasm-pack/installer/init.sh -sSf | bash
+        run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | bash
 
       - name: Install system dependencies for headless Chrome
         run: |
@@ -379,6 +402,10 @@ jobs:
       - name: Run wasm headless tests
         env:
           RUNMAT_CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+          WASM_BINDGEN_TEST_TIMEOUT: "300"
+          # Explicitly absent: RUNMAT_GENERATE_WASM_REGISTRY must NOT be set here;
+          # the script sets it only for the regeneration cargo check and unsets it
+          # before wasm-pack test to prevent an infinite rebuild loop.
         run: scripts/test-wasm-headless.sh
 
       - name: Build bindings package

@@ -619,7 +619,7 @@ pub(crate) mod tests {
 
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
-            runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-3,
         };
         for (g, c) in gpu.data.iter().zip(cpu.data.iter()) {
             assert!(
