@@ -81,6 +81,9 @@ Interactive commands inside the REPL:
 - `.stats`: execution statistics (total, JIT vs interpreter, avg time)
 - `.gc`: GC statistics summary
 
+Display note:
+N-D numeric/logical/complex arrays are shown page-by-page (for example, `A(:, :, 1)`) for manageable sizes. Very large N-D arrays fall back to compact shape summaries.
+
 Example:
 ```text
 runmat> x = 1 + 2

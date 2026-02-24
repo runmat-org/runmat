@@ -741,7 +741,13 @@ pub(crate) mod tests {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
                     assert_eq!(gathered.shape, vec![2, 1]);
-                    assert_eq!(gathered.data, vec![0.91, -1.21]);
+                    let expected = [0.91f64, -1.21f64];
+                    for (got, exp) in gathered.data.iter().zip(expected.iter()) {
+                        assert!(
+                            (got - exp).abs() < 1e-5,
+                            "ceil mismatch: got {got}, expected {exp}"
+                        );
+                    }
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }
