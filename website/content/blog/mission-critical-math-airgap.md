@@ -106,8 +106,8 @@ We don't believe security should require sacrificing capability. That's why we b
 
 ## TL;DR
 
-- **RunMat** is a single static binary that runs MATLAB-compatible code entirely offline — no license server, no internet, no dependencies.
-- **RunMat Cloud** deploys as one server binary with local Postgres; licensing uses offline signed payloads.
+- **RunMat** (open-source runtime) is a single static binary that runs MATLAB-compatible code entirely offline — no license server, no internet, no dependencies. Free to download and use.
+- **RunMat Enterprise** (self-hosted) deploys as one server binary with local Postgres; licensing uses offline signed payloads. [Contact Sales](mailto:team@runmat.com) for access.
 - GPU acceleration works via native APIs (Metal, Vulkan, DX12) with no CUDA toolkit required.
 - Built-in structured logging, audit trails, SSO/SCIM, and RBAC align with ITAR and NIST compliance frameworks.
 - Real-time collaboration, AI-assisted analysis (via local LLM endpoints), and automatic versioning all work fully offline.
@@ -119,13 +119,13 @@ If you've administered a scientific computing environment inside a secure facili
 
 If the license server goes down during a test campaign, your analysts can't work. If the license expires, you're repeating the whole process. If the hardware changes, you're starting from scratch. The license server is a single point of failure in an environment where failure is not an option.
 
-For teams that need the full RunMat Cloud platform (collaboration, versioning, AI integration), licensing uses **offline signed payloads** -- a small file you carry in on the same media as the binary. The server verifies the signature locally and applies the policy. Renewal means replacing one file. No network calls. No phone-home. Ever.
+For teams that need the full platform — collaboration, versioning, AI integration — **RunMat Enterprise** is the self-hosted product designed for exactly this environment. Licensing uses **offline signed payloads** -- a small file you carry in on the same media as the binary. The server verifies the signature locally and applies the policy. Renewal means replacing one file. No network calls. No phone-home. Ever.
 
 And if you build RunMat from source, telemetry is off by default. There is nothing to disable, nothing to firewall. The binary makes zero network requests unless you explicitly configure it to.
 
 ## Two binaries, full platform
 
-Two binaries. The open-source runtime is a single static binary; RunMat Cloud is a single server binary paired with Postgres. Copy them onto approved media and you have a complete platform.
+Two binaries. The open-source runtime is a single static binary, free to use. RunMat Enterprise is a single server binary paired with Postgres, available for self-hosted deployment. Copy them onto approved media and you have a complete platform.
 
 Getting software into an airgapped facility means walking it in. Complex installations are the enemy.
 
@@ -136,7 +136,7 @@ MATLAB is simpler to install but comes with its own weight: a multi-gigabyte ins
 RunMat takes a different approach.
 **The open-source runtime** is a single static binary, free to use. It contains the full execution engine, the standard library, the LSP language server, and the Jupyter kernel. It has zero external dependencies. Copy it to a machine and it runs. Startup takes 5 milliseconds. This is the engine for individual analysis and scripting -- download it from [GitHub](https://github.com/runmat-org/runmat), carry it in, and go.
 
-**RunMat Cloud** is the commercial platform for teams, also delivered as a single server binary. Pair it with a Postgres instance and local disk for blob storage and you have a complete collaboration environment: multi-user real-time updates, a filesystem with automatic versioning and snapshots, LLM integration, SSO with your on-prem identity provider, role-based access control, and a real-time signal bus. All of it runs entirely offline.
+**RunMat Enterprise** is the self-hosted platform for teams, delivered as a single server binary. Pair it with a Postgres instance and local disk for blob storage and you have a complete collaboration environment: multi-user real-time updates, a filesystem with automatic versioning and snapshots, LLM integration, SSO with your on-prem identity provider, role-based access control, and a real-time signal bus. All of it runs entirely offline. RunMat Enterprise is available through direct engagement — [contact sales](mailto:team@runmat.com) to discuss deployment for your facility.
 
 Configuration for both is a local TOML file or environment variables. There is no cloud config service to reach. You can provision a hundred machines with standard configuration management tools and never worry about network connectivity.
 
@@ -160,7 +160,7 @@ flowchart TD
         R1[Analyst Laptop]
         R2[RunMat Binary - Free, OSS]
         R3[Local GPU]
-        R4[RunMat Cloud Server]
+        R4[RunMat Enterprise]
         R5[Local Postgres and Disk]
         R6[Local LLM Endpoint]
         R1 --> R2
@@ -198,7 +198,7 @@ RunMat was designed to satisfy security reviewers, auditors, and compliance fram
 
 **Audit records.** Every filesystem write and membership change emits a structured audit record with actor identity, action, resource identifier, and timestamp. These records can be routed to an immutable audit sink with chain-of-custody controls.
 
-**Identity and access.** RunMat Cloud supports SSO with on-premises identity providers via SAML or OIDC -- Keycloak, ADFS, or whatever your facility runs. SCIM provisioning handles user lifecycle and group-to-role mapping. Role-based access control enforces permissions at the org, project, and file level. API keys for headless and CI usage are scoped, revocable, and rotation-friendly.
+**Identity and access.** RunMat Enterprise supports SSO with on-premises identity providers via SAML or OIDC -- Keycloak, ADFS, or whatever your facility runs. SCIM provisioning handles user lifecycle and group-to-role mapping. Role-based access control enforces permissions at the org, project, and file level. API keys for headless and CI usage are scoped, revocable, and rotation-friendly.
 
 **Telemetry transparency.** The open-source runtime provides full telemetry opt-out. Source builds have telemetry disabled by default. For teams that want to verify, `RUNMAT_TELEMETRY_SHOW=1` prints every telemetry payload to stderr before transmission. Inside an airgap, nothing is transmitted because there is nowhere for it to go.
 
@@ -208,7 +208,7 @@ The goal isn't just "the same tools, but offline." It's giving engineers inside 
 
 **Real-time collaboration on classified projects.** File changes and project events stream to teammates via Server-Sent Events. When an analyst saves a script, her teammate sees the update immediately. No shared drives, no emailing attachments, no "which version is current?" conversations.
 
-**AI-assisted analysis inside the airgap.** RunMat Cloud's LLM integration supports configurable provider endpoints. Point it at a local model server -- Ollama, vLLM, or a facility-approved endpoint -- and your engineers get AI-assisted code completion and analysis without any data leaving the building. This is something no legacy scientific computing tool can offer in a disconnected environment.
+**AI-assisted analysis inside the airgap.** RunMat Enterprise's LLM integration supports configurable provider endpoints. Point it at a local model server -- Ollama, vLLM, or a facility-approved endpoint -- and your engineers get AI-assisted code completion and analysis without any data leaving the building. This is something no legacy scientific computing tool can offer in a disconnected environment.
 
 **Auditable version history for every script.** Every file write creates a version record. Snapshots capture the full project state at a point in time. Snapshots can be exported as a git fast-import stream for external review. When someone asks "which version of this script was running during the anomaly investigation last Tuesday?" you have a definitive answer.
 
@@ -226,6 +226,6 @@ If you're building the future of aerospace or defense, you shouldn't be fighting
 
 ---
 
-*The open-source RunMat runtime is available on [GitHub](https://github.com/runmat-org/runmat). Interested in deploying RunMat Cloud in your secure environment? [Get in touch](mailto:team@runmat.com).*
+*The open-source RunMat runtime is available on [GitHub](https://github.com/runmat-org/runmat). Interested in deploying RunMat Enterprise in your secure environment? [Contact sales](mailto:team@runmat.com).*
 
 *RunMat is not affiliated with MathWorks, Inc. "MATLAB" is a registered trademark of MathWorks, Inc. We reference it nominatively to describe the language whose grammar and semantics our independent runtime accepts.*
