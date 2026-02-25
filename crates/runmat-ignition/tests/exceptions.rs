@@ -46,6 +46,34 @@ fn catch_and_multi_assign_propagation() {
 }
 
 #[test]
+fn dot_access_identifier_and_message() {
+    // err.identifier and err.message via dot syntax (LoadMember, not getfield);
+    // use an index-out-of-bounds error so the try body always fires from the VM directly.
+    let ast =
+        parse("A=[1 2]; try; x=A(10); catch e; id=e.identifier; msg=e.message; ok=1; end").unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    let catch_ran = vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs() < 1e-9));
+    assert!(catch_ran, "catch block did not run");
+    let has_id = vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::String(_)));
+    let has_msg = vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::String(_)));
+    assert!(
+        has_id,
+        "err.identifier did not produce a String via dot access"
+    );
+    assert!(
+        has_msg,
+        "err.message did not produce a String via dot access"
+    );
+}
+
+#[test]
 fn catch_index_error_and_continue() {
     // Index out of bounds on tensor, caught by try/catch
     let ast =

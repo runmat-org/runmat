@@ -53,11 +53,11 @@
     },
     {
       "description": "Use Standard Output Without An Explicit File Identifier",
-      "input": "fprintf('Processing %s ...\\n', datestr(now, 0))"
+      "input": "n = 42;\nfprintf('Processed %d items\\n', n)"
     },
     {
       "description": "Write To Standard Error Using The Stream Name",
-      "input": "fprintf('stderr', 'Warning: iteration limit reached (%d steps)\\n', iter)"
+      "input": "iter = 100;\nfprintf('stderr', 'Warning: iteration limit reached (%d steps)\\n', iter)"
     },
     {
       "description": "Format A Matrix In Column-Major Order",

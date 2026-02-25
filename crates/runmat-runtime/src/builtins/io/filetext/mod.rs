@@ -8,6 +8,7 @@ pub mod filewrite;
 pub mod fopen;
 pub mod fprintf;
 pub mod fread;
+pub mod frewind;
 pub mod fwrite;
 pub(crate) mod helpers;
 pub(crate) mod registry;

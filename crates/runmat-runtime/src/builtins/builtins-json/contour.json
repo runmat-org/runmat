@@ -40,7 +40,7 @@
   "examples": [
     {
       "description": "",
-      "input": "contour(peaks(50));\ncontour(x, y, z, 20);\ncontour(x, y, z, [0, 0.5, 1.0]);\ncontour(x, y, z, 'LevelStep', 0.25, 'LineColor', 'none')"
+      "input": "[X, Y] = meshgrid(-2:0.25:2, -2:0.25:2);\nz = X .* exp(-X.^2 - Y.^2);\ncontour(z);\ncontour(z, [0, 0.5, 1.0]);\ncontour(z, 'LevelStep', 0.25, 'LineColor', 'none')"
     }
   ],
   "faqs": [],
