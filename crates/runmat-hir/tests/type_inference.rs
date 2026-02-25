@@ -240,6 +240,24 @@ fn infer_range_shape_with_negative_start() {
 }
 
 #[test]
+fn infer_range_shape_two_arg_descending_is_empty() {
+    let result = lower_result("r = 5:1;");
+    let r_id = runmat_hir::VarId(*result.variables.get("r").unwrap());
+    let globals =
+        runmat_hir::infer_global_variable_types(&result.hir, &result.inferred_function_returns);
+    let r_ty = globals
+        .get(&r_id)
+        .cloned()
+        .unwrap_or(runmat_builtins::Type::Unknown);
+    assert_eq!(
+        r_ty,
+        runmat_builtins::Type::Tensor {
+            shape: Some(vec![Some(1), Some(0)])
+        }
+    );
+}
+
+#[test]
 fn infer_index_shapes_for_scalar_and_range() {
     if !runmat_builtins::constants()
         .iter()
