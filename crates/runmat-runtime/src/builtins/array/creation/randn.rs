@@ -1,6 +1,6 @@
 //! MATLAB-compatible `randn` builtin with GPU-aware semantics for RunMat.
 
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
+use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, ProviderPrecision};
 use runmat_builtins::{ComplexTensor, NumericDType, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -123,6 +123,16 @@ impl ParsedRandn {
                         idx += 1;
                         continue;
                     }
+                    "gpuarray" => {
+                        // MATLAB class-specification syntax: randn(m,n,"gpuArray") or
+                        // gpuArray.randn(m,n). Produce a GPU-resident double-precision
+                        // array; randn_double routes through try_gpu_normal which
+                        // prefers the GPU provider when one is registered.
+                        template = Some(RandnTemplate::Double);
+                        dtype = NumericDType::F64;
+                        idx += 1;
+                        continue;
+                    }
                     other => {
                         return Err(builtin_error(format!(
                             "randn: unrecognised option '{other}'"
@@ -185,7 +195,28 @@ async fn build_output(parsed: ParsedRandn) -> crate::BuiltinResult<Value> {
     }
 }
 
+fn try_gpu_normal(shape: &[usize]) -> crate::BuiltinResult<Option<Value>> {
+    let Some(provider) = runmat_accelerate_api::provider() else {
+        return Ok(None);
+    };
+    if provider.precision() != ProviderPrecision::F64 {
+        return Ok(None);
+    }
+    match provider.random_normal(shape) {
+        Ok(handle) => Ok(Some(Value::GpuTensor(handle))),
+        Err(err) => {
+            log::warn!(
+                "randn: provider random_normal failed ({err}); falling back to host tensor path"
+            );
+            Ok(None)
+        }
+    }
+}
+
 fn randn_double(shape: &[usize]) -> crate::BuiltinResult<Value> {
+    if let Some(value) = try_gpu_normal(shape)? {
+        return Ok(value);
+    }
     let len = tensor::element_count(shape);
     let data = random::generate_normal(len, "randn")?;
     let tensor =
@@ -419,6 +450,32 @@ pub(crate) mod tests {
                 }
             }
             other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn randn_gpuarray_keyword_produces_valid_output() {
+        let _guard = random::test_lock().lock().unwrap();
+        reset_rng_clean();
+        let args = vec![
+            Value::Num(3.0),
+            Value::Num(4.0),
+            Value::from("gpuArray"),
+        ];
+        let result = block_on(randn_builtin(args)).expect("randn gpuArray");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![3, 4]);
+                assert_eq!(t.dtype, NumericDType::F64);
+                for &v in &t.data {
+                    assert!(v.is_finite());
+                }
+            }
+            Value::GpuTensor(h) => {
+                assert_eq!(h.shape, vec![3, 4]);
+            }
+            other => panic!("expected tensor or gpu tensor, got {other:?}"),
         }
     }
 

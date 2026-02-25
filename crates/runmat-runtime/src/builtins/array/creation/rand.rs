@@ -121,6 +121,15 @@ impl ParsedRand {
                         idx += 1;
                         continue;
                     }
+                    "gpuarray" => {
+                        // MATLAB class-specification syntax: rand(m,n,"gpuArray") or
+                        // gpuArray.rand(m,n). Produce a GPU-resident double-precision
+                        // array; rand_double already prefers the GPU provider when one
+                        // is registered and falls back to host when it is not.
+                        template = Some(RandTemplate::Double);
+                        idx += 1;
+                        continue;
+                    }
                     other => {
                         return Err(builtin_error(format!(
                             "rand: unrecognised option '{other}'"
@@ -465,6 +474,32 @@ pub(crate) mod tests {
                 }
             }
             other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rand_gpuarray_keyword_produces_valid_output() {
+        let _guard = random::test_lock().lock().unwrap();
+        reset_rng_clean();
+        let args = vec![
+            Value::Num(3.0),
+            Value::Num(4.0),
+            Value::from("gpuArray"),
+        ];
+        let result = block_on(rand_builtin(args)).expect("rand gpuArray");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![3, 4]);
+                assert_eq!(t.dtype, NumericDType::F64);
+                for &v in &t.data {
+                    assert!((0.0..1.0).contains(&v));
+                }
+            }
+            Value::GpuTensor(h) => {
+                assert_eq!(h.shape, vec![3, 4]);
+            }
+            other => panic!("expected tensor or gpu tensor, got {other:?}"),
         }
     }
 
