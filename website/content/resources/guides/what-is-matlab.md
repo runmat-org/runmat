@@ -4,6 +4,8 @@ description: "A plain-English explainer of MATLAB's language model and how RunMa
 date: "2025-01-01"
 dateModified: "2026-01-14"
 readTime: "8 min read"
+image: "https://web.runmatstatic.com/blog-images/matrix-math.png"
+imageAlt: "What is MATLAB"
 resourceType: "guides"
 author: "RunMat Team"
 authors:

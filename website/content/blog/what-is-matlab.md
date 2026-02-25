@@ -3,6 +3,8 @@ title: "What is MATLAB? The Language, The Runtime, and RunMat"
 description: "A plain-English explainer of MATLAB's language model and how RunMat delivers a modern, high-performance open-source runtime for it."
 date: "2025-01-01"
 dateModified: "2025-02-01"
+image: "https://web.runmatstatic.com/blog-images/matrix-math.png"
+imageAlt: "What is MATLAB"
 authors:
   - name: "Julie Ruiz"
     url: "https://www.linkedin.com/in/julie-ruiz-64b24328/"

@@ -192,26 +192,24 @@ function loadNativeResources(): ResourceItem[] {
 }
 
 function loadBlogResources(): ResourceItem[] {
-  return getPublicBlogPosts()
-    .filter(post => normalizeResourceType(post.resourceType || undefined))
-    .map(post => {
-      const type = normalizeResourceType(post.resourceType || undefined)!
-      return {
-        id: `blog:${post.slug}`,
-        slug: post.slug,
-        title: post.title,
-        description: post.description,
-        href: `/blog/${post.slug}`,
-        type,
-        source: 'blog',
-        date: post.date,
-        dateModified: post.dateModified,
-        readTime: post.readTime,
-        tags: post.tags,
-        image: post.image,
-        imageAlt: post.imageAlt,
-      } satisfies ResourceItem
-    })
+  return getPublicBlogPosts().map((post) => {
+    const type = normalizeResourceType(post.resourceType || undefined) ?? 'blogs'
+    return {
+      id: `blog:${post.slug}`,
+      slug: post.slug,
+      title: post.title,
+      description: post.description,
+      href: `/blog/${post.slug}`,
+      type,
+      source: 'blog',
+      date: post.date,
+      dateModified: post.dateModified,
+      readTime: post.readTime,
+      tags: post.tags,
+      image: post.image,
+      imageAlt: post.imageAlt,
+    } satisfies ResourceItem
+  })
 }
 
 function loadCuratedDocs(): ResourceItem[] {
@@ -274,7 +272,6 @@ function loadCuratedBenchmarks(): ResourceItem[] {
       readTime: benchmark.readTime,
       tags: benchmark.tags,
       image: benchmark.imageUrl,
-      featured: benchmark.featured,
     })
   }
 
@@ -296,7 +293,6 @@ function buildResourceIndex(): ResourceItem[] {
   const aggregated = [
     ...loadNativeResources(),
     ...loadBlogResources(),
-    ...loadCuratedDocs(),
     ...loadCuratedBenchmarks(),
   ]
   const deduped = uniqueById(aggregated)
@@ -458,9 +454,17 @@ function loadGuidesFromDocs(): ResourceItem[] {
       join(process.cwd(), '..', '..', node.file),
     ]
     let collections: string[] | undefined
+    let docImage: string | undefined
+    let docImageAlt: string | undefined
     for (const p of candidates) {
       if (existsSync(p)) {
-        collections = readCollectionsFromFile(p)
+        try {
+          const raw = readFileSync(p, 'utf-8')
+          const { data } = matter(raw)
+          collections = coerceStringArray((data as { collections?: unknown }).collections)
+          docImage = (data as { image?: string }).image
+          docImageAlt = (data as { imageAlt?: string }).imageAlt
+        } catch { /* skip */ }
         if (collections) break
       }
     }
@@ -475,6 +479,8 @@ function loadGuidesFromDocs(): ResourceItem[] {
       source: 'doc',
       date: docMtime(node),
       tags: node.seo?.keywords,
+      image: docImage,
+      imageAlt: docImageAlt,
     })
   }
   return items

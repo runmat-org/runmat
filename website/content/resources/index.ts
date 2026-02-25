@@ -12,9 +12,7 @@ export const curatedBenchmarks = [
 ]
 
 export const featuredResources = [
-  // Curated featured entries (optional). Use frontmatter `featured: true` for content-driven featuring.
-  { kind: 'doc', slug: '/docs/matlab-function-reference', type: 'docs' },
-  { kind: 'doc', slug: '/docs/accelerate/fusion-intro', type: 'docs' },
+  // Curated featured entries (optional). Use frontmatter `featured: true` for content-driven featuring. No docs—resource hub is for guides, blogs, benchmarks.
   { kind: 'blog', slug: 'in-defense-of-matlab-whiteboard-style-code', type: 'blogs' },
 ]
 
