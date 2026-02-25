@@ -55,7 +55,7 @@
     },
     {
       "description": "Save struct fields as individual variables",
-      "input": "opts.output = y;\nopts.answer = x;\nsave('opts.mat', '-struct', 'opts')"
+      "input": "x = 1:5;\ny = rand(1, 5);\nopts = struct('output', y, 'answer', x);\nsave('opts.mat', '-struct', 'opts')"
     },
     {
       "description": "Select variables by regular expression",
