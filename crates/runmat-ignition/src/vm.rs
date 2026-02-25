@@ -1220,8 +1220,7 @@ fn set_workspace_state(
     assigned: HashSet<String>,
     vars: &mut Vec<Value>,
 ) -> WorkspaceStateGuard {
-    let idx_to_name: HashMap<usize, String> =
-        names.iter().map(|(k, &v)| (v, k.clone())).collect();
+    let idx_to_name: HashMap<usize, String> = names.iter().map(|(k, &v)| (v, k.clone())).collect();
     WORKSPACE_STATE.with(|state| {
         *state.borrow_mut() = Some(WorkspaceState {
             names,

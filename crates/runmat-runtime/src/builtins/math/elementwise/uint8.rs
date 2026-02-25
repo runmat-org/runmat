@@ -147,11 +147,7 @@ fn cast_scalar_to_uint8(value: f64) -> u8 {
         return 0;
     }
     if value.is_infinite() {
-        return if value.is_sign_negative() {
-            0
-        } else {
-            u8::MAX
-        };
+        return if value.is_sign_negative() { 0 } else { u8::MAX };
     }
     value.round().clamp(0.0, UINT8_MAX_F64) as u8
 }

@@ -458,11 +458,7 @@ pub(crate) mod tests {
     fn randn_gpuarray_keyword_produces_valid_output() {
         let _guard = random::test_lock().lock().unwrap();
         reset_rng_clean();
-        let args = vec![
-            Value::Num(3.0),
-            Value::Num(4.0),
-            Value::from("gpuArray"),
-        ];
+        let args = vec![Value::Num(3.0), Value::Num(4.0), Value::from("gpuArray")];
         let result = block_on(randn_builtin(args)).expect("randn gpuArray");
         match result {
             Value::Tensor(t) => {

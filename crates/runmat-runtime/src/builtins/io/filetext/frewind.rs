@@ -86,7 +86,9 @@ pub async fn evaluate(fid_value: &Value) -> BuiltinResult<()> {
         .map_err(map_control_flow)?;
     let fid = parse_fid(&fid_host)?;
     if fid < 0 {
-        return Err(frewind_error("frewind: file identifier must be non-negative"));
+        return Err(frewind_error(
+            "frewind: file identifier must be non-negative",
+        ));
     }
     if fid < 3 {
         return Ok(());

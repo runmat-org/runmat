@@ -25,5 +25,5 @@ pub(crate) mod sign;
 pub(crate) mod single;
 pub(crate) mod sqrt;
 pub(crate) mod times;
-pub(crate) mod uint8;
 pub(crate) mod uint16;
+pub(crate) mod uint8;
