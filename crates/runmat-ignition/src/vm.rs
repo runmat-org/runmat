@@ -9713,6 +9713,24 @@ async fn run_interpreter_inner(
                             .map_err(|e| format!("cell field gather: {e}"))?;
                         stack.push(Value::Cell(new_cell));
                     }
+                    Value::MException(mex) => {
+                        let value = match field.as_str() {
+                            "identifier" => Value::String(mex.identifier.clone()),
+                            "message" => Value::String(mex.message.clone()),
+                            "stack" => {
+                                let values: Vec<Value> =
+                                    mex.stack.iter().map(|s| Value::String(s.clone())).collect();
+                                let rows = values.len();
+                                let cell = runmat_builtins::CellArray::new(values, rows, 1)
+                                    .map_err(|e| format!("MException.stack: {e}"))?;
+                                Value::Cell(cell)
+                            }
+                            other => {
+                                vm_bail!(format!("Reference to non-existent field '{}'.", other))
+                            }
+                        };
+                        stack.push(value);
+                    }
                     _ => vm_bail!("LoadMember on non-object".to_string()),
                 }
             }
@@ -9785,6 +9803,24 @@ async fn run_interpreter_inner(
                         } else {
                             vm_bail!(format!("Undefined field '{}'", name));
                         }
+                    }
+                    Value::MException(mex) => {
+                        let value = match name.as_str() {
+                            "identifier" => Value::String(mex.identifier.clone()),
+                            "message" => Value::String(mex.message.clone()),
+                            "stack" => {
+                                let values: Vec<Value> =
+                                    mex.stack.iter().map(|s| Value::String(s.clone())).collect();
+                                let rows = values.len();
+                                let cell = runmat_builtins::CellArray::new(values, rows, 1)
+                                    .map_err(|e| format!("MException.stack: {e}"))?;
+                                Value::Cell(cell)
+                            }
+                            other => {
+                                vm_bail!(format!("Reference to non-existent field '{}'.", other))
+                            }
+                        };
+                        stack.push(value);
                     }
                     _ => vm_bail!("LoadMemberDynamic on non-struct/object".to_string()),
                 }
