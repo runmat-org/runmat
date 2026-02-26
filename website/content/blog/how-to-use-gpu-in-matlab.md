@@ -186,8 +186,6 @@ gpuDevice
 %   ...
 ```
 
-<!-- IMAGE NEEDED: Screenshot of gpuDevice output in MATLAB command window showing GPU name, compute capability, and memory -->
-
 If `gpuDeviceCount` returns 0, check these common causes:
 
 - **Driver mismatch.** Update your NVIDIA driver to the version required by your MATLAB release.
@@ -407,8 +405,6 @@ fprintf("cpu=%.6f gpu=%.6f\n", double(m_cpu), double(gather(m_gpu)));
 
 If the GPU isn't helping, it's usually one of three things: the problem is too small, the code is forcing boundaries, or the computation is dominated by something other than array math (I/O, parsing, plotting, scalar loops).
 
-<!-- IMAGE NEEDED: Benchmark chart comparing CPU vs GPU performance at different array sizes (10K, 100K, 1M, 10M elements) -->
-
 ---
 
 ## **Beyond NVIDIA: GPU acceleration on any hardware**
@@ -432,8 +428,6 @@ fprintf("m = %.6f\n", double(m));
 ```
 
 Under the hood, RunMat uses *fusion* — combining multiple array operations into one GPU kernel — to reduce overhead and keep the GPU busy. This happens automatically when the computation is contiguous. For more detail, see the [RunMat Fusion guide](/docs/fusion-guide).
-
-<!-- IMAGE NEEDED: Architecture diagram showing MATLAB's data path (CPU -> gpuArray -> CUDA -> NVIDIA only) vs RunMat's path (automatic routing -> wgpu -> Metal/DX12/Vulkan -> any GPU) -->
 
 ### How automatic routing works
 
