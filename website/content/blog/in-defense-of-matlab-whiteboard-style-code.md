@@ -12,8 +12,6 @@ slug: "in-defense-of-matlab-whiteboard-style-code"
 tags: ["matlab", "runmat", "whiteboard-code", "scientific-computing", "engineering-math", "matlab-alternative"]
 keywords: "MATLAB, MATLAB syntax, whiteboard-style code, RunMat, scientific computing, engineering math, code review, LLM code generation, MATLAB alternative"
 excerpt: "People joke about MATLAB, but the syntax is not the problem. Whiteboard-style code is still one of the safest ways for engineers to write and review math-heavy logic. This article explains why readable math matters in an AI coding world and how RunMat keeps the syntax while modernizing the engine."
-resourceType: "blogs"
-featured: true
 image: "https://web.runmatstatic.com/matlab-runmat-whiteboard-c.png"
 imageAlt: "Engineer copying matrix equations from a whiteboard into MATLAB-style code on a laptop."
 ogType: "article"

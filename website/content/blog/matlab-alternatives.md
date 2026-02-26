@@ -4,9 +4,6 @@ description: "A deep comparison of free MATLAB alternatives. We look at RunMat, 
 date: "2025-09-19"
 dateModified: "2026-01-14"
 readTime: "15 min read"
-resourceType: "blogs"
-collections:
-  - guides
 authors:
   - name: "Fin Watterson"
     url: "https://www.linkedin.com/in/finbarrwatterson/"

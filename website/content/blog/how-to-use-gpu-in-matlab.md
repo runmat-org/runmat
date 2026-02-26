@@ -7,9 +7,6 @@ authors:
   - name: "Fin Watterson"
     url: "https://www.linkedin.com/in/finbarrwatterson/"
 readTime: "14 min read"
-resourceType: "blogs"
-collections:
-  - guides
 slug: "how-to-use-gpu-in-matlab"
 tags: ["matlab", "gpu", "nvidia", "gpuArray", "scientific-computing", "parallel-computing-toolbox"]
 keywords: "how to use nvidia gpus for matlab, matlab gpu setup, gpuArray tutorial, matlab parallel computing toolbox, matlab gpu acceleration, MATLAB GPU, gpuArray, NVIDIA GPU, GPU-shaped"
