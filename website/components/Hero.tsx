@@ -1,6 +1,4 @@
 import Link from "next/link";
-import { SiGithub } from "react-icons/si";
-
 import { Button } from "@/components/ui/button";
 
 export default function Hero() {
@@ -25,17 +23,6 @@ export default function Hero() {
               </Button>
               <Button variant="outline" size="lg" asChild className="h-12 px-8 text-base">
                 <Link href="/download">Download</Link>
-              </Button>
-              <Button variant="outline" size="lg" asChild className="h-12 px-8 text-base">
-                <Link
-                  href="https://github.com/runmat-org/runmat"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="inline-flex items-center gap-2"
-                >
-                  <SiGithub className="h-5 w-5" />
-                  View Source
-                </Link>
               </Button>
             </div>
           </div>
