@@ -46,8 +46,8 @@ pub use core::scene::GpuVertexBuffer;
 // Core plot types
 // Avoid ambiguous re-exports: explicitly export plot types
 pub use event::{
-    FigureEvent, FigureEventKind, FigureLayout, FigureLegendEntry, FigureMetadata, FigureSnapshot,
-    PlotDescriptor, PlotKind,
+    FigureEvent, FigureEventKind, FigureLayout, FigureLegendEntry, FigureMetadata, FigureScene,
+    FigureSnapshot, PlotDescriptor, PlotKind,
 };
 pub use plots::{
     AreaPlot, ContourFillPlot, ContourPlot, Figure, ImagePlot, LinePlot, PieChart, QuiverPlot,

@@ -1,0 +1,126 @@
+name: Publish Dev Bindings
+
+on:
+  push:
+    branches:
+      - dev
+    paths:
+      - "bindings/ts/**"
+      - "crates/runmat-wasm/**"
+      - "crates/runmat-runtime/**"
+      - "crates/runmat-lsp/**"
+      - "scripts/test-wasm-headless.sh"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/publish-dev-bindings.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-dev-bindings-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  publish-dev-bindings:
+    environment: Dev
+    name: Build and publish runmat@dev
+    runs-on: ubuntu-latest
+    env:
+      RUST_BACKTRACE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: "https://registry.npmjs.org"
+          cache: npm
+          cache-dependency-path: bindings/ts/package-lock.json
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.90.0
+          profile: minimal
+
+      - name: Add wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: curl https://drager.github.io/wasm-pack/installer/init.sh -sSf | bash
+
+      - name: Install system dependencies for headless Chrome
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config libssl-dev build-essential \
+            libopenblas-dev liblapack-dev libzmq3-dev \
+            libgtk-3-0 libnss3 libx11-xcb1 libxcomposite1 \
+            libxi6 libxdamage1 libxrandr2 libgdk-pixbuf2.0-0 libdrm2 libgbm1 \
+            libpango-1.0-0 libcairo2 libatspi2.0-0 libxss1 libxfixes3 \
+            libxkbcommon0 libwayland-client0 libwayland-cursor0 libwayland-egl1 \
+            libxshmfence1 fonts-liberation libu2f-udev
+          sudo apt-get install -y libasound2 || sudo apt-get install -y libasound2t64
+
+      - name: Setup Chrome
+        id: chrome
+        uses: browser-actions/setup-chrome@v1
+
+      - name: Setup chromedriver
+        uses: nanasess/setup-chromedriver@v2
+
+      - name: Install npm dependencies
+        working-directory: bindings/ts
+        run: npm ci
+
+      - name: Build wasm32 target
+        run: RUNMAT_GENERATE_WASM_REGISTRY=1 cargo build -p runmat-wasm --target wasm32-unknown-unknown
+
+      - name: Run wasm headless tests
+        env:
+          RUNMAT_CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
+          WASM_BINDGEN_TEST_TIMEOUT: "300"
+        run: scripts/test-wasm-headless.sh
+
+      - name: Build bindings package
+        working-directory: bindings/ts
+        run: npm run build
+
+      - name: Lint bindings package
+        working-directory: bindings/ts
+        run: npm run lint
+
+      - name: Stamp SHA prerelease version
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd bindings/ts
+          BASE_VERSION=$(node -p "require('./package.json').version")
+          CLEAN_BASE_VERSION="${BASE_VERSION%%-*}"
+          DEV_VERSION="${CLEAN_BASE_VERSION}-dev.${GITHUB_SHA::7}"
+          echo "RUNMAT_DEV_VERSION=$DEV_VERSION" >> "$GITHUB_ENV"
+          npm version "$DEV_VERSION" --no-git-tag-version
+          echo "Prepared runmat@$DEV_VERSION for publish"
+
+      - name: Skip if version already published
+        shell: bash
+        run: |
+          set -euo pipefail
+          if npm view "runmat@${RUNMAT_DEV_VERSION}" version >/dev/null 2>&1; then
+            echo "RUNMAT_ALREADY_PUBLISHED=true" >> "$GITHUB_ENV"
+            echo "runmat@${RUNMAT_DEV_VERSION} already exists; skipping publish."
+          else
+            echo "RUNMAT_ALREADY_PUBLISHED=false" >> "$GITHUB_ENV"
+          fi
+
+      - name: Publish bindings package to npm dist-tag dev
+        if: env.RUNMAT_ALREADY_PUBLISHED != 'true'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          cd bindings/ts
+          npm publish --access public --tag dev

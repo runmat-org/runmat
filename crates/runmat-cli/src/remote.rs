@@ -446,6 +446,7 @@ async fn list_projects(
     let server_url = resolve_server_url(&config, None)?;
     let token = resolve_auth_token(&mut config, &server_url).await?;
     let client = build_public_client(&server_url, &token)?;
+    let org_id = org_id.to_string();
     let response = client
         .list_projects(&org_id, cursor.as_deref(), limit.map(|value| value as u64))
         .await
@@ -466,6 +467,7 @@ async fn create_project(org: Option<Uuid>, name: String) -> Result<()> {
     let server_url = resolve_server_url(&config, None)?;
     let token = resolve_auth_token(&mut config, &server_url).await?;
     let client = build_public_client(&server_url, &token)?;
+    let org_id = org_id.to_string();
     let response = client
         .create_project(&org_id, &public_api::types::ProjectCreateRequest { name })
         .await
@@ -485,6 +487,7 @@ async fn list_project_members(
     let server_url = resolve_server_url(&config, None)?;
     let token = resolve_auth_token(&mut config, &server_url).await?;
     let client = build_public_client(&server_url, &token)?;
+    let project_id = project_id.to_string();
     let response = client
         .list_project_memberships(
             &project_id,

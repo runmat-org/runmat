@@ -14,7 +14,10 @@ use runmat_lexer::{tokenize_detailed, Token as LexToken};
 pub use runmat_parser::CompatMode;
 use runmat_parser::{parse_with_options, ParserOptions, SyntaxError};
 use runmat_runtime::warning_store::RuntimeWarning;
-use runmat_runtime::{build_runtime_error, RuntimeError};
+use runmat_runtime::{build_runtime_error, gather_if_needed_async, RuntimeError};
+use runmat_runtime::{
+    runtime_export_workspace_state, runtime_import_workspace_state, WorkspaceReplayMode,
+};
 #[cfg(target_arch = "wasm32")]
 use runmat_snapshot::SnapshotBuilder;
 use runmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
@@ -308,6 +311,13 @@ pub struct WorkspaceSnapshot {
     pub full: bool,
     pub version: u64,
     pub values: Vec<WorkspaceEntry>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WorkspaceExportMode {
+    Off,
+    Auto,
+    Force,
 }
 
 #[derive(Debug, Clone)]
@@ -1739,6 +1749,57 @@ impl RunMatSession {
         self.workspace_preview_tokens.clear();
     }
 
+    pub async fn export_workspace_state(
+        &mut self,
+        mode: WorkspaceExportMode,
+    ) -> Result<Option<Vec<u8>>> {
+        if matches!(mode, WorkspaceExportMode::Off) {
+            return Ok(None);
+        }
+
+        let source_map = if self.workspace_values.is_empty() {
+            &self.variables
+        } else {
+            &self.workspace_values
+        };
+
+        let mut entries: Vec<(String, Value)> = Vec::with_capacity(source_map.len());
+        for (name, value) in source_map {
+            let gathered = gather_if_needed_async(value).await?;
+            entries.push((name.clone(), gathered));
+        }
+
+        if entries.is_empty() && matches!(mode, WorkspaceExportMode::Auto) {
+            return Ok(None);
+        }
+
+        let replay_mode = match mode {
+            WorkspaceExportMode::Auto => WorkspaceReplayMode::Auto,
+            WorkspaceExportMode::Force => WorkspaceReplayMode::Force,
+            WorkspaceExportMode::Off => WorkspaceReplayMode::Off,
+        };
+
+        runtime_export_workspace_state(&entries, replay_mode)
+            .await
+            .map_err(Into::into)
+    }
+
+    pub fn import_workspace_state(&mut self, bytes: &[u8]) -> Result<()> {
+        let entries = runtime_import_workspace_state(bytes)?;
+        self.clear_variables();
+
+        for (index, (name, value)) in entries.into_iter().enumerate() {
+            self.variable_names.insert(name.clone(), index);
+            self.variable_array.push(value.clone());
+            self.variables.insert(name.clone(), value.clone());
+            self.workspace_values.insert(name, value);
+        }
+
+        self.workspace_preview_tokens.clear();
+        self.workspace_version = self.workspace_version.wrapping_add(1);
+        Ok(())
+    }
+
     /// Control whether fusion plan snapshots are emitted in [`ExecutionResult`].
     pub fn set_emit_fusion_plan(&mut self, enabled: bool) {
         self.emit_fusion_plan = enabled;
@@ -2268,6 +2329,67 @@ mod tests {
                 .iter()
                 .any(|entry| entry.name == "x"),
             "workspace snapshot should include assigned variable"
+        );
+    }
+
+    #[test]
+    fn workspace_state_roundtrip_replace_only() {
+        let mut source_session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let _ = block_on(source_session.execute("x = 42; y = [1, 2, 3];")).expect("exec succeeds");
+
+        let bytes = block_on(source_session.export_workspace_state(WorkspaceExportMode::Force))
+            .expect("workspace export")
+            .expect("workspace bytes");
+
+        let mut restore_session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let _ = block_on(restore_session.execute("z = 99;")).expect("seed workspace");
+        restore_session
+            .import_workspace_state(&bytes)
+            .expect("workspace import");
+
+        let _restored =
+            block_on(restore_session.execute("r = x + y(2);")).expect("post-import exec");
+
+        let x = block_on(restore_session.materialize_variable(
+            WorkspaceMaterializeTarget::Name("x".to_string()),
+            WorkspaceMaterializeOptions::default(),
+        ))
+        .expect("x should exist after import");
+        assert_eq!(x.name, "x");
+
+        let y = block_on(restore_session.materialize_variable(
+            WorkspaceMaterializeTarget::Name("y".to_string()),
+            WorkspaceMaterializeOptions::default(),
+        ))
+        .expect("y should exist after import");
+        assert_eq!(y.name, "y");
+
+        let z = block_on(restore_session.materialize_variable(
+            WorkspaceMaterializeTarget::Name("z".to_string()),
+            WorkspaceMaterializeOptions::default(),
+        ));
+        assert!(
+            z.is_err(),
+            "replace-only import should drop stale z variable"
+        );
+    }
+
+    #[test]
+    fn workspace_state_import_rejects_invalid_payload() {
+        let mut session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let err = session
+            .import_workspace_state(&[1, 2, 3, 4])
+            .expect_err("invalid payload should be rejected");
+        let runtime_err = err
+            .downcast_ref::<runmat_runtime::RuntimeError>()
+            .expect("error should preserve runtime replay details");
+        assert_eq!(
+            runtime_err.identifier(),
+            Some("RunMat:ReplayDecodeFailed"),
+            "invalid payload should map to replay decode identifier"
         );
     }
 }
