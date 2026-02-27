@@ -14,7 +14,7 @@ import {
   navigationMenuTriggerStyle,
 } from "@/components/ui/navigation-menu";
 import { Button } from "@/components/ui/button";
-import { Download, Menu, BookOpen, FileText, Scale, Minus } from "lucide-react";
+import { Download, Menu, BookOpen, FileText, Scale, Minus, DollarSign } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -131,6 +131,13 @@ export default function Navigation() {
                 <NavigationMenuLink className={navigationMenuTriggerStyle()} asChild>
                   <Link href="/benchmarks">
                     Benchmarks
+                  </Link>
+                </NavigationMenuLink>
+              </NavigationMenuItem>
+              <NavigationMenuItem>
+                <NavigationMenuLink className={navigationMenuTriggerStyle()} asChild>
+                  <Link href="/pricing">
+                    Pricing
                   </Link>
                 </NavigationMenuLink>
               </NavigationMenuItem>
@@ -270,6 +277,14 @@ export default function Navigation() {
               >
                 <Scale className="mr-2 h-4 w-4" />
                 Benchmarks
+              </Link>
+              <Link
+                href="/pricing"
+                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <DollarSign className="mr-2 h-4 w-4" />
+                Pricing
               </Link>
               <Link
                 href="/download"

@@ -70,6 +70,8 @@ export default function Footer() {
             <h3 className="text-foreground font-semibold mb-2">Resources</h3>
             <ul className="space-y-1">
               <li><Link href="/about" className="hover:underline">About</Link></li>
+              <li><Link href="/pricing" className="hover:underline">Pricing</Link></li>
+              <li><Link href="/contact" className="hover:underline">Contact</Link></li>
               <li><Link href="/license" className="hover:underline">License</Link></li>
               <li><Link href="/matlab-online" className="hover:underline">MATLAB Online</Link></li>
             </ul>
