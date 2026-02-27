@@ -240,9 +240,6 @@
 
   /* Tables: keep readable columns and allow horizontal scroll on narrow screens */
   .table-mobile-wrap {
-    display: block;
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
     table-layout: auto;
     width: 100%;
     max-width: 100%;
