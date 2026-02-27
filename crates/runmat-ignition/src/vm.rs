@@ -5058,6 +5058,9 @@ async fn run_interpreter_inner(
                         if dims == 1 {
                             let total = t.data.len();
                             let mut idxs: Vec<usize> = Vec::new();
+                            // When the index is an empty tensor, mirror its shape (e.g. 1:0
+                            // produces a [1,0] tensor, so A(1:0) yields a [1,0] result).
+                            let mut empty_idx_shape: Option<Vec<usize>> = None;
                             let is_colon = (colon_mask & 1u32) != 0;
                             let is_end = (end_mask & 1u32) != 0;
                             if is_colon {
@@ -5077,6 +5080,9 @@ async fn run_interpreter_inner(
                                         idxs = vec![i as usize];
                                     }
                                     Value::Tensor(idx_t) => {
+                                        if idx_t.data.is_empty() {
+                                            empty_idx_shape = Some(idx_t.shape.clone());
+                                        }
                                         for &val in &idx_t.data {
                                             let i = val as isize;
                                             if i < 1 || (i as usize) > total {
@@ -5119,6 +5125,14 @@ async fn run_interpreter_inner(
                             }
                             if idxs.len() == 1 {
                                 stack.push(Value::Num(t.data[idxs[0] - 1]));
+                            } else if idxs.is_empty() {
+                                // Use the index tensor's shape so that A(1:0) on any source
+                                // returns a result with the same shape as the index (1×0 for
+                                // a row-range index). Fall back to [1,0] for other empty cases.
+                                let shape = empty_idx_shape.unwrap_or_else(|| vec![1, 0]);
+                                let tens = runmat_builtins::Tensor::new(vec![], shape)
+                                    .map_err(|e| format!("Slice error: {e}"))?;
+                                stack.push(Value::Tensor(tens));
                             } else {
                                 let mut out = Vec::with_capacity(idxs.len());
                                 for &i in &idxs {
