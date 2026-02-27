@@ -69,7 +69,7 @@
     },
     {
       "description": "Validating index ranges before reshaping",
-      "input": "idx = 1:numel(A);\n[i, j] = ind2sub(size(A), idx);\nB = accumarray([i(:) j(:)], A(:))"
+      "input": "A = magic(4);\nidx = 1:numel(A);\n[i, j] = ind2sub(size(A), idx)"
     }
   ],
   "faqs": [

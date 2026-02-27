@@ -25,7 +25,7 @@ Environment variables:
 | `RUNMAT_CHROME_BIN` | Override the Chrome binary (defaults to the system Chrome/Chromium). |
 | `CHROMEDRIVER_ARGS` | Extra args for the WebDriver binary (default `--log-level=SEVERE` to suppress early stderr warnings that confuse `wasm-bindgen-test`). |
 | `RUNMAT_WASM_INCLUDE_RUNTIME=1` | Attempt to run the `runmat-runtime` tests as well (see below). |
-| `WASM_BINDGEN_TEST_TIMEOUT` | Per-test timeout passed to `wasm-bindgen-test` (default `120`). |
+| `WASM_BINDGEN_TEST_TIMEOUT` | Per-test timeout passed to `wasm-bindgen-test` (default `300`). |
 
 ## Current coverage
 
@@ -45,8 +45,7 @@ feature flags and/or guard those tests in follow-up work.
 
 - Extend the script to cover additional crates (`runmat-snapshot`, `runmat-plot`, etc.) once
   their tests are wasm-safe.
-- Add a CI job that runs `scripts/test-wasm-headless.sh` against Chrome-for-Testing on Linux.
+- Keep the CI wasm browser job aligned with this script and Chrome-for-Testing on Linux.
 - Continue migrating existing tests by adding `#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]`
   (done via the regex-based helper in this change) or gating them when they rely on native-only
   functionality.
-

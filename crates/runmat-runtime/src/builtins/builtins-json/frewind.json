@@ -1,0 +1,108 @@
+{
+  "title": "frewind",
+  "category": "io/filetext",
+  "keywords": [
+    "frewind",
+    "file",
+    "rewind",
+    "seek",
+    "io",
+    "file identifier"
+  ],
+  "summary": "Rewind the file position indicator to the beginning of an open file.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/frewind.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the CPU. Arguments that live on the GPU are gathered automatically, and file handles remain host-resident."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::io::filetext::frewind::tests",
+    "integration": "builtins::io::filetext::frewind::tests::frewind_rewinds_to_beginning"
+  },
+  "description": "`frewind(fid)` moves the file position indicator back to the beginning of the file associated with `fid`. It is equivalent to calling `fseek(fid, 0, 'bof')` and is commonly used to re-read a file after an initial pass without closing and reopening it.",
+  "behaviors": [
+    "`frewind(fid)` rewinds the file position indicator to byte offset 0 for the file identified by `fid`.",
+    "`fid` must be a non-negative integer returned by `fopen`. Passing an invalid identifier raises an error.",
+    "Standard input/output identifiers (`0`, `1`, `2`) are silently accepted and treated as a no-op; RunMat does not support seeking on those streams.",
+    "`frewind` produces no output value. Assigning the result of `frewind` to a variable yields an empty output list.",
+    "After `frewind`, subsequent calls to `fread`, `fgets`, or `fscanf` start from the beginning of the file."
+  ],
+  "examples": [
+    {
+      "description": "Write then rewind and read back binary data",
+      "input": "fid = fopen('data.bin', 'w+b');\nfwrite(fid, [1 2 3], 'double');\nfrewind(fid);\nvalues = fread(fid, 'double');\nfclose(fid);\ndelete('data.bin')"
+    },
+    {
+      "description": "Read a text file twice without reopening",
+      "input": "fid = fopen('notes.txt', 'r');\nfirst_line = fgets(fid);\nfrewind(fid);\nsame_line = fgets(fid);\nfclose(fid)"
+    },
+    {
+      "description": "Rewind a binary file opened for reading bytes",
+      "input": "fid = fopen('payload.bin', 'w+b');\nfwrite(fid, uint8(1:6), 'uint8');\nfrewind(fid);\nbytes = fread(fid, 4, 'uint8');\nfclose(fid);\ndelete('payload.bin')"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What kind of input does `frewind` accept?",
+      "answer": "Pass a scalar numeric file identifier returned by `fopen`. The identifier must be a non-negative integer. Character vectors and strings are not accepted."
+    },
+    {
+      "question": "Does `frewind` return a value?",
+      "answer": "No. `frewind` is a void function and produces no output. Capturing its result assigns an empty output list."
+    },
+    {
+      "question": "How does `frewind` compare to `fseek`?",
+      "answer": "`frewind(fid)` is exactly equivalent to `fseek(fid, 0, 'bof')`. Use `frewind` when you only ever need to return to the beginning; use `fseek` when you need to jump to arbitrary positions."
+    },
+    {
+      "question": "Can I call `frewind` on a write-only file?",
+      "answer": "Yes, as long as the underlying file was opened with a mode that supports seeking (e.g. `'w+'` or `'w+b'`). Rewinding a write-only stream positions the cursor at the start so subsequent writes overwrite from the beginning."
+    },
+    {
+      "question": "Can I call `frewind` on a closed file?",
+      "answer": "No. Passing a closed or never-opened identifier raises `\"Invalid file identifier. Use fopen to generate a valid file ID.\"`"
+    }
+  ],
+  "links": [
+    {
+      "label": "fopen",
+      "url": "./fopen"
+    },
+    {
+      "label": "fclose",
+      "url": "./fclose"
+    },
+    {
+      "label": "fread",
+      "url": "./fread"
+    },
+    {
+      "label": "fwrite",
+      "url": "./fwrite"
+    },
+    {
+      "label": "feof",
+      "url": "./feof"
+    }
+  ],
+  "source": {
+    "label": "Open an issue",
+    "url": "https://github.com/runmat-org/runmat/issues/new/choose"
+  },
+  "gpu_residency": "No. File identifiers are always owned by the host-side registry maintained by `fopen`. Wrapping a scalar identifier in `gpuArray` does not keep the file handle on the GPU—the runtime gathers the scalar before performing the seek. The rewind operation itself executes entirely on the host.",
+  "gpu_behavior": [
+    "`frewind` is a host-only operation. If `fid` resides on the GPU (for example inside a `gpuArray`), RunMat gathers the scalar to host memory before consulting the file registry. File handles always remain on the CPU, so there are no provider hooks or fusion paths for this builtin."
+  ]
+}

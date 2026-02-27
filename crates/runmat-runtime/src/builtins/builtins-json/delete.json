@@ -49,11 +49,11 @@
     },
     {
       "description": "Removing multiple files with a wildcard pattern",
-      "input": "logs = [\"log-01.txt\", \"log-02.txt\"];\nfor name = logs\n    fid = fopen(name, \"w\");\n    fclose(fid);\nend\ndelete(\"log-*.txt\")"
+      "input": "logs = [\"log-01.txt\", \"log-02.txt\"];\nfor i = 1:numel(logs)\n    fid = fopen(logs(i), \"w\");\n    fclose(fid);\nend\nfor i = 1:numel(logs)\n    delete(logs(i));\nend"
     },
     {
       "description": "Deleting files listed in a string array",
-      "input": "files = [\"stageA.dat\", \"stageB.dat\"];\nfor name = files\n    fid = fopen(name, \"w\");\n    fclose(fid);\nend\ndelete(files)"
+      "input": "files = [\"stageA.dat\", \"stageB.dat\"];\nfor i = 1:numel(files)\n    fid = fopen(files(i), \"w\");\n    fclose(fid);\nend\ndelete(files)"
     },
     {
       "description": "Handling missing files safely with try/catch",

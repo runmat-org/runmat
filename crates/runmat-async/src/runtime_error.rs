@@ -52,12 +52,10 @@ impl ErrorContext {
     }
 }
 
-#[derive(Debug, Error, miette::Diagnostic)]
+#[derive(Debug, Error)]
 #[error("{message}")]
-#[diagnostic(code(runmat::runtime::error))]
 pub struct RuntimeError {
     pub message: String,
-    #[label]
     pub span: Option<SourceSpan>,
     #[source]
     pub source: Option<Box<dyn StdError + Send + Sync>>,
@@ -144,6 +142,19 @@ impl RuntimeError {
             }
         }
         lines.join("\n")
+    }
+}
+
+impl miette::Diagnostic for RuntimeError {
+    fn code<'a>(&'a self) -> Option<Box<dyn std::fmt::Display + 'a>> {
+        Some(Box::new("runmat::runtime::error"))
+    }
+
+    fn labels(&self) -> Option<Box<dyn Iterator<Item = miette::LabeledSpan> + '_>> {
+        self.span.map(|span| {
+            Box::new(std::iter::once(miette::LabeledSpan::underline(span)))
+                as Box<dyn Iterator<Item = miette::LabeledSpan>>
+        })
     }
 }
 

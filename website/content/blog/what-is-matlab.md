@@ -132,6 +132,14 @@ In practice, when people say “MATLAB”, they may mean a few different things:
 
 This FAQ explains MATLAB at a language/concept level, then explains how **RunMat** relates to it.
 
+## TL;DR
+
+- **MATLAB** is a programming language and computing environment built around matrices, vectors, and array-first programming.
+- **RunMat** is a free, open-source runtime that executes MATLAB code with semantic compatibility — not just similar syntax.
+- RunMat uses tiered execution (interpreter + JIT) and Fusion (automatic CPU/GPU routing) for high performance.
+- Many `.m` scripts run with few or no changes; coverage gaps are library/toolbox breadth, not language incompatibility.
+- No MathWorks license required.
+
 ---
 
 ## Why MATLAB is popular

@@ -1183,6 +1183,7 @@ runmat_thread_local! {
 struct WorkspaceState {
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
+    idx_to_name: HashMap<usize, String>,
     data_ptr: *const Value,
     len: usize,
 }
@@ -1219,10 +1220,12 @@ fn set_workspace_state(
     assigned: HashSet<String>,
     vars: &mut Vec<Value>,
 ) -> WorkspaceStateGuard {
+    let idx_to_name: HashMap<usize, String> = names.iter().map(|(k, &v)| (v, k.clone())).collect();
     WORKSPACE_STATE.with(|state| {
         *state.borrow_mut() = Some(WorkspaceState {
             names,
             assigned,
+            idx_to_name,
             data_ptr: vars.as_ptr(),
             len: vars.len(),
         });
@@ -2134,6 +2137,13 @@ async fn run_interpreter_inner(
                     refresh_workspace_state(&vars);
                 }
                 vars[i] = val;
+                WORKSPACE_STATE.with(|state| {
+                    if let Some(ws) = state.borrow_mut().as_mut() {
+                        if let Some(name) = ws.idx_to_name.get(&i) {
+                            ws.assigned.insert(name.clone());
+                        }
+                    }
+                });
                 // If this var is declared global, update the global table entry
                 // We optimistically write-through whenever StoreVar happens and a global exists for this name
                 let key = format!("var_{i}");
@@ -9671,6 +9681,20 @@ async fn run_interpreter_inner(
                             vm_bail!(format!("Unknown class {}", obj.class_name));
                         }
                     }
+                    Value::HandleObject(handle) => {
+                        match call_builtin_vm!(
+                            "call_method",
+                            &[
+                                Value::HandleObject(handle),
+                                Value::String("subsref".to_string()),
+                                Value::String(".".to_string()),
+                                Value::String(field),
+                            ],
+                        ) {
+                            Ok(v) => stack.push(v),
+                            Err(e) => vm_bail!(e.to_string()),
+                        }
+                    }
                     Value::Struct(st) => {
                         if let Some(v) = st.fields.get(&field) {
                             stack.push(v.clone());
@@ -9698,6 +9722,24 @@ async fn run_interpreter_inner(
                         let new_cell = runmat_builtins::CellArray::new(out, ca.rows, ca.cols)
                             .map_err(|e| format!("cell field gather: {e}"))?;
                         stack.push(Value::Cell(new_cell));
+                    }
+                    Value::MException(mex) => {
+                        let value = match field.as_str() {
+                            "identifier" => Value::String(mex.identifier.clone()),
+                            "message" => Value::String(mex.message.clone()),
+                            "stack" => {
+                                let values: Vec<Value> =
+                                    mex.stack.iter().map(|s| Value::String(s.clone())).collect();
+                                let rows = values.len();
+                                let cell = runmat_builtins::CellArray::new(values, rows, 1)
+                                    .map_err(|e| format!("MException.stack: {e}"))?;
+                                Value::Cell(cell)
+                            }
+                            other => {
+                                vm_bail!(format!("Reference to non-existent field '{}'.", other))
+                            }
+                        };
+                        stack.push(value);
                     }
                     _ => vm_bail!("LoadMember on non-object".to_string()),
                 }
@@ -9751,12 +9793,44 @@ async fn run_interpreter_inner(
                             vm_bail!(format!("Unknown class {}", obj.class_name));
                         }
                     }
+                    Value::HandleObject(handle) => {
+                        match call_builtin_vm!(
+                            "call_method",
+                            &[
+                                Value::HandleObject(handle),
+                                Value::String("subsref".to_string()),
+                                Value::String(".".to_string()),
+                                Value::String(name),
+                            ],
+                        ) {
+                            Ok(v) => stack.push(v),
+                            Err(e) => vm_bail!(e.to_string()),
+                        }
+                    }
                     Value::Struct(st) => {
                         if let Some(v) = st.fields.get(&name) {
                             stack.push(v.clone());
                         } else {
                             vm_bail!(format!("Undefined field '{}'", name));
                         }
+                    }
+                    Value::MException(mex) => {
+                        let value = match name.as_str() {
+                            "identifier" => Value::String(mex.identifier.clone()),
+                            "message" => Value::String(mex.message.clone()),
+                            "stack" => {
+                                let values: Vec<Value> =
+                                    mex.stack.iter().map(|s| Value::String(s.clone())).collect();
+                                let rows = values.len();
+                                let cell = runmat_builtins::CellArray::new(values, rows, 1)
+                                    .map_err(|e| format!("MException.stack: {e}"))?;
+                                Value::Cell(cell)
+                            }
+                            other => {
+                                vm_bail!(format!("Reference to non-existent field '{}'.", other))
+                            }
+                        };
+                        stack.push(value);
                     }
                     _ => vm_bail!("LoadMemberDynamic on non-struct/object".to_string()),
                 }
@@ -9843,6 +9917,19 @@ async fn run_interpreter_inner(
                             vm_bail!(format!("Unknown property '{}' on class {}", field, cls));
                         }
                     }
+                    Value::HandleObject(handle) => match call_builtin_vm!(
+                        "call_method",
+                        &[
+                            Value::HandleObject(handle),
+                            Value::String("subsasgn".to_string()),
+                            Value::String(".".to_string()),
+                            Value::String(field),
+                            rhs,
+                        ],
+                    ) {
+                        Ok(v) => stack.push(v),
+                        Err(e) => vm_bail!(e.to_string()),
+                    },
                     Value::Struct(mut st) => {
                         if let Some(oldv) = st.fields.get(&field) {
                             runmat_gc::gc_record_write(oldv, &rhs);
@@ -9926,6 +10013,19 @@ async fn run_interpreter_inner(
                         obj.properties.insert(name, rhs);
                         stack.push(Value::Object(obj));
                     }
+                    Value::HandleObject(handle) => match call_builtin_vm!(
+                        "call_method",
+                        &[
+                            Value::HandleObject(handle),
+                            Value::String("subsasgn".to_string()),
+                            Value::String(".".to_string()),
+                            Value::String(name),
+                            rhs,
+                        ],
+                    ) {
+                        Ok(v) => stack.push(v),
+                        Err(e) => vm_bail!(e.to_string()),
+                    },
                     Value::Struct(mut st) => {
                         if let Some(oldv) = st.fields.get(&name) {
                             runmat_gc::gc_record_write(oldv, &rhs);
@@ -10054,7 +10154,23 @@ async fn run_interpreter_inner(
                                 captures: vec![],
                             }));
                         } else {
-                            vm_bail!(format!("Unknown static method '{}' on class {}", name, cls));
+                            // Fallback to namespaced builtin (e.g., Point.origin) when class
+                            // metadata has not been registered yet.
+                            let qualified = format!("{cls}.{name}");
+                            if runmat_builtins::builtin_functions()
+                                .iter()
+                                .any(|b| b.name == qualified)
+                            {
+                                stack.push(Value::Closure(runmat_builtins::Closure {
+                                    function_name: qualified,
+                                    captures: vec![],
+                                }));
+                            } else {
+                                vm_bail!(format!(
+                                    "Unknown static method '{}' on class {}",
+                                    name, cls
+                                ));
+                            }
                         }
                     }
                     _ => vm_bail!("LoadMethod requires object or classref".to_string()),
@@ -10121,41 +10237,55 @@ async fn run_interpreter_inner(
                     };
                     stack.push(v);
                 } else {
-                    // Fallback for type-class static methods like gpuArray.zeros(m, n)
-                    // These are equivalent to calling the builtin with the class name appended:
-                    // e.g., gpuArray.zeros(2, 3) → zeros(2, 3, 'gpuArray')
-                    let is_type_class = matches!(
-                        class_name.as_str(),
-                        "gpuArray"
-                            | "logical"
-                            | "double"
-                            | "single"
-                            | "int8"
-                            | "int16"
-                            | "int32"
-                            | "int64"
-                            | "uint8"
-                            | "uint16"
-                            | "uint32"
-                            | "uint64"
-                            | "char"
-                            | "string"
-                            | "cell"
-                            | "struct"
-                    );
-                    if is_type_class {
-                        // Append the class name as a string argument
-                        args.push(Value::from(class_name.as_str()));
-                        let v = match call_builtin_vm!(&method, &args) {
+                    // Fallback to namespaced builtin (e.g., Point.origin) when class metadata
+                    // has not been registered yet.
+                    let qualified = format!("{class_name}.{method}");
+                    if runmat_builtins::builtin_functions()
+                        .iter()
+                        .any(|b| b.name == qualified)
+                    {
+                        let v = match call_builtin_vm!(&qualified, &args) {
                             Ok(v) => v,
                             Err(e) => vm_bail!(e),
                         };
                         stack.push(v);
                     } else {
-                        vm_bail!(format!(
-                            "Unknown static method '{}' on class {}",
-                            method, class_name
-                        ));
+                        // Fallback for type-class static methods like gpuArray.zeros(m, n)
+                        // These are equivalent to calling the builtin with the class name appended:
+                        // e.g., gpuArray.zeros(2, 3) → zeros(2, 3, 'gpuArray')
+                        let is_type_class = matches!(
+                            class_name.as_str(),
+                            "gpuArray"
+                                | "logical"
+                                | "double"
+                                | "single"
+                                | "int8"
+                                | "int16"
+                                | "int32"
+                                | "int64"
+                                | "uint8"
+                                | "uint16"
+                                | "uint32"
+                                | "uint64"
+                                | "char"
+                                | "string"
+                                | "cell"
+                                | "struct"
+                        );
+                        if is_type_class {
+                            // Append the class name as a string argument
+                            args.push(Value::from(class_name.as_str()));
+                            let v = match call_builtin_vm!(&method, &args) {
+                                Ok(v) => v,
+                                Err(e) => vm_bail!(e),
+                            };
+                            stack.push(v);
+                        } else {
+                            vm_bail!(format!(
+                                "Unknown static method '{}' on class {}",
+                                method, class_name
+                            ));
+                        }
                     }
                 }
             }

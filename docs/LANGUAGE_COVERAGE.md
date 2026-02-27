@@ -13,7 +13,7 @@ RunMat implements MATLAB's core language grammar and semantics. This document tr
 | | `global` variables | ✅ | ✅ | Name-based, cross-function binding; write-through semantics. |
 | | `persistent` variables | ✅ | ✅ | Per-function lifetime, name- and slot-based restore. |
 | | Logical scalars/arrays | ✅ | ✅ | First-class logical type: scalar `bool` and N-D `LogicalArray`. `islogical`, `isgpuarray`, `class`, `isa`, `size`, `numel`, `isempty` follow MATLAB; predicates (`isnan`, `isfinite`, `isinf`, comparisons) produce logical arrays; masks are preserved in indexing and assignment. |
-| | Integer scalars (`int8`…`uint64`) | ✅ | ❌ | Per-width scalar types (`int8`…`uint64`) (not a single platform `int`) with `class`/`isa` parity and numeric ops routed through MATLAB-compatible paths; integer arrays are planned. |
+| | Integer scalars (`int8`…`uint64`) | ✅ | ❌ | Per-width scalar types (`int8`…`uint64`) (not a single platform `int`) with `class`/`isa` parity and numeric ops routed through MATLAB-compatible paths. Cast builtins such as `int32(...)`/`uint16(...)` are available for scalars and arrays; packed native integer array storage is still planned. |
 | | Complex numbers | ✅ | ✅ | Complex scalars and arrays with arithmetic, comparisons, transpose (`'` conjugate, `.'` non-conjugate), element-wise power, and matrix power (integer exponents). |
 | **Matrices & Arrays** | Literals `[ … ]` | ✅ | ✅ | Rectangular and ragged cell literals supported; numeric tensors support rectangular construction. |
 | | Empty `[]` | ✅ | ✅ | Shape-consistent behavior. |
@@ -26,7 +26,7 @@ RunMat implements MATLAB's core language grammar and semantics. This document tr
 | | Logical element-wise (&, &#124;, ~) | ✅ | ✅ | Element-wise logicals on numeric/logical masks. |
 | | Logical short-circuit (&&, &#124;&#124;) | ✅ | ✅ | Semantics match MATLAB short-circuit rules. |
 | | Transpose `'`, non-conjugate `.'` | ✅ | ✅ | Distinction modeled; `'` is conjugate transpose for complex and `.'` is non-conjugate; identical for real inputs. |
-| | Colon `:` (ranges) | ✅ | ✅ | Construction and indexing; `start:step:end` with step validation. |
+| | Colon `:` (ranges) | ✅ | ✅ | Construction and indexing; two-argument form always steps by `+1` and returns `[]` when `stop < start`; descending ranges require the explicit three-argument form. |
 | **Statements & Control Flow** | `if/elseif/else/end` | ✅ | ✅ | Full semantics. |
 | | `for` loops | ✅ | ✅ | Range iteration; standard MATLAB semantics. |
 | | `while` loops | ✅ | ✅ | Full semantics. |
@@ -67,7 +67,7 @@ RunMat implements MATLAB's core language grammar and semantics. This document tr
  
 ## Notes on semantics parity
  
-- N-D indexing/slicing: RunMat implements gather/scatter with broadcast rules, logical masks, colon, and `end` arithmetic across dimensions; 2-D fast paths for entire rows/columns are included. Error identifiers match MATLAB (`MATLAB:SliceNonTensor`, `MATLAB:IndexStepZero`, etc.).
+- N-D indexing/slicing: RunMat implements gather/scatter with broadcast rules, logical masks, colon, and `end` arithmetic across dimensions; 2-D fast paths for entire rows/columns are included. Error identifiers match MATLAB (`MATLAB:SliceNonTensor`, `MATLAB:IndexStepZero`, etc.). The implicit two-argument colon uses a `+1` increment and yields an empty selection when `stop < start`, mirroring MATLAB.
 - Multi-LHS and expansion: `[a,b]=f()` and `[~,b]=f()` are supported; function and cell expansions into slice targets are handled with dynamic packing (`PackToRow/PackToCol`).
 - Varargs and counts: `varargin`/`varargout` with strict count checks and `nargin`/`nargout` report per-call counts consistently across single and multi-output call sites.
 - OOP: Static/instance members, operator overloading (`plus`, `mtimes`, relational/logical) and `subsref`/`subsasgn` dispatch ordering with standardized negative errors (`MATLAB:MissingSubsref`, `MATLAB:MissingSubsasgn`).

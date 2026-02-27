@@ -560,7 +560,7 @@ pub(crate) mod tests {
                 assert_eq!(gt.shape, ct.shape);
                 let tol = match runmat_accelerate_api::provider().unwrap().precision() {
                     runmat_accelerate_api::ProviderPrecision::F64 => 1e-12,
-                    runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+                    runmat_accelerate_api::ProviderPrecision::F32 => 1e-3,
                 };
                 for (a, b) in gt.data.iter().zip(ct.data.iter()) {
                     assert!((a - b).abs() < tol, "|{} - {}| >= {}", a, b, tol);

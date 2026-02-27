@@ -75,6 +75,10 @@ pub fn fread_type(args: &[Type], _ctx: &ResolveContext) -> Type {
     Type::Union(vec![Type::String, Type::tensor(), Type::logical()])
 }
 
+pub fn frewind_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    num_type(args, ctx)
+}
+
 pub fn fwrite_type(args: &[Type], ctx: &ResolveContext) -> Type {
     num_type(args, ctx)
 }
