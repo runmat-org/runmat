@@ -352,19 +352,19 @@ pub struct ClassicLightTheme {
 impl Default for ClassicLightTheme {
     fn default() -> Self {
         Self {
-            background_color: Vec4::new(1.0, 1.0, 1.0, 1.0),
-            text_color: Vec4::new(0.0, 0.0, 0.0, 1.0),
-            accent_color: Vec4::new(0.0, 0.5, 1.0, 1.0),
-            grid_color: Vec4::new(0.8, 0.8, 0.8, 0.8),
-            axis_color: Vec4::new(0.3, 0.3, 0.3, 1.0),
+            background_color: Vec4::new(0.98, 0.985, 0.995, 1.0),
+            text_color: Vec4::new(0.12, 0.16, 0.22, 1.0),
+            accent_color: Vec4::new(0.05, 0.44, 0.86, 1.0),
+            grid_color: Vec4::new(0.28, 0.34, 0.44, 0.42),
+            axis_color: Vec4::new(0.18, 0.24, 0.33, 1.0),
             data_colors: vec![
-                Vec4::new(0.0, 0.5, 1.0, 1.0), // Blue
-                Vec4::new(1.0, 0.5, 0.0, 1.0), // Orange
-                Vec4::new(0.5, 0.8, 0.2, 1.0), // Green
-                Vec4::new(0.8, 0.2, 0.8, 1.0), // Magenta
-                Vec4::new(1.0, 0.8, 0.0, 1.0), // Yellow
-                Vec4::new(0.2, 0.8, 0.8, 1.0), // Cyan
-                Vec4::new(0.8, 0.2, 0.2, 1.0), // Red
+                Vec4::new(0.07, 0.40, 0.80, 1.0), // Cobalt
+                Vec4::new(0.88, 0.38, 0.12, 1.0), // Vermilion
+                Vec4::new(0.10, 0.58, 0.45, 1.0), // Teal
+                Vec4::new(0.53, 0.29, 0.78, 1.0), // Violet
+                Vec4::new(0.76, 0.58, 0.08, 1.0), // Ochre
+                Vec4::new(0.13, 0.60, 0.72, 1.0), // Cerulean
+                Vec4::new(0.74, 0.24, 0.27, 1.0), // Brick
             ],
         }
     }

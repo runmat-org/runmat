@@ -6,6 +6,10 @@ import {
   deregisterFigureCanvas,
   deregisterPlotCanvas,
   renderFigureImage,
+  exportFigureScene,
+  importFigureScene,
+  exportWorkspaceState,
+  importWorkspaceState,
   createWorkspaceHoverProvider,
   createFusionPlanAdapter,
   type RunMatSessionHandle,
@@ -189,6 +193,8 @@ interface NativeSession {
   resetSession(): void;
   stats(): SessionStats;
   clearWorkspace(): void;
+  exportWorkspaceState?: (includeVariables?: string) => Promise<Uint8Array | null>;
+  importWorkspaceState?: (state: Uint8Array) => boolean;
   telemetryConsent(): boolean;
   telemetryClientId?: () => string | undefined;
   memoryUsage?: () => { bytes: number; pages: number };
@@ -559,6 +565,126 @@ describe("renderFigureImage", () => {
       handle: 77
     });
     expect(native.renderFigureImage).toHaveBeenCalledWith(77, 640, 480);
+  });
+});
+
+describe("figure scene bindings", () => {
+  afterEach(() => {
+    __internals.setNativeModuleOverride(null);
+    vi.restoreAllMocks();
+  });
+
+  it("exports figure scenes as Uint8Array", async () => {
+    const spy = vi.fn(() => new Uint8Array([7, 8, 9]));
+    const native: NativeModule = {
+      default: async () => {},
+      exportFigureScene: spy
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    const scene = await exportFigureScene(11);
+    expect(Array.from(scene ?? [])).toEqual([7, 8, 9]);
+    expect(spy).toHaveBeenCalledWith(11);
+  });
+
+  it("imports figure scenes and returns created handle", async () => {
+    const scene = new Uint8Array([1, 2, 3]);
+    const spy = vi.fn(() => 42);
+    const native: NativeModule = {
+      default: async () => {},
+      importFigureScene: spy
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    await expect(importFigureScene(scene)).resolves.toBe(42);
+    expect(spy).toHaveBeenCalledWith(scene);
+  });
+
+  it("returns null when figure scene import throws", async () => {
+    const native: NativeModule = {
+      default: async () => {},
+      importFigureScene: vi.fn(() => {
+        throw { code: "ReplayDecodeFailed" };
+      })
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    await expect(importFigureScene(new Uint8Array([9, 9, 9]))).resolves.toBeNull();
+  });
+
+  it("returns null when figure scene bindings are unavailable", async () => {
+    const native: NativeModule = {
+      default: async () => {}
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    await expect(exportFigureScene(3)).resolves.toBeNull();
+    await expect(importFigureScene(new Uint8Array([1]))).resolves.toBeNull();
+  });
+});
+
+describe("workspace replay bindings", () => {
+  afterEach(() => {
+    __internals.setNativeModuleOverride(null);
+    vi.restoreAllMocks();
+  });
+
+  it("forwards workspace export mode to native module", async () => {
+    const spy = vi.fn(async () => new Uint8Array([4, 5, 6]));
+    const native: NativeModule = {
+      default: async () => {},
+      exportWorkspaceState: spy
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    const bytes = await exportWorkspaceState({ includeVariables: "force" });
+    expect(Array.from(bytes ?? [])).toEqual([4, 5, 6]);
+    expect(spy).toHaveBeenCalledWith("force");
+  });
+
+  it("imports workspace state and reports failures", async () => {
+    const state = new Uint8Array([9]);
+    const okNative: NativeModule = {
+      default: async () => {},
+      importWorkspaceState: vi.fn(() => true)
+    } as NativeModule;
+    __internals.setNativeModuleOverride(okNative);
+
+    await expect(importWorkspaceState(state)).resolves.toBe(true);
+
+    const failingNative: NativeModule = {
+      default: async () => {},
+      importWorkspaceState: vi.fn(() => {
+        throw new Error("bad state");
+      })
+    } as NativeModule;
+    __internals.setNativeModuleOverride(failingNative);
+
+    await expect(importWorkspaceState(state)).resolves.toBe(false);
+  });
+
+  it("wires session workspace export/import helpers", async () => {
+    const exportSpy = vi.fn(async () => new Uint8Array([2, 2]));
+    const importSpy = vi.fn(() => true);
+    const native: NativeModule = {
+      default: async () => {},
+      registerFsProvider: () => {},
+      initRunMat: async () =>
+        createMockNativeSession({
+          exportWorkspaceState: exportSpy,
+          importWorkspaceState: importSpy
+        })
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
+    const exported = await session.exportWorkspaceState({ includeVariables: "off" });
+    const imported = await session.importWorkspaceState(new Uint8Array([3, 3]));
+
+    expect(Array.from(exported ?? [])).toEqual([2, 2]);
+    expect(imported).toBe(true);
+    expect(exportSpy).toHaveBeenCalledWith("off");
+    expect(importSpy).toHaveBeenCalledWith(new Uint8Array([3, 3]));
   });
 });
 

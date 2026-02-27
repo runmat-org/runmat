@@ -2,7 +2,7 @@ use bytemuck::cast_slice;
 use futures::channel::oneshot;
 use std::sync::Arc;
 
-async fn map_read_async(
+pub(crate) async fn map_read_async(
     device: &wgpu::Device,
     slice: &wgpu::BufferSlice<'_>,
 ) -> Result<(), String> {

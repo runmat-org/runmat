@@ -6415,6 +6415,7 @@ dependencies = [
  "reqwest 0.12.23",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "tokio",
  "url",
@@ -6821,6 +6822,7 @@ dependencies = [
  "uuid",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-bindgen-test",
  "web-sys",
 ]
 
