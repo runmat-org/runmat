@@ -78,7 +78,14 @@ jsonLd:
 
 *Engineers shouldn't need a CS degree to have a history of their work.*
 
-## The file naming convention everyone recognizes
+## TL;DR
+
+- **RunMat** versions every file save automatically — no commits, no staging area, no git commands to learn.
+- Snapshots capture full project state at any point; restore any version with one click.
+- Every change creates an immutable audit trail with actor, action, and timestamp.
+- Snapshot chains export as git-compatible history when compliance or CI/CD requires it.
+
+## Why do engineers use _v2_FINAL instead of version control?
 
 If you have worked in an engineering team for more than a week, you have seen this:
 
@@ -92,7 +99,9 @@ thermal_analysis_v3_FINAL_v2_USE_THIS_ONE.m
 
 This is version control for tens of thousands of engineers. Not because they have never heard of git. Because git asks too much of them.
 
-## Most engineers who write code aren't developers
+## Why don't most engineers use git?
+
+Because git's mental model — staging, branching, merge conflicts, detached HEAD — demands significant learning investment for a capability that has nothing to do with their actual job.
 
 There is a massive population of people who write code every day but have never used version control. They are aerospace engineers analyzing thermal data. Mechanical engineers running FEA simulations. Physicists fitting models to experimental results. GNC engineers tuning control loops during a test campaign.
 
@@ -111,9 +120,9 @@ That is a significant learning curve for someone whose actual job is analyzing a
 
 So they make the rational choice: spend their time on the engineering, not on learning developer workflows. They rename files and move on.
 
-## What they lose
+## What do engineers lose without version control?
 
-The consequences are quiet but real. They accumulate over months and years, and they are felt most acutely when it matters most:
+No undo, no accountability, no collaboration, and no reproducibility. These are the four costs, and in mission-critical environments they are risks, not inconveniences. They accumulate over months and years, and they are felt most acutely when it matters most:
 
 **No undo.** You overwrite your working script with an experimental change. The old version is gone. You hope you remember what you changed. Sometimes you do. Sometimes you lose an afternoon reconstructing it.
 
@@ -123,9 +132,9 @@ The consequences are quiet but real. They accumulate over months and years, and 
 
 **No reproducibility.** A result from six months ago cannot be recreated because the script has been modified twenty times since, with no record of what changed or when. In research, this is the reproducibility crisis. In industry, it is a quality assurance problem.
 
-These are not minor inconveniences. In mission-critical environments, they are risks.
+## Why doesn't git work for engineers?
 
-## Why git is not the answer (for this audience)
+These are not minor inconveniences. In mission-critical environments, they are risks.
 
 Git is an extraordinary tool. It powers most of the world's software development, and for good reason. But git was designed for a specific audience — professional software development teams — and it carries the assumptions of that audience into everything it does.
 
@@ -157,7 +166,7 @@ When we built RunMat Cloud, we asked a simple question: what if version control 
 
 **Audit trail for free.** Every change is recorded with who, what, and when. No discipline required. No commit messages to write. The trail exists because the platform creates it, not because someone remembered to.
 
-## Git when someone else needs it
+## Can RunMat export history as git?
 
 Some organizations need git-formatted history. Compliance reviewers expect it. CI/CD systems consume it. External auditors want to see a commit log.
 
@@ -167,7 +176,7 @@ The key insight: **git is an export format, not a daily workflow.** Your enginee
 
 For teams that want git as a continuous secondary record, RunMat supports two-way sync on a single linear branch. But this is optional — most teams will never need it.
 
-## This is part of something bigger
+## What else does RunMat automate for engineers?
 
 Automatic versioning is not an isolated feature. It is part of a design philosophy that runs through everything we build: **bring modern platform capabilities to engineers without asking them to become software engineers first.**
 

@@ -35,6 +35,28 @@ export const docsTree: DocsNode[] = [
         },
       },
       {
+        title: "Versioning & History",
+        slug: ["versioning"],
+        file: "docs/VERSIONING.md",
+        seo: {
+          description: "How RunMat's automatic versioning and snapshots work.",
+          keywords: ["version control", "git export", "snapshots", "history", "RunMat versioning"],
+          ogTitle: "Versioning & History",
+          ogDescription: "RunMat versions your work automatically. Learn about snapshots, history, and git export.",
+        },
+      },
+      {
+        title: "Collaboration & Teams",
+        slug: ["collaboration"],
+        file: "docs/COLLABORATION.md",
+        seo: {
+          description: "How to collaborate with teams in RunMat: organizations, projects, roles, real-time sync, and enterprise SSO.",
+          keywords: ["collaboration", "teams", "organizations", "sharing", "real-time", "SSO", "RunMat Cloud"],
+          ogTitle: "Collaboration & Teams",
+          ogDescription: "Share projects, manage teams, and collaborate in real time with RunMat Cloud.",
+        },
+      },
+      {
         title: "Design Philosophy",
         slug: ["design-philosophy"],
         file: "docs/DESIGN_PHILOSOPHY.md",
