@@ -47,12 +47,12 @@ const pricingFaqItems: { question: string; answer: string }[] = [
   {
     question: "What's included in Cloud Free vs Pro vs Team?",
     answer:
-      "Free: unlimited projects, 200MB storage, limited LLM (small models only); no built-in version history. Pro: unlimited projects, 10GB storage, version history (counts toward storage), $10/mo LLM credits included ($30/mo per user). Team: SSO / SAML (and SCIM), audit logs, 100GB storage, version history, $25/mo LLM credits included, unlimited seats, priority support ($100/mo per user).",
+      "Free: unlimited projects, 200MB storage, version history (counts toward storage). Pro: unlimited projects, 10GB storage, version history (counts toward storage) ($30/mo per user). Team: SSO / SAML (and SCIM), 100GB storage, version history (counts toward storage), priority support ($100/mo per user).",
   },
   {
     question: "How does RunMat Cloud billing work?",
     answer:
-      "Pro and Team are monthly subscriptions billed per user (per seat). You can upgrade or change plan from your account. Beyond included storage and LLM credits, usage is pay-as-you-go; you can set a usage cap so you never spend more than you're comfortable with.",
+      "Pro and Team are monthly subscriptions billed per user (per seat). You can upgrade or change plan from your account. Beyond included storage, usage is pay-as-you-go; you can set a usage cap so you never spend more than you're comfortable with.",
   },
   {
     question: "When do I need RunMat Enterprise instead of Cloud?",

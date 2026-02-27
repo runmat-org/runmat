@@ -24,12 +24,11 @@ const productRows: ProductRow[] = [
   ["Cloud file storage", "x", "check", "check", "Persist and sync projects in the cloud."],
   ["Project sharing", "x", "check", "check", "Share projects and collaborate with your team."],
   ["Team workspaces", "x", "check", "check", "Organize work in shared team workspaces."],
-  ["File versioning", "x", "Pro, Team", "check", "Built-in version history on paid Cloud tiers; counts toward storage. Free Cloud has no version history."],
-  ["Cloud storage", "x", "200 MB (Free); 10 GB (Pro); 100 GB (Team)", "Included", "Total cloud storage for project files. Version history counts toward storage on Pro and Team."],
-  ["Included LLM credits", "x", "Limited (Free); $10/mo (Pro); $25/mo (Team)", "x", "Free: small-model-only, limited tokens. Pro and Team: included credits and pay-as-you-go overage."],
+  ["File versioning", "x", "check", "check", "Built-in version history on all Cloud tiers; counts toward storage."],
+  ["Cloud storage", "x", "200 MB (Free); 10 GB (Pro); 100 GB (Team)", "Included", "Total cloud storage for project files. Version history counts toward storage on all Cloud tiers."],
   ["SOC 2 compliance", "x", "check", "check", "Audited security and compliance controls."],
   ["SSO / SAML", "x", "Team plan", "check", "Single sign-on and SAML for enterprise."],
-  ["Audit logs", "x", "Team plan", "check", "Audit logging for team and compliance."],
+  ["Audit logs", "x", "x", "check", "Audit logging for Enterprise deployment and compliance."],
   ["Air-gapped deployment", "x", "x", "check", "Deploy RunMat Enterprise in isolated networks."],
   ["Community (GitHub)", "check", "check", "check", "Community support and open source on GitHub."],
   ["Priority support", "x", "Team plan", "check", "Priority support on Team and Enterprise."],
@@ -42,7 +41,7 @@ const productSectionLabels = [
   "Security and Compliance",
   "Support",
 ];
-const productSectionSizes = [4, 5, 6, 4, 2];
+const productSectionSizes = [4, 5, 5, 4, 2];
 
 function SectionHeaderRow({ label }: { label: string }) {
   return (

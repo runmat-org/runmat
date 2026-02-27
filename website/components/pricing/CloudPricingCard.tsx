@@ -27,7 +27,7 @@ const cloudTierConfig: Record<
     features: [
       "Unlimited projects",
       "200MB cloud storage",
-      "Limited LLM (small models only)",
+      "Version history",
       "Community support",
     ],
     ctaLabel: "Start free",
@@ -39,7 +39,6 @@ const cloudTierConfig: Record<
     features: [
       "Unlimited projects",
       "10GB cloud storage",
-      "$10/mo LLM credits included",
       "Version history",
     ],
     ctaLabel: "Get started",
@@ -50,11 +49,8 @@ const cloudTierConfig: Record<
     description: "For organizations that need SSO and centralized identity management.",
     features: [
       "SSO / SAML (and SCIM)",
-      "Team seats + shared workspaces",
       "100GB cloud storage",
-      "$25/mo LLM credits included",
       "Version history",
-      "Audit logs",
       "Priority support",
     ],
     ctaLabel: "Get started",
