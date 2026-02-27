@@ -101,7 +101,7 @@ export default function CloudPricingCard() {
                   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                   selected
                     ? "bg-gradient-to-r from-blue-500 to-purple-600 text-white"
-                    : "text-gray-300 hover:bg-white/10 hover:text-white"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
                 )}
               >
                 {label}
