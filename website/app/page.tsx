@@ -306,15 +306,6 @@ export default function HomePage() {
               </div>
             </div>
           </div>
-          <div className="mt-6 text-center">
-            <Link href="#" className="text-sm text-muted-foreground hover:text-foreground underline">
-              Explore plot types
-            </Link>
-            <span className="hidden sm:inline text-muted-foreground"> • </span>
-            <Link href="#" className="text-sm text-muted-foreground hover:text-foreground underline">
-              How zero-copy plotting works
-            </Link>
-          </div>
         </div>
       </section>
 
