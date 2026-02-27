@@ -102,7 +102,7 @@ const jsonLd = {
 export const metadata: Metadata = {
   title: "RunMat: Free Runtime for MATLAB Code (Browser & Desktop)",
   description:
-    "Execute .m files instantly with automatic GPU acceleration. An open-source runtime compatible with standard MATLAB code. No license or installation required.",
+    "Execute .m files instantly with automatic GPU acceleration. An open-source runtime built on MATLAB semantics. No license or installation required.",
   keywords: [
     "run matlab online",
     "free matlab runtime",
@@ -143,7 +143,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "RunMat: Free Runtime for MATLAB Code (Browser & Desktop)",
     description:
-      "Execute .m files instantly with automatic GPU acceleration. An open-source runtime compatible with standard MATLAB code. No license or installation required.",
+      "Execute .m files instantly with automatic GPU acceleration. An open-source runtime built on MATLAB semantics. No license or installation required.",
     url: "/",
     siteName: "RunMat",
     type: "website",
@@ -152,7 +152,7 @@ export const metadata: Metadata = {
     card: "summary_large_image",
     title: "RunMat: Free Runtime for MATLAB Code (Browser & Desktop)",
     description:
-      "Execute .m files instantly with automatic GPU acceleration. An open-source runtime compatible with standard MATLAB code. No license or installation required.",
+      "Execute .m files instantly with automatic GPU acceleration. An open-source runtime built on MATLAB semantics. No license or installation required.",
   },
 };
 
@@ -168,7 +168,7 @@ export default function HomePage() {
       <div className="sr-only">
         <h1>RunMat: Free Runtime for MATLAB Code (Browser & Desktop)</h1>
         <p>
-          Execute .m files instantly with automatic GPU acceleration. An open-source runtime compatible with standard MATLAB code. No license or installation required.
+          Execute .m files instantly with automatic GPU acceleration. An open-source runtime built on MATLAB semantics. No license or installation required.
         </p>
       </div>
 

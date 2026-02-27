@@ -297,7 +297,7 @@ Python and Julia both have strong momentum and active development. Octave is sta
 ## ⛙ Decision Guide
 | Priority                        | Best Choice     | Why                                                               |
 |---------------------------------|-----------------|-------------------------------------------------------------------|
-| Reuse MATLAB code directly      | RunMat / Octave | Drop-in compatibility; RunMat is faster/newer, Octave is mature   |
+| Reuse MATLAB code directly      | RunMat / Octave | Familiar syntax; RunMat is faster/newer, Octave is mature          |
 | Maximum performance / HPC       | Julia / RunMat  | JIT-compiled, multi-threaded, GPU-friendly                        |
 | Automatic GPU acceleration      | RunMat          | Cross-vendor GPU support without code changes                     |
 | Browser-based computing         | RunMat          | WebGPU acceleration, no quotas, client-side execution             |
@@ -308,6 +308,6 @@ Python and Julia both have strong momentum and active development. Octave is sta
 ## 👍 Closing
 These tools aren't mutually exclusive; use Python for breadth, Julia for performance, and RunMat or Octave for MATLAB compatibility. With RunMat's GPU acceleration and browser-based execution, you can even run serious computations from a Chromebook or locked-down corporate machine. You can now do advanced numerical computing without MATLAB by choosing the platform that best balances compatibility, performance, ecosystem, and cost.
 
-And with options like RunMat emerging, it's possible to get the best attributes (high performance, nearly 100% MATLAB compatibility, cross-vendor GPU acceleration, and open-source freedom) all in one package. 
+And with options like RunMat emerging, it's possible to get the best attributes (high performance, broad MATLAB language coverage, cross-vendor GPU acceleration, and open-source freedom) all in one package. 
 
 *Try RunMat free today at [runmat.org](https://runmat.org). RunMat is a free, open source community project developed by [Dystr](https://dystr.com).*
