@@ -1,4 +1,8 @@
 @import "tailwindcss";
+
+/* Use class-based dark mode so theme toggle (next-themes) controls dark: styles, not OS preference */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @import "prismjs/themes/prism-okaidia.css";
 
 @layer base {

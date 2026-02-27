@@ -115,6 +115,7 @@ We don't believe security should require sacrificing capability. That's why we b
 ## The license server problem
 
 RunMat has zero licensing infrastructure — no daemon, no host ID, no dongle. Copy the binary onto an approved drive, carry it in, and run your code.
+
 If you've administered a scientific computing environment inside a secure facility, you know the FlexLM ritual. You need a dedicated machine to host the license daemon. You generate a host ID, request a license file from the vendor -- from a different network -- and carry it across the gap on approved media. You configure the daemon, test it, and pray it stays up.
 
 If the license server goes down during a test campaign, your analysts can't work. If the license expires, you're repeating the whole process. If the hardware changes, you're starting from scratch. The license server is a single point of failure in an environment where failure is not an option.
