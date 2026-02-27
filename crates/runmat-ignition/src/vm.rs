@@ -5126,10 +5126,12 @@ async fn run_interpreter_inner(
                             if idxs.len() == 1 {
                                 stack.push(Value::Num(t.data[idxs[0] - 1]));
                             } else if idxs.is_empty() {
-                                // Use the index tensor's shape so that A(1:0) on any source
-                                // returns a result with the same shape as the index (1×0 for
-                                // a row-range index). Fall back to [1,0] for other empty cases.
-                                let shape = empty_idx_shape.unwrap_or_else(|| vec![1, 0]);
+                                // For empty tensor indices (e.g. 1:0 → [1,0]) mirror the index
+                                // shape so the result has the same shape as the index.
+                                // For all other empty cases (colon on empty source, logical
+                                // masking with no true values) fall back to [0,1] — a 0×1
+                                // column vector, matching MATLAB's A(:) on an empty source.
+                                let shape = empty_idx_shape.unwrap_or_else(|| vec![0, 1]);
                                 let tens = runmat_builtins::Tensor::new(vec![], shape)
                                     .map_err(|e| format!("Slice error: {e}"))?;
                                 stack.push(Value::Tensor(tens));
