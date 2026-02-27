@@ -31,12 +31,12 @@
     "unit": "builtins::image::filters::filter2::tests",
     "integration": "builtins::image::filters::filter2::tests::filter2_gpu_matches_cpu"
   },
-  "description": "`filter2(H, X)` performs a 2-D correlation of the image (or matrix) `X` with the kernel `H`. By default the operation returns an array the same size as `X`, mirroring MATLAB\u2019s behaviour and matching the identity `filter2(H, X) == conv2(X, rot90(H, 2), 'same')`.",
+  "description": "`filter2(H, X)` performs a 2-D correlation of the image (or matrix) `X` with the kernel `H`. By default the operation returns an array the same size as `X`, mirroring MATLAB’s behaviour and matching the identity `filter2(H, X) == conv2(X, rot90(H, 2), 'same')`.",
   "behaviors": [
     "The first argument is the kernel and the second is the image or matrix being filtered.",
     "The default configuration performs correlation with zero padding and `'same'` output sizing.",
     "Passing `'full'` or `'valid'` as the third argument switches the output size to the full convolution result or the strictly valid interior, respectively.",
-    "Supplying `'conv'` rotates the kernel by 180\u00b0 so the operation matches MATLAB convolution. Use `'corr'` for an explicit correlation request; it is the default.",
+    "Supplying `'conv'` rotates the kernel by 180° so the operation matches MATLAB convolution. Use `'corr'` for an explicit correlation request; it is the default.",
     "Inputs may be numeric or logical. Logical arrays are promoted to double precision prior to filtering.",
     "Both arguments may be gpuArray handles; RunMat keeps them on the device whenever the active acceleration provider exposes the `imfilter` hook."
   ],

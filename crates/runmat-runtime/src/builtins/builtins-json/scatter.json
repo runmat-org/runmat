@@ -28,7 +28,7 @@
   "tested": {
     "unit": "builtins::plotting::scatter::tests"
   },
-  "description": "`scatter(x, y)` plots paired points in 2-D space. The RunMat implementation mirrors MATLAB's default styling\u2014circular markers, grid enabled, and axis labels applied to the active figure. Positional size/color arguments (`S`, `C`), the `'filled'` flag, and name-value pairs for marker appearance are supported.",
+  "description": "`scatter(x, y)` plots paired points in 2-D space. The RunMat implementation mirrors MATLAB's default styling—circular markers, grid enabled, and axis labels applied to the active figure. Positional size/color arguments (`S`, `C`), the `'filled'` flag, and name-value pairs for marker appearance are supported.",
   "behaviors": [
     "Inputs must contain the same number of elements. Row and column vectors are both accepted.",
     "Single-precision gpuArray inputs stay on the device when the shared WebGPU renderer is active, so browser and native builds avoid a gather step. Other tensors automatically fall back to the host path.",

@@ -74,11 +74,11 @@
   "faqs": [
     {
       "question": "When should I use `atan`?",
-      "answer": "Use `atan` whenever you need the element-wise inverse tangent of data expressed in radians\u2014common in signal processing, control systems, and geometric computations."
+      "answer": "Use `atan` whenever you need the element-wise inverse tangent of data expressed in radians—common in signal processing, control systems, and geometric computations."
     },
     {
       "question": "How is `atan` different from `atan2`?",
-      "answer": "`atan` accepts a single input and returns results in `(-\u03c0/2, \u03c0/2)`. `atan2(y, x)` takes two inputs, uses the signs of both arguments to determine the correct quadrant, and returns values in `(-\u03c0, \u03c0]`."
+      "answer": "`atan` accepts a single input and returns results in `(-π/2, π/2)`. `atan2(y, x)` takes two inputs, uses the signs of both arguments to determine the correct quadrant, and returns values in `(-π, π]`."
     },
     {
       "question": "Does `atan` support complex numbers?",
@@ -90,7 +90,7 @@
     },
     {
       "question": "What happens with NaN or Inf inputs?",
-      "answer": "NaNs propagate, and infinities map to the appropriate asymptotic limits (`atan(\u00b1Inf) = \u00b1\u03c0/2`), matching MATLAB's IEEE behavior."
+      "answer": "NaNs propagate, and infinities map to the appropriate asymptotic limits (`atan(±Inf) = ±π/2`), matching MATLAB's IEEE behavior."
     }
   ],
   "links": [

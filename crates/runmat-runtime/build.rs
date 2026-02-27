@@ -81,21 +81,32 @@ fn main() {
 }
 
 /// Ensure the generated wasm registry file exists so include! does not fail in wasm builds.
-/// The proc-macro will overwrite/extend this file when generating the registry; this stub
-/// keeps the compile happy when the generator hasn’t run yet.
+/// The proc-macro will overwrite/extend this file when RUNMAT_GENERATE_WASM_REGISTRY=1;
+/// this stub keeps the compile happy when the generator has not yet run.
+///
+/// ORDERING CONSTRAINT: build.rs runs *after* all dependency crates finish compiling (cargo
+/// compiles deps before running the dependent's build script). The `#[runtime_builtin]`
+/// proc-macros in runmat-macros populate this file during runmat-builtins compilation.
+/// Therefore this function must NOT reset the file — doing so overwrites proc-macro output
+/// and leaves include!() reading an empty registry.
+///
+/// Do NOT emit cargo:rerun-if-changed for this file. Proc-macros modify it during builds;
+/// adding rerun-if-changed would trigger build.rs to re-run after every proc-macro write,
+/// which resets the file, which forces a recompile of runmat-runtime, which re-runs
+/// proc-macros — an infinite rebuild loop that manifests as cargo stuck at the wasm test
+/// targets indefinitely.
 fn ensure_wasm_registry_stub() {
     let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     path.push("../../target/runmat_wasm_registry.rs");
     if let Some(parent) = path.parent() {
         let _ = fs::create_dir_all(parent);
     }
-    // When a build explicitly requests registry generation, reset the file so proc-macros can
-    // append fresh registrations deterministically (avoids stale/corrupt output).
-    let force_reset = env::var("RUNMAT_GENERATE_WASM_REGISTRY").is_ok();
-    if force_reset || !path.exists() {
+    // Only create a placeholder when no file exists yet. Once proc-macros have run they
+    // own the file content; build.rs must not touch it after that point.
+    if !path.exists() {
         let _ = fs::write(&path, "pub fn register_all() {\n}\n");
     }
-    // Re-run if the path changes or the env var forces regeneration
-    println!("cargo:rerun-if-changed={}", path.display());
+    // Re-run only when the env var itself changes (switching between generation and normal
+    // build modes). Do NOT add rerun-if-changed for the registry path — see above.
     println!("cargo:rerun-if-env-changed=RUNMAT_GENERATE_WASM_REGISTRY");
 }

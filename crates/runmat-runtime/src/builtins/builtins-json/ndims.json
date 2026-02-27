@@ -30,7 +30,7 @@
   },
   "description": "`ndims(A)` returns the number of dimensions (rank) of `A`, following MATLAB conventions. Scalars, vectors, matrices, and N-D tensors always report at least two dimensions; higher-rank arrays report their full dimension count. This behaviour matches MathWorks MATLAB for numeric, logical, char, string, cell, struct, and GPU arrays.",
   "behaviors": [
-    "Scalars and vectors return `2`, because MATLAB treats them as `1\u00d71` or `1\u00d7N`.",
+    "Scalars and vectors return `2`, because MATLAB treats them as `1×1` or `1×N`.",
     "Matrices return `2` unless they have trailing dimensions beyond the second.",
     "N-D arrays return the length of their dimension vector after trailing singleton dimensions are preserved.",
     "Character arrays, string arrays, logical arrays, complex arrays, and cell arrays all follow their MATLAB array shape metadata.",
@@ -41,42 +41,42 @@
     {
       "description": "Checking how many dimensions a scalar has",
       "input": "n = ndims(42)",
-      "output": "n = 2;"
+      "output": "n = 2"
     },
     {
       "description": "Counting the dimensions of a matrix",
       "input": "A = rand(5, 3);\nr = ndims(A)",
-      "output": "r = 2;"
+      "output": "r = 2"
     },
     {
       "description": "Detecting 3-D array dimensionality",
       "input": "V = rand(4, 5, 6);\nr = ndims(V)",
-      "output": "r = 3;"
+      "output": "r = 3"
     },
     {
       "description": "Finding ndims for gpuArray data without gathering",
       "input": "G = gpuArray(ones(16, 32, 2));\nr = ndims(G)",
-      "output": "r = 3;"
+      "output": "r = 3"
     },
     {
       "description": "Understanding ndims with cell arrays",
       "input": "C = {1, 2, 3; 4, 5, 6};\nr = ndims(C)",
-      "output": "r = 2;"
+      "output": "r = 2"
     },
     {
       "description": "Verifying ndims on string arrays",
       "input": "S = [\"alpha\"; \"beta\"; \"gamma\"];\nr = ndims(S)",
-      "output": "r = 2;"
+      "output": "r = 2"
     }
   ],
   "faqs": [
     {
       "question": "Why does `ndims` return 2 for scalars and vectors?",
-      "answer": "MATLAB treats scalars and vectors as 2-D arrays (`1\u00d71` or `1\u00d7N`). RunMat mirrors this behaviour, so `ndims(5)` and `ndims([1 2 3])` both return `2`."
+      "answer": "MATLAB treats scalars and vectors as 2-D arrays (`1×1` or `1×N`). RunMat mirrors this behaviour, so `ndims(5)` and `ndims([1 2 3])` both return `2`."
     },
     {
       "question": "Does `ndims` ignore trailing singleton dimensions?",
-      "answer": "No. MATLAB preserves trailing singletons when reporting the rank. If your tensor was explicitly created with size `10\u00d71\u00d71\u00d74`, `ndims` returns `4`."
+      "answer": "No. MATLAB preserves trailing singletons when reporting the rank. If your tensor was explicitly created with size `10×1×1×4`, `ndims` returns `4`."
     },
     {
       "question": "How does `ndims` behave for GPU tensors?",

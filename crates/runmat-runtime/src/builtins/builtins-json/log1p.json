@@ -37,7 +37,7 @@
     "Logical inputs are promoted to double precision (`true -> 1.0`, `false -> 0.0`) before execution.",
     "Character arrays are interpreted as their numeric code points and return dense double tensors.",
     "Values equal to `-1` yield `-Inf`, matching MATLAB's handling of `log(0)`.",
-    "Inputs smaller than `-1` promote to complex outputs: `log1p(-2)` returns `0 + i\u03c0`.",
+    "Inputs smaller than `-1` promote to complex outputs: `log1p(-2)` returns `0 + iπ`.",
     "Complex inputs follow MATLAB's definition by computing the natural logarithm of `1 + z`.",
     "Existing GPU tensors remain on the device when the registered provider implements `unary_log1p` alongside `reduce_min`. RunMat queries the device-side minimum to confirm the data stays within the real-valued domain; otherwise it gathers to the host, computes the exact result, and preserves residency metadata."
   ],
@@ -45,27 +45,27 @@
     {
       "description": "Protecting precision when adding tiny percentages",
       "input": "delta = 1e-12;\nvalue = log1p(delta)",
-      "output": "value = 9.999999999995e-13;"
+      "output": "value = 9.999999999995e-13"
     },
     {
       "description": "Computing log-growth factors from percentage changes",
       "input": "rates = [-0.25 -0.10 0 0.10 0.25];\ngrowth = log1p(rates)",
-      "output": "growth = [-0.2877 -0.1054 0 0.0953 0.2231];"
+      "output": "growth = [-0.2877 -0.1054 0 0.0953 0.2231]"
     },
     {
       "description": "Handling the branch cut at x = -1",
       "input": "y = log1p(-1)",
-      "output": "y = -Inf;"
+      "output": "y = -Inf"
     },
     {
       "description": "Obtaining complex results for inputs less than -1",
       "input": "data = [-2 -3 -5];\nresult = log1p(data)",
-      "output": "result = [0.0000 + 3.1416i, 0.6931 + 3.1416i, 1.3863 + 3.1416i];"
+      "output": "result = [0.0000 + 3.1416i, 0.6931 + 3.1416i, 1.3863 + 3.1416i]"
     },
     {
       "description": "Executing log1p on GPU arrays with automatic residency",
       "input": "G = gpuArray(linspace(-0.5, 0.5, 5));\nout = log1p(G);\nrealResult = gather(out)",
-      "output": "realResult = [-0.6931 -0.2877 0 0.2231 0.4055];"
+      "output": "realResult = [-0.6931 -0.2877 0 0.2231 0.4055]"
     }
   ],
   "faqs": [

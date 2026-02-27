@@ -83,7 +83,7 @@
     },
     {
       "question": "Can I combine `\"reverse\"` and `\"omitnan\"`?",
-      "answer": "Yes. The options can be specified in any order and RunMat mirrors MATLAB\u2019s results."
+      "answer": "Yes. The options can be specified in any order and RunMat mirrors MATLAB’s results."
     },
     {
       "question": "Does the GPU path respect `\"omitnan\"`?",
@@ -118,6 +118,6 @@
   },
   "gpu_residency": "Manual `gpuArray` calls are optional. RunMat promotes tensors automatically when the planner predicts a benefit, keeping fused expressions resident on the device. Explicit `gpuArray` is still supported for MATLAB compatibility or when you want to guarantee GPU residency before entering a critical loop.",
   "gpu_behavior": [
-    "When data already lives on the GPU, RunMat asks the active acceleration provider for a device-side prefix-product implementation. The runtime calls the `cumprod_scan` hook with the chosen dimension, direction, and NaN mode. Providers that lack this hook\u2014or that report an error for the requested options\u2014trigger a gather to host memory, perform the cumulative product on the CPU, and return the dense tensor result. Residency metadata is cleared so downstream operations can re-promote the tensor when profitable."
+    "When data already lives on the GPU, RunMat asks the active acceleration provider for a device-side prefix-product implementation. The runtime calls the `cumprod_scan` hook with the chosen dimension, direction, and NaN mode. Providers that lack this hook—or that report an error for the requested options—trigger a gather to host memory, perform the cumulative product on the CPU, and return the dense tensor result. Residency metadata is cleared so downstream operations can re-promote the tensor when profitable."
   ]
 }

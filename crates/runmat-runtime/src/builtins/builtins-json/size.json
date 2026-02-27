@@ -28,12 +28,12 @@
     "unit": "builtins::array::introspection::size::tests",
     "integration": "builtins::array::introspection::size::tests::size_gpu_tensor_uses_handle_shape"
   },
-  "description": "`size(A)` reports the length of every dimension of `A`. The return value is always a row vector describing the current shape, with scalars reported as `1\u00d71`. This matches MathWorks MATLAB semantics for scalars, vectors, matrices, N-D arrays, strings, chars, tables, and cells.",
+  "description": "`size(A)` reports the length of every dimension of `A`. The return value is always a row vector describing the current shape, with scalars reported as `1×1`. This matches MathWorks MATLAB semantics for scalars, vectors, matrices, N-D arrays, strings, chars, tables, and cells.",
   "behaviors": [
-    "`size(A)` returns a `1\u00d7N` row vector listing the extents of each dimension.",
+    "`size(A)` returns a `1×N` row vector listing the extents of each dimension.",
     "`size(A, dim)` returns the extent of the specified dimension as a scalar. Dimensions outside the current rank return `1`.",
     "`size(A, dims)` accepts a vector of dimensions and returns the corresponding extents.",
-    "Column and row vectors are distinguished by the tensor metadata: `size(A)` yields `[m n]` for `m\u00d7n` matrices, `[1 n]` for row vectors, and `[m 1]` for column vectors.",
+    "Column and row vectors are distinguished by the tensor metadata: `size(A)` yields `[m n]` for `m×n` matrices, `[1 n]` for row vectors, and `[m 1]` for column vectors.",
     "Character arrays return `[rows cols]`; string scalars return `[1 1]`.",
     "Cell arrays and struct scalars follow MATLAB's array semantics.",
     "Empty dimensions (zeros) are preserved in the output vector.",
@@ -43,27 +43,27 @@
     {
       "description": "Find the size of a matrix",
       "input": "A = [1 2 3; 4 5 6];\nshape = size(A)",
-      "output": "shape = [2 3];"
+      "output": "shape = [2 3]"
     },
     {
       "description": "Determine the number of rows in a matrix",
       "input": "A = randn(8, 4);\nm = size(A, 1)",
-      "output": "m = 8;"
+      "output": "m = 8"
     },
     {
       "description": "Query multiple dimensions at once",
       "input": "A = rand(5, 4, 3);\nselected = size(A, [1 3])",
-      "output": "selected = [5 3];"
+      "output": "selected = [5 3]"
     },
     {
       "description": "Inspect a gpuArray without gathering",
       "input": "G = gpuArray(ones(256, 512));\nshape = size(G)",
-      "output": "shape = [256 512];"
+      "output": "shape = [256 512]"
     },
     {
       "description": "Check the size of a cell array",
       "input": "C = {1, 2, 3; 4, 5, 6};\ngrid = size(C)",
-      "output": "grid = [2 3];"
+      "output": "grid = [2 3]"
     }
   ],
   "faqs": [

@@ -36,34 +36,34 @@
     "When you omit the dimension, `join` operates along the **last dimension whose size is not 1**. If all dimensions are singleton, it uses dimension 2.",
     "The default delimiter is a single space character. You can pass a scalar delimiter (string or character vector) or supply a string/cell array whose shape matches the input, with the join dimension reduced by one, to customise delimiters for each gap.",
     "Inputs may be string scalars, string arrays (including N-D), character arrays, or cell arrays of character vectors. Cell inputs return cell arrays; all other inputs return string scalars or string arrays.",
-    "If any element participating in a join is the string `<missing>`, the result for that slice is also `<missing>`, matching MATLAB\u2019s missing propagation rules.",
+    "If any element participating in a join is the string `<missing>`, the result for that slice is also `<missing>`, matching MATLAB’s missing propagation rules.",
     "Joining along a dimension greater than `ndims(str)` leaves the input unchanged."
   ],
   "examples": [
     {
       "description": "Combine Strings In Each Row Of A Matrix",
       "input": "names = [\"Carlos\" \"Sada\"; \"Ella\" \"Olsen\"; \"Diana\" \"Lee\"];\nfullNames = join(names)",
-      "output": "fullNames = 3\u00d71 string\n    \"Carlos Sada\"\n    \"Ella Olsen\"\n    \"Diana Lee\""
+      "output": "fullNames = 3×1 string\n    \"Carlos Sada\"\n    \"Ella Olsen\"\n    \"Diana Lee\""
     },
     {
       "description": "Insert A Custom Delimiter Between Elements",
       "input": "labels = [\"x\" \"y\" \"z\"; \"a\" \"b\" \"c\"];\njoined = join(labels, \"-\")",
-      "output": "joined = 2\u00d71 string\n    \"x-y-z\"\n    \"a-b-c\""
+      "output": "joined = 2×1 string\n    \"x-y-z\"\n    \"a-b-c\""
     },
     {
       "description": "Provide A Delimiter Array That Varies Per Row",
       "input": "str = [\"x\" \"y\" \"z\"; \"a\" \"b\" \"c\"];\ndelims = [\" + \" \" = \"; \" - \" \" = \"];\nequations = join(str, delims)",
-      "output": "equations = 2\u00d71 string\n    \"x + y = z\"\n    \"a - b = c\""
+      "output": "equations = 2×1 string\n    \"x + y = z\"\n    \"a - b = c\""
     },
     {
       "description": "Join Along A Specific Dimension",
       "input": "scores = [\"Alice\" \"Bob\"; \"92\" \"88\"; \"85\" \"90\"];\nbyColumn = join(scores, 1)",
-      "output": "byColumn = 1\u00d72 string\n    \"Alice 92 85\"    \"Bob 88 90\""
+      "output": "byColumn = 1×2 string\n    \"Alice 92 85\"    \"Bob 88 90\""
     },
     {
       "description": "Join A Cell Array Of Character Vectors",
       "input": "C = {'GPU', 'Accelerate'; 'Ignition', 'Interpreter'};\nresult = join(C, \", \")",
-      "output": "result = 2\u00d71 cell\n    {'GPU, Accelerate'}\n    {'Ignition, Interpreter'}"
+      "output": "result = 2×1 cell\n    {'GPU, Accelerate'}\n    {'Ignition, Interpreter'}"
     },
     {
       "description": "Join Using A Dimension Argument As The Second Input",
@@ -73,7 +73,7 @@
     {
       "description": "Join Rows Of An Empty String Array",
       "input": "emptyRows = strings(2, 0);\nout = join(emptyRows)",
-      "output": "out = 2\u00d71 string\n    \"\"\n    \"\""
+      "output": "out = 2×1 string\n    \"\"\n    \"\""
     }
   ],
   "faqs": [
@@ -87,7 +87,7 @@
     },
     {
       "question": "What happens when `str` contains `<missing>`?",
-      "answer": "The result for that slice becomes `<missing>`. This matches MATLAB\u2019s behaviour and ensures missing values propagate."
+      "answer": "The result for that slice becomes `<missing>`. This matches MATLAB’s behaviour and ensures missing values propagate."
     },
     {
       "question": "Can I pass GPU-resident text or delimiters?",

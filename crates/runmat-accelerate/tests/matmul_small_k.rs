@@ -5,7 +5,7 @@ use runmat_accelerate::backend::wgpu::provider::{self, WgpuProviderOptions};
 #[cfg(feature = "wgpu")]
 use runmat_accelerate_api::{HostTensorView, ProviderPrecision};
 #[cfg(feature = "wgpu")]
-use std::sync::Mutex;
+use tokio::sync::Mutex;
 
 #[cfg(feature = "wgpu")]
 static TEST_MUTEX: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
@@ -45,7 +45,7 @@ fn cpu_matmul_f32(a: &[f32], ar: usize, ac: usize, b: &[f32], br: usize, bc: usi
 #[cfg(feature = "wgpu")]
 #[tokio::test]
 async fn matmul_small_k_threshold() {
-    let _guard = TEST_MUTEX.lock().unwrap();
+    let _guard = TEST_MUTEX.lock().await;
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
     let p = runmat_accelerate_api::provider().expect("provider");
 
@@ -98,7 +98,7 @@ async fn matmul_small_k_threshold() {
 #[cfg(feature = "wgpu")]
 #[tokio::test]
 async fn matmul_small_k_exact_threshold() {
-    let _guard = TEST_MUTEX.lock().unwrap();
+    let _guard = TEST_MUTEX.lock().await;
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
     let p = runmat_accelerate_api::provider().expect("provider");
 
@@ -151,7 +151,7 @@ async fn matmul_small_k_exact_threshold() {
 #[cfg(feature = "wgpu")]
 #[tokio::test]
 async fn matmul_vec4_f32_matches_cpu() {
-    let _guard = TEST_MUTEX.lock().unwrap();
+    let _guard = TEST_MUTEX.lock().await;
     std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
     let _ = provider::register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu");
     let p = runmat_accelerate_api::provider().expect("provider");

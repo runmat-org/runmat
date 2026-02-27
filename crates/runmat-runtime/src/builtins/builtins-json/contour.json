@@ -40,7 +40,7 @@
   "examples": [
     {
       "description": "",
-      "input": "contour(peaks(50));\ncontour(x, y, z, 20);\ncontour(x, y, z, [0, 0.5, 1.0]);\ncontour(x, y, z, 'LevelStep', 0.25, 'LineColor', 'none')"
+      "input": "[X, Y] = meshgrid(-2:0.25:2, -2:0.25:2);\nz = X .* exp(-X.^2 - Y.^2);\ncontour(z);\ncontour(z, [0, 0.5, 1.0]);\ncontour(z, 'LevelStep', 0.25, 'LineColor', 'none')"
     }
   ],
   "faqs": [],
@@ -50,9 +50,9 @@
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/contour.rs"
   },
   "options": [
-    "`'LevelList', vec` / `'Levels', vec` \u2013 provide an explicit, strictly increasing vector of Z values to contour. `vec` may be a numeric vector (host tensor or gpuArray). If a scalar is supplied the helper interprets it as the requested number of levels, matching MATLAB.",
-    "`'LevelStep', step` \u2013 positive finite scalar that determines the spacing between contour levels.",
-    "`'LevelListMode', 'auto' | 'manual'` \u2013 `'auto'` resets the helper to evenly spaced defaults; `'manual'` requires the same call to also pass `'LevelList'` or `'LevelStep'`.",
-    "`'LineColor', spec` \u2013 accepts MATLAB color strings (`\"r\"`, `\"magenta\"`, etc.), RGB triples, or the literals `'auto'`/`'flat'` (use the colormap) and `'none'` (suppress iso-line overlays when paired with `contourf`)."
+    "`'LevelList', vec` / `'Levels', vec` – provide an explicit, strictly increasing vector of Z values to contour. `vec` may be a numeric vector (host tensor or gpuArray). If a scalar is supplied the helper interprets it as the requested number of levels, matching MATLAB.",
+    "`'LevelStep', step` – positive finite scalar that determines the spacing between contour levels.",
+    "`'LevelListMode', 'auto' | 'manual'` – `'auto'` resets the helper to evenly spaced defaults; `'manual'` requires the same call to also pass `'LevelList'` or `'LevelStep'`.",
+    "`'LineColor', spec` – accepts MATLAB color strings (`\"r\"`, `\"magenta\"`, etc.), RGB triples, or the literals `'auto'`/`'flat'` (use the colormap) and `'none'` (suppress iso-line overlays when paired with `contourf`)."
   ]
 }

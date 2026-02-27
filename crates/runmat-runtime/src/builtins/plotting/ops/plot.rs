@@ -533,11 +533,20 @@ pub(crate) mod tests {
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_builtins::{ResolveContext, Type};
+    use std::sync::{Mutex, MutexGuard};
 
-    fn setup_plot_tests() {
+    // All tests that touch the global figure registry must hold this guard for
+    // their entire duration. Without it, concurrent tests share one `current`
+    // figure handle and can stomp each other's `clear_figure` / `plot_builtin`
+    // calls, producing a spurious "Data" fallback label.
+    static PLOT_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn setup_plot_tests() -> MutexGuard<'static, ()> {
+        let guard = PLOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         ensure_plot_test_env();
         reset_hold_state_for_run();
         let _ = clear_figure(None);
+        guard
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
@@ -561,7 +570,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn build_plot_requires_equal_lengths() {
-        setup_plot_tests();
+        let _guard = setup_plot_tests();
         assert!(build_line_plot(
             vec![1.0, 2.0],
             vec![1.0],
@@ -574,7 +583,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn plot_builtin_produces_figure_even_without_backend() {
-        setup_plot_tests();
+        let _guard = setup_plot_tests();
         let result = block_on(plot_builtin(
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[0.0, 1.0])),
@@ -588,7 +597,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn plot_builtin_infers_label_from_callsite() {
-        setup_plot_tests();
+        let _guard = setup_plot_tests();
         let source = "plot(a, b);";
         let _source_guard = crate::source_context::replace_current_source(Some(source));
         let spans = vec![
@@ -613,7 +622,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_series_specs_handles_interleaved_styles() {
-        setup_plot_tests();
+        let _guard = setup_plot_tests();
         let args = vec![
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[1.0, 2.0])),
@@ -631,7 +640,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_series_specs_errors_on_incomplete_pair() {
-        setup_plot_tests();
+        let _guard = setup_plot_tests();
         let args = vec![
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::String("linewidth".into()),
@@ -643,7 +652,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_series_specs_rejects_style_before_data() {
-        setup_plot_tests();
+        let _guard = setup_plot_tests();
         let args = vec![Value::String("linewidth".into()), Value::Num(2.0)];
         let err = parse_series_specs(args).unwrap_err();
         assert!(err.to_string().contains("expected numeric X data"));
@@ -652,7 +661,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_series_specs_extracts_line_style_order() {
-        setup_plot_tests();
+        let _guard = setup_plot_tests();
         let args = vec![
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[1.0, 2.0])),

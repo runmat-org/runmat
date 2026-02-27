@@ -85,7 +85,7 @@
     },
     {
       "question": "Can I post binary data?",
-      "answer": "Yes. Provide numeric tensors (`double`, integer, or logical) and set `\"ContentType\",\"binary\"` or `\"MediaType\",\"application/octet-stream\"`. Values must be in the 0\u2013255 range."
+      "answer": "Yes. Provide numeric tensors (`double`, integer, or logical) and set `\"ContentType\",\"binary\"` or `\"MediaType\",\"application/octet-stream\"`. Values must be in the 0–255 range."
     },
     {
       "question": "What controls the response decoding?",

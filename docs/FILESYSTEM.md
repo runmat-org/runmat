@@ -81,6 +81,13 @@ load("/data/example.mat")
 
 If the runtime is configured with a remote filesystem provider, these calls read and write to the remote storage automatically.
 
+For portable path assembly, use `fullfile` to join segments with the platform-specific separator:
+
+```matlab
+rawPath = fullfile("data", "raw", "sample.dat");
+fid = fopen(rawPath, "w"); fclose(fid);
+```
+
 ## Using the CLI with the remote filesystem
 
 ### Authenticate and select a project

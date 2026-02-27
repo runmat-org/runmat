@@ -42,12 +42,12 @@
     {
       "description": "Undoing fftshift on an even-length spectrum",
       "input": "x = 0:7;\ny = ifftshift(x)",
-      "output": "y = [4 5 6 7 0 1 2 3];"
+      "output": "y = [4 5 6 7 0 1 2 3]"
     },
     {
       "description": "Undoing fftshift on an odd-length spectrum",
       "input": "x = 1:5;\ny = ifftshift(x)",
-      "output": "y = [3 4 5 1 2];"
+      "output": "y = [3 4 5 1 2]"
     },
     {
       "description": "Preparing data for inverse FFT",
@@ -61,7 +61,7 @@
     {
       "description": "Using ifftshift with gpuArray data",
       "input": "G = gpuArray(0:7);\nshifted = ifftshift(G);\nhost = gather(shifted)",
-      "output": "host = [4 5 6 7 0 1 2 3];"
+      "output": "host = [4 5 6 7 0 1 2 3]"
     }
   ],
   "faqs": [
@@ -116,7 +116,7 @@
     "label": "`crates/runmat-runtime/src/builtins/math/fft/ifftshift.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/fft/ifftshift.rs"
   },
-  "gpu_residency": "You can rely on RunMat's auto-offload to keep FFT data on the GPU. When a provider exposes `circshift`, `ifftshift` executes entirely on the device and the result remains GPU-resident. If no provider is registered\u2014or it lacks `circshift`\u2014RunMat gathers once, applies the host reorder, and uploads the result so the rest of the computation can still run accelerated. You can call `gpuArray` explicitly when you need MATLAB parity or to enforce a residency boundary.",
+  "gpu_residency": "You can rely on RunMat's auto-offload to keep FFT data on the GPU. When a provider exposes `circshift`, `ifftshift` executes entirely on the device and the result remains GPU-resident. If no provider is registered—or it lacks `circshift`—RunMat gathers once, applies the host reorder, and uploads the result so the rest of the computation can still run accelerated. You can call `gpuArray` explicitly when you need MATLAB parity or to enforce a residency boundary.",
   "gpu_behavior": [
     "RunMat first attempts to execute the shift entirely on the GPU using the provider's `circshift` hook. If that is unavailable, RunMat gathers the data exactly once, performs the reorder on the host, and uploads the result so downstream computations can continue on the device. Scalars remain on their current device to avoid unnecessary transfers."
   ]

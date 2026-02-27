@@ -11,8 +11,8 @@ use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorView, Redu
 use runmat_builtins::Value;
 use std::collections::HashMap;
 
-static TEST_MUTEX: once_cell::sync::Lazy<std::sync::Mutex<()>> =
-    once_cell::sync::Lazy::new(|| std::sync::Mutex::new(()));
+static TEST_MUTEX: once_cell::sync::Lazy<tokio::sync::Mutex<()>> =
+    once_cell::sync::Lazy::new(|| tokio::sync::Mutex::new(()));
 
 fn upload(
     provider: &runmat_accelerate::backend::wgpu::provider_impl::WgpuProvider,
@@ -30,7 +30,7 @@ fn upload(
 
 #[tokio::test]
 async fn fused_sum_square_dim0_matches_manual() {
-    let _guard = TEST_MUTEX.lock().unwrap();
+    let _guard = TEST_MUTEX.lock().await;
     let provider = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
         WgpuProviderOptions::default(),
     )

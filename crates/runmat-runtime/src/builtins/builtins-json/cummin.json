@@ -46,7 +46,7 @@
     {
       "description": "Tracking column-wise running minima",
       "input": "A = [4 2 7; 3 5 1];\n[Y, I] = cummin(A)",
-      "output": "Y =\n     4     2     1\n     3     2     1\nI =\n     1     1     2\n     2     1     2"
+      "output": "Y =\n     4     2     7\n     3     2     1\nI =\n     1     1     1\n     2     1     2"
     },
     {
       "description": "Requesting running minima across rows",
@@ -122,6 +122,6 @@
   },
   "gpu_residency": "Manual `gpuArray` calls are optional. The planner keeps tensors on the GPU when profitable, and the cummin builtin preserves residency whenever the provider implements `cummin_scan`. If the hook is unavailable, RunMat gathers to the host transparently and still returns MATLAB-compatible minima and indices. You can still use `gpuArray` to match MATLAB scripts or force residency ahead of a tight GPU loop.",
   "gpu_behavior": [
-    "When the input already resides on the GPU, RunMat calls the acceleration provider's `cummin_scan` hook. Providers that implement this hook return GPU handles for both the running minima and their indices. If the hook is missing\u2014or if it rejects the requested options (such as `\"omitnan\"` or `\"reverse\"`)\u2014RunMat gathers the data to the host, computes the MATLAB-compatible result, and returns dense tensors on the CPU. Residency metadata is cleared so downstream kernels can re-promote values when profitable."
+    "When the input already resides on the GPU, RunMat calls the acceleration provider's `cummin_scan` hook. Providers that implement this hook return GPU handles for both the running minima and their indices. If the hook is missing—or if it rejects the requested options (such as `\"omitnan\"` or `\"reverse\"`)—RunMat gathers the data to the host, computes the MATLAB-compatible result, and returns dense tensors on the CPU. Residency metadata is cleared so downstream kernels can re-promote values when profitable."
   ]
 }

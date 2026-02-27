@@ -19,6 +19,14 @@ pub struct WorkspaceResolver {
 mod resolver_storage {
     use super::WorkspaceResolver;
 
+    pub(super) fn set(resolver: WorkspaceResolver) {
+        imp::set(resolver)
+    }
+
+    pub(super) fn with<R>(f: impl FnOnce(Option<&WorkspaceResolver>) -> R) -> R {
+        imp::with(f)
+    }
+
     #[cfg(test)]
     mod imp {
         use super::WorkspaceResolver;
@@ -65,14 +73,6 @@ mod resolver_storage {
             let guard = RESOLVER.read().unwrap_or_else(|poison| poison.into_inner());
             f(guard.as_ref())
         }
-    }
-
-    pub(super) fn set(resolver: WorkspaceResolver) {
-        imp::set(resolver)
-    }
-
-    pub(super) fn with<R>(f: impl FnOnce(Option<&WorkspaceResolver>) -> R) -> R {
-        imp::with(f)
     }
 }
 

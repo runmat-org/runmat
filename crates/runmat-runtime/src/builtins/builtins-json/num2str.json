@@ -30,10 +30,10 @@
     "unit": "builtins::strings::core::num2str::tests",
     "integration": "builtins::strings::core::num2str::tests::num2str_gpu_tensor_roundtrip"
   },
-  "description": "`num2str(x)` converts numeric scalars, vectors, and matrices into a character array where each row of `x` becomes a row of text. Values use MATLAB's short-`g` formatting by default, and you can provide a precision or an explicit format specifier to control the output. Complex inputs produce `a \u00b1 bi` strings, and logical data is converted to `0` or `1`.",
+  "description": "`num2str(x)` converts numeric scalars, vectors, and matrices into a character array where each row of `x` becomes a row of text. Values use MATLAB's short-`g` formatting by default, and you can provide a precision or an explicit format specifier to control the output. Complex inputs produce `a ± bi` strings, and logical data is converted to `0` or `1`.",
   "behaviors": [
     "Default formatting uses up to 15 significant digits with MATLAB-style `g` behaviour (switching to scientific notation when needed).",
-    "`num2str(x, p)` formats using `p` significant digits (`0 \u2264 p \u2264 52`).",
+    "`num2str(x, p)` formats using `p` significant digits (`0 ≤ p ≤ 52`).",
     "`num2str(x, fmt)` accepts a single-number `printf`-style format such as `'%0.3f'`, `'%10.4e'`, or `'%.5g'`. Width, `+`, `-`, and `0` flags are supported.",
     "A trailing `'local'` argument switches the decimal separator to the one inferred from the active locale (or the `RUNMAT_DECIMAL_SEPARATOR` environment variable).",
     "Vector inputs return single-row character arrays; matrices return one textual row per numeric row.",

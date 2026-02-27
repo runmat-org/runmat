@@ -57,7 +57,7 @@
     {
       "description": "Scaling by a scalar using backslash",
       "input": "s = 2;\nB = [2 4 6];\nscaled = s \\ B",
-      "output": "scaled = [1 2 3];"
+      "output": "scaled = [1 2 3]"
     },
     {
       "description": "Solving multiple right-hand sides at once",
@@ -77,7 +77,7 @@
     },
     {
       "question": "What happens if `A` is singular or rectangular?",
-      "answer": "RunMat mirrors MATLAB by computing the minimum-norm least-squares solution using singular-value decomposition\u2014no explicit pseudoinverse is necessary."
+      "answer": "RunMat mirrors MATLAB by computing the minimum-norm least-squares solution using singular-value decomposition—no explicit pseudoinverse is necessary."
     },
     {
       "question": "Does `mldivide` work with higher-dimensional arrays?",
@@ -85,11 +85,11 @@
     },
     {
       "question": "How are logical or integer arrays treated?",
-      "answer": "They are promoted to double precision (`true \u2192 1`, `false \u2192 0`) before solving, matching MATLAB semantics."
+      "answer": "They are promoted to double precision (`true → 1`, `false → 0`) before solving, matching MATLAB semantics."
     },
     {
       "question": "How does RunMat handle NaN or Inf values?",
-      "answer": "NaNs and Infs propagate through the least-squares solver exactly as MATLAB does\u2014any slice containing NaNs will typically produce NaNs in the corresponding output entries."
+      "answer": "NaNs and Infs propagate through the least-squares solver exactly as MATLAB does—any slice containing NaNs will typically produce NaNs in the corresponding output entries."
     }
   ],
   "links": [
@@ -120,6 +120,6 @@
   },
   "gpu_residency": "No manual residency management is required. If both operands already live on the GPU and the active provider implements `mldivide`, the solve stays on the device. When the provider falls back to the host (as the current WGPU backend does), RunMat gathers data, executes the same SVD solver used by the CPU implementation, and re-uploads the result so subsequent GPU work continues seamlessly.",
   "gpu_behavior": [
-    "When a gpuArray provider is active, RunMat first offers the solve to its `mldivide` hook. The current WGPU provider downloads the operands to the host, executes the shared SVD-based solver, then uploads the result back to the device so downstream GPU pipelines keep their residency. If no provider is available\u2014or a provider declines the request\u2014RunMat gathers gpuArray inputs to the host, performs the solve there, and returns a host tensor."
+    "When a gpuArray provider is active, RunMat first offers the solve to its `mldivide` hook. The current WGPU provider downloads the operands to the host, executes the shared SVD-based solver, then uploads the result back to the device so downstream GPU pipelines keep their residency. If no provider is available—or a provider declines the request—RunMat gathers gpuArray inputs to the host, performs the solve there, and returns a host tensor."
   ]
 }

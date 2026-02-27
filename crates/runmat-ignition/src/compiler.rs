@@ -163,6 +163,18 @@ fn is_exp_call(expr: &HirExpr) -> bool {
 }
 
 impl Compiler {
+    fn normalize_class_literal_name(raw: &str) -> String {
+        if raw.len() >= 2 {
+            let bytes = raw.as_bytes();
+            let first = bytes[0] as char;
+            let last = bytes[raw.len() - 1] as char;
+            if (first == '\'' || first == '"') && first == last {
+                return raw[1..raw.len() - 1].to_string();
+            }
+        }
+        raw.to_string()
+    }
+
     fn compile_stochastic_evolution(
         &mut self,
         plan: StochasticEvolutionPlan<'_>,
@@ -1921,9 +1933,7 @@ impl Compiler {
                         self.emit(Instr::Transpose);
                     }
                     runmat_parser::UnOp::Not => {
-                        // Simple lowering: x -> (x == 0)
-                        self.emit(Instr::LoadConst(0.0));
-                        self.emit(Instr::Equal);
+                        self.emit(Instr::CallBuiltin("not".to_string(), 1));
                     }
                 }
             }
@@ -2721,11 +2731,7 @@ impl Compiler {
                     }
                     HirExprKind::FuncCall(name, args) if name == "classref" && args.len() == 1 => {
                         if let HirExprKind::String(cls) = &args[0].kind {
-                            let cls_name = if cls.starts_with('\'') && cls.ends_with('\'') {
-                                cls[1..cls.len() - 1].to_string()
-                            } else {
-                                cls.clone()
-                            };
+                            let cls_name = Self::normalize_class_literal_name(cls);
                             self.emit(Instr::LoadStaticProperty(cls_name, field.clone()));
                         } else {
                             self.compile_expr(base)?;
@@ -2764,11 +2770,7 @@ impl Compiler {
                 }
                 HirExprKind::FuncCall(name, bargs) if name == "classref" && bargs.len() == 1 => {
                     if let HirExprKind::String(cls) = &bargs[0].kind {
-                        let cls_name = if cls.starts_with('\'') && cls.ends_with('\'') {
-                            cls[1..cls.len() - 1].to_string()
-                        } else {
-                            cls.clone()
-                        };
+                        let cls_name = Self::normalize_class_literal_name(cls);
                         for arg in args {
                             self.compile_expr(arg)?;
                         }

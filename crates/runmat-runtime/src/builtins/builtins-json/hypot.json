@@ -46,32 +46,32 @@
     {
       "description": "Computing the hypotenuse of two scalars",
       "input": "result = hypot(3, 4)",
-      "output": "result = 5;"
+      "output": "result = 5"
     },
     {
       "description": "Using `hypot` with vectors and implicit expansion",
       "input": "x = [-3, 0, 4];\ny = 4;\nnorms = hypot(x, y)",
-      "output": "norms = [5 4 5];"
+      "output": "norms = [5 4 5]"
     },
     {
       "description": "Calculating per-element distances between two matrices",
       "input": "X = [1 2; 3 4];\nY = [0 1; 1 0];\ndist = hypot(X, Y)",
-      "output": "dist = [1.0000 2.2361; 3.1623 4.0000];"
+      "output": "dist = [1.0000 2.2361; 3.1623 4.0000]"
     },
     {
       "description": "Working with complex numbers",
       "input": "a = [1+2i, 3-4i];\nb = [2-1i, -1+1i];\nmag = hypot(a, b)",
-      "output": "mag = [3.1623 5.1962];"
+      "output": "mag = [3.1623 5.1962]"
     },
     {
       "description": "Applying `hypot` to character data",
       "input": "codes = hypot('A', zeros(1, 1))",
-      "output": "codes = 65.0000;"
+      "output": "codes = 65.0000"
     },
     {
       "description": "Executing `hypot` on GPU arrays",
       "input": "Gx = gpuArray([3 4; 5 12]);\nGy = gpuArray([4 3; 12 5]);\ndistance_gpu = hypot(Gx, Gy);\ndistance = gather(distance_gpu)",
-      "output": "distance = [5 5; 13 13];"
+      "output": "distance = [5 5; 13 13]"
     }
   ],
   "faqs": [

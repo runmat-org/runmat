@@ -44,17 +44,17 @@
     {
       "description": "Creating a logical mask from numeric data",
       "input": "values = [0 2 -3 0];\nmask = logical(values)",
-      "output": "mask =\n  1\u00d74 logical array\n     0     1     1     0"
+      "output": "mask =\n  1×4 logical array\n     0     1     1     0"
     },
     {
       "description": "Building a logical mask from a matrix",
       "input": "M = [-4 0 8; 0 1 0];\nmask = logical(M)",
-      "output": "mask =\n  2\u00d73 logical array\n     1     0     1\n     0     1     0"
+      "output": "mask =\n  2×3 logical array\n     1     0     1\n     0     1     0"
     },
     {
       "description": "Treating NaN and Inf values as true",
       "input": "flags = logical([NaN Inf 0])",
-      "output": "flags =\n  1\u00d73 logical array\n     1     1     0"
+      "output": "flags =\n  1×3 logical array\n     1     1     0"
     },
     {
       "description": "Converting complex numbers to logical scalars",
@@ -64,17 +64,17 @@
     {
       "description": "Converting character arrays to logical values",
       "input": "chars = ['A' 0 'C'];\nmask = logical(chars)",
-      "output": "mask =\n  1\u00d73 logical array\n     1     0     1"
+      "output": "mask =\n  1×3 logical array\n     1     0     1"
     },
     {
       "description": "Keeping gpuArray inputs on the device",
       "input": "G = gpuArray([0 1 2]);\nmaskGPU = logical(G);\nhostMask = gather(maskGPU)",
-      "output": "hostMask =\n  1\u00d73 logical array\n     0     1     1"
+      "output": "hostMask =\n  1×3 logical array\n     0     1     1"
     },
     {
       "description": "Preserving empty shapes through logical conversion",
       "input": "emptyVec = zeros(0, 3);\nlogicalEmpty = logical(emptyVec)",
-      "output": "logicalEmpty =\n  0\u00d73 logical array\n     []"
+      "output": "logicalEmpty =\n  0×3 logical array\n     []"
     }
   ],
   "faqs": [
@@ -84,7 +84,7 @@
     },
     {
       "question": "How are NaN or Inf values treated?",
-      "answer": "They evaluate to `true`. MATLAB defines logical conversion as \u201cnon-zero\u201d, and `NaN` / `Inf` both satisfy that rule."
+      "answer": "They evaluate to `true`. MATLAB defines logical conversion as “non-zero”, and `NaN` / `Inf` both satisfy that rule."
     },
     {
       "question": "How does `logical` handle complex numbers?",
@@ -137,10 +137,10 @@
     "label": "crates/runmat-runtime/src/builtins/logical/ops.rs",
     "url": "crates/runmat-runtime/src/builtins/logical/ops.rs"
   },
-  "gpu_residency": "You rarely need to call `gpuArray` manually. When the acceleration provider is active, RunMat keeps logical conversions on the GPU by issuing `elem_ne(X, 0)` kernels (backed by `zeros_like` allocations) and flagging the handle as logical metadata. Explicit `gpuArray` calls are available for MATLAB compatibility or when you want to pin residency before interacting with external libraries. When the provider lacks the necessary hook, RunMat documents the fallback: it gathers the data, converts it on the host, and\u2014if a provider is still available\u2014re-uploads the logical mask so downstream GPU code continues to work without residency surprises.",
+  "gpu_residency": "You rarely need to call `gpuArray` manually. When the acceleration provider is active, RunMat keeps logical conversions on the GPU by issuing `elem_ne(X, 0)` kernels (backed by `zeros_like` allocations) and flagging the handle as logical metadata. Explicit `gpuArray` calls are available for MATLAB compatibility or when you want to pin residency before interacting with external libraries. When the provider lacks the necessary hook, RunMat documents the fallback: it gathers the data, converts it on the host, and—if a provider is still available—re-uploads the logical mask so downstream GPU code continues to work without residency surprises.",
   "gpu_behavior": [
     "When a GPU provider implements `elem_ne` and `zeros_like`, RunMat performs the conversion in-place on the device by evaluating `elem_ne(X, 0)`, then marks the resulting handle as logical so predicates like `islogical` work without downloads.",
-    "If the provider cannot service the request (missing hooks, unsupported dtype, or allocation failure), the value is transparently gathered to the host, converted, and\u2014when a provider is still available\u2014re-uploaded as a logical gpuArray. The fallback is documented so users understand potential host/device transitions.",
+    "If the provider cannot service the request (missing hooks, unsupported dtype, or allocation failure), the value is transparently gathered to the host, converted, and—when a provider is still available—re-uploaded as a logical gpuArray. The fallback is documented so users understand potential host/device transitions.",
     "Handles that are already flagged as logical (`gpuArray.logical`) are returned without modification.",
     "Scalars remain scalars: converting a `gpuArray` scalar preserves the residency and returns a logical gpuArray scalar."
   ]

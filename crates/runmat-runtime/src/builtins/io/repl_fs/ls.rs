@@ -19,6 +19,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::console::{record_console_output, ConsoleStream};
+use crate::output_context::requested_output_count;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::ls")]
@@ -90,7 +91,9 @@ async fn ls_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
         list_current_directory()?
     };
 
-    emit_listing_stdout(&entries);
+    if should_emit_stdout() {
+        emit_listing_stdout(&entries);
+    }
     rows_to_char_array(&entries)
 }
 
@@ -234,6 +237,14 @@ fn emit_listing_stdout(rows: &[String]) {
     }
     let text = rows.join("\n");
     record_console_output(ConsoleStream::Stdout, text);
+}
+
+fn should_emit_stdout() -> bool {
+    match requested_output_count() {
+        Some(0) => true,
+        Some(_) => false,
+        None => true,
+    }
 }
 
 fn patterns_from_value(value: &Value) -> BuiltinResult<Vec<String>> {

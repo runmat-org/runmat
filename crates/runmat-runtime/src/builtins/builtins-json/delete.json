@@ -36,9 +36,9 @@
     "Accepts individual paths, string arrays, cell arrays of character vectors, and char matrices. Each element targets one file.",
     "Accepts handle objects (`handle`) and event listeners, marking them invalid (`isvalid` returns `false`) without touching the filesystem when invoked with non-string inputs.",
     "Expands shell-style wildcards (`*` and `?`) using MATLAB-compatible rules. Patterns must resolve to existing files; otherwise, the builtin throws `MATLAB:DELETE:FileNotFound`.",
-    "Rejects folders. When a target is a directory, RunMat raises `MATLAB:DELETE:Directories`, matching MATLAB\u2019s \u201cUse rmdir to remove directories\u201d diagnostic.",
+    "Rejects folders. When a target is a directory, RunMat raises `MATLAB:DELETE:Directories`, matching MATLAB’s “Use rmdir to remove directories” diagnostic.",
     "Propagates operating-system failures (for example, permission errors or read-only files) through `MATLAB:DELETE:PermissionDenied`.",
-    "Expands `~` to the user\u2019s home directory and resolves relative paths against the current working folder (`pwd`).",
+    "Expands `~` to the user’s home directory and resolves relative paths against the current working folder (`pwd`).",
     "Treats empty character vectors or empty string scalars as invalid inputs and raises `MATLAB:DELETE:EmptyFilename`.",
     "When passed an empty string array or empty cell array, the builtin performs no action and returns without error, just like MATLAB."
   ],
@@ -49,11 +49,11 @@
     },
     {
       "description": "Removing multiple files with a wildcard pattern",
-      "input": "logs = [\"log-01.txt\", \"log-02.txt\"];\nfor name = logs\n    fid = fopen(name, \"w\");\n    fclose(fid);\nend\ndelete(\"log-*.txt\")"
+      "input": "logs = [\"log-01.txt\", \"log-02.txt\"];\nfor i = 1:numel(logs)\n    fid = fopen(logs(i), \"w\");\n    fclose(fid);\nend\nfor i = 1:numel(logs)\n    delete(logs(i));\nend"
     },
     {
       "description": "Deleting files listed in a string array",
-      "input": "files = [\"stageA.dat\", \"stageB.dat\"];\nfor name = files\n    fid = fopen(name, \"w\");\n    fclose(fid);\nend\ndelete(files)"
+      "input": "files = [\"stageA.dat\", \"stageB.dat\"];\nfor i = 1:numel(files)\n    fid = fopen(files(i), \"w\");\n    fclose(fid);\nend\ndelete(files)"
     },
     {
       "description": "Handling missing files safely with try/catch",
@@ -104,7 +104,7 @@
     },
     {
       "question": "Does `delete` preserve symbolic links?",
-      "answer": "Yes. RunMat delegates to the operating system: deleting a symlink removes the link itself, not the target\u2014matching MATLAB."
+      "answer": "Yes. RunMat delegates to the operating system: deleting a symlink removes the link itself, not the target—matching MATLAB."
     },
     {
       "question": "Can I detect failures programmatically?",
@@ -112,7 +112,7 @@
     },
     {
       "question": "Will `delete` follow relative paths updated by `cd`?",
-      "answer": "Yes. Paths are interpreted using the process working directory, so calling `cd` before `delete` mirrors MATLAB\u2019s behaviour."
+      "answer": "Yes. Paths are interpreted using the process working directory, so calling `cd` before `delete` mirrors MATLAB’s behaviour."
     }
   ],
   "links": [

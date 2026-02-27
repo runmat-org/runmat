@@ -73,7 +73,7 @@
   "faqs": [
     {
       "question": "Which modes does `imfilter` support?",
-      "answer": "The builtin accepts `'corr'` (default) or `'conv'` to switch between correlation and convolution. Convolution is equivalent to correlating with the kernel rotated 180\u00b0 in each dimension."
+      "answer": "The builtin accepts `'corr'` (default) or `'conv'` to switch between correlation and convolution. Convolution is equivalent to correlating with the kernel rotated 180° in each dimension."
     },
     {
       "question": "How do `'same'`, `'full'`, and `'valid'` differ?",
@@ -85,7 +85,7 @@
     },
     {
       "question": "Can I filter RGB or higher-dimensional arrays?",
-      "answer": "Yes. The kernel must either match each image dimension or use size 1 along trailing axes (e.g., a 3\u00d73\u00d71 filter applied independently to each colour channel)."
+      "answer": "Yes. The kernel must either match each image dimension or use size 1 along trailing axes (e.g., a 3×3×1 filter applied independently to each colour channel)."
     },
     {
       "question": "Does `imfilter` normalise the kernel automatically?",
@@ -124,6 +124,6 @@
   },
   "gpu_residency": "RunMat automatically keeps tensors on the GPU when the acceleration provider implements the `imfilter` hook, so explicit `gpuArray` calls are rarely necessary. For backwards compatibility and manual residency control, you may still wrap inputs in `gpuArray`; the builtin forwards handles directly to the provider. When the hook is absent, RunMat gathers arrays to the host transparently, ensuring functional parity with MATLAB even without a GPU implementation.",
   "gpu_behavior": [
-    "When the active acceleration provider implements the custom `imfilter` hook, the builtin keeps the image and kernel on the device, honouring padding and size options without host round-trips. Mixed-residency inputs are handled automatically: device images cause host kernels to be uploaded on demand, and failures to upload or execute simply fall back to the reference path. Providers that do not yet expose this hook trigger a transparent fallback\u2014RunMat gathers the operands to the host, executes the scalar reference implementation, and (when appropriate) returns a host tensor. This guarantees correctness while still allowing future GPU acceleration with no API surface changes."
+    "When the active acceleration provider implements the custom `imfilter` hook, the builtin keeps the image and kernel on the device, honouring padding and size options without host round-trips. Mixed-residency inputs are handled automatically: device images cause host kernels to be uploaded on demand, and failures to upload or execute simply fall back to the reference path. Providers that do not yet expose this hook trigger a transparent fallback—RunMat gathers the operands to the host, executes the scalar reference implementation, and (when appropriate) returns a host tensor. This guarantees correctness while still allowing future GPU acceleration with no API surface changes."
   ]
 }

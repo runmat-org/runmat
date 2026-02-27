@@ -124,6 +124,6 @@
   },
   "gpu_residency": "RunMat's auto-offload system keeps tensors on the GPU when profitable, so explicit `gpuArray` calls are rarely required. They remain available to mirror MATLAB workflows. When the provider lacks an inverse FFT hook, RunMat automatically gathers once, evaluates the transform on the host, and returns the result, so manual residency management is unnecessary.",
   "gpu_behavior": [
-    "RunMat keeps `gpuArray` inputs on the device long enough to query the active acceleration provider for the `ifft_dim` hook. When the hook is present, the inverse transform executes on the device, after which RunMat immediately downloads the result to return the standard MATLAB host types. If the provider lacks that hook\u2014or if the requested length is zero\u2014the runtime gathers the data once, evaluates the inverse transform on the CPU via `rustfft`, and returns a MATLAB-compatible result."
+    "RunMat keeps `gpuArray` inputs on the device long enough to query the active acceleration provider for the `ifft_dim` hook. When the hook is present, the inverse transform executes on the device, after which RunMat immediately downloads the result to return the standard MATLAB host types. If the provider lacks that hook—or if the requested length is zero—the runtime gathers the data once, evaluates the inverse transform on the CPU via `rustfft`, and returns a MATLAB-compatible result."
   ]
 }

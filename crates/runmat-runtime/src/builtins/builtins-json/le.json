@@ -49,27 +49,27 @@
     {
       "description": "Create A Mask For Matrix Values Below Or Equal To A Threshold",
       "input": "M = [1 2 3; 4 5 6];\nmask = le(M, 3)",
-      "output": "mask =\n  2\u00d73 logical array\n     1     1     1\n     0     0     0"
+      "output": "mask =\n  2×3 logical array\n     1     1     1\n     0     0     0"
     },
     {
       "description": "Apply Less-Equal With Implicit Expansion",
       "input": "v = [1 3 5 7];\nmask = le(v, [2 6])",
-      "output": "mask =\n  1\u00d74 logical array\n     1     1     0     0"
+      "output": "mask =\n  1×4 logical array\n     1     1     0     0"
     },
     {
       "description": "Compare Character Data To Numeric Codes With Equality Support",
       "input": "letters = ['A' 'B' 'C'];\nisBeforeOrB = le(letters, 66)",
-      "output": "isBeforeOrB =\n  1\u00d73 logical array\n     1     1     1"
+      "output": "isBeforeOrB =\n  1×3 logical array\n     1     1     1"
     },
     {
       "description": "Compare String Arrays Lexicographically Allowing Equality",
       "input": "names = [\"alice\" \"charlie\" \"bob\"];\nearlierOrSame = le(names, \"bob\")",
-      "output": "earlierOrSame =\n  1\u00d73 logical array\n     1     0     1"
+      "output": "earlierOrSame =\n  1×3 logical array\n     1     0     1"
     },
     {
       "description": "Run `le` Directly On `gpuArray` Inputs",
       "input": "G1 = gpuArray([1 4 7]);\nG2 = gpuArray([2 4 8]);\ndeviceResult = le(G1, G2);\nhostResult = gather(deviceResult)",
-      "output": "deviceResult =\n  1\u00d73 gpuArray logical array\n     1     1     1\nhostResult =\n  1\u00d73 logical array\n     1     1     1"
+      "output": "deviceResult =\n  1×3 gpuArray logical array\n     1     1     1\nhostResult =\n  1×3 logical array\n     1     1     1"
     }
   ],
   "faqs": [
