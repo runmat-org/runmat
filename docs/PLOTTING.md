@@ -100,3 +100,42 @@ from figure mutation:
 
 3D camera-based rendering uses a depth attachment so surfaces/meshes/3D scatter occlude
 correctly during interaction.
+
+## Figure scene replay payloads
+
+RunMat now exposes a versioned figure-scene replay payload at the wasm boundary:
+
+- `exportFigureScene(handle) -> Uint8Array | null`
+- `importFigureScene(sceneBytes) -> number | null`
+
+The payload is JSON and self-describing (schema version + kind) so hosts can persist it as an
+artifact and hydrate later without coupling to renderer internals.
+
+Runtime-level limits are enforced during decode/import:
+
+- maximum payload bytes
+- maximum plot object count
+
+Invalid schema, oversized payloads, and rejected imports return `null` at the wasm/TS boundary.
+
+## Native surface theming
+
+Headless/native-surface interactive render exports support explicit theme injection.
+Hosts can pass a full `PlotThemeConfig` to keep interactive plot colors aligned with
+UI theme changes (including light/dark presets and custom overrides) without rerunning
+the underlying script.
+
+The same theme payload is supported by the wasm/web worker surface path so active
+WebGPU plot surfaces can switch themes live while attached.
+
+Theme application now covers overlay plot chrome consistently (frame, axes ticks/labels,
+grid, legend, title, and axis labels). The default `classic_light` theme is tuned for
+stronger contrast on bright backgrounds while preserving the existing dark preset.
+
+Background fill now follows an explicit policy:
+
+- **Theme-driven** when figure background is unspecified/default.
+- **Explicit override** when a figure sets a background color directly.
+
+This policy is applied consistently across Web/WASM and native-surface render paths to
+avoid dark-default leakage during first render and theme switches.

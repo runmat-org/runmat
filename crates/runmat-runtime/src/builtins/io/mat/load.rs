@@ -332,7 +332,15 @@ pub(crate) fn read_mat_file(path: &Path) -> BuiltinResult<Vec<(String, Value)>> 
         )
     })?;
     let mut reader = BufReader::new(file);
+    read_mat_reader(&mut reader)
+}
 
+pub fn decode_workspace_from_mat_bytes(bytes: &[u8]) -> BuiltinResult<Vec<(String, Value)>> {
+    let mut cursor = Cursor::new(bytes);
+    read_mat_reader(&mut cursor)
+}
+
+fn read_mat_reader<R: Read>(reader: &mut R) -> BuiltinResult<Vec<(String, Value)>> {
     let mut header = [0u8; MAT_HEADER_LEN];
     reader.read_exact(&mut header).map_err(|err| {
         load_error_with_source(format!("load: failed to read MAT-file header: {err}"), err)
@@ -342,7 +350,7 @@ pub(crate) fn read_mat_file(path: &Path) -> BuiltinResult<Vec<(String, Value)>> 
     }
 
     let mut variables = Vec::new();
-    while let Some(tagged) = read_tagged(&mut reader, true)? {
+    while let Some(tagged) = read_tagged(reader, true)? {
         if tagged.data_type != MI_MATRIX {
             continue;
         }

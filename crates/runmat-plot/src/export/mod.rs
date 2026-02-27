@@ -3,6 +3,7 @@
 //! Supports PNG, SVG, PDF, HTML, and other output formats.
 
 pub mod image;
+pub mod native_surface;
 pub mod vector;
 pub mod web;
 

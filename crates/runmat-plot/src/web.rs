@@ -11,6 +11,9 @@ use crate::context::SharedWgpuContext;
 use crate::core::plot_renderer::{PlotRenderConfig, PlotRenderer, RenderTarget};
 use crate::core::{camera::MouseButton as CameraMouseButton, CameraController, PlotEvent};
 use crate::plots::Figure;
+#[cfg(feature = "egui-overlay")]
+use crate::styling::ModernDarkTheme;
+use crate::styling::PlotThemeConfig;
 use log::{debug, warn};
 use std::sync::Arc;
 use thiserror::Error;
@@ -71,6 +74,8 @@ pub struct WebRendererOptions {
     pub present_mode: wgpu::PresentMode,
     /// Requested MSAA sample count.
     pub msaa_samples: u32,
+    /// Whether to enable egui overlay composition when the feature is compiled.
+    pub enable_overlay: bool,
 }
 
 impl Default for WebRendererOptions {
@@ -81,6 +86,7 @@ impl Default for WebRendererOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             present_mode: wgpu::PresentMode::AutoNoVsync,
             msaa_samples: 4,
+            enable_overlay: false,
         }
     }
 }
@@ -121,8 +127,15 @@ pub struct WebRenderer {
     pixels_per_point: f32,
     last_axes_viewports_px: Vec<(u32, u32, u32, u32)>,
     last_pointer_position: glam::Vec2,
+    background_policy: BackgroundPolicy,
     #[cfg(feature = "egui-overlay")]
     overlay: Option<WebOverlayState>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BackgroundPolicy {
+    ThemeDriven,
+    Explicit(glam::Vec4),
 }
 
 #[cfg(feature = "egui-overlay")]
@@ -226,17 +239,17 @@ impl WebRenderer {
                 .map_err(|err| WebRendererError::PlotInit(err.to_string()))?;
 
         #[cfg(feature = "egui-overlay")]
-        let overlay = {
+        let overlay = if options.enable_overlay {
             let egui_ctx = egui::Context::default();
-            // Match native overlay: modern dark theme + transparent panels.
-            let theme = crate::styling::ModernDarkTheme::default();
-            theme.apply_to_egui(&egui_ctx);
+            ModernDarkTheme::default().apply_to_egui(&egui_ctx);
             let egui_renderer = egui_wgpu::Renderer::new(&device, surface_config.format, None, 1);
             Some(WebOverlayState {
                 egui_ctx,
                 egui_renderer,
                 plot_overlay: PlotOverlay::new(),
             })
+        } else {
+            None
         };
 
         let mut renderer = Self {
@@ -259,6 +272,7 @@ impl WebRenderer {
             pixels_per_point: 1.0,
             last_axes_viewports_px: vec![(0, 0, width.max(1), height.max(1))],
             last_pointer_position: glam::Vec2::ZERO,
+            background_policy: BackgroundPolicy::ThemeDriven,
             #[cfg(feature = "egui-overlay")]
             overlay,
         };
@@ -443,8 +457,21 @@ impl WebRenderer {
         }
     }
 
+    pub fn set_theme_config(&mut self, theme: PlotThemeConfig) {
+        self.plot_renderer.theme = theme.clone();
+        self.render_config.theme = theme;
+        self.apply_background_policy();
+    }
+
     /// Render a [`Figure`] directly into the canvas.
     pub fn render_figure(&mut self, figure: Figure) -> Result<(), WebRendererError> {
+        let bg = figure.background_color;
+        self.background_policy = if is_default_figure_bg(bg) {
+            BackgroundPolicy::ThemeDriven
+        } else {
+            BackgroundPolicy::Explicit(bg)
+        };
+        self.apply_background_policy();
         self.plot_renderer.set_figure(figure);
         self.render_current_scene()
     }
@@ -528,14 +555,33 @@ impl WebRenderer {
                 }
             };
 
-            self.plot_renderer
-                .render(&mut encoder, render_target, &self.render_config)
-                .map_err(|err| WebRendererError::Render(err.to_string()))?;
+            if msaa_view_holder.is_some() {
+                // Keep explicit MSAA resolve target wiring in the non-overlay web fast path.
+                self.plot_renderer
+                    .render(&mut encoder, render_target, &self.render_config)
+                    .map_err(|err| WebRendererError::Render(err.to_string()))?;
+            } else {
+                self.plot_renderer
+                    .render_scene_to_target(&mut encoder, &frame_view, &self.render_config)
+                    .map_err(|err| WebRendererError::Render(err.to_string()))?;
+            }
         } else {
             #[cfg(feature = "egui-overlay")]
             {
                 // Clear background once per frame.
                 {
+                    debug!(
+                        target: "runmat_plot.theme",
+                        "plot-web clear pass bg=({:.3},{:.3},{:.3},{:.3}) policy={}",
+                        self.render_config.background_color.x,
+                        self.render_config.background_color.y,
+                        self.render_config.background_color.z,
+                        self.render_config.background_color.w,
+                        match self.background_policy {
+                            BackgroundPolicy::ThemeDriven => "theme",
+                            BackgroundPolicy::Explicit(_) => "explicit",
+                        }
+                    );
                     let _ = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("runmat-plot-web-clear"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -580,6 +626,10 @@ impl WebRenderer {
                 let scene_stats = self.plot_renderer.scene.statistics();
                 let mut plot_area_points: Option<egui::Rect> = None;
                 let full_output = overlay.egui_ctx.run(raw_input, |ctx| {
+                    overlay
+                        .plot_overlay
+                        .set_theme_config(self.plot_renderer.theme.clone());
+                    overlay.plot_overlay.apply_theme(ctx);
                     let overlay_config = OverlayConfig {
                         // Let the plot pipeline draw grid under data (more efficient).
                         show_grid: false,
@@ -718,16 +768,15 @@ impl WebRenderer {
                             &frame_view,
                             &viewports,
                             requested_samples,
+                            &self.render_config,
                         )
                         .map_err(|err| WebRendererError::Render(err.to_string()))?;
                 } else {
                     self.last_axes_viewports_px = vec![(vx, vy, vw.max(1), vh.max(1))];
-                    let cfg = PlotRenderConfig {
-                        width: vw.max(1),
-                        height: vh.max(1),
-                        msaa_samples: requested_samples,
-                        ..Default::default()
-                    };
+                    let mut cfg = self.render_config.clone();
+                    cfg.width = vw.max(1);
+                    cfg.height = vh.max(1);
+                    cfg.msaa_samples = requested_samples;
                     let cam = self.plot_renderer.camera().clone();
                     let _ = self
                         .plot_renderer
@@ -805,6 +854,30 @@ impl WebRenderer {
         let _ = self.ensure_msaa_texture();
     }
 
+    fn apply_background_policy(&mut self) {
+        self.render_config.background_color = match self.background_policy {
+            BackgroundPolicy::ThemeDriven => self
+                .plot_renderer
+                .theme
+                .build_theme()
+                .get_background_color(),
+            BackgroundPolicy::Explicit(color) => color,
+        };
+        debug!(
+            target: "runmat_plot.theme",
+            "plot-web apply_background policy={} bg=({:.3},{:.3},{:.3},{:.3}) variant={:?}",
+            match self.background_policy {
+                BackgroundPolicy::ThemeDriven => "theme",
+                BackgroundPolicy::Explicit(_) => "explicit",
+            },
+            self.render_config.background_color.x,
+            self.render_config.background_color.y,
+            self.render_config.background_color.z,
+            self.render_config.background_color.w,
+            self.plot_renderer.theme.variant
+        );
+    }
+
     fn ensure_msaa_texture(&mut self) -> Result<(), WebRendererError> {
         if self.render_config.msaa_samples <= 1 {
             self.msaa_texture = None;
@@ -836,6 +909,14 @@ impl WebRenderer {
         self.msaa_extent = (width, height);
         Ok(())
     }
+}
+
+fn is_default_figure_bg(bg: glam::Vec4) -> bool {
+    const EPS: f32 = 1e-3;
+    (bg.x - 1.0).abs() <= EPS
+        && (bg.y - 1.0).abs() <= EPS
+        && (bg.z - 1.0).abs() <= EPS
+        && (bg.w - 1.0).abs() <= EPS
 }
 
 fn map_mouse_button(button: crate::core::interaction::MouseButton) -> CameraMouseButton {
