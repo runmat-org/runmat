@@ -155,7 +155,6 @@ We'll cover prerequisites, your first GPU computation, which functions support G
 - Most slowdowns come from small arrays, too many tiny kernels, and frequent CPU↔GPU transfers.
 - Start with `single` precision unless your numerics require `double`.
 - If you want automatic CPU/GPU routing without manual device management, RunMat is a cross-platform alternative.
-
 ---
 
 ## **Prerequisites: what you need for MATLAB GPU acceleration**

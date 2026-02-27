@@ -12,6 +12,9 @@ export interface BlogPost {
   author: string
   authors: AuthorInfo[]
   tags: string[]
+  resourceType?: string
+  collections?: string[]
+  featured?: boolean
   image?: string
   imageAlt?: string
   visibility: 'public' | 'unlisted'
@@ -45,6 +48,9 @@ interface BlogFrontmatter {
   imageAlt?: string
   visibility?: 'public' | 'unlisted'
   dateModified?: string
+  resourceType?: string
+  collections?: unknown
+  featured?: unknown
   [key: string]: unknown
 }
 
@@ -87,6 +93,19 @@ function normalizeAuthors(frontmatter: BlogFrontmatter): AuthorInfo[] {
   return result
 }
 
+function coerceStringArray(val: unknown): string[] | undefined {
+  if (val === undefined) return undefined
+  if (!Array.isArray(val)) return undefined
+  const out = val.filter((v): v is string => typeof v === 'string').map(v => v.trim()).filter(Boolean)
+  return out.length ? out : undefined
+}
+
+function coerceBoolean(val: unknown): boolean | undefined {
+  if (val === undefined) return undefined
+  if (typeof val === 'boolean') return val
+  return undefined
+}
+
 function resolveFrontmatterSlug(frontmatter: BlogFrontmatter, file: string): string {
   if (typeof frontmatter.slug === 'string' && frontmatter.slug.trim().length > 0) {
     return frontmatter.slug.trim()
@@ -113,6 +132,12 @@ export function getAllBlogPosts(): BlogPost[] {
       const authors = normalizeAuthors(frontmatter)
       const visibility: 'public' | 'unlisted' =
         frontmatter.visibility === 'unlisted' ? 'unlisted' : 'public'
+      const resourceType =
+        typeof frontmatter.resourceType === 'string' && frontmatter.resourceType.trim().length > 0
+          ? frontmatter.resourceType.trim()
+          : undefined
+    const collections = coerceStringArray(frontmatter.collections)
+    const featured = coerceBoolean(frontmatter.featured)
 
       return {
         slug,
@@ -124,6 +149,9 @@ export function getAllBlogPosts(): BlogPost[] {
         author: authors.map(author => author.name).join(', '),
         authors,
         tags: Array.isArray(frontmatter.tags) ? frontmatter.tags : [],
+        resourceType,
+      collections,
+      featured,
         image: frontmatter.image,
         imageAlt: frontmatter.imageAlt,
         visibility,

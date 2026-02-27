@@ -2,17 +2,18 @@
 title: "What is MATLAB? The Language, The Runtime, and RunMat"
 description: "A plain-English explainer of MATLAB's language model and how RunMat delivers a modern, high-performance open-source runtime for it."
 date: "2025-01-01"
-dateModified: "2025-02-01"
+dateModified: "2026-01-14"
+readTime: "8 min read"
 image: "https://web.runmatstatic.com/blog-images/matrix-math.png"
 imageAlt: "What is MATLAB"
+resourceType: "guides"
+author: "RunMat Team"
 authors:
   - name: "Julie Ruiz"
     url: "https://www.linkedin.com/in/julie-ruiz-64b24328/"
-readTime: "10 min read"
 slug: "what-is-matlab"
 tags: ["MATLAB", "RunMat", "language", "runtime"]
-visibility: unlisted
-canonical: "https://runmat.com/blog/what-is-matlab"
+canonical: "https://runmat.org/blog/what-is-matlab"
 jsonLd:
   "@context": "https://schema.org"
   "@graph":
@@ -21,23 +22,23 @@ jsonLd:
         - "@type": "ListItem"
           position: 1
           name: "Docs"
-          item: "https://runmat.com/docs"
+          item: "https://runmat.org/docs"
         - "@type": "ListItem"
           position: 2
           name: "Concepts"
-          item: "https://runmat.com/docs/concepts"
+          item: "https://runmat.org/docs/concepts"
         - "@type": "ListItem"
           position: 3
           name: "What is MATLAB?"
-          item: "https://runmat.com/blog/what-is-matlab"
+          item: "https://runmat.org/blog/what-is-matlab"
     - "@type": "TechArticle"
-      "@id": "https://runmat.com/blog/what-is-matlab#article"
+      "@id": "https://runmat.org/blog/what-is-matlab#article"
       headline: "What is MATLAB? The Language, The Runtime, and RunMat"
       alternativeHeadline: "MATLAB vs RunMat: A Technical Overview"
       description: "An engineer's guide to the MATLAB language, its mental model (arrays, matrices, indexing), and how RunMat provides a modern, high-performance open-source runtime for it."
       proficiencyLevel: "Beginner"
       datePublished: "2025-01-01T00:00:00Z"
-      dateModified: "2025-02-01T00:00:00Z"
+      dateModified: "2025-01-01T00:00:00Z"
       author:
         "@type": "Organization"
         name: "Dystr Inc."
@@ -57,7 +58,7 @@ jsonLd:
           operatingSystem: ["Windows", "macOS", "Linux"]
         - "@type": "SoftwareApplication"
           name: "RunMat"
-          url: "https://runmat.com"
+          url: "https://runmat.org"
           applicationCategory: "Runtime Environment"
           operatingSystem: ["Windows", "macOS", "Linux"]
           offers:
@@ -97,26 +98,6 @@ jsonLd:
           acceptedAnswer:
             "@type": "Answer"
             text: "RunMat uses <b>Fusion</b> to capture chains of array operations and automatically route them to the CPU or GPU based on cost. It also features a tiered execution model with a fast-start interpreter and a JIT compiler for hot loops."
-        - "@type": "Question"
-          name: "Is MATLAB free?"
-          acceptedAnswer:
-            "@type": "Answer"
-            text: "No. MATLAB is proprietary software from MathWorks, requiring paid licenses that can cost thousands of dollars per year (especially with toolboxes). However, <b>RunMat</b> is a free, open-source runtime that executes MATLAB code without requiring a MathWorks license."
-        - "@type": "Question"
-          name: "Why is MATLAB slow?"
-          acceptedAnswer:
-            "@type": "Answer"
-            text: "MATLAB can feel slow for several reasons: unvectorized loops, interpreter overhead, and lack of automatic GPU acceleration. RunMat addresses these with a tiered execution model (fast interpreter + JIT compiler) and <b>Fusion</b>, which automatically routes array operations to CPU or GPU based on cost."
-        - "@type": "Question"
-          name: "Can MATLAB run on GPU?"
-          acceptedAnswer:
-            "@type": "Answer"
-            text: "Traditional MATLAB requires the Parallel Computing Toolbox and explicit <code>gpuArray</code> calls to use the GPU. RunMat takes a different approach: its <b>Fusion</b> engine automatically detects when GPU execution would be faster and routes operations there transparently—no code changes required."
-        - "@type": "Question"
-          name: "Can I run MATLAB code without MATLAB?"
-          acceptedAnswer:
-            "@type": "Answer"
-            text: "Yes. <b>RunMat</b> is an open-source runtime that executes MATLAB code without requiring a MathWorks license. It implements MATLAB's core language semantics (not just similar syntax) and focuses on high performance via JIT compilation and automatic GPU acceleration."
 ---
 
 
@@ -131,14 +112,6 @@ In practice, when people say “MATLAB”, they may mean a few different things:
 - **The IDE and workflow**: editor, debugger, workspace browser, plotting tools, and interactive REPL-like experience.
 
 This FAQ explains MATLAB at a language/concept level, then explains how **RunMat** relates to it.
-
-## TL;DR
-
-- **MATLAB** is a programming language and computing environment built around matrices, vectors, and array-first programming.
-- **RunMat** is a free, open-source runtime that executes MATLAB code with semantic compatibility — not just similar syntax.
-- RunMat uses tiered execution (interpreter + JIT) and Fusion (automatic CPU/GPU routing) for high performance.
-- Many `.m` scripts run with few or no changes; coverage gaps are library/toolbox breadth, not language incompatibility.
-- No MathWorks license required.
 
 ---
 
@@ -219,7 +192,7 @@ RunMat’s strategy (by design) is:
 - Treat “toolbox breadth” as **packages** (rather than baking everything into the core).
 - Focus on **performance and portability**, especially for array-heavy numeric workloads.
 
-As an open source project, RunMat’s framing is discussed explicitly in [Design Philosophy](/docs/design-philosophy).
+As an open source project, RunMat’s framing is discussed explicitly in [Design Philosophy](../DESIGN_PHILOSOPHY.md).
 
 ---
 
@@ -233,7 +206,7 @@ What’s already strongly covered:
 - MATLAB-style indexing and slicing: including `end` arithmetic and logical masks.
 - Many “hard” language features: `classdef` OOP, operator overloading, imports/name resolution.
 
-For a detailed feature-by-feature status, see [Language Coverage](/docs/language-coverage).
+For a detailed feature-by-feature status, see [Language Coverage](../LANGUAGE_COVERAGE.md).
 
 What to expect in practice:
 
@@ -271,9 +244,7 @@ RunMat also invests heavily in the CPU story:
 
 ## Quick start: try RunMat on MATLAB-style code
 
-The fastest way to try RunMat is in your browser—no install required. <a href="/sandbox" data-ph-capture-attribute-destination="sandbox" data-ph-capture-attribute-source="blog-what-is-matlab" data-ph-capture-attribute-cta="try-sandbox">Open the RunMat sandbox</a> and start running MATLAB-style code immediately. WebGPU acceleration is available in supported browsers (Chrome, Edge).
-
-For local use, RunMat is CLI-first. Common entry points:
+RunMat is CLI-first. Common entry points:
 
 ```bash
 # Start an interactive REPL
@@ -290,42 +261,6 @@ runmat accel-info
 ```
 
 For the full CLI reference, see [CLI](/docs/cli).
-
----
-
-## Common questions about MATLAB
-
-### Is MATLAB free?
-
-No. MATLAB is proprietary software from MathWorks, and licenses can be expensive—often thousands of dollars per year, especially when you add toolboxes. Academic licenses are cheaper but still not free, and they come with usage restrictions.
-
-**RunMat** is a free, open-source alternative. It executes MATLAB code without requiring a MathWorks license, making it accessible to hobbyists, students, and teams who want to run `.m` files without the licensing overhead.
-
-### Why is MATLAB slow?
-
-MATLAB's performance reputation is mixed. Well-vectorized code can be fast, but several things commonly cause slowdowns:
-
-- **Unvectorized loops**: MATLAB's interpreter has overhead on each iteration. Writing explicit `for` loops over large arrays is often slower than expressing the same logic as array operations.
-- **Interpreter overhead**: Even vectorized code goes through an interpreter layer before hitting optimized BLAS/LAPACK routines.
-- **No automatic GPU**: Traditional MATLAB requires explicit `gpuArray` calls (and the Parallel Computing Toolbox) to use GPU acceleration.
-
-RunMat addresses these with a **tiered execution model**—a fast-start interpreter (Ignition) plus a JIT compiler (Turbine) for hot paths—and **Fusion**, which automatically routes array operations to CPU or GPU based on cost heuristics.
-
-### Can MATLAB run on GPU?
-
-Yes, but not automatically. Traditional MATLAB requires the **Parallel Computing Toolbox** (an additional paid license) and explicit code changes: you must wrap arrays in `gpuArray()` and manage transfers yourself.
-
-RunMat takes a different approach. Its **Fusion** engine captures chains of array operations, decides whether CPU or GPU execution would be faster, and routes accordingly—no code changes, no device flags, no extra toolbox. This works across platforms via `wgpu` (Metal on macOS, DirectX 12 on Windows, Vulkan on Linux).
-
-For details, see [Introduction to RunMat GPU/Fusion](/docs/accelerate/fusion-intro).
-
-### Can I run MATLAB code without MATLAB?
-
-Yes. That's exactly what **RunMat** is built for: a high-performance, open-source runtime that executes MATLAB code without requiring a MathWorks license.
-
-RunMat focuses on **semantic compatibility**—not just "similar syntax" but correct behavior for MATLAB's indexing, array semantics, `classdef` OOP, and more. Many `.m` scripts run with few or no changes.
-
-If a specific toolbox function isn't available yet, that's a library coverage gap (which grows over time), not a fundamental language incompatibility.
 
 ---
 

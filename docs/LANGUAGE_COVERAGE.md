@@ -1,6 +1,6 @@
 # RunMat Language Coverage
 
-RunMat's goal is to provide a high-performance, modern runtime to execute MATLAB code, with complete language grammar and semantics. This document tracks language coverage in RunMat and compares it to GNU Octave where helpful. It focuses on core language features (syntax and semantics), not breadth of numeric libraries or toolboxes.
+RunMat implements MATLAB's core language grammar and semantics. This document tracks current coverage in RunMat and compares it to GNU Octave where helpful. It focuses on core language features (syntax and semantics), not breadth of numeric libraries or toolboxes.
 
 ## Language Feature Compatibility
 
@@ -175,7 +175,7 @@ end
 
 ## Where RunMat intentionally goes beyond Octave
 
-- 100% MATLAB language semantics coverage: Full parity for syntax, operators, control flow, indexing/slicing (incl. `end` arithmetic), OOP (`classdef`, properties/methods, operator overloading), events/handles, name resolution, and standardized `MException` identifiers. Practically, this means your existing MATLAB scripts run unchanged on RunMat. Octave remains partial or divergent in several of these areas (e.g., classdef/events/metaclass support and precedence nuances).
+- Broader MATLAB language semantics coverage than Octave: Full support for syntax, operators, control flow, indexing/slicing (incl. `end` arithmetic), OOP (`classdef`, properties/methods, operator overloading), events/handles, name resolution, and standardized `MException` identifiers. Octave remains partial or divergent in several of these areas (e.g., classdef/events/metaclass support and precedence nuances).
 - Metaclass operator `?Class` and static access through `Class.*` imports.
 - Consistent precedence for specific vs wildcard imports, including `Class.*` statics.
 - N-D `end` arithmetic across dimensions in both gather and scatter with broadcast-correct semantics and 2-D fast paths.
