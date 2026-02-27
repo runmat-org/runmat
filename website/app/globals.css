@@ -371,3 +371,57 @@
 :not(pre) > code[class*="language-"], pre[class*="language-"] {
   background: hsl(var(--code-surface));
 }
+
+/* WCAG-friendly Prism colors for light mode on near-white code surfaces. */
+html:not(.dark) :not(pre) > code[class*="language-"],
+html:not(.dark) pre[class*="language-"],
+html:not(.dark) code[class*="language-"] {
+  color: #111827;
+  text-shadow: none;
+}
+
+html:not(.dark) .token.comment,
+html:not(.dark) .token.prolog,
+html:not(.dark) .token.doctype,
+html:not(.dark) .token.cdata {
+  color: #4b5563;
+}
+
+html:not(.dark) .token.punctuation,
+html:not(.dark) .token.operator,
+html:not(.dark) .token.entity,
+html:not(.dark) .token.url {
+  color: #374151;
+}
+
+html:not(.dark) .token.keyword,
+html:not(.dark) .token.atrule,
+html:not(.dark) .token.important {
+  color: #1d4ed8;
+}
+
+html:not(.dark) .token.function,
+html:not(.dark) .token.class-name,
+html:not(.dark) .token.builtin {
+  color: #7c3aed;
+}
+
+html:not(.dark) .token.string,
+html:not(.dark) .token.char,
+html:not(.dark) .token.attr-value,
+html:not(.dark) .token.inserted {
+  color: #166534;
+}
+
+html:not(.dark) .token.number,
+html:not(.dark) .token.boolean,
+html:not(.dark) .token.constant,
+html:not(.dark) .token.symbol {
+  color: #b45309;
+}
+
+html:not(.dark) .token.regex,
+html:not(.dark) .token.variable,
+html:not(.dark) .token.selector {
+  color: #be123c;
+}
