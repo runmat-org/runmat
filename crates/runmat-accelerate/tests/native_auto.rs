@@ -21,12 +21,14 @@ fn make_tensor(len: usize) -> Tensor {
     Tensor::new(data, vec![len, 1]).expect("tensor")
 }
 
-#[test]
-fn promotes_large_tensors_to_gpu_for_elementwise() {
+#[tokio::test]
+async fn promotes_large_tensors_to_gpu_for_elementwise() {
     ensure_auto_init();
     let tensor = make_tensor(8);
     let value = Value::Tensor(tensor.clone());
-    let (a_gpu, b_gpu) = promote_binary(BinaryOp::Elementwise, &value, &value).expect("promote");
+    let (a_gpu, b_gpu) = promote_binary(BinaryOp::Elementwise, &value, &value)
+        .await
+        .expect("promote");
     assert!(matches!(a_gpu, Value::GpuTensor(_)));
     assert!(matches!(b_gpu, Value::GpuTensor(_)));
 }
@@ -36,7 +38,9 @@ async fn gather_occurs_for_sink_builtins() {
     ensure_auto_init();
     let tensor = make_tensor(4);
     let value = Value::Tensor(tensor.clone());
-    let (gpu, _) = promote_binary(BinaryOp::Elementwise, &value, &value).expect("promote");
+    let (gpu, _) = promote_binary(BinaryOp::Elementwise, &value, &value)
+        .await
+        .expect("promote");
     let prepared = prepare_builtin_args("disp", &[gpu]).await.expect("prepare");
     assert!(matches!(prepared.as_slice(), [Value::Tensor(_)]));
 }

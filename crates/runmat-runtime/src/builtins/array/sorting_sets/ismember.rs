@@ -64,7 +64,21 @@ fn ismember_error(message: impl Into<String>) -> crate::RuntimeError {
     builtin_path = "crate::builtins::array::sorting_sets::ismember"
 )]
 async fn ismember_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    Ok(evaluate(a, b, &rest).await?.into_mask_value())
+    let eval = evaluate(a, b, &rest).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        if out_count == 1 {
+            return Ok(Value::OutputList(vec![eval.into_mask_value()]));
+        }
+        let (mask, loc) = eval.into_pair();
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count,
+            vec![mask, loc],
+        ));
+    }
+    Ok(eval.into_mask_value())
 }
 
 /// Evaluate the `ismember` builtin once and expose all outputs.

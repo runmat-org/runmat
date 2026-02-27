@@ -72,7 +72,25 @@ fn intersect_error(message: impl Into<String>) -> crate::RuntimeError {
     builtin_path = "crate::builtins::array::sorting_sets::intersect"
 )]
 async fn intersect_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    Ok(evaluate(a, b, &rest).await?.into_values_value())
+    let eval = evaluate(a, b, &rest).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        if out_count == 1 {
+            return Ok(Value::OutputList(vec![eval.into_values_value()]));
+        }
+        if out_count == 2 {
+            let (values, ia) = eval.into_pair();
+            return Ok(Value::OutputList(vec![values, ia]));
+        }
+        let (values, ia, ib) = eval.into_triple();
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count,
+            vec![values, ia, ib],
+        ));
+    }
+    Ok(eval.into_values_value())
 }
 
 /// Evaluate the `intersect` builtin once and expose all outputs.
@@ -120,8 +138,9 @@ fn parse_options(rest: &[Value]) -> crate::BuiltinResult<IntersectOptions> {
         let text = match token {
             crate::builtins::common::arg_tokens::ArgToken::String(text) => text.as_str(),
             _ => {
-                let text = tensor::value_to_string(arg)
-                    .ok_or_else(|| intersect_error("intersect: expected string option arguments"))?;
+                let text = tensor::value_to_string(arg).ok_or_else(|| {
+                    intersect_error("intersect: expected string option arguments")
+                })?;
                 let lowered = text.trim().to_ascii_lowercase();
                 parse_intersect_option(&mut opts, &mut seen_order, &lowered)?;
                 continue;
@@ -138,41 +157,41 @@ fn parse_intersect_option(
     seen_order: &mut Option<IntersectOrder>,
     lowered: &str,
 ) -> crate::BuiltinResult<()> {
-        match lowered {
-            "rows" => opts.rows = true,
-            "sorted" => {
-                if let Some(prev) = seen_order {
-                    if *prev != IntersectOrder::Sorted {
-                        return Err(intersect_error(
-                            "intersect: cannot combine 'sorted' with 'stable'",
-                        ));
-                    }
+    match lowered {
+        "rows" => opts.rows = true,
+        "sorted" => {
+            if let Some(prev) = seen_order {
+                if *prev != IntersectOrder::Sorted {
+                    return Err(intersect_error(
+                        "intersect: cannot combine 'sorted' with 'stable'",
+                    ));
                 }
-                *seen_order = Some(IntersectOrder::Sorted);
-                opts.order = IntersectOrder::Sorted;
             }
-            "stable" => {
-                if let Some(prev) = seen_order {
-                    if *prev != IntersectOrder::Stable {
-                        return Err(intersect_error(
-                            "intersect: cannot combine 'sorted' with 'stable'",
-                        ));
-                    }
-                }
-                *seen_order = Some(IntersectOrder::Stable);
-                opts.order = IntersectOrder::Stable;
-            }
-            "legacy" | "r2012a" => {
-                return Err(intersect_error(
-                    "intersect: the 'legacy' behaviour is not supported",
-                ));
-            }
-            other => {
-                return Err(intersect_error(format!(
-                    "intersect: unrecognised option '{other}'"
-                )))
-            }
+            *seen_order = Some(IntersectOrder::Sorted);
+            opts.order = IntersectOrder::Sorted;
         }
+        "stable" => {
+            if let Some(prev) = seen_order {
+                if *prev != IntersectOrder::Stable {
+                    return Err(intersect_error(
+                        "intersect: cannot combine 'sorted' with 'stable'",
+                    ));
+                }
+            }
+            *seen_order = Some(IntersectOrder::Stable);
+            opts.order = IntersectOrder::Stable;
+        }
+        "legacy" | "r2012a" => {
+            return Err(intersect_error(
+                "intersect: the 'legacy' behaviour is not supported",
+            ));
+        }
+        other => {
+            return Err(intersect_error(format!(
+                "intersect: unrecognised option '{other}'"
+            )))
+        }
+    }
     Ok(())
 }
 

@@ -34,9 +34,9 @@
   "description": "`Y = acos(X)` computes the inverse cosine (in radians) of every element of `X`. Results match MATLAB semantics for real, logical, character, and complex inputs. Real values outside the interval `[-1, 1]` promote to complex outputs automatically so the mathematical definition remains valid over the complex plane.",
   "behaviors": [
     "Operates on scalars, vectors, matrices, and N-D tensors using MATLAB broadcasting rules.",
-    "Logical inputs convert to double precision (`true \u2192 1`, `false \u2192 0`) before applying inverse cosine.",
-    "Character arrays are interpreted as their numeric code points and return dense double or complex tensors that mirror MATLAB\u2019s output.",
-    "Real inputs with magnitude greater than `1` yield complex results (`acos(2) \u2192 0 - 1.3170i`), matching MATLAB\u2019s principal branch.",
+    "Logical inputs convert to double precision (`true → 1`, `false → 0`) before applying inverse cosine.",
+    "Character arrays are interpreted as their numeric code points and return dense double or complex tensors that mirror MATLAB’s output.",
+    "Real inputs with magnitude greater than `1` yield complex results (`acos(2) → 0 - 1.3170i`), matching MATLAB’s principal branch.",
     "Complex inputs follow MATLAB's definition `acos(z) = -i log(z + i sqrt(1 - z^2))`, ensuring identical behaviour for branch cuts and special values.",
     "NaNs and Infs propagate in the same way MATLAB does, including complex infinities when necessary."
   ],
@@ -87,7 +87,7 @@
     },
     {
       "question": "What happens with NaN or Inf values?",
-      "answer": "NaNs propagate through the computation. Inputs of `\u00b1Inf` produce complex infinities exactly as in MATLAB."
+      "answer": "NaNs propagate through the computation. Inputs of `±Inf` produce complex infinities exactly as in MATLAB."
     },
     {
       "question": "Can I keep the result on the GPU if it becomes complex?",

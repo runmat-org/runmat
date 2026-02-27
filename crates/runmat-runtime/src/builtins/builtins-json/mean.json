@@ -35,12 +35,12 @@
   },
   "description": "`mean(x)` computes the arithmetic mean of scalars, vectors, matrices, and higher-dimensional tensors. When no dimension is supplied, the reduction runs along the first non-singleton dimension.",
   "behaviors": [
-    "`mean(X)` on an `m \u00d7 n` matrix returns a row vector (`1 \u00d7 n`) with column averages.",
-    "`mean(X, 2)` returns a column vector (`m \u00d7 1`) containing row averages.",
+    "`mean(X)` on an `m × n` matrix returns a row vector (`1 × n`) with column averages.",
+    "`mean(X, 2)` returns a column vector (`m × 1`) containing row averages.",
     "`mean(X, 'all')` collapses every dimension and returns a scalar average of all elements.",
     "`mean(X, vecdim)` accepts a vector of dimensions (e.g., `[1 3]`) and reduces each listed axis in one call while preserving the others.",
-    "Complex inputs are supported and follow MATLAB's rule `mean(a + bi) = mean(real(a + bi)) + i\u00b7mean(imag(a + bi))`, propagating `NaN` through either component.",
-    "Logical inputs are promoted to double precision (`true \u2192 1.0`, `false \u2192 0.0`).",
+    "Complex inputs are supported and follow MATLAB's rule `mean(a + bi) = mean(real(a + bi)) + i·mean(imag(a + bi))`, propagating `NaN` through either component.",
+    "Logical inputs are promoted to double precision (`true → 1.0`, `false → 0.0`).",
     "`mean(..., 'omitnan')` ignores `NaN` values; if every element in the slice is `NaN`, the result is `NaN`.",
     "`mean(..., 'includenan')` (default) propagates `NaN` when any element in the slice is `NaN`.",
     "`mean(___, outtype)` accepts `'double'`, `'default'`, or `'native'` to control the output numeric class. Integer outputs round to the nearest integer, matching MATLAB.",
@@ -52,32 +52,32 @@
     {
       "description": "Computing the mean of a matrix",
       "input": "A = [1 2 3; 4 5 6];\ncolMeans = mean(A);      % column averages\nrowMeans = mean(A, 2);   % row averages",
-      "output": "colMeans = [2.5 3.5 4.5];\nrowMeans = [2; 5];"
+      "output": "colMeans = [2.5 3.5 4.5];\nrowMeans = [2; 5]"
     },
     {
       "description": "Computing the mean of a vector with NaN values",
       "input": "values = [1 NaN 3];\navg = mean(values, 'omitnan')",
-      "output": "avg = 2;"
+      "output": "avg = 2"
     },
     {
       "description": "Computing the overall mean across all elements",
       "input": "B = reshape(1:12, [3 4]);\noverall = mean(B, 'all')",
-      "output": "overall = 6.5;"
+      "output": "overall = 6.5"
     },
     {
       "description": "Reducing across multiple dimensions at once",
       "input": "C = cat(3, [1 2; 3 4], [5 6; 7 8]);\nslice_means = mean(C, [1 3]);   % reduce rows and pages, keep columns",
-      "output": "slice_means = [4 5];"
+      "output": "slice_means = [4 5]"
     },
     {
       "description": "Matching a prototype with `'like'`",
       "input": "G = gpuArray(single([1 3; 5 7]));\nmu = mean(G, 'all', 'like', G);\nresult = gather(mu)",
-      "output": "result = single(4);"
+      "output": "result = single(4)"
     },
     {
       "description": "Computing the mean of a matrix on a GPU",
       "input": "G = gpuArray([1 2 NaN; 3 4 5]);\nmeans = mean(G, 2, 'omitnan');\nresult = gather(means)",
-      "output": "result = [1.5; 4];"
+      "output": "result = [1.5; 4]"
     }
   ],
   "faqs": [
@@ -103,7 +103,7 @@
     },
     {
       "question": "Does `mean` support GPU arrays automatically?",
-      "answer": "Yes. If a GPU provider is registered, device-resident tensors remain on the GPU and run through `reduce_mean_dim`/`reduce_mean`. Calls that the provider cannot satisfy\u2014most notably `'omitnan'` and unsupported dimension combinations\u2014are gathered to the CPU transparently."
+      "answer": "Yes. If a GPU provider is registered, device-resident tensors remain on the GPU and run through `reduce_mean_dim`/`reduce_mean`. Calls that the provider cannot satisfy—most notably `'omitnan'` and unsupported dimension combinations—are gathered to the CPU transparently."
     },
     {
       "question": "How are complex numbers handled?",
@@ -146,6 +146,6 @@
   },
   "gpu_residency": "You usually do NOT need to call `gpuArray` yourself in RunMat (unlike MATLAB).\n\nIn RunMat, the fusion planner keeps residency on GPU in branches of fused expressions. As such, in the above example, the result of the `mean` call will already be on the GPU when the fusion planner has detected a net benefit to operating the fused expression it is part of on the GPU.\n\nTo preserve backwards compatibility with MathWorks MATLAB, and for when you want to explicitly bootstrap GPU residency, you can call `gpuArray` explicitly to move data to the GPU if you want to be explicit about the residency.\n\nSince MathWorks MATLAB does not have a fusion planner, and they kept their parallel execution toolbox separate from the core language, as their toolbox is a separate commercial product, MathWorks MATLAB users need to call `gpuArray` to move data to the GPU manually whereas RunMat users can rely on the fusion planner to keep data on the GPU automatically.",
   "gpu_behavior": [
-    "When the input tensor lives on the GPU, RunMat first asks the active acceleration provider for a device-side result via `reduce_mean_dim` or (when the entire tensor collapses) `reduce_mean`. If the provider lacks those hooks or the call specifies `'omitnan'`, RunMat gathers the data back to the host and evaluates the mean with the CPU reference implementation. Output templates are then applied: `'native'` restores integer classes, and `'like'` mirrors both the numeric class and residency\u2014re-uploading to the GPU when the prototype is device-resident."
+    "When the input tensor lives on the GPU, RunMat first asks the active acceleration provider for a device-side result via `reduce_mean_dim` or (when the entire tensor collapses) `reduce_mean`. If the provider lacks those hooks or the call specifies `'omitnan'`, RunMat gathers the data back to the host and evaluates the mean with the CPU reference implementation. Output templates are then applied: `'native'` restores integer classes, and `'like'` mirrors both the numeric class and residency—re-uploading to the GPU when the prototype is device-resident."
   ]
 }

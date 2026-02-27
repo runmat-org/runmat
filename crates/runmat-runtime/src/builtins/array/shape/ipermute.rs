@@ -14,9 +14,9 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use runmat_builtins::shape_rules::element_count_if_known;
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::GpuTensorHandle;
+use runmat_builtins::shape_rules::element_count_if_known;
 use runmat_builtins::{ResolveContext, Type, Value};
 use runmat_macros::runtime_builtin;
 

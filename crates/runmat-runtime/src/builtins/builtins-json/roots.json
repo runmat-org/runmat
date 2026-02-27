@@ -11,7 +11,7 @@
   "summary": "Compute the roots of a polynomial specified by its coefficients, matching MATLAB semantics including complex output.",
   "references": [
     "title: \"MATLAB roots documentation\"",
-    "title: \"Golub & Van Loan \u2013 Matrix Computations, Chapter 7\""
+    "title: \"Golub & Van Loan – Matrix Computations, Chapter 7\""
   ],
   "gpu_support": {
     "elementwise": false,
@@ -90,7 +90,7 @@
     },
     {
       "question": "How does RunMat handle numerical round-off?",
-      "answer": "Small imaginary components (|imag| \u2264 1e-10\u00b7(1 + |real|)) are rounded to zero so that near-real roots are displayed as real numbers, matching MATLAB formatting."
+      "answer": "Small imaginary components (|imag| ≤ 1e-10·(1 + |real|)) are rounded to zero so that near-real roots are displayed as real numbers, matching MATLAB formatting."
     }
   ],
   "links": [

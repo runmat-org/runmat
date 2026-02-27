@@ -28,7 +28,7 @@ const BUILTIN_NAME: &str = "surfc";
     type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::surfc"
 )]
-pub fn surfc_builtin(
+pub async fn surfc_builtin(
     x: Tensor,
     y: Tensor,
     z: Value,
@@ -36,9 +36,7 @@ pub fn surfc_builtin(
 ) -> crate::BuiltinResult<String> {
     let x_axis = numeric_vector(x);
     let y_axis = numeric_vector(y);
-    let mut x_axis = Some(x_axis);
-    let mut y_axis = Some(y_axis);
-    let mut z_input = Some(SurfaceDataInput::from_value(z, "surfc")?);
+    let z_input = SurfaceDataInput::from_value(z, "surfc")?;
     let style = Arc::new(parse_surface_style_args(
         "surfc",
         &rest,
@@ -59,65 +57,114 @@ pub fn surfc_builtin(
         ..Default::default()
     };
     let level_spec = ContourLevelSpec::Count(default_level_count());
-    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
-        let level_spec = level_spec.clone();
-        let x_vec = x_axis.take().expect("surfc X consumed once");
-        let y_vec = y_axis.take().expect("surfc Y consumed once");
-        let z_arg = z_input.take().expect("surfc Z consumed once");
-
-        let style = Arc::clone(&style);
-        let contour_map = style.colormap;
-        if let Some(z_gpu) = z_arg.gpu_handle() {
-            match build_surface_gpu_plot(BUILTIN_NAME, &x_vec, &y_vec, z_gpu) {
-                Ok(mut surface) => {
-                    let base_z = surface.bounds().min.z;
-                    style.apply_to_plot(&mut surface);
-                    match build_contour_gpu_plot(
-                        BUILTIN_NAME,
-                        &x_vec,
-                        &y_vec,
-                        z_gpu,
-                        contour_map,
-                        base_z,
-                        &level_spec,
-                        &ContourLineColor::Auto,
-                    ) {
-                        Ok(contour) => {
-                            figure.add_surface_plot_on_axes(surface, axes);
-                            figure.add_contour_plot_on_axes(contour, axes);
-                            return Ok(());
-                        }
-                        Err(err) => {
-                            warn!("surfc contour GPU path unavailable: {err}");
-                        }
+    // Build plots up-front so we can await GPU work without blocking the render loop.
+    let contour_map = style.colormap;
+    let (mut surface, contour) = if let Some(z_gpu) = z_input.gpu_handle().cloned() {
+        match build_surface_gpu_plot(
+            BUILTIN_NAME,
+            &x_axis,
+            &y_axis,
+            &z_gpu,
+            style.colormap,
+            style.alpha,
+            style.flatten_z,
+        )
+        .await
+        {
+            Ok(mut surface) => {
+                let base_z = surface.bounds().min.z;
+                style.apply_to_plot(&mut surface);
+                match build_contour_gpu_plot(
+                    BUILTIN_NAME,
+                    &x_axis,
+                    &y_axis,
+                    &z_gpu,
+                    contour_map,
+                    base_z,
+                    &level_spec,
+                    &ContourLineColor::Auto,
+                ) {
+                    Ok(contour) => (surface, contour),
+                    Err(err) => {
+                        warn!("surfc contour GPU path unavailable: {err}");
+                        let z_tensor =
+                            super::common::gather_tensor_from_gpu_async(z_gpu, BUILTIN_NAME)
+                                .await?;
+                        let grid = tensor_to_surface_grid(
+                            z_tensor,
+                            x_axis.len(),
+                            y_axis.len(),
+                            BUILTIN_NAME,
+                        )?;
+                        let base_z = surface.bounds().min.z;
+                        let contour = build_contour_plot(
+                            BUILTIN_NAME,
+                            &x_axis,
+                            &y_axis,
+                            &grid,
+                            contour_map,
+                            base_z,
+                            &level_spec,
+                            &ContourLineColor::Auto,
+                        )?;
+                        (surface, contour)
                     }
                 }
-                Err(err) => {
-                    warn!("surfc surface GPU path unavailable: {err}");
-                }
+            }
+            Err(err) => {
+                warn!("surfc surface GPU path unavailable: {err}");
+                let z_tensor =
+                    super::common::gather_tensor_from_gpu_async(z_gpu, BUILTIN_NAME).await?;
+                let grid =
+                    tensor_to_surface_grid(z_tensor, x_axis.len(), y_axis.len(), BUILTIN_NAME)?;
+                let mut surface = build_surface(x_axis.clone(), y_axis.clone(), grid.clone())?;
+                style.apply_to_plot(&mut surface);
+                let base_z = surface.bounds().min.z;
+                let contour = build_contour_plot(
+                    BUILTIN_NAME,
+                    &x_axis,
+                    &y_axis,
+                    &grid,
+                    contour_map,
+                    base_z,
+                    &level_spec,
+                    &ContourLineColor::Auto,
+                )?;
+                (surface, contour)
             }
         }
-
+    } else {
         let grid = tensor_to_surface_grid(
-            z_arg.into_tensor(BUILTIN_NAME)?,
-            x_vec.len(),
-            y_vec.len(),
+            z_input.into_tensor(BUILTIN_NAME)?,
+            x_axis.len(),
+            y_axis.len(),
             BUILTIN_NAME,
         )?;
-        let mut surface = build_surface(x_vec.clone(), y_vec.clone(), grid.clone())?;
+        let mut surface = build_surface(x_axis.clone(), y_axis.clone(), grid.clone())?;
         style.apply_to_plot(&mut surface);
         let base_z = surface.bounds().min.z;
         let contour = build_contour_plot(
             BUILTIN_NAME,
-            &x_vec,
-            &y_vec,
+            &x_axis,
+            &y_axis,
             &grid,
             contour_map,
             base_z,
             &level_spec,
             &ContourLineColor::Auto,
         )?;
+        (surface, contour)
+    };
 
+    surface = surface
+        .with_colormap(ColorMap::Parula)
+        .with_shading(ShadingMode::Smooth);
+
+    let mut surface_opt = Some(surface);
+    let mut contour_opt = Some(contour);
+    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+        let surface = surface_opt.take().expect("surfc surface consumed once");
+        let contour = contour_opt.take().expect("surfc contour consumed once");
         figure.add_surface_plot_on_axes(surface, axes);
         figure.add_contour_plot_on_axes(contour, axes);
         Ok(())
@@ -149,7 +196,7 @@ pub(crate) mod tests {
     #[test]
     fn surfc_requires_matching_grid() {
         setup_plot_tests();
-        let res = surfc_builtin(
+        let res = futures::executor::block_on(surfc_builtin(
             tensor_from(&[0.0]),
             tensor_from(&[0.0, 1.0]),
             Value::Tensor(Tensor {
@@ -160,7 +207,7 @@ pub(crate) mod tests {
                 dtype: runmat_builtins::NumericDType::F64,
             }),
             Vec::new(),
-        );
+        ));
         assert!(res.is_err());
     }
 

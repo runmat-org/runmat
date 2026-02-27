@@ -95,6 +95,18 @@ async fn regexp_builtin(
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     let evaluation = evaluate(subject, pattern, &rest).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        let mut outputs = evaluation.outputs_for_multi()?;
+        if outputs.len() > out_count {
+            outputs.truncate(out_count);
+        }
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count, outputs,
+        ));
+    }
     let mut outputs = evaluation.outputs_for_single()?;
     if outputs.is_empty() {
         return Ok(Value::Num(0.0));
@@ -544,7 +556,6 @@ impl RegexpEvaluation {
         self.values_for_specs(&specs)
     }
 
-    #[allow(dead_code)] // Used by ignition's CallBuiltinMulti path
     pub fn outputs_for_multi(&self) -> BuiltinResult<Vec<Value>> {
         let specs = if self.options.outputs.is_empty() {
             vec![OutputSpec::Start, OutputSpec::End, OutputSpec::Match]

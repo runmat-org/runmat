@@ -5,11 +5,11 @@
 //! semantics for GPU arrays while retaining host fallbacks when GPU providers
 //! do not expose specialised kernels.
 
+use crate::builtins::acceleration::gpu::type_resolvers::pagefun_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::acceleration::gpu::type_resolvers::pagefun_type;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView, PagefunOp, PagefunRequest};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
@@ -854,6 +854,7 @@ impl TypeName for Value {
             Value::Closure(_) => "closure",
             Value::ClassRef(_) => "class reference",
             Value::MException(_) => "MException",
+            Value::OutputList(_) => "output list",
         }
     }
 }

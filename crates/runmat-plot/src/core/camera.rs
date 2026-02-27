@@ -97,9 +97,14 @@ impl Camera {
     /// Create a 2D orthographic camera for 2D plotting
     pub fn new_2d(bounds: (f32, f32, f32, f32)) -> Self {
         let (left, right, bottom, top) = bounds;
+        let center_x = (left + right) / 2.0;
+        let center_y = (bottom + top) / 2.0;
         let mut camera = Self {
-            position: Vec3::new(0.0, 0.0, 1.0),
-            target: Vec3::new((left + right) / 2.0, (bottom + top) / 2.0, 0.0),
+            // Keep the eye directly above the data center for true 2D top-down view.
+            // If position.x/y differ from target.x/y, the look-at matrix tilts and the plot
+            // appears skewed / edge-on for data ranges far from the origin.
+            position: Vec3::new(center_x, center_y, 1.0),
+            target: Vec3::new(center_x, center_y, 0.0),
             // For 2D views we look down -Z; keep a stable screen-up (+Y).
             up: Vec3::Y,
             projection: ProjectionType::Orthographic {
@@ -353,12 +358,16 @@ impl Camera {
 
     pub fn set_clip_planes(&mut self, near: f32, far: f32) {
         match &mut self.projection {
-            ProjectionType::Perspective { near: n, far: f, .. } => {
+            ProjectionType::Perspective {
+                near: n, far: f, ..
+            } => {
                 *n = near.max(1e-4);
                 *f = far.max(*n + 1e-3);
                 self.view_proj_dirty = true;
             }
-            ProjectionType::Orthographic { near: n, far: f, .. } => {
+            ProjectionType::Orthographic {
+                near: n, far: f, ..
+            } => {
                 *n = near;
                 *f = far;
                 self.view_proj_dirty = true;
@@ -498,7 +507,6 @@ impl Camera {
 
         self.view_proj_dirty = false;
     }
-
 }
 
 /// Camera controller for handling input events
@@ -563,7 +571,11 @@ impl CameraController {
                 // - Alt+LMB: orbit; Alt+MMB: pan; Alt+RMB: dolly/zoom
                 //
                 // Also keep LMB orbit + Shift+LMB pan as a convenient fallback.
-                let fine = if modifiers.ctrl || modifiers.meta { 0.35 } else { 1.0 };
+                let fine = if modifiers.ctrl || modifiers.meta {
+                    0.35
+                } else {
+                    1.0
+                };
                 let d = self.mouse_delta * fine;
 
                 if modifiers.alt {
@@ -811,6 +823,8 @@ mod tests {
     #[test]
     fn test_2d_camera() {
         let camera = Camera::new_2d((-10.0, 10.0, -10.0, 10.0));
+        assert_eq!(camera.position, Vec3::new(0.0, 0.0, 1.0));
+        assert_eq!(camera.target, Vec3::new(0.0, 0.0, 0.0));
         match camera.projection {
             ProjectionType::Orthographic {
                 left,
@@ -852,5 +866,12 @@ mod tests {
             }
             _ => panic!("Expected orthographic projection"),
         }
+    }
+
+    #[test]
+    fn test_2d_camera_tracks_non_origin_bounds_center() {
+        let camera = Camera::new_2d((10.0, 30.0, -2.0, 2.0));
+        assert_eq!(camera.position, Vec3::new(20.0, 0.0, 1.0));
+        assert_eq!(camera.target, Vec3::new(20.0, 0.0, 0.0));
     }
 }

@@ -285,9 +285,7 @@ fn parse_bool_like(value: &Value) -> BuiltinResult<bool> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_builtins::{
-        CellArray, CharArray, ResolveContext, StringArray, Tensor, Type,
-    };
+    use runmat_builtins::{CellArray, CharArray, ResolveContext, StringArray, Tensor, Type};
 
     fn run_strfind(text: Value, pattern: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(strfind_builtin(text, pattern, rest))

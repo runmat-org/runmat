@@ -46,12 +46,13 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
     constant_strategy: ConstantStrategy::InlineLiteral,
-    residency: ResidencyPolicy::GatherImmediately,
+    // Plotting is a sink, but can consume gpuArray inputs zero-copy when a shared WGPU context exists.
+    residency: ResidencyPolicy::InheritInputs,
     nan_mode: ReductionNaN::Include,
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "2-D scatter rendering happens outside fusion; tensors are gathered first.",
+    notes: "2-D scatter rendering terminates fusion graphs; gpuArray inputs may remain on device when shared plotting context is installed.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::scatter")]
@@ -401,8 +402,7 @@ fn build_scatter_gpu_plot(
     y: &GpuTensorHandle,
     style: &ScatterResolvedStyle,
 ) -> BuiltinResult<ScatterPlot> {
-    let context = runmat_plot::shared_wgpu_context()
-        .ok_or_else(|| scatter_err("scatter: plotting GPU context unavailable"))?;
+    let context = super::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
 
     let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
         .ok_or_else(|| scatter_err("scatter: unable to export GPU X data"))?;
@@ -774,7 +774,10 @@ pub(crate) mod tests {
     #[test]
     fn scatter_type_is_string() {
         assert_eq!(
-            string_type(&[Type::tensor(), Type::tensor()], &ResolveContext::new(Vec::new())),
+            string_type(
+                &[Type::tensor(), Type::tensor()],
+                &ResolveContext::new(Vec::new())
+            ),
             Type::String
         );
     }

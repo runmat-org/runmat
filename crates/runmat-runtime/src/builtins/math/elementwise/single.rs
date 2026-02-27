@@ -105,6 +105,7 @@ async fn single_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> 
         Value::FunctionHandle(_) | Value::Closure(_) => Err(conversion_error("function_handle")),
         Value::ClassRef(_) => Err(conversion_error("meta.class")),
         Value::MException(_) => Err(conversion_error("MException")),
+        Value::OutputList(_) => Err(conversion_error("OutputList")),
     }?;
     apply_output_template(converted, &template).await
 }

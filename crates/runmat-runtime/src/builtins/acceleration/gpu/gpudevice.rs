@@ -4,11 +4,11 @@ use runmat_accelerate_api::{ApiDeviceInfo, ProviderPrecision};
 use runmat_builtins::{IntValue, StructValue, Value};
 use runmat_macros::runtime_builtin;
 
+use crate::builtins::acceleration::gpu::type_resolvers::gpudevice_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::acceleration::gpu::type_resolvers::gpudevice_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 /// Error used when no acceleration provider is registered.

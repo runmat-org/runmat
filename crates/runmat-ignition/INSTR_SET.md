@@ -74,8 +74,7 @@ Notation:
 
 ## Calls and Expansion
 
-- CallBuiltin(name, argc): pops `argc`, pushes 1; tries imports (specific then wildcard) on failure
-- CallBuiltinMulti(name, argc, outc): invoke builtin and push up to `outc` values (from tensors/cells or scalar+pads)
+- CallBuiltin(name, argc): pops `argc`, pushes 1; tries imports (specific then wildcard) on failure; when followed by `Unpack(outc)` it requests multiple outputs from the builtin
 - CallBuiltinExpandLast(name, fixed_argc, num_indices): expand last argument from `C{...}`
 - CallBuiltinExpandAt(name, before_count, num_indices, after_count): expand an argument in the middle
 - CallBuiltinExpandMulti(name, specs: Vec<ArgSpec>): multi-position expansion; each `ArgSpec { is_expand, num_indices, expand_all }`

@@ -221,7 +221,8 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(builtin_error(
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(builtin_error(
             "ldivide: unsupported prototype conversion to GPU output",
         )),
     }
@@ -914,7 +915,7 @@ pub(crate) mod tests {
             assert_eq!(t.shape, vec![2, 1]);
             let expected = [0.25, 1.0 / 6.0];
             for (got, exp) in t.data.iter().zip(expected.iter()) {
-                assert!((got - exp).abs() < EPS);
+                assert!((got - exp).abs() < GPU_EPS);
             }
         });
     }

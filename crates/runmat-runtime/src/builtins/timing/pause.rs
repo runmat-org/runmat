@@ -10,9 +10,9 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::timing::type_resolvers::pause_type;
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
 use crate::builtins::plotting;
+use crate::builtins::timing::type_resolvers::pause_type;
 #[cfg(not(test))]
 use crate::interaction;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
@@ -286,7 +286,8 @@ async fn classify_argument(arg: &Value) -> Result<PauseArgument, RuntimeError> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(pause_error_with_identifier(
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(pause_error_with_identifier(
             MSG_INVALID_ARG,
             ERR_INVALID_ARG,
         )),

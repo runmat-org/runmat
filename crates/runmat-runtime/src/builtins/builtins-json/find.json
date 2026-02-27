@@ -80,7 +80,7 @@
     },
     {
       "question": "What happens when I request more matches than exist?",
-      "answer": "`find` returns all available nonzero elements\u2014no error is raised. For example, `find(A, 10)` simply returns every nonzero in `A` if it has fewer than 10."
+      "answer": "`find` returns all available nonzero elements—no error is raised. For example, `find(A, 10)` simply returns every nonzero in `A` if it has fewer than 10."
     },
     {
       "question": "Does `find` support char arrays and integers?",
@@ -92,7 +92,7 @@
     },
     {
       "question": "What shapes do empty results take?",
-      "answer": "When no element matches, the returned arrays are `0\u00d71` column vectors, just like MATLAB."
+      "answer": "When no element matches, the returned arrays are `0×1` column vectors, just like MATLAB."
     },
     {
       "question": "How does `find` interact with fusion or auto-offload?",

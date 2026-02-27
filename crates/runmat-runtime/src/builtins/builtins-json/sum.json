@@ -32,11 +32,11 @@
   },
   "description": "`sum(X)` adds together elements of scalars, vectors, matrices, and higher-dimensional tensors. When no dimension is supplied, the reduction runs along the first non-singleton dimension.",
   "behaviors": [
-    "`sum(X)` on an `m \u00d7 n` matrix returns a row vector (`1 \u00d7 n`) with column sums.",
-    "`sum(X, 2)` returns a column vector (`m \u00d7 1`) containing row sums.",
+    "`sum(X)` on an `m × n` matrix returns a row vector (`1 × n`) with column sums.",
+    "`sum(X, 2)` returns a column vector (`m × 1`) containing row sums.",
     "`sum(X, dims)` accepts a vector of dimensions (e.g., `[1 3]`) and collapses each listed axis while leaving the others untouched.",
     "`sum(X, 'all')` flattens every dimension into a single scalar sum.",
-    "Logical inputs are promoted to double precision (`true \u2192 1.0`, `false \u2192 0.0`).",
+    "Logical inputs are promoted to double precision (`true → 1.0`, `false → 0.0`).",
     "`sum(___, 'omitnan')` ignores `NaN` values; if every element in the slice is `NaN`, the result becomes `0`.",
     "`sum(___, 'includenan')` (default) propagates `NaN` when any element in the slice is `NaN`.",
     "`sum(___, outtype)` accepts `'double'`, `'default'`, or `'native'` to control the output class.",
@@ -47,17 +47,17 @@
     {
       "description": "Summing the elements of a matrix",
       "input": "A = [1 2 3; 4 5 6];\ncolSums = sum(A);\nrowSums = sum(A, 2)",
-      "output": "colSums = [5 7 9];\nrowSums = [6; 15];"
+      "output": "colSums = [5 7 9];\nrowSums = [6; 15]"
     },
     {
       "description": "Summing across multiple dimensions",
       "input": "B = reshape(1:24, [3 4 2]);\ncollapse = sum(B, [1 3])",
-      "output": "collapse = [48 66 84 102];"
+      "output": "collapse = [48 66 84 102]"
     },
     {
       "description": "Summing with NaN values ignored",
       "input": "values = [1 NaN 3];\ntotal = sum(values, 'omitnan')",
-      "output": "total = 4;"
+      "output": "total = 4"
     },
     {
       "description": "Summing on the GPU and matching an existing prototype",
@@ -67,12 +67,12 @@
     {
       "description": "Summing all elements of an array into a scalar",
       "input": "C = [1 2 3; 4 5 6];\ngrandTotal = sum(C, 'all')",
-      "output": "grandTotal = 21;"
+      "output": "grandTotal = 21"
     },
     {
       "description": "Summing with native output type",
       "input": "ints = int32([100 200 300]);\ntotal = sum(ints, 'native')",
-      "output": "total = int32(600);"
+      "output": "total = int32(600)"
     }
   ],
   "faqs": [
@@ -129,6 +129,6 @@
   },
   "gpu_residency": "You usually do **not** need to call `gpuArray` yourself. The fusion planner keeps tensors on the GPU whenever the provider exposes the required kernels. To mirror MATLAB, RunMat still accepts and respects explicit `gpuArray` / `gather` usage and the `'like'` option to control residency explicitly.",
   "gpu_behavior": [
-    "RunMat Accelerate keeps tensors on the GPU whenever a provider is active:\n\n1. If a tensor already resides on the device, the runtime calls the provider\u2019s `reduce_sum_dim` (or `reduce_sum` for whole-array reductions). Successful hooks return a new GPU handle so downstream consumers stay on device. 2. Cases that require extra bookkeeping\u2014such as `'omitnan'`, multi-axis reductions, or `'like'`/`'native'` class coercions\u2014fall back to the host implementation. The runtime gathers the data, computes the correct MATLAB result, and re-uploads it only when a `'like'` prototype demands GPU residency. 3. The fusion planner keeps surrounding elementwise producers and consumers on the GPU, so manual `gpuArray` / `gather` calls are optional unless you want to force residency for interoperability with legacy MATLAB workflows."
+    "RunMat Accelerate keeps tensors on the GPU whenever a provider is active:\n\n1. If a tensor already resides on the device, the runtime calls the provider’s `reduce_sum_dim` (or `reduce_sum` for whole-array reductions). Successful hooks return a new GPU handle so downstream consumers stay on device. 2. Cases that require extra bookkeeping—such as `'omitnan'`, multi-axis reductions, or `'like'`/`'native'` class coercions—fall back to the host implementation. The runtime gathers the data, computes the correct MATLAB result, and re-uploads it only when a `'like'` prototype demands GPU residency. 3. The fusion planner keeps surrounding elementwise producers and consumers on the GPU, so manual `gpuArray` / `gather` calls are optional unless you want to force residency for interoperability with legacy MATLAB workflows."
   ]
 }

@@ -36,10 +36,10 @@
   "description": "`rot90(A)` rotates the matrix `A` by 90 degrees counterclockwise. A second argument specifies additional 90-degree turns (positive values rotate counterclockwise, negative values clockwise). For N-D arrays, only the first two dimensions participate in the rotation; trailing dimensions remain unchanged.",
   "behaviors": [
     "Default behaviour rotates 90 degrees counterclockwise (`k = 1`).",
-    "`rot90(A, K)` rotates by `K * 90\u00b0`; the rotation count can be positive, negative, or zero. Any integer multiple of four leaves the input unchanged.",
+    "`rot90(A, K)` rotates by `K * 90°`; the rotation count can be positive, negative, or zero. Any integer multiple of four leaves the input unchanged.",
     "The direction keywords `'clockwise'` and `'counterclockwise'` are accepted as an alternative to the numeric argument (case-insensitive).",
     "Works for numeric tensors, logical masks, complex arrays, string arrays, and character matrices. Scalars are unchanged.",
-    "For empty dimensions the function still swaps the first two extents, so `rot90(zeros(0, 3))` returns a `3\u00d70` array."
+    "For empty dimensions the function still swaps the first two extents, so `rot90(zeros(0, 3))` returns a `3×0` array."
   ],
   "examples": [
     {
@@ -84,7 +84,7 @@
     },
     {
       "question": "What happens for empty matrices?",
-      "answer": "Empty inputs still swap the first two dimension sizes. For example, a `0\u00d75` matrix becomes `5\u00d70` after a single counterclockwise rotation."
+      "answer": "Empty inputs still swap the first two dimension sizes. For example, a `0×5` matrix becomes `5×0` after a single counterclockwise rotation."
     },
     {
       "question": "Can I rotate logical, string, or character arrays?",

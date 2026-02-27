@@ -188,7 +188,10 @@ pub(crate) mod tests {
 
     #[test]
     fn isinf_type_returns_logical() {
-        let out = logical_unary_type(&[Type::Tensor { shape: None }], &ResolveContext::new(Vec::new()));
+        let out = logical_unary_type(
+            &[Type::Tensor { shape: None }],
+            &ResolveContext::new(Vec::new()),
+        );
         assert_eq!(out, Type::logical());
     }
     use runmat_builtins::IntValue;

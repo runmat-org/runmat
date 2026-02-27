@@ -10,13 +10,13 @@ use once_cell::sync::Lazy;
 use runmat_builtins::{CharArray, HandleRef, IntValue, LogicalArray, StructValue, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::containers::type_resolvers::{
-    map_cell_type, map_handle_type, map_is_key_type, map_unknown_type,
-};
 use crate::builtins::common::random_args::keyword_of;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
+};
+use crate::builtins::containers::type_resolvers::{
+    map_cell_type, map_handle_type, map_is_key_type, map_unknown_type,
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -1179,7 +1179,8 @@ fn normalize_numeric_value(value: Value, builtin: &'static str) -> BuiltinResult
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
-        | Value::GpuTensor(_) => Err(map_error(
+        | Value::GpuTensor(_)
+        | Value::OutputList(_) => Err(map_error(
             "containers.Map: values must be numeric when ValueType is 'double' or 'single'",
             builtin,
         )),
@@ -1215,7 +1216,8 @@ fn normalize_logical_value(value: Value, builtin: &'static str) -> BuiltinResult
         | Value::Closure(_)
         | Value::ClassRef(_)
         | Value::MException(_)
-        | Value::GpuTensor(_) => Err(map_error(
+        | Value::GpuTensor(_)
+        | Value::OutputList(_) => Err(map_error(
             "containers.Map: values must be logical when ValueType is 'logical'",
             builtin,
         )),

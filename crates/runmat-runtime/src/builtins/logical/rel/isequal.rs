@@ -2,7 +2,9 @@
 //!
 //! Tests whether all input arrays have the same size, class, and content.
 
-use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::gpu_helpers;
@@ -60,7 +62,9 @@ async fn gather_value(value: Value) -> crate::BuiltinResult<Value> {
         Value::GpuTensor(handle) => {
             let tensor = gpu_helpers::gather_tensor_async(&handle)
                 .await
-                .map_err(|err| isequal_error(format!("{BUILTIN_NAME}: {err}"), IDENT_NOT_ENOUGH_INPUTS))?;
+                .map_err(|err| {
+                    isequal_error(format!("{BUILTIN_NAME}: {err}"), IDENT_NOT_ENOUGH_INPUTS)
+                })?;
             Ok(Value::Tensor(tensor))
         }
         other => Ok(other),
@@ -81,8 +85,8 @@ fn values_equal(a: &Value, b: &Value) -> bool {
         (Value::Bool(x), Value::Num(y)) => (if *x { 1.0 } else { 0.0 }) == *y,
         (Value::Num(x), Value::Int(y)) => *x == y.to_f64(),
         (Value::Int(x), Value::Num(y)) => x.to_f64() == *y,
-        (Value::Bool(x), Value::Int(y)) => (if *x { 1 } else { 0 }) == y.as_i64(),
-        (Value::Int(x), Value::Bool(y)) => x.as_i64() == if *y { 1 } else { 0 },
+        (Value::Bool(x), Value::Int(y)) => (if *x { 1 } else { 0 }) == y.to_i64(),
+        (Value::Int(x), Value::Bool(y)) => x.to_i64() == if *y { 1 } else { 0 },
 
         // Complex scalars
         (Value::Complex(ar, ai), Value::Complex(br, bi)) => ar == br && ai == bi,
@@ -116,24 +120,10 @@ fn values_equal(a: &Value, b: &Value) -> bool {
         }
 
         // Cells
-        (Value::Cell(a), Value::Cell(b)) => cells_equal(a, b),
-
-        // Cell arrays with shape
-        (Value::CellArray(a), Value::CellArray(b)) => {
-            a.shape == b.shape && cells_equal(&a.data, &b.data)
-        }
+        (Value::Cell(a), Value::Cell(b)) => a.shape == b.shape && cells_equal(a, b),
 
         // Structs
         (Value::Struct(a), Value::Struct(b)) => structs_equal(a, b),
-
-        // Empty arrays - check shape compatibility
-        (Value::Empty, Value::Empty) => true,
-        (Value::Empty, Value::Tensor(t)) => t.data.is_empty(),
-        (Value::Tensor(t), Value::Empty) => t.data.is_empty(),
-        (Value::Empty, Value::LogicalArray(a)) => a.data.is_empty(),
-        (Value::LogicalArray(a), Value::Empty) => a.data.is_empty(),
-        (Value::Empty, Value::Cell(c)) => c.is_empty(),
-        (Value::Cell(c), Value::Empty) => c.is_empty(),
 
         // Different types are not equal
         _ => false,
@@ -196,31 +186,24 @@ fn string_arrays_equal(a: &StringArray, b: &StringArray) -> bool {
     a.data == b.data
 }
 
-fn cells_equal(a: &[Value], b: &[Value]) -> bool {
-    if a.len() != b.len() {
+fn cells_equal(a: &CellArray, b: &CellArray) -> bool {
+    if a.data.len() != b.data.len() {
         return false;
     }
-    a.iter().zip(b.iter()).all(|(x, y)| values_equal(x, y))
+    a.data
+        .iter()
+        .zip(b.data.iter())
+        .all(|(x, y)| values_equal(x, y))
 }
 
-fn structs_equal(
-    a: &std::collections::HashMap<String, Value>,
-    b: &std::collections::HashMap<String, Value>,
-) -> bool {
-    if a.len() != b.len() {
+fn structs_equal(a: &runmat_builtins::StructValue, b: &runmat_builtins::StructValue) -> bool {
+    if a.fields.len() != b.fields.len() {
         return false;
     }
-    for (key, val_a) in a {
-        match b.get(key) {
-            Some(val_b) => {
-                if !values_equal(val_a, val_b) {
-                    return false;
-                }
-            }
-            None => return false,
-        }
-    }
-    true
+    a.fields
+        .iter()
+        .zip(b.fields.iter())
+        .all(|((key_a, val_a), (key_b, val_b))| key_a == key_b && values_equal(val_a, val_b))
 }
 
 #[cfg(test)]
@@ -294,7 +277,10 @@ pub(crate) mod tests {
     #[test]
     fn isequal_empty_arrays() {
         // Test that empty arrays are equal
-        let result = run_isequal(vec![Value::Empty, Value::Empty]).expect("isequal");
+        let empty_a = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
+        let empty_b = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
+        let result =
+            run_isequal(vec![Value::Tensor(empty_a), Value::Tensor(empty_b)]).expect("isequal");
         assert_eq!(result, Value::Bool(true));
     }
 
@@ -302,10 +288,10 @@ pub(crate) mod tests {
     #[test]
     fn isequal_empty_cell_arrays() {
         // Test the cell example from the failing test: cell(2,2) elements should be []
-        let c1 = CellArray::new(vec![Value::Empty; 4], vec![2, 2]).unwrap();
-        let c2 = CellArray::new(vec![Value::Empty; 4], vec![2, 2]).unwrap();
-        let result =
-            run_isequal(vec![Value::CellArray(c1), Value::CellArray(c2)]).expect("isequal");
+        let empty = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
+        let c1 = CellArray::new(vec![Value::Tensor(empty.clone()); 4], 2, 2).unwrap();
+        let c2 = CellArray::new(vec![Value::Tensor(empty); 4], 2, 2).unwrap();
+        let result = run_isequal(vec![Value::Cell(c1), Value::Cell(c2)]).expect("isequal");
         assert_eq!(result, Value::Bool(true));
     }
 
@@ -313,11 +299,15 @@ pub(crate) mod tests {
     #[test]
     fn isequal_cell_element_with_empty() {
         // Test isequal(C{1,1}, [], C{2,2}, []) pattern
+        let empty_a = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
+        let empty_b = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
+        let empty_c = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
+        let empty_d = Tensor::new(Vec::new(), vec![0, 0]).unwrap();
         let result = run_isequal(vec![
-            Value::Empty,
-            Value::Empty,
-            Value::Empty,
-            Value::Empty,
+            Value::Tensor(empty_a),
+            Value::Tensor(empty_b),
+            Value::Tensor(empty_c),
+            Value::Tensor(empty_d),
         ])
         .expect("isequal");
         assert_eq!(result, Value::Bool(true));
@@ -327,7 +317,8 @@ pub(crate) mod tests {
     #[test]
     fn isequal_nan_not_equal() {
         // In isequal, NaN != NaN (use isequaln for NaN equality)
-        let result = run_isequal(vec![Value::Num(f64::NAN), Value::Num(f64::NAN)]).expect("isequal");
+        let result =
+            run_isequal(vec![Value::Num(f64::NAN), Value::Num(f64::NAN)]).expect("isequal");
         assert_eq!(result, Value::Bool(false));
     }
 
@@ -345,7 +336,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isequal_different_types() {
-        let result = run_isequal(vec![Value::Num(5.0), Value::String("5".into())]).expect("isequal");
+        let result =
+            run_isequal(vec![Value::Num(5.0), Value::String("5".into())]).expect("isequal");
         assert_eq!(result, Value::Bool(false));
     }
 
@@ -367,11 +359,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn isequal_complex() {
-        let result = run_isequal(vec![
-            Value::Complex(1.0, 2.0),
-            Value::Complex(1.0, 2.0),
-        ])
-        .expect("isequal");
+        let result =
+            run_isequal(vec![Value::Complex(1.0, 2.0), Value::Complex(1.0, 2.0)]).expect("isequal");
         assert_eq!(result, Value::Bool(true));
     }
 }

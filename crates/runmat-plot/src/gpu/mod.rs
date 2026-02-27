@@ -1,3 +1,4 @@
+pub mod axis;
 pub mod bar;
 pub mod contour;
 pub mod contour_fill;

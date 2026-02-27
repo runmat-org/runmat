@@ -67,7 +67,25 @@ fn union_error(message: impl Into<String>) -> crate::RuntimeError {
     builtin_path = "crate::builtins::array::sorting_sets::union"
 )]
 async fn union_builtin(a: Value, b: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    Ok(evaluate(a, b, &rest).await?.into_values_value())
+    let eval = evaluate(a, b, &rest).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        if out_count == 1 {
+            return Ok(Value::OutputList(vec![eval.into_values_value()]));
+        }
+        if out_count == 2 {
+            let (values, ia) = eval.into_pair();
+            return Ok(Value::OutputList(vec![values, ia]));
+        }
+        let (values, ia, ib) = eval.into_triple();
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count,
+            vec![values, ia, ib],
+        ));
+    }
+    Ok(eval.into_values_value())
 }
 
 /// Evaluate the `union` builtin once and expose all outputs.
@@ -113,33 +131,33 @@ fn parse_union_option(
     seen_order: &mut Option<UnionOrder>,
     lowered: &str,
 ) -> crate::BuiltinResult<()> {
-        match lowered {
-            "rows" => opts.rows = true,
-            "sorted" => {
-                if let Some(prev) = seen_order {
-                    if *prev != UnionOrder::Sorted {
-                        return Err(union_error("union: cannot combine 'sorted' with 'stable'"));
-                    }
+    match lowered {
+        "rows" => opts.rows = true,
+        "sorted" => {
+            if let Some(prev) = seen_order {
+                if *prev != UnionOrder::Sorted {
+                    return Err(union_error("union: cannot combine 'sorted' with 'stable'"));
                 }
-                *seen_order = Some(UnionOrder::Sorted);
-                opts.order = UnionOrder::Sorted;
             }
-            "stable" => {
-                if let Some(prev) = seen_order {
-                    if *prev != UnionOrder::Stable {
-                        return Err(union_error("union: cannot combine 'sorted' with 'stable'"));
-                    }
-                }
-                *seen_order = Some(UnionOrder::Stable);
-                opts.order = UnionOrder::Stable;
-            }
-            "legacy" | "r2012a" => {
-                return Err(union_error(
-                    "union: the 'legacy' behaviour is not supported",
-                ));
-            }
-            other => return Err(union_error(format!("union: unrecognised option '{other}'"))),
+            *seen_order = Some(UnionOrder::Sorted);
+            opts.order = UnionOrder::Sorted;
         }
+        "stable" => {
+            if let Some(prev) = seen_order {
+                if *prev != UnionOrder::Stable {
+                    return Err(union_error("union: cannot combine 'sorted' with 'stable'"));
+                }
+            }
+            *seen_order = Some(UnionOrder::Stable);
+            opts.order = UnionOrder::Stable;
+        }
+        "legacy" | "r2012a" => {
+            return Err(union_error(
+                "union: the 'legacy' behaviour is not supported",
+            ));
+        }
+        other => return Err(union_error(format!("union: unrecognised option '{other}'"))),
+    }
     Ok(())
 }
 

@@ -8,8 +8,8 @@ use glam::{Mat4, Vec3, Vec4};
 use std::sync::Arc;
 use wgpu::util::DeviceExt;
 
-use crate::{core::scene::GpuVertexBuffer, gpu::shaders};
 use crate::core::DepthMode;
+use crate::{core::scene::GpuVertexBuffer, gpu::shaders};
 
 /// Uniforms for the procedural 3D grid plane.
 #[repr(C)]
@@ -263,6 +263,11 @@ pub struct WgpuRenderer {
     depth_view: Option<Arc<wgpu::TextureView>>,
     depth_extent: (u32, u32, u32), // (w, h, sample_count)
 
+    // MSAA color resources for resolving into single-sampled targets.
+    msaa_color_texture: Option<wgpu::Texture>,
+    msaa_color_view: Option<Arc<wgpu::TextureView>>,
+    msaa_color_extent: (u32, u32, u32), // (w, h, sample_count)
+
     /// Depth mapping mode for camera-based 3D pipelines.
     pub depth_mode: DepthMode,
 }
@@ -460,6 +465,9 @@ impl WgpuRenderer {
             depth_texture: None,
             depth_view: None,
             depth_extent: (0, 0, 0),
+            msaa_color_texture: None,
+            msaa_color_view: None,
+            msaa_color_extent: (0, 0, 0),
             depth_mode: DepthMode::default(),
         }
     }
@@ -513,6 +521,9 @@ impl WgpuRenderer {
             self.depth_texture = None;
             self.depth_view = None;
             self.depth_extent = (0, 0, 0);
+            self.msaa_color_texture = None;
+            self.msaa_color_view = None;
+            self.msaa_color_extent = (0, 0, 0);
         }
     }
 
@@ -563,6 +574,36 @@ impl WgpuRenderer {
             .as_ref()
             .cloned()
             .expect("depth view missing")
+    }
+
+    pub fn ensure_msaa_color_view(&mut self) -> Arc<wgpu::TextureView> {
+        let width = self.surface_config.width.max(1);
+        let height = self.surface_config.height.max(1);
+        let samples = self.msaa_sample_count.max(1);
+        if self.msaa_color_view.is_none() || self.msaa_color_extent != (width, height, samples) {
+            let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("runmat_msaa_color_plot"),
+                size: wgpu::Extent3d {
+                    width,
+                    height,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: samples,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.surface_config.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                view_formats: &[],
+            });
+            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+            self.msaa_color_texture = Some(texture);
+            self.msaa_color_view = Some(Arc::new(view));
+            self.msaa_color_extent = (width, height, samples);
+        }
+        self.msaa_color_view
+            .as_ref()
+            .cloned()
+            .expect("msaa color view missing")
     }
 
     /// Create a GPU texture and bind group for an RGBA8 image

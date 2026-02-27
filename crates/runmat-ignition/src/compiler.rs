@@ -163,6 +163,18 @@ fn is_exp_call(expr: &HirExpr) -> bool {
 }
 
 impl Compiler {
+    fn normalize_class_literal_name(raw: &str) -> String {
+        if raw.len() >= 2 {
+            let bytes = raw.as_bytes();
+            let first = bytes[0] as char;
+            let last = bytes[raw.len() - 1] as char;
+            if (first == '\'' || first == '"') && first == last {
+                return raw[1..raw.len() - 1].to_string();
+            }
+        }
+        raw.to_string()
+    }
+
     fn compile_stochastic_evolution(
         &mut self,
         plan: StochasticEvolutionPlan<'_>,
@@ -1412,6 +1424,7 @@ impl Compiler {
                                                     fargs.len(),
                                                     outc,
                                                 ));
+                                                self.emit(Instr::Unpack(outc));
                                                 if dims_len == 1 || is_col_slice {
                                                     self.emit(Instr::PackToCol(outc));
                                                 } else {
@@ -1506,6 +1519,7 @@ impl Compiler {
                                             fargs.len(),
                                             outc,
                                         ));
+                                        self.emit(Instr::Unpack(outc));
                                         self.emit(Instr::PackToCol(outc));
                                     } else {
                                         self.compile_expr(rhs)?;
@@ -1743,6 +1757,7 @@ impl Compiler {
                                 Instr::CallFunctionMulti(name.clone(), args.len(), vars.len()),
                                 &call_arg_spans,
                             );
+                            self.emit(Instr::Unpack(vars.len()));
                             // Store outputs in order
                             for (_i, var) in vars.iter().enumerate().rev() {
                                 if let Some(v) = var {
@@ -1757,9 +1772,10 @@ impl Compiler {
                                 self.compile_expr(arg)?;
                             }
                             self.emit_call_with_arg_spans(
-                                Instr::CallBuiltinMulti(name.clone(), args.len(), vars.len()),
+                                Instr::CallBuiltin(name.clone(), args.len()),
                                 &call_arg_spans,
                             );
+                            self.emit(Instr::Unpack(vars.len()));
                             for (_i, var) in vars.iter().enumerate().rev() {
                                 if let Some(v) = var {
                                     self.emit(Instr::StoreVar(v.0));
@@ -1917,9 +1933,7 @@ impl Compiler {
                         self.emit(Instr::Transpose);
                     }
                     runmat_parser::UnOp::Not => {
-                        // Simple lowering: x -> (x == 0)
-                        self.emit(Instr::LoadConst(0.0));
-                        self.emit(Instr::Equal);
+                        self.emit(Instr::CallBuiltin("not".to_string(), 1));
                     }
                 }
             }
@@ -2308,6 +2322,7 @@ impl Compiler {
                                             inner_args.len(),
                                             outc,
                                         ));
+                                        self.emit(Instr::Unpack(outc));
                                         total_argc += outc;
                                         continue;
                                     }
@@ -2380,6 +2395,7 @@ impl Compiler {
                                         inner_args.len(),
                                         outc,
                                     ));
+                                    self.emit(Instr::Unpack(outc));
                                     total_argc += outc;
                                     did_expand_inner = true;
                                 } else {
@@ -2715,11 +2731,7 @@ impl Compiler {
                     }
                     HirExprKind::FuncCall(name, args) if name == "classref" && args.len() == 1 => {
                         if let HirExprKind::String(cls) = &args[0].kind {
-                            let cls_name = if cls.starts_with('\'') && cls.ends_with('\'') {
-                                cls[1..cls.len() - 1].to_string()
-                            } else {
-                                cls.clone()
-                            };
+                            let cls_name = Self::normalize_class_literal_name(cls);
                             self.emit(Instr::LoadStaticProperty(cls_name, field.clone()));
                         } else {
                             self.compile_expr(base)?;
@@ -2758,11 +2770,7 @@ impl Compiler {
                 }
                 HirExprKind::FuncCall(name, bargs) if name == "classref" && bargs.len() == 1 => {
                     if let HirExprKind::String(cls) = &bargs[0].kind {
-                        let cls_name = if cls.starts_with('\'') && cls.ends_with('\'') {
-                            cls[1..cls.len() - 1].to_string()
-                        } else {
-                            cls.clone()
-                        };
+                        let cls_name = Self::normalize_class_literal_name(cls);
                         for arg in args {
                             self.compile_expr(arg)?;
                         }

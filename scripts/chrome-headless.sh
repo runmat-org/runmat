@@ -28,17 +28,28 @@ if [[ ! -x "${CHROME_BIN}" ]]; then
   exit 1
 fi
 
-ANGLE_FLAG="--use-angle=metal"
 if [[ "$(uname -s)" == "Linux" ]]; then
-  ANGLE_FLAG="--use-angle=vulkan"
+  # ubuntu-latest CI runners have no real GPU or Vulkan; use SwiftShader
+  # (CPU-based software renderer) so Chrome doesn't hang on init.
+  # --no-sandbox and --disable-dev-shm-usage are required in containers.
+  exec "${CHROME_BIN}" \
+    --headless=new \
+    --no-sandbox \
+    --disable-dev-shm-usage \
+    --use-gl=angle \
+    --use-angle=swiftshader \
+    --enable-unsafe-webgpu \
+    --disable-gpu-sandbox \
+    --disable-webgpu-vsync \
+    "$@"
+else
+  exec "${CHROME_BIN}" \
+    --headless=new \
+    --use-angle=metal \
+    --enable-features=Vulkan,UseSkiaRenderer,WebGPUService \
+    --enable-unsafe-webgpu \
+    --disable-gpu-sandbox \
+    --disable-webgpu-vsync \
+    "$@"
 fi
-
-exec "${CHROME_BIN}" \
-  --headless=new \
-  --enable-features=Vulkan,UseSkiaRenderer,WebGPUService \
-  --enable-unsafe-webgpu \
-  --disable-gpu-sandbox \
-  --disable-webgpu-vsync \
-  "${ANGLE_FLAG}" \
-  "$@"
 

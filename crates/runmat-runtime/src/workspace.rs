@@ -7,14 +7,25 @@ use std::sync::Mutex;
 
 /// Resolver used by the runtime to access the caller workspace when builtins
 /// (such as `save`) need to look up variables by name.
+type AssignFn = fn(&str, Value) -> Result<(), String>;
+
 pub struct WorkspaceResolver {
     pub lookup: fn(&str) -> Option<Value>,
     pub snapshot: fn() -> Vec<(String, Value)>,
     pub globals: fn() -> Vec<String>,
+    pub assign: Option<AssignFn>,
 }
 
 mod resolver_storage {
     use super::WorkspaceResolver;
+
+    pub(super) fn set(resolver: WorkspaceResolver) {
+        imp::set(resolver)
+    }
+
+    pub(super) fn with<R>(f: impl FnOnce(Option<&WorkspaceResolver>) -> R) -> R {
+        imp::with(f)
+    }
 
     #[cfg(test)]
     mod imp {
@@ -63,14 +74,6 @@ mod resolver_storage {
             f(guard.as_ref())
         }
     }
-
-    pub(super) fn set(resolver: WorkspaceResolver) {
-        imp::set(resolver)
-    }
-
-    pub(super) fn with<R>(f: impl FnOnce(Option<&WorkspaceResolver>) -> R) -> R {
-        imp::with(f)
-    }
 }
 
 #[cfg(test)]
@@ -96,6 +99,16 @@ pub fn snapshot() -> Option<Vec<(String, Value)>> {
 /// Return the list of global variable names visible to the active workspace.
 pub fn global_names() -> Vec<String> {
     resolver_storage::with(|resolver| resolver.map(|r| (r.globals)()).unwrap_or_default())
+}
+
+pub fn assign(name: &str, value: Value) -> Result<(), String> {
+    resolver_storage::with(|resolver| {
+        let resolver = resolver.ok_or_else(|| "workspace state unavailable".to_string())?;
+        let assign = resolver
+            .assign
+            .ok_or_else(|| "workspace assignment unavailable".to_string())?;
+        (assign)(name, value)
+    })
 }
 
 /// Returns true when a resolver has been registered.

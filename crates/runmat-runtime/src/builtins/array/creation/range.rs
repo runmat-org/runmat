@@ -7,11 +7,11 @@ use runmat_builtins::{ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
+use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::arg_tokens::tokens_from_values;
 use crate::builtins::common::{gpu_helpers, tensor};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::range")]

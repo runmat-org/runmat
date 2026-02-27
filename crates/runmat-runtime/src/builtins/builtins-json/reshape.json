@@ -33,7 +33,7 @@
   },
   "description": "`reshape(A, newSize)` returns the elements of `A` with a different dimensional layout while preserving column-major ordering. The total number of elements must remain unchanged.",
   "behaviors": [
-    "Accepts either a size vector `reshape(A, [m n \u2026])` or individual dimensions `reshape(A, m, n, \u2026)`.",
+    "Accepts either a size vector `reshape(A, [m n …])` or individual dimensions `reshape(A, m, n, …)`.",
     "Exactly one dimension may be specified as `[]`; RunMat infers its value from `numel(A)`.",
     "Dimensions must be nonnegative integers. Zero-sized dimensions are allowed when `numel(A) == 0`.",
     "Works on numeric, logical, complex, string, char, GPU, and cell arrays (cell/char currently support up to 2-D).",

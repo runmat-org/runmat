@@ -60,6 +60,28 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn load_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(&args).await?;
+
+    // current_output_count() is set by the dispatcher only for multi-output Unpack patterns
+    // like `[a, b] = load(...)`. Guard against requesting more than one struct output.
+    if let Some(n) = crate::output_count::current_output_count() {
+        if n > 1 {
+            return Err(load_error("load supports at most one output argument"));
+        }
+    }
+
+    // The VM sets output_context::requested_output_count() at every call site before
+    // dispatching:
+    //   Some(0) → statement-level call (result is discarded or printed without capture)
+    //             → assign loaded variables directly into the caller's workspace.
+    //   Some(1) → single-output assignment `S = load(...)` → return a struct.
+    //   None    → called outside the VM (e.g. directly from Rust) → return a struct.
+    if crate::output_context::requested_output_count() == Some(0) {
+        for (name, value) in eval.variables() {
+            crate::workspace::assign(name, value.clone()).map_err(|err| load_error(err))?;
+        }
+        return Ok(Value::OutputList(Vec::new()));
+    }
+
     Ok(eval.first_output())
 }
 
@@ -310,7 +332,15 @@ pub(crate) fn read_mat_file(path: &Path) -> BuiltinResult<Vec<(String, Value)>> 
         )
     })?;
     let mut reader = BufReader::new(file);
+    read_mat_reader(&mut reader)
+}
 
+pub fn decode_workspace_from_mat_bytes(bytes: &[u8]) -> BuiltinResult<Vec<(String, Value)>> {
+    let mut cursor = Cursor::new(bytes);
+    read_mat_reader(&mut cursor)
+}
+
+fn read_mat_reader<R: Read>(reader: &mut R) -> BuiltinResult<Vec<(String, Value)>> {
     let mut header = [0u8; MAT_HEADER_LEN];
     reader.read_exact(&mut header).map_err(|err| {
         load_error_with_source(format!("load: failed to read MAT-file header: {err}"), err)
@@ -320,7 +350,7 @@ pub(crate) fn read_mat_file(path: &Path) -> BuiltinResult<Vec<(String, Value)>> 
     }
 
     let mut variables = Vec::new();
-    while let Some(tagged) = read_tagged(&mut reader, true)? {
+    while let Some(tagged) = read_tagged(reader, true)? {
         if tagged.data_type != MI_MATRIX {
             continue;
         }
@@ -846,6 +876,7 @@ pub(crate) mod tests {
                 entries
             },
             globals: || Vec::new(),
+            assign: None,
         });
     }
 

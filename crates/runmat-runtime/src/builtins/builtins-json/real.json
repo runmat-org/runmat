@@ -43,7 +43,7 @@
     {
       "description": "Extract the real part of a complex scalar",
       "input": "z = 3 + 4i;\nr = real(z)",
-      "output": "r = 3;"
+      "output": "r = 3"
     },
     {
       "description": "Take the real part of a complex matrix",
@@ -53,7 +53,7 @@
     {
       "description": "Confirm that real inputs remain unchanged",
       "input": "data = [-2.5 0 9.75];\nresult = real(data)",
-      "output": "result = [-2.5 0 9.75];"
+      "output": "result = [-2.5 0 9.75]"
     },
     {
       "description": "Convert logical masks to doubles",
@@ -63,7 +63,7 @@
     {
       "description": "Convert characters to numeric codes",
       "input": "chars = 'RunMat';\ncodes = real(chars)",
-      "output": "codes = [82 117 110 77 97 116];"
+      "output": "codes = [82 117 110 77 97 116]"
     },
     {
       "description": "Keep GPU tensors device-resident when possible",
@@ -93,7 +93,7 @@
     },
     {
       "question": "Is GPU execution numerically identical to CPU?",
-      "answer": "Yes\u2014`real` is an identity for real tensors. Results match within the provider's precision (`single` or `double`)."
+      "answer": "Yes—`real` is an identity for real tensors. Results match within the provider's precision (`single` or `double`)."
     },
     {
       "question": "Does `real` participate in fusion?",

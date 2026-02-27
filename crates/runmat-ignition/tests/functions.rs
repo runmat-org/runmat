@@ -2,8 +2,8 @@ mod test_helpers;
 
 use runmat_parser::parse;
 use std::collections::HashMap;
-use std::thread;
 use std::convert::TryFrom;
+use std::thread;
 use test_helpers::lower;
 use test_helpers::{execute, interpret};
 
@@ -248,6 +248,19 @@ fn classes_static_and_inheritance() {
             .unwrap();
     let hir5 = lower(&ast5).unwrap();
     assert!(execute(&hir5).is_err());
+}
+
+#[test]
+fn static_method_via_classref_uses_namespaced_builtin_without_class_registry() {
+    let ast = parse("P = classref(\"Point\").origin(); point_class = class(P);").unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Object(_))));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s == "Point")));
 }
 
 #[cfg(any(feature = "test-classes", test))]
@@ -1340,6 +1353,43 @@ fn oop_negative_undefined_property_and_missing_subsref() {
             .iter()
             .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-2.0).abs()<1e-9)));
     }
+}
+
+#[test]
+fn containers_map_parenthesis_indexing() {
+    let program = r#"
+        fruit = containers.Map({'apple'}, {99});
+        energy = fruit('apple');
+    "#;
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 99.0).abs() < 1e-9)));
+}
+
+#[test]
+fn containers_map_dot_properties() {
+    let program = r#"
+        m = containers.Map();
+        key_type = m.KeyType;
+        value_type = m.ValueType;
+        count = m.Count;
+    "#;
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+
+    assert!(vars.iter().any(|v| match v {
+        runmat_builtins::Value::CharArray(ca) => ca.data.iter().collect::<String>() == "char",
+        _ => false,
+    }));
+    assert!(vars.iter().any(|v| match v {
+        runmat_builtins::Value::CharArray(ca) => ca.data.iter().collect::<String>() == "any",
+        _ => false,
+    }));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n).abs() < 1e-9)));
 }
 
 #[test]

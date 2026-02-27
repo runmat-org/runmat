@@ -1,7 +1,7 @@
 //! MATLAB-compatible `save` builtin for RunMat.
 
 use std::collections::HashSet;
-use std::io::{BufWriter, Write};
+use std::io::{BufWriter, Cursor, Write};
 use std::path::{Path, PathBuf};
 
 use futures::future::LocalBoxFuture;
@@ -661,6 +661,47 @@ fn write_mat_file(path: &Path, vars: &[MatVar]) -> BuiltinResult<()> {
         .map_err(|e| save_error_with_source(format!("save: flush failed: {e}"), e))
 }
 
+pub async fn encode_workspace_to_mat_bytes(entries: &[(String, Value)]) -> BuiltinResult<Vec<u8>> {
+    let mut mat_vars = Vec::with_capacity(entries.len());
+    for (name, value) in entries {
+        mat_vars.push(MatVar {
+            name: name.clone(),
+            array: convert_value(value.clone()).await?,
+        });
+    }
+    write_mat_bytes(&mat_vars)
+}
+
+fn write_mat_bytes(vars: &[MatVar]) -> BuiltinResult<Vec<u8>> {
+    let mut writer = BufWriter::new(Cursor::new(Vec::<u8>::new()));
+
+    let mut header = [0u8; MAT_HEADER_LEN];
+    let desc = b"MATLAB 5.0 MAT-file, RunMat save";
+    for (i, byte) in desc.iter().enumerate() {
+        header[i] = *byte;
+    }
+    header[124] = 0x00;
+    header[125] = 0x01;
+    header[126] = b'I';
+    header[127] = b'M';
+    writer
+        .write_all(&header)
+        .map_err(|e| save_error_with_source(format!("save: failed to write header: {e}"), e))?;
+
+    for var in vars {
+        let matrix_bytes = build_matrix_bytes(&var.array, Some(&var.name))?;
+        write_tagged(&mut writer, MI_MATRIX, &matrix_bytes)?;
+    }
+
+    writer
+        .flush()
+        .map_err(|e| save_error_with_source(format!("save: flush failed: {e}"), e))?;
+    Ok(writer
+        .into_inner()
+        .map_err(|e| save_error_with_source("save: failed to finalize MAT bytes", e))?
+        .into_inner())
+}
+
 fn build_matrix_bytes(array: &MatArray, name: Option<&str>) -> BuiltinResult<Vec<u8>> {
     let mut buf = Vec::new();
 
@@ -817,6 +858,7 @@ pub(crate) mod tests {
                 entries
             },
             globals: || Vec::new(),
+            assign: None,
         });
     }
 

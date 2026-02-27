@@ -11,9 +11,9 @@ use miette::{SourceOffset, SourceSpan};
 use std::env;
 use uuid::Uuid;
 
-mod telemetry_sink;
 mod public_api;
 mod remote;
+mod telemetry_sink;
 use runmat_accelerate::AccelerateInitOptions;
 use runmat_builtins::Value;
 use runmat_config::{self as config, ConfigLoader, PlotBackend, PlotMode, RunMatConfig};
@@ -39,8 +39,8 @@ use std::io::{self, Read, Write};
 use std::path::PathBuf;
 use std::time::Duration;
 use telemetry_sink::{
-    capture_provider_snapshot, sink as telemetry_sink, telemetry_client_id, RuntimeExecutionCounters,
-    TelemetryRunKind,
+    capture_provider_snapshot, sink as telemetry_sink, telemetry_client_id,
+    RuntimeExecutionCounters, TelemetryRunKind,
 };
 
 fn parser_compat(mode: config::LanguageCompatMode) -> runmat_parser::CompatMode {

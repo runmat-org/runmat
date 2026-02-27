@@ -37,7 +37,7 @@
     "Character arrays are processed row by row. Rows shrink as characters are removed and are padded with spaces so the result remains a rectangular char array.",
     "Cell arrays must contain string scalars or character vectors. The result is a cell array with the same shape whose elements reflect the removed substrings.",
     "The `pattern` input can be a string scalar, string array, character array, or cell array of character vectors/string scalars. Provide either a scalar pattern or a list; an empty list leaves `text` unchanged.",
-    "Pattern values are treated literally\u2014no regular expressions are used. Use [`replace`](./replace) or the regex builtins for pattern-based removal."
+    "Pattern values are treated literally—no regular expressions are used. Use [`replace`](./replace) or the regex builtins for pattern-based removal."
   ],
   "examples": [
     {
@@ -48,27 +48,27 @@
     {
       "description": "Remove multiple substrings from each element of a string array",
       "input": "labels = [\"GPU pipeline\"; \"CPU pipeline\"];\nresult = erase(labels, [\"GPU \", \"CPU \"])",
-      "output": "result = 2\u00d71 string\n    \"pipeline\"\n    \"pipeline\""
+      "output": "result = 2×1 string\n    \"pipeline\"\n    \"pipeline\""
     },
     {
       "description": "Erase characters from a character array while preserving padding",
       "input": "chars = char(\"workspace\", \"snapshots\");\ntrimmed = erase(chars, \"s\")",
-      "output": "trimmed =\n\n  2\u00d78 char array\n\n    'workpace'\n    'napshot '"
+      "output": "trimmed =\n\n  2×8 char array\n\n    'workpace'\n    'naphot '"
     },
     {
       "description": "Remove substrings from a cell array of text",
       "input": "C = {'Kernel Planner', \"GPU Fusion\"};\nout = erase(C, [\"Kernel \", \"GPU \"])",
-      "output": "out = 1\u00d72 cell array\n    {'Planner'}    {\"Fusion\"}"
+      "output": "out = 1×2 cell array\n    {'Planner'}    {\"Fusion\"}"
     },
     {
       "description": "Provide an empty pattern list to leave the text unchanged",
       "input": "data = [\"alpha\", \"beta\"];\nunchanged = erase(data, string.empty)",
-      "output": "unchanged = 1\u00d72 string\n    \"alpha\"    \"beta\""
+      "output": "unchanged = 1×2 string\n    \"alpha\"    \"beta\""
     },
     {
       "description": "Remove delimiters before splitting text",
-      "input": "path = \"runmat/bin:runmat/lib\";\nclean = erase(path, \":\");\nparts = split(clean, \"runmat/\")",
-      "output": "clean = \"runmat/binrunmat/lib\"\nparts = 1\u00d73 string\n    \"\"    \"bin\"    \"lib\""
+      "input": "path = \"runmat/bin:runmat/lib\";\nclean = erase(path, \":\")\nparts = split(clean, \"runmat/\")",
+      "output": "clean = \"runmat/binrunmat/lib\"\nparts = 1×3 string\n    \"\"    \"bin\"    \"lib\""
     }
   ],
   "faqs": [

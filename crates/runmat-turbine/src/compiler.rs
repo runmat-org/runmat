@@ -288,9 +288,10 @@ impl BytecodeCompiler {
                 let instr = &instructions[pc];
 
                 match instr {
-                    &Instr::PackToRow(_) | &Instr::PackToCol(_) => {
+                    &Instr::PackToRow(_) | &Instr::PackToCol(_) | &Instr::Unpack(_) => {
                         return Err(execution_error(
-                            "PackToRow/PackToCol not supported in JIT; use interpreter".to_string(),
+                            "PackToRow/PackToCol/Unpack not supported in JIT; use interpreter"
+                                .to_string(),
                         ));
                     }
                     Instr::DeclareGlobalNamed(_, _) | Instr::DeclarePersistentNamed(_, _) => {
@@ -639,7 +640,6 @@ impl BytecodeCompiler {
                     | Instr::CallBuiltinExpandMulti(_, _)
                     | Instr::CallFunctionExpandMulti(_, _)
                     | Instr::CallFunctionMulti(_, _, _)
-                    | Instr::CallBuiltinMulti(_, _, _)
                     | Instr::CallFunctionExpandAt(_, _, _, _)
                     | Instr::Swap
                     | Instr::RegisterImport { .. }

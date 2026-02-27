@@ -36,7 +36,7 @@
   "behaviors": [
     "The size vector `siz` supplies one extent per dimension. Each entry must be a positive integer.",
     "`idx` can be a scalar or an array of any shape; every element must be a positive integer within `prod(siz)`.",
-    "The result is always a 1\u00d7N cell array (N is `numel(siz)`). Each cell contains a double array that matches the shape of `idx`.",
+    "The result is always a 1×N cell array (N is `numel(siz)`). Each cell contains a double array that matches the shape of `idx`.",
     "Non-integer, complex, NaN, Inf, or out-of-range indices raise MATLAB-compatible errors.",
     "Empty inputs produce empty outputs with matching shapes.",
     "When called with multiple outputs (`[i,j,k] = ind2sub(...)`) RunMat unpacks the cell array automatically, mirroring MATLAB semantics."
@@ -45,17 +45,17 @@
     {
       "description": "Recovering row and column subscripts from a matrix index",
       "input": "[row, col] = ind2sub([3 4], 8)",
-      "output": "row = 2;\ncol = 3;"
+      "output": "row = 2;\ncol = 3"
     },
     {
       "description": "Extracting multiple matrix indices at once",
       "input": "idx = [7 8 9];\n[rows, cols] = ind2sub([3 5], idx)",
-      "output": "rows = [1 2 3];\ncols = [3 3 3];"
+      "output": "rows = [1 2 3];\ncols = [3 3 3]"
     },
     {
       "description": "Converting indices for a 3-D volume",
       "input": "idx = [3 11];\n[r, c, p] = ind2sub([2 3 4], idx)",
-      "output": "r = [1 1];\nc = [2 3];\np = [1 2];"
+      "output": "r = [1 1];\nc = [2 3];\np = [1 2]"
     },
     {
       "description": "Keeping indices on the GPU",
@@ -65,17 +65,17 @@
     {
       "description": "Using a single output cell for flexible unpacking",
       "input": "subs = ind2sub(size(magic(4)), 6:9);\n% Access with subs{1}, subs{2}, ...",
-      "output": "subs =\n  1\u00d72 cell array\n    {1\u00d74 double}    {1\u00d74 double}"
+      "output": "subs =\n  1×2 cell array\n    {1×4 double}    {1×4 double}"
     },
     {
       "description": "Validating index ranges before reshaping",
-      "input": "idx = 1:numel(A);\n[i, j] = ind2sub(size(A), idx);\nB = accumarray([i(:) j(:)], A(:))"
+      "input": "A = magic(4);\nidx = 1:numel(A);\n[i, j] = ind2sub(size(A), idx)"
     }
   ],
   "faqs": [
     {
       "question": "What types does `ind2sub` accept for `idx`?",
-      "answer": "Numeric and logical inputs are accepted. Logical arrays are treated as double precision (with `true \u2192 1`, `false \u2192 0`); complex values are rejected."
+      "answer": "Numeric and logical inputs are accepted. Logical arrays are treated as double precision (with `true → 1`, `false → 0`); complex values are rejected."
     },
     {
       "question": "Can `siz` contain zeros?",
@@ -83,7 +83,7 @@
     },
     {
       "question": "How are errors reported for invalid indices?",
-      "answer": "Indices that are non-integer, non-positive, or exceed `prod(siz)` raise errors matching MATLAB's wording (e.g., \"Index exceeds number of array elements. Index must not exceed \u2026\")."
+      "answer": "Indices that are non-integer, non-positive, or exceed `prod(siz)` raise errors matching MATLAB's wording (e.g., \"Index exceeds number of array elements. Index must not exceed …\")."
     },
     {
       "question": "What shape do the output arrays have?",
@@ -111,7 +111,7 @@
     },
     {
       "question": "Can I use `ind2sub` with more dimensions than two?",
-      "answer": "Definitely\u2014`ind2sub` works for any number of dimensions represented in `siz`."
+      "answer": "Definitely—`ind2sub` works for any number of dimensions represented in `siz`."
     }
   ],
   "links": [

@@ -215,7 +215,8 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
         | Value::FunctionHandle(_)
         | Value::Closure(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(builtin_error(
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(builtin_error(
             "minus: unsupported prototype conversion to GPU output",
         )),
     }
@@ -618,9 +619,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
-        CharArray, ComplexTensor, LogicalArray, ResolveContext, Tensor, Type,
-    };
+    use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, ResolveContext, Tensor, Type};
 
     const EPS: f64 = 1e-12;
 

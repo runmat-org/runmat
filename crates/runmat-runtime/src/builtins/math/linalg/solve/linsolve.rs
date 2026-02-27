@@ -83,6 +83,23 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
     let eval = evaluate_args(lhs, rhs, &rest).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        if out_count == 1 {
+            return Ok(Value::OutputList(vec![eval.solution()]));
+        }
+        if out_count == 2 {
+            return Ok(Value::OutputList(vec![
+                eval.solution(),
+                eval.reciprocal_condition(),
+            ]));
+        }
+        return Err(builtin_error(
+            "linsolve currently supports at most two outputs",
+        ));
+    }
     Ok(eval.solution())
 }
 

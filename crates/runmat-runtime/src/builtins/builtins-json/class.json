@@ -82,7 +82,7 @@
     },
     {
       "question": "What does `class` return for handle objects?",
-      "answer": "`class` returns the object\u2019s defining class name (for example `\"MyHandleClass\"`). Use `isa(h, \"handle\")` to test for handle semantics."
+      "answer": "`class` returns the object’s defining class name (for example `\"MyHandleClass\"`). Use `isa(h, \"handle\")` to test for handle semantics."
     },
     {
       "question": "What happens if I pass a struct or cell array?",
@@ -123,7 +123,7 @@
     "label": "class",
     "url": "class"
   },
-  "gpu_residency": "You do not need to call `gpuArray` purely to query a value\u2019s class. The auto-offload planner keeps tensors on the GPU whenever profitable, and `class` simply returns the residency-aware class name without altering where the data lives. Explicit `gpuArray` and `gather` calls remain available for compatibility with MATLAB code that manages residency manually.",
+  "gpu_residency": "You do not need to call `gpuArray` purely to query a value’s class. The auto-offload planner keeps tensors on the GPU whenever profitable, and `class` simply returns the residency-aware class name without altering where the data lives. Explicit `gpuArray` and `gather` calls remain available for compatibility with MATLAB code that manages residency manually.",
   "gpu_behavior": [
     "`class` is an introspection-only builtin. When the input resides on the GPU, RunMat reads the residency metadata, returns the class name immediately, and leaves the data in place. No kernels are launched and no buffers are copied back to the CPU, so providers do not need to expose any hooks."
   ]

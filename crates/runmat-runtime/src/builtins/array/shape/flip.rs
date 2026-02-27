@@ -7,11 +7,11 @@
 //! host when a registered acceleration provider does not expose a native flip
 //! kernel.
 
+use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::arg_tokens::{tokens_from_values, ArgToken};
 use crate::builtins::common::{gpu_helpers, tensor};
 use crate::{build_runtime_error, RuntimeError};
 use runmat_accelerate_api::{GpuTensorHandle, HostTensorView};
@@ -58,8 +58,12 @@ fn preserve_array_type(args: &[Type], _context: &ResolveContext) -> Type {
         None => return Type::Unknown,
     };
     match input {
-        Type::Tensor { shape } => Type::Tensor { shape: shape.clone() },
-        Type::Logical { shape } => Type::Logical { shape: shape.clone() },
+        Type::Tensor { shape } => Type::Tensor {
+            shape: shape.clone(),
+        },
+        Type::Logical { shape } => Type::Logical {
+            shape: shape.clone(),
+        },
         Type::Num | Type::Int | Type::Bool => Type::tensor(),
         Type::Cell { element_type, .. } => Type::Cell {
             element_type: element_type.clone(),
@@ -149,7 +153,8 @@ async fn flip_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         | Value::HandleObject(_)
         | Value::Listener(_)
         | Value::ClassRef(_)
-        | Value::MException(_) => Err(flip_error_for("flip", "flip: unsupported input type")),
+        | Value::MException(_)
+        | Value::OutputList(_) => Err(flip_error_for("flip", "flip: unsupported input type")),
     }
 }
 

@@ -6,14 +6,14 @@ use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
 use crate::builtins::array::type_resolvers::row_vector_type;
-use runmat_builtins::shape_rules::infer_range_shape;
-use runmat_builtins::ResolveContext;
 use crate::builtins::common::residency::{sequence_gpu_preference, SequenceIntent};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::{gpu_helpers, tensor};
+use runmat_builtins::shape_rules::infer_range_shape;
+use runmat_builtins::ResolveContext;
 
 const MIN_RATIO_TOL: f64 = f64::EPSILON * 8.0;
 const MAX_RATIO_TOL: f64 = 1e-9;
@@ -62,7 +62,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 
 fn colon_type(_args: &[Type], ctx: &ResolveContext) -> Type {
     let (start, step, end) = match ctx.literal_args.as_slice() {
-        [LiteralValue::Number(start), LiteralValue::Number(end)] => (Some(*start), None, Some(*end)),
+        [LiteralValue::Number(start), LiteralValue::Number(end)] => {
+            (Some(*start), None, Some(*end))
+        }
         [LiteralValue::Number(start), LiteralValue::Number(step), LiteralValue::Number(end)] => {
             (Some(*start), Some(*step), Some(*end))
         }
@@ -303,12 +305,10 @@ fn materialize_progression(plan: &ProgressionPlan, start: f64, step: f64) -> Vec
     data
 }
 
-fn default_step(start: f64, stop: f64) -> f64 {
-    if stop >= start {
-        1.0
-    } else {
-        -1.0
-    }
+fn default_step(_start: f64, _stop: f64) -> f64 {
+    // MATLAB's implicit step is always +1. Descending sequences require an explicit
+    // negative increment (three-argument form); otherwise the result is empty.
+    1.0
 }
 
 fn tolerance(start: f64, step: f64, stop: f64) -> f64 {
@@ -509,8 +509,22 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn colon_basic_descending() {
+    fn colon_two_arg_descending_returns_empty() {
         let result = colon_builtin(Value::Num(5.0), Value::Num(1.0), Vec::new()).expect("colon");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![1, 0]);
+                assert!(t.data.is_empty());
+            }
+            other => panic!("expected tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn colon_three_arg_descending() {
+        let result =
+            colon_builtin(Value::Num(5.0), Value::Num(-1.0), vec![Value::Num(1.0)]).expect("colon");
         match result {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![1, 5]);
@@ -743,10 +757,27 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn colon_char_descending() {
+    fn colon_char_two_arg_descending_returns_empty() {
         let start = Value::CharArray(CharArray::new_row("f"));
         let stop = Value::CharArray(CharArray::new_row("b"));
         let result = colon_builtin(start, stop, Vec::new()).expect("colon");
+        match result {
+            Value::CharArray(arr) => {
+                assert_eq!(arr.rows, 1);
+                assert_eq!(arr.cols, 0);
+                assert!(arr.data.is_empty());
+            }
+            other => panic!("expected char array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn colon_char_three_arg_descending() {
+        let start = Value::CharArray(CharArray::new_row("f"));
+        let step = Value::Num(-1.0);
+        let stop = Value::CharArray(CharArray::new_row("b"));
+        let result = colon_builtin(start, step, vec![stop]).expect("colon");
         match result {
             Value::CharArray(arr) => {
                 assert_eq!(arr.rows, 1);

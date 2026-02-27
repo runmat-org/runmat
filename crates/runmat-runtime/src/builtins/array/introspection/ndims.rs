@@ -75,7 +75,10 @@ pub(crate) mod tests {
     #[test]
     fn ndims_type_returns_int() {
         assert_eq!(
-            super::ndims_type(&[Type::Tensor { shape: None }], &ResolveContext::new(Vec::new())),
+            super::ndims_type(
+                &[Type::Tensor { shape: None }],
+                &ResolveContext::new(Vec::new())
+            ),
             Type::Int
         );
     }

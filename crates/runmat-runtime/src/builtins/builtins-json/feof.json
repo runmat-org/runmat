@@ -111,7 +111,7 @@
     "label": "Open an issue",
     "url": "https://github.com/runmat-org/runmat/issues/new/choose"
   },
-  "gpu_residency": "No. File identifiers are always owned by the host-side registry maintained by `fopen`. Wrapping a scalar identifier in `gpuArray` does not keep the file handle on the GPU\u2014the runtime gathers the scalar before performing the lookup. This means you can freely mix host and GPU code when driving file I/O loops, and `feof` remains inexpensive regardless of execution tier.",
+  "gpu_residency": "No. File identifiers are always owned by the host-side registry maintained by `fopen`. Wrapping a scalar identifier in `gpuArray` does not keep the file handle on the GPU—the runtime gathers the scalar before performing the lookup. This means you can freely mix host and GPU code when driving file I/O loops, and `feof` remains inexpensive regardless of execution tier.",
   "gpu_behavior": [
     "`feof` is a host-only query. If `fid` resides on the GPU (for example inside a `gpuArray`), RunMat gathers the scalar to host memory before consulting the file registry. File handles always remain on the CPU, so there are no provider hooks or fusion paths for this builtin. The result is produced on the host as a logical scalar that mirrors MATLAB behaviour."
   ]

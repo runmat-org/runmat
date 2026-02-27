@@ -406,9 +406,7 @@ pub(crate) mod tests {
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
-    use runmat_builtins::{
-        CharArray, IntValue, LogicalArray, ResolveContext, Tensor, Type, Value,
-    };
+    use runmat_builtins::{CharArray, IntValue, LogicalArray, ResolveContext, Tensor, Type, Value};
 
     fn ceil_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::ceil_builtin(value, rest))
@@ -743,7 +741,13 @@ pub(crate) mod tests {
                 Value::GpuTensor(handle) => {
                     let gathered = test_support::gather(Value::GpuTensor(handle)).expect("gather");
                     assert_eq!(gathered.shape, vec![2, 1]);
-                    assert_eq!(gathered.data, vec![0.91, -1.21]);
+                    let expected = [0.91f64, -1.21f64];
+                    for (got, exp) in gathered.data.iter().zip(expected.iter()) {
+                        assert!(
+                            (got - exp).abs() < 1e-5,
+                            "ceil mismatch: got {got}, expected {exp}"
+                        );
+                    }
                 }
                 other => panic!("expected GPU tensor, got {other:?}"),
             }

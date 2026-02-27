@@ -71,6 +71,21 @@ async fn polyfit_builtin(
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<Value> {
     let eval = evaluate(x, y, degree, &rest).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        let mut outputs = vec![eval.coefficients()];
+        if out_count >= 2 {
+            outputs.push(eval.stats());
+        }
+        if out_count >= 3 {
+            outputs.push(eval.mu());
+        }
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count, outputs,
+        ));
+    }
     Ok(eval.coefficients())
 }
 

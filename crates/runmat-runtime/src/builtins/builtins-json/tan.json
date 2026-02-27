@@ -35,12 +35,12 @@
   "description": "`y = tan(x)` computes the tangent of every element in `x`, interpreting each input value in radians.",
   "behaviors": [
     "Operates on scalars, vectors, matrices, and N-D tensors while respecting MATLAB's implicit-expansion (broadcasting) rules.",
-    "Logical and integer inputs are promoted to double precision (`true \u2192 1.0`, `false \u2192 0.0`) before the tangent is applied so downstream arithmetic mirrors MATLAB.",
+    "Logical and integer inputs are promoted to double precision (`true → 1.0`, `false → 0.0`) before the tangent is applied so downstream arithmetic mirrors MATLAB.",
     "Character arrays operate on their Unicode code points and return dense double arrays of identical shape.",
-    "Complex inputs follow MATLAB\u2019s analytic extension `tan(a + bi) = sin(2a)/(cos(2a) + cosh(2b)) + i\u00b7sinh(2b)/(cos(2a) + cosh(2b))`, propagating `NaN`/`Inf` components independently.",
-    "Appending `'like', prototype` mirrors the prototype\u2019s class and residency for real numeric prototypes; complex prototypes currently raise a descriptive error so you can fall back to the default output rules.",
+    "Complex inputs follow MATLAB’s analytic extension `tan(a + bi) = sin(2a)/(cos(2a) + cosh(2b)) + i·sinh(2b)/(cos(2a) + cosh(2b))`, propagating `NaN`/`Inf` components independently.",
+    "Appending `'like', prototype` mirrors the prototype’s class and residency for real numeric prototypes; complex prototypes currently raise a descriptive error so you can fall back to the default output rules.",
     "`tan` accepts both host tensors and `gpuArray` inputs. GPU residency is preserved whenever the active provider exposes the `unary_tan` kernel or a fused elementwise implementation.",
-    "Strings and string arrays are rejected to match MATLAB\u2019s numeric-only contract for the trigonometric family.",
+    "Strings and string arrays are rejected to match MATLAB’s numeric-only contract for the trigonometric family.",
     "Empty inputs, singleton dimensions, and already-reduced shapes pass through unchanged to avoid unnecessary allocations."
   ],
   "examples": [
@@ -88,11 +88,11 @@
   "faqs": [
     {
       "question": "When should I use the `tan` function?",
-      "answer": "Use `tan` whenever you need the tangent of angles expressed in radians\u2014whether you are modelling waves, evaluating transfer functions, or analysing geometric relationships element-wise across large arrays."
+      "answer": "Use `tan` whenever you need the tangent of angles expressed in radians—whether you are modelling waves, evaluating transfer functions, or analysing geometric relationships element-wise across large arrays."
     },
     {
       "question": "What happens near odd multiples of `pi/2`?",
-      "answer": "Values that approach `(2k + 1)\u00b7pi/2` grow rapidly toward \u00b1Inf, just like in MATLAB. RunMat preserves IEEE semantics, so you may observe very large magnitudes or `Inf`/-`Inf` where poles occur."
+      "answer": "Values that approach `(2k + 1)·pi/2` grow rapidly toward ±Inf, just like in MATLAB. RunMat preserves IEEE semantics, so you may observe very large magnitudes or `Inf`/-`Inf` where poles occur."
     },
     {
       "question": "Does `tan` support complex numbers?",
@@ -100,15 +100,15 @@
     },
     {
       "question": "Can I keep the result on the GPU?",
-      "answer": "Yes. When a provider implements `unary_tan`, the result never leaves the device. If a fallback is required, RunMat gathers to the host, computes the result, and reapplies residency requests\u2014including `'like'` outputs\u2014before handing the value back."
+      "answer": "Yes. When a provider implements `unary_tan`, the result never leaves the device. If a fallback is required, RunMat gathers to the host, computes the result, and reapplies residency requests—including `'like'` outputs—before handing the value back."
     },
     {
       "question": "How do I control units?",
-      "answer": "`tan` operates in radians. Convert degrees with `deg2rad` (or multiply by `pi/180`) before calling `tan`, or use MATLAB\u2019s degree-specific builtins (`tand`, etc.) when available."
+      "answer": "`tan` operates in radians. Convert degrees with `deg2rad` (or multiply by `pi/180`) before calling `tan`, or use MATLAB’s degree-specific builtins (`tand`, etc.) when available."
     },
     {
       "question": "Does `tan` change the input type?",
-      "answer": "By default results are double precision. Passing `'like', prototype` preserves the prototype\u2019s real numeric type (host or GPU). Complex prototypes are currently unsupported and raise a clear error."
+      "answer": "By default results are double precision. Passing `'like', prototype` preserves the prototype’s real numeric type (host or GPU). Complex prototypes are currently unsupported and raise a clear error."
     },
     {
       "question": "Are logical arrays supported?",

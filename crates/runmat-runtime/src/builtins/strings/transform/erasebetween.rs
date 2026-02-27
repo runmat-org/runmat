@@ -700,9 +700,7 @@ pub(crate) mod tests {
     #![allow(non_snake_case)]
 
     use super::*;
-    use runmat_builtins::{
-        CellArray, CharArray, ResolveContext, StringArray, Tensor, Type,
-    };
+    use runmat_builtins::{CellArray, CharArray, ResolveContext, StringArray, Tensor, Type};
 
     fn erase_between_builtin(
         text: Value,

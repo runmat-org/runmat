@@ -35,7 +35,7 @@
   "behaviors": [
     "Complex scalars and arrays have their imaginary components multiplied by `-1`; when a result has no imaginary part it collapses to a real scalar or tensor just like MATLAB.",
     "Purely real numeric inputs (double, single, integer) are returned unchanged.",
-    "Logical arrays are promoted to double precision with `true \u2192 1.0` and `false \u2192 0.0`.",
+    "Logical arrays are promoted to double precision with `true → 1.0` and `false → 0.0`.",
     "Character arrays are promoted to double precision containing their Unicode code points; the Conjugate operation does not alter the codes because they are real-valued.",
     "String arrays are not supported and raise an error."
   ],
@@ -43,7 +43,7 @@
     {
       "description": "Complex conjugate of a scalar value in MATLAB",
       "input": "z = 3 + 4i;\nresult = conj(z)",
-      "output": "result = 3 - 4i;"
+      "output": "result = 3 - 4i"
     },
     {
       "description": "Apply conj to every element of a complex matrix",
@@ -53,7 +53,7 @@
     {
       "description": "Ensure conj leaves real inputs unchanged",
       "input": "data = [-2.5 0 9.75];\nunchanged = conj(data)",
-      "output": "unchanged = [-2.5 0 9.75];"
+      "output": "unchanged = [-2.5 0 9.75]"
     },
     {
       "description": "Use conj on logical masks converted to doubles",
@@ -62,7 +62,7 @@
     },
     {
       "description": "Convert MATLAB char arrays to numeric codes with conj",
-      "input": "chars = 'RunMat';\ncodes = conj(chars);\noutputClass = class(codes)",
+      "input": "chars = 'RunMat';\ncodes = conj(chars)\noutputClass = class(codes)",
       "output": "codes = [82 117 110 77 97 116];\noutputClass = 'double'"
     },
     {

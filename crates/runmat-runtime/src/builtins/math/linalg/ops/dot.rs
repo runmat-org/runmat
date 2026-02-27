@@ -423,12 +423,12 @@ pub(crate) mod tests {
     fn dot_type_reduces_first_dimension() {
         let out = dot_type(
             &[
-            Type::Tensor {
-                shape: Some(vec![Some(3), Some(2)]),
-            },
-            Type::Tensor {
-                shape: Some(vec![Some(3), Some(2)]),
-            },
+                Type::Tensor {
+                    shape: Some(vec![Some(3), Some(2)]),
+                },
+                Type::Tensor {
+                    shape: Some(vec![Some(3), Some(2)]),
+                },
             ],
             &ResolveContext::new(Vec::new()),
         );

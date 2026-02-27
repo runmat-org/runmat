@@ -6,6 +6,10 @@ This guide explains how the RunMat filesystem works, how to choose a backend, an
 
 RunMat’s filesystem keeps scripts consistent across laptop, browser, desktop, and cloud without requiring runtime scripts to rewrite `load` or `save`. You can scale from a local sandbox to petabytes in the cloud without changing your code.
 
+Replay note: notebook replay artifacts (figure scene/workspace replay payloads) are host-managed
+files. The runtime only exports/imports opaque payload bytes; artifact naming, retention, and
+storage location are controlled by the host application.
+
 ```
            ┌────────────────────┐
            │ RunMat Runtime     │
@@ -76,6 +80,13 @@ load("/data/example.mat")
 ```
 
 If the runtime is configured with a remote filesystem provider, these calls read and write to the remote storage automatically.
+
+For portable path assembly, use `fullfile` to join segments with the platform-specific separator:
+
+```matlab
+rawPath = fullfile("data", "raw", "sample.dat");
+fid = fopen(rawPath, "w"); fclose(fid);
+```
 
 ## Using the CLI with the remote filesystem
 

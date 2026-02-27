@@ -20,9 +20,10 @@ use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 // attribute arguments, which does not currently count as a "use" for Rust's
 // unused-import lint. Keep a small reference so `-D unused-imports` builds.
 #[allow(dead_code)]
-const _SYMR_CM_TYPE_RESOLVER: fn(&[runmat_builtins::Type], &ResolveContext) ->
-    runmat_builtins::Type =
-    symrcm_type;
+const _SYMR_CM_TYPE_RESOLVER: fn(
+    &[runmat_builtins::Type],
+    &ResolveContext,
+) -> runmat_builtins::Type = symrcm_type;
 #[runmat_macros::register_gpu_spec(
     builtin_path = "crate::builtins::math::linalg::structure::symrcm"
 )]

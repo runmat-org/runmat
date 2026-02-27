@@ -1,11 +1,11 @@
 //! MATLAB-compatible `gpuInfo` builtin that formats the active GPU device metadata.
 
 use super::gpudevice::{self, active_device_struct};
+use crate::builtins::acceleration::gpu::type_resolvers::gpuinfo_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::acceleration::gpu::type_resolvers::gpuinfo_type;
 
 use runmat_builtins::{IntValue, StructValue, Value};
 use runmat_macros::runtime_builtin;

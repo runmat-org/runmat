@@ -6,17 +6,17 @@ use runmat_macros::runtime_builtin;
 use std::sync::OnceLock;
 
 use crate::build_runtime_error;
+use crate::builtins::array::type_resolvers::tensor_type_from_rank;
 use crate::builtins::common::random;
 use crate::builtins::common::random_args::{
     complex_tensor_into_value, extract_dims, keyword_of, shape_from_value,
 };
-use crate::builtins::array::type_resolvers::tensor_type_from_rank;
-use runmat_builtins::ResolveContext;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
+use runmat_builtins::ResolveContext;
 use runmat_builtins::Type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::rand")]
@@ -118,6 +118,15 @@ impl ParsedRand {
                     }
                     "single" => {
                         template = Some(RandTemplate::Single);
+                        idx += 1;
+                        continue;
+                    }
+                    "gpuarray" => {
+                        // MATLAB class-specification syntax: rand(m,n,"gpuArray") or
+                        // gpuArray.rand(m,n). Produce a GPU-resident double-precision
+                        // array; rand_double already prefers the GPU provider when one
+                        // is registered and falls back to host when it is not.
+                        template = Some(RandTemplate::Double);
                         idx += 1;
                         continue;
                     }
@@ -465,6 +474,28 @@ pub(crate) mod tests {
                 }
             }
             other => panic!("expected complex tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn rand_gpuarray_keyword_produces_valid_output() {
+        let _guard = random::test_lock().lock().unwrap();
+        reset_rng_clean();
+        let args = vec![Value::Num(3.0), Value::Num(4.0), Value::from("gpuArray")];
+        let result = block_on(rand_builtin(args)).expect("rand gpuArray");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![3, 4]);
+                assert_eq!(t.dtype, NumericDType::F64);
+                for &v in &t.data {
+                    assert!((0.0..1.0).contains(&v));
+                }
+            }
+            Value::GpuTensor(h) => {
+                assert_eq!(h.shape, vec![3, 4]);
+            }
+            other => panic!("expected tensor or gpu tensor, got {other:?}"),
         }
     }
 

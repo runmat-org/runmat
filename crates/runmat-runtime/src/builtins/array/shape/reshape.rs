@@ -6,12 +6,12 @@ use crate::builtins::common::spec::{
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
 use crate::builtins::common::tensor;
-use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
 use crate::{build_runtime_error, RuntimeError};
+use runmat_builtins::shape_rules::{element_count_if_known, unknown_shape};
+use runmat_builtins::ResolveContext;
 use runmat_builtins::{
     CellArray, CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Type, Value,
 };
-use runmat_builtins::ResolveContext;
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::shape::reshape")]

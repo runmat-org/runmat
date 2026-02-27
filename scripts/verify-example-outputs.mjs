@@ -15,8 +15,8 @@ import { basename, dirname, extname, join, resolve } from "path";
 import { fileURLToPath } from "url";
 
 /**
- * @typedef {import("../BuiltinMetadataSpecification").BuiltinMetadata} BuiltinMetadata
- * @typedef {import("../BuiltinMetadataSpecification").Example} BuiltinExample
+ * @typedef {import("./BuiltinMetadataSpecification").BuiltinMetadata} BuiltinMetadata
+ * @typedef {import("./BuiltinMetadataSpecification").Example} BuiltinExample
  */
 
 /**
@@ -65,6 +65,7 @@ const timeoutMs = resolveTimeoutMs();
 const concurrency = resolveConcurrency();
 const overallTimeoutMs = resolveOverallTimeoutMs(timeoutMs, concurrency, cases.length);
 const logIntervalMs = resolveLogIntervalMs();
+const reportMode = resolveReportMode();
 const runnerHtml = createRunnerHtml(timeoutMs, concurrency, logIntervalMs);
 const casesJson = JSON.stringify(cases);
 
@@ -77,6 +78,19 @@ const results = await runHeadlessChrome({
 });
 
 const resultsById = new Map(results.map((result) => [result.id, result]));
+const debugCase = cases.find(
+    (testCase) => testCase.builtin === "cellfun" && testCase.exampleIndex === 0
+);
+if (debugCase) {
+    const result = resultsById.get(debugCase.id);
+    const info = result && typeof result.debugInfo === "string" ? result.debugInfo : "";
+    const err = result && typeof result.debugError === "string" ? result.debugError : "";
+    const debugLine = `[debug] exist('make_handle','builtin') => "${info}" error="${err}"\n`;
+    console.log(debugLine.trimEnd());
+    try {
+        writeFileSync("/tmp/runmat-debug.txt", debugLine, "utf8");
+    } catch (e) {}
+}
 
 mkdirSync(outputDir, { recursive: true });
 
@@ -93,10 +107,11 @@ const rows = cases.map((testCase) => {
     };
 });
 
-const reportHtml = buildReportHtml(rows);
+const reportRows = filterReportRows(rows, reportMode);
+const reportHtml = buildReportHtml(rows, reportRows, reportMode);
 writeFileSync(reportPath, reportHtml, "utf8");
 
-const reportMarkdown = buildReportMarkdown(rows);
+const reportMarkdown = buildReportMarkdown(rows, reportRows, reportMode);
 writeFileSync(markdownReportPath, reportMarkdown, "utf8");
 
 console.log(`Wrote consolidated reports to:
@@ -106,7 +121,7 @@ console.log(`Wrote consolidated reports to:
 function findRepoRoot(startDir) {
     let current = startDir;
     while (true) {
-        if (existsSync(join(current, "BuiltinMetadataSpecification.ts"))) {
+      if (existsSync(join(current, "rust-toolchain.toml"))) {
             return current;
         }
         const parent = dirname(current);
@@ -356,6 +371,20 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "  let stdoutText = \"\";",
         "  let valueText = \"\";",
         "  let errorText = \"\";",
+        "  let debugInfo = \"\";",
+        "  let debugError = \"\";",
+        "  const normalizeErrorText = (errorValue) => {",
+        "    if (typeof errorValue === \"string\") return errorValue;",
+        "    if (!errorValue || typeof errorValue !== \"object\") return String(errorValue || \"\");",
+        "    if (typeof errorValue.message === \"string\" && errorValue.message.length > 0) {",
+        "      return errorValue.message;",
+        "    }",
+        "    try {",
+        "      return JSON.stringify(errorValue);",
+        "    } catch (err) {",
+        "      return String(errorValue);",
+        "    }",
+        "  };",
         "  try {",
         "    if (typeof self.process !== \"object\" || !self.process) {",
         "      self.process = { env: {} };",
@@ -408,7 +437,7 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "    }",
         "    const session = await module.initRunMat({",
         "      telemetryConsent: false,",
-        "      enableGpu: false,",
+        "      enableGpu: true,",
         "      languageCompat: \"matlab\",",
         "      fsProvider: fsProvider || undefined",
         "    });",
@@ -416,6 +445,17 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "      try {",
         "        await Promise.resolve(session.execute(\"cd('/')\"));",
         "      } catch (err) {}",
+        "      try {",
+        "        const check = await Promise.resolve(session.execute(\"exist('make_handle','builtin')\"));",
+        "        if (check && typeof check.valueText === \"string\") {",
+        "          debugInfo = check.valueText;",
+        "        }",
+        "        if (check && check.error != null) {",
+        "          debugError = normalizeErrorText(check.error);",
+        "        }",
+        "      } catch (err) {",
+        "        debugError = err instanceof Error ? err.message : String(err);",
+        "      }",
         "      const execResult = await Promise.resolve(session.execute(testCase.input));",
         "      if (execResult && Array.isArray(execResult.stdout)) {",
         "        stdoutText = execResult.stdout.map((entry) => entry.text || \"\").join(\"\\n\");",
@@ -423,8 +463,8 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "      if (execResult && typeof execResult.valueText === \"string\") {",
         "        valueText = execResult.valueText;",
         "      }",
-        "      if (execResult && typeof execResult.error === \"string\") {",
-        "        errorText = execResult.error;",
+        "      if (execResult && execResult.error != null) {",
+        "        errorText = normalizeErrorText(execResult.error);",
         "      }",
         "    } finally {",
         "      if (typeof session.dispose === \"function\") {",
@@ -434,7 +474,7 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "  } catch (err) {",
         "    errorText = err instanceof Error ? err.message : String(err);",
         "  }",
-        "  self.postMessage({ id: testCase.id, stdoutText, valueText, errorText });",
+        "  self.postMessage({ id: testCase.id, stdoutText, valueText, errorText, debugInfo, debugError });",
         "};"
     ].join("\n");
     return `<!doctype html>
@@ -792,6 +832,36 @@ function resolveLogIntervalMs() {
     return Math.floor(parsed);
 }
 
+function resolveReportMode() {
+    const args = new Set(process.argv.slice(2));
+    if (args.has("--errors-only")) {
+        return "errors-only";
+    }
+    if (args.has("--all")) {
+        return "all";
+    }
+    const raw = process.env.RUNMAT_EXAMPLE_REPORT_MODE;
+    if (!raw) {
+        return "all";
+    }
+    const normalized = raw.trim().toLowerCase();
+    if (normalized === "errors-only" || normalized === "errors" || normalized === "mismatches") {
+        return "errors-only";
+    }
+    return "all";
+}
+
+/**
+ * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, matches: boolean }[]} rows
+ * @param {"all" | "errors-only"} reportMode
+ */
+function filterReportRows(rows, reportMode) {
+    if (reportMode === "errors-only") {
+        return rows.filter((row) => !row.matches);
+    }
+    return rows;
+}
+
 /**
  * @param {string} text
  */
@@ -801,8 +871,11 @@ function normalizeOutput(text) {
     }
     const lines = text.replace(/\r\n/g, "\n").split("\n");
     const stripped = lines.map((line) =>
-        line.replace(/^\s*\d+(?:\s*[x×]\s*\d+)+\s+\w+(?:\s+\w+)*(?:\s+array)?\s*$/i, "")
+        line.replace(/^\s*Columns?\s+\d+\s+through\s+\d+\s*$/i, "")
+            .replace(/^\s*Column\s+\d+\s*$/i, "")
+            .replace(/^\s*\d+(?:\s*[x×]\s*\d+)+\s+\w+(?:\s+\w+)*(?:\s+array)?\s*$/i, "")
             .replace(/^\s*\d+(?:\s*[x×]\s*\d+)+\s*$/i, "")
+            .replace(/^\s*(?:[A-Za-z_]\w*)?\(\s*:\s*,\s*:\s*(?:,\s*\d+\s*)+\)\s*=\s*$/i, "")
             .replace(/^\s*[A-Za-z_]\w*(?:\([^)]*\))?\s*=\s*/, "")
     );
     const joined = stripped.join(" ");
@@ -828,16 +901,12 @@ function normalizeOutput(text) {
     const normalizedConstants = normalizedBooleans
         .replace(/\bpi\b/gi, String(Math.PI));
     const strippedMetadata = normalizedConstants
-        .replace(/GpuTensor\([^)]*\)/g, " ")
-        .replace(/Tensor\(shape=[^)]+\)/g, " ")
+        .replace(/(?:GpuTensor|Tensor|ComplexTensor)\(\s*(?:shape\s*=\s*)?[^)]*\)/g, " ")
         .replace(/\b\d+(?:\s*[x×]\s*\d+)+\s*(?:gpuArray\s*)?(?:logical|double|single|char|string|cell)?\s*array\b/gi, " ")
-        .replace(/\b(?:gpuArray|logical|double|single|string|char|cell)\b/gi, " ");
+        .replace(/\b(?:gpuArray|logical|double|single|string|char|cell|Tensor|ComplexTensor|GpuTensor)\b/gi, " ");
     const normalizedComplex = strippedMetadata
         .replace(/(\d+\.\d+)(\d+\.\d+[ij])/g, "$1+$2")
-        .replace(/(\d)\s*\+\s*(?=\d)/g, "$1+")
-        .replace(/(\d)\s*\+\s*(?=[ij])/g, "$1+")
-        .replace(/(\d)\s*-\s*(?=\d)/g, "$1-")
-        .replace(/(\d)\s*-\s*(?=[ij])/g, "$1-")
+        .replace(/(\d)\s*([+-])\s*(?=(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?[ij]\b)/g, "$1$2")
         .replace(/\+\s*-/g, "-")
         .replace(/-\s*\+/g, "-")
         .replace(/\+\s*\+/g, "+");
@@ -864,12 +933,11 @@ function normalizeOutput(text) {
         }
     );
     const withoutZeroPlus = normalizedNumbers.replace(/\b0\s*\+\s*/g, "");
-    const withoutZeroMinus = withoutZeroPlus.replace(/\b0-/g, "-");
+    const withoutZeroMinus = withoutZeroPlus.replace(/\b0-(?=\d+(?:\.\d+)?[ij]\b)/g, "-");
     const withoutImaginaryZero = withoutZeroMinus
         .replace(/\s*[+-]\s*0[ij]\b/g, "")
         .replace(/\b0[ij]\b/g, "0");
-    const tightenedMinus = withoutImaginaryZero.replace(/([0-9])\s*-\s*([0-9])/g, "$1-$2");
-    const compact = tightenedMinus.trim().replace(/\s+/g, " ");
+    const compact = withoutImaginaryZero.trim().replace(/\s+/g, " ");
     const fixedZeroConcat = compact
         .replace(/(?<![0-9.])0(?=\d+(?:\.\d+)?[ij]\b)/g, "")
         .replace(/(?<![0-9.])0(?=0[ij]\b)/g, "")
@@ -919,12 +987,13 @@ function formatWasmOutput(result) {
 /**
  * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, matches: boolean }[]} rows
  */
-function buildReportHtml(rows) {
+function buildReportHtml(allRows, reportRows, reportMode) {
     const title = "RunMat Builtins Example Output Report";
-    const totalCount = rows.length;
-    const successCount = rows.filter((row) => row.matches).length;
+    const totalCount = allRows.length;
+    const errorCount = allRows.filter((row) => !row.matches).length;
+    const successCount = totalCount - errorCount;
     const successPercent = totalCount === 0 ? "0.0" : ((successCount / totalCount) * 100).toFixed(1);
-    const renderedRows = rows.map((row) => {
+    const renderedRows = reportRows.map((row) => {
         const statusClass = row.matches ? "status-ok" : "status-bad";
         const statusSymbol = row.matches ? "&#10003;" : "X";
         const statusLabel = row.matches ? "Match" : "Mismatch";
@@ -1009,8 +1078,15 @@ function buildReportHtml(rows) {
   <body>
     <h1>${escapeHtml(title)}</h1>
     <p class="meta">Results: ${successCount}/${totalCount} succeeded (${successPercent}%).</p>
-    <p class="meta">Generated from ${rows.length} example(s).</p>
-    <table>
+    <p class="meta">${
+        reportMode === "errors-only"
+            ? `Showing ${reportRows.length} mismatch(es) out of ${totalCount} example(s).`
+            : `Showing all ${reportRows.length} example(s).`
+    }</p>
+    ${
+        reportRows.length === 0
+            ? "<p class=\"meta\">No mismatches detected.</p>"
+            : `<table>
       <thead>
         <tr>
           <th>Input</th>
@@ -1021,17 +1097,27 @@ function buildReportHtml(rows) {
       <tbody>
         ${renderedRows}
       </tbody>
-    </table>
+    </table>`
+    }
   </body>
 </html>`;
 }
 
 /**
- * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, matches: boolean }[]} rows
+ * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, matches: boolean }[]} allRows
+ * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, matches: boolean }[]} reportRows
+ * @param {"all" | "errors-only"} reportMode
  */
-function buildReportMarkdown(rows) {
+function buildReportMarkdown(allRows, reportRows, reportMode) {
+    const totalCount = allRows.length;
+    const errorCount = allRows.filter((row) => !row.matches).length;
+    const successCount = totalCount - errorCount;
+    const successPercent = totalCount === 0 ? "0.0" : ((successCount / totalCount) * 100).toFixed(1);
+    const summary = reportMode === "errors-only"
+        ? `Showing ${reportRows.length} mismatch(es) out of ${totalCount} example(s).`
+        : `Showing all ${reportRows.length} example(s).`;
     const tableHeader = "| Status | Description / Input | Expected | Actual |\n| :--- | :--- | :--- | :--- |\n";
-    const tableRows = rows.map((row) => {
+    const tableRows = reportRows.map((row) => {
         const status = row.matches ? "✅" : "❌";
         const description = row.testCase.description;
         const sourceInfo = `${row.testCase.file} (example ${row.testCase.exampleIndex + 1})`;
@@ -1043,7 +1129,11 @@ function buildReportMarkdown(rows) {
         return `| ${status} | **${description}**<br>${sourceInfo}<br>\`${input}\` | \`${expected}\` | \`${actual}\` |`;
     }).join("\n");
 
-    return tableHeader + tableRows;
+    const header = `Results: ${successCount}/${totalCount} succeeded (${successPercent}%).\n${summary}\n\n`;
+    if (!tableRows) {
+        return `${header}No mismatches detected.\n`;
+    }
+    return header + tableHeader + tableRows;
 }
 
 /**

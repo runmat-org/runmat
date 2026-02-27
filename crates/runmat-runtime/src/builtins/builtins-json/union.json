@@ -102,11 +102,11 @@
     },
     {
       "question": "Are scalar outputs returned as vectors?",
-      "answer": "Scalars follow MATLAB's behaviour: a `1\u00d71` union result is represented as a scalar double."
+      "answer": "Scalars follow MATLAB's behaviour: a `1×1` union result is represented as a scalar double."
     },
     {
       "question": "Do trailing spaces matter for character data?",
-      "answer": "Yes. Character arrays treat every character, including trailing spaces, as significant\u2014matching MATLAB's behaviour."
+      "answer": "Yes. Character arrays treat every character, including trailing spaces, as significant—matching MATLAB's behaviour."
     },
     {
       "question": "Is the `'legacy'` flag supported?",

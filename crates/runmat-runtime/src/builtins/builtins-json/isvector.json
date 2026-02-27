@@ -30,9 +30,9 @@
   },
   "description": "`isvector(A)` returns logical `true` when the input is 1-by-`N` or `N`-by-1 (including scalars) and has at most two dimensions. The builtin mirrors MATLAB semantics across numeric arrays, logical arrays, characters, strings, cells, structs, objects, and GPU-resident tensors.",
   "behaviors": [
-    "`isvector` is `true` for 1-by-`N` and `N`-by-1 arrays (with `N \u2265 0`), including scalars (`1\u00d71`).",
-    "Arrays with more than two dimensions always return `false`, even when all trailing dimensions are singleton (for example, `1\u00d71\u00d71`).",
-    "Empty arrays follow MATLAB rules: size `0\u00d71` or `1\u00d70` is a vector, but size `0\u00d73` is not.",
+    "`isvector` is `true` for 1-by-`N` and `N`-by-1 arrays (with `N ≥ 0`), including scalars (`1×1`).",
+    "Arrays with more than two dimensions always return `false`, even when all trailing dimensions are singleton (for example, `1×1×1`).",
+    "Empty arrays follow MATLAB rules: size `0×1` or `1×0` is a vector, but size `0×3` is not.",
     "Character arrays, string arrays, cell arrays, structs, objects, and handle objects follow the same dimension check.",
     "GPU tensors use metadata stored in their `GpuTensorHandle`. If metadata is missing, RunMat gathers once to inspect dimensions.",
     "Sparse matrices currently follow dense semantics; when sparse support lands, `isvector` will continue to rely on reported dimensions."
@@ -90,7 +90,7 @@
     },
     {
       "question": "Are higher-dimensional arrays ever considered vectors?",
-      "answer": "No. Any array with more than two dimensions returns `false`, even if the trailing dimensions equal one (for example, `1\u00d71\u00d7N`)."
+      "answer": "No. Any array with more than two dimensions returns `false`, even if the trailing dimensions equal one (for example, `1×1×N`)."
     },
     {
       "question": "Do character vectors and string scalars count as vectors?",

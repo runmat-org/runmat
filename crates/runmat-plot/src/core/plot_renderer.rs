@@ -11,7 +11,17 @@ use crate::plots::surface::ColorMap;
 use crate::plots::Figure;
 use glam::{Mat4, Vec3, Vec4};
 use runmat_time::Instant;
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::sync::Arc;
+
+#[derive(Clone, Debug)]
+struct CachedSceneBuffers {
+    vertex_signature: (usize, usize),
+    vertex_buffer: Arc<wgpu::Buffer>,
+    index_signature: Option<(usize, usize)>,
+    index_buffer: Option<Arc<wgpu::Buffer>>,
+}
 
 /// Unified plot renderer that handles both interactive and static rendering
 pub struct PlotRenderer {
@@ -59,6 +69,8 @@ pub struct PlotRenderer {
     camera_auto_fit: bool,
     /// Cached flag: whether the current figure contains 3D plots (surf/scatter3).
     figure_has_3d: bool,
+    /// Per-node GPU buffer cache for stable interactive redraws.
+    scene_buffer_cache: RefCell<HashMap<u64, CachedSceneBuffers>>,
 }
 
 /// Configuration for plot rendering
@@ -154,15 +166,45 @@ impl PlotRenderer {
 
     fn prepare_buffers_for_render_data(
         &self,
+        node_id: u64,
         render_data: &crate::core::RenderData,
-    ) -> Option<(Arc<wgpu::Buffer>, Option<wgpu::Buffer>)> {
+    ) -> Option<(Arc<wgpu::Buffer>, Option<Arc<wgpu::Buffer>>)> {
+        let mut cache = self.scene_buffer_cache.borrow_mut();
+        let vertex_signature = (
+            render_data.vertices.as_ptr() as usize,
+            render_data.vertices.len(),
+        );
+        let index_signature = render_data
+            .indices
+            .as_ref()
+            .map(|indices| (indices.as_ptr() as usize, indices.len()));
+
+        if let Some(cached) = cache.get(&node_id) {
+            if cached.vertex_signature == vertex_signature
+                && cached.index_signature == index_signature
+            {
+                return Some((cached.vertex_buffer.clone(), cached.index_buffer.clone()));
+            }
+        }
+
         let vertex_buffer = self
             .wgpu_renderer
             .vertex_buffer_from_sources(render_data.gpu_vertices.as_ref(), &render_data.vertices)?;
         let index_buffer = render_data
             .indices
             .as_ref()
-            .map(|indices| self.wgpu_renderer.create_index_buffer(indices));
+            .map(|indices| Arc::new(self.wgpu_renderer.create_index_buffer(indices)));
+
+        cache.insert(
+            node_id,
+            CachedSceneBuffers {
+                vertex_signature,
+                vertex_buffer: vertex_buffer.clone(),
+                index_signature,
+                index_buffer: index_buffer.clone(),
+            },
+        );
+
         Some((vertex_buffer, index_buffer))
     }
 
@@ -211,6 +253,7 @@ impl PlotRenderer {
             last_scene_viewport_px: None,
             camera_auto_fit: true,
             figure_has_3d: false,
+            scene_buffer_cache: RefCell::new(HashMap::new()),
         })
     }
 
@@ -226,15 +269,17 @@ impl PlotRenderer {
     pub fn set_figure(&mut self, figure: Figure) {
         // Clear existing scene
         self.scene.clear();
+        self.scene_buffer_cache.borrow_mut().clear();
 
         // Convert figure to scene nodes
         let prev_has_3d = self.figure_has_3d;
         let stats = figure.statistics();
-        let next_has_3d =
-            stats.plot_type_counts.contains_key(&crate::plots::figure::PlotType::Surface)
-                || stats
-                    .plot_type_counts
-                    .contains_key(&crate::plots::figure::PlotType::Scatter3);
+        let next_has_3d = stats
+            .plot_type_counts
+            .contains_key(&crate::plots::figure::PlotType::Surface)
+            || stats
+                .plot_type_counts
+                .contains_key(&crate::plots::figure::PlotType::Scatter3);
         self.figure_has_3d = next_has_3d;
 
         // If the plot "mode" changed (2D <-> 3D), reset auto-fit so the new mode gets a sensible
@@ -277,12 +322,10 @@ impl PlotRenderer {
         self.needs_update = true;
 
         // Recompute bounds and fit camera immediately (only once per initial dataset).
-        if self.camera_auto_fit {
-            if self.fit_camera_to_data() {
-                // Freeze the initial fit (CAD-like): don't re-fit as data updates (e.g. animations)
-                // unless the user explicitly asks (Fit Extents / Reset View) or we change plot mode.
-                self.camera_auto_fit = false;
-            }
+        if self.camera_auto_fit && self.fit_camera_to_data() {
+            // Freeze the initial fit (CAD-like): don't re-fit as data updates (e.g. animations)
+            // unless the user explicitly asks (Fit Extents / Reset View) or we change plot mode.
+            self.camera_auto_fit = false;
         }
     }
 
@@ -655,314 +698,6 @@ impl PlotRenderer {
         })
     }
 
-    /// High-performance direct viewport rendering with optimized coordinate transformation
-    /// Provides precise data-to-screen mapping for interactive plot windows
-    pub fn render_direct_to_viewport(
-        &mut self,
-        encoder: &mut wgpu::CommandEncoder,
-        target_view: &wgpu::TextureView,
-        viewport: (f32, f32, f32, f32), // (x, y, width, height) in framebuffer coordinates
-        data_bounds: (f64, f64, f64, f64), // (x_min, y_min, x_max, y_max) in data space
-        clear_background: bool,
-        background_color: Option<glam::Vec4>,
-    ) -> Result<RenderResult, Box<dyn std::error::Error>> {
-        let start_time = Instant::now();
-
-        // Ensure direct pipelines exist
-        self.wgpu_renderer.ensure_direct_line_pipeline();
-        self.wgpu_renderer.ensure_direct_triangle_pipeline();
-
-        // Update camera uniforms for standard rendering path
-        let mut cam = self.camera().clone();
-        let view_proj_matrix = cam.view_proj_matrix();
-        self.wgpu_renderer
-            .update_uniforms(view_proj_matrix, Mat4::IDENTITY);
-
-        // Collect render data and buffers (include optional index buffers)
-        let mut render_items: Vec<(
-            &crate::core::RenderData,
-            Arc<wgpu::Buffer>,
-            Option<wgpu::Buffer>,
-        )> = Vec::new();
-        let mut total_vertices = 0;
-
-        for node in self.scene.get_visible_nodes() {
-            if let Some(render_data) = &node.render_data {
-                if let Some((vertex_buffer, index_buffer)) =
-                    self.prepare_buffers_for_render_data(render_data)
-                {
-                    render_items.push((render_data, vertex_buffer, index_buffer));
-                    total_vertices += render_data.vertex_count();
-                }
-            }
-        }
-
-        // (render pass will be created after precreating resources)
-
-        // Update direct uniforms for line/triangle rendering (data -> viewport mapping)
-        // IMPORTANT: When a viewport is set, clip-space coordinates are interpreted
-        // relative to that viewport. Therefore, map data directly to [-1,1] in both axes.
-        // The viewport transformation will place the geometry into (viewport_x, viewport_y, viewport_width, viewport_height).
-        let ndc_left = -1.0;
-        let ndc_right = 1.0;
-        let ndc_bottom = -1.0;
-        let ndc_top = 1.0;
-
-        let (x_min, y_min, x_max, y_max) = data_bounds; // already reordered by caller
-        self.wgpu_renderer.update_direct_uniforms(
-            [x_min as f32, y_min as f32],
-            [x_max as f32, y_max as f32],
-            [ndc_left, ndc_bottom],
-            [ndc_right, ndc_top],
-            [viewport.2, viewport.3],
-        );
-
-        // Ensure pipelines are ready to avoid borrow conflicts inside the loop
-        self.wgpu_renderer
-            .ensure_pipeline(crate::core::PipelineType::Points);
-        self.wgpu_renderer
-            .ensure_pipeline(crate::core::PipelineType::Lines);
-        self.wgpu_renderer
-            .ensure_pipeline(crate::core::PipelineType::Triangles);
-        self.wgpu_renderer.ensure_direct_line_pipeline();
-        self.wgpu_renderer.ensure_direct_triangle_pipeline();
-        self.wgpu_renderer.ensure_direct_point_pipeline();
-        self.wgpu_renderer.ensure_image_pipeline();
-
-        // Pre-create image bind groups to avoid lifetimes inside pass
-        let mut image_bind_groups: Vec<Option<wgpu::BindGroup>> =
-            Vec::with_capacity(render_items.len());
-        let mut point_style_bind_groups: Vec<Option<wgpu::BindGroup>> =
-            Vec::with_capacity(render_items.len());
-        for (render_data, _vb, _ib) in &render_items {
-            if render_data.pipeline_type == crate::core::PipelineType::Textured {
-                if let Some(crate::core::scene::ImageData::Rgba8 {
-                    width,
-                    height,
-                    data,
-                }) = &render_data.image
-                {
-                    let (_t, _v, img_bg) = self
-                        .wgpu_renderer
-                        .create_image_texture_and_bind_group(*width, *height, data);
-                    image_bind_groups.push(Some(img_bg));
-                } else {
-                    image_bind_groups.push(None);
-                }
-            } else {
-                image_bind_groups.push(None);
-            }
-            if render_data.pipeline_type == crate::core::PipelineType::Points {
-                let style = crate::core::renderer::PointStyleUniforms {
-                    face_color: render_data.material.albedo.to_array(),
-                    edge_color: render_data.material.emissive.to_array(),
-                    edge_thickness_px: render_data.material.roughness,
-                    marker_shape: render_data.material.metallic as u32,
-                    _pad: [0.0, 0.0],
-                };
-                let (_buf, bg) = self.wgpu_renderer.create_point_style_bind_group(style);
-                point_style_bind_groups.push(Some(bg));
-            } else {
-                point_style_bind_groups.push(None);
-            }
-        }
-
-        // Begin pass with Load (preserve egui), after precreating image bind groups
-        {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Direct Viewport Plot Render Pass"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: if clear_background {
-                            wgpu::LoadOp::Clear(wgpu::Color {
-                                r: background_color.map_or(0.08, |c| c.x as f64),
-                                g: background_color.map_or(0.09, |c| c.y as f64),
-                                b: background_color.map_or(0.11, |c| c.z as f64),
-                                a: background_color.map_or(1.0, |c| c.w as f64),
-                            })
-                        } else {
-                            wgpu::LoadOp::Load
-                        },
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-            // Constrain drawing to the plot viewport
-            let (viewport_x, viewport_y, viewport_width, viewport_height) = viewport;
-            render_pass.set_viewport(
-                viewport_x,
-                viewport_y,
-                viewport_width,
-                viewport_height,
-                0.0,
-                1.0,
-            );
-
-            // Execute rendering within viewport mapping
-            let mut __temp_point_buffers_cam: Vec<wgpu::Buffer> = Vec::new();
-            for (idx, (render_data, vertex_buffer, index_buffer)) in render_items.iter().enumerate()
-            {
-                match render_data.pipeline_type {
-                    crate::core::PipelineType::Lines => {
-                        let pipeline = self.wgpu_renderer.direct_line_pipeline.as_ref().unwrap();
-                        render_pass.set_pipeline(pipeline);
-                        render_pass.set_bind_group(
-                            0,
-                            &self.wgpu_renderer.direct_uniform_bind_group,
-                            &[],
-                        );
-                        render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                        if let Some((args, offset)) = Self::gpu_indirect_args(render_data) {
-                            render_pass.draw_indirect(args, offset);
-                            continue;
-                        }
-                        for draw_call in &render_data.draw_calls {
-                            render_pass.draw(
-                                draw_call.vertex_offset as u32
-                                    ..(draw_call.vertex_offset + draw_call.vertex_count) as u32,
-                                0..draw_call.instance_count as u32,
-                            );
-                        }
-                    }
-                    crate::core::PipelineType::Triangles => {
-                        // Use direct triangle pipeline so triangles map to the viewport rect
-                        let pipeline = self
-                            .wgpu_renderer
-                            .direct_triangle_pipeline
-                            .as_ref()
-                            .unwrap();
-                        render_pass.set_pipeline(pipeline);
-                        render_pass.set_bind_group(
-                            0,
-                            &self.wgpu_renderer.direct_uniform_bind_group,
-                            &[],
-                        );
-                        render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                        if let Some((args, offset)) = Self::gpu_indirect_args(render_data) {
-                            render_pass.draw_indirect(args, offset);
-                            continue;
-                        }
-                        if let Some(idx) = index_buffer {
-                            render_pass.set_index_buffer(idx.slice(..), wgpu::IndexFormat::Uint32);
-                            if let Some(indices) = &render_data.indices {
-                                render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
-                            }
-                            continue;
-                        }
-                        for draw_call in &render_data.draw_calls {
-                            render_pass.draw(
-                                draw_call.vertex_offset as u32
-                                    ..(draw_call.vertex_offset + draw_call.vertex_count) as u32,
-                                0..draw_call.instance_count as u32,
-                            );
-                        }
-                    }
-                    crate::core::PipelineType::Textured => {
-                        // Use image pipeline with direct uniforms + image bind group
-                        let pipeline = self
-                            .wgpu_renderer
-                            .get_pipeline(crate::core::PipelineType::Textured);
-                        render_pass.set_pipeline(pipeline);
-                        render_pass.set_bind_group(
-                            0,
-                            &self.wgpu_renderer.direct_uniform_bind_group,
-                            &[],
-                        );
-                        if let Some(ref bg) = image_bind_groups[idx] {
-                            render_pass.set_bind_group(1, bg, &[]);
-                        }
-                        render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                        if let Some(idx) = index_buffer {
-                            render_pass.set_index_buffer(idx.slice(..), wgpu::IndexFormat::Uint32);
-                            if let Some(indices) = &render_data.indices {
-                                render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
-                            }
-                        } else {
-                            if let Some((args, offset)) = Self::gpu_indirect_args(render_data) {
-                                render_pass.draw_indirect(args, offset);
-                                continue;
-                            }
-                            for dc in &render_data.draw_calls {
-                                render_pass.draw(
-                                    dc.vertex_offset as u32
-                                        ..(dc.vertex_offset + dc.vertex_count) as u32,
-                                    0..dc.instance_count as u32,
-                                );
-                            }
-                        }
-                    }
-                    _ => {
-                        // Fallback to standard pipeline for other types
-                        let pipeline = self.wgpu_renderer.get_pipeline(render_data.pipeline_type);
-                        render_pass.set_pipeline(pipeline);
-                        render_pass.set_bind_group(
-                            0,
-                            self.wgpu_renderer.get_uniform_bind_group(),
-                            &[],
-                        );
-                        render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-                        if render_data.indices.is_some() {
-                            if let Some(idx) = index_buffer {
-                                render_pass
-                                    .set_index_buffer(idx.slice(..), wgpu::IndexFormat::Uint32);
-                                if let Some(indices) = &render_data.indices {
-                                    render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
-                                }
-                            }
-                        } else {
-                            // Points: bind direct uniforms and optional style for markers
-                            if matches!(
-                                render_data.pipeline_type,
-                                crate::core::PipelineType::Points
-                            ) {
-                                // Use direct pipeline for points for pixel-stable markers
-                                let pipeline =
-                                    self.wgpu_renderer.direct_point_pipeline.as_ref().unwrap();
-                                render_pass.set_pipeline(pipeline);
-                                render_pass.set_bind_group(
-                                    0,
-                                    &self.wgpu_renderer.direct_uniform_bind_group,
-                                    &[],
-                                );
-                                if let Some(ref bg) = point_style_bind_groups[idx] {
-                                    render_pass.set_bind_group(1, bg, &[]);
-                                }
-                            }
-                            if let Some((args, offset)) = Self::gpu_indirect_args(render_data) {
-                                render_pass.draw_indirect(args, offset);
-                                continue;
-                            }
-                            for dc in &render_data.draw_calls {
-                                render_pass.draw(
-                                    dc.vertex_offset as u32
-                                        ..(dc.vertex_offset + dc.vertex_count) as u32,
-                                    0..dc.instance_count as u32,
-                                );
-                            }
-                        }
-                    }
-                }
-            }
-
-            // render_pass dropped at end of scope
-        }
-
-        let render_time = start_time.elapsed().as_millis() as f64;
-
-        Ok(RenderResult {
-            success: true,
-            data_bounds: Some(data_bounds),
-            vertex_count: total_vertices,
-            triangle_count: 0,
-            render_time_ms: render_time,
-        })
-    }
-
     /// Render the current scene to a texture/surface
     pub fn render(
         &mut self,
@@ -991,7 +726,7 @@ impl PlotRenderer {
         for node in self.scene.get_visible_nodes() {
             if let Some(render_data) = &node.render_data {
                 if let Some((vertex_buffer, index_buffer)) =
-                    self.prepare_buffers_for_render_data(render_data)
+                    self.prepare_buffers_for_render_data(node.id, render_data)
                 {
                     self.wgpu_renderer
                         .ensure_pipeline(render_data.pipeline_type);
@@ -1008,9 +743,52 @@ impl PlotRenderer {
         // Pre-create image bind groups and set direct uniforms once (for textured items)
         let mut image_bind_groups: Vec<Option<wgpu::BindGroup>> =
             Vec::with_capacity(render_items.len());
-        // Ensure image pipeline once to avoid mutable borrow during pass
-        self.wgpu_renderer.ensure_image_pipeline();
-        if let Some((x_min, x_max, y_min, y_max)) = self.data_bounds {
+        let has_textured_items = render_items.iter().any(|(render_data, _, _)| {
+            render_data.pipeline_type == crate::core::PipelineType::Textured
+        });
+        if has_textured_items {
+            // Ensure image pipeline once to avoid mutable borrow during pass.
+            self.wgpu_renderer.ensure_image_pipeline();
+            let mut inferred_bounds: Option<(f64, f64, f64, f64)> = None;
+            for (render_data, _, _) in &render_items {
+                let Some(bounds) = render_data.bounds.as_ref() else {
+                    continue;
+                };
+                let min_x = bounds.min.x as f64;
+                let max_x = bounds.max.x as f64;
+                let min_y = bounds.min.y as f64;
+                let max_y = bounds.max.y as f64;
+                inferred_bounds = Some(match inferred_bounds {
+                    Some((x0, x1, y0, y1)) => {
+                        (x0.min(min_x), x1.max(max_x), y0.min(min_y), y1.max(max_y))
+                    }
+                    None => (min_x, max_x, min_y, max_y),
+                });
+            }
+
+            let (mut x_min, mut x_max, mut y_min, mut y_max) = self
+                .data_bounds
+                .or(inferred_bounds)
+                .unwrap_or((-1.0, 1.0, -1.0, 1.0));
+            // Avoid zero ranges in the direct image shader (division by data_range).
+            if (x_max - x_min).abs() < f64::EPSILON {
+                x_min -= 0.5;
+                x_max += 0.5;
+            }
+            if (y_max - y_min).abs() < f64::EPSILON {
+                y_min -= 0.5;
+                y_max += 0.5;
+            }
+            log::trace!(
+                target: "runmat_plot",
+                "direct uniforms bounds x=({}, {}) y=({}, {}) size=({}, {})",
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                config.width,
+                config.height
+            );
             self.wgpu_renderer.update_direct_uniforms(
                 [x_min as f32, y_min as f32],
                 [x_max as f32, y_max as f32],
@@ -1058,11 +836,36 @@ impl PlotRenderer {
 
         // Create render pass
         {
+            let depth_view = self.wgpu_renderer.ensure_depth_view();
+            let use_msaa = self.wgpu_renderer.msaa_sample_count > 1;
+            let mut cached_msaa_view: Option<Arc<wgpu::TextureView>> = None;
+
+            let (color_view, resolve_target) = if use_msaa {
+                if let Some(explicit_resolve_target) = target.resolve_target {
+                    (target.view, Some(explicit_resolve_target))
+                } else {
+                    cached_msaa_view = Some(self.wgpu_renderer.ensure_msaa_color_view());
+                    (
+                        cached_msaa_view
+                            .as_ref()
+                            .expect("msaa color view should exist")
+                            .as_ref(),
+                        Some(target.view),
+                    )
+                }
+            } else {
+                (target.view, target.resolve_target)
+            };
+
+            let depth_clear = match self.wgpu_renderer.depth_mode {
+                crate::core::DepthMode::Standard => 1.0,
+                crate::core::DepthMode::ReversedZ => 0.0,
+            };
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Plot Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target.view,
-                    resolve_target: target.resolve_target,
+                    view: color_view,
+                    resolve_target,
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             r: config.background_color.x as f64,
@@ -1073,10 +876,18 @@ impl PlotRenderer {
                         store: wgpu::StoreOp::Store,
                     },
                 })],
-                depth_stencil_attachment: None,
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &depth_view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(depth_clear),
+                        store: wgpu::StoreOp::Discard,
+                    }),
+                    stencil_ops: None,
+                }),
                 occlusion_query_set: None,
                 timestamp_writes: None,
             });
+            let _keep_msaa_view_alive = &cached_msaa_view;
 
             // Now render all items with proper bind group setup
             for (i, (render_data, vertex_buffer, index_buffer)) in render_items.iter().enumerate() {
@@ -1183,6 +994,81 @@ impl PlotRenderer {
         })
     }
 
+    /// Shared scene orchestration for non-overlay render targets.
+    ///
+    /// For single-axes figures this follows the direct full-target render path.
+    /// For subplot grids, it renders each axes into a deterministic tiled viewport layout.
+    pub fn render_scene_to_target(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        target_view: &wgpu::TextureView,
+        config: &PlotRenderConfig,
+    ) -> Result<RenderResult, Box<dyn std::error::Error>> {
+        let start_time = Instant::now();
+        let (rows, cols) = self.figure_axes_grid();
+        let axes_count = rows.saturating_mul(cols);
+        if axes_count <= 1 {
+            return self.render(
+                encoder,
+                RenderTarget {
+                    view: target_view,
+                    resolve_target: None,
+                },
+                config,
+            );
+        }
+
+        let viewports =
+            Self::compute_tiled_viewports(config.width.max(1), config.height.max(1), rows, cols);
+        self.render_axes_to_viewports(
+            encoder,
+            target_view,
+            &viewports,
+            config.msaa_samples.max(1),
+            config,
+        )?;
+        let stats = self.scene.statistics();
+        Ok(RenderResult {
+            success: true,
+            data_bounds: self.data_bounds,
+            vertex_count: stats.total_vertices,
+            triangle_count: stats.total_triangles,
+            render_time_ms: start_time.elapsed().as_secs_f64() * 1000.0,
+        })
+    }
+
+    fn compute_tiled_viewports(
+        total_width: u32,
+        total_height: u32,
+        rows: usize,
+        cols: usize,
+    ) -> Vec<(u32, u32, u32, u32)> {
+        if rows == 0 || cols == 0 {
+            return vec![(0, 0, total_width.max(1), total_height.max(1))];
+        }
+        let rows_u32 = rows as u32;
+        let cols_u32 = cols as u32;
+        let cell_w = (total_width / cols_u32).max(1);
+        let cell_h = (total_height / rows_u32).max(1);
+        let mut out = Vec::with_capacity(rows * cols);
+        for r in 0..rows_u32 {
+            for c in 0..cols_u32 {
+                let x = c * cell_w;
+                let y = r * cell_h;
+                let mut w = cell_w;
+                let mut h = cell_h;
+                if c + 1 == cols_u32 {
+                    w = total_width.saturating_sub(x).max(1);
+                }
+                if r + 1 == rows_u32 {
+                    h = total_height.saturating_sub(y).max(1);
+                }
+                out.push((x, y, w, h));
+            }
+        }
+        out
+    }
+
     /// Render using the camera-based pipeline into a viewport region with a scissor rectangle.
     /// This preserves existing contents (Load) and draws only inside the viewport rectangle.
     pub fn render_camera_to_viewport(
@@ -1229,7 +1115,22 @@ impl PlotRenderer {
         self.wgpu_renderer
             .update_uniforms(view_proj_matrix, Mat4::IDENTITY);
 
-        let (sx, sy, sw, sh) = viewport_scissor;
+        let (mut sx, mut sy, mut sw, mut sh) = viewport_scissor;
+        let target_w = self.wgpu_renderer.surface_config.width.max(1);
+        let target_h = self.wgpu_renderer.surface_config.height.max(1);
+        if sx >= target_w || sy >= target_h {
+            return Ok(RenderResult {
+                success: true,
+                data_bounds: self.data_bounds,
+                vertex_count: 0,
+                triangle_count: 0,
+                render_time_ms: 0.0,
+            });
+        }
+        sx = sx.min(target_w.saturating_sub(1));
+        sy = sy.min(target_h.saturating_sub(1));
+        sw = sw.max(1).min(target_w.saturating_sub(sx).max(1));
+        sh = sh.max(1).min(target_h.saturating_sub(sy).max(1));
         let is_2d = matches!(
             cam.projection,
             crate::core::camera::ProjectionType::Orthographic { .. }
@@ -1243,7 +1144,7 @@ impl PlotRenderer {
         let mut total_triangles = 0usize;
         for node in self.scene.get_visible_nodes() {
             if let Some(render_data) = &node.render_data {
-                if let Some((vb, ib)) = self.prepare_buffers_for_render_data(render_data) {
+                if let Some((vb, ib)) = self.prepare_buffers_for_render_data(node.id, render_data) {
                     self.wgpu_renderer
                         .ensure_pipeline(render_data.pipeline_type);
                     total_vertices += render_data.vertex_count();
@@ -1305,10 +1206,17 @@ impl PlotRenderer {
 
             if plane_pts.len() >= 2 {
                 min_x = plane_pts.iter().map(|p| p.x).fold(f32::INFINITY, f32::min);
-                max_x = plane_pts.iter().map(|p| p.x).fold(f32::NEG_INFINITY, f32::max);
+                max_x = plane_pts
+                    .iter()
+                    .map(|p| p.x)
+                    .fold(f32::NEG_INFINITY, f32::max);
                 min_y = plane_pts.iter().map(|p| p.y).fold(f32::INFINITY, f32::min);
-                max_y = plane_pts.iter().map(|p| p.y).fold(f32::NEG_INFINITY, f32::max);
-            } else if let crate::core::camera::ProjectionType::Perspective { fov, .. } = cam.projection
+                max_y = plane_pts
+                    .iter()
+                    .map(|p| p.y)
+                    .fold(f32::NEG_INFINITY, f32::max);
+            } else if let crate::core::camera::ProjectionType::Perspective { fov, .. } =
+                cam.projection
             {
                 let dist = (cam.position - cam.target).length().max(1e-3);
                 let extent = (dist * (0.5 * fov).tan() * 1.25).max(0.5);
@@ -1400,19 +1308,38 @@ impl PlotRenderer {
             // Procedural XY grid plane (depth-tested, no depth writes). This avoids far-plane
             // popping and keeps line density stable via shader derivatives.
             if self.figure_show_grid {
+                let theme = self.theme.build_theme();
+                let bg = theme.get_background_color();
+                let grid = theme.get_grid_color();
+                let bg_luma = 0.2126 * bg.x + 0.7152 * bg.y + 0.0722 * bg.z;
+                let mut major_rgb = [grid.x, grid.y, grid.z];
+                let mut minor_rgb = [grid.x, grid.y, grid.z];
+                let mut major_alpha = grid.w.clamp(0.08, 0.22);
+                let mut minor_alpha = (grid.w * 0.45).clamp(0.04, 0.14);
+                if bg_luma <= 0.62 {
+                    major_rgb = [grid.x * 0.80, grid.y * 0.80, grid.z * 0.80];
+                    minor_rgb = [grid.x * 0.68, grid.y * 0.68, grid.z * 0.68];
+                }
+                if bg_luma > 0.62 {
+                    major_rgb = [grid.x * 0.45, grid.y * 0.45, grid.z * 0.45];
+                    minor_rgb = [grid.x * 0.33, grid.y * 0.33, grid.z * 0.33];
+                    major_alpha = major_alpha.max(0.24);
+                    minor_alpha = minor_alpha.max(0.12);
+                }
                 self.wgpu_renderer.ensure_grid_plane_pipeline();
-                self.wgpu_renderer.update_grid_uniforms(crate::core::renderer::GridUniforms {
-                    major_step: major_step as f32,
-                    minor_step: minor_step as f32,
-                    fade_start: (0.60 * dx.max(dy)).max(major_step as f32),
-                    fade_end: (0.95 * dx.max(dy)).max((major_step as f32) * 2.0),
-                    camera_pos: cam.position.to_array(),
-                    _pad0: 0.0,
-                    target_pos: Vec3::new(cam.target.x, cam.target.y, 0.0).to_array(),
-                    _pad1: 0.0,
-                    major_color: [0.90, 0.92, 0.96, 0.30],
-                    minor_color: [0.82, 0.84, 0.88, 0.18],
-                });
+                self.wgpu_renderer
+                    .update_grid_uniforms(crate::core::renderer::GridUniforms {
+                        major_step: major_step as f32,
+                        minor_step: minor_step as f32,
+                        fade_start: (0.60 * dx.max(dy)).max(major_step as f32),
+                        fade_end: (0.95 * dx.max(dy)).max((major_step as f32) * 2.0),
+                        camera_pos: cam.position.to_array(),
+                        _pad0: 0.0,
+                        target_pos: Vec3::new(cam.target.x, cam.target.y, 0.0).to_array(),
+                        _pad1: 0.0,
+                        major_color: [major_rgb[0], major_rgb[1], major_rgb[2], major_alpha],
+                        minor_color: [minor_rgb[0], minor_rgb[1], minor_rgb[2], minor_alpha],
+                    });
 
                 let quad_vertices = [
                     Vertex::new(Vec3::new(min_x, min_y, z_grid), Vec4::ONE),
@@ -1455,7 +1382,11 @@ impl PlotRenderer {
                         break;
                     }
                     let p = origin + axis * t;
-                    push_line(p - perp * tick_len, p + perp * tick_len, Vec4::new(col.x, col.y, col.z, col.w * 0.85));
+                    push_line(
+                        p - perp * tick_len,
+                        p + perp * tick_len,
+                        Vec4::new(col.x, col.y, col.z, col.w * 0.85),
+                    );
                 }
             };
             add_ticks(Vec3::X, Vec3::Y, col_x);
@@ -1486,7 +1417,10 @@ impl PlotRenderer {
                 if let Some(dc) = owned_render_data[idx].draw_calls.get_mut(0) {
                     dc.vertex_count = vcount;
                 }
-                let vb = Arc::new(self.wgpu_renderer.create_vertex_buffer(&owned_render_data[idx].vertices));
+                let vb = Arc::new(
+                    self.wgpu_renderer
+                        .create_vertex_buffer(&owned_render_data[idx].vertices),
+                );
                 // Draw helpers first (under data, depth-tested).
                 let rd_ref: &crate::core::RenderData = &owned_render_data[idx];
                 render_items.insert(0, (rd_ref, vb, None));
@@ -1510,7 +1444,12 @@ impl PlotRenderer {
             }
         }
         // Precreate image bind groups for textured items to avoid lifetime issues
-        self.wgpu_renderer.ensure_image_pipeline();
+        let has_textured_items = render_items.iter().any(|(render_data, _vb, _ib)| {
+            render_data.pipeline_type == crate::core::PipelineType::Textured
+        });
+        if has_textured_items {
+            self.wgpu_renderer.ensure_image_pipeline();
+        }
         let mut image_bind_groups: Vec<Option<wgpu::BindGroup>> =
             Vec::with_capacity(render_items.len());
 
@@ -1666,7 +1605,16 @@ impl PlotRenderer {
                     view: msaa_view_opt.as_ref().unwrap_or(target_view),
                     resolve_target: if use_msaa { Some(target_view) } else { None },
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                        load: if use_msaa {
+                            wgpu::LoadOp::Clear(wgpu::Color {
+                                r: config.background_color.x as f64,
+                                g: config.background_color.y as f64,
+                                b: config.background_color.z as f64,
+                                a: config.background_color.w as f64,
+                            })
+                        } else {
+                            wgpu::LoadOp::Load
+                        },
                         store: wgpu::StoreOp::Store,
                     },
                 })],
@@ -1856,7 +1804,31 @@ impl PlotRenderer {
         target_view: &wgpu::TextureView,
         axes_viewports: &[(u32, u32, u32, u32)],
         msaa_samples: u32,
+        base_config: &PlotRenderConfig,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        {
+            let clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("runmat-subplot-clear"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: base_config.background_color.x as f64,
+                            g: base_config.background_color.y as f64,
+                            b: base_config.background_color.z as f64,
+                            a: base_config.background_color.w as f64,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            drop(clear_pass);
+        }
+
         // Build map axes_index -> node ids
         let mut axes_to_nodes: std::collections::HashMap<usize, Vec<crate::core::scene::NodeId>> =
             std::collections::HashMap::new();
@@ -1906,12 +1878,10 @@ impl PlotRenderer {
             let _ = self.calculate_data_bounds();
 
             // Render this axes into its viewport
-            let cfg = PlotRenderConfig {
-                width: viewport.2,
-                height: viewport.3,
-                msaa_samples,
-                ..Default::default()
-            };
+            let mut cfg = base_config.clone();
+            cfg.width = viewport.2;
+            cfg.height = viewport.3;
+            cfg.msaa_samples = msaa_samples;
             let _ = self.render_camera_to_viewport(encoder, target_view, *viewport, &cfg, &cam)?;
 
             // Restore hidden nodes visibility

@@ -204,9 +204,7 @@ mod tests {
 
     #[test]
     fn dims_from_tokens_rejects_non_numeric() {
-        let dims = dims_from_tokens(&[ArgToken::Vector(vec![ArgToken::String(
-            "bad".to_string(),
-        )])]);
+        let dims = dims_from_tokens(&[ArgToken::Vector(vec![ArgToken::String("bad".to_string())])]);
         assert_eq!(dims, None);
     }
 }

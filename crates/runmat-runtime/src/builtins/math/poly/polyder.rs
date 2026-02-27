@@ -64,6 +64,29 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::poly::polyder"
 )]
 async fn polyder_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count <= 1 {
+            let result = match rest.len() {
+                0 => derivative_single(first).await,
+                1 => derivative_product(first, rest.into_iter().next().unwrap()).await,
+                _ => Err(polyder_error("polyder: too many input arguments")),
+            }?;
+            if out_count == 0 {
+                return Ok(Value::OutputList(Vec::new()));
+            }
+            return Ok(Value::OutputList(vec![result]));
+        }
+        if rest.len() != 1 {
+            return Err(polyder_error(
+                "Not enough input arguments for quotient form.",
+            ));
+        }
+        let eval = evaluate_quotient(first, rest.into_iter().next().unwrap()).await?;
+        let outputs = vec![eval.numerator(), eval.denominator()];
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count, outputs,
+        ));
+    }
     match rest.len() {
         0 => derivative_single(first).await,
         1 => derivative_product(first, rest.into_iter().next().unwrap()).await,

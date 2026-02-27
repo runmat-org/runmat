@@ -61,7 +61,7 @@ pub fn struct_type(args: &[Type], _context: &ResolveContext) -> Type {
         };
     }
 
-    if args.len() % 2 != 0 {
+    if !args.len().is_multiple_of(2) {
         return Type::Unknown;
     }
 

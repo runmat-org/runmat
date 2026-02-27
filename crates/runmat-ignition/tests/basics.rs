@@ -22,7 +22,7 @@ fn arithmetic_and_assignment() {
 }
 
 #[test]
-fn call_builtin_multi_advances_pc_for_zero_outputs() {
+fn call_builtin_multi_output_advances_pc_for_zero_outputs() {
     let input = "disp('hi'); x = 42;";
     let ast = parse(input).expect("parse disp script");
     let hir = lower(&ast).expect("lower disp script");
@@ -108,5 +108,36 @@ fn complex_literal_matrix_executes() {
             assert_eq!(tensor.data, vec![(1.0, 2.0), (3.0, -4.0)]);
         }
         other => panic!("expected complex tensor, got {other:?}"),
+    }
+}
+
+#[test]
+fn chol_multiassign_reports_failure() {
+    let input = "A = [1 2; 2 1]; [R, p] = chol(A);";
+    let ast = parse(input).unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    let p: f64 = (&vars[2]).try_into().unwrap();
+    assert_eq!(p, 2.0);
+    match &vars[1] {
+        Value::Tensor(tensor) => {
+            assert_eq!(tensor.shape, vec![2, 2]);
+        }
+        other => panic!("expected chol factor tensor, got {other:?}"),
+    }
+}
+
+#[test]
+fn uint16_cast_is_callable_in_vm() {
+    let input = "A = uint16([3.49 -2 70000]);";
+    let ast = parse(input).unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    match &vars[0] {
+        Value::Tensor(tensor) => {
+            assert_eq!(tensor.shape, vec![1, 3]);
+            assert_eq!(tensor.data, vec![3.0, 0.0, u16::MAX as f64]);
+        }
+        other => panic!("expected tensor output, got {other:?}"),
     }
 }

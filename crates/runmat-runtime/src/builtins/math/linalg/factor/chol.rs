@@ -77,6 +77,21 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn chol_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(value, &rest).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        if out_count == 1 {
+            if !eval.is_positive_definite() {
+                return Err(chol_error("Matrix must be positive definite."));
+            }
+            return Ok(Value::OutputList(vec![eval.factor()]));
+        }
+        if out_count == 2 {
+            return Ok(Value::OutputList(vec![eval.factor(), eval.flag()]));
+        }
+        return Err(chol_error("chol currently supports at most two outputs"));
+    }
     if !eval.is_positive_definite() {
         return Err(chol_error("Matrix must be positive definite."));
     }

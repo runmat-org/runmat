@@ -66,10 +66,8 @@ fn square_summary_type(args: &[Type]) -> Type {
         .filter(|arg| matches!(arg, Type::Tensor { .. } | Type::Logical { .. }))
         .take(2)
         .collect();
-    if data.is_empty() {
-        if is_numeric_scalar(first) {
-            data.push(first);
-        }
+    if data.is_empty() && is_numeric_scalar(first) {
+        data.push(first);
     }
     if data.is_empty() {
         return Type::Unknown;

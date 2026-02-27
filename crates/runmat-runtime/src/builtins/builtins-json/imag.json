@@ -43,7 +43,7 @@
     {
       "description": "Extracting the imaginary part of a complex scalar",
       "input": "z = 3 + 4i;\nb = imag(z)",
-      "output": "b = 4;"
+      "output": "b = 4"
     },
     {
       "description": "Retrieving imaginary components of a complex matrix",
@@ -53,7 +53,7 @@
     {
       "description": "Verifying that real inputs yield zero",
       "input": "data = [-2.5 0 9.75];\nvalues = imag(data)",
-      "output": "values = [0 0 0];"
+      "output": "values = [0 0 0]"
     },
     {
       "description": "Imaginary part of logical masks",

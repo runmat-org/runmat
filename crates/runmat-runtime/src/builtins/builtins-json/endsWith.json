@@ -34,7 +34,7 @@
   "behaviors": [
     "Accepts text inputs as string scalars/arrays, character vectors/arrays, or cell arrays of character vectors.",
     "Accepts patterns in the same formats; scalar inputs expand across the other argument following MATLAB broadcast rules.",
-    "Missing string scalars (`missing`, displayed as `<missing>`) never match any pattern.",
+    "Missing string scalars (`<missing>`) never match any pattern.",
     "Empty patterns (`\"\"` or `''`) always match non-missing text elements.",
     "Patterns that are `<missing>` never match and therefore return `false`.",
     "Character arrays treat each row as an independent element; zero-row character arrays yield empty outputs.",
@@ -55,27 +55,27 @@
     {
       "description": "Apply a scalar suffix to every element of a string array",
       "input": "labels = [\"alpha\" \"beta\" \"gamma\"];\ntf = endsWith(labels, \"ma\")",
-      "output": "tf = 1\u00d73 logical array\n   0   0   1"
+      "output": "tf = 1×3 logical array\n   0   0   1"
     },
     {
       "description": "Use element-wise suffixes with implicit expansion",
       "input": "names = [\"hydrogen\"; \"helium\"; \"lithium\"];\nsuffixes = [\"gen\"; \"ium\"; \"ium\"];\ntf = endsWith(names, suffixes)",
-      "output": "tf = 3\u00d71 logical array\n   1\n   1\n   1"
+      "output": "tf = 3×1 logical array\n   1\n   1\n   1"
     },
     {
       "description": "Test suffixes for a cell array of character vectors",
       "input": "C = {'Mercury', 'Venus', 'Mars'};\ntf = endsWith(C, 's')",
-      "output": "tf = 1\u00d73 logical array\n   0   1   1"
+      "output": "tf = 1×3 logical array\n   0   1   1"
     },
     {
       "description": "Provide multiple suffixes as a column vector",
       "input": "tf = endsWith(\"saturn\", ['n'; 'x'; 'r'])",
-      "output": "tf = 3\u00d71 logical array\n   1\n   0\n   0"
+      "output": "tf = 3×1 logical array\n   1\n   0\n   0"
     },
     {
       "description": "Handle empty patterns and missing values",
-      "input": "texts = [\"\", missing];\ntf = endsWith(texts, \"\")",
-      "output": "tf = 1\u00d72 logical array\n   1   0"
+      "input": "texts = [\"\", \"<missing>\"];\ntf = endsWith(texts, \"\")",
+      "output": "tf = 1×2 logical array\n   1   0"
     }
   ],
   "faqs": [

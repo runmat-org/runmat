@@ -32,9 +32,9 @@
   },
   "description": "`readline(t)` reads ASCII text from the remote host associated with the MATLAB-compatible `tcpclient` struct `t`. It consumes data until it encounters the line terminator (RunMat currently honours the MATLAB default line feed (LF, `\"\\n\"`)) and returns the characters **without** the terminator. If the terminator is not observed before the timeout elapses, the builtin returns a 0-by-0 double (`[]`) just like MATLAB and preserves the buffered bytes for the next call. When the peer closes the connection, any buffered characters are returned and the internal connection flag is cleared.",
   "behaviors": [
-    "`readline(t)` waits for data and reads character bytes until the first line feed. The returned value is a MATLAB string scalar that excludes the terminator, mirroring MATLAB\u2019s `tcpclient.readline`.",
-    "If the peer uses carriage-return/line-feed pairs (`\"\\r\\n\"`), RunMat automatically strips both bytes so the returned string matches MATLAB\u2019s behaviour for default CR/LF terminators.",
-    "When the terminator is not encountered before the client\u2019s `Timeout` expires, the builtin returns a 0-by-0 double (`[]`). Any bytes that arrived remain buffered internally so the next `readline` call continues assembling the same logical line.",
+    "`readline(t)` waits for data and reads character bytes until the first line feed. The returned value is a MATLAB string scalar that excludes the terminator, mirroring MATLAB’s `tcpclient.readline`.",
+    "If the peer uses carriage-return/line-feed pairs (`\"\\r\\n\"`), RunMat automatically strips both bytes so the returned string matches MATLAB’s behaviour for default CR/LF terminators.",
+    "When the terminator is not encountered before the client’s `Timeout` expires, the builtin returns a 0-by-0 double (`[]`). Any bytes that arrived remain buffered internally so the next `readline` call continues assembling the same logical line.",
     "If the remote host closes the connection before a terminator is observed, the builtin returns the buffered characters (which might be empty) and marks the underlying client as disconnected so subsequent network calls can react accordingly.",
     "Inputs passed from the GPU are gathered automatically. Networking always runs on the CPU and the returned string is CPU-resident.",
     "Invalid structs, missing handles, or disconnected clients raise MATLAB-style diagnostics (for example, `MATLAB:readline:InvalidTcpClient`)."
@@ -74,7 +74,7 @@
   "faqs": [
     {
       "question": "Which terminator does RunMat use?",
-      "answer": "RunMat currently honours MATLAB\u2019s default line feed (LF, `\"\\n\"`). Support for `configureTerminator` will allow other terminators in a future update."
+      "answer": "RunMat currently honours MATLAB’s default line feed (LF, `\"\\n\"`). Support for `configureTerminator` will allow other terminators in a future update."
     },
     {
       "question": "Does `readline` return the terminator?",
@@ -86,7 +86,7 @@
     },
     {
       "question": "How are CR/LF pairs handled?",
-      "answer": "When the payload ends with `\"\\r\\n\"`, both bytes are removed so the result matches MATLAB\u2019s CR/LF behaviour."
+      "answer": "When the payload ends with `\"\\r\\n\"`, both bytes are removed so the result matches MATLAB’s CR/LF behaviour."
     },
     {
       "question": "What if the connection closes mid-line?",

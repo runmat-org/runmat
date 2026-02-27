@@ -9,9 +9,19 @@ use std::sync::RwLock;
 use once_cell::sync::OnceCell;
 
 #[cfg(target_arch = "wasm32")]
+fn default_env_map() -> BTreeMap<String, String> {
+    let mut env = BTreeMap::new();
+    // Match the documented baseline process environment in wasm sessions.
+    env.insert("HOME".to_string(), "/".to_string());
+    env.insert("PATH".to_string(), "/".to_string());
+    env.insert("USER".to_string(), "user".to_string());
+    env
+}
+
+#[cfg(target_arch = "wasm32")]
 fn env_lock() -> &'static RwLock<BTreeMap<String, String>> {
     static ENV: OnceCell<RwLock<BTreeMap<String, String>>> = OnceCell::new();
-    ENV.get_or_init(|| RwLock::new(BTreeMap::new()))
+    ENV.get_or_init(|| RwLock::new(default_env_map()))
 }
 
 pub fn var(key: &str) -> io::Result<String> {

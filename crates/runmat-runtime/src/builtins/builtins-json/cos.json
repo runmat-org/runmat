@@ -32,13 +32,13 @@
     "unit": "builtins::math::trigonometry::cos::tests",
     "integration": "builtins::math::trigonometry::cos::tests::cos_gpu_provider_roundtrip"
   },
-  "description": "`y = cos(x)` evaluates the cosine of each element in `x`, interpreting angles in radians while preserving MATLAB\u2019s column-major layout and broadcasting rules.",
+  "description": "`y = cos(x)` evaluates the cosine of each element in `x`, interpreting angles in radians while preserving MATLAB’s column-major layout and broadcasting rules.",
   "behaviors": [
     "Operates on scalars, vectors, matrices, and N-D tensors with MATLAB-compatible implicit expansion.",
-    "Logical and integer inputs are promoted to double precision before evaluation so downstream arithmetic matches MATLAB\u2019s numeric tower.",
-    "Complex values use the analytic extension `cos(a + bi) = cos(a)cosh(b) - i\u00b7sin(a)sinh(b)` while propagating `NaN`/`Inf` components independently.",
-    "Character arrays are interpreted through their Unicode code points and return dense double arrays that mirror MATLAB\u2019s behaviour.",
-    "Appending `'like', prototype` mirrors the prototype\u2019s class and residency (host or GPU), re-uploading the result when a device prototype is supplied.",
+    "Logical and integer inputs are promoted to double precision before evaluation so downstream arithmetic matches MATLAB’s numeric tower.",
+    "Complex values use the analytic extension `cos(a + bi) = cos(a)cosh(b) - i·sin(a)sinh(b)` while propagating `NaN`/`Inf` components independently.",
+    "Character arrays are interpreted through their Unicode code points and return dense double arrays that mirror MATLAB’s behaviour.",
+    "Appending `'like', prototype` mirrors the prototype’s class and residency (host or GPU), re-uploading the result when a device prototype is supplied.",
     "Empty inputs and singleton dimensions are preserved without introducing extraneous allocations."
   ],
   "examples": [
@@ -59,7 +59,7 @@
     },
     {
       "description": "Cosine on a GPU tensor without manual residency",
-      "input": "A = reshape(0:5, [3 2]);\nresult = cos(A);        % planner keeps the tensor on device when beneficial",
+      "input": "A = reshape(0:5, [3 2]);\nresult = cos(A)        % planner keeps the tensor on device when beneficial",
       "output": "result =\n    1.0000   -0.9900\n    0.5403   -0.6536\n   -0.4161    0.2837"
     },
     {
@@ -76,15 +76,15 @@
   "faqs": [
     {
       "question": "When should I use the `cos` function?",
-      "answer": "Use `cos` whenever you need the cosine of angles expressed in radians\u2014whether those angles are scalars, vectors, matrices, or higher-dimensional tensors."
+      "answer": "Use `cos` whenever you need the cosine of angles expressed in radians—whether those angles are scalars, vectors, matrices, or higher-dimensional tensors."
     },
     {
       "question": "Does `cos` promote inputs to double precision?",
-      "answer": "Yes. Unless you request otherwise with `'like'`, RunMat promotes numeric inputs to double precision, matching MATLAB\u2019s default behaviour."
+      "answer": "Yes. Unless you request otherwise with `'like'`, RunMat promotes numeric inputs to double precision, matching MATLAB’s default behaviour."
     },
     {
       "question": "How does `cos` handle complex inputs?",
-      "answer": "Complex numbers follow MATLAB\u2019s analytic definition `cos(a + bi) = cos(a)cosh(b) - i\u00b7sin(a)sinh(b)` so both the real and imaginary parts are handled correctly."
+      "answer": "Complex numbers follow MATLAB’s analytic definition `cos(a + bi) = cos(a)cosh(b) - i·sin(a)sinh(b)` so both the real and imaginary parts are handled correctly."
     },
     {
       "question": "What happens if the GPU provider lacks `unary_cos`?",
@@ -123,8 +123,8 @@
   },
   "gpu_residency": "```matlab:runnable\nA = reshape(0:5, [3 2]);\nresult = cos(A);        % planner keeps the tensor on device when beneficial\n```\n\nExpected output (after `gather(result)`):\n\n```matlab\nresult =\n    1.0000   -0.9899\n    0.5403   -0.6536\n   -0.4161    0.2837\n```",
   "gpu_behavior": [
-    "With RunMat Accelerate active, tensors remain on the device and execute through the provider\u2019s `unary_cos` hook (or fused elementwise kernels) without leaving GPU memory.",
-    "If the provider declines the operation\u2014for example, when only CPU precision is available or the operand type is unsupported\u2014RunMat transparently gathers to the host, computes the result, and reapplies the requested residency rules (including `'like'` prototypes).",
-    "Fusion planning keeps neighbouring elementwise operators grouped, reducing host\u2194device transfers even when an intermediate fallback occurs."
+    "With RunMat Accelerate active, tensors remain on the device and execute through the provider’s `unary_cos` hook (or fused elementwise kernels) without leaving GPU memory.",
+    "If the provider declines the operation—for example, when only CPU precision is available or the operand type is unsupported—RunMat transparently gathers to the host, computes the result, and reapplies the requested residency rules (including `'like'` prototypes).",
+    "Fusion planning keeps neighbouring elementwise operators grouped, reducing host↔device transfers even when an intermediate fallback occurs."
   ]
 }

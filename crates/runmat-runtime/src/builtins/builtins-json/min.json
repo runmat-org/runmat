@@ -34,7 +34,7 @@
   },
   "description": "`min` finds the smallest values in its input while preserving MATLAB semantics for reductions, elementwise comparisons, NaN handling, complex magnitude comparisons, and linear indexing.",
   "behaviors": [
-    "`min(X)` on an `m \u00d7 n` array reduces along the first non-singleton dimension, returning a row vector of column-wise minima and the corresponding indices (when requested).",
+    "`min(X)` on an `m × n` array reduces along the first non-singleton dimension, returning a row vector of column-wise minima and the corresponding indices (when requested).",
     "`min(X, [], dim)` reduces along the specified dimension; `min(X, [], vecdim)` reduces along each dimension listed in `vecdim`.",
     "`min(X, [], 'all')` collapses every element into a scalar and returns the linear index when two outputs are requested.",
     "`min(X, [], 'linear')` is equivalent to `'all'` but guarantees that the matching index is linear over `X(:)`.",
@@ -47,12 +47,12 @@
     {
       "description": "Finding column-wise minima of a matrix",
       "input": "A = [3 1 5; 4 2 6];\n[m, idx] = min(A)",
-      "output": "m   = [3 1 5];\nidx = [1 2 1];"
+      "output": "m   = [3 1 5];\nidx = [1 2 1]"
     },
     {
       "description": "Reducing along the second dimension",
       "input": "A = [3 1 5; 4 2 6];\n[m, idx] = min(A, [], 2)",
-      "output": "m   = [1; 2];\nidx = [2; 2];"
+      "output": "m   = [1; 2];\nidx = [2; 2]"
     },
     {
       "description": "Collapsing all elements with linear indices",
@@ -62,7 +62,7 @@
     {
       "description": "Ignoring NaN values during reduction",
       "input": "values = [NaN 4 2; 3 NaN 1];\n[m, idx] = min(values, [], 1, 'omitnan')",
-      "output": "m   = [3 4 1];\nidx = [2 1 2];"
+      "output": "m   = [3 4 1];\nidx = [2 1 2]"
     },
     {
       "description": "Elementwise minimum with broadcasting",
@@ -127,7 +127,7 @@
     "label": "`crates/runmat-runtime/src/builtins/math/reduction/min.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/min.rs"
   },
-  "gpu_residency": "You typically do **not** need to call `gpuArray` manually. The fusion planner keeps tensors on the GPU between compatible kernels. When a reduction is supported by the active provider, the minimum values and indices stay on device. If a provider lacks the necessary hook, RunMat gathers data to the host, computes the result, and returns host tensors\u2014subsequent fused GPU kernels can re-upload data when profitable.",
+  "gpu_residency": "You typically do **not** need to call `gpuArray` manually. The fusion planner keeps tensors on the GPU between compatible kernels. When a reduction is supported by the active provider, the minimum values and indices stay on device. If a provider lacks the necessary hook, RunMat gathers data to the host, computes the result, and returns host tensors—subsequent fused GPU kernels can re-upload data when profitable.",
   "gpu_behavior": [
     "When RunMat Accelerate is active, tensors that already reside on the GPU stay on the device whenever the provider exposes `reduce_min_dim` (for dimension reductions) or `reduce_min` (for whole-array reductions). Requests that require `omitnan`, custom comparison modes, `'linear'` indices, or complex arithmetic gather the data to the host, compute the MATLAB-compatible result, and return the output on the host. Elementwise `min(A, B)` currently executes on the host; the planner rematerializes tensors on the GPU when follow-on fused kernels make it profitable."
   ]

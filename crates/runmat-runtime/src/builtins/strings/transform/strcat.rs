@@ -387,9 +387,7 @@ pub(crate) mod tests {
     use crate::builtins::common::test_support;
     #[cfg(feature = "wgpu")]
     use runmat_builtins::Tensor;
-    use runmat_builtins::{
-        CellArray, CharArray, IntValue, ResolveContext, StringArray, Type,
-    };
+    use runmat_builtins::{CellArray, CharArray, IntValue, ResolveContext, StringArray, Type};
 
     fn run_strcat(rest: Vec<Value>) -> BuiltinResult<Value> {
         futures::executor::block_on(strcat_builtin(rest))

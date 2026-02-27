@@ -362,7 +362,7 @@ async fn build_line_gpu_plot_async(
     let api_provider_present = runmat_accelerate_api::provider().is_some();
     let api_provider_for_x_present = runmat_accelerate_api::provider_for_handle(x).is_some();
     let api_provider_for_y_present = runmat_accelerate_api::provider_for_handle(y).is_some();
-    let shared_ctx = runmat_plot::shared_wgpu_context();
+    let shared_ctx_present = runmat_plot::shared_wgpu_context().is_some();
     trace!(
         "plot-gpu: attempt label={label:?} x(device_id={}, buffer_id={}, shape={:?}) y(device_id={}, buffer_id={}, shape={:?}) shared_ctx_present={} api_provider_present={} api_provider_for_x_present={} api_provider_for_y_present={}",
         x.device_id,
@@ -371,13 +371,12 @@ async fn build_line_gpu_plot_async(
         y.device_id,
         y.buffer_id,
         y.shape,
-        shared_ctx.is_some(),
+        shared_ctx_present,
         api_provider_present,
         api_provider_for_x_present,
         api_provider_for_y_present
     );
-    let context = shared_ctx
-        .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot: plotting GPU context unavailable"))?;
+    let context = crate::builtins::plotting::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
 
     let x_ref = match runmat_accelerate_api::export_wgpu_buffer(x) {
         Some(buf) => {
@@ -528,17 +527,26 @@ impl PlotSeriesInput {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::plotting::tests::ensure_plot_test_env;
     use crate::builtins::plotting::state::{clear_figure, reset_hold_state_for_run};
+    use crate::builtins::plotting::tests::ensure_plot_test_env;
     use crate::builtins::plotting::{clone_figure, current_figure_handle};
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_builtins::{ResolveContext, Type};
+    use std::sync::{Mutex, MutexGuard};
 
-    fn setup_plot_tests() {
+    // All tests that touch the global figure registry must hold this guard for
+    // their entire duration. Without it, concurrent tests share one `current`
+    // figure handle and can stomp each other's `clear_figure` / `plot_builtin`
+    // calls, producing a spurious "Data" fallback label.
+    static PLOT_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+    fn setup_plot_tests() -> MutexGuard<'static, ()> {
+        let guard = PLOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         ensure_plot_test_env();
         reset_hold_state_for_run();
         let _ = clear_figure(None);
+        guard
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
@@ -562,7 +570,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn build_plot_requires_equal_lengths() {
-        setup_plot_tests();
+        let _guard = setup_plot_tests();
         assert!(build_line_plot(
             vec![1.0, 2.0],
             vec![1.0],
@@ -575,7 +583,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn plot_builtin_produces_figure_even_without_backend() {
-        setup_plot_tests();
+        let _guard = setup_plot_tests();
         let result = block_on(plot_builtin(
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[0.0, 1.0])),
@@ -589,7 +597,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn plot_builtin_infers_label_from_callsite() {
-        setup_plot_tests();
+        let _guard = setup_plot_tests();
         let source = "plot(a, b);";
         let _source_guard = crate::source_context::replace_current_source(Some(source));
         let spans = vec![
@@ -614,7 +622,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_series_specs_handles_interleaved_styles() {
-        setup_plot_tests();
+        let _guard = setup_plot_tests();
         let args = vec![
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[1.0, 2.0])),
@@ -632,7 +640,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_series_specs_errors_on_incomplete_pair() {
-        setup_plot_tests();
+        let _guard = setup_plot_tests();
         let args = vec![
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::String("linewidth".into()),
@@ -644,7 +652,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_series_specs_rejects_style_before_data() {
-        setup_plot_tests();
+        let _guard = setup_plot_tests();
         let args = vec![Value::String("linewidth".into()), Value::Num(2.0)];
         let err = parse_series_specs(args).unwrap_err();
         assert!(err.to_string().contains("expected numeric X data"));
@@ -653,7 +661,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_series_specs_extracts_line_style_order() {
-        setup_plot_tests();
+        let _guard = setup_plot_tests();
         let args = vec![
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[1.0, 2.0])),
@@ -675,7 +683,10 @@ pub(crate) mod tests {
     #[test]
     fn plot_type_is_string() {
         assert_eq!(
-            string_type(&[Type::tensor(), Type::tensor()], &ResolveContext::new(Vec::new())),
+            string_type(
+                &[Type::tensor(), Type::tensor()],
+                &ResolveContext::new(Vec::new())
+            ),
             Type::String
         );
     }

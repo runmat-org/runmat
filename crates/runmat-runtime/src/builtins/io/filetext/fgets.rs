@@ -74,6 +74,15 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn fgets_builtin(fid: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(&fid, &rest).await?;
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count,
+            eval.outputs(),
+        ));
+    }
     Ok(eval.first_output())
 }
 
@@ -133,8 +142,9 @@ pub async fn evaluate(fid_value: &Value, rest: &[Value]) -> BuiltinResult<FgetsE
         .lock()
         .map_err(|_| fgets_error("fgets: failed to lock file handle (poisoned mutex)"))?;
 
-    let limit = parse_nchar(rest).await?;
-    let read = read_line(&mut file, limit)?;
+    let nchar_limit = parse_nchar(rest).await?;
+    let max_bytes = apply_matlab_nchar_limit(nchar_limit);
+    let read = read_line(&mut file, max_bytes)?;
     if read.eof_before_any {
         return Ok(FgetsEval::end_of_file());
     }
@@ -260,6 +270,10 @@ async fn parse_nchar(args: &[Value]) -> BuiltinResult<Option<usize>> {
 fn permission_allows_read(permission: &str) -> bool {
     let lower = permission.to_ascii_lowercase();
     lower.starts_with('r') || lower.contains('+')
+}
+
+fn apply_matlab_nchar_limit(nchar_limit: Option<usize>) -> Option<usize> {
+    nchar_limit.map(|nchar| nchar.saturating_sub(1))
 }
 
 struct LineRead {
@@ -598,7 +612,7 @@ pub(crate) mod tests {
         match eval.first_output() {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
-                assert_eq!(text, "abcde");
+                assert_eq!(text, "abcd");
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -645,7 +659,7 @@ pub(crate) mod tests {
         match first.first_output() {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
-                assert_eq!(text, "ABC");
+                assert_eq!(text, "AB");
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -658,7 +672,7 @@ pub(crate) mod tests {
         match second.first_output() {
             Value::CharArray(ca) => {
                 let text: String = ca.data.iter().collect();
-                assert_eq!(text, "DE\r\n");
+                assert_eq!(text, "CDE\r\n");
             }
             other => panic!("expected char array, got {other:?}"),
         }
@@ -765,6 +779,32 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn fgets_nchar_one_returns_empty_char() {
+        let _guard = registry_guard();
+        registry::reset_for_tests();
+        let path = unique_path("fgets_one");
+        fs::write(&path, "hello\n").unwrap();
+        let handle = fopen_path(&path);
+
+        let eval = run_evaluate(
+            &Value::Num(handle.fid as f64),
+            &[Value::Int(IntValue::I32(1))],
+        )
+        .expect("fgets");
+        match eval.first_output() {
+            Value::CharArray(ca) => {
+                assert_eq!(ca.rows, 1);
+                assert_eq!(ca.cols, 0);
+                assert!(ca.data.is_empty());
+            }
+            other => panic!("expected empty char array, got {other:?}"),
+        }
+
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn fgets_gathers_gpu_scalar_arguments() {
         let _guard = registry_guard();
         registry::reset_for_tests();
@@ -791,7 +831,7 @@ pub(crate) mod tests {
             match eval.first_output() {
                 Value::CharArray(ca) => {
                     let text: String = ca.data.iter().collect();
-                    assert_eq!(text, "abc");
+                    assert_eq!(text, "ab");
                 }
                 other => panic!("expected char array, got {other:?}"),
             }

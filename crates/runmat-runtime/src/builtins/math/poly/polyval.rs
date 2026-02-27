@@ -62,6 +62,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::math::poly::polyval"
 )]
 async fn polyval_builtin(p: Value, x: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+    if let Some(out_count) = crate::output_count::current_output_count() {
+        let eval = evaluate(p, x, &rest, out_count >= 2).await?;
+        if out_count == 0 {
+            return Ok(Value::OutputList(Vec::new()));
+        }
+        let mut outputs = vec![eval.value()];
+        if out_count >= 2 {
+            outputs.push(eval.delta()?);
+        }
+        return Ok(crate::output_count::output_list_with_padding(
+            out_count, outputs,
+        ));
+    }
     let eval = evaluate(p, x, &rest, false).await?;
     Ok(eval.value())
 }

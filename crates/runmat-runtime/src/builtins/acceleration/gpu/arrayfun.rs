@@ -6,17 +6,19 @@
 //! downstream code continues to see GPU residency. Future provider hooks can swap
 //! in a device kernel without affecting the public API.
 
+use crate::builtins::acceleration::gpu::type_resolvers::arrayfun_type;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::acceleration::gpu::type_resolvers::arrayfun_type;
 use crate::{
     build_runtime_error, gather_if_needed_async, make_cell_with_shape, user_functions,
     BuiltinResult, RuntimeError,
 };
 use runmat_accelerate_api::{set_handle_logical, GpuTensorHandle, HostTensorView};
-use runmat_builtins::{CharArray, Closure, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
+use runmat_builtins::{
+    CharArray, Closure, ComplexTensor, LogicalArray, StringArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::acceleration::gpu::arrayfun")]
@@ -550,12 +552,11 @@ impl ArrayData {
                     .map_err(|e| arrayfun_flow(format!("arrayfun: {e}")))?;
                 Ok(Value::CharArray(char_array))
             }
-            ArrayData::String(sa) => Ok(Value::String(
-                sa.data
-                    .get(idx)
-                    .cloned()
-                    .ok_or_else(|| arrayfun_flow("arrayfun: index out of bounds"))?,
-            )),
+            ArrayData::String(sa) => {
+                Ok(Value::String(sa.data.get(idx).cloned().ok_or_else(
+                    || arrayfun_flow("arrayfun: index out of bounds"),
+                )?))
+            }
             ArrayData::Scalar(v) => Ok(v.clone()),
         }
     }

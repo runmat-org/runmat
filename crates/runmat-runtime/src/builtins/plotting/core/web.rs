@@ -21,6 +21,7 @@ pub(crate) mod wasm {
     use crate::builtins::plotting::state::{clone_figure, current_figure_revision, FigureHandle};
     use log::debug;
     use runmat_plot::core::PlotEvent;
+    use runmat_plot::styling::PlotThemeConfig;
     use runmat_plot::web::WebRenderer;
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
@@ -28,6 +29,7 @@ pub(crate) mod wasm {
 
     runmat_thread_local! {
         static SURFACES: RefCell<HashMap<u32, SurfaceEntry>> = RefCell::new(HashMap::new());
+        static ACTIVE_THEME: RefCell<PlotThemeConfig> = RefCell::new(PlotThemeConfig::default());
     }
 
     struct SurfaceEntry {
@@ -38,8 +40,11 @@ pub(crate) mod wasm {
 
     pub(super) fn install_surface_impl(
         surface_id: u32,
-        renderer: WebRenderer,
+        mut renderer: WebRenderer,
     ) -> BuiltinResult<()> {
+        ACTIVE_THEME.with(|theme| {
+            renderer.set_theme_config(theme.borrow().clone());
+        });
         SURFACES.with(|slot| {
             slot.borrow_mut().insert(
                 surface_id,
@@ -110,6 +115,33 @@ pub(crate) mod wasm {
         })
     }
 
+    pub(super) fn set_theme_config_impl(theme: PlotThemeConfig) -> BuiltinResult<()> {
+        debug!(
+            "plot-web: runtime set_theme_config_impl variant={:?} custom_colors={}",
+            theme.variant,
+            theme.custom_colors.is_some()
+        );
+        ACTIVE_THEME.with(|slot| {
+            *slot.borrow_mut() = theme.clone();
+        });
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            debug!("plot-web: applying theme to {} surfaces", map.len());
+            for entry in map.values_mut() {
+                entry.renderer.set_theme_config(theme.clone());
+                if let Some(handle) = entry.bound_handle {
+                    if let Some(figure) = clone_figure(FigureHandle::from(handle)) {
+                        entry
+                            .renderer
+                            .render_figure(figure)
+                            .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
+                    }
+                }
+            }
+            Ok(())
+        })
+    }
+
     pub(super) fn present_figure_on_surface_impl(
         surface_id: u32,
         handle: u32,
@@ -163,7 +195,10 @@ pub(crate) mod wasm {
         })
     }
 
-    pub(super) fn handle_surface_event_impl(surface_id: u32, event: PlotEvent) -> BuiltinResult<()> {
+    pub(super) fn handle_surface_event_impl(
+        surface_id: u32,
+        event: PlotEvent,
+    ) -> BuiltinResult<()> {
         SURFACES.with(|slot| {
             let mut map = slot.borrow_mut();
             let entry = map.get_mut(&surface_id).ok_or_else(|| {
@@ -338,6 +373,12 @@ pub(crate) mod wasm {
     pub(super) fn reset_surface_camera_impl(_surface_id: u32) -> BuiltinResult<()> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
+
+    pub(super) fn set_theme_config_impl(
+        _theme: runmat_plot::styling::PlotThemeConfig,
+    ) -> BuiltinResult<()> {
+        Err(web_error(ERR_PLOTTING_UNAVAILABLE))
+    }
 }
 
 pub use wasm::render_current_scene;
@@ -386,6 +427,10 @@ pub fn fit_surface_extents(surface_id: u32) -> BuiltinResult<()> {
 
 pub fn reset_surface_camera(surface_id: u32) -> BuiltinResult<()> {
     wasm::reset_surface_camera_impl(surface_id)
+}
+
+pub fn set_plot_theme_config(theme: runmat_plot::styling::PlotThemeConfig) -> BuiltinResult<()> {
+    wasm::set_theme_config_impl(theme)
 }
 
 // No render_web_canvas wrapper; web presentation is surface-driven.

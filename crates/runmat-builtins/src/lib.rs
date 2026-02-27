@@ -90,6 +90,8 @@ pub enum Value {
     HandleObject(HandleRef),
     /// Event listener handle for events
     Listener(Listener),
+    /// Multiple outputs captured as a list (internal destructuring helper)
+    OutputList(Vec<Value>),
     // Function handle pointing to a named function (builtin or user)
     FunctionHandle(String),
     Closure(Closure),
@@ -503,6 +505,89 @@ impl ComplexTensor {
     }
 }
 
+const MAX_ND_DISPLAY_ELEMENTS: usize = 4096;
+
+fn should_expand_nd_display(shape: &[usize]) -> bool {
+    shape.len() > 2
+        && matches!(
+            total_len(shape),
+            Some(total) if total > 0 && total <= MAX_ND_DISPLAY_ELEMENTS
+        )
+}
+
+fn column_major_strides(shape: &[usize]) -> Vec<usize> {
+    let mut strides = Vec::with_capacity(shape.len());
+    let mut stride = 1usize;
+    for &dim in shape {
+        strides.push(stride);
+        stride = stride.saturating_mul(dim);
+    }
+    strides
+}
+
+fn decode_page_coords(mut page_index: usize, page_shape: &[usize]) -> Vec<usize> {
+    let mut coords = Vec::with_capacity(page_shape.len());
+    for &dim in page_shape {
+        if dim == 0 {
+            coords.push(0);
+        } else {
+            coords.push(page_index % dim);
+            page_index /= dim;
+        }
+    }
+    coords
+}
+
+fn write_nd_pages(
+    f: &mut fmt::Formatter<'_>,
+    shape: &[usize],
+    mut write_element: impl FnMut(&mut fmt::Formatter<'_>, usize) -> fmt::Result,
+) -> fmt::Result {
+    if shape.len() <= 2 {
+        return Ok(());
+    }
+    let rows = shape[0];
+    let cols = shape[1];
+    if rows == 0 || cols == 0 {
+        return write!(f, "[]");
+    }
+    let Some(page_count) = total_len(&shape[2..]) else {
+        return write!(f, "Tensor(shape={shape:?})");
+    };
+    if page_count == 0 {
+        return write!(f, "[]");
+    }
+    let strides = column_major_strides(shape);
+    for page_index in 0..page_count {
+        if page_index > 0 {
+            write!(f, "\n\n")?;
+        }
+        let coords = decode_page_coords(page_index, &shape[2..]);
+        write!(f, "(:, :")?;
+        for &coord in &coords {
+            write!(f, ", {}", coord + 1)?;
+        }
+        write!(f, ") =")?;
+
+        let mut page_base = 0usize;
+        for (offset, &coord) in coords.iter().enumerate() {
+            page_base += coord * strides[offset + 2];
+        }
+        for r in 0..rows {
+            writeln!(f)?;
+            write!(f, "  ")?;
+            for c in 0..cols {
+                if c > 0 {
+                    write!(f, "  ")?;
+                }
+                let linear = page_base + r + c * rows;
+                write_element(f, linear)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 impl fmt::Display for Tensor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self.shape.len() {
@@ -534,7 +619,15 @@ impl fmt::Display for Tensor {
                 }
                 Ok(())
             }
-            _ => write!(f, "Tensor(shape={:?})", self.shape),
+            _ => {
+                if should_expand_nd_display(&self.shape) {
+                    write_nd_pages(f, &self.shape, |f, idx| {
+                        write!(f, "{}", format_number_short_g(self.data[idx]))
+                    })
+                } else {
+                    write!(f, "Tensor(shape={:?})", self.shape)
+                }
+            }
         }
     }
 }
@@ -590,6 +683,16 @@ impl fmt::Display for LogicalArray {
         }
         match self.shape.len() {
             0 => write!(f, "[]"),
+            1 => {
+                write!(f, "[")?;
+                for (i, v) in self.data.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, " ")?;
+                    }
+                    write!(f, "{}", if *v != 0 { 1 } else { 0 })?;
+                }
+                write!(f, "]")
+            }
             2 => {
                 let rows = self.shape[0];
                 let cols = self.shape[1];
@@ -607,16 +710,15 @@ impl fmt::Display for LogicalArray {
                 }
                 Ok(())
             }
-            // 1-D and higher-dimensional arrays: linear bracket display
             _ => {
-                write!(f, "[")?;
-                for (i, v) in self.data.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "{}", if *v != 0 { 1 } else { 0 })?;
+                if should_expand_nd_display(&self.shape) {
+                    write_nd_pages(f, &self.shape, |f, idx| {
+                        write!(f, "{}", if self.data[idx] != 0 { 1 } else { 0 })
+                    })
+                } else {
+                    let dims: Vec<String> = self.shape.iter().map(|d| d.to_string()).collect();
+                    write!(f, "{} logical array", dims.join("x"))
                 }
-                write!(f, "]")
             }
         }
     }
@@ -849,6 +951,8 @@ pub enum Type {
         /// Optional set of known field names observed via control-flow (None = unknown fields)
         known_fields: Option<Vec<String>>, // kept sorted unique for deterministic Eq
     },
+    /// Multiple return values captured as a list (internal destructuring helper)
+    OutputList(Vec<Type>),
 }
 
 impl Type {
@@ -898,6 +1002,7 @@ impl Type {
             (Type::Unknown, _) | (_, Type::Unknown) => true,
             (Type::Int, Type::Num) | (Type::Num, Type::Int) => true, // Number compatibility
             (Type::Tensor { .. }, Type::Tensor { .. }) => true, // Tensor compatibility regardless of dims for now
+            (Type::OutputList(a), Type::OutputList(b)) => a.len() == b.len(),
             (a, b) => a == b,
         }
     }
@@ -907,10 +1012,58 @@ impl Type {
         match (self, other) {
             (Type::Unknown, t) | (t, Type::Unknown) => t.clone(),
             (Type::Int, Type::Num) | (Type::Num, Type::Int) => Type::Num,
-            (Type::Tensor { .. }, Type::Tensor { .. }) => Type::tensor(), // Lose shape info for now
+            (Type::Tensor { shape: a }, Type::Tensor { shape: b }) => {
+                let a_norm = match a {
+                    Some(dims) if dims.is_empty() => None,
+                    _ => a.clone(),
+                };
+                let b_norm = match b {
+                    Some(dims) if dims.is_empty() => None,
+                    _ => b.clone(),
+                };
+                let a_unknown = a_norm
+                    .as_ref()
+                    .map(|dims| dims.iter().all(|d| d.is_none()))
+                    .unwrap_or(true);
+                let b_unknown = b_norm
+                    .as_ref()
+                    .map(|dims| dims.iter().all(|d| d.is_none()))
+                    .unwrap_or(true);
+                if a_norm == b_norm
+                    || (!a_unknown && b_unknown)
+                    || (a_norm.is_some() && b_norm.is_none())
+                {
+                    Type::Tensor { shape: a_norm }
+                } else if (a_unknown && !b_unknown) || (a_norm.is_none() && b_norm.is_some()) {
+                    Type::Tensor { shape: b_norm }
+                } else {
+                    Type::tensor()
+                }
+            }
             (Type::Logical { shape: a }, Type::Logical { shape: b }) => {
-                if a == b {
-                    Type::Logical { shape: a.clone() }
+                let a_norm = match a {
+                    Some(dims) if dims.is_empty() => None,
+                    _ => a.clone(),
+                };
+                let b_norm = match b {
+                    Some(dims) if dims.is_empty() => None,
+                    _ => b.clone(),
+                };
+                let a_unknown = a_norm
+                    .as_ref()
+                    .map(|dims| dims.iter().all(|d| d.is_none()))
+                    .unwrap_or(true);
+                let b_unknown = b_norm
+                    .as_ref()
+                    .map(|dims| dims.iter().all(|d| d.is_none()))
+                    .unwrap_or(true);
+                if a_norm == b_norm
+                    || (!a_unknown && b_unknown)
+                    || (a_norm.is_some() && b_norm.is_none())
+                {
+                    Type::Logical { shape: a_norm }
+                } else if (a_unknown && !b_unknown) || (a_norm.is_none() && b_norm.is_some()) {
+                    Type::Logical { shape: b_norm }
                 } else {
                     Type::logical()
                 }
@@ -928,6 +1081,18 @@ impl Type {
                     }
                 }
             },
+            (Type::OutputList(a), Type::OutputList(b)) => {
+                if a.len() == b.len() {
+                    let items = a
+                        .iter()
+                        .zip(b.iter())
+                        .map(|(lhs, rhs)| lhs.unify(rhs))
+                        .collect();
+                    Type::OutputList(items)
+                } else {
+                    Type::OutputList(vec![Type::Unknown; a.len().max(b.len())])
+                }
+            }
             (a, b) if a == b => a.clone(),
             _ => Type::Union(vec![self.clone(), other.clone()]),
         }
@@ -989,6 +1154,9 @@ impl Type {
                     element_type: Some(Box::new(Type::String)),
                     length: Some(ca.rows * ca.cols),
                 }
+            }
+            Value::OutputList(values) => {
+                Type::OutputList(values.iter().map(Type::from_value).collect())
             }
         }
     }
@@ -1396,7 +1564,7 @@ fn format_number_short_g(value: f64) -> String {
 
     if use_scientific {
         // 5 significant digits in scientific notation for short g style
-        let s = format!("{v:.5e}");
+        let s = format!("{v:.4e}");
         // Trim trailing zeros in fraction part
         if let Some(idx) = s.find('e') {
             let (mut mantissa, exp) = s.split_at(idx);
@@ -1570,6 +1738,16 @@ impl fmt::Display for Value {
                 }
                 write!(f, "}}")
             }
+            Value::OutputList(values) => {
+                write!(f, "[")?;
+                for (i, value) in values.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{}", value)?;
+                }
+                write!(f, "]")
+            }
             Value::FunctionHandle(name) => write!(f, "@{name}"),
             Value::Closure(c) => write!(
                 f,
@@ -1620,8 +1798,65 @@ impl fmt::Display for ComplexTensor {
                 }
                 write!(f, "]")
             }
-            _ => write!(f, "ComplexTensor(shape={:?})", self.shape),
+            _ => {
+                if should_expand_nd_display(&self.shape) {
+                    write_nd_pages(f, &self.shape, |f, idx| {
+                        let (re, im) = self.data[idx];
+                        write!(f, "{}", Value::Complex(re, im))
+                    })
+                } else {
+                    write!(f, "ComplexTensor(shape={:?})", self.shape)
+                }
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod display_tests {
+    use super::{ComplexTensor, LogicalArray, Tensor};
+
+    #[test]
+    fn tensor_nd_display_uses_page_headers() {
+        let tensor = Tensor::new(
+            vec![1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+            vec![2, 3, 2],
+        )
+        .expect("tensor");
+        let rendered = tensor.to_string();
+        assert!(rendered.contains("(:, :, 1) ="));
+        assert!(rendered.contains("(:, :, 2) ="));
+        assert!(rendered.contains("  1  0  0"));
+    }
+
+    #[test]
+    fn tensor_nd_display_falls_back_for_large_arrays() {
+        let tensor = Tensor::new(vec![0.0; 4097], vec![1, 1, 4097]).expect("tensor");
+        assert_eq!(tensor.to_string(), "Tensor(shape=[1, 1, 4097])");
+    }
+
+    #[test]
+    fn logical_nd_display_uses_headers_and_fallback_summary() {
+        let logical =
+            LogicalArray::new(vec![1, 0, 0, 1, 1, 0, 0, 1], vec![2, 2, 2]).expect("logical");
+        let rendered = logical.to_string();
+        assert!(rendered.contains("(:, :, 1) ="));
+        assert!(rendered.contains("(:, :, 2) ="));
+
+        let large = LogicalArray::new(vec![1; 4097], vec![1, 1, 4097]).expect("large logical");
+        assert_eq!(large.to_string(), "1x1x4097 logical array");
+    }
+
+    #[test]
+    fn complex_nd_display_uses_page_headers() {
+        let complex = ComplexTensor::new(
+            vec![(1.0, 0.0), (0.0, 1.0), (0.0, 0.0), (1.0, 0.0)],
+            vec![2, 1, 2],
+        )
+        .expect("complex");
+        let rendered = complex.to_string();
+        assert!(rendered.contains("(:, :, 1) ="));
+        assert!(rendered.contains("(:, :, 2) ="));
     }
 }
 
