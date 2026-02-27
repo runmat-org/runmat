@@ -11,6 +11,15 @@
           "paths": ["/a/:path*"]
         },
         {
+          "paths": ["/o/:path*"]
+        },
+        {
+          "paths": ["/p/:path*"]
+        },
+        {
+          "paths": ["/login"]
+        },
+        {
           "paths": ["/_p/:path*"]
         },
         {

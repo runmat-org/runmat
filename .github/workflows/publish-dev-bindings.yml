@@ -58,6 +58,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             pkg-config libssl-dev build-essential \
+            libopenblas-dev liblapack-dev libzmq3-dev \
             libgtk-3-0 libnss3 libx11-xcb1 libxcomposite1 \
             libxi6 libxdamage1 libxrandr2 libgdk-pixbuf2.0-0 libdrm2 libgbm1 \
             libpango-1.0-0 libcairo2 libatspi2.0-0 libxss1 libxfixes3 \
