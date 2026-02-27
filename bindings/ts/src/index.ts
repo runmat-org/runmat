@@ -496,6 +496,9 @@ export interface RunMatSessionHandle {
   clearWorkspace(): void;
   exportWorkspaceState(options?: { includeVariables?: "off" | "auto" | "force" }): Promise<Uint8Array | null>;
   importWorkspaceState(state: Uint8Array): Promise<boolean>;
+  exportFigureScene?(handle: number): Promise<Uint8Array | null>;
+  importFigureScene?(scene: Uint8Array): Promise<number | null>;
+  currentFigureHandle?(): Promise<number>;
   dispose(): void;
   telemetryConsent(): boolean;
   memoryUsage(): Promise<MemoryUsage>;
@@ -543,6 +546,9 @@ interface RunMatNativeSession {
   clearWorkspace(): void;
   exportWorkspaceState?: (includeVariables?: string) => Promise<Uint8Array | null>;
   importWorkspaceState?: (state: Uint8Array) => boolean;
+  exportFigureScene?: (handle: number) => Uint8Array | null;
+  importFigureScene?: (scene: Uint8Array) => number | null;
+  currentFigureHandle?: () => number;
   dispose?: () => void;
   telemetryConsent(): boolean;
   memoryUsage?: () => MemoryUsage;
@@ -1070,6 +1076,37 @@ class WebRunMatSession implements RunMatSessionHandle {
     } catch {
       return false;
     }
+  }
+
+  async exportFigureScene(handle: number): Promise<Uint8Array | null> {
+    this.ensureActive();
+    if (typeof this.native.exportFigureScene !== "function") {
+      return null;
+    }
+    try {
+      return this.native.exportFigureScene(handle) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async importFigureScene(scene: Uint8Array): Promise<number | null> {
+    this.ensureActive();
+    if (typeof this.native.importFigureScene !== "function") {
+      return null;
+    }
+    try {
+      const handle = this.native.importFigureScene(scene);
+      return typeof handle === "number" ? handle : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async currentFigureHandle(): Promise<number> {
+    this.ensureActive();
+    requireNativeFunction(this.native, "currentFigureHandle");
+    return this.native.currentFigureHandle();
   }
 
   dispose(): void {

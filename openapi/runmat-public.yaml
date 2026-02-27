@@ -1664,6 +1664,25 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/FsHistoryEntryResponse'
+    FsHistoryEntryResponse:
+      type: object
+      required:
+      - id
+      - path
+      - size
+      - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        path:
+          type: string
+        size:
+          type: integer
+          format: int64
+        createdAt:
+          type: string
+          format: date-time
     FsHistoryRestoreRequest:
       type: object
       required:
