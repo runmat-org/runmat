@@ -148,8 +148,9 @@ pub fn infer_range_shape(
             Some(vec![Some(1), Some(len)])
         }
         (Some(s), None, Some(e)) => {
-            let step = if e >= s { 1.0 } else { -1.0 };
-            let len = range_len(s, step, e)?;
+            // Implicit two-argument colon always uses a +1 increment. If the end
+            // lies "behind" the start, MATLAB returns an empty row vector.
+            let len = range_len(s, 1.0, e)?;
             Some(vec![Some(1), Some(len)])
         }
         _ => None,
@@ -518,6 +519,18 @@ mod tests {
     fn broadcast_shapes_aligns_trailing_dims() {
         let out = broadcast_shapes(&[Some(1), Some(3)], &[Some(2), Some(1)]);
         assert_eq!(out, vec![Some(2), Some(3)]);
+    }
+
+    #[test]
+    fn infer_range_shape_two_arg_descending_is_empty() {
+        let shape = infer_range_shape(Some(5.0), None, Some(1.0)).expect("shape");
+        assert_eq!(shape, vec![Some(1), Some(0)]);
+    }
+
+    #[test]
+    fn infer_range_shape_three_arg_descending_respects_step() {
+        let shape = infer_range_shape(Some(5.0), Some(-1.0), Some(1.0)).expect("shape");
+        assert_eq!(shape, vec![Some(1), Some(5)]);
     }
 
     #[test]

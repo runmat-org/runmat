@@ -1183,6 +1183,7 @@ runmat_thread_local! {
 struct WorkspaceState {
     names: HashMap<String, usize>,
     assigned: HashSet<String>,
+    idx_to_name: HashMap<usize, String>,
     data_ptr: *const Value,
     len: usize,
 }
@@ -1219,10 +1220,12 @@ fn set_workspace_state(
     assigned: HashSet<String>,
     vars: &mut Vec<Value>,
 ) -> WorkspaceStateGuard {
+    let idx_to_name: HashMap<usize, String> = names.iter().map(|(k, &v)| (v, k.clone())).collect();
     WORKSPACE_STATE.with(|state| {
         *state.borrow_mut() = Some(WorkspaceState {
             names,
             assigned,
+            idx_to_name,
             data_ptr: vars.as_ptr(),
             len: vars.len(),
         });
@@ -2134,6 +2137,13 @@ async fn run_interpreter_inner(
                     refresh_workspace_state(&vars);
                 }
                 vars[i] = val;
+                WORKSPACE_STATE.with(|state| {
+                    if let Some(ws) = state.borrow_mut().as_mut() {
+                        if let Some(name) = ws.idx_to_name.get(&i) {
+                            ws.assigned.insert(name.clone());
+                        }
+                    }
+                });
                 // If this var is declared global, update the global table entry
                 // We optimistically write-through whenever StoreVar happens and a global exists for this name
                 let key = format!("var_{i}");
@@ -9713,6 +9723,24 @@ async fn run_interpreter_inner(
                             .map_err(|e| format!("cell field gather: {e}"))?;
                         stack.push(Value::Cell(new_cell));
                     }
+                    Value::MException(mex) => {
+                        let value = match field.as_str() {
+                            "identifier" => Value::String(mex.identifier.clone()),
+                            "message" => Value::String(mex.message.clone()),
+                            "stack" => {
+                                let values: Vec<Value> =
+                                    mex.stack.iter().map(|s| Value::String(s.clone())).collect();
+                                let rows = values.len();
+                                let cell = runmat_builtins::CellArray::new(values, rows, 1)
+                                    .map_err(|e| format!("MException.stack: {e}"))?;
+                                Value::Cell(cell)
+                            }
+                            other => {
+                                vm_bail!(format!("Reference to non-existent field '{}'.", other))
+                            }
+                        };
+                        stack.push(value);
+                    }
                     _ => vm_bail!("LoadMember on non-object".to_string()),
                 }
             }
@@ -9785,6 +9813,24 @@ async fn run_interpreter_inner(
                         } else {
                             vm_bail!(format!("Undefined field '{}'", name));
                         }
+                    }
+                    Value::MException(mex) => {
+                        let value = match name.as_str() {
+                            "identifier" => Value::String(mex.identifier.clone()),
+                            "message" => Value::String(mex.message.clone()),
+                            "stack" => {
+                                let values: Vec<Value> =
+                                    mex.stack.iter().map(|s| Value::String(s.clone())).collect();
+                                let rows = values.len();
+                                let cell = runmat_builtins::CellArray::new(values, rows, 1)
+                                    .map_err(|e| format!("MException.stack: {e}"))?;
+                                Value::Cell(cell)
+                            }
+                            other => {
+                                vm_bail!(format!("Reference to non-existent field '{}'.", other))
+                            }
+                        };
+                        stack.push(value);
                     }
                     _ => vm_bail!("LoadMemberDynamic on non-struct/object".to_string()),
                 }

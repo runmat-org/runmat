@@ -47,31 +47,31 @@
   "examples": [
     {
       "description": "Load the entire file into the workspace",
-      "input": "load('results.mat');\ndisp(norm(weights))"
+      "input": "weights = [0.5, 1.0, 1.5];\nsave('results.mat', 'weights');\nload('results.mat');\ndisp(norm(weights))"
     },
     {
       "description": "Load a subset of variables by name",
-      "input": "load('sim_state.mat', 'state', 'time');\nplot(time, state)"
+      "input": "time = 0:0.25:1;\nstate = [0, 0.5, 0.8, 0.6, 0.3];\nsave('sim_state.mat', 'time', 'state');\nload('sim_state.mat', 'state', 'time');\nplot(time, state)"
     },
     {
       "description": "Load variables using regular expressions",
-      "input": "load('checkpoint.mat', '-regexp', '^layer_\\\\d+$')"
+      "input": "layer_1 = ones(4, 4);\nlayer_2 = ones(8, 8);\nsave('checkpoint.mat', 'layer_1', 'layer_2');\nload('checkpoint.mat', '-regexp', '^layer_\\d+$')"
     },
     {
       "description": "Capture loaded variables in a struct without altering the workspace",
-      "input": "S = load('snapshot.mat');\ndisp(fieldnames(S))"
+      "input": "x = 3.14;\ny = 2.72;\nsave('snapshot.mat', 'x', 'y');\nS = load('snapshot.mat');\ndisp(fieldnames(S))"
     },
     {
       "description": "Combine explicit names and regex filters",
-      "input": "model = load('model.mat', 'config', '-regexp', '^weights_(conv|fc)')"
+      "input": "config = struct('lr', 0.01);\nweights_conv = randn(3, 3);\nweights_fc = randn(4, 2);\nsave('model.mat', 'config', 'weights_conv', 'weights_fc');\nmodel = load('model.mat', 'config', '-regexp', '^weights_(conv|fc)')"
     },
     {
       "description": "Honour a custom default filename",
-      "input": "setenv('RUNMAT_LOAD_DEFAULT_PATH', fullfile(tempdir, 'autosave.mat'));\nload()"
+      "input": "x = 0;\nsave(fullfile(tempdir, 'autosave.mat'), 'x');\nsetenv('RUNMAT_LOAD_DEFAULT_PATH', fullfile(tempdir, 'autosave.mat'));\nload()"
     },
     {
       "description": "Load character and string data",
-      "input": "values = load('strings.mat', 'labels');\ndisp(values.labels(1))"
+      "input": "labels = 'hello';\nsave('strings.mat', 'labels');\nvalues = load('strings.mat', 'labels');\ndisp(values.labels)"
     }
   ],
   "faqs": [

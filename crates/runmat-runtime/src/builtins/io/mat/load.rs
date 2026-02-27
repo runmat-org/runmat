@@ -60,18 +60,28 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn load_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let eval = evaluate(&args).await?;
-    if let Some(out_count) = crate::output_count::current_output_count() {
-        if out_count == 0 {
-            for (name, value) in eval.variables() {
-                crate::workspace::assign(name, value.clone()).map_err(|err| load_error(err))?;
-            }
-            return Ok(Value::OutputList(Vec::new()));
-        }
-        if out_count > 1 {
+
+    // current_output_count() is set by the dispatcher only for multi-output Unpack patterns
+    // like `[a, b] = load(...)`. Guard against requesting more than one struct output.
+    if let Some(n) = crate::output_count::current_output_count() {
+        if n > 1 {
             return Err(load_error("load supports at most one output argument"));
         }
-        return Ok(Value::OutputList(vec![eval.first_output()]));
     }
+
+    // The VM sets output_context::requested_output_count() at every call site before
+    // dispatching:
+    //   Some(0) → statement-level call (result is discarded or printed without capture)
+    //             → assign loaded variables directly into the caller's workspace.
+    //   Some(1) → single-output assignment `S = load(...)` → return a struct.
+    //   None    → called outside the VM (e.g. directly from Rust) → return a struct.
+    if crate::output_context::requested_output_count() == Some(0) {
+        for (name, value) in eval.variables() {
+            crate::workspace::assign(name, value.clone()).map_err(|err| load_error(err))?;
+        }
+        return Ok(Value::OutputList(Vec::new()));
+    }
+
     Ok(eval.first_output())
 }
 
