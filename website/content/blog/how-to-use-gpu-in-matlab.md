@@ -148,6 +148,13 @@ If you have an NVIDIA GPU and MATLAB code that operates on large arrays, GPU acc
 
 We'll cover prerequisites, your first GPU computation, which functions support GPU, common performance traps, and how to verify everything is working. If you're looking for GPU acceleration that works on any hardware — not just NVIDIA — without manual device management, skip ahead to [the RunMat section](#beyond-nvidia-gpu-acceleration-on-any-hardware).
 
+## TL;DR
+
+- MATLAB GPU acceleration requires the **Parallel Computing Toolbox** and a **CUDA-capable NVIDIA GPU**.
+- The core performance pattern is: **`gpuArray` once -> run vectorized GPU-enabled operations -> `gather` once**.
+- Most slowdowns come from small arrays, too many tiny kernels, and frequent CPU↔GPU transfers.
+- Start with `single` precision unless your numerics require `double`.
+- If you want automatic CPU/GPU routing without manual device management, RunMat is a cross-platform alternative.
 ---
 
 ## **Prerequisites: what you need for MATLAB GPU acceleration**
