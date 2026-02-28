@@ -666,6 +666,14 @@ pub async fn global() -> Option<&'static NativeAutoOffload> {
     if let Some(existing) = GLOBAL.get() {
         return existing.as_ref();
     }
+    // If auto-offload is disabled or there is no GPU provider registered,
+    // initialize_async() would return None immediately (no I/O, no blocking).
+    // Resolve without acquiring the async lock so single-poll callers (e.g.
+    // the turbine JIT interpreter fallback) never observe a spurious Pending.
+    if !auto_enabled() || runmat_accelerate_api::provider().is_none() {
+        let _ = GLOBAL.set(None);
+        return GLOBAL.get().and_then(|v| v.as_ref());
+    }
     let _guard = GLOBAL_INIT_LOCK.lock().await;
     if let Some(existing) = GLOBAL.get() {
         return existing.as_ref();
