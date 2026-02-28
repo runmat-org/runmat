@@ -494,6 +494,11 @@ export interface RunMatSessionHandle {
   resetSession(): Promise<void>;
   stats(): Promise<SessionStats>;
   clearWorkspace(): void;
+  exportWorkspaceState(options?: { includeVariables?: "off" | "auto" | "force" }): Promise<Uint8Array | null>;
+  importWorkspaceState(state: Uint8Array): Promise<boolean>;
+  exportFigureScene?(handle: number): Promise<Uint8Array | null>;
+  importFigureScene?(scene: Uint8Array): Promise<number | null>;
+  currentFigureHandle?(): Promise<number>;
   dispose(): void;
   telemetryConsent(): boolean;
   memoryUsage(): Promise<MemoryUsage>;
@@ -539,6 +544,11 @@ interface RunMatNativeSession {
   resetSession(): void;
   stats(): SessionStats;
   clearWorkspace(): void;
+  exportWorkspaceState?: (includeVariables?: string) => Promise<Uint8Array | null>;
+  importWorkspaceState?: (state: Uint8Array) => boolean;
+  exportFigureScene?: (handle: number) => Uint8Array | null;
+  importFigureScene?: (scene: Uint8Array) => number | null;
+  currentFigureHandle?: () => number;
   dispose?: () => void;
   telemetryConsent(): boolean;
   memoryUsage?: () => MemoryUsage;
@@ -583,15 +593,25 @@ interface RunMatNativeModule {
   deregisterFigureCanvas?: (handle: number) => void;
   plotRendererReady?: () => boolean;
   renderCurrentFigureScene?: (handle: number) => void;
+  exportFigureScene?: (handle: number) => Uint8Array | null;
+  importFigureScene?: (scene: Uint8Array) => number | null;
+  exportWorkspaceState?: (includeVariables?: string) => Promise<Uint8Array | null>;
+  importWorkspaceState?: (state: Uint8Array) => boolean;
   createPlotSurface?: (canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<number>;
   destroyPlotSurface?: (surfaceId: number) => void;
-  resizePlotSurface?: (surfaceId: number, width: number, height: number) => void;
+  resizePlotSurface?: (
+    surfaceId: number,
+    width: number,
+    height: number,
+    pixelsPerPoint?: number
+  ) => void;
   bindSurfaceToFigure?: (surfaceId: number, handle: number) => void;
   presentSurface?: (surfaceId: number) => void;
   presentFigureOnSurface?: (surfaceId: number, handle: number) => void;
   handlePlotSurfaceEvent?: (surfaceId: number, event: PlotSurfaceEvent) => void;
   fitPlotSurfaceExtents?: (surfaceId: number) => void;
   resetPlotSurfaceCamera?: (surfaceId: number) => void;
+  setPlotThemeConfig?: (theme: unknown) => void;
   onFigureEvent?: (callback: ((event: FigureEvent) => void) | null) => void;
   newFigureHandle?: () => number;
   selectFigure?: (handle: number) => void;
@@ -743,10 +763,15 @@ export async function destroyPlotSurface(surfaceId: number): Promise<void> {
   native.destroyPlotSurface(surfaceId);
 }
 
-export async function resizePlotSurface(surfaceId: number, widthPx: number, heightPx: number): Promise<void> {
+export async function resizePlotSurface(
+  surfaceId: number,
+  widthPx: number,
+  heightPx: number,
+  pixelsPerPoint?: number
+): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "resizePlotSurface");
-  native.resizePlotSurface(surfaceId, widthPx, heightPx);
+  native.resizePlotSurface(surfaceId, widthPx, heightPx, pixelsPerPoint);
 }
 
 export async function bindSurfaceToFigure(surfaceId: number, handle: number): Promise<void> {
@@ -789,6 +814,12 @@ export async function resetPlotSurfaceCamera(surfaceId: number): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "resetPlotSurfaceCamera");
   native.resetPlotSurfaceCamera(surfaceId);
+}
+
+export async function setPlotThemeConfig(theme: unknown): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "setPlotThemeConfig");
+  native.setPlotThemeConfig(theme);
 }
 
 export async function onFigureEvent(listener: FigureEventListener | null): Promise<void> {
@@ -937,6 +968,59 @@ export async function renderFigureImage(options: FigureImageOptions = {}): Promi
   }
 }
 
+export async function exportFigureScene(handle: number): Promise<Uint8Array | null> {
+  const native = await loadNativeModule();
+  if (typeof native.exportFigureScene !== "function") {
+    return null;
+  }
+  try {
+    const scene = native.exportFigureScene(handle);
+    if (!scene) {
+      return null;
+    }
+    return scene instanceof Uint8Array ? scene : new Uint8Array(scene);
+  } catch (error) {
+    throw coerceFigureError(error);
+  }
+}
+
+export async function importFigureScene(scene: Uint8Array): Promise<number | null> {
+  const native = await loadNativeModule();
+  if (typeof native.importFigureScene !== "function") {
+    return null;
+  }
+  try {
+    const handle = native.importFigureScene(scene);
+    return typeof handle === "number" ? handle : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function exportWorkspaceState(options: {
+  includeVariables?: "off" | "auto" | "force";
+} = {}): Promise<Uint8Array | null> {
+  const native = await loadNativeModule();
+  if (typeof native.exportWorkspaceState !== "function") {
+    return null;
+  }
+  const mode = options.includeVariables ?? "auto";
+  const state = await native.exportWorkspaceState(mode);
+  return state ?? null;
+}
+
+export async function importWorkspaceState(state: Uint8Array): Promise<boolean> {
+  const native = await loadNativeModule();
+  if (typeof native.importWorkspaceState !== "function") {
+    return false;
+  }
+  try {
+    return native.importWorkspaceState(state) === true;
+  } catch {
+    return false;
+  }
+}
+
 class WebRunMatSession implements RunMatSessionHandle {
   private disposed = false;
 
@@ -970,6 +1054,59 @@ class WebRunMatSession implements RunMatSessionHandle {
   clearWorkspace(): void {
     this.ensureActive();
     this.native.clearWorkspace();
+  }
+
+  async exportWorkspaceState(options: { includeVariables?: "off" | "auto" | "force" } = {}): Promise<Uint8Array | null> {
+    this.ensureActive();
+    if (typeof this.native.exportWorkspaceState !== "function") {
+      return null;
+    }
+    const mode = options.includeVariables ?? "auto";
+    const state = await this.native.exportWorkspaceState(mode);
+    return state ?? null;
+  }
+
+  async importWorkspaceState(state: Uint8Array): Promise<boolean> {
+    this.ensureActive();
+    if (typeof this.native.importWorkspaceState !== "function") {
+      return false;
+    }
+    try {
+      return this.native.importWorkspaceState(state) === true;
+    } catch {
+      return false;
+    }
+  }
+
+  async exportFigureScene(handle: number): Promise<Uint8Array | null> {
+    this.ensureActive();
+    if (typeof this.native.exportFigureScene !== "function") {
+      return null;
+    }
+    try {
+      return this.native.exportFigureScene(handle) ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  async importFigureScene(scene: Uint8Array): Promise<number | null> {
+    this.ensureActive();
+    if (typeof this.native.importFigureScene !== "function") {
+      return null;
+    }
+    try {
+      const handle = this.native.importFigureScene(scene);
+      return typeof handle === "number" ? handle : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async currentFigureHandle(): Promise<number> {
+    this.ensureActive();
+    requireNativeFunction(this.native, "currentFigureHandle");
+    return this.native.currentFigureHandle();
   }
 
   dispose(): void {

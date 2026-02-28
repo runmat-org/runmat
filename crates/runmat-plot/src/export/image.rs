@@ -127,6 +127,11 @@ impl ImageExporter {
         self.encode_png_bytes(&pixels)
     }
 
+    /// Render figure into raw RGBA8 bytes.
+    pub async fn render_rgba_bytes(&self, figure: &mut Figure) -> Result<Vec<u8>, String> {
+        self.render_rgba(figure, None).await
+    }
+
     /// Render figure into a PNG buffer using an explicit camera override.
     pub async fn render_png_bytes_with_camera(
         &self,
@@ -135,6 +140,15 @@ impl ImageExporter {
     ) -> Result<Vec<u8>, String> {
         let pixels = self.render_rgba(figure, Some(camera)).await?;
         self.encode_png_bytes(&pixels)
+    }
+
+    /// Render figure into raw RGBA8 bytes using an explicit camera override.
+    pub async fn render_rgba_bytes_with_camera(
+        &self,
+        figure: &mut Figure,
+        camera: &Camera,
+    ) -> Result<Vec<u8>, String> {
+        self.render_rgba(figure, Some(camera)).await
     }
 
     /// Render figure into a PNG buffer using per-axes camera overrides.
@@ -147,6 +161,16 @@ impl ImageExporter {
             .render_rgba_with_axes_cameras(figure, axes_cameras)
             .await?;
         self.encode_png_bytes(&pixels)
+    }
+
+    /// Render figure into raw RGBA8 bytes using per-axes camera overrides.
+    pub async fn render_rgba_bytes_with_axes_cameras(
+        &self,
+        figure: &mut Figure,
+        axes_cameras: &[Camera],
+    ) -> Result<Vec<u8>, String> {
+        self.render_rgba_with_axes_cameras(figure, axes_cameras)
+            .await
     }
 
     async fn render_rgba(
@@ -303,7 +327,7 @@ impl ImageExporter {
                 }
             }
             plot_renderer
-                .render_axes_to_viewports(&mut encoder, &color_view, &viewports, 1)
+                .render_axes_to_viewports(&mut encoder, &color_view, &viewports, 1, &cfg)
                 .map_err(|e| format!("render subplot failed: {e}"))?;
         } else {
             let viewport = (0u32, 0u32, self.settings.width, self.settings.height);

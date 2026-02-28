@@ -105,3 +105,35 @@ fn empty_slice_rows_and_columns() {
         panic!("Expected tensor for empty column slice");
     }
 }
+
+#[test]
+fn linear_index_preserves_numeric_index_shape() {
+    let program = parse(
+        "
+        A = reshape(1:9, 3, 3);
+        rowIdx = [1 3 5];
+        colIdx = [1; 3; 5];
+        R = A(rowIdx);
+        C = A(colIdx);
+        ",
+    )
+    .unwrap();
+    let hir = lower(&program).unwrap();
+    let vars = execute(&hir).unwrap();
+
+    if let Value::Tensor(r) = &vars[3] {
+        assert_eq!(r.rows(), 1);
+        assert_eq!(r.cols(), 3);
+        assert_eq!(r.data, vec![1.0, 3.0, 5.0]);
+    } else {
+        panic!("Expected tensor for row-shaped linear index");
+    }
+
+    if let Value::Tensor(c) = &vars[4] {
+        assert_eq!(c.rows(), 3);
+        assert_eq!(c.cols(), 1);
+        assert_eq!(c.data, vec![1.0, 3.0, 5.0]);
+    } else {
+        panic!("Expected tensor for column-shaped linear index");
+    }
+}

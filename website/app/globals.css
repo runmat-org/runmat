@@ -1,4 +1,8 @@
 @import "tailwindcss";
+
+/* Use class-based dark mode so theme toggle (next-themes) controls dark: styles, not OS preference */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @import "prismjs/themes/prism-okaidia.css";
 
 @layer base {
@@ -53,7 +57,7 @@
 @layer base {
   html {
     scroll-behavior: smooth;
-    overflow-x: hidden;
+    overflow-x: clip;
     width: 100%;
   }
   * {
@@ -62,7 +66,7 @@
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
-    overflow-x: hidden;
+    overflow-x: clip;
     width: 100%;
     word-wrap: break-word;
     overflow-wrap: break-word;
@@ -138,6 +142,8 @@
     border: 1px solid hsl(var(--border));
     background-color: hsl(var(--code-surface));
     box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
   }
 
   .dark .markdown-pre {
@@ -154,6 +160,7 @@
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
+    min-width: max-content;
   }
 
   @media (max-width: 640px) {
@@ -235,51 +242,74 @@
     }
   }
 
+  /* Home page static depth (no animation); brand palette, runs full page height */
+  .home-page-depth {
+    background:
+      radial-gradient(1200px 600px at 15% 8%, rgba(62, 167, 253, 0.07), transparent 60%),
+      radial-gradient(1000px 520px at 85% 12%, rgba(187, 81, 255, 0.07), transparent 62%),
+      radial-gradient(1100px 550px at 15% 28%, rgba(62, 167, 253, 0.05), transparent 58%),
+      radial-gradient(900px 480px at 85% 32%, rgba(187, 81, 255, 0.05), transparent 60%),
+      radial-gradient(1000px 500px at 15% 52%, rgba(62, 167, 253, 0.04), transparent 56%),
+      radial-gradient(800px 440px at 85% 56%, rgba(187, 81, 255, 0.04), transparent 58%),
+      radial-gradient(1100px 550px at 15% 76%, rgba(62, 167, 253, 0.04), transparent 58%),
+      radial-gradient(900px 480px at 85% 80%, rgba(187, 81, 255, 0.04), transparent 60%),
+      radial-gradient(1000px 500px at 15% 98%, rgba(62, 167, 253, 0.03), transparent 55%),
+      radial-gradient(800px 440px at 85% 98%, rgba(187, 81, 255, 0.03), transparent 55%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
+  }
+  .dark .home-page-depth {
+    background:
+      radial-gradient(1200px 600px at 15% 8%, rgba(62, 167, 253, 0.09), transparent 60%),
+      radial-gradient(1000px 520px at 85% 12%, rgba(187, 81, 255, 0.09), transparent 62%),
+      radial-gradient(1100px 550px at 15% 28%, rgba(62, 167, 253, 0.06), transparent 58%),
+      radial-gradient(900px 480px at 85% 32%, rgba(187, 81, 255, 0.06), transparent 60%),
+      radial-gradient(1000px 500px at 15% 52%, rgba(62, 167, 253, 0.05), transparent 56%),
+      radial-gradient(800px 440px at 85% 56%, rgba(187, 81, 255, 0.05), transparent 58%),
+      radial-gradient(1100px 550px at 15% 76%, rgba(62, 167, 253, 0.05), transparent 58%),
+      radial-gradient(900px 480px at 85% 80%, rgba(187, 81, 255, 0.05), transparent 60%),
+      radial-gradient(1000px 500px at 15% 98%, rgba(62, 167, 253, 0.04), transparent 55%),
+      radial-gradient(800px 440px at 85% 98%, rgba(187, 81, 255, 0.04), transparent 55%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent);
+  }
+  .elevated-panel {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+  }
+  .dark .elevated-panel {
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
+    box-shadow: 0 14px 35px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.08);
+  }
+  .hero-depth-veil {
+    background: linear-gradient(180deg, hsl(var(--background) / 0.35), hsl(var(--background) / 0.12), hsl(var(--background) / 0.35));
+  }
+
   /* Tables: wrap header row and first column, keep table width */
   .table-mobile-wrap {
     table-layout: auto;
     width: 100%;
     max-width: 100%;
-  }
-  /* First column: allow aggressive wrapping to avoid overflow */
-  .table-mobile-wrap td:first-child {
-    white-space: normal;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-    max-width: 0;
-  }
-  /* Body cells: allow wrapping to keep table within container */
-  .table-mobile-wrap td {
-    white-space: normal;
-    overflow-wrap: anywhere;
-    word-break: break-word;
-    max-width: 0;
+    border-collapse: separate;
   }
   /* Header cells: allow wrapping on mobile */
+  .table-mobile-wrap td,
   .table-mobile-wrap th {
     white-space: normal;
-    overflow-wrap: anywhere;
+    overflow-wrap: break-word;
     word-break: break-word;
-    hyphens: auto;
+    min-width: 10rem;
+  }
+  .table-mobile-wrap td:first-child,
+  .table-mobile-wrap th:first-child {
+    min-width: 12rem;
   }
   @media (min-width: 640px) {
+    .table-mobile-wrap td,
     .table-mobile-wrap th {
       overflow-wrap: normal;
       word-break: normal;
-      hyphens: none;
     }
-    .table-mobile-wrap th:not(:first-child) {
-      width: min-content;
-    }
-  }
-  /* Ensure table shrinks to container without forcing equal columns */
-  .table-mobile-wrap {
-    border-collapse: separate; /* allow cell widths to adapt naturally */
-  }
-  /* Allow first column to take remaining space */
-  .table-mobile-wrap td:first-child,
-  .table-mobile-wrap th:first-child {
-    width: auto;
   }
 
   /* reactbits RotatingText base styles */
@@ -331,110 +361,56 @@
   background: hsl(var(--code-surface));
 }
 
-/* Light mode: Prism token overrides for readable MATLAB/code blocks on light code-surface (WCAG-friendly). */
-/* Exclude .code-block-dark-bg so hero/dark code cards keep Okaidia. */
-/* Test: switch theme to light and check /blog, /docs/getting-started, /download; Windows: font stack uses Consolas. */
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) code {
-  color: hsl(var(--foreground));
-}
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.comment,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.prolog,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.doctype,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.cdata {
-  color: #6b7280;
-}
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.punctuation {
-  color: #374151;
-}
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.property,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.tag,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.constant,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.symbol,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.deleted {
-  color: #b91c1c;
-}
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.boolean,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.number {
-  color: #7c3aed;
-}
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.selector,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.attr-name,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.string,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.char,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.builtin,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.inserted {
-  color: #15803d;
-}
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.operator,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.entity,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.url,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .language-css .token.string,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .style .token.string,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.variable {
-  color: #1f2937;
-}
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.atrule,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.attr-value,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.function,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.class-name {
-  color: #b45309;
-}
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.keyword {
-  color: #0369a1;
-}
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.regex,
-html:not(.dark) .markdown-pre:not(.code-block-dark-bg) .token.important {
-  color: #c2410c;
+/* WCAG-friendly Prism colors for light mode on near-white code surfaces. */
+html:not(.dark) :not(pre) > code[class*="language-"],
+html:not(.dark) pre[class*="language-"],
+html:not(.dark) code[class*="language-"] {
+  color: #111827;
+  text-shadow: none;
 }
 
-/* How-it-works code blocks: high-contrast tokens in dark mode so code is readable on dark surface */
-.dark .how-it-works-code .markdown-pre code {
-  color: #e5e7eb;
+html:not(.dark) .token.comment,
+html:not(.dark) .token.prolog,
+html:not(.dark) .token.doctype,
+html:not(.dark) .token.cdata {
+  color: #4b5563;
 }
-.dark .how-it-works-code .token.comment,
-.dark .how-it-works-code .token.prolog,
-.dark .how-it-works-code .token.doctype,
-.dark .how-it-works-code .token.cdata {
-  color: #9ca3af;
+
+html:not(.dark) .token.punctuation,
+html:not(.dark) .token.operator,
+html:not(.dark) .token.entity,
+html:not(.dark) .token.url {
+  color: #374151;
 }
-.dark .how-it-works-code .token.punctuation {
-  color: #e5e7eb;
+
+html:not(.dark) .token.keyword,
+html:not(.dark) .token.atrule,
+html:not(.dark) .token.important {
+  color: #1d4ed8;
 }
-.dark .how-it-works-code .token.property,
-.dark .how-it-works-code .token.tag,
-.dark .how-it-works-code .token.constant,
-.dark .how-it-works-code .token.symbol,
-.dark .how-it-works-code .token.deleted {
-  color: #f87171;
+
+html:not(.dark) .token.function,
+html:not(.dark) .token.class-name,
+html:not(.dark) .token.builtin {
+  color: #7c3aed;
 }
-.dark .how-it-works-code .token.boolean,
-.dark .how-it-works-code .token.number {
-  color: #fcd34d;
+
+html:not(.dark) .token.string,
+html:not(.dark) .token.char,
+html:not(.dark) .token.attr-value,
+html:not(.dark) .token.inserted {
+  color: #166534;
 }
-.dark .how-it-works-code .token.selector,
-.dark .how-it-works-code .token.attr-name,
-.dark .how-it-works-code .token.string,
-.dark .how-it-works-code .token.char,
-.dark .how-it-works-code .token.builtin,
-.dark .how-it-works-code .token.inserted {
-  color: #86efac;
+
+html:not(.dark) .token.number,
+html:not(.dark) .token.boolean,
+html:not(.dark) .token.constant,
+html:not(.dark) .token.symbol {
+  color: #b45309;
 }
-.dark .how-it-works-code .token.operator,
-.dark .how-it-works-code .token.entity,
-.dark .how-it-works-code .token.url,
-.dark .how-it-works-code .token.variable {
-  color: #e5e7eb;
-}
-.dark .how-it-works-code .token.atrule,
-.dark .how-it-works-code .token.attr-value,
-.dark .how-it-works-code .token.function,
-.dark .how-it-works-code .token.class-name {
-  color: #fcd34d;
-}
-.dark .how-it-works-code .token.keyword {
-  color: #93c5fd;
-}
-.dark .how-it-works-code .token.regex,
-.dark .how-it-works-code .token.important {
-  color: #fdba74;
+
+html:not(.dark) .token.regex,
+html:not(.dark) .token.variable,
+html:not(.dark) .token.selector {
+  color: #be123c;
 }

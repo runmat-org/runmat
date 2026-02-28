@@ -717,6 +717,24 @@ pub fn clone_figure(handle: FigureHandle) -> Option<Figure> {
     reg.figures.get(&handle).map(|state| state.figure.clone())
 }
 
+pub fn import_figure(figure: Figure) -> FigureHandle {
+    let mut reg = registry();
+    let handle = reg.next_handle;
+    reg.next_handle = reg.next_handle.next();
+    reg.current = handle;
+    let figure_clone = figure.clone();
+    reg.figures.insert(
+        handle,
+        FigureState {
+            figure,
+            ..FigureState::new(handle)
+        },
+    );
+    drop(reg);
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Created);
+    handle
+}
+
 pub fn clear_figure(target: Option<FigureHandle>) -> Result<FigureHandle, FigureError> {
     let mut reg = registry();
     let handle = target.unwrap_or(reg.current);
@@ -833,6 +851,7 @@ where
     F: FnMut(&mut Figure, usize) -> BuiltinResult<()>,
 {
     let rendering_disabled = interactive_rendering_disabled();
+    let host_managed_rendering = host_managed_rendering_enabled();
     let (handle, figure_clone) = {
         let mut reg = registry();
         let handle = reg.current;
@@ -863,7 +882,14 @@ where
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 
     if rendering_disabled {
+        if host_managed_rendering {
+            return Ok(format!("Figure {} updated", handle.as_u32()));
+        }
         return Err(plotting_error(builtin, ERR_PLOTTING_UNAVAILABLE));
+    }
+
+    if host_managed_rendering {
+        return Ok(format!("Figure {} updated", handle.as_u32()));
     }
 
     // On Web/WASM we deliberately decouple "mutate figure state" from "present pixels".
@@ -894,6 +920,10 @@ pub fn current_figure_revision(handle: FigureHandle) -> Option<u64> {
 
 fn interactive_rendering_disabled() -> bool {
     std::env::var_os("RUNMAT_DISABLE_INTERACTIVE_PLOTS").is_some()
+}
+
+fn host_managed_rendering_enabled() -> bool {
+    std::env::var_os("RUNMAT_HOST_MANAGED_PLOTS").is_some()
 }
 
 #[cfg(test)]

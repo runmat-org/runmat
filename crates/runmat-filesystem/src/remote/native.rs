@@ -5,6 +5,8 @@ use once_cell::sync::Lazy;
 use reqwest::blocking::{Client, Response};
 use reqwest::StatusCode;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 use std::collections::VecDeque;
 use std::fmt;
 use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
@@ -306,6 +308,62 @@ impl RemoteInner {
         )
     }
 
+    fn upload_session_start(
+        &self,
+        path: &str,
+        size_bytes: u64,
+        content_sha256: &str,
+    ) -> io::Result<UploadSessionStartResponse> {
+        self.post_json(
+            "/fs/upload-session/start",
+            &UploadSessionStartRequest {
+                path: path.to_string(),
+                size_bytes: size_bytes as i64,
+                content_type: None,
+                content_sha256: content_sha256.to_string(),
+            },
+        )
+    }
+
+    fn upload_session_chunks(
+        &self,
+        session_id: &str,
+        blob_key: &str,
+        chunks: &[UploadSessionChunkDescriptor],
+    ) -> io::Result<UploadSessionChunksResponse> {
+        self.post_json(
+            "/fs/upload-session/chunks",
+            &UploadSessionChunksRequest {
+                session_id: session_id.to_string(),
+                blob_key: blob_key.to_string(),
+                chunks: chunks.to_vec(),
+            },
+        )
+    }
+
+    fn upload_session_complete(
+        &self,
+        path: &str,
+        session_id: &str,
+        blob_key: &str,
+        size_bytes: u64,
+        content_sha256: &str,
+        chunk_count: usize,
+    ) -> io::Result<()> {
+        self.post_empty(
+            "/fs/upload-session/complete",
+            &UploadSessionCompleteRequest {
+                path: path.to_string(),
+                session_id: session_id.to_string(),
+                blob_key: blob_key.to_string(),
+                size_bytes: size_bytes as i64,
+                content_sha256: content_sha256.to_string(),
+                chunk_count,
+                hash: None,
+            },
+        )
+    }
+
     fn multipart_presign_part(
         &self,
         session_id: &str,
@@ -368,6 +426,28 @@ impl RemoteInner {
             .unwrap_or("")
             .to_string();
         Ok(etag)
+    }
+
+    fn put_upload_target(
+        &self,
+        method: &str,
+        url: &str,
+        headers: &HashMap<String, String>,
+        data: &[u8],
+    ) -> io::Result<()> {
+        let method = reqwest::Method::from_bytes(method.as_bytes()).map_err(|err| {
+            io::Error::new(
+                ErrorKind::InvalidInput,
+                format!("invalid upload method `{method}`: {err}"),
+            )
+        })?;
+        let mut request = self.client.request(method, url).body(data.to_vec());
+        for (name, value) in headers {
+            request = request.header(name, value);
+        }
+        let resp = request.send().map_err(map_http_err)?;
+        handle_error(resp)?;
+        Ok(())
     }
 
     fn fetch_metadata(&self, path: &str) -> io::Result<MetadataResponse> {
@@ -651,6 +731,110 @@ impl RemoteFsProvider {
             self.inner.upload_chunk(path, 0, true, true, data, None)?;
             return Ok(());
         }
+        let content_sha256 = sha256_hex(data);
+        let session =
+            match self
+                .inner
+                .upload_session_start(path, data.len() as u64, &content_sha256)
+            {
+                Ok(session) => session,
+                Err(err) if err.kind() == ErrorKind::NotFound => {
+                    return self.upload_multipart_file_legacy(path, data);
+                }
+                Err(err) => return Err(err),
+            };
+        let chunk_size = (session.chunk_size_bytes as usize).max(1);
+        let mut tasks = Vec::new();
+        let mut offset = 0usize;
+        let mut index = 0usize;
+        while offset < data.len() {
+            let end = std::cmp::min(offset + chunk_size, data.len());
+            let slice = &data[offset..end];
+            tasks.push(UploadTask {
+                index,
+                offset,
+                length: end - offset,
+                chunk_sha256: sha256_hex(slice),
+            });
+            offset = end;
+            index += 1;
+        }
+        let descriptors: Vec<UploadSessionChunkDescriptor> = tasks
+            .iter()
+            .map(|task| UploadSessionChunkDescriptor {
+                chunk_index: task.index,
+                offset_bytes: task.offset as i64,
+                size_bytes: task.length as i64,
+                chunk_sha256: task.chunk_sha256.clone(),
+            })
+            .collect();
+        let chunk_response = self.inner.upload_session_chunks(
+            &session.session_id,
+            &session.blob_key,
+            &descriptors,
+        )?;
+        let targets = Arc::new(chunk_response.targets);
+        let tasks = Arc::new(Mutex::new(VecDeque::from(tasks)));
+        let error = Arc::new(Mutex::new(None));
+        let data = Arc::new(data.to_vec());
+        thread::scope(|scope| {
+            for _ in 0..self.inner.parallel_requests {
+                let tasks = Arc::clone(&tasks);
+                let targets = Arc::clone(&targets);
+                let error = Arc::clone(&error);
+                let inner = Arc::clone(&self.inner);
+                let data = Arc::clone(&data);
+                scope.spawn(move |_| loop {
+                    let task = {
+                        let mut guard = tasks.lock().unwrap();
+                        guard.pop_front()
+                    };
+                    let Some(task) = task else { break };
+                    let target = targets
+                        .iter()
+                        .find(|target| target.chunk_index == task.index)
+                        .cloned();
+                    let result = (|| {
+                        let target = target.ok_or_else(|| {
+                            io::Error::other(format!(
+                                "missing upload target for chunk {}",
+                                task.index
+                            ))
+                        })?;
+                        let slice = &data[task.offset..task.offset + task.length];
+                        inner.put_upload_target(
+                            &target.method,
+                            &target.upload_url,
+                            &target.headers,
+                            slice,
+                        )
+                    })();
+                    if let Err(err) = result {
+                        let mut err_guard = error.lock().unwrap();
+                        if err_guard.is_none() {
+                            *err_guard = Some(io::Error::new(err.kind(), err.to_string()));
+                        }
+                        break;
+                    }
+                });
+            }
+        })
+        .expect("upload session scope");
+        if let Some(err) = error.lock().unwrap().take() {
+            return Err(err);
+        }
+        self.inner.upload_session_complete(
+            path,
+            &session.session_id,
+            &session.blob_key,
+            data.len() as u64,
+            &content_sha256,
+            descriptors.len(),
+        )?;
+        Ok(())
+    }
+
+    fn upload_multipart_file_legacy(&self, path: &str, data: &[u8]) -> io::Result<()> {
         let session = self.inner.multipart_create(path, data.len() as u64)?;
         let part_size = session.part_size_bytes as usize;
         let mut tasks = std::collections::VecDeque::new();
@@ -766,6 +950,14 @@ struct MultipartTask {
     part_number: i32,
     offset: usize,
     length: usize,
+}
+
+#[derive(Clone)]
+struct UploadTask {
+    index: usize,
+    offset: usize,
+    length: usize,
+    chunk_sha256: String,
 }
 
 impl FsProvider for RemoteFsProvider {
@@ -1077,6 +1269,67 @@ struct DownloadUrlResponse {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UploadSessionStartRequest {
+    path: String,
+    size_bytes: i64,
+    content_type: Option<String>,
+    content_sha256: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UploadSessionStartResponse {
+    session_id: String,
+    blob_key: String,
+    chunk_size_bytes: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UploadSessionChunkDescriptor {
+    chunk_index: usize,
+    offset_bytes: i64,
+    size_bytes: i64,
+    chunk_sha256: String,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UploadSessionChunksRequest {
+    session_id: String,
+    blob_key: String,
+    chunks: Vec<UploadSessionChunkDescriptor>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UploadSessionChunksResponse {
+    targets: Vec<UploadChunkTarget>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UploadChunkTarget {
+    chunk_index: usize,
+    method: String,
+    upload_url: String,
+    headers: HashMap<String, String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UploadSessionCompleteRequest {
+    path: String,
+    session_id: String,
+    blob_key: String,
+    size_bytes: i64,
+    content_sha256: String,
+    chunk_count: usize,
+    hash: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 struct MultipartUploadRequest {
     path: String,
     #[serde(rename = "sizeBytes")]
@@ -1161,6 +1414,16 @@ struct FsWriteSessionResponse {
     next_offset: i64,
 }
 
+fn sha256_hex(data: &[u8]) -> String {
+    let digest = Sha256::digest(data);
+    let mut out = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        use std::fmt::Write as _;
+        let _ = write!(out, "{byte:02x}");
+    }
+    out
+}
+
 fn map_http_err(err: reqwest::Error) -> io::Error {
     io::Error::other(err)
 }
@@ -1209,6 +1472,7 @@ mod tests {
     use axum::routing::{delete, get, post, put};
     use axum::{Json, Router};
     use serde::Deserialize;
+    use std::collections::HashMap;
     use std::net::TcpListener as StdTcpListener;
     use std::sync::Arc;
     use tempfile::tempdir;
@@ -1220,16 +1484,24 @@ mod tests {
         root: Arc<PathBuf>,
         _keeper: Arc<tempfile::TempDir>,
         base_url: Arc<Mutex<Option<String>>>,
+        upload_sessions: Arc<Mutex<HashMap<String, UploadSessionTestState>>>,
+        omit_last_chunk_target: bool,
     }
 
     impl Harness {
         fn new() -> Self {
+            Self::with_omit_last_chunk_target(false)
+        }
+
+        fn with_omit_last_chunk_target(omit_last_chunk_target: bool) -> Self {
             let dir = tempdir().expect("tempdir");
             let path = dir.path().to_path_buf();
             Self {
                 root: Arc::new(path),
                 _keeper: Arc::new(dir),
                 base_url: Arc::new(Mutex::new(None)),
+                upload_sessions: Arc::new(Mutex::new(HashMap::new())),
+                omit_last_chunk_target,
             }
         }
 
@@ -1239,6 +1511,12 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct UploadSessionTestState {
+        path: String,
+        chunk_count: usize,
+    }
+
     #[derive(Deserialize)]
     struct PathParams {
         path: String,
@@ -1246,6 +1524,14 @@ mod tests {
         length: Option<usize>,
         truncate: Option<String>,
         recursive: Option<String>,
+    }
+
+    #[derive(Deserialize)]
+    struct UploadChunkQuery {
+        #[serde(rename = "sessionId")]
+        session_id: String,
+        #[serde(rename = "chunkIndex")]
+        chunk_index: usize,
     }
 
     async fn metadata_handler(
@@ -1347,6 +1633,113 @@ mod tests {
         }
         data[offset..offset + body.len()].copy_from_slice(&body);
         std::fs::write(path, data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        Ok(())
+    }
+
+    async fn upload_session_start_handler(
+        State(harness): State<Harness>,
+        Json(req): Json<UploadSessionStartRequest>,
+    ) -> Result<Json<UploadSessionStartResponse>, StatusCode> {
+        let session_id = Uuid::new_v4().to_string();
+        let chunk_size_bytes = 1024i64;
+        harness
+            .upload_sessions
+            .lock()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .insert(
+                session_id.clone(),
+                UploadSessionTestState {
+                    path: req.path,
+                    chunk_count: 0,
+                },
+            );
+        Ok(Json(UploadSessionStartResponse {
+            session_id: session_id.clone(),
+            blob_key: format!("test/blob/{session_id}"),
+            chunk_size_bytes,
+        }))
+    }
+
+    async fn upload_session_chunks_handler(
+        State(harness): State<Harness>,
+        Json(req): Json<UploadSessionChunksRequest>,
+    ) -> Result<Json<UploadSessionChunksResponse>, StatusCode> {
+        let base = harness
+            .base_url
+            .lock()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .clone()
+            .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+        let mut sessions = harness
+            .upload_sessions
+            .lock()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        let state = sessions
+            .get_mut(&req.session_id)
+            .ok_or(StatusCode::NOT_FOUND)?;
+        state.chunk_count = req.chunks.len();
+        let mut targets = req
+            .chunks
+            .iter()
+            .map(|chunk| UploadChunkTarget {
+                chunk_index: chunk.chunk_index,
+                method: "PUT".to_string(),
+                upload_url: format!(
+                    "{base}/upload-chunk?sessionId={}&chunkIndex={}",
+                    req.session_id, chunk.chunk_index
+                ),
+                headers: HashMap::new(),
+            })
+            .collect::<Vec<_>>();
+        if harness.omit_last_chunk_target && !targets.is_empty() {
+            targets.pop();
+        }
+        Ok(Json(UploadSessionChunksResponse { targets }))
+    }
+
+    async fn upload_chunk_handler(
+        State(harness): State<Harness>,
+        Query(query): Query<UploadChunkQuery>,
+        body: axum::body::Bytes,
+    ) -> Result<(), StatusCode> {
+        let chunk_path = harness.resolve(&format!(
+            "/.upload-sessions/{}/{}",
+            query.session_id, query.chunk_index
+        ));
+        if let Some(parent) = chunk_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        }
+        std::fs::write(chunk_path, body).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        Ok(())
+    }
+
+    async fn upload_session_complete_handler(
+        State(harness): State<Harness>,
+        Json(req): Json<UploadSessionCompleteRequest>,
+    ) -> Result<(), StatusCode> {
+        let state = harness
+            .upload_sessions
+            .lock()
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?
+            .remove(&req.session_id)
+            .ok_or(StatusCode::NOT_FOUND)?;
+        let mut data = Vec::new();
+        for chunk_index in 0..state.chunk_count {
+            let chunk_path = harness.resolve(&format!(
+                "/.upload-sessions/{}/{}",
+                req.session_id, chunk_index
+            ));
+            let chunk = std::fs::read(chunk_path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+            data.extend_from_slice(&chunk);
+        }
+        if sha256_hex(&data) != req.content_sha256 {
+            return Err(StatusCode::BAD_REQUEST);
+        }
+        let target_path = harness.resolve(&state.path);
+        if let Some(parent) = target_path.parent() {
+            std::fs::create_dir_all(parent).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+        }
+        std::fs::write(target_path, data).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
         Ok(())
     }
 
@@ -1467,20 +1860,35 @@ mod tests {
             .route("/fs/canonicalize", get(canonicalize_handler))
             .route("/fs/read", get(read_handler))
             .route("/fs/write", put(write_handler))
+            .route(
+                "/fs/upload-session/start",
+                post(upload_session_start_handler),
+            )
+            .route(
+                "/fs/upload-session/chunks",
+                post(upload_session_chunks_handler),
+            )
+            .route(
+                "/fs/upload-session/complete",
+                post(upload_session_complete_handler),
+            )
             .route("/fs/mkdir", post(mkdir_handler))
             .route("/fs/rename", post(rename_handler))
             .route("/fs/set-readonly", post(set_readonly_handler))
+            .route("/upload-chunk", put(upload_chunk_handler))
             .with_state(harness.clone());
         let std_listener = StdTcpListener::bind("127.0.0.1:0").unwrap();
         std_listener.set_nonblocking(true).expect("nonblocking");
         let addr = std_listener.local_addr().unwrap();
         let service = router.into_make_service();
         let rt = Runtime::new().unwrap();
+        let base = format!("http://{addr}");
+        *harness.base_url.lock().unwrap() = Some(base.clone());
         rt.spawn(async move {
             let listener = TokioTcpListener::from_std(std_listener).unwrap();
             axum::serve(listener, service).await.unwrap();
         });
-        (format!("http://{addr}"), harness, rt)
+        (base, harness, rt)
     }
 
     fn spawn_server_with_download_url() -> (String, Harness, Runtime) {
@@ -1492,10 +1900,63 @@ mod tests {
             .route("/fs/canonicalize", get(canonicalize_handler))
             .route("/fs/read", get(read_with_download_handler))
             .route("/fs/write", put(write_handler))
+            .route(
+                "/fs/upload-session/start",
+                post(upload_session_start_handler),
+            )
+            .route(
+                "/fs/upload-session/chunks",
+                post(upload_session_chunks_handler),
+            )
+            .route(
+                "/fs/upload-session/complete",
+                post(upload_session_complete_handler),
+            )
             .route("/fs/mkdir", post(mkdir_handler))
             .route("/fs/rename", post(rename_handler))
             .route("/fs/set-readonly", post(set_readonly_handler))
             .route("/download", get(download_handler))
+            .route("/upload-chunk", put(upload_chunk_handler))
+            .with_state(harness.clone());
+        let std_listener = StdTcpListener::bind("127.0.0.1:0").unwrap();
+        std_listener.set_nonblocking(true).expect("nonblocking");
+        let addr = std_listener.local_addr().unwrap();
+        let service = router.into_make_service();
+        let rt = Runtime::new().unwrap();
+        let base = format!("http://{addr}");
+        *harness.base_url.lock().unwrap() = Some(base.clone());
+        rt.spawn(async move {
+            let listener = TokioTcpListener::from_std(std_listener).unwrap();
+            axum::serve(listener, service).await.unwrap();
+        });
+        (base, harness, rt)
+    }
+
+    fn spawn_server_with_missing_chunk_target() -> (String, Harness, Runtime) {
+        let harness = Harness::with_omit_last_chunk_target(true);
+        let router = Router::new()
+            .route("/fs/metadata", get(metadata_handler))
+            .route("/fs/dir", get(dir_handler).delete(delete_dir_handler))
+            .route("/fs/file", delete(delete_file_handler))
+            .route("/fs/canonicalize", get(canonicalize_handler))
+            .route("/fs/read", get(read_handler))
+            .route("/fs/write", put(write_handler))
+            .route(
+                "/fs/upload-session/start",
+                post(upload_session_start_handler),
+            )
+            .route(
+                "/fs/upload-session/chunks",
+                post(upload_session_chunks_handler),
+            )
+            .route(
+                "/fs/upload-session/complete",
+                post(upload_session_complete_handler),
+            )
+            .route("/fs/mkdir", post(mkdir_handler))
+            .route("/fs/rename", post(rename_handler))
+            .route("/fs/set-readonly", post(set_readonly_handler))
+            .route("/upload-chunk", put(upload_chunk_handler))
             .with_state(harness.clone());
         let std_listener = StdTcpListener::bind("127.0.0.1:0").unwrap();
         std_listener.set_nonblocking(true).expect("nonblocking");
@@ -1520,6 +1981,7 @@ mod tests {
             chunk_bytes: 1024,
             parallel_requests: 4,
             direct_read_threshold_bytes: u64::MAX,
+            direct_write_threshold_bytes: 1024,
             timeout: Duration::from_secs(30),
             ..RemoteFsConfig::default()
         })
@@ -1561,5 +2023,27 @@ mod tests {
 
         let read_back = provider.read(Path::new("/reports/data.bin")).expect("read");
         assert_eq!(data, read_back);
+    }
+
+    #[test]
+    fn remote_provider_errors_when_chunk_target_is_missing() {
+        let (base, _harness, _rt) = spawn_server_with_missing_chunk_target();
+        let provider = RemoteFsProvider::new(RemoteFsConfig {
+            base_url: base,
+            auth_token: None,
+            chunk_bytes: 128,
+            parallel_requests: 2,
+            direct_read_threshold_bytes: u64::MAX,
+            direct_write_threshold_bytes: 128,
+            timeout: Duration::from_secs(30),
+            ..RemoteFsConfig::default()
+        })
+        .expect("provider");
+
+        let data = vec![7u8; 1024];
+        let err = provider
+            .write(Path::new("/reports/missing-target.bin"), &data)
+            .expect_err("write should fail when chunk target is missing");
+        assert_eq!(err.kind(), io::ErrorKind::Other);
     }
 }

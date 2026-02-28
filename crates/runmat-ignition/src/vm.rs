@@ -474,6 +474,10 @@ enum SliceSelector {
     Colon,
     Scalar(usize),
     Indices(Vec<usize>),
+    LinearIndices {
+        values: Vec<usize>,
+        output_shape: Vec<usize>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -688,8 +692,24 @@ async fn build_slice_selectors(
                 "missing numeric index for linear slice",
             )
         })?;
-        let idxs = indices_from_value_linear(value, total_len).await?;
-        selectors.push(SliceSelector::Indices(idxs));
+        if let Value::Tensor(idx_t) = value {
+            let len = idx_t.shape.iter().product::<usize>();
+            let mut indices = Vec::with_capacity(len);
+            for &val in &idx_t.data {
+                let idx = val as isize;
+                if idx < 1 || (idx as usize) > total_len {
+                    return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+                }
+                indices.push(idx as usize);
+            }
+            selectors.push(SliceSelector::LinearIndices {
+                values: indices,
+                output_shape: idx_t.shape.clone(),
+            });
+        } else {
+            let idxs = indices_from_value_linear(value, total_len).await?;
+            selectors.push(SliceSelector::Indices(idxs));
+        }
         return Ok(selectors);
     }
 
@@ -726,20 +746,21 @@ fn build_slice_plan(
             .first()
             .cloned()
             .unwrap_or(SliceSelector::Indices(Vec::new()));
-        let indices = match list {
+        let indices = match &list {
             SliceSelector::Colon => (1..=total_len).collect::<Vec<usize>>(),
-            SliceSelector::Scalar(i) => vec![i],
-            SliceSelector::Indices(v) => v,
+            SliceSelector::Scalar(i) => vec![*i],
+            SliceSelector::Indices(v) => v.clone(),
+            SliceSelector::LinearIndices { values, .. } => values.clone(),
         };
         if indices.iter().any(|&i| i == 0 || i > total_len) {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
         }
         let zero_based: Vec<u32> = indices.iter().map(|&i| (i - 1) as u32).collect();
         let count = zero_based.len();
-        let shape = if count <= 1 {
-            vec![1, 1]
-        } else {
-            vec![count, 1]
+        let shape = match list {
+            SliceSelector::LinearIndices { output_shape, .. } => output_shape,
+            _ if count <= 1 => vec![1, 1],
+            _ => vec![count, 1],
         };
         return Ok(SlicePlan {
             indices: zero_based,
@@ -758,6 +779,7 @@ fn build_slice_plan(
             SliceSelector::Colon => (1..=dim_len).collect::<Vec<usize>>(),
             SliceSelector::Scalar(i) => vec![*i],
             SliceSelector::Indices(v) => v.clone(),
+            SliceSelector::LinearIndices { values: v, .. } => v.clone(),
         };
         if idxs.iter().any(|&i| i == 0 || i > dim_len) {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
@@ -5058,9 +5080,10 @@ async fn run_interpreter_inner(
                         if dims == 1 {
                             let total = t.data.len();
                             let mut idxs: Vec<usize> = Vec::new();
-                            // When the index is an empty tensor, mirror its shape (e.g. 1:0
-                            // produces a [1,0] tensor, so A(1:0) yields a [1,0] result).
-                            let mut empty_idx_shape: Option<Vec<usize>> = None;
+                            // For tensor indices, mirror the index shape in the output so that
+                            // A([1 3 5]) (row index) → row result and A(1:0) (1×0 index) → 1×0.
+                            // None means no tensor index was used; fall back to defaults.
+                            let mut idx_shape: Option<Vec<usize>> = None;
                             let is_colon = (colon_mask & 1u32) != 0;
                             let is_end = (end_mask & 1u32) != 0;
                             if is_colon {
@@ -5080,9 +5103,7 @@ async fn run_interpreter_inner(
                                         idxs = vec![i as usize];
                                     }
                                     Value::Tensor(idx_t) => {
-                                        if idx_t.data.is_empty() {
-                                            empty_idx_shape = Some(idx_t.shape.clone());
-                                        }
+                                        idx_shape = Some(idx_t.shape.clone());
                                         for &val in &idx_t.data {
                                             let i = val as isize;
                                             if i < 1 || (i as usize) > total {
@@ -5126,12 +5147,11 @@ async fn run_interpreter_inner(
                             if idxs.len() == 1 {
                                 stack.push(Value::Num(t.data[idxs[0] - 1]));
                             } else if idxs.is_empty() {
-                                // For empty tensor indices (e.g. 1:0 → [1,0]) mirror the index
-                                // shape so the result has the same shape as the index.
-                                // For all other empty cases (colon on empty source, logical
-                                // masking with no true values) fall back to [0,1] — a 0×1
-                                // column vector, matching MATLAB's A(:) on an empty source.
-                                let shape = empty_idx_shape.unwrap_or_else(|| vec![0, 1]);
+                                // For tensor indices (e.g. 1:0 → [1,0]) mirror the index shape.
+                                // For all other empty cases (colon on empty source, logical mask
+                                // with no true values) fall back to [0,1] — a 0×1 column vector,
+                                // matching MATLAB's A(:) on an empty source.
+                                let shape = idx_shape.unwrap_or_else(|| vec![0, 1]);
                                 let tens = runmat_builtins::Tensor::new(vec![], shape)
                                     .map_err(|e| format!("Slice error: {e}"))?;
                                 stack.push(Value::Tensor(tens));
@@ -5140,7 +5160,11 @@ async fn run_interpreter_inner(
                                 for &i in &idxs {
                                     out.push(t.data[i - 1]);
                                 }
-                                let tens = runmat_builtins::Tensor::new(out, vec![idxs.len(), 1])
+                                // Mirror the index tensor's shape so A([1 3 5]) (row index) gives
+                                // a row result, and A([1;3;5]) (column index) gives a column.
+                                let shape = idx_shape
+                                    .unwrap_or_else(|| vec![idxs.len(), 1]);
+                                let tens = runmat_builtins::Tensor::new(out, shape)
                                     .map_err(|e| format!("Slice error: {e}"))?;
                                 stack.push(Value::Tensor(tens));
                             }
@@ -7005,6 +7029,7 @@ async fn run_interpreter_inner(
                                     SliceSelector::Colon => (1..=dim_len).collect(),
                                     SliceSelector::Scalar(i) => vec![*i],
                                     SliceSelector::Indices(v) => v.clone(),
+                                    SliceSelector::LinearIndices { values: v, .. } => v.clone(),
                                 };
                                 if idxs.iter().any(|&i| i == 0 || i > dim_len) {
                                     vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
@@ -7863,6 +7888,9 @@ async fn run_interpreter_inner(
                                         }
                                         SliceSelector::Scalar(i) => vec![*i],
                                         SliceSelector::Indices(v) => v.clone(),
+                                        SliceSelector::LinearIndices { values: v, .. } => {
+                                            v.clone()
+                                        }
                                     };
                                     per_dim_indices.push(idxs);
                                 }

@@ -1,10 +1,12 @@
+"use client";
+
+import { useMemo } from "react";
 import { slugifyHeading } from "@/lib/utils";
+import { OnThisPageNav, type TocHeading } from "@/components/OnThisPageNav";
 
-type Heading = { depth: number; text: string; id: string };
-
-function extractHeadings(md: string): Heading[] {
+function extractHeadings(md: string): TocHeading[] {
   const lines = md.split(/\r?\n/);
-  const out: Heading[] = [];
+  const out: TocHeading[] = [];
   let inFence = false;
   for (const raw of lines) {
     const line = raw.trim();
@@ -21,23 +23,7 @@ function extractHeadings(md: string): Heading[] {
 }
 
 export function HeadingsNav({ source }: { source: string }) {
-  const headings = extractHeadings(source);
-  if (!headings.length) return null;
-  return (
-    <aside className="hidden lg:block">
-      <div className="sticky top-24">
-        <div className="text-sm font-semibold text-foreground/90 mb-2">On this page</div>
-        <ul className="text-sm space-y-2">
-          {headings.map((h, i) => (
-            <li key={i} className={h.depth > 2 ? "pl-4" : undefined}>
-              <a href={`#${h.id}`} className="text-muted-foreground hover:text-foreground">
-                {h.text}
-              </a>
-            </li>
-          ))}
-        </ul>
-      </div>
-    </aside>
-  );
+  const headings = useMemo(() => extractHeadings(source), [source]);
+  return <OnThisPageNav headings={headings} />;
 }
 
