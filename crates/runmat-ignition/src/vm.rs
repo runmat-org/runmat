@@ -5162,8 +5162,7 @@ async fn run_interpreter_inner(
                                 }
                                 // Mirror the index tensor's shape so A([1 3 5]) (row index) gives
                                 // a row result, and A([1;3;5]) (column index) gives a column.
-                                let shape = idx_shape
-                                    .unwrap_or_else(|| vec![idxs.len(), 1]);
+                                let shape = idx_shape.unwrap_or_else(|| vec![idxs.len(), 1]);
                                 let tens = runmat_builtins::Tensor::new(out, shape)
                                     .map_err(|e| format!("Slice error: {e}"))?;
                                 stack.push(Value::Tensor(tens));
@@ -7888,9 +7887,7 @@ async fn run_interpreter_inner(
                                         }
                                         SliceSelector::Scalar(i) => vec![*i],
                                         SliceSelector::Indices(v) => v.clone(),
-                                        SliceSelector::LinearIndices { values: v, .. } => {
-                                            v.clone()
-                                        }
+                                        SliceSelector::LinearIndices { values: v, .. } => v.clone(),
                                     };
                                     per_dim_indices.push(idxs);
                                 }
