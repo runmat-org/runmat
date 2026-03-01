@@ -166,13 +166,7 @@ fn analyze_data_expr(
                 if let HirExprKind::Var(array_var) = base.kind {
                     if let Some(array_binding) = arrays.get(&array_var) {
                         if let Some(rank) = array_binding.rank {
-                            let slice_arg = if method == "read" {
-                                args.first()
-                            } else if args.len() > 1 {
-                                args.first()
-                            } else {
-                                None
-                            };
+                            let slice_arg = args.first();
                             if let Some(slice_expr) = slice_arg {
                                 if let Some(actual_slice_rank) = slice_rank(slice_expr) {
                                     if actual_slice_rank > rank {
@@ -232,13 +226,7 @@ fn analyze_data_expr(
                     if let HirExprKind::Var(array_var) = base.kind {
                         if let Some(array_binding) = arrays.get(&array_var) {
                             if let Some(rank) = array_binding.rank {
-                                let slice_arg = if name == "DataArray.read" {
-                                    args.get(1)
-                                } else if args.len() > 2 {
-                                    args.get(1)
-                                } else {
-                                    None
-                                };
+                                let slice_arg = args.get(1);
                                 if let Some(slice_expr) = slice_arg {
                                     if let Some(actual_slice_rank) = slice_rank(slice_expr) {
                                         if actual_slice_rank > rank {

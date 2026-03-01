@@ -67,10 +67,6 @@ impl TextRange {
     }
 }
 
-pub fn analyze_document(text: &str) -> DocumentAnalysis {
-    analyze_document_with_compat(text, CompatMode::default())
-}
-
 pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentAnalysis {
     let tokens = tokenize_detailed(text);
     match parse_with_options(text, ParserOptions::new(compat)) {
@@ -889,7 +885,7 @@ mod tests {
     #[test]
     fn hover_returns_builtin_docs() {
         let text = "plot(1, 2);";
-        let analysis = analyze_document(text);
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
         if let Some(err) = &analysis.syntax_error {
             panic!(
                 "unexpected parse error at {}: {}",
@@ -948,7 +944,7 @@ mod tests {
     #[test]
     fn hover_includes_inferred_tensor_shape() {
         let text = "x = 0:1:100; y = sin(x);";
-        let analysis = analyze_document(text);
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
         let x_offset = text.find('x').expect("x offset");
         let y_offset = text.find('y').expect("y offset");
         let x_position = offset_to_position(text, x_offset);
@@ -973,7 +969,7 @@ mod tests {
     #[test]
     fn hover_includes_inferred_tensor_shape_for_negative_range() {
         let text = "XRange = -2:0.02:2;";
-        let analysis = analyze_document(text);
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
         let x_offset = text.find("XRange").expect("XRange offset");
         let x_position = offset_to_position(text, x_offset);
 
@@ -1014,7 +1010,7 @@ for t = 0:dT:T
 
 end
 "#;
-        let analysis = analyze_document(text);
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
         if let Some(err) = &analysis.syntax_error {
             eprintln!("syntax error: {} at {}", err.message, err.position);
         }
@@ -1055,7 +1051,7 @@ for t = 0:dT:T
 
 end
 "#;
-        let analysis = analyze_document(text);
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
         let x_offset = text.find("XRange").expect("XRange offset");
         let x_position = offset_to_position(text, x_offset);
         let hover = hover_at(text, &analysis, &x_position).expect("hover result");
@@ -1069,7 +1065,7 @@ end
     #[test]
     fn diagnostics_include_shape_lints() {
         let text = "a = ones(2,3); b = ones(4,2); c = a * b;";
-        let analysis = analyze_document(text);
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
         let diags = diagnostics_for_document(text, &analysis);
         let diag = diags.iter().find(|d| match &d.code {
             Some(lsp_types::NumberOrString::String(code)) => code == "lint.shape.matmul",

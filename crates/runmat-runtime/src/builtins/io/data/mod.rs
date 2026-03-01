@@ -211,7 +211,7 @@ async fn data_import_builtin(
 ) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.import path")?;
     let format = parse_string(&format, "data.import format")?;
-    if format.to_ascii_lowercase() != "data" {
+    if !format.eq_ignore_ascii_case("data") {
         return Err(data_error(
             "data.import currently supports only format='data'",
         ));
@@ -239,7 +239,7 @@ async fn data_export_builtin(
 ) -> BuiltinResult<Value> {
     let path = parse_string(&path, "data.export path")?;
     let format = parse_string(&format, "data.export format")?;
-    if format.to_ascii_lowercase() != "data" {
+    if !format.eq_ignore_ascii_case("data") {
         return Err(data_error(
             "data.export currently supports only format='data'",
         ));
@@ -986,23 +986,21 @@ async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<
     let root = dataset_root(&dataset_path);
     let mut manifest = read_manifest(&root)?;
     ensure_manifest_sequence(base_sequence, &manifest)?;
-    if let Some(options) = rest.first() {
-        if let Value::Struct(options) = options {
-            if let Some(expected) = options.fields.get("if_manifest") {
-                let expected = parse_string(expected, "DataTransaction.commit if_manifest")?;
-                let actual = manifest_version_token(&manifest);
-                if expected != actual {
-                    tracing::warn!(
-                        target: "runmat.data",
-                        tx_id = tx_id,
-                        expected_manifest = expected,
-                        actual_manifest = actual,
-                        "data transaction manifest conflict"
-                    );
-                    return Err(data_error(
-                        "MANIFEST_CONFLICT: if_manifest precondition failed",
-                    ));
-                }
+    if let Some(Value::Struct(options)) = rest.first() {
+        if let Some(expected) = options.fields.get("if_manifest") {
+            let expected = parse_string(expected, "DataTransaction.commit if_manifest")?;
+            let actual = manifest_version_token(&manifest);
+            if expected != actual {
+                tracing::warn!(
+                    target: "runmat.data",
+                    tx_id = tx_id,
+                    expected_manifest = expected,
+                    actual_manifest = actual,
+                    "data transaction manifest conflict"
+                );
+                return Err(data_error(
+                    "MANIFEST_CONFLICT: if_manifest precondition failed",
+                ));
             }
         }
     }
