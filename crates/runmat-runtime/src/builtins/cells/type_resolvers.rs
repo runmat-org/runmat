@@ -51,12 +51,15 @@ fn cell2mat_element_type(element_type: &Type) -> Type {
         Type::Bool | Type::Logical { .. } => Type::logical(),
         Type::Num | Type::Int | Type::Tensor { .. } => Type::tensor(),
         Type::String => Type::cell_of(Type::String),
+        Type::DataArray { .. } => Type::tensor(),
         Type::Cell { .. }
         | Type::Struct { .. }
         | Type::Function { .. }
         | Type::Void
         | Type::Unknown
-        | Type::OutputList(_) => Type::Unknown,
+        | Type::OutputList(_)
+        | Type::DataDataset { .. }
+        | Type::DataTransaction => Type::Unknown,
     }
 }
 
@@ -85,6 +88,7 @@ fn mat2cell_element_type(input: &Type) -> Option<Type> {
         } if matches!(**element_type, Type::String) => {
             Some(Type::Union(vec![Type::String, Type::cell_of(Type::String)]))
         }
+        Type::DataArray { .. } => Some(Type::tensor()),
         _ => None,
     }
 }

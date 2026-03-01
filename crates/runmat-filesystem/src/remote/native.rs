@@ -1,3 +1,6 @@
+use crate::data_contract::{
+    DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
+};
 use crate::{DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags};
 use chrono::DateTime;
 use crossbeam_utils::thread;
@@ -474,6 +477,33 @@ impl RemoteFsProvider {
         Ok(Self {
             inner: Arc::new(RemoteInner::new(config)?),
         })
+    }
+
+    /// Fetch a dataset manifest descriptor through the provider-neutral data contract endpoint.
+    pub fn data_manifest_descriptor(
+        &self,
+        request: &DataManifestRequest,
+    ) -> io::Result<DataManifestDescriptor> {
+        let mut query = vec![("path", request.path.clone())];
+        if let Some(version) = &request.version {
+            query.push(("version", version.clone()));
+        }
+        self.inner.get_json("/data/manifest", &query)
+    }
+
+    /// Request direct upload targets for dataset chunk objects.
+    pub fn data_chunk_upload_targets(
+        &self,
+        request: &DataChunkUploadRequest,
+    ) -> io::Result<Vec<DataChunkUploadTarget>> {
+        #[derive(Deserialize)]
+        struct DataChunkUploadTargetsResponse {
+            targets: Vec<DataChunkUploadTarget>,
+        }
+        let response: DataChunkUploadTargetsResponse = self
+            .inner
+            .post_json("/data/chunks/upload-targets", request)?;
+        Ok(response.targets)
     }
 
     fn normalize(&self, path: &Path) -> String {
@@ -1104,6 +1134,36 @@ impl FsProvider for RemoteFsProvider {
             },
         )
     }
+
+    fn data_manifest_descriptor(
+        &self,
+        request: &DataManifestRequest,
+    ) -> io::Result<DataManifestDescriptor> {
+        let mut query = vec![("path", request.path.clone())];
+        if let Some(version) = &request.version {
+            query.push(("version", version.clone()));
+        }
+        self.inner.get_json("/data/manifest", &query)
+    }
+
+    fn data_chunk_upload_targets(
+        &self,
+        request: &DataChunkUploadRequest,
+    ) -> io::Result<Vec<DataChunkUploadTarget>> {
+        #[derive(Deserialize)]
+        struct DataChunkUploadTargetsResponse {
+            targets: Vec<DataChunkUploadTarget>,
+        }
+        let response: DataChunkUploadTargetsResponse = self
+            .inner
+            .post_json("/data/chunks/upload-targets", request)?;
+        Ok(response.targets)
+    }
+
+    fn data_upload_chunk(&self, target: &DataChunkUploadTarget, data: &[u8]) -> io::Result<()> {
+        self.inner
+            .put_upload_target(&target.method, &target.upload_url, &target.headers, data)
+    }
 }
 
 impl Clone for RemoteFsProvider {
@@ -1467,6 +1527,7 @@ impl fmt::Debug for RemoteFsProvider {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::data_contract::DataChunkDescriptor;
     use axum::extract::{Query, State};
     use axum::http::{HeaderMap, StatusCode};
     use axum::routing::{delete, get, post, put};
@@ -1532,6 +1593,12 @@ mod tests {
         session_id: String,
         #[serde(rename = "chunkIndex")]
         chunk_index: usize,
+    }
+
+    #[derive(Deserialize)]
+    struct DataManifestQuery {
+        path: String,
+        version: Option<String>,
     }
 
     async fn metadata_handler(
@@ -1713,6 +1780,44 @@ mod tests {
         Ok(())
     }
 
+    async fn data_manifest_handler(
+        Query(query): Query<DataManifestQuery>,
+    ) -> Result<Json<DataManifestDescriptor>, StatusCode> {
+        let updated_at = if query.version.as_deref() == Some("v1") {
+            "2026-01-01T00:00:00Z"
+        } else {
+            "2026-02-02T00:00:00Z"
+        };
+        Ok(Json(DataManifestDescriptor {
+            schema_version: 1,
+            format: "runmat-data".to_string(),
+            dataset_id: format!("dataset:{}", query.path),
+            updated_at: updated_at.to_string(),
+            txn_sequence: 9,
+        }))
+    }
+
+    async fn data_chunk_upload_targets_handler(
+        Json(req): Json<DataChunkUploadRequest>,
+    ) -> Result<Json<serde_json::Value>, StatusCode> {
+        let targets = req
+            .chunks
+            .iter()
+            .map(|chunk| {
+                serde_json::json!({
+                    "key": chunk.key,
+                    "method": "PUT",
+                    "upload_url": format!("https://uploads.example.test/{}/{}", req.array, chunk.object_id),
+                    "headers": {
+                        "x-runmat-hash": chunk.hash,
+                        "x-runmat-object": chunk.object_id,
+                    }
+                })
+            })
+            .collect::<Vec<_>>();
+        Ok(Json(serde_json::json!({ "targets": targets })))
+    }
+
     async fn upload_session_complete_handler(
         State(harness): State<Harness>,
         Json(req): Json<UploadSessionCompleteRequest>,
@@ -1875,6 +1980,11 @@ mod tests {
             .route("/fs/mkdir", post(mkdir_handler))
             .route("/fs/rename", post(rename_handler))
             .route("/fs/set-readonly", post(set_readonly_handler))
+            .route("/data/manifest", get(data_manifest_handler))
+            .route(
+                "/data/chunks/upload-targets",
+                post(data_chunk_upload_targets_handler),
+            )
             .route("/upload-chunk", put(upload_chunk_handler))
             .with_state(harness.clone());
         let std_listener = StdTcpListener::bind("127.0.0.1:0").unwrap();
@@ -1916,6 +2026,11 @@ mod tests {
             .route("/fs/rename", post(rename_handler))
             .route("/fs/set-readonly", post(set_readonly_handler))
             .route("/download", get(download_handler))
+            .route("/data/manifest", get(data_manifest_handler))
+            .route(
+                "/data/chunks/upload-targets",
+                post(data_chunk_upload_targets_handler),
+            )
             .route("/upload-chunk", put(upload_chunk_handler))
             .with_state(harness.clone());
         let std_listener = StdTcpListener::bind("127.0.0.1:0").unwrap();
@@ -1956,6 +2071,11 @@ mod tests {
             .route("/fs/mkdir", post(mkdir_handler))
             .route("/fs/rename", post(rename_handler))
             .route("/fs/set-readonly", post(set_readonly_handler))
+            .route("/data/manifest", get(data_manifest_handler))
+            .route(
+                "/data/chunks/upload-targets",
+                post(data_chunk_upload_targets_handler),
+            )
             .route("/upload-chunk", put(upload_chunk_handler))
             .with_state(harness.clone());
         let std_listener = StdTcpListener::bind("127.0.0.1:0").unwrap();
@@ -2045,5 +2165,73 @@ mod tests {
             .write(Path::new("/reports/missing-target.bin"), &data)
             .expect_err("write should fail when chunk target is missing");
         assert_eq!(err.kind(), io::ErrorKind::Other);
+    }
+
+    #[test]
+    fn remote_provider_data_manifest_descriptor_fetches_descriptor() {
+        let (base, _harness, _rt) = spawn_server();
+        let provider = RemoteFsProvider::new(RemoteFsConfig {
+            base_url: base,
+            auth_token: None,
+            timeout: Duration::from_secs(30),
+            ..RemoteFsConfig::default()
+        })
+        .expect("provider");
+
+        let descriptor = provider
+            .data_manifest_descriptor(&DataManifestRequest {
+                path: "/datasets/alpha.data".to_string(),
+                version: Some("v1".to_string()),
+            })
+            .expect("manifest descriptor");
+        assert_eq!(descriptor.schema_version, 1);
+        assert_eq!(descriptor.format, "runmat-data");
+        assert_eq!(descriptor.dataset_id, "dataset:/datasets/alpha.data");
+        assert_eq!(descriptor.updated_at, "2026-01-01T00:00:00Z");
+        assert_eq!(descriptor.txn_sequence, 9);
+    }
+
+    #[test]
+    fn remote_provider_data_chunk_upload_targets_fetches_targets() {
+        let (base, _harness, _rt) = spawn_server();
+        let provider = RemoteFsProvider::new(RemoteFsConfig {
+            base_url: base,
+            auth_token: None,
+            timeout: Duration::from_secs(30),
+            ..RemoteFsConfig::default()
+        })
+        .expect("provider");
+
+        let targets = provider
+            .data_chunk_upload_targets(&DataChunkUploadRequest {
+                dataset_path: "/datasets/alpha.data".to_string(),
+                array: "X".to_string(),
+                chunks: vec![DataChunkDescriptor {
+                    key: "X/0-0".to_string(),
+                    object_id: "obj_0".to_string(),
+                    hash: "sha256:abc".to_string(),
+                    bytes_raw: 10,
+                    bytes_stored: 8,
+                }],
+            })
+            .expect("chunk upload targets");
+
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].key, "X/0-0");
+        assert_eq!(targets[0].method, "PUT");
+        assert_eq!(
+            targets[0].upload_url,
+            "https://uploads.example.test/X/obj_0"
+        );
+        let headers = &targets[0].headers;
+        assert_eq!(headers.len(), 2);
+        assert_eq!(
+            headers.get("x-runmat-hash").map(String::as_str),
+            Some("sha256:abc")
+        );
+        assert_eq!(
+            headers.get("x-runmat-object").map(String::as_str),
+            Some("obj_0")
+        );
     }
 }

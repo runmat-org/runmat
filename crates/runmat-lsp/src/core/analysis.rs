@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::core::docs;
 use crate::core::position::{offset_to_position, position_to_offset};
 use lsp_types::{
@@ -599,7 +597,6 @@ pub enum VariableKind {
     Global,
     Parameter,
     Output,
-    Local,
 }
 
 impl VariableKind {
@@ -608,7 +605,6 @@ impl VariableKind {
             VariableKind::Global => "global",
             VariableKind::Parameter => "parameter",
             VariableKind::Output => "output",
-            VariableKind::Local => "local",
         }
     }
 }
@@ -620,7 +616,6 @@ pub struct FunctionSemantic {
     pub range: TextRange,
     pub selection: TextRange,
     pub variables: HashMap<String, VariableSymbol>,
-    pub return_types: Vec<Type>,
 }
 
 #[derive(Clone)]
@@ -864,16 +859,6 @@ fn build_semantic_model(
             range: body_range,
             selection,
             variables,
-            return_types: lowering
-                .inferred_function_returns
-                .get(&func_name)
-                .cloned()
-                .unwrap_or_else(|| {
-                    outputs
-                        .iter()
-                        .filter_map(|o| lowering.var_types.get(o.0).cloned())
-                        .collect()
-                }),
         };
         functions.push(semantic);
     }
@@ -885,7 +870,8 @@ fn build_semantic_model(
             .push(idx);
     }
 
-    let diagnostics = runmat_hir::lint_shapes(&lowering);
+    let mut diagnostics = runmat_static_analysis::lint_shapes(&lowering);
+    diagnostics.extend(runmat_static_analysis::lint_data_api(&lowering));
 
     SemanticModel {
         globals,
