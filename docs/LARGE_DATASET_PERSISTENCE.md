@@ -510,64 +510,6 @@ Suggested error payload:
 - progressively introduce scene references to dataset chunk objects,
 - mark replay capability explicitly (`full`, `preview-only`) to avoid blank states.
 
-## Finalized decisions
-
-These are the highest-impact choices that are now fixed for implementation:
-
-1. **Adopt `.data` as first-class dataset container** with explicit `data.*` API.
-2. **Use content-addressed chunk objects + manifest CAS commits** as core write model.
-3. **Default array order to `column_major`** for user expectation alignment.
-4. **Use `zstd` default codec** with per-array override (`lz4` for interactive hot paths).
-5. **Treat `save/load` as compatibility path**, not the primary large-data API.
-6. **Separate immutable data plane and mutable collaboration ops plane**.
-7. **Integrate plotting replay via dataset references** rather than large inline scene payloads.
-
-## Implementation checklist
-
-- Keep API names clear and MATLAB-idiomatic while preserving explicit semantics.
-- Document transaction/conflict behavior in user-facing runtime docs and errors.
-- Support implicit single-write commits and explicit transactions for multi-write units.
-- Implement dataset snapshots as wrappers over project snapshot primitives.
-- Encode default chunking heuristics in one planner module with deterministic behavior.
-- Ensure error codes are returned consistently across runtime, CLI, desktop, and server APIs.
-
-## Current implementation status
-
-- Runtime now persists array payloads with chunk sidecars (`arrays/<name>/chunks/index.json`) in addition to manifest metadata, and reconstructs reads from chunk indexes when present.
-- Filesystem provider abstraction now exposes provider-neutral data transport primitives (`data_manifest_descriptor`, `data_chunk_upload_targets`, `data_upload_chunk`) with concrete implementations across native/sandbox/remote providers.
-- Runtime `data.*` API now includes `data.copy`, `data.move`, `data.import`, `data.export`, plus transaction operations for `resize`, `fill`, `create_array`, and `delete_array`.
-- Lint coverage includes `data/no-multiwrite-outside-tx` in addition to untyped-open and commit guidance lints.
-- Lint coverage now also includes manifest-informed checks for unknown array names (`data/unknown-array-name`) and invalid slice rank (`data/invalid-slice-rank`) when `data.open('<literal-path>')` can resolve a local manifest.
-- Runtime test coverage includes HTTP endpoint integration for touched-chunk uploads, including cross-boundary slice writes that upload only intersecting chunk keys.
-- Chunk hashes now use SHA-256 (`sha256:<hex>`) to match server contract expectations.
-- Runtime emits structured tracing events (`target=runmat.data`) for transaction begin/commit/abort, manifest conflicts, chunk planning, and chunk upload completions.
-- Domain-specific static analysis has been extracted from `runmat-hir` into `runmat-static-analysis` with modular files (`schema`, `lints/data_api`, `lints/shape`) to keep HIR crate boundaries clean.
-
-## Done matrix
-
-- API surface (`data.*`, `Dataset`, `DataArray`, `DataTransaction`): **done**
-- Provider abstraction + concrete providers (native/sandbox/remote/wasm fallback): **done**
-- Server `/data/manifest` + `/data/chunks/upload-targets`: **done**
-- N-D chunk grid planner + touched-chunk-only slice writes: **done**
-- Manifest CAS / conflict semantics (`txn_sequence`, `if_manifest`): **done**
-- SHA-256 hash parity on chunk descriptors: **done**
-- Typed resolver/inference coverage for data methods/objects with `Dataset<T>` / `DataArray<T,Shape>` semantics: **done**
-- Manifest-informed lints (`unknown-array-name`, `invalid-slice-rank`, multiwrite): **done**
-- Runtime HTTP integration tests for touched chunk uploads: **done**
-- Observability hooks for core data operations: **done (tracing events)**
-
-## Final validation checklist
-
-Run these from `runmat/` unless noted:
-
-1. `cargo fmt`
-2. `cargo test -p runmat-runtime --lib builtins::io::data:: -- --nocapture`
-3. `cargo test -p runmat-runtime --lib data:: -- --nocapture`
-4. `cargo test -p runmat-hir --test type_inference -- --nocapture`
-5. `cargo test -p runmat-filesystem --lib -- --nocapture`
-6. `cargo test -p runmat-lsp diagnostics_include_shape_lints -- --nocapture`
-7. From `runmat-private/server/`: `cargo test -p server-http --test filesystem -- --nocapture`
-
 ## Full user-facing API surface
 
 This section is the implementation contract for runtime/CLI/desktop UX and language tooling.
@@ -841,3 +783,61 @@ ok = tx.commit();
 path = strcat("/datasets/", run_id, ".data");
 ds = data.open(path, schema);
 ```
+
+## Finalized implementation decisions
+
+These are the highest-impact choices that are now fixed for implementation:
+
+1. **Adopt `.data` as first-class dataset container** with explicit `data.*` API.
+2. **Use content-addressed chunk objects + manifest CAS commits** as core write model.
+3. **Default array order to `column_major`** for user expectation alignment.
+4. **Use `zstd` default codec** with per-array override (`lz4` for interactive hot paths).
+5. **Treat `save/load` as compatibility path**, not the primary large-data API.
+6. **Separate immutable data plane and mutable collaboration ops plane**.
+7. **Integrate plotting replay via dataset references** rather than large inline scene payloads.
+
+## Implementation checklist
+
+- Keep API names clear and MATLAB-idiomatic while preserving explicit semantics.
+- Document transaction/conflict behavior in user-facing runtime docs and errors.
+- Support implicit single-write commits and explicit transactions for multi-write units.
+- Implement dataset snapshots as wrappers over project snapshot primitives.
+- Encode default chunking heuristics in one planner module with deterministic behavior.
+- Ensure error codes are returned consistently across runtime, CLI, desktop, and server APIs.
+
+## Current implementation status
+
+- Runtime now persists array payloads with chunk sidecars (`arrays/<name>/chunks/index.json`) in addition to manifest metadata, and reconstructs reads from chunk indexes when present.
+- Filesystem provider abstraction now exposes provider-neutral data transport primitives (`data_manifest_descriptor`, `data_chunk_upload_targets`, `data_upload_chunk`) with concrete implementations across native/sandbox/remote providers.
+- Runtime `data.*` API now includes `data.copy`, `data.move`, `data.import`, `data.export`, plus transaction operations for `resize`, `fill`, `create_array`, and `delete_array`.
+- Lint coverage includes `data/no-multiwrite-outside-tx` in addition to untyped-open and commit guidance lints.
+- Lint coverage now also includes manifest-informed checks for unknown array names (`data/unknown-array-name`) and invalid slice rank (`data/invalid-slice-rank`) when `data.open('<literal-path>')` can resolve a local manifest.
+- Runtime test coverage includes HTTP endpoint integration for touched-chunk uploads, including cross-boundary slice writes that upload only intersecting chunk keys.
+- Chunk hashes now use SHA-256 (`sha256:<hex>`) to match server contract expectations.
+- Runtime emits structured tracing events (`target=runmat.data`) for transaction begin/commit/abort, manifest conflicts, chunk planning, and chunk upload completions.
+- Domain-specific static analysis has been extracted from `runmat-hir` into `runmat-static-analysis` with modular files (`schema`, `lints/data_api`, `lints/shape`) to keep HIR crate boundaries clean.
+
+## Done matrix
+
+- API surface (`data.*`, `Dataset`, `DataArray`, `DataTransaction`): **done**
+- Provider abstraction + concrete providers (native/sandbox/remote/wasm fallback): **done**
+- Server `/data/manifest` + `/data/chunks/upload-targets`: **done**
+- N-D chunk grid planner + touched-chunk-only slice writes: **done**
+- Manifest CAS / conflict semantics (`txn_sequence`, `if_manifest`): **done**
+- SHA-256 hash parity on chunk descriptors: **done**
+- Typed resolver/inference coverage for data methods/objects with `Dataset<T>` / `DataArray<T,Shape>` semantics: **done**
+- Manifest-informed lints (`unknown-array-name`, `invalid-slice-rank`, multiwrite): **done**
+- Runtime HTTP integration tests for touched chunk uploads: **done**
+- Observability hooks for core data operations: **done (tracing events)**
+
+## Final validation checklist
+
+Run these from `runmat/` unless noted:
+
+1. `cargo fmt`
+2. `cargo test -p runmat-runtime --lib builtins::io::data:: -- --nocapture`
+3. `cargo test -p runmat-runtime --lib data:: -- --nocapture`
+4. `cargo test -p runmat-hir --test type_inference -- --nocapture`
+5. `cargo test -p runmat-filesystem --lib -- --nocapture`
+6. `cargo test -p runmat-lsp diagnostics_include_shape_lints -- --nocapture`
+7. From `runmat-private/server/`: `cargo test -p server-http --test filesystem -- --nocapture`
