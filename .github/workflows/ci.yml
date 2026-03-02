@@ -360,6 +360,7 @@ jobs:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
           cache: npm
+          cache-dependency-path: bindings/ts/package-lock.json
 
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
