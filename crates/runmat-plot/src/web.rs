@@ -15,6 +15,7 @@ use crate::plots::Figure;
 use crate::styling::ModernDarkTheme;
 use crate::styling::PlotThemeConfig;
 use log::{debug, warn};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
 use web_sys::{HtmlCanvasElement, OffscreenCanvas};
@@ -130,6 +131,42 @@ pub struct WebRenderer {
     background_policy: BackgroundPolicy,
     #[cfg(feature = "egui-overlay")]
     overlay: Option<WebOverlayState>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlotCameraState {
+    pub position: [f32; 3],
+    pub target: [f32; 3],
+    pub up: [f32; 3],
+    pub zoom: f32,
+    pub aspect_ratio: f32,
+    pub projection: PlotCameraProjection,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PlotCameraProjection {
+    Perspective {
+        fov: f32,
+        near: f32,
+        far: f32,
+    },
+    Orthographic {
+        left: f32,
+        right: f32,
+        bottom: f32,
+        top: f32,
+        near: f32,
+        far: f32,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlotSurfaceCameraState {
+    pub active_axes: usize,
+    pub axes: Vec<PlotCameraState>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -484,6 +521,31 @@ impl WebRenderer {
     /// Reset camera orientation/position (explicit user action).
     pub fn reset_camera_position(&mut self) {
         self.plot_renderer.reset_camera_position();
+    }
+
+    pub fn camera_state(&self) -> PlotSurfaceCameraState {
+        let mut axes: Vec<PlotCameraState> = Vec::new();
+        let mut idx = 0;
+        while let Some(camera) = self.plot_renderer.axes_camera(idx) {
+            axes.push(camera_to_state(camera));
+            idx += 1;
+        }
+        let active_axes = self
+            .pick_axes_index(self.last_pointer_position)
+            .min(axes.len().saturating_sub(1));
+        PlotSurfaceCameraState { active_axes, axes }
+    }
+
+    pub fn set_camera_state(&mut self, state: &PlotSurfaceCameraState) {
+        if state.axes.is_empty() {
+            return;
+        }
+        for (idx, camera_state) in state.axes.iter().enumerate() {
+            if let Some(camera) = self.plot_renderer.axes_camera_mut(idx) {
+                apply_camera_state(camera, camera_state);
+            }
+        }
+        self.plot_renderer.note_camera_interaction();
     }
 
     /// Redraw the last figure that was provided.
@@ -909,6 +971,70 @@ impl WebRenderer {
         self.msaa_extent = (width, height);
         Ok(())
     }
+}
+
+fn camera_to_state(camera: &crate::core::Camera) -> PlotCameraState {
+    let projection = match camera.projection {
+        crate::core::camera::ProjectionType::Perspective { fov, near, far } => {
+            PlotCameraProjection::Perspective { fov, near, far }
+        }
+        crate::core::camera::ProjectionType::Orthographic {
+            left,
+            right,
+            bottom,
+            top,
+            near,
+            far,
+        } => PlotCameraProjection::Orthographic {
+            left,
+            right,
+            bottom,
+            top,
+            near,
+            far,
+        },
+    };
+    PlotCameraState {
+        position: [camera.position.x, camera.position.y, camera.position.z],
+        target: [camera.target.x, camera.target.y, camera.target.z],
+        up: [camera.up.x, camera.up.y, camera.up.z],
+        zoom: camera.zoom,
+        aspect_ratio: camera.aspect_ratio,
+        projection,
+    }
+}
+
+fn apply_camera_state(camera: &mut crate::core::Camera, state: &PlotCameraState) {
+    camera.position = glam::Vec3::new(state.position[0], state.position[1], state.position[2]);
+    camera.target = glam::Vec3::new(state.target[0], state.target[1], state.target[2]);
+    camera.up = glam::Vec3::new(state.up[0], state.up[1], state.up[2]);
+    camera.zoom = state.zoom;
+    camera.aspect_ratio = state.aspect_ratio.max(0.000_1);
+    camera.projection = match state.projection {
+        PlotCameraProjection::Perspective { fov, near, far } => {
+            crate::core::camera::ProjectionType::Perspective {
+                fov,
+                near: near.max(1.0e-6),
+                far: far.max(near + 1.0e-6),
+            }
+        }
+        PlotCameraProjection::Orthographic {
+            left,
+            right,
+            bottom,
+            top,
+            near,
+            far,
+        } => crate::core::camera::ProjectionType::Orthographic {
+            left,
+            right,
+            bottom,
+            top,
+            near,
+            far,
+        },
+    };
+    camera.mark_dirty();
 }
 
 fn is_default_figure_bg(bg: glam::Vec4) -> bool {

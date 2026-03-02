@@ -495,21 +495,6 @@ Suggested error payload:
 }
 ```
 
-## RFC appendix: migration strategy
-
-### From `save/load` to `data.*`
-
-- keep `save/load` default behavior unchanged,
-- add docs + lints/hints for large arrays,
-- provide `data.import(..., "mat", ...)` and `data.export(..., "mat", ...)` for interop,
-- optional future bridge: `save(..., "format", "data")`.
-
-### Existing artifacts and replay
-
-- continue supporting current scene artifact format,
-- progressively introduce scene references to dataset chunk objects,
-- mark replay capability explicitly (`full`, `preview-only`) to avoid blank states.
-
 ## Full user-facing API surface
 
 This section is the implementation contract for runtime/CLI/desktop UX and language tooling.
