@@ -530,6 +530,9 @@ impl WebRenderer {
             axes.push(camera_to_state(camera));
             idx += 1;
         }
+        if axes.is_empty() {
+            axes.push(camera_to_state(self.plot_renderer.camera()));
+        }
         let active_axes = self
             .pick_axes_index(self.last_pointer_position)
             .min(axes.len().saturating_sub(1));
