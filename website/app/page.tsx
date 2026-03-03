@@ -472,7 +472,7 @@ export default function HomePage() {
                   </span>
                   <div>
                     <p className="text-xl font-medium text-gray-100">SOC 2 ready</p>
-                    <p className="text-base text-gray-300">Built to SOC 2 standards. Audit planned for Q3 2026.</p>
+                    <p className="text-base text-gray-300">Built to SOC 2 standards. Audit planned for Q2 2026.</p>
                   </div>
                 </div>
               </div>
