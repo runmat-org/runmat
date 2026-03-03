@@ -116,7 +116,7 @@ Chunk descriptor fields:
 
 ## API surface in RunMat language
 
-We should keep `save/load` for convenience and compatibility, but add explicit large-data APIs.
+We keep `save/load` for convenience and compatibility, but add explicit large-data APIs.
 
 ### User-facing module
 
@@ -198,7 +198,7 @@ tx.commit();
 
 ## Collaboration model
 
-For "Figma for math" style collaboration, separate two planes:
+For collaborative computational workflows, we separate two planes:
 
 1. **Data plane (heavy, immutable chunks)**
 2. **Intent/annotation plane (lightweight, mutable ops)**
@@ -207,14 +207,6 @@ For "Figma for math" style collaboration, separate two planes:
 
 - Concurrent writers use manifest CAS and transaction conflicts are explicit.
 - Merge strategies can be array-region aware in future phases.
-
-### View/state collaboration (future)
-
-- camera, overlays, labels, plot styling, selections, bookmarks as ops.
-- operation log can be streamed over existing event infrastructure.
-- periodic checkpoints compact op history.
-
-This keeps giant tensor payloads stable while enabling real-time shared editing semantics.
 
 ## Integration with plotting and replay
 
@@ -237,7 +229,7 @@ Benefits:
 
 ## Observability
 
-Add explicit telemetry for:
+For systemic observability and performance monitoring, we add explicit telemetry for:
 
 - chunk read/write throughput and latency,
 - cache hit/miss,
@@ -792,15 +784,15 @@ These are the highest-impact choices that are now fixed for implementation:
 
 ## Current implementation status
 
-- Runtime now persists array payloads with chunk sidecars (`arrays/<name>/chunks/index.json`) in addition to manifest metadata, and reconstructs reads from chunk indexes when present.
-- Filesystem provider abstraction now exposes provider-neutral data transport primitives (`data_manifest_descriptor`, `data_chunk_upload_targets`, `data_upload_chunk`) with concrete implementations across native/sandbox/remote providers.
-- Runtime `data.*` API now includes `data.copy`, `data.move`, `data.import`, `data.export`, plus transaction operations for `resize`, `fill`, `create_array`, and `delete_array`.
+- Runtime persists array payloads with chunk sidecars (`arrays/<name>/chunks/index.json`) in addition to manifest metadata, and reconstructs reads from chunk indexes when present.
+- Filesystem provider abstraction exposes provider-neutral data transport primitives (`data_manifest_descriptor`, `data_chunk_upload_targets`, `data_upload_chunk`) with concrete implementations across native/sandbox/remote providers.
+- Runtime `data.*` API includes `data.copy`, `data.move`, `data.import`, `data.export`, plus transaction operations for `resize`, `fill`, `create_array`, and `delete_array`.
 - Lint coverage includes `data/no-multiwrite-outside-tx` in addition to untyped-open and commit guidance lints.
-- Lint coverage now also includes manifest-informed checks for unknown array names (`data/unknown-array-name`) and invalid slice rank (`data/invalid-slice-rank`) when `data.open('<literal-path>')` can resolve a local manifest.
+- Lint coverage includes manifest-informed checks for unknown array names (`data/unknown-array-name`) and invalid slice rank (`data/invalid-slice-rank`) when `data.open('<literal-path>')` can resolve a local manifest.
 - Runtime test coverage includes HTTP endpoint integration for touched-chunk uploads, including cross-boundary slice writes that upload only intersecting chunk keys.
-- Chunk hashes now use SHA-256 (`sha256:<hex>`) to match server contract expectations.
+- Chunk hashes use SHA-256 (`sha256:<hex>`) to match server contract expectations.
 - Runtime emits structured tracing events (`target=runmat.data`) for transaction begin/commit/abort, manifest conflicts, chunk planning, and chunk upload completions.
-- Domain-specific static analysis has been extracted from `runmat-hir` into `runmat-static-analysis` with modular files (`schema`, `lints/data_api`, `lints/shape`) to keep HIR crate boundaries clean.
+- Domain-specific static analysis is extracted from `runmat-hir` into `runmat-static-analysis` with modular files (`schema`, `lints/data_api`, `lints/shape`) to keep HIR crate boundaries clean.
 
 ## Done matrix
 
