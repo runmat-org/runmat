@@ -41,9 +41,9 @@ export default function Hero() {
             >
               <source src="https://web.runmatstatic.com/video/runmat-wave-simulation.mp4" type="video/mp4" />
             </video>
-            <span className="absolute bottom-3 right-3 flex items-center gap-1.5 rounded-lg bg-black/50 backdrop-blur-sm px-3 py-1.5 text-xs font-medium text-white/80 transition-colors group-hover:text-white group-hover:bg-black/70">
-              <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" x2="21" y1="14" y2="3" /></svg>
-              View surf() example
+            <span className="hidden sm:flex absolute bottom-2 right-2 items-center gap-1 rounded-md bg-black/40 backdrop-blur-sm px-2 py-1 text-[10px] font-medium text-white/70 transition-colors group-hover:text-white group-hover:bg-black/60">
+              <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /><polyline points="15 3 21 3 21 9" /><line x1="10" x2="21" y1="14" y2="3" /></svg>
+              surf() example
             </span>
           </Link>
         </div>

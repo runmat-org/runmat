@@ -50,7 +50,7 @@ const pricingFaqItems: { question: string; answer: string; answerContent?: React
   {
     question: "What's included in Cloud Free vs Pro vs Team?",
     answer:
-      "Free: unlimited projects, 200MB storage, version history (counts toward storage). Pro: unlimited projects, 10GB storage, version history (counts toward storage) ($30/mo per user). Team: SSO / SAML (and SCIM), 100GB storage, version history (counts toward storage), priority support ($100/mo per user).",
+      "Free: unlimited projects, 200MB storage, version history (counts toward storage). Pro: unlimited projects, 10GB storage, version history (counts toward storage) ($30/mo per user). Team: unlimited projects, SSO / SAML (and SCIM), 100GB storage, version history (counts toward storage), priority support ($100/mo per user).",
   },
   {
     question: "How does RunMat Cloud billing work?",

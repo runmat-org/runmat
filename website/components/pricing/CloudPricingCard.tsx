@@ -48,6 +48,7 @@ const cloudTierConfig: Record<
     price: "$100/mo per user",
     description: "For organizations that need SSO and centralized identity management.",
     features: [
+      "Unlimited projects",
       "SSO / SAML (and SCIM)",
       "100GB cloud storage",
       "Version history (counts toward storage)",
