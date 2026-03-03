@@ -1,18 +1,18 @@
 ---
-title: "Deterministic Run Replay for Scientific and Numerical Calculations"
+title: "Restoring Historical Run State for Scientific and Numerical Calculations"
 description: "A practical guide to restoring historical run state for scientific and numerical workflows, so teams can investigate issues without expensive re-execution."
 date: "2026-03-02"
 dateModified: "2026-03-02"
 image: "https://web.runmatstatic.com/blog-images/deterministic-replay.png"
-imageAlt: "Deterministic replay of historical computational runs"
+imageAlt: "Restoring historical computational run state"
 authors:
   - name: "Julie Ruiz"
     url: "https://www.linkedin.com/in/julie-ruiz-64b24328/"
 readTime: "12 min read"
-slug: "deterministic-run-replay-scientific-numerical-calculations"
-tags: ["replay", "scientific computing", "numerical methods", "debugging", "RunMat"]
+slug: "restoring-historical-run-state-scientific-numerical-calculations"
+tags: ["historical state", "scientific computing", "numerical methods", "debugging", "RunMat"]
 visibility: unlisted
-canonical: "https://runmat.com/blog/deterministic-run-replay-scientific-numerical-calculations"
+canonical: "https://runmat.com/blog/restoring-historical-run-state-scientific-numerical-calculations"
 jsonLd:
   "@context": "https://schema.org"
   "@graph":
@@ -24,11 +24,11 @@ jsonLd:
           item: "https://runmat.com/blog"
         - "@type": "ListItem"
           position: 2
-          name: "Deterministic Run Replay for Scientific and Numerical Calculations"
-          item: "https://runmat.com/blog/deterministic-run-replay-scientific-numerical-calculations"
+          name: "Restoring Historical Run State for Scientific and Numerical Calculations"
+          item: "https://runmat.com/blog/restoring-historical-run-state-scientific-numerical-calculations"
     - "@type": "TechArticle"
-      "@id": "https://runmat.com/blog/deterministic-run-replay-scientific-numerical-calculations#article"
-      headline: "Deterministic Run Replay for Scientific and Numerical Calculations"
+      "@id": "https://runmat.com/blog/restoring-historical-run-state-scientific-numerical-calculations#article"
+      headline: "Restoring Historical Run State for Scientific and Numerical Calculations"
       description: "How computational teams restore historical run state to debug faster, reduce reruns, and improve confidence in incident analysis."
       datePublished: "2026-03-02T00:00:00Z"
       dateModified: "2026-03-02T00:00:00Z"
@@ -45,7 +45,7 @@ jsonLd:
           url: "/runmat-logo.svg"
       about:
         - "@type": "Thing"
-          name: "Deterministic Replay"
+          name: "Historical Run State Restoration"
         - "@type": "Thing"
           name: "Scientific Computing"
         - "@type": "Thing"
@@ -61,7 +61,7 @@ jsonLd:
             priceCurrency: "USD"
 ---
 
-# Deterministic Run Replay for Scientific and Numerical Calculations
+# Restoring Historical Run State for Scientific and Numerical Calculations
 
 If you work on scientific or numerical systems, this probably sounds familiar.
 
@@ -79,7 +79,7 @@ That is not a tooling failure. It is a missing capability.
 
 Most teams can re-execute. Fewer teams can reliably inspect the exact state of a past run.
 
-That is what deterministic replay gives you.
+That is what restoring historical run state gives you.
 
 ## When a result looks off, the real need is historical state
 
@@ -98,13 +98,13 @@ You answer them by restoring prior run context and inspecting it directly.
 Rerun is still essential. It is just for a different phase.
 
 - Rerun tells you what happens now.
-- Replay lets you inspect what happened then.
+- Historical state restoration lets you inspect what happened then.
 
 That distinction sounds simple, but it changes incident work a lot.
 
 When teams use rerun as the first move for historical investigation, they burn time comparing two runs that may not be comparable.
 
-## What teams do without replay
+## What teams do without historical state restoration
 
 People are practical. They fill the gap however they can:
 
@@ -121,9 +121,9 @@ The symptoms are predictable:
 - long "is this the same issue?" threads,
 - and postmortems based on partial evidence.
 
-## What deterministic replay actually restores
+## What historical state restoration actually restores
 
-Good replay is not "history for history’s sake." It restores enough context to make debugging concrete:
+Good historical-state tooling is not "history for history’s sake." It restores enough context to make debugging concrete:
 
 - run/session identity,
 - figure state,
@@ -162,18 +162,18 @@ If reruns are expensive and collaborative, the pain compounds fast.
 
 ## Compliance and safety angle
 
-In regulated or safety-adjacent domains, replay has another benefit: better evidence.
+In regulated or safety-adjacent domains, historical-state restoration has another benefit: better evidence.
 
 Instead of "we think this is what happened," teams can point to restored historical state tied to a specific run.
 
 It does not replace governance processes, but it improves the technical foundation those processes depend on.
 
-## Replay and persistence are different layers
+## Historical state restoration and persistence are different layers
 
 One useful boundary to keep clear:
 
 - persistence stores artifacts durably,
-- replay restores historical state from those artifacts.
+- state restoration rebuilds historical context from those artifacts.
 
 Both are necessary. They solve different parts of the same operational problem.
 
@@ -181,7 +181,7 @@ Both are necessary. They solve different parts of the same operational problem.
 
 Start small.
 
-Pick one recurring incident type where reruns are noisy or expensive. Use replay-first investigation there for a few weeks.
+Pick one recurring incident type where reruns are noisy or expensive. Use historical-state inspection first there for a few weeks.
 
 Track two numbers:
 
@@ -196,4 +196,4 @@ Rerun is still part of a healthy workflow.
 
 But when the question is historical, rerun alone is the long way around.
 
-Deterministic replay gives teams a cleaner first step: inspect what actually happened, then validate what should happen next.
+This gives teams a cleaner first step: inspect what actually happened, then validate what should happen next.

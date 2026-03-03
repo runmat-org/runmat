@@ -128,7 +128,7 @@ This is why chunked externalization and reference-based manifests are not optimi
 
 In RunMat, we built a persistence substrate that makes large data persistence practical and reliable.
 
-We separated "large artifact persistence" from higher-level replay UX and treated persistence as infrastructure.
+We separated large artifact persistence state persistence and restoration, as they are different domains of concern. State persistence and restoration relies on the persistence substrate for persisting and restoring large artifacts, such as large intermediate tensors and scenes.
 
 Core design points:
 
@@ -187,12 +187,12 @@ After:
 
 ## What this is not
 
-This persistence layer is not replay itself.
+This persistence layer is not historical-state restoration itself.
 
 - Persistence answers: "Can we store and retrieve large outputs reliably?"
-- Replay answers: "Can we reconstruct historical run state exactly?"
+- Historical-state restoration answers: "Can we reconstruct historical run state exactly?"
 
-Replay depends on persistence, but conflating them hides where real problems occur and makes debugging harder.
+Historical-state restoration depends on persistence, but conflating them hides where real problems occur and makes debugging harder.
 
 ## Closing thought
 
