@@ -671,8 +671,7 @@ pub async fn global() -> Option<&'static NativeAutoOffload> {
     // Resolve without acquiring the async lock so single-poll callers (e.g.
     // the turbine JIT interpreter fallback) never observe a spurious Pending.
     if !auto_enabled() || runmat_accelerate_api::provider().is_none() {
-        let _ = GLOBAL.set(None);
-        return GLOBAL.get().and_then(|v| v.as_ref());
+        return None;
     }
     let _guard = GLOBAL_INIT_LOCK.lock().await;
     if let Some(existing) = GLOBAL.get() {
