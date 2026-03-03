@@ -26,7 +26,7 @@ const productRows: ProductRow[] = [
   ["Team workspaces", "x", "check", "check", "Organize work in shared team workspaces."],
   ["File versioning", "x", "check", "check", "Built-in version history on all Cloud tiers; counts toward storage."],
   ["Cloud storage", "x", "200 MB (Free); 10 GB (Pro); 100 GB (Team)", "Included", "Total cloud storage for project files. Version history counts toward storage on all Cloud tiers."],
-  ["SOC 2 compliance", "x", "check", "check", "Audited security and compliance controls."],
+  ["SOC 2 compliance", "x", "check", "check", "Designed to SOC 2 standards. Audit planned for Q3 2026."],
   ["SSO / SAML", "x", "Team plan", "check", "Single sign-on and SAML for enterprise."],
   ["Audit logs", "x", "x", "check", "Audit logging for Enterprise deployment and compliance."],
   ["Air-gapped deployment", "x", "x", "check", "Deploy RunMat Enterprise in isolated networks."],

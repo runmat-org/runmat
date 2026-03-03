@@ -89,6 +89,7 @@ export const docsTree: DocsNode[] = [
       },
       { title: "CLI Reference", slug: ["cli"], file: "docs/CLI.md", seo: { description: "RunMat CLI commands, flags, environment variables, and examples.", keywords: ["RunMat CLI", "command line", "flags"] } },
       { title: "Configuration", slug: ["configuration"], file: "docs/CONFIG.md", seo: { description: "Configure RunMat: files, environment overrides, and precedence.", keywords: ["RunMat config", "configuration", "YAML", "TOML", "JSON"] } },
+      { title: "Plotting", slug: ["plotting"], file: "docs/PLOTTING.md", seo: { description: "How RunMat plotting works: MATLAB-familiar API, GPU-first rendering, drawnow/pause semantics.", keywords: ["plotting", "GPU plotting", "MATLAB plot", "3D visualization", "drawnow"] } },
     ],
   },
   {
@@ -138,6 +139,7 @@ export const docsTree: DocsNode[] = [
     title: "Accelerate (GPU)",
     children: [
       { title: "Introduction to RunMat Fusion", slug: ["accelerate", "fusion-intro"], file: "docs/INTRODUCTION_TO_RUNMAT_GPU.md", seo: { description: "How RunMat manages GPU data residency: keeping arrays on device, minimizing transfers.", keywords: ["GPU", "residency", "data residency", "device memory"] } },
+      { title: "GPU Residency & Precision", slug: ["accelerate", "gpu-behavior"], file: "docs/GPU_BEHAVIOR_NOTES.md", seo: { description: "GPU residency rules and precision guarantees: when data moves to/from device.", keywords: ["GPU residency", "precision", "f32", "f64", "device memory"] } },
       {
         title: "Fusion Guide",
         externalHref: "/docs/fusion-guide",
@@ -159,6 +161,7 @@ export const docsTree: DocsNode[] = [
     children: [
       { title: "License", slug: ["license"], file: "LICENSE.md", seo: { description: "RunMat software license." } },
       { title: "Telemetry", slug: ["telemetry"], file: "docs/TELEMETRY.md", seo: { description: "RunMat telemetry: what information is collected and how it is used." } },
+      { title: "Contributing", slug: ["contributing"], file: "docs/CONTRIBUTING.md", seo: { description: "How to contribute to RunMat: branch workflow, PR scope, and coding style." } },
     ],
   },
 ];

@@ -177,11 +177,19 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
     hr: ({ ...props }: Record<string, unknown>) => (
       <hr className="my-12 border-t border-border" {...props} />
     ),
-    a: ({ children, href, ...props }: { children: React.ReactNode; href?: string }) => (
-      <a href={href} className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline underline-offset-4 transition-colors" {...props}>
-        {children}
-      </a>
-    ),
+    a: ({ children, href, ...props }: { children: React.ReactNode; href?: string }) => {
+      const isExternal = href?.startsWith('http') && !href?.startsWith('https://runmat.com');
+      return (
+        <a
+          href={href}
+          className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline underline-offset-4 transition-colors"
+          {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
+          {...props}
+        >
+          {children}
+        </a>
+      );
+    },
     table: ({ children, ...props }: { children: React.ReactNode }) => (
       <div className="my-8 mx-0 overflow-x-auto max-w-full">
         <table className="w-full min-w-full sm:min-w-[500px] border-collapse border border-border rounded-lg table-mobile-wrap" {...props}>{children}</table>

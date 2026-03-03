@@ -27,7 +27,7 @@ const cloudTierConfig: Record<
     features: [
       "Unlimited projects",
       "200MB cloud storage",
-      "Version history",
+      "Version history (counts toward storage)",
       "Community support",
     ],
     ctaLabel: "Start free",
@@ -39,7 +39,7 @@ const cloudTierConfig: Record<
     features: [
       "Unlimited projects",
       "10GB cloud storage",
-      "Version history",
+      "Version history (counts toward storage)",
     ],
     ctaLabel: "Get started",
     ctaHref: "/sandbox",
@@ -50,7 +50,7 @@ const cloudTierConfig: Record<
     features: [
       "SSO / SAML (and SCIM)",
       "100GB cloud storage",
-      "Version history",
+      "Version history (counts toward storage)",
       "Priority support",
     ],
     ctaLabel: "Get started",
@@ -65,21 +65,17 @@ const cloudTierTabs: { id: CloudTier; label: string }[] = [
 ];
 
 export default function CloudPricingCard() {
-  const [activeTier, setActiveTier] = useState<CloudTier>("pro");
+  const [activeTier, setActiveTier] = useState<CloudTier>("free");
   const currentTier = cloudTierConfig[activeTier];
 
   return (
     <Card className="relative flex h-full flex-col border border-blue-500/50 bg-muted/40 shadow-lg shadow-blue-500/10">
       <CardHeader className="space-y-4 pb-4">
-        <div className="flex items-center justify-between">
-          <Badge className="bg-violet-500/20 text-violet-800 border-violet-600/50 dark:text-violet-200 dark:border-violet-400/40 hover:bg-violet-500/20">
-            Cloud
-          </Badge>
-          <Badge className="bg-gradient-to-r from-blue-500 to-purple-600 text-white border-0 hover:from-blue-500 hover:to-purple-600">
-            Most Popular
-          </Badge>
-        </div>
+        <Badge className="w-fit bg-violet-500/20 text-violet-800 border-violet-600/50 dark:text-violet-200 dark:border-violet-400/40 hover:bg-violet-500/20">
+          Cloud
+        </Badge>
         <CardTitle className="text-xl text-foreground">RunMat Cloud</CardTitle>
+        <p className="text-xs text-muted-foreground">Everything in RunMat, plus cloud storage and collaboration.</p>
         <div
           role="tablist"
           aria-label="RunMat Cloud tiers"

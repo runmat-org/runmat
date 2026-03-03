@@ -12,7 +12,8 @@ export const curatedBenchmarks = [
 ]
 
 export const featuredResources = [
-  // Curated featured entries (optional). Use frontmatter `featured: true` for content-driven featuring. No docs—resource hub is for guides, blogs, benchmarks.
+  { kind: 'blog', slug: 'free-matlab-alternatives', type: 'blogs' },
+  { kind: 'blog', slug: 'version-control-for-engineers-who-dont-use-git', type: 'blogs' },
   { kind: 'blog', slug: 'in-defense-of-matlab-whiteboard-style-code', type: 'blogs' },
 ]
 

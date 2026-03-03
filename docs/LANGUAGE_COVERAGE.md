@@ -1,6 +1,8 @@
 # RunMat Language Coverage
 
-RunMat implements MATLAB's core language grammar and semantics. This document tracks current coverage in RunMat and compares it to GNU Octave where helpful. It focuses on core language features (syntax and semantics), not breadth of numeric libraries or toolboxes.
+RunMat targets MATLAB's core language grammar and semantics so that engineers familiar with MATLAB can be productive immediately without learning a new language. The goal is high-fidelity coverage of MATLAB's syntax, operators, control flow, OOP, and indexing — not verbatim drop-in execution of every legacy script or toolbox function. Where RunMat intentionally diverges, it does so for performance, clarity, or safety, and those divergences are documented below.
+
+This document tracks current coverage and compares it to GNU Octave where helpful. It focuses on core language features (syntax and semantics), not breadth of numeric libraries or toolboxes.
 
 ## Language Feature Compatibility
 

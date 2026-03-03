@@ -5,6 +5,7 @@ import Prism from "prismjs";
 import "prismjs/components/prism-matlab";
 import { useMemo } from "react";
 import { TryInBrowserButton } from "@/components/TryInBrowserButton";
+import { openWorkspace } from "@/lib/desktop";
 
 const sampleCode = `
 x = 0:0.001:4*pi;           % 0 to 4π in steps of 0.001
@@ -18,14 +19,25 @@ interface MatlabCodeCardProps {
 
 export function MatlabCodeCard({ code = sampleCode, className }: MatlabCodeCardProps) {
   const highlighted = useMemo(() => Prism.highlight(code, Prism.languages.matlab, "matlab"), [code]);
+  const openInBrowser = () =>
+    openWorkspace([{ path: "/example.m", content: code }], { targetPath: "/sandbox", metadata: { source: "example-page" } });
 
   return (
     <div
       className={cn(
-        "matlab-code-card-hero w-full max-w-3xl rounded-3xl p-4 shadow-2xl",
+        "matlab-code-card-hero w-full max-w-3xl rounded-3xl p-4 shadow-2xl cursor-pointer",
         "border border-border bg-muted/40 dark:border-white/10 dark:bg-gradient-to-b dark:from-[#131a2a] dark:to-[#060a12]",
         className
       )}
+      role="link"
+      tabIndex={0}
+      onClick={openInBrowser}
+      onKeyDown={event => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          openInBrowser();
+        }
+      }}
     >
       <div className="flex items-center gap-2 rounded-2xl bg-muted dark:bg-[#0d1422] px-4 py-3">
         <div className="flex gap-2">
@@ -35,7 +47,11 @@ export function MatlabCodeCard({ code = sampleCode, className }: MatlabCodeCardP
         </div>
       </div>
       <div className="mt-3 relative group">
-        <div className="absolute top-3 right-3 z-10">
+        <div
+          className="absolute top-3 right-3 z-10"
+          onClick={event => event.stopPropagation()}
+          onKeyDown={event => event.stopPropagation()}
+        >
           <TryInBrowserButton
             code={code}
             size="sm"

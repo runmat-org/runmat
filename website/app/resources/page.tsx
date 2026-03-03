@@ -17,11 +17,11 @@ export const metadata: Metadata = {
   title: "Resources | RunMat",
   description:
     "Guides, Q&A, case studies, news, and curated docs/benchmarks to learn RunMat. Hand-picked, never auto-indexed.",
-  alternates: { canonical: "https://runmat.org/resources" },
+  alternates: { canonical: "https://runmat.com/resources" },
   openGraph: {
     title: "RunMat Resources",
     description: "Guides, Q&A, case studies, news, and curated docs/benchmarks.",
-    url: "https://runmat.org/resources",
+    url: "https://runmat.com/resources",
     type: "website",
   },
 };
@@ -107,7 +107,6 @@ export default function ResourcesPage() {
         <section id="latest" className="space-y-6">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <h2 className="text-2xl font-semibold text-foreground">Latest</h2>
-            <span className="text-sm text-muted-foreground">Most recent across all types</span>
           </div>
           {latest.length ? (
             <div className="grid gap-4 lg:grid-cols-3 sm:grid-cols-2">
