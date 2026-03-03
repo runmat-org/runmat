@@ -5080,7 +5080,10 @@ async fn run_interpreter_inner(
                         if dims == 1 {
                             let total = t.data.len();
                             let mut idxs: Vec<usize> = Vec::new();
-                            let mut linear_output_shape: Option<Vec<usize>> = None;
+                            // For tensor indices, mirror the index shape in the output so that
+                            // A([1 3 5]) (row index) → row result and A(1:0) (1×0 index) → 1×0.
+                            // None means no tensor index was used; fall back to defaults.
+                            let mut idx_shape: Option<Vec<usize>> = None;
                             let is_colon = (colon_mask & 1u32) != 0;
                             let is_end = (end_mask & 1u32) != 0;
                             if is_colon {
@@ -5100,7 +5103,7 @@ async fn run_interpreter_inner(
                                         idxs = vec![i as usize];
                                     }
                                     Value::Tensor(idx_t) => {
-                                        linear_output_shape = Some(idx_t.shape.clone());
+                                        idx_shape = Some(idx_t.shape.clone());
                                         for &val in &idx_t.data {
                                             let i = val as isize;
                                             if i < 1 || (i as usize) > total {
@@ -5143,12 +5146,23 @@ async fn run_interpreter_inner(
                             }
                             if idxs.len() == 1 {
                                 stack.push(Value::Num(t.data[idxs[0] - 1]));
+                            } else if idxs.is_empty() {
+                                // For tensor indices (e.g. 1:0 → [1,0]) mirror the index shape.
+                                // For all other empty cases (colon on empty source, logical mask
+                                // with no true values) fall back to [0,1] — a 0×1 column vector,
+                                // matching MATLAB's A(:) on an empty source.
+                                let shape = idx_shape.unwrap_or_else(|| vec![0, 1]);
+                                let tens = runmat_builtins::Tensor::new(vec![], shape)
+                                    .map_err(|e| format!("Slice error: {e}"))?;
+                                stack.push(Value::Tensor(tens));
                             } else {
                                 let mut out = Vec::with_capacity(idxs.len());
                                 for &i in &idxs {
                                     out.push(t.data[i - 1]);
                                 }
-                                let shape = linear_output_shape.unwrap_or_else(|| vec![idxs.len(), 1]);
+                                // Mirror the index tensor's shape so A([1 3 5]) (row index) gives
+                                // a row result, and A([1;3;5]) (column index) gives a column.
+                                let shape = idx_shape.unwrap_or_else(|| vec![idxs.len(), 1]);
                                 let tens = runmat_builtins::Tensor::new(out, shape)
                                     .map_err(|e| format!("Slice error: {e}"))?;
                                 stack.push(Value::Tensor(tens));
@@ -7873,9 +7887,7 @@ async fn run_interpreter_inner(
                                         }
                                         SliceSelector::Scalar(i) => vec![*i],
                                         SliceSelector::Indices(v) => v.clone(),
-                                        SliceSelector::LinearIndices { values: v, .. } => {
-                                            v.clone()
-                                        }
+                                        SliceSelector::LinearIndices { values: v, .. } => v.clone(),
                                     };
                                     per_dim_indices.push(idxs);
                                 }
