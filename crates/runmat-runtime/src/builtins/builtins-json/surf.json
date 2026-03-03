@@ -38,6 +38,10 @@
     {
       "description": "",
       "input": "x = linspace(-2, 2, 50);\ny = linspace(-2, 2, 50);\nz = meshgrid(x, y);\nsurf(x, y, sin(x)' * cos(y))"
+    },
+    {
+      "description": "Wave interference from 8 point sources",
+      "input": "N = 300;\nx = linspace(-10, 10, N);\ny = linspace(-10, 10, N);\n[X, Y] = meshgrid(single(x), single(y));\n\n% Gaussian envelope — smoothly damps the surface toward the edges\nenvelope = exp(-(X.^2 + Y.^2) / 25);\n\nfor t = 1:80\n    Z = zeros(N, N, 'single');\n\n    % Superpose 8 wave sources equally spaced around a circle\n    for k = 1:8\n        a = 2 * pi * k / 8;\n        cx = 6 * cos(a);\n        cy = 6 * sin(a);\n        r = sqrt((X - cx).^2 + (Y - cy).^2) + 0.1;\n\n        Z = Z + sin(5 * r - t * 0.2 + k * 0.8) ./ (1 + r);\n    end\n\n    Z = Z .* envelope;\n    surf(x, y, Z);\n    colormap(\"jet\");\n    shading(\"interp\");\n    drawnow;\nend"
     }
   ],
   "faqs": [],
