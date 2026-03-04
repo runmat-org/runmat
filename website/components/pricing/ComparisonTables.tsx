@@ -9,7 +9,7 @@ const columnTints = [
   "rgba(245, 158, 11, 0.04)",
 ] as const;
 
-type ProductRow = [string, string, string, string, string];
+type ProductRow = [string, string, string, string, string, string?];
 
 const productRows: ProductRow[] = [
   ["MATLAB syntax execution", "check", "check", "check", "Execute standard MATLAB-syntax code across all RunMat products."],
@@ -22,10 +22,11 @@ const productRows: ProductRow[] = [
   ["Interactive 2D/3D plotting", "check", "check", "check", "Interactive plots you can rotate, zoom, and inspect."],
   ["Type and shape diagnostics", "check", "check", "check", "Real-time type and matrix shape tracking with dimension errors."],
   ["Cloud file storage", "x", "check", "check", "Persist and sync projects in the cloud."],
-  ["Project sharing", "x", "check", "check", "Share projects and collaborate with your team."],
-  ["Team workspaces", "x", "check", "check", "Organize work in shared team workspaces."],
+  ["Project sharing", "x", "check", "check", "Share projects with editors in your organization. Each editor is billed as a seat on Cloud plans."],
+  ["Team workspaces", "x", "check", "check", "Organize projects under your team's organization. Created automatically when you sign up."],
+  ["Collaborators", "x", "Paid per seat", "Included", "Each editor in your organization is billed as a seat on Cloud plans."],
   ["File versioning", "x", "check", "check", "Built-in version history on all Cloud tiers; counts toward storage."],
-  ["Cloud storage", "x", "200 MB (Free); 10 GB (Pro); 100 GB (Team)", "Included", "Total cloud storage for project files. Version history counts toward storage on all Cloud tiers."],
+  ["Cloud storage", "x", "200 MB (Free); 10 GB (Pro); 100 GB (Team)", "Included", "Cloud storage is shared across your organization. Free: 200 MB (hard cap). Pro: 10 GB included, pay-as-you-go at $0.15/GB after. Team: 100 GB included, pay-as-you-go at $0.15/GB after. Version history counts toward storage.", "compare-storage"],
   ["SOC 2 compliance", "x", "check", "check", "Designed to SOC 2 standards. Audit planned for Q2 2026."],
   ["SSO / SAML", "x", "Team plan", "check", "Single sign-on and SAML for enterprise."],
   ["Audit logs", "x", "x", "check", "Audit logging for Enterprise deployment and compliance."],
@@ -41,7 +42,7 @@ const productSectionLabels = [
   "Security and Compliance",
   "Support",
 ];
-const productSectionSizes = [4, 5, 5, 4, 2];
+const productSectionSizes = [4, 5, 6, 4, 2];
 
 function SectionHeaderRow({ label }: { label: string }) {
   return (
@@ -57,15 +58,18 @@ function ExpandableRow({
   label,
   cells,
   description,
+  id,
 }: {
   label: string;
   cells: [string, string, string];
   description: string;
+  id?: string;
 }) {
   const [open, setOpen] = useState(false);
   return (
     <>
       <tr
+        id={id}
         className="border-b border-border/30 cursor-pointer hover:bg-muted/5 transition-colors"
         onClick={() => setOpen((o) => !o)}
         role="button"
@@ -154,12 +158,14 @@ export function CompareProductsTable() {
                     .map(([label, ...rest]) => {
                       const cells = rest.slice(0, 3) as [string, string, string];
                       const description = rest[3] as string;
+                      const rowId = rest[4] as string | undefined;
                       return (
                         <ExpandableRow
                           key={label}
                           label={label}
                           cells={cells}
                           description={description}
+                          id={rowId}
                         />
                       );
                     })}

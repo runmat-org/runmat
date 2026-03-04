@@ -11,23 +11,25 @@ import { cn } from "@/lib/utils";
 
 type CloudTier = "free" | "pro" | "team";
 
-const cloudTierConfig: Record<
-  CloudTier,
-  {
-    price: string;
-    description: string;
-    features: string[];
-    ctaLabel: string;
-    ctaHref: string;
-  }
-> = {
+type Feature = string | { label: string; href: string };
+
+interface CloudTierDef {
+  price: string;
+  description: string;
+  inheritsFrom?: string;
+  features: Feature[];
+  ctaLabel: string;
+  ctaHref: string;
+}
+
+const cloudTierConfig: Record<CloudTier, CloudTierDef> = {
   free: {
     price: "Free",
     description: "Sign up free to get cloud storage and collaboration.",
     features: [
       "Unlimited projects",
-      "200MB cloud storage",
-      "Version history (counts toward storage)",
+      { label: "200 MB storage", href: "#compare-storage" },
+      "Version history (uses storage)",
       "Community support",
     ],
     ctaLabel: "Start free",
@@ -36,10 +38,9 @@ const cloudTierConfig: Record<
   pro: {
     price: "$30/mo per user",
     description: "For individuals and small teams shipping real work.",
+    inheritsFrom: "Everything in Free, plus:",
     features: [
-      "Unlimited projects",
-      "10GB cloud storage",
-      "Version history (counts toward storage)",
+      { label: "10 GB storage", href: "#compare-storage" },
     ],
     ctaLabel: "Get started",
     ctaHref: "/sandbox",
@@ -47,11 +48,10 @@ const cloudTierConfig: Record<
   team: {
     price: "$100/mo per user",
     description: "For organizations that need SSO and centralized identity management.",
+    inheritsFrom: "Everything in Pro, plus:",
     features: [
-      "Unlimited projects",
+      { label: "100 GB storage", href: "#compare-storage" },
       "SSO / SAML (and SCIM)",
-      "100GB cloud storage",
-      "Version history (counts toward storage)",
       "Priority support",
     ],
     ctaLabel: "Get started",
@@ -118,14 +118,32 @@ export default function CloudPricingCard() {
             <p className="text-3xl font-bold text-foreground">{currentTier.price}</p>
             <p className="mt-2 text-sm text-muted-foreground">{currentTier.description}</p>
           </div>
-          <ul className="space-y-2">
-            {currentTier.features.map(feature => (
-              <li key={feature} className="flex items-start gap-2 text-sm text-muted-foreground">
-                <Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-violet-300" />
-                <span>{feature}</span>
-              </li>
-            ))}
-          </ul>
+
+          <div className="space-y-2">
+            {currentTier.inheritsFrom && (
+              <p className="text-xs font-medium text-muted-foreground/70">
+                {currentTier.inheritsFrom}
+              </p>
+            )}
+            <ul className="space-y-2">
+              {currentTier.features.map(feature => {
+                const label = typeof feature === "string" ? feature : feature.label;
+                const href = typeof feature === "string" ? undefined : feature.href;
+                return (
+                  <li key={label} className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-violet-300" />
+                    {href ? (
+                      <a href={href} className="no-underline hover:text-foreground transition-colors">
+                        {label}
+                      </a>
+                    ) : (
+                      <span>{label}</span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         </div>
         <Button
           asChild

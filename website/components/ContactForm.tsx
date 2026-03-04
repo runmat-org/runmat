@@ -44,6 +44,7 @@ export default function ContactForm() {
               email,
               company,
               message,
+              source: inquiryType === "enterprise" ? "pricing_contact_sales" : "website_contact_page",
               pageUri: window.location.href,
               pageName: document.title,
             }),

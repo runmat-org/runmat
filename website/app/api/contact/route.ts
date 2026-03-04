@@ -13,13 +13,14 @@ function isValidEmail(email: string): boolean {
 
 export async function POST(req: NextRequest) {
   try {
-    const { firstname, lastname, email, company, message, pageUri, pageName } =
+    const { firstname, lastname, email, company, message, source, pageUri, pageName } =
       (await req.json()) as {
         firstname?: string;
         lastname?: string;
         email?: string;
         company?: string;
         message?: string;
+        source?: string;
         pageUri?: string;
         pageName?: string;
       };
@@ -53,6 +54,8 @@ export async function POST(req: NextRequest) {
     if (company?.trim()) {
       fields.push({ name: "company", value: company.trim() });
     }
+
+    fields.push({ name: "runmat_source", value: source?.trim() || "website_contact_page" });
 
     const payload = {
       fields,

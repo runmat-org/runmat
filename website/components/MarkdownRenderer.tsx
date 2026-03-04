@@ -183,8 +183,8 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
         <a
           href={href}
           className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline underline-offset-4 transition-colors"
-          {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
           {...props}
+          {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
         >
           {children}
         </a>

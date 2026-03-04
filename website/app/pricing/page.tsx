@@ -20,7 +20,7 @@ const runmatFreeFeatures = [
   "GPU acceleration (Metal/Vulkan/DX12)",
   "Interactive, high performance 2D/3D plotting",
   "CLI for scripts and CI/CD",
-  "Zero-install (in browser) and IDE desktop app",
+  "Zero-install (in browser) and desktop app (coming soon)",
 ];
 
 const serverFeatures = [

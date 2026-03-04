@@ -62,6 +62,7 @@ export function MatlabCodeCard({ code = sampleCode, className }: MatlabCodeCardP
         <pre
           className="markdown-pre m-0 max-w-full overflow-x-auto rounded-2xl bg-[hsl(var(--code-surface))] dark:bg-[#0d1422] text-left text-foreground dark:text-white language-example"
           tabIndex={0}
+          onKeyDown={event => event.stopPropagation()}
           suppressHydrationWarning
         >
           <code
