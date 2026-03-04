@@ -3,7 +3,7 @@ title: "Restoring Historical Run State for Scientific and Numerical Calculations
 description: "A practical guide to restoring historical run state for scientific and numerical workflows, so teams can investigate issues without expensive re-execution."
 date: "2026-03-02"
 dateModified: "2026-03-02"
-image: "https://web.runmatstatic.com/blog-images/deterministic-replay.png"
+image: "https://web.runmatstatic.com/blog-images/historical-run-state.png"
 imageAlt: "Restoring historical computational run state"
 authors:
   - name: "Julie Ruiz"
