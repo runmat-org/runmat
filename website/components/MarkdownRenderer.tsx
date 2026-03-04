@@ -178,7 +178,8 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       <hr className="my-12 border-t border-border" {...props} />
     ),
     a: ({ children, href, ...props }: { children: React.ReactNode; href?: string }) => {
-      const isExternal = href?.startsWith('http') && !href?.startsWith('https://runmat.com');
+      const isInternal = href === 'https://runmat.com' || href?.startsWith('https://runmat.com/') || href?.startsWith('https://runmat.com?') || href?.startsWith('https://runmat.com#');
+      const isExternal = href?.startsWith('http') && !isInternal;
       return (
         <a
           href={href}
