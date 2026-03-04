@@ -245,6 +245,11 @@ export default function Navigation() {
                 Download
               </Link>
             </Button>
+            <Button variant="outline" size="sm" className="ml-2" asChild>
+              <Link href="https://runmat.com/o/">
+                Sign In
+              </Link>
+            </Button>
             <Link
               href="https://runmat.com/sandbox"
               className="inline-flex items-center justify-center h-10 px-6 text-sm font-semibold flex-shrink-0 whitespace-nowrap rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow hover:from-blue-600 hover:to-purple-700 transition-colors"
@@ -358,6 +363,25 @@ export default function Navigation() {
               >
                 <Download className="mr-2 h-4 w-4" />
                 Download
+              </Link>
+              <Link
+                href="https://runmat.com/sandbox"
+                className="flex w-full items-center justify-center rounded-lg mt-2 p-3 text-sm font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow hover:from-blue-600 hover:to-purple-700 transition-colors"
+                onClick={() => {
+                  setMobileMenuOpen(false);
+                  handleTryInBrowserClick();
+                }}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                Try in Browser
+              </Link>
+              <Link
+                href="https://runmat.com/o/"
+                className="flex w-full items-center justify-center rounded-md p-2 text-sm font-medium hover:bg-accent"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                Sign In
               </Link>
             </div>
           </div>
