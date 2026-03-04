@@ -12,8 +12,19 @@ import { CompareProductsTable } from "@/components/pricing/ComparisonTables";
 export const metadata: Metadata = {
   title: "RunMat Pricing | Free, Cloud, and Enterprise",
   description:
-    "Simple RunMat pricing: free runtime and app (open source CLI, free browser & desktop), RunMat Cloud, and RunMat Enterprise for on-prem.",
+    "Simple RunMat pricing: free runtime and cloud tier. Pro from $30/mo per user, Team from $100/mo per user. Enterprise for on-prem and air-gapped deployment.",
   alternates: { canonical: "https://runmat.com/pricing" },
+  openGraph: {
+    title: "RunMat Pricing | Free, Cloud, and Enterprise",
+    description:
+      "Free runtime and cloud tier. Pro from $30/mo per user, Team from $100/mo per user. RunMat Enterprise for on-prem and air-gapped deployment.",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "RunMat Pricing | Free, Cloud, and Enterprise",
+    description:
+      "Free runtime and cloud tier. Pro from $30/mo per user, Team from $100/mo per user. RunMat Enterprise for on-prem and air-gapped deployment.",
+  },
 };
 
 const runmatFreeFeatures = [
