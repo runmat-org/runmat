@@ -11,23 +11,25 @@ import { cn } from "@/lib/utils";
 
 type CloudTier = "free" | "pro" | "team";
 
-const cloudTierConfig: Record<
-  CloudTier,
-  {
-    price: string;
-    description: string;
-    features: string[];
-    ctaLabel: string;
-    ctaHref: string;
-  }
-> = {
+type Feature = string | { label: string; href: string };
+
+interface CloudTierDef {
+  price: string;
+  description: string;
+  inheritsFrom?: string;
+  features: Feature[];
+  ctaLabel: string;
+  ctaHref: string;
+}
+
+const cloudTierConfig: Record<CloudTier, CloudTierDef> = {
   free: {
     price: "Free",
     description: "Sign up free to get cloud storage and collaboration.",
     features: [
       "Unlimited projects",
-      "200MB cloud storage",
-      "Version history",
+      { label: "200 MB storage", href: "#compare-storage" },
+      "Version history (uses storage)",
       "Community support",
     ],
     ctaLabel: "Start free",
@@ -36,10 +38,9 @@ const cloudTierConfig: Record<
   pro: {
     price: "$30/mo per user",
     description: "For individuals and small teams shipping real work.",
+    inheritsFrom: "Everything in Free, plus:",
     features: [
-      "Unlimited projects",
-      "10GB cloud storage",
-      "Version history",
+      { label: "10 GB storage", href: "#compare-storage" },
     ],
     ctaLabel: "Get started",
     ctaHref: "/sandbox",
@@ -47,10 +48,10 @@ const cloudTierConfig: Record<
   team: {
     price: "$100/mo per user",
     description: "For organizations that need SSO and centralized identity management.",
+    inheritsFrom: "Everything in Pro, plus:",
     features: [
+      { label: "100 GB storage", href: "#compare-storage" },
       "SSO / SAML (and SCIM)",
-      "100GB cloud storage",
-      "Version history",
       "Priority support",
     ],
     ctaLabel: "Get started",
@@ -65,21 +66,17 @@ const cloudTierTabs: { id: CloudTier; label: string }[] = [
 ];
 
 export default function CloudPricingCard() {
-  const [activeTier, setActiveTier] = useState<CloudTier>("pro");
+  const [activeTier, setActiveTier] = useState<CloudTier>("free");
   const currentTier = cloudTierConfig[activeTier];
 
   return (
     <Card className="relative flex h-full flex-col border border-blue-500/50 bg-muted/40 shadow-lg shadow-blue-500/10">
       <CardHeader className="space-y-4 pb-4">
-        <div className="flex items-center justify-between">
-          <Badge className="bg-violet-500/20 text-violet-800 border-violet-600/50 dark:text-violet-200 dark:border-violet-400/40 hover:bg-violet-500/20">
-            Cloud
-          </Badge>
-          <Badge className="bg-gradient-to-r from-blue-500 to-purple-600 text-white border-0 hover:from-blue-500 hover:to-purple-600">
-            Most Popular
-          </Badge>
-        </div>
+        <Badge className="w-fit bg-violet-500/20 text-violet-800 border-violet-600/50 dark:text-violet-200 dark:border-violet-400/40 hover:bg-violet-500/20">
+          Cloud
+        </Badge>
         <CardTitle className="text-xl text-foreground">RunMat Cloud</CardTitle>
+        <p className="text-xs text-muted-foreground">Everything in RunMat, plus cloud storage and collaboration.</p>
         <div
           role="tablist"
           aria-label="RunMat Cloud tiers"
@@ -121,14 +118,32 @@ export default function CloudPricingCard() {
             <p className="text-3xl font-bold text-foreground">{currentTier.price}</p>
             <p className="mt-2 text-sm text-muted-foreground">{currentTier.description}</p>
           </div>
-          <ul className="space-y-2">
-            {currentTier.features.map(feature => (
-              <li key={feature} className="flex items-start gap-2 text-sm text-muted-foreground">
-                <Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-violet-300" />
-                <span>{feature}</span>
-              </li>
-            ))}
-          </ul>
+
+          <div className="space-y-2">
+            {currentTier.inheritsFrom && (
+              <p className="text-xs font-medium text-muted-foreground/70">
+                {currentTier.inheritsFrom}
+              </p>
+            )}
+            <ul className="space-y-2">
+              {currentTier.features.map(feature => {
+                const label = typeof feature === "string" ? feature : feature.label;
+                const href = typeof feature === "string" ? undefined : feature.href;
+                return (
+                  <li key={label} className="flex items-start gap-2 text-sm text-muted-foreground">
+                    <Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-violet-300" />
+                    {href ? (
+                      <a href={href} className="no-underline hover:text-foreground transition-colors">
+                        {label}
+                      </a>
+                    ) : (
+                      <span>{label}</span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         </div>
         <Button
           asChild

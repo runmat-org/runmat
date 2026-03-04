@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { SiGithub } from "react-icons/si";
-import { Users, GitBranch, Code, Lock, Shield, Bug, Eye, ClipboardCheck, Cpu, Monitor, HardDrive } from "lucide-react";
+import { Users, GitBranch, Camera, Lock, Shield, Eye, ClipboardCheck, Cpu, Monitor, HardDrive } from "lucide-react";
 
 import MatlabCodeCard from "@/components/MatlabCodeCard";
 import Hero from "@/components/Hero";
@@ -15,14 +15,14 @@ const jsonLd = {
   "@graph": [
     {
       "@type": "Organization",
-      "@id": "https://runmat.org/#organization",
+      "@id": "https://runmat.com/#organization",
       "name": "RunMat",
       "alternateName": ["RunMat by Dystr", "Dystr"],
       "legalName": "Dystr Inc.",
-      "url": "https://runmat.org",
+      "url": "https://runmat.com",
       "logo": {
         "@type": "ImageObject",
-        "url": "https://runmat.org/runmat-logo.svg",
+        "url": "https://runmat.com/runmat-logo.svg",
         "caption": "RunMat"
       },
       "description": "RunMat is a high-performance, open-source runtime for math that lets you run MATLAB-syntax code in the browser, on the desktop, or from the CLI, while getting GPU-speed execution.",
@@ -46,24 +46,24 @@ const jsonLd = {
     },
     {
       "@type": "WebSite",
-      "@id": "https://runmat.org/#website",
-      "url": "https://runmat.org",
+      "@id": "https://runmat.com/#website",
+      "url": "https://runmat.com",
       "name": "RunMat",
       "description": "The Fastest Runtime for Your Math. RunMat fuses back-to-back ops into fewer GPU steps and intelligently manages memory.",
-      "publisher": { "@id": "https://runmat.org/#organization" },
+      "publisher": { "@id": "https://runmat.com/#organization" },
       "image": "https://web.runmatstatic.com/runmat-sandbox-dark.png",
       "potentialAction": {
         "@type": "SearchAction",
         "target": {
           "@type": "EntryPoint",
-          "urlTemplate": "https://runmat.org/search?q={search_term_string}"
+          "urlTemplate": "https://runmat.com/search?q={search_term_string}"
         },
         "query-input": "required name=search_term_string"
       }
     },
     {
       "@type": "SoftwareApplication",
-      "@id": "https://runmat.org/#software",
+      "@id": "https://runmat.com/#software",
       "name": "RunMat",
       "description": "RunMat is a high-performance, open-source runtime for math that lets you run MATLAB-syntax code in the browser, on the desktop, or from the CLI, while getting GPU-speed execution.",
       "license": "https://opensource.org/licenses/MIT",
@@ -86,10 +86,10 @@ const jsonLd = {
         "priceCurrency": "USD",
         "availability": "https://schema.org/InStock"
       },
-      "author": { "@id": "https://runmat.org/#organization" },
-      "publisher": { "@id": "https://runmat.org/#organization" },
-      "downloadUrl": "https://runmat.org/download",
-      "mainEntityOfPage": { "@id": "https://runmat.org/#website" },
+      "author": { "@id": "https://runmat.com/#organization" },
+      "publisher": { "@id": "https://runmat.com/#organization" },
+      "downloadUrl": "https://runmat.com/download",
+      "mainEntityOfPage": { "@id": "https://runmat.com/#website" },
       "screenshot": {
         "@type": "ImageObject",
         "url": "https://web.runmatstatic.com/runmat-sandbox-dark.png",
@@ -174,6 +174,36 @@ export default function HomePage() {
 
       <Hero />
 
+      {/* Fastest to Visualize: 3D plotting */}
+      <section className="w-full py-16 md:py-24 lg:py-32 bg-muted/50">
+        <div className="container mx-auto px-4 md:px-6">
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
+            <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">
+              Interactive 3D plotting, built in
+            </h2>
+            <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-lg">
+              GPU-accelerated 2D and 3D plotting, built into the same environment as your code. Your plots are part of the same computation chain as your math. No copying data between systems, no separate plotting library.
+            </p>
+          </div>
+          <div className="mx-auto max-w-3xl">
+            <div className="rounded-xl border border-border overflow-hidden elevated-panel">
+              <Link href="/sandbox" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-b-none rounded-t-xl overflow-hidden">
+                <video
+                  className="w-full h-auto"
+                  autoPlay
+                  muted
+                  loop
+                  playsInline
+                  aria-label="RunMat 3D interactive plotting demo"
+                >
+                  <source src="https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.mp4" type="video/mp4" />
+                </video>
+              </Link>
+            </div>
+          </div>
+        </div>
+      </section>
+
       {/* Fastest to Read: Syntax you already know */}
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
@@ -182,7 +212,7 @@ export default function HomePage() {
               Syntax you already know.
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-base text-muted-foreground sm:text-lg sm:leading-8">
-              MATLAB syntax reads like the whiteboard — one line of math, one line of code. You and your team already know it. Write the math you mean, and RunMat routes it across CPU and GPU automatically.
+              MATLAB syntax reads like the whiteboard: one line of math, one line of code. You and your team already know it. Write the math you mean, and RunMat routes it across CPU and GPU automatically.
             </p>
           </div>
           <div className="flex justify-center w-full">
@@ -206,7 +236,7 @@ export default function HomePage() {
               The fastest runtime for your math
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-lg sm:leading-7">
-              RunMat runs math faster than anything else — not because of a trick, but because of how the runtime is engineered. Fusion merges sequential operations into fewer GPU steps. Residency keeps your arrays on-device between steps. The result: less memory traffic, fewer program launches, faster scripts.
+              RunMat runs math faster because of how the runtime is engineered. Fusion merges sequential operations into fewer GPU steps; residency keeps your arrays on-device between steps. That means less memory traffic, fewer program launches, and faster scripts.
             </p>
           </div>
 
@@ -233,10 +263,10 @@ export default function HomePage() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">
-              Catch errors before you run
+              Debug with full visibility
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-lg">
-              Hover any variable to see its shape and type. Get dimension mismatch warnings before you run, not after. Inspect intermediate values, trace execution, and read structured logs — all built into the same environment as your code.
+              Debug faster by seeing everything as you write. Hover any variable to see its shape and type. Click on an intermediate value to inspect it. Dimension mismatches are flagged in the editor before you run.
             </p>
           </div>
           <div className="mx-auto max-w-3xl">
@@ -253,57 +283,6 @@ export default function HomePage() {
                   <source src="https://web.runmatstatic.com/video/runmat-shape-tracking.mp4" type="video/mp4" />
                 </video>
               </Link>
-              <div className="p-4">
-                <h3 className="font-semibold text-lg">Hover to see matrix dimensions</h3>
-                <p className="text-muted-foreground text-sm mt-1">
-                  Red underlines warn you about dimension mismatches before execution.
-                </p>
-              </div>
-            </div>
-          </div>
-          <div className="mt-6 text-center">
-            <Link href="#" className="text-sm text-muted-foreground hover:text-foreground underline">
-              Tracing and logging in RunMat
-            </Link>
-            <span className="hidden sm:inline text-muted-foreground"> • </span>
-            <Link href="/sandbox" className="text-sm text-muted-foreground hover:text-foreground underline">
-              Open sandbox
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      {/* Fastest to Visualize: 3D plotting */}
-      <section className="w-full py-16 md:py-24 lg:py-32 bg-muted/50">
-        <div className="container mx-auto px-4 md:px-6">
-          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">
-              See your results the moment they exist
-            </h2>
-            <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-lg">
-              GPU-accelerated 2D and 3D plotting, built into the same environment as your code. Your plots are part of the same computation chain as your math — no copying data between systems, no separate plotting library.
-            </p>
-          </div>
-          <div className="mx-auto max-w-3xl">
-            <div className="rounded-xl border border-border overflow-hidden elevated-panel">
-              <Link href="/sandbox" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-b-none rounded-t-xl overflow-hidden">
-                <video
-                  className="w-full h-auto"
-                  autoPlay
-                  muted
-                  loop
-                  playsInline
-                  aria-label="RunMat 3D interactive plotting demo"
-                >
-                  <source src="https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.mp4" type="video/mp4" />
-                </video>
-              </Link>
-              <div className="p-4">
-                <h3 className="font-semibold text-lg">Interactive 3D plotting</h3>
-                <p className="text-muted-foreground text-sm mt-1">
-                  Explore your results as crisp, interactive 3D surfaces. Rotate, zoom in, and inspect your data from any angle.
-                </p>
-              </div>
             </div>
           </div>
         </div>
@@ -314,48 +293,57 @@ export default function HomePage() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">
-              Your whole team can work on it
+              Every change versioned. No git required.
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-lg">
-              Cloud projects sync without git. Built-in versioning — both per-file and full project snapshots — tracks every change and efficiently stores diffs, even on terabyte-scale datasets. And there&apos;s no new language to learn: if your team writes MATLAB, they already write RunMat.
+              Every save is a version, automatically. Per-file history and full project snapshots track every change, even on terabyte-scale datasets. Share projects with your team, no git setup, no merge conflicts.
             </p>
           </div>
           <div className="mx-auto max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-            <div
-              className="rounded-2xl border border-border bg-muted/40 min-h-[380px] md:row-span-3 flex items-center justify-center text-muted-foreground"
-              aria-hidden
+            <Link
+              href="/sandbox"
+              className="rounded-2xl border border-border overflow-hidden min-h-[380px] md:row-span-3 flex items-center justify-center bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
-              Video placeholder
+              <video
+                className="w-full h-auto min-h-[380px] object-cover"
+                autoPlay
+                muted
+                loop
+                playsInline
+                aria-label="RunMat versioning demo"
+              >
+                <source src="https://web.runmatstatic.com/video/runmat-versioning.mp4" type="video/mp4" />
+              </video>
+            </Link>
+            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
+                <GitBranch className="h-5 w-5" />
+              </span>
+              <h3 className="text-lg font-semibold text-gray-100">Automatic file history</h3>
+              <p className="text-sm text-gray-300 mt-1">Every save creates a version. Browse the timeline, restore any previous state. No commits, no staging.</p>
+            </div>
+            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
+                <Camera className="h-5 w-5" />
+              </span>
+              <h3 className="text-lg font-semibold text-gray-100">Project snapshots</h3>
+              <p className="text-sm text-gray-300 mt-1">Capture your entire project in one click. Restore instantly. A clean timeline with no merge conflicts.</p>
             </div>
             <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
               <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
                 <Users className="h-5 w-5" />
               </span>
-              <h3 className="text-lg font-semibold text-gray-100">Real-time collaboration</h3>
-              <p className="text-sm text-gray-300 mt-1">Work together on shared projects with your entire team in real-time</p>
-            </div>
-            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
-                <GitBranch className="h-5 w-5" />
-              </span>
-              <h3 className="text-lg font-semibold text-gray-100">File and project versioning</h3>
-              <p className="text-sm text-gray-300 mt-1">Per-file history and full project snapshots. Diffs are stored efficiently — versioning stays fast and affordable even on TB/PB-scale datasets.</p>
-            </div>
-            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
-                <Code className="h-5 w-5" />
-              </span>
-              <h3 className="text-lg font-semibold text-gray-100">MATLAB syntax</h3>
-              <p className="text-sm text-gray-300 mt-1">No new language to learn — use the MATLAB syntax your team already knows</p>
+              <h3 className="text-lg font-semibold text-gray-100">Cloud project sharing</h3>
+              <p className="text-sm text-gray-300 mt-1">Share projects with colleagues instantly. No shared drives, no emailing files.</p>
             </div>
           </div>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link href="#" className="text-sm text-muted-foreground hover:text-foreground underline">
-              Learn more about RunMat Cloud
+            <Link href="/docs/versioning" className="text-sm text-muted-foreground hover:text-foreground underline">
+              How versioning works
             </Link>
             <span className="hidden sm:inline text-muted-foreground">•</span>
-            <Link href="/pricing" className="text-sm text-muted-foreground hover:text-foreground underline">
-              Sign up free
+            <Link href="/docs/collaboration" className="text-sm text-muted-foreground hover:text-foreground underline">
+              Collaboration and teams
             </Link>
           </div>
         </div>
@@ -369,38 +357,30 @@ export default function HomePage() {
               Scale your math, not your toolchain
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-lg">
-              Scale computation by running on bigger GPUs — or scale data by streaming terabyte datasets through a high-bandwidth cloud filesystem. Same code runs on Apple, Nvidia, and ARM GPUs across macOS, Windows, and Linux. No rewrites, no device flags.
+              Same code runs on Apple, Nvidia, and ARM GPUs across macOS, Windows, and Linux. For large data, a sharded cloud filesystem handles multi-petabyte datasets with parallel reads and writes designed for NIC saturation. Delta snapshots version your datasets efficiently without duplicating terabytes.
             </p>
           </div>
-          <div className="mx-auto max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
-            <div className="flex flex-col gap-4 md:row-span-3">
-              <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
-                <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
-                  <Cpu className="h-5 w-5" />
-                </span>
-                <h3 className="text-lg font-semibold text-gray-100">Any GPU</h3>
-                <p className="text-sm text-gray-300 mt-1">Metal on Mac, Vulkan on Linux and ARM, DirectX 12 on Windows. No CUDA dependency.</p>
-              </div>
-              <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
-                <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
-                  <Monitor className="h-5 w-5" />
-                </span>
-                <h3 className="text-lg font-semibold text-gray-100">Any OS</h3>
-                <p className="text-sm text-gray-300 mt-1">macOS, Windows, Linux, and headless servers. Same runtime, same results.</p>
-              </div>
-              <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
-                <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
-                  <HardDrive className="h-5 w-5" />
-                </span>
-              <h3 className="text-lg font-semibold text-gray-100">High-bandwidth cloud filesystem</h3>
-              <p className="text-sm text-gray-300 mt-1">Stream and process terabyte-scale datasets without downloading them first. Parallel reads saturate your network for maximum throughput.</p>
-              </div>
+          <div className="mx-auto max-w-5xl grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
+                <Cpu className="h-5 w-5" />
+              </span>
+              <h3 className="text-lg font-semibold text-gray-100">Any GPU</h3>
+              <p className="text-sm text-gray-300 mt-1">Metal on Mac, Vulkan on Linux and ARM, DirectX 12 on Windows. No CUDA dependency.</p>
             </div>
-            <div
-              className="rounded-2xl border border-border bg-muted/40 min-h-[380px] md:row-span-3 flex items-center justify-center text-muted-foreground"
-              aria-hidden
-            >
-              Video placeholder
+            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
+                <Monitor className="h-5 w-5" />
+              </span>
+              <h3 className="text-lg font-semibold text-gray-100">Any OS</h3>
+              <p className="text-sm text-gray-300 mt-1">macOS, Windows, Linux, and headless servers. Same runtime, same results.</p>
+            </div>
+            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
+                <HardDrive className="h-5 w-5" />
+              </span>
+              <h3 className="text-lg font-semibold text-gray-100">High-bandwidth cloud filesystem</h3>
+              <p className="text-sm text-gray-300 mt-1">Sharded storage for multi-petabyte datasets. Parallel reads and writes designed for NIC saturation. Delta snapshots for efficient dataset versioning.</p>
             </div>
           </div>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -408,7 +388,7 @@ export default function HomePage() {
               Learn more about RunMat filesystem
             </Link>
             <span className="hidden sm:inline text-muted-foreground">•</span>
-            <Link href="mailto:team@runmat.com" className="text-sm text-muted-foreground hover:text-foreground underline">
+            <Link href="/contact" className="text-sm text-muted-foreground hover:text-foreground underline">
               Contact RunMat team
             </Link>
           </div>
@@ -433,11 +413,11 @@ export default function HomePage() {
                   <SiGithub className="h-14 w-14" />
                 </Link>
                 <p className="text-gray-300 text-lg">
-                  The RunMat runtime is MIT licensed and on{" "}
+                  Read every line of code that runs your math. Fork it, audit it, self-host it. No vendor lock-in, no black boxes. The runtime is on{" "}
                   <Link href="https://github.com/runmat-org/runmat" className="underline text-blue-300 hover:text-blue-200" target="_blank" rel="noreferrer">
                     GitHub
                   </Link>
-                  . The JIT, the fusion engine, the GPU planner — all open source and actively maintained.
+                  {" "}and actively maintained.
                 </p>
               </CardContent>
             </Card>
@@ -450,10 +430,10 @@ export default function HomePage() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto max-w-4xl space-y-4 text-center">
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
-              Designed for enterprise
+              Secure by design
             </h2>
             <p className="text-muted-foreground text-lg">
-              Security, compliance, and deployment options built for organizations that ship critical software.
+              Security, compliance, and deployment options for teams that protect proprietary research and engineering data.
             </p>
           </div>
           <div className="mx-auto mt-10 max-w-5xl">
@@ -479,15 +459,6 @@ export default function HomePage() {
                 </div>
                 <div className="flex items-start gap-4">
                   <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400">
-                    <Bug className="h-5 w-5" />
-                  </span>
-                  <div>
-                    <p className="text-xl font-medium text-gray-100">Built in Rust</p>
-                    <p className="text-base text-gray-300">Memory safe by default. No garbage collector, no runtime surprises.</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-4">
-                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400">
                     <Eye className="h-5 w-5" />
                   </span>
                   <div>
@@ -500,20 +471,20 @@ export default function HomePage() {
                     <ClipboardCheck className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-xl font-medium text-gray-100">SOC-II</p>
-                    <p className="text-base text-gray-300">Audit in progress.</p>
+                    <p className="text-xl font-medium text-gray-100">SOC 2 ready</p>
+                    <p className="text-base text-gray-300">Built to SOC 2 standards. Audit planned for Q2 2026.</p>
                   </div>
                 </div>
               </div>
             </div>
           </div>
           <div className="flex flex-col sm:flex-row gap-4 justify-center mt-8">
-            <Link href="mailto:team@runmat.com" className="text-sm text-muted-foreground hover:text-foreground underline">
+            <Link href="/contact" className="text-sm text-muted-foreground hover:text-foreground underline">
               Contact RunMat
             </Link>
             <span className="hidden sm:inline text-muted-foreground">•</span>
-            <Link href="#" className="text-sm text-muted-foreground hover:text-foreground underline">
-              See trust center
+            <Link href="/blog/mission-critical-math-airgap" className="text-sm text-muted-foreground hover:text-foreground underline">
+              Air-gapped deployment guide
             </Link>
           </div>
         </div>
@@ -525,10 +496,10 @@ export default function HomePage() {
           <Card className="mx-auto max-w-3xl border border-purple-500/30 bg-gradient-to-r from-purple-500/10 to-blue-500/10 shadow-lg">
             <CardContent className="py-8 space-y-4 text-center">
               <h2 className="text-3xl md:text-4xl font-bold text-foreground">
-                Start running math in your browser
+                Try it now
               </h2>
               <p className="text-muted-foreground text-lg">
-                No install, no license, no setup. Open the sandbox and write your first script in seconds.
+                Free, instant, no sign-up. Open the sandbox and write your first script in seconds.
               </p>
               <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
                 <Button
@@ -547,9 +518,6 @@ export default function HomePage() {
                 </Button>
                 <Button variant="outline" size="lg" asChild className="h-12 px-8 text-base">
                   <Link href="/pricing">View pricing</Link>
-                </Button>
-                <Button variant="outline" size="lg" asChild className="h-12 px-8 text-base">
-                  <Link href="/download">Other download options</Link>
                 </Button>
               </div>
             </CardContent>

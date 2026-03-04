@@ -293,6 +293,7 @@ function buildResourceIndex(): ResourceItem[] {
   const aggregated = [
     ...loadNativeResources(),
     ...loadBlogResources(),
+    ...loadCuratedDocs(),
     ...loadCuratedBenchmarks(),
   ]
   const deduped = uniqueById(aggregated)
@@ -379,7 +380,7 @@ export function getFeaturedResources(): ResourceItem[] {
 }
 
 export function getLatestResources(limit = 12): ResourceItem[] {
-  return getAllResources().slice(0, limit)
+  return getAllResources().filter(r => r.type !== 'docs' && r.type !== 'benchmarks').slice(0, limit)
 }
 
 export const RESOURCE_TYPES: ResourceType[] = ['docs', 'guides', 'blogs', 'case-studies', 'webinars', 'benchmarks']
