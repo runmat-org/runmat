@@ -1,3 +1,4 @@
+import type { Metadata } from "next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
@@ -13,21 +14,97 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { OSInstallCommand } from "@/components/OSInstallCommand";
-import { buildPageMetadata } from "@/lib/seo";
 import { GettingStartedTabs } from "@/components/GettingStartedTabs";
 
-export const metadata = buildPageMetadata({
-  title: "Getting Started | Docs",
-  description:
-    "Get started with RunMat: interactive plotting, real-time diagnostics, and GPU acceleration for MATLAB-style code. Browser or CLI.",
-  canonicalPath: "/docs/getting-started",
-  ogType: "article",
-  ogImagePath: "/docs/getting-started/opengraph-image",
-});
+const pageTitle = "Getting Started | Docs";
+const pageDescription =
+  "Get started with RunMat: interactive plotting, real-time diagnostics, and GPU acceleration for MATLAB-style code. Browser or CLI.";
+
+export const metadata: Metadata = {
+  title: pageTitle,
+  description: pageDescription,
+  alternates: { canonical: "https://runmat.com/docs/getting-started" },
+  keywords: [
+    "RunMat getting started", "MATLAB alternative setup", "RunMat CLI install",
+    "RunMat browser IDE", "GPU acceleration tutorial", "RunMat sandbox",
+  ],
+  openGraph: {
+    title: pageTitle,
+    description: pageDescription,
+    url: "/docs/getting-started",
+    siteName: "RunMat",
+    type: "article",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: pageTitle,
+    description: pageDescription,
+  },
+  robots: {
+    index: true,
+    follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      'max-video-preview': -1,
+      'max-image-preview': 'large',
+      'max-snippet': -1,
+    },
+  },
+};
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebPage",
+      "@id": "https://runmat.com/docs/getting-started#webpage",
+      url: "https://runmat.com/docs/getting-started",
+      name: pageTitle,
+      description: pageDescription,
+      inLanguage: "en",
+      dateModified: "2026-03-05",
+      isPartOf: { "@id": "https://runmat.com/#website" },
+      author: { "@id": "https://runmat.com/#organization" },
+      publisher: { "@id": "https://runmat.com/#organization" },
+    },
+    {
+      "@type": "HowTo",
+      name: "Get started with RunMat",
+      description: pageDescription,
+      step: [
+        {
+          "@type": "HowToStep",
+          name: "Try RunMat in your browser",
+          text: "Visit runmat.com/sandbox to open the browser-based IDE. No installation or account required.",
+          url: "https://runmat.com/sandbox",
+        },
+        {
+          "@type": "HowToStep",
+          name: "Install the CLI",
+          text: "Run 'curl -fsSL https://runmat.com/install | sh' to install the RunMat CLI for native GPU performance and local file access.",
+          url: "https://runmat.com/download",
+        },
+        {
+          "@type": "HowToStep",
+          name: "Set up Jupyter",
+          text: "Run 'runmat --install-kernel' to use RunMat as a Jupyter kernel for interactive notebooks.",
+          url: "https://runmat.com/docs/getting-started#jupyter-notebook-integration",
+        },
+      ],
+    },
+  ],
+};
 
 export default function GettingStartedPage() {
   return (
     <div className="min-h-screen bg-background">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify(jsonLd).replace(/<\//g, "<\\/"),
+        }}
+      />
       <div className="container mx-auto px-4 md:px-0 py-16 md:py-4">
         
         {/* Header */}

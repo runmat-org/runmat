@@ -3,6 +3,23 @@ collections:
   - guides
 image: "https://web.runmatstatic.com/runmat-sandbox-dark.png"
 imageAlt: "RunMat Sandbox"
+jsonLd:
+  "@context": "https://schema.org"
+  "@type": "WebApplication"
+  name: "RunMat Sandbox"
+  url: "https://runmat.com/sandbox"
+  applicationCategory: "DeveloperApplication"
+  operatingSystem: "Any"
+  offers:
+    "@type": "Offer"
+    price: "0"
+    priceCurrency: "USD"
+  featureList:
+    - "GPU-accelerated MATLAB-style code execution via WebGPU"
+    - "Interactive 2D and 3D plotting"
+    - "Real-time variable inspector with type and shape tracking"
+    - "Syntax highlighting and error diagnostics"
+    - "Cloud storage and automatic file versioning (with free account)"
 ---
 
 # Browser Guide

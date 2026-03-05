@@ -24,14 +24,14 @@ export const docsTree: DocsNode[] = [
     children: [
       { title: "Getting Started", externalHref: "/docs/getting-started" },
       {
-        title: "Desktop & Browser Guide",
+        title: "Browser Guide",
         slug: ["desktop-browser-guide"],
         file: "docs/DESKTOP_BROWSER_GUIDE.md",
         seo: {
-          description: "Get started with RunMat Desktop, a browser-based IDE for writing and running MATLAB-style code with GPU acceleration.",
-          keywords: ["RunMat Desktop", "browser IDE", "sandbox", "WebAssembly", "GPU acceleration", "MATLAB online"],
-          ogTitle: "Desktop & Browser Guide",
-          ogDescription: "Learn how to use RunMat Desktop—a browser-based development environment for MATLAB-style code with automatic GPU acceleration.",
+          description: "Use the RunMat sandbox, a browser-based IDE for writing and running MATLAB-style code with GPU acceleration, cloud storage, and file versioning.",
+          keywords: ["RunMat sandbox", "RunMat browser", "browser IDE", "sandbox", "WebAssembly", "GPU acceleration", "MATLAB online", "cloud storage", "file versioning"],
+          ogTitle: "Browser Guide",
+          ogDescription: "Use the RunMat sandbox—a browser-based development environment for MATLAB-style code with automatic GPU acceleration and cloud storage.",
         },
       },
       {
