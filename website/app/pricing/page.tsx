@@ -51,7 +51,7 @@ const pricingFaqItems: { question: string; answer: string; answerContent?: React
   {
     question: "Is RunMat really free?",
     answer:
-      "Yes. The RunMat runtime is open source and the browser sandbox is free. The desktop app is coming soon and will also be free. RunMat Cloud has a free tier with unlimited projects and 200MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.",
+      "Yes. The RunMat runtime is open source and the browser sandbox is free. The desktop app is coming soon and will also be free. RunMat Cloud has a free tier with unlimited projects and 100 MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.",
   },
   {
     question: "Do I need an account to use RunMat?",
@@ -61,7 +61,7 @@ const pricingFaqItems: { question: string; answer: string; answerContent?: React
   {
     question: "What's included in Cloud Free vs Pro vs Team?",
     answer:
-      "Free: unlimited projects, 200MB storage, version history (counts toward storage). Pro: unlimited projects, 10GB storage, version history (counts toward storage) ($30/mo per user). Team: unlimited projects, SSO / SAML (and SCIM), 100GB storage, version history (counts toward storage), priority support ($100/mo per user).",
+      "Free: unlimited projects, 100 MB storage, version history (counts toward storage). Pro: unlimited projects, 10GB storage, version history (counts toward storage) ($30/mo per user). Team: unlimited projects, SSO / SAML (and SCIM), 100GB storage, version history (counts toward storage), priority support ($100/mo per user).",
   },
   {
     question: "How does RunMat Cloud billing work?",

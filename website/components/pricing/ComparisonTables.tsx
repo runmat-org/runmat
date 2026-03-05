@@ -26,7 +26,7 @@ const productRows: ProductRow[] = [
   ["Team workspaces", "x", "check", "check", "Organize projects under your team's organization. Created automatically when you sign up."],
   ["Collaborators", "x", "Paid per seat", "Included", "Each editor in your organization is billed as a seat on Cloud plans."],
   ["File versioning", "x", "check", "check", "Built-in version history on all Cloud tiers; counts toward storage."],
-  ["Cloud storage", "x", "200 MB (Free); 10 GB (Pro); 100 GB (Team)", "Included", "Cloud storage is shared across your organization. Free: 200 MB (hard cap). Pro: 10 GB included, pay-as-you-go at $0.15/GB after. Team: 100 GB included, pay-as-you-go at $0.15/GB after. Version history counts toward storage.", "compare-storage"],
+  ["Cloud storage", "x", "100 MB (Free); 10 GB (Pro); 100 GB (Team)", "Included", "Cloud storage is shared across your organization. Free: 100 MB (hard cap). Pro: 10 GB included, pay-as-you-go at $0.15/GB after. Team: 100 GB included, pay-as-you-go at $0.15/GB after. Version history counts toward storage.", "compare-storage"],
   ["SOC 2 compliance", "x", "check", "check", "Designed to SOC 2 standards. Audit planned for Q2 2026."],
   ["SSO / SAML", "x", "Team plan", "check", "Single sign-on and SAML for enterprise."],
   ["Audit logs", "x", "x", "check", "Audit logging for Enterprise deployment and compliance."],

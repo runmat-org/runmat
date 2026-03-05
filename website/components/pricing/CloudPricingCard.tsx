@@ -28,7 +28,7 @@ const cloudTierConfig: Record<CloudTier, CloudTierDef> = {
     description: "Sign up free to get cloud storage and collaboration.",
     features: [
       "Unlimited projects",
-      { label: "200 MB storage", href: "#compare-storage" },
+      { label: "100 MB storage", href: "#compare-storage" },
       "Version history (uses storage)",
       "Community support",
     ],

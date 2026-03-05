@@ -102,7 +102,7 @@ export function BrowserTabContent() {
       </Card>
 
       <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-muted-foreground">
-        <strong className="text-foreground">Sandbox storage:</strong> Files live in your browser tab. No account required; your code never leaves your machine. Files are cleared when you close or refresh the tab. Sign in free for 200 MB cloud storage with automatic versioning, or use the CLI for local persistence.
+        <strong className="text-foreground">Sandbox storage:</strong> Files live in your browser tab. No account required; your code never leaves your machine. Files are cleared when you close or refresh the tab. Sign in free for 100 MB cloud storage with automatic versioning, or use the CLI for local persistence.
       </div>
     </div>
   );

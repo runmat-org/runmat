@@ -207,7 +207,7 @@ Without signing in, the sandbox runs entirely in your browser. Your files are st
 
 Sign in to get cloud storage, automatic file versioning, and access to your projects from any device. Your files sync to RunMat Cloud and persist across sessions.
 
-- **Free tier** — 200 MB storage, unlimited projects, automatic version history
+- **Free tier** — 100 MB storage, unlimited projects, automatic version history
 - **Pro** — 10 GB storage, version history ($30/mo per user)
 - **Team** — 100 GB storage, project sharing, SSO ($100/mo per user)
 
