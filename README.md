@@ -359,16 +359,16 @@ For more details, see [Introduction to RunMat GPU](https://runmat.com/docs/accel
 
 ## 💡 Design Philosophy
 
-RunMat follows a **minimal core, fast runtime, open extension model** philosophy:
+RunMat follows a **fast-by-default runtime, open extension model** philosophy:
 
-- **Full language support**: The core implements the complete MATLAB grammar and semantics, not a subset
-- **Extensive built-ins**: The standard library aims for complete base MATLAB built-in coverage (300+ functions)
+- **High-fidelity language coverage**: Core MATLAB syntax, operators, control flow, OOP, and indexing — not a subset, not a new language
+- **Extensive built-ins**: 300+ functions covering core MATLAB built-ins, with more added continuously
 - **Tiered execution**: Ignition interpreter for fast startup, Turbine JIT for hot code
 - **GPU-first math**: Fusion engine automatically turns MATLAB code into fast GPU workloads
-- **Small, portable runtime**: Single static binary, fast startup, modern CLI, Jupyter kernel support
+- **Single portable binary**: One static binary includes the runtime, GPU engine, and plotting — fast startup, modern CLI, Jupyter kernel support
 - **Toolboxes as packages**: Signal processing, statistics, image processing, and other domains live as packages — the package manager is [in active design](https://runmat.com/docs/package-manager)
 
-RunMat keeps the core small and uncompromisingly high-quality; everything else is a package. Use any editor you like, or the built-in [browser IDE](https://runmat.com/sandbox) and upcoming desktop app.
+The runtime intentionally ships GPU acceleration, fusion, JIT, and plotting as first-class subsystems rather than optional plugins — this is what makes RunMat fast by default. Domain-specific toolboxes (signal processing, statistics, image processing, etc.) live as packages. Use any editor you like, or the built-in [browser IDE](https://runmat.com/sandbox) and upcoming desktop app.
 
 See [Design Philosophy](https://runmat.com/docs/design-philosophy) for the complete design rationale.
 
