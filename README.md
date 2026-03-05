@@ -496,7 +496,8 @@ RunMat is more than just software—it's a movement toward **open, fast, and acc
 ### 💬 Connect With Us
 
 - **GitHub Discussions**: [Share ideas and get help](https://github.com/runmat-org/runmat/discussions)  
-- **Twitter**: [@dystreng](https://x.com/dystreng) for updates and announcements
+- **X (Twitter)**: [@runmat_com](https://x.com/runmat_com) for updates and announcements  
+- **LinkedIn**: [RunMat](https://www.linkedin.com/company/runmat)
 
 ---
 
@@ -520,7 +521,7 @@ See [LICENSE.md](LICENSE.md) for complete terms or visit [runmat.com/license](ht
 
 ⭐ **Star us on GitHub** if RunMat is useful to you.
 
-[**🚀 Get Started**](https://runmat.com/docs/getting-started) • [**📖 Docs**](https://runmat.com/docs) • [**📝 Blog**](https://runmat.com/blog) • [**💰 Pricing**](https://runmat.com/pricing) • [**🐦 Follow @dystr**](https://x.com/dystrEng)
+[**🚀 Get Started**](https://runmat.com/docs/getting-started) • [**📖 Docs**](https://runmat.com/docs) • [**📝 Blog**](https://runmat.com/blog) • [**💰 Pricing**](https://runmat.com/pricing) • [**𝕏 @runmat_com**](https://x.com/runmat_com) • [**LinkedIn**](https://www.linkedin.com/company/runmat)
 
 ---
 
