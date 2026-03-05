@@ -46,17 +46,17 @@ const pricingFaqItems: { question: string; answer: string; answerContent?: React
   {
     question: "What's the difference between RunMat, Cloud, and Enterprise?",
     answer:
-      "RunMat is the free, open-source runtime — GPU acceleration, plotting, CLI, browser sandbox, and desktop app. RunMat Cloud adds cloud storage, project sharing, and version history on top, with Free, Pro, and Team tiers. RunMat Enterprise is everything in Cloud, deployed on your own infrastructure for air-gapped, compliance-ready environments.",
+      "RunMat is the free, open-source runtime — GPU acceleration, plotting, CLI, and browser sandbox. The desktop app is coming soon. RunMat Cloud adds cloud storage, project sharing, and version history on top, with Free, Pro, and Team tiers. RunMat Enterprise is everything in Cloud, deployed on your own infrastructure for air-gapped, compliance-ready environments.",
   },
   {
     question: "Is RunMat really free?",
     answer:
-      "Yes. The RunMat runtime is open source and the browser and desktop app are free. RunMat Cloud has a free tier with unlimited projects and 200MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.",
+      "Yes. The RunMat runtime is open source and the browser sandbox is free. The desktop app is coming soon and will also be free. RunMat Cloud has a free tier with unlimited projects and 200MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.",
   },
   {
     question: "Do I need an account to use RunMat?",
     answer:
-      "No. The browser sandbox and desktop app work without an account. An account is only required for cloud storage and team features.",
+      "No. The browser sandbox works without an account. The desktop app (coming soon) will also work without one. An account is only required for cloud storage and team features.",
   },
   {
     question: "What's included in Cloud Free vs Pro vs Team?",

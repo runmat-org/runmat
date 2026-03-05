@@ -7,7 +7,8 @@ import {
   Code,
   Zap,
   Cpu,
-  ExternalLink
+  ExternalLink,
+  Monitor,
 } from "lucide-react";
 import { SiGithub } from "react-icons/si";
 import { OSInstallCommand } from "@/components/OSInstallCommand";
@@ -42,6 +43,10 @@ export default function DownloadPage() {
             </CardContent>
           </Card>
         </section>
+
+        <p className="text-center text-muted-foreground mt-4">
+          Or <Link href="/sandbox" className="underline hover:text-foreground">try RunMat in your browser</Link> with no installation.
+        </p>
 
         {/* Alternative Installation Methods */}
         <section className="mb-12">
@@ -119,7 +124,29 @@ export default function DownloadPage() {
             Development environment
           </h2>
           
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            {/* Desktop App */}
+            <Card className="opacity-60 relative">
+              <CardHeader>
+                <CardTitle className="flex items-center">
+                  <Monitor className="h-5 w-5 mr-2 text-gray-400" />
+                  Desktop App
+                  <span className="ml-auto bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded-full text-xs font-medium">
+                    Coming soon
+                  </span>
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-gray-500 dark:text-gray-400 mb-4">
+                  Full IDE with native GPU performance and local file system access.
+                </p>
+                <Button className="w-full opacity-50 cursor-not-allowed" disabled>
+                  <ExternalLink className="mr-2 h-4 w-4" />
+                  Download
+                </Button>
+              </CardContent>
+            </Card>
+
             {/* VS Code Extension */}
             <Card className="opacity-60 relative">
               <CardHeader>

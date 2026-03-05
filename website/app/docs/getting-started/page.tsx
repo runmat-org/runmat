@@ -8,6 +8,8 @@ import {
   Zap,
   ExternalLink,
   BarChart3,
+  Check,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { OSInstallCommand } from "@/components/OSInstallCommand";
@@ -17,7 +19,7 @@ import { GettingStartedTabs } from "@/components/GettingStartedTabs";
 export const metadata = buildPageMetadata({
   title: "Getting Started | Docs",
   description:
-    "Get started with RunMat: interactive plotting, real-time diagnostics, and GPU acceleration for MATLAB-style code. Browser, desktop, or CLI.",
+    "Get started with RunMat: interactive plotting, real-time diagnostics, and GPU acceleration for MATLAB-style code. Browser or CLI.",
   canonicalPath: "/docs/getting-started",
   ogType: "article",
   ogImagePath: "/docs/getting-started/opengraph-image",
@@ -68,6 +70,70 @@ export default function GettingStartedPage() {
           <GettingStartedTabs />
         </section>
 
+        {/* Feature comparison */}
+        <section className="mb-12">
+          <h2 className="text-3xl font-bold mb-6 text-foreground">
+            Compare surfaces
+          </h2>
+          <div className="rounded-xl border border-border/60 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[540px] text-sm">
+                <thead>
+                  <tr className="border-b border-border/40">
+                    <th className="text-left py-4 px-5 text-sm font-medium text-muted-foreground w-[34%]">Feature</th>
+                    <th className="text-center py-4 px-3 w-[22%]">
+                      <div className="text-sm font-semibold text-foreground">CLI</div>
+                    </th>
+                    <th className="text-center py-4 px-3 w-[22%]">
+                      <div className="text-sm font-semibold text-foreground">Sandbox</div>
+                      <div className="text-xs font-normal text-muted-foreground mt-0.5">No account</div>
+                    </th>
+                    <th className="text-center py-4 px-3 w-[22%]">
+                      <div className="text-sm font-semibold text-foreground">Sandbox + Cloud</div>
+                      <div className="text-xs font-normal text-muted-foreground mt-0.5">Signed in</div>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {([
+                    ["Installation required", "yes", "no", "no"],
+                    ["Account required", "no", "no", "yes-text:Yes (free)"],
+                    ["GPU acceleration", "text:Native (Metal, Vulkan, DX12)", "text:WebGPU (browser-throttled)", "text:WebGPU (browser-throttled)"],
+                    ["Interactive IDE", "no", "yes", "yes"],
+                    ["Interactive plotting", "yes-text:GUI window", "yes-text:In-editor", "yes-text:In-editor"],
+                    ["Variable inspector", "no", "yes", "yes"],
+                    ["File storage", "text:Local filesystem", "text:In-memory (cleared on tab close)", "text:Cloud (persists across sessions)"],
+                    ["File versioning", "text:No (use git)", "no", "yes-text:Automatic"],
+                    ["Project sharing", "no", "no", "text:Paid plans"],
+                    ["Jupyter support", "yes", "no", "no"],
+                    ["Offline support", "yes", "no", "no"],
+                  ] as [string, string, string, string][]).map(([feature, cli, sandbox, cloud]) => (
+                    <tr key={feature} className="border-b border-border/30">
+                      <td className="py-3 px-5 text-muted-foreground">{feature}</td>
+                      {[cli, sandbox, cloud].map((cell, i) => (
+                        <td key={`${feature}-${i}`} className="py-3 px-3 text-center">
+                          {cell === "yes" ? (
+                            <Check className="inline-block h-4 w-4 text-green-500" aria-label="Yes" />
+                          ) : cell === "no" ? (
+                            <X className="inline-block h-4 w-4 text-muted-foreground/40" aria-label="No" />
+                          ) : cell.startsWith("yes-text:") ? (
+                            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                              <Check className="h-4 w-4 text-green-500 shrink-0" aria-hidden />
+                              {cell.replace("yes-text:", "")}
+                            </span>
+                          ) : (
+                            <span className="text-xs text-muted-foreground">{cell.replace("text:", "")}</span>
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </section>
+
         {/* Next Steps */}
         <section className="mb-12">
           <h2 className="text-3xl font-bold mb-6 text-foreground">
@@ -84,11 +150,11 @@ export default function GettingStartedPage() {
               </CardHeader>
               <CardContent>
                 <p className="text-muted-foreground mb-4">
-                  Install the CLI to run scripts from your terminal and use local files. Need native GPU performance? Download RunMat for full-speed execution.
+                  Install the CLI for native GPU performance and local file access.
                 </p>
                 <Button variant="outline" className="w-full" asChild>
                   <Link href="/download" className="flex items-center justify-center">
-                    Install RunMat / Download
+                    Install the CLI
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Link>
                 </Button>
@@ -108,7 +174,7 @@ export default function GettingStartedPage() {
                 </p>
                 <Button variant="outline" className="w-full" asChild>
                   <Link href="/docs/desktop-browser-guide" className="flex items-center justify-center">
-                    Desktop &amp; browser guide
+                    Browser guide
                     <ArrowRight className="ml-2 h-4 w-4" />
                   </Link>
                 </Button>

@@ -44,7 +44,7 @@ export default function Footer() {
             </Link>
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            The Fastest Runtime for Math
+            Run your math, blazing fast
           </p>
           <div className="flex items-center gap-3 mt-1">
             <Link href="https://github.com/runmat-org/runmat" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">

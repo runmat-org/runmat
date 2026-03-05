@@ -17,7 +17,7 @@ const productRows: ProductRow[] = [
   ["GPU fusion", "check", "check", "check", "Fuses ops into fewer GPU steps and keeps arrays on device (residency) for less memory traffic and fewer launches."],
   ["Cross-platform (macOS/Linux/Windows)", "check", "check", "check", "Run the same code on macOS, Linux, and Windows."],
   ["Browser sandbox", "check", "check", "check", "Run code in the browser with zero install via the sandbox."],
-  ["Desktop app", "check", "check", "check", "Full desktop IDE with local file access and offline use."],
+  ["Desktop app (coming soon)", "check", "check", "check", "Full desktop IDE with local file access and offline use. Coming soon."],
   ["Code editor and file explorer", "check", "check", "check", "Integrated editor and project file browser."],
   ["Interactive 2D/3D plotting", "check", "check", "check", "Interactive plots you can rotate, zoom, and inspect."],
   ["Type and shape diagnostics", "check", "check", "check", "Real-time type and matrix shape tracking with dimension errors."],
