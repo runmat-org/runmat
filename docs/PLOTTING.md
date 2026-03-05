@@ -89,6 +89,12 @@ from figure mutation:
 - **Figure updates** (data changes) still follow the figure-event coalescing model.
 - **Camera updates** (pan/zoom/rotate) trigger a **camera-only re-render** on the bound surface,
   even if the figure revision did not change.
+- Hosts can snapshot/restore camera state per surface using:
+  - `getPlotSurfaceCameraState(surfaceId) -> PlotSurfaceCameraState | null`
+  - `setPlotSurfaceCameraState(surfaceId, state) -> void`
+
+This is useful for preserving camera continuity when UIs rebind figures across sessions/tabs
+or virtualize plot surfaces for notebook-style layouts with many concurrent figures.
 
 ### Current controls
 
@@ -110,6 +116,34 @@ RunMat now exposes a versioned figure-scene replay payload at the wasm boundary:
 
 The payload is JSON and self-describing (schema version + kind) so hosts can persist it as an
 artifact and hydrate later without coupling to renderer internals.
+
+Scene replay roundtrip currently reconstructs these plot families directly:
+
+- 2D: `line`, `scatter`, `errorbar`, `stairs`, `stem`, `area`
+- 3D: `surface`, `scatter3`
+
+Hosts should persist scene artifacts whenever `exportFigureScene` returns bytes and use PNG
+preview artifacts only as a fallback display path.
+
+For large 3D payloads (for example, dense `surface` grids and large `scatter3` point/color
+arrays), persistence externalizes numeric buffers into dataset-style chunked blobs and
+stores typed refs inside the scene JSON (`runmat-data-array-v1`).
+
+Replay rehydration resolves refs by stable chunk identity (`artifactId`) with `src` as a hint,
+then imports a hydrated scene payload. This keeps replay robust across provider root/cwd
+differences while preserving chunked storage scalability.
+
+Implementation boundaries:
+
+- Runtime core (`runmat-runtime`) owns scene schema validation, import safety limits, and scene reconstruction.
+- Shared bindings helper (`bindings/ts/src/replay/scene-resolver.ts`) owns provider-aware ref rehydration orchestration.
+- Host apps (desktop/web) only provide filesystem reads and invoke scene import; they do not implement plot-kind hydration logic.
+
+Performance sanity check (native runtime debug profile):
+
+- Command: `cargo test -p runmat-runtime replay::scene::tests::bench_scene_ref_hydration_large_surface -- --ignored --nocapture`
+- Sample local result: `512x512` surface scene decode+rehydrate in about `165 ms`.
+- This benchmark is informational (ignored by default) and intended for regression spot checks, not hard pass/fail thresholds.
 
 Runtime-level limits are enforced during decode/import:
 

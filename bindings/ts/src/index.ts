@@ -36,6 +36,13 @@ export type {
   FusionPlanAdapter,
   FusionPlanAdapterOptions
 } from "./fusion-plan.js";
+export {
+  hydrateFigureSceneDataRefs,
+} from "./replay/scene-resolver.js";
+export type {
+  SceneHydrationDiagnostics,
+  SceneHydrationOptions,
+} from "./replay/scene-resolver.js";
 
 export type LanguageCompatMode = "matlab" | "strict";
 type RunMatPresetLogLevel = "trace" | "debug" | "info" | "warn" | "error";
@@ -582,6 +589,38 @@ interface MaterializeVariableOptionsWire {
   };
 }
 
+export type PlotCameraProjectionState =
+  | {
+    kind: "perspective";
+    fov: number;
+    near: number;
+    far: number;
+  }
+  | {
+    kind: "orthographic";
+    left: number;
+    right: number;
+    bottom: number;
+    top: number;
+    near: number;
+    far: number;
+  };
+
+export interface PlotCameraState {
+  position: [number, number, number];
+  target: [number, number, number];
+  up: [number, number, number];
+  zoom: number;
+  aspectRatio: number;
+  projection: PlotCameraProjectionState;
+}
+
+export interface PlotSurfaceCameraState {
+  activeAxes: number;
+  axes: PlotCameraState[];
+}
+
+
 interface RunMatNativeModule {
   default: (module?: WasmInitInput | Promise<WasmInitInput>) => Promise<unknown>;
   initRunMat(options: NativeInitOptions): Promise<RunMatNativeSession>;
@@ -611,6 +650,8 @@ interface RunMatNativeModule {
   handlePlotSurfaceEvent?: (surfaceId: number, event: PlotSurfaceEvent) => void;
   fitPlotSurfaceExtents?: (surfaceId: number) => void;
   resetPlotSurfaceCamera?: (surfaceId: number) => void;
+  getPlotSurfaceCameraState?: (surfaceId: number) => unknown;
+  setPlotSurfaceCameraState?: (surfaceId: number, state: unknown) => void;
   setPlotThemeConfig?: (theme: unknown) => void;
   onFigureEvent?: (callback: ((event: FigureEvent) => void) | null) => void;
   newFigureHandle?: () => number;
@@ -814,6 +855,21 @@ export async function resetPlotSurfaceCamera(surfaceId: number): Promise<void> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "resetPlotSurfaceCamera");
   native.resetPlotSurfaceCamera(surfaceId);
+}
+
+export async function getPlotSurfaceCameraState(surfaceId: number): Promise<PlotSurfaceCameraState> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "getPlotSurfaceCameraState");
+  return native.getPlotSurfaceCameraState(surfaceId) as PlotSurfaceCameraState;
+}
+
+export async function setPlotSurfaceCameraState(
+  surfaceId: number,
+  state: PlotSurfaceCameraState
+): Promise<void> {
+  const native = await loadNativeModule();
+  requireNativeFunction(native, "setPlotSurfaceCameraState");
+  native.setPlotSurfaceCameraState(surfaceId, state);
 }
 
 export async function setPlotThemeConfig(theme: unknown): Promise<void> {

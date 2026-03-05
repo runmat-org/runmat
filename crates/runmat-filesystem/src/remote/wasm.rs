@@ -1,3 +1,6 @@
+use crate::data_contract::{
+    DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
+};
 use crate::{DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags};
 use js_sys::{ArrayBuffer, Uint8Array};
 use serde::{Deserialize, Serialize};
@@ -779,6 +782,44 @@ impl FsProvider for RemoteFsProvider {
                 readonly,
             },
         )
+    }
+
+    fn data_manifest_descriptor(
+        &self,
+        request: &DataManifestRequest,
+    ) -> io::Result<DataManifestDescriptor> {
+        let mut query = vec![("path", request.path.clone())];
+        if let Some(version) = &request.version {
+            query.push(("version", version.clone()));
+        }
+        let text = self.send_text("GET", "/data/manifest", &query, None, None)?;
+        serde_json::from_str(&text).map_err(map_serde_err)
+    }
+
+    fn data_chunk_upload_targets(
+        &self,
+        request: &DataChunkUploadRequest,
+    ) -> io::Result<Vec<DataChunkUploadTarget>> {
+        #[derive(Deserialize)]
+        struct DataChunkUploadTargetsResponse {
+            targets: Vec<DataChunkUploadTarget>,
+        }
+
+        let payload = serde_json::to_vec(request).map_err(map_serde_err)?;
+        let text = self.send_text(
+            "POST",
+            "/data/chunks/upload-targets",
+            &[],
+            Some(&payload),
+            Some("application/json"),
+        )?;
+        let response: DataChunkUploadTargetsResponse =
+            serde_json::from_str(&text).map_err(map_serde_err)?;
+        Ok(response.targets)
+    }
+
+    fn data_upload_chunk(&self, target: &DataChunkUploadTarget, data: &[u8]) -> io::Result<()> {
+        self.upload_chunk_target(&target.method, &target.upload_url, &target.headers, data)
     }
 }
 

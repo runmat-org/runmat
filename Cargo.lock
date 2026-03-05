@@ -5638,7 +5638,10 @@ dependencies = [
  "runmat-lexer",
  "runmat-parser",
  "runmat-runtime",
+ "runmat-static-analysis",
  "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]
@@ -5737,6 +5740,7 @@ dependencies = [
  "runmat-lexer",
  "runmat-parser",
  "runmat-runtime",
+ "runmat-static-analysis",
  "runmat-thread-local",
  "serde",
  "serde-wasm-bindgen",
@@ -5857,6 +5861,7 @@ dependencies = [
  "rustfft",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -5918,6 +5923,18 @@ dependencies = [
  "thiserror 1.0.69",
  "tokio",
  "zstd",
+]
+
+[[package]]
+name = "runmat-static-analysis"
+version = "0.2.8"
+dependencies = [
+ "runmat-builtins",
+ "runmat-hir",
+ "runmat-parser",
+ "runmat-runtime",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

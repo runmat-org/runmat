@@ -64,6 +64,7 @@ use runmat_runtime::builtins::plotting::{
     current_figure_handle as runtime_current_figure_handle,
     detach_surface as runtime_detach_surface, figure_handles as runtime_figure_handles,
     fit_surface_extents as runtime_fit_surface_extents,
+    get_surface_camera_state as runtime_get_surface_camera_state,
     handle_plot_surface_event as runtime_handle_plot_surface_event,
     install_figure_observer as runtime_install_figure_observer,
     install_surface as runtime_install_surface, new_figure_handle as runtime_new_figure_handle,
@@ -75,8 +76,9 @@ use runmat_runtime::builtins::plotting::{
     reset_surface_camera as runtime_reset_surface_camera, resize_surface as runtime_resize_surface,
     select_figure as runtime_select_figure, set_hold as runtime_set_hold,
     set_plot_theme_config as runtime_set_plot_theme_config,
+    set_surface_camera_state as runtime_set_surface_camera_state,
     web_renderer_ready as runtime_plot_renderer_ready, FigureAxesState, FigureError,
-    FigureEventKind, FigureEventView, FigureHandle, HoldMode,
+    FigureEventKind, FigureEventView, FigureHandle, HoldMode, PlotSurfaceCameraState,
 };
 #[cfg(target_arch = "wasm32")]
 use runmat_runtime::builtins::{
@@ -1074,6 +1076,22 @@ pub fn fit_plot_surface_extents(surface_id: u32) -> Result<(), JsValue> {
 #[wasm_bindgen(js_name = "resetPlotSurfaceCamera")]
 pub fn reset_plot_surface_camera(surface_id: u32) -> Result<(), JsValue> {
     runtime_reset_surface_camera(surface_id).map_err(|err| js_error(err.message()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = "getPlotSurfaceCameraState")]
+pub fn get_plot_surface_camera_state(surface_id: u32) -> Result<JsValue, JsValue> {
+    let state =
+        runtime_get_surface_camera_state(surface_id).map_err(|err| js_error(err.message()))?;
+    serde_wasm_bindgen::to_value(&state).map_err(|err| js_error(&err.to_string()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = "setPlotSurfaceCameraState")]
+pub fn set_plot_surface_camera_state(surface_id: u32, state: JsValue) -> Result<(), JsValue> {
+    let parsed: PlotSurfaceCameraState =
+        serde_wasm_bindgen::from_value(state).map_err(|err| js_error(&err.to_string()))?;
+    runtime_set_surface_camera_state(surface_id, parsed).map_err(|err| js_error(err.message()))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -2911,7 +2929,7 @@ fn parse_materialize_target(value: JsValue) -> Result<WorkspaceMaterializeTarget
         ));
     }
     if let Some(token) = value.as_string() {
-        return parse_materialize_token_str(&token);
+        return parse_materialize_selector_str(&token);
     }
     let payload: MaterializeSelectorPayload = serde_wasm_bindgen::from_value(value.clone())
         .map_err(|err| js_error(&format!("materializeVariable selector: {err}")))?;
@@ -2936,6 +2954,19 @@ fn parse_materialize_token_str(token: &str) -> Result<WorkspaceMaterializeTarget
     let parsed = Uuid::parse_str(token.trim())
         .map_err(|_| js_error("materializeVariable previewToken must be a UUID string"))?;
     Ok(WorkspaceMaterializeTarget::Token(parsed))
+}
+
+fn parse_materialize_selector_str(selector: &str) -> Result<WorkspaceMaterializeTarget, JsValue> {
+    let trimmed = selector.trim();
+    if trimmed.is_empty() {
+        return Err(js_error(
+            "materializeVariable selector string must not be empty",
+        ));
+    }
+    if let Ok(parsed) = Uuid::parse_str(trimmed) {
+        return Ok(WorkspaceMaterializeTarget::Token(parsed));
+    }
+    Ok(WorkspaceMaterializeTarget::Name(trimmed.to_string()))
 }
 
 fn parse_materialize_options(value: JsValue) -> Result<WorkspaceMaterializeOptions, JsValue> {

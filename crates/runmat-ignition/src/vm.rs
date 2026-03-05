@@ -5148,7 +5148,8 @@ async fn run_interpreter_inner(
                                 for &i in &idxs {
                                     out.push(t.data[i - 1]);
                                 }
-                                let shape = linear_output_shape.unwrap_or_else(|| vec![idxs.len(), 1]);
+                                let shape =
+                                    linear_output_shape.unwrap_or_else(|| vec![idxs.len(), 1]);
                                 let tens = runmat_builtins::Tensor::new(out, shape)
                                     .map_err(|e| format!("Slice error: {e}"))?;
                                 stack.push(Value::Tensor(tens));
@@ -7873,9 +7874,7 @@ async fn run_interpreter_inner(
                                         }
                                         SliceSelector::Scalar(i) => vec![*i],
                                         SliceSelector::Indices(v) => v.clone(),
-                                        SliceSelector::LinearIndices { values: v, .. } => {
-                                            v.clone()
-                                        }
+                                        SliceSelector::LinearIndices { values: v, .. } => v.clone(),
                                     };
                                     per_dim_indices.push(idxs);
                                 }
