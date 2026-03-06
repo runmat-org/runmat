@@ -1,3 +1,5 @@
+use runmat_analysis_core::AnalysisField;
+use runmat_analysis_fea::diagnostics::FeaDiagnostic;
 use runmat_analysis_fea::{ComputeBackend, FeaRunResult};
 use serde::{Deserialize, Serialize};
 
@@ -55,6 +57,7 @@ pub struct RunProvenance {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisRunResult {
+    pub run_id: String,
     pub run: FeaRunResult,
     pub model_validity: QualityGate,
     pub solver_convergence: QualityGate,
@@ -62,6 +65,45 @@ pub struct AnalysisRunResult {
     pub run_status: RunStatus,
     pub publishable: bool,
     pub provenance: RunProvenance,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisArtifactRecord {
+    pub run_id: String,
+    pub created_at: String,
+    pub op_version: String,
+    pub field_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisResultsQuery {
+    pub include_fields: Vec<String>,
+    pub include_diagnostics: bool,
+}
+
+impl Default for AnalysisResultsQuery {
+    fn default() -> Self {
+        Self {
+            include_fields: Vec::new(),
+            include_diagnostics: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisResultsSummary {
+    pub field_count: usize,
+    pub total_elements: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisResultsData {
+    pub fields: Vec<AnalysisField>,
+    pub diagnostics: Option<Vec<FeaDiagnostic>>,
+    pub run_status: RunStatus,
+    pub publishable: bool,
+    pub provenance: RunProvenance,
+    pub summary: AnalysisResultsSummary,
 }
 
 pub(crate) fn format_precision_mode(mode: PrecisionMode) -> String {

@@ -13,16 +13,20 @@ use crate::operations::{
 
 mod contracts;
 mod promotion;
+pub mod storage;
 
 pub use contracts::{
-    AnalysisRunOptions, AnalysisRunResult, AnalysisValidateResult, PrecisionMode, QualityGate,
-    RunProvenance, RunStatus,
+    AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunOptions,
+    AnalysisRunResult, AnalysisValidateResult, PrecisionMode, QualityGate, RunProvenance,
+    RunStatus,
 };
 
 const ANALYSIS_VALIDATE_OPERATION: &str = "analysis.validate";
 const ANALYSIS_VALIDATE_OP_VERSION: &str = "analysis.validate/v1";
 const ANALYSIS_RUN_OPERATION: &str = "analysis.run_linear_static";
 const ANALYSIS_RUN_OP_VERSION: &str = "analysis.run_linear_static/v1";
+const ANALYSIS_RESULTS_OPERATION: &str = "analysis.results";
+const ANALYSIS_RESULTS_OP_VERSION: &str = "analysis.results/v1";
 
 pub fn analysis_validate(
     model: &AnalysisModel,
@@ -104,6 +108,7 @@ pub fn analysis_run_linear_static_with_options(
     };
 
     let result = AnalysisRunResult {
+        run_id: storage::next_run_id(),
         run,
         model_validity: QualityGate::Pass,
         solver_convergence,
@@ -118,12 +123,137 @@ pub fn analysis_run_linear_static_with_options(
         },
     };
 
+    storage::persist_run_result(&result).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_OPERATION,
+            ANALYSIS_RUN_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist analysis run artifact: {err}"),
+            BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
+        )
+    })?;
+
     Ok(OperationEnvelope::new(
         ANALYSIS_RUN_OPERATION,
         ANALYSIS_RUN_OP_VERSION,
         &context,
         result,
     ))
+}
+
+pub fn analysis_results_op(
+    run_result: &AnalysisRunResult,
+    query: AnalysisResultsQuery,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisResultsData>, OperationErrorEnvelope> {
+    let mut fields = vec![
+        run_result.run.displacement_field.clone(),
+        run_result.run.von_mises_field.clone(),
+    ];
+
+    if !query.include_fields.is_empty() {
+        let mut filtered = Vec::new();
+        for requested in &query.include_fields {
+            let Some(field) = fields.iter().find(|field| &field.field_id == requested) else {
+                return Err(operation_error(
+                    ANALYSIS_RESULTS_OPERATION,
+                    ANALYSIS_RESULTS_OP_VERSION,
+                    &context,
+                    OperationErrorSpec {
+                        error_code: "ANALYSIS_RESULTS_FIELD_NOT_FOUND",
+                        error_type: OperationErrorType::Input,
+                        retryable: false,
+                        severity: OperationErrorSeverity::Error,
+                    },
+                    format!("requested analysis field '{requested}' was not produced by run"),
+                    BTreeMap::from([
+                        ("requested_field".to_string(), requested.clone()),
+                        (
+                            "available_fields".to_string(),
+                            fields
+                                .iter()
+                                .map(|field| field.field_id.clone())
+                                .collect::<Vec<_>>()
+                                .join(","),
+                        ),
+                    ]),
+                ));
+            };
+            filtered.push(field.clone());
+        }
+        fields = filtered;
+    }
+
+    let summary = AnalysisResultsSummary {
+        field_count: fields.len(),
+        total_elements: fields.iter().map(|field| field.element_count()).sum(),
+    };
+
+    let data = AnalysisResultsData {
+        fields,
+        diagnostics: if query.include_diagnostics {
+            Some(run_result.run.diagnostics.clone())
+        } else {
+            None
+        },
+        run_status: run_result.run_status,
+        publishable: run_result.publishable,
+        provenance: run_result.provenance.clone(),
+        summary,
+    };
+
+    Ok(OperationEnvelope::new(
+        ANALYSIS_RESULTS_OPERATION,
+        ANALYSIS_RESULTS_OP_VERSION,
+        &context,
+        data,
+    ))
+}
+
+pub fn analysis_results_by_run_id_op(
+    run_id: &str,
+    query: AnalysisResultsQuery,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisResultsData>, OperationErrorEnvelope> {
+    let run_result = storage::load_run_result(run_id).map_err(|err| {
+        operation_error(
+            ANALYSIS_RESULTS_OPERATION,
+            ANALYSIS_RESULTS_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to load analysis run artifact: {err}"),
+            BTreeMap::from([("run_id".to_string(), run_id.to_string())]),
+        )
+    })?;
+
+    let Some(run_result) = run_result else {
+        return Err(operation_error(
+            ANALYSIS_RESULTS_OPERATION,
+            ANALYSIS_RESULTS_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RESULTS_RUN_NOT_FOUND",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("analysis run_id '{run_id}' was not found"),
+            BTreeMap::from([("run_id".to_string(), run_id.to_string())]),
+        ));
+    };
+
+    analysis_results_op(&run_result, query, context)
 }
 
 fn map_validate_error(

@@ -3,7 +3,8 @@ use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
-    analysis_run_linear_static_op, analysis_run_linear_static_with_options, analysis_validate,
+    analysis_results_by_run_id_op, analysis_results_op, analysis_run_linear_static_op,
+    analysis_run_linear_static_with_options, analysis_validate, AnalysisResultsQuery,
     AnalysisRunOptions, PrecisionMode, RunStatus,
 };
 use runmat_runtime::geometry::{geometry_inspect_op, geometry_load_op};
@@ -11,6 +12,23 @@ use runmat_runtime::operations::OperationContext;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
+
+fn assert_fallback_event_schema(event: &str) {
+    let parts: Vec<&str> = event.splitn(3, ':').collect();
+    assert_eq!(parts.len(), 3, "fallback event must have 3 parts");
+
+    assert!(
+        matches!(parts[0], "BACKEND_NO_PROVIDER" | "BACKEND_UPLOAD_FAILED"),
+        "unexpected fallback category: {}",
+        parts[0]
+    );
+    assert!(
+        matches!(parts[1], "displacement" | "von_mises"),
+        "unexpected fallback stage: {}",
+        parts[1]
+    );
+    assert!(!parts[2].is_empty(), "fallback reason must be non-empty");
+}
 
 #[test]
 fn geometry_operation_contracts_are_v1_and_versioned() {
@@ -114,6 +132,94 @@ fn analysis_run_contract_is_v1_and_publishable_for_fixture() {
         envelope.data.run.displacement_field.values,
         AnalysisFieldValues::HostF64(_)
     ));
+}
+
+#[test]
+fn analysis_results_contract_is_v1_and_filterable() {
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let run = analysis_run_linear_static_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-3b-run".to_string()), None),
+    )
+    .expect("run should succeed");
+
+    let results = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery {
+            include_fields: vec!["von_mises".to_string()],
+            include_diagnostics: false,
+        },
+        OperationContext::new(Some("trace-contract-3b-results".to_string()), None),
+    )
+    .expect("results should succeed");
+
+    assert_eq!(results.operation, "analysis.results");
+    assert_eq!(results.op_version, "analysis.results/v1");
+    assert_eq!(results.data.fields.len(), 1);
+    assert_eq!(results.data.fields[0].field_id, "von_mises");
+    assert!(results.data.diagnostics.is_none());
+}
+
+#[test]
+fn analysis_results_unknown_field_maps_typed_error_contract() {
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let run = analysis_run_linear_static_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-3c-run".to_string()), None),
+    )
+    .expect("run should succeed");
+
+    let err = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery {
+            include_fields: vec!["nonexistent".to_string()],
+            include_diagnostics: true,
+        },
+        OperationContext::new(Some("trace-contract-3c-results".to_string()), None),
+    )
+    .expect_err("results should fail");
+
+    assert_eq!(err.operation, "analysis.results");
+    assert_eq!(err.op_version, "analysis.results/v1");
+    assert_eq!(err.error_code, "ANALYSIS_RESULTS_FIELD_NOT_FOUND");
+}
+
+#[test]
+fn analysis_results_by_run_id_contract_roundtrip() {
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+    let run = analysis_run_linear_static_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-results-id-run".to_string()), None),
+    )
+    .expect("run should succeed");
+
+    let results = analysis_results_by_run_id_op(
+        &run.data.run_id,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(Some("trace-contract-results-id-get".to_string()), None),
+    )
+    .expect("results by run id should succeed");
+
+    assert_eq!(results.operation, "analysis.results");
+    assert_eq!(results.op_version, "analysis.results/v1");
+    assert_eq!(results.data.summary.field_count, 2);
+}
+
+#[test]
+fn analysis_results_by_run_id_missing_maps_typed_error_contract() {
+    let err = analysis_results_by_run_id_op(
+        "run_does_not_exist",
+        AnalysisResultsQuery::default(),
+        OperationContext::new(Some("trace-contract-results-id-missing".to_string()), None),
+    )
+    .expect_err("results by run id should fail");
+
+    assert_eq!(err.operation, "analysis.results");
+    assert_eq!(err.op_version, "analysis.results/v1");
+    assert_eq!(err.error_code, "ANALYSIS_RESULTS_RUN_NOT_FOUND");
 }
 
 #[test]
@@ -235,6 +341,9 @@ fn analysis_run_gpu_without_provider_records_fallback_contract() {
         .fallback_events
         .iter()
         .any(|event| event.starts_with("BACKEND_NO_PROVIDER:displacement")));
+    for event in &envelope.data.provenance.fallback_events {
+        assert_fallback_event_schema(event);
+    }
     assert!(matches!(
         envelope.data.run.displacement_field.values,
         AnalysisFieldValues::HostF64(_)
@@ -313,5 +422,65 @@ fn analysis_run_gpu_with_provider_emits_device_ref_contract() {
     assert!(matches!(
         envelope.data.run.von_mises_field.values,
         AnalysisFieldValues::DeviceRef(_)
+    ));
+}
+
+#[test]
+fn analysis_run_gpu_upload_failure_records_fallback_contract() {
+    struct UploadFailProvider;
+
+    impl runmat_accelerate_api::AccelProvider for UploadFailProvider {
+        fn upload(
+            &self,
+            _host: &runmat_accelerate_api::HostTensorView,
+        ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+            Err(anyhow::anyhow!("forced-upload-failure"))
+        }
+
+        fn download<'a>(
+            &'a self,
+            h: &'a runmat_accelerate_api::GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            Box::pin(async move {
+                Ok(runmat_accelerate_api::HostTensorOwned {
+                    data: vec![0.0; h.shape.iter().product()],
+                    shape: h.shape.clone(),
+                })
+            })
+        }
+
+        fn free(&self, _h: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "upload-fail-provider".to_string()
+        }
+    }
+
+    static PROVIDER: UploadFailProvider = UploadFailProvider;
+    let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+
+    let envelope = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Gpu,
+        AnalysisRunOptions::default(),
+        OperationContext::new(Some("trace-contract-10".to_string()), None),
+    )
+    .expect("gpu run should still succeed with fallback");
+
+    assert!(envelope
+        .data
+        .provenance
+        .fallback_events
+        .iter()
+        .any(|event| event.starts_with("BACKEND_UPLOAD_FAILED:displacement")));
+    for event in &envelope.data.provenance.fallback_events {
+        assert_fallback_event_schema(event);
+    }
+    assert!(matches!(
+        envelope.data.run.displacement_field.values,
+        AnalysisFieldValues::HostF64(_)
     ));
 }

@@ -185,3 +185,95 @@ fn gpu_run_with_provider_emits_device_refs() {
         AnalysisFieldValues::DeviceRef(_)
     ));
 }
+
+#[test]
+fn analysis_results_returns_filtered_fields_and_metadata() {
+    let model = sample_model();
+    let run = analysis_run_linear_static_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-results-1".to_string()), None),
+    )
+    .expect("run should pass");
+
+    let results = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery {
+            include_fields: vec!["displacement".to_string()],
+            include_diagnostics: false,
+        },
+        OperationContext::new(Some("trace-results-2".to_string()), None),
+    )
+    .expect("results should pass");
+
+    assert_eq!(results.operation, "analysis.results");
+    assert_eq!(results.op_version, "analysis.results/v1");
+    assert_eq!(results.data.fields.len(), 1);
+    assert_eq!(results.data.fields[0].field_id, "displacement");
+    assert!(results.data.diagnostics.is_none());
+    assert_eq!(results.data.summary.field_count, 1);
+}
+
+#[test]
+fn analysis_results_unknown_field_maps_typed_error() {
+    let model = sample_model();
+    let run = analysis_run_linear_static_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-results-3".to_string()), None),
+    )
+    .expect("run should pass");
+
+    let err = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery {
+            include_fields: vec!["strain_energy".to_string()],
+            include_diagnostics: true,
+        },
+        OperationContext::new(Some("trace-results-4".to_string()), None),
+    )
+    .expect_err("results should fail");
+
+    assert_eq!(err.operation, "analysis.results");
+    assert_eq!(err.op_version, "analysis.results/v1");
+    assert_eq!(err.error_code, "ANALYSIS_RESULTS_FIELD_NOT_FOUND");
+}
+
+#[test]
+fn analysis_results_by_run_id_roundtrip_works() {
+    storage::reset_artifact_store_for_tests();
+    let model = sample_model();
+    let run = analysis_run_linear_static_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-results-by-id-run".to_string()), None),
+    )
+    .expect("run should pass");
+
+    let fetched = analysis_results_by_run_id_op(
+        &run.data.run_id,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(Some("trace-results-by-id-fetch".to_string()), None),
+    )
+    .expect("results by id should pass");
+
+    assert_eq!(fetched.operation, "analysis.results");
+    assert_eq!(fetched.op_version, "analysis.results/v1");
+    assert_eq!(fetched.data.summary.field_count, 2);
+
+    storage::reset_artifact_store_for_tests();
+}
+
+#[test]
+fn analysis_results_by_run_id_missing_maps_typed_error() {
+    storage::reset_artifact_store_for_tests();
+    let err = analysis_results_by_run_id_op(
+        "run_missing",
+        AnalysisResultsQuery::default(),
+        OperationContext::new(Some("trace-results-by-id-missing".to_string()), None),
+    )
+    .expect_err("missing run id should fail");
+
+    assert_eq!(err.error_code, "ANALYSIS_RESULTS_RUN_NOT_FOUND");
+    storage::reset_artifact_store_for_tests();
+}

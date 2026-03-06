@@ -282,6 +282,20 @@ For analysis solve responses, `data` must include:
 - publication decision: `run_status` and `publishable`
 - provenance core: `backend`, `precision_mode`, `deterministic_mode`, `fallback_events`
 
+For result retrieval (`analysis.results/v1`), query/response semantics are:
+
+- query: `include_fields` (empty = all), `include_diagnostics` (bool)
+- response: `fields`, optional `diagnostics`, `run_status`, `publishable`, `provenance`, `summary`
+- invalid field requests must return typed error `ANALYSIS_RESULTS_FIELD_NOT_FOUND`
+- run lookup supports `run_id` retrieval and must return `ANALYSIS_RESULTS_RUN_NOT_FOUND` when lineage record is absent
+
+Run artifact persistence boundary:
+
+- runtime analysis writes run envelopes to an artifact store via adapter interface (`AnalysisArtifactStore`)
+- default adapter is in-memory for local runtime/test execution
+- filesystem adapter is available for persisted run lineage; object-store adapters can be added without contract changes
+- large field payload storage remains behind adapter boundaries so storage implementation can reuse existing tensor/object pipelines
+
 Solve requests should carry explicit run options, at minimum:
 
 - `deterministic_mode` (true/false)
@@ -944,9 +958,17 @@ For maintainers onboarding mid-project, verify:
 1. Stand up fixture corpus and deterministic replay tests.
 2. Add CPU/GPU parity harness with tolerance policy checks.
 3. Add contract conformance tests for operation versions.
+4. Emit machine-readable benchmark/conformance artifacts and fail CI on gate regressions.
+5. Upload benchmark/conformance artifacts from CI for regression triage.
 
 ## Progress Log (OSS)
 
+- 2026-03-06: Added run-artifact persistence boundary for analysis runtime (`AnalysisArtifactStore` adapter with in-memory default + filesystem adapter), introduced `run_id` on `analysis.run_linear_static` responses, and implemented `analysis.results` retrieval by run id with typed missing-lineage error (`ANALYSIS_RESULTS_RUN_NOT_FOUND`).
+- 2026-03-06: Implemented `analysis.results/v1` runtime operation with typed field filtering and metadata response (`fields`, `diagnostics`, status/provenance/summary), added typed unknown-field error mapping (`ANALYSIS_RESULTS_FIELD_NOT_FOUND`), and integrated results-op conformance checks into unit, contract, and benchmark harness tests.
+- 2026-03-06: Wired CI artifact publishing for analysis benchmark reports by uploading `target/runmat-analysis-artifacts/*.json` from `ci.yml` after test execution, enabling per-matrix run triage.
+- 2026-03-06: Added unified benchmark/conformance harness test (`runmat-runtime/tests/analysis_benchmark_conformance.rs`) with fixture manifest schema, CPU/GPU runner, machine-readable JSON artifact output (`target/runmat-analysis-artifacts/analysis_benchmark_report.json` by default), and hard gates for parity tolerance, contract error/version expectations, fallback schema, and GPU residency expectations.
+- 2026-03-06: Added fallback-event schema conformance checks in runtime operation contract tests, validating stable parsable format (`category:stage:reason`) for GPU fallback telemetry events.
+- 2026-03-06: Extended operation contract tests to cover provider-upload failure fallback semantics (`BACKEND_UPLOAD_FAILED`) for GPU-targeted analysis runs, asserting host field retention and explicit fallback provenance events.
 - 2026-03-06: Refactored runtime analysis module into directory layout (`runmat-runtime/src/analysis/{mod,contracts,promotion,tests}.rs`) to separate operation surface, contract types, device-ref promotion logic, and tests without changing operation semantics.
 - 2026-03-06: Extended runtime operation contract integration tests to lock GPU field residency behavior: explicit fallback-event contract when no provider is present, and `AnalysisFieldValues::DeviceRef` contract when provider-backed promotion is available.
 - 2026-03-06: Runtime analysis now opportunistically promotes GPU solve output fields to `AnalysisFieldValues::DeviceRef` via `runmat-accelerate-api` provider upload hooks, and records explicit fallback events (`BACKEND_NO_PROVIDER`, `BACKEND_UPLOAD_FAILED`) when promotion cannot happen.
