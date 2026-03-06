@@ -302,10 +302,10 @@ export default function HomePage() {
           <div className="mx-auto max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
             <Link
               href="/sandbox"
-              className="rounded-2xl border border-border overflow-hidden min-h-[380px] md:row-span-3 flex items-center justify-center bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="rounded-2xl border border-border overflow-hidden min-h-[380px] md:row-span-3 bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               <video
-                className="w-full h-auto min-h-[380px] object-cover"
+                className="w-full h-full min-h-[380px] object-cover object-left-top"
                 autoPlay
                 muted
                 loop
