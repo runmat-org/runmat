@@ -13,6 +13,12 @@ pub trait AnalysisArtifactStore: Send + Sync {
     fn load_run(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String>;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnalysisArtifactStoreConfig {
+    InMemory,
+    Filesystem { root: PathBuf },
+}
+
 pub struct InMemoryAnalysisArtifactStore {
     runs: RwLock<HashMap<String, AnalysisRunResult>>,
 }
@@ -81,7 +87,7 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
         }
         let bytes = serde_json::to_vec_pretty(run)
             .map_err(|err| format!("failed to encode run artifact: {err}"))?;
-        fs::write(&path, bytes).map_err(|err| format!("failed to write run artifact: {err}"))?;
+        atomic_write(&path, &bytes)?;
 
         Ok(AnalysisArtifactRecord {
             run_id: run.run_id.clone(),
@@ -108,7 +114,10 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
 
 fn global_store() -> &'static RwLock<Arc<dyn AnalysisArtifactStore>> {
     static STORE: OnceLock<RwLock<Arc<dyn AnalysisArtifactStore>>> = OnceLock::new();
-    STORE.get_or_init(|| RwLock::new(Arc::new(InMemoryAnalysisArtifactStore::new())))
+    STORE.get_or_init(|| {
+        let default = store_from_config(config_from_env());
+        RwLock::new(default)
+    })
 }
 
 static NEXT_RUN_ID: AtomicU64 = AtomicU64::new(1);
@@ -130,6 +139,56 @@ pub fn load_run_result(run_id: &str) -> Result<Option<AnalysisRunResult>, String
         .read()
         .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
     guard.load_run(run_id)
+}
+
+pub fn configure_artifact_store(config: AnalysisArtifactStoreConfig) -> Result<(), String> {
+    let mut guard = global_store()
+        .write()
+        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+    *guard = store_from_config(config);
+    Ok(())
+}
+
+pub fn configure_artifact_store_from_env() -> Result<(), String> {
+    configure_artifact_store(config_from_env())
+}
+
+fn store_from_config(config: AnalysisArtifactStoreConfig) -> Arc<dyn AnalysisArtifactStore> {
+    match config {
+        AnalysisArtifactStoreConfig::InMemory => Arc::new(InMemoryAnalysisArtifactStore::new()),
+        AnalysisArtifactStoreConfig::Filesystem { root } => {
+            Arc::new(FilesystemAnalysisArtifactStore::new(root))
+        }
+    }
+}
+
+fn config_from_env() -> AnalysisArtifactStoreConfig {
+    let mode = std::env::var("RUNMAT_ANALYSIS_ARTIFACT_STORE")
+        .unwrap_or_else(|_| "in_memory".to_string())
+        .to_lowercase();
+    if mode == "filesystem" {
+        let root = std::env::var("RUNMAT_ANALYSIS_ARTIFACT_ROOT")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target/runmat-analysis-store")
+            });
+        AnalysisArtifactStoreConfig::Filesystem { root }
+    } else {
+        AnalysisArtifactStoreConfig::InMemory
+    }
+}
+
+fn atomic_write(path: &PathBuf, bytes: &[u8]) -> Result<(), String> {
+    let tmp = path.with_extension(format!(
+        "tmp-{}-{}",
+        std::process::id(),
+        Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    ));
+    fs::write(&tmp, bytes).map_err(|err| format!("failed to write temp artifact file: {err}"))?;
+    fs::rename(&tmp, path).map_err(|err| {
+        let _ = fs::remove_file(&tmp);
+        format!("failed to atomically replace run artifact: {err}")
+    })
 }
 
 #[cfg(test)]

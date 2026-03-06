@@ -12,7 +12,8 @@ use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
-    analysis_results_op, analysis_run_linear_static_with_options, analysis_validate,
+    analysis_results_by_run_id_op, analysis_results_op, analysis_run_linear_static_with_options,
+    analysis_validate,
     AnalysisResultsQuery, AnalysisRunOptions, PrecisionMode,
 };
 use runmat_runtime::operations::OperationContext;
@@ -218,7 +219,7 @@ fn compute_parity(left: &[f64], right: &[f64]) -> ParitySummary {
     }
 }
 
-fn run_fixture(spec: &FixtureSpec) -> FixtureRunRecord {
+fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> FixtureRunRecord {
     let model = (spec.model)();
     let mut failures = Vec::new();
 
@@ -399,6 +400,42 @@ fn run_fixture(spec: &FixtureSpec) -> FixtureRunRecord {
                         || gpu_results.op_version != "analysis.results/v1"
                     {
                         failures.push("analysis.results contract version mismatch".to_string());
+                    }
+
+                    if let Some(root) = filesystem_root {
+                        runmat_runtime::analysis::storage::configure_artifact_store(
+                            runmat_runtime::analysis::storage::AnalysisArtifactStoreConfig::Filesystem {
+                                root: root.clone(),
+                            },
+                        )
+                        .expect("reconfigure filesystem artifact store");
+
+                        let persisted = analysis_results_by_run_id_op(
+                            &gpu_envelope.data.run_id,
+                            AnalysisResultsQuery {
+                                include_fields: vec!["displacement".to_string()],
+                                include_diagnostics: false,
+                            },
+                            OperationContext::new(
+                                Some(format!("trace-results-gpu-by-id-{}", spec.id)),
+                                None,
+                            ),
+                        );
+                        match persisted {
+                            Ok(by_id) => {
+                                if by_id.operation != "analysis.results"
+                                    || by_id.op_version != "analysis.results/v1"
+                                {
+                                    failures.push(
+                                        "analysis.results by-run-id contract mismatch".to_string(),
+                                    );
+                                }
+                            }
+                            Err(err) => failures.push(format!(
+                                "analysis.results by-run-id failed for fixture {}: {}",
+                                spec.id, err.error_code
+                            )),
+                        }
                     }
 
                     if let Some(expectation) = spec.residency_expectation {
@@ -595,12 +632,26 @@ fn artifact_path() -> PathBuf {
 
 #[test]
 fn analysis_benchmark_conformance_manifest_gates() {
+    let store_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("../../target/runmat-analysis-artifacts/store")
+        .join(format!("harness-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&store_root);
+    runmat_runtime::analysis::storage::configure_artifact_store(
+        runmat_runtime::analysis::storage::AnalysisArtifactStoreConfig::Filesystem {
+            root: store_root.clone(),
+        },
+    )
+    .expect("configure filesystem artifact store for harness");
+
     let specs = manifest_specs();
     let manifest = fixture_manifest(&specs);
 
     assert_eq!(manifest.version, "analysis-conformance/v1");
 
-    let records: Vec<FixtureRunRecord> = specs.iter().map(run_fixture).collect();
+    let records: Vec<FixtureRunRecord> = specs
+        .iter()
+        .map(|spec| run_fixture(spec, Some(&store_root)))
+        .collect();
     let mut failures = Vec::new();
     for record in &records {
         if !record.failures.is_empty() {
@@ -621,6 +672,11 @@ fn analysis_benchmark_conformance_manifest_gates() {
         fs::create_dir_all(parent).expect("create artifact directory");
     }
     fs::write(&path, report_json).expect("write benchmark report artifact");
+
+    runmat_runtime::analysis::storage::configure_artifact_store(
+        runmat_runtime::analysis::storage::AnalysisArtifactStoreConfig::InMemory,
+    )
+    .expect("reset artifact store to in-memory after harness");
 
     assert!(
         failures.is_empty(),
