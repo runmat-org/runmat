@@ -2,10 +2,12 @@
 
 pub mod assembly;
 pub mod diagnostics;
+pub mod fixtures;
+pub mod parity;
 pub mod post;
 pub mod solve;
 
-use runmat_analysis_core::{validate_model, AnalysisModel};
+use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -27,8 +29,8 @@ pub enum ComputeBackend {
 pub struct FeaRunResult {
     pub backend: ComputeBackend,
     pub diagnostics: Vec<FeaDiagnostic>,
-    pub displacement_field: Vec<f64>,
-    pub von_mises_field: Vec<f64>,
+    pub displacement_field: AnalysisField,
+    pub von_mises_field: AnalysisField,
 }
 
 #[derive(Debug, Error)]
@@ -71,61 +73,29 @@ pub fn run_linear_static(
 
 #[cfg(test)]
 mod tests {
-    use runmat_analysis_core::{
-        AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind, BoundaryCondition,
-        BoundaryConditionKind, LoadCase, LoadKind, MaterialModel, ReferenceFrame,
-    };
-    use runmat_geometry_core::UnitSystem;
-
     use super::*;
-
-    fn cantilever_model() -> AnalysisModel {
-        AnalysisModel {
-            model_id: AnalysisModelId("cantilever".to_string()),
-            geometry_id: "geo:cantilever".to_string(),
-            geometry_revision: 1,
-            units: UnitSystem::Meter,
-            frame: ReferenceFrame::Global,
-            materials: vec![MaterialModel {
-                material_id: "mat_steel".to_string(),
-                name: "Steel".to_string(),
-                youngs_modulus_pa: 200e9,
-                poisson_ratio: 0.3,
-            }],
-            boundary_conditions: vec![BoundaryCondition {
-                bc_id: "bc_root".to_string(),
-                region_id: "root".to_string(),
-                kind: BoundaryConditionKind::Fixed,
-            }],
-            loads: vec![LoadCase {
-                load_id: "tip_load".to_string(),
-                region_id: "tip".to_string(),
-                kind: LoadKind::Force {
-                    fx: 0.0,
-                    fy: -1000.0,
-                    fz: 0.0,
-                },
-            }],
-            steps: vec![AnalysisStep {
-                step_id: "static_1".to_string(),
-                kind: AnalysisStepKind::Static,
-            }],
-        }
-    }
+    use crate::{
+        fixtures::{fixture_model, FixtureId},
+        parity::{assert_vectors_within_tolerance, ParityTolerance},
+    };
 
     #[test]
     fn canonical_cantilever_benchmark_runs() {
-        let model = cantilever_model();
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
         let result = run_linear_static(&model, ComputeBackend::Cpu).expect("solve should succeed");
 
-        assert_eq!(result.displacement_field.len(), 3);
-        assert_eq!(result.von_mises_field.len(), 1);
-        assert!(result.displacement_field[1] < 0.0);
+        assert_eq!(result.displacement_field.element_count(), 3);
+        assert_eq!(result.von_mises_field.element_count(), 1);
+        let displacement = result
+            .displacement_field
+            .as_host_f64()
+            .expect("scaffold emits host displacement field");
+        assert!(displacement[1] < 0.0);
     }
 
     #[test]
     fn convergence_diagnostics_are_emitted() {
-        let model = cantilever_model();
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
         let result = run_linear_static(&model, ComputeBackend::Cpu).expect("solve should succeed");
         assert!(result
             .diagnostics
@@ -134,12 +104,63 @@ mod tests {
     }
 
     #[test]
-    fn cpu_gpu_parity_for_scaffold_pipeline() {
-        let model = cantilever_model();
+    fn deterministic_replay_for_fixture_is_stable() {
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
+        let first =
+            run_linear_static(&model, ComputeBackend::Cpu).expect("first run should succeed");
+        let second =
+            run_linear_static(&model, ComputeBackend::Cpu).expect("second run should succeed");
+
+        assert_eq!(first.displacement_field, second.displacement_field);
+        assert_eq!(first.von_mises_field, second.von_mises_field);
+        assert_eq!(first.diagnostics, second.diagnostics);
+    }
+
+    #[test]
+    fn cpu_gpu_parity_respects_tolerance_policy() {
+        let model = fixture_model(FixtureId::CantileverLinearStatic);
         let cpu = run_linear_static(&model, ComputeBackend::Cpu).expect("cpu run should succeed");
         let gpu = run_linear_static(&model, ComputeBackend::Gpu).expect("gpu run should succeed");
 
-        assert_eq!(cpu.displacement_field, gpu.displacement_field);
-        assert_eq!(cpu.von_mises_field, gpu.von_mises_field);
+        let tol = ParityTolerance::strict();
+        let cpu_displacement = cpu
+            .displacement_field
+            .as_host_f64()
+            .expect("cpu displacement should be host-backed in scaffold");
+        let gpu_displacement = gpu
+            .displacement_field
+            .as_host_f64()
+            .expect("gpu displacement should be host-backed in scaffold");
+        assert_vectors_within_tolerance(cpu_displacement, gpu_displacement, tol);
+
+        let cpu_stress = cpu
+            .von_mises_field
+            .as_host_f64()
+            .expect("cpu stress should be host-backed in scaffold");
+        let gpu_stress = gpu
+            .von_mises_field
+            .as_host_f64()
+            .expect("gpu stress should be host-backed in scaffold");
+        assert_vectors_within_tolerance(cpu_stress, gpu_stress, tol);
+    }
+
+    #[test]
+    fn fixture_missing_materials_is_rejected() {
+        let model = fixture_model(FixtureId::MissingMaterials);
+        let err = run_linear_static(&model, ComputeBackend::Cpu)
+            .expect_err("fixture should fail validation");
+        assert!(err
+            .to_string()
+            .contains("ANALYSIS_VALIDATION_MISSING_MATERIALS"));
+    }
+
+    #[test]
+    fn fixture_missing_loads_is_rejected() {
+        let model = fixture_model(FixtureId::MissingLoads);
+        let err = run_linear_static(&model, ComputeBackend::Cpu)
+            .expect_err("fixture should fail validation");
+        assert!(err
+            .to_string()
+            .contains("ANALYSIS_VALIDATION_MISSING_LOADS"));
     }
 }

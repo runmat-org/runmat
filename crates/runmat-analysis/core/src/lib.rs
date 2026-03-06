@@ -7,8 +7,10 @@ pub mod problem {
     pub mod model;
     pub mod steps;
 }
+pub mod field;
 pub mod validate;
 
+pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
 pub use problem::bc::{BoundaryCondition, BoundaryConditionKind};
 pub use problem::loads::{LoadCase, LoadKind};
 pub use problem::materials::MaterialModel;
@@ -84,12 +86,9 @@ mod tests {
     fn unit_frame_mismatch_rejection() {
         let mut model = valid_model();
         model.units = UnitSystem::Inch;
-        let err = validate_model_against_geometry(
-            &model,
-            UnitSystem::Meter,
-            &ReferenceFrame::Global,
-        )
-        .expect_err("expected unit mismatch");
+        let err =
+            validate_model_against_geometry(&model, UnitSystem::Meter, &ReferenceFrame::Global)
+                .expect_err("expected unit mismatch");
         assert!(matches!(
             err,
             AnalysisValidationError::UnitMismatch {
@@ -100,12 +99,9 @@ mod tests {
 
         let mut model = valid_model();
         model.frame = ReferenceFrame::Local("fixture_frame".to_string());
-        let err = validate_model_against_geometry(
-            &model,
-            UnitSystem::Meter,
-            &ReferenceFrame::Global,
-        )
-        .expect_err("expected frame mismatch");
+        let err =
+            validate_model_against_geometry(&model, UnitSystem::Meter, &ReferenceFrame::Global)
+                .expect_err("expected frame mismatch");
         assert!(matches!(
             err,
             AnalysisValidationError::FrameMismatch {

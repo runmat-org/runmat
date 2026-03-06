@@ -276,6 +276,23 @@ Each operation returns either:
 
 `error_code` is stable API. `message` is human-readable only.
 
+For analysis solve responses, `data` must include:
+
+- tier gates: `model_validity`, `solver_convergence`, `result_quality`
+- publication decision: `run_status` and `publishable`
+- provenance core: `backend`, `precision_mode`, `deterministic_mode`, `fallback_events`
+
+Solve requests should carry explicit run options, at minimum:
+
+- `deterministic_mode` (true/false)
+- `precision_mode` (`fp32` | `fp64` | `mixed`)
+
+Field payloads must use a domain field container (not raw numeric arrays in operation contracts):
+
+- `AnalysisField { field_id, shape, values }`
+- `values` supports `host_f64` and `device_ref` variants
+- runtime adapters may project to host tensors or provider handles, but contract shape remains stable
+
 ## Contract Versioning and Compatibility
 
 - Every operation request/response must carry a contract version (`op_version`).
@@ -928,6 +945,12 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-06: Added explicit runtime solve options for `analysis.run_linear_static` (`deterministic_mode`, `precision_mode`) and extended contract tests to assert deterministic replay stability plus provenance backend/precision recording across CPU/GPU runs.
+- 2026-03-06: Extended runtime contract conformance tests for `analysis.validate` mismatch scenarios to assert exact typed envelope mapping for `ANALYSIS_VALIDATION_UNIT_MISMATCH` and `ANALYSIS_VALIDATION_FRAME_MISMATCH` (including structured mismatch context fields).
+- 2026-03-06: Expanded Track C fixture coverage: added invalid analysis fixtures (`MissingMaterials`, `MissingLoads`) in `runmat-analysis-fea::fixtures`, added fixture rejection tests in FEA, and extended runtime contract conformance tests to assert failure envelope mapping (`SOLVER_MODEL_INVALID`) and field-contract shape (`AnalysisFieldValues`).
+- 2026-03-06: Replaced raw analysis result vectors in FEA contracts with `AnalysisField` abstraction (`host_f64 | device_ref`) in `runmat-analysis-core`, and updated FEA/runtime tests to consume fields through the domain boundary to avoid throwaway contract types.
+- 2026-03-06: Track C kickoff. Added initial fixture corpus wiring in `runmat-analysis-fea` (`fixtures::FixtureId` + canonical cantilever model), deterministic replay test coverage for repeated solve stability, CPU/GPU parity tolerance policy helper (`ParityTolerance`) with parity tests, and runtime contract conformance integration tests for operation/version/error-code envelopes (`--test operation_contracts`).
+- 2026-03-06: Added solve gating and provenance fields to runtime analysis envelopes (`model_validity`, `solver_convergence`, `result_quality`, `run_status`, `publishable`, and backend/precision/determinism/fallback provenance core) so publishability decisions are explicit and machine-readable.
 - 2026-03-06: Runtime operation envelopes added for geometry and analysis. Introduced typed `OperationEnvelope`/`OperationErrorEnvelope`, implemented `analysis.validate/v1` and `analysis.run_linear_static/v1` runtime ops, upgraded geometry ops to `geometry.inspect/load/compute_stats` envelopes, and aligned machine error families (`GEOMETRY_*`, `ANALYSIS_*`, `SOLVER_*`, `CAPACITY_*`) with tests.
 - 2026-03-06: Track B started. Added `runmat-analysis-core` (`problem/*` + `validate`) and `runmat-analysis-fea` (`assembly`, `solve/linear`, `post/fields`, `diagnostics`) with workspace wiring and scaffold tests for validation failures, unit/frame mismatch rejection, canonical cantilever run, convergence diagnostic emission, and CPU/GPU parity behavior.
 - 2026-03-06: Track A scaffolding validated end-to-end. Fixed `runmat-geometry-io` compile regressions (`import_stl` module path and test `ImportResult` import), then passed `cargo test -p runmat-geometry-io -p runmat-geometry-ops` and runtime geometry smoke tests via `cargo test -p runmat-runtime geometry::tests::`.

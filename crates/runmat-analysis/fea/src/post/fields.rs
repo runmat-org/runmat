@@ -1,11 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+use runmat_analysis_core::AnalysisField;
+
 use crate::{assembly::AssemblySummary, solve::linear::LinearSolveResult};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PostFieldResult {
-    pub displacement_field: Vec<f64>,
-    pub von_mises_field: Vec<f64>,
+    pub displacement_field: AnalysisField,
+    pub von_mises_field: AnalysisField,
 }
 
 pub fn recover_result_fields(
@@ -14,8 +16,8 @@ pub fn recover_result_fields(
 ) -> PostFieldResult {
     if !solve_result.converged {
         return PostFieldResult {
-            displacement_field: Vec::new(),
-            von_mises_field: Vec::new(),
+            displacement_field: AnalysisField::host_f64("displacement", vec![0], Vec::new()),
+            von_mises_field: AnalysisField::host_f64("von_mises", vec![0], Vec::new()),
         };
     }
 
@@ -26,7 +28,11 @@ pub fn recover_result_fields(
         .collect();
 
     PostFieldResult {
-        displacement_field,
-        von_mises_field: vec![12.5e6],
+        displacement_field: AnalysisField::host_f64(
+            "displacement",
+            vec![dof_count],
+            displacement_field,
+        ),
+        von_mises_field: AnalysisField::host_f64("von_mises", vec![1], vec![12.5e6]),
     }
 }
