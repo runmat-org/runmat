@@ -17,7 +17,7 @@ use runmat_runtime::analysis::{
     AnalysisResultsQuery, AnalysisRunOptions, PrecisionMode,
 };
 use runmat_runtime::operations::OperationContext;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy)]
 enum GpuMode {
@@ -50,7 +50,7 @@ struct FixtureSpec {
     residency_expectation: Option<ResidencyExpectation>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct FixtureManifestEntry {
     id: String,
     description: String,
@@ -63,19 +63,19 @@ struct FixtureManifestEntry {
     residency_expectation: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct FixtureManifest {
     version: String,
     fixtures: Vec<FixtureManifestEntry>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ParitySummary {
     max_abs_diff: f64,
     max_rel_diff: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct FixtureRunRecord {
     fixture_id: String,
     validate_ok: bool,
@@ -91,12 +91,19 @@ struct FixtureRunRecord {
     failures: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct BenchmarkConformanceReport {
     schema_version: String,
     manifest: FixtureManifest,
     records: Vec<FixtureRunRecord>,
     passed: bool,
+}
+
+#[derive(Debug)]
+struct BaselineConfig {
+    path: Option<PathBuf>,
+    enforce: bool,
+    max_slowdown_ratio: f64,
 }
 
 fn manifest_specs() -> Vec<FixtureSpec> {
@@ -630,6 +637,89 @@ fn artifact_path() -> PathBuf {
         .join("../../target/runmat-analysis-artifacts/analysis_benchmark_report.json")
 }
 
+fn baseline_config() -> BaselineConfig {
+    let path = std::env::var("RUNMAT_ANALYSIS_BASELINE_PATH")
+        .ok()
+        .map(PathBuf::from);
+    let enforce = std::env::var("RUNMAT_ANALYSIS_ENFORCE_BASELINE")
+        .ok()
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    let max_slowdown_ratio = std::env::var("RUNMAT_ANALYSIS_MAX_SLOWDOWN_RATIO")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(1.5);
+    BaselineConfig {
+        path,
+        enforce,
+        max_slowdown_ratio,
+    }
+}
+
+fn load_baseline_report(path: &PathBuf) -> Result<BenchmarkConformanceReport, String> {
+    let bytes = fs::read(path).map_err(|err| format!("failed to read baseline report: {err}"))?;
+    serde_json::from_slice::<BenchmarkConformanceReport>(&bytes)
+        .map_err(|err| format!("failed to parse baseline report: {err}"))
+}
+
+fn check_baseline_drift(
+    baseline: &BenchmarkConformanceReport,
+    current: &BenchmarkConformanceReport,
+    max_slowdown_ratio: f64,
+    failures: &mut Vec<String>,
+) {
+    for current_record in &current.records {
+        let Some(baseline_record) = baseline
+            .records
+            .iter()
+            .find(|record| record.fixture_id == current_record.fixture_id)
+        else {
+            continue;
+        };
+
+        check_timing_ratio(
+            &current_record.fixture_id,
+            "cpu",
+            baseline_record.cpu_run_ms,
+            current_record.cpu_run_ms,
+            max_slowdown_ratio,
+            failures,
+        );
+        check_timing_ratio(
+            &current_record.fixture_id,
+            "gpu",
+            baseline_record.gpu_run_ms,
+            current_record.gpu_run_ms,
+            max_slowdown_ratio,
+            failures,
+        );
+    }
+}
+
+fn check_timing_ratio(
+    fixture_id: &str,
+    backend: &str,
+    baseline_ms: Option<f64>,
+    current_ms: Option<f64>,
+    max_slowdown_ratio: f64,
+    failures: &mut Vec<String>,
+) {
+    let (Some(base), Some(now)) = (baseline_ms, current_ms) else {
+        return;
+    };
+    if base <= 0.0 {
+        return;
+    }
+    let ratio = now / base;
+    if ratio > max_slowdown_ratio {
+        failures.push(format!(
+            "baseline slowdown exceeded for fixture={} backend={} ratio={ratio:.3} limit={max_slowdown_ratio:.3} (baseline_ms={base:.3}, current_ms={now:.3})",
+            fixture_id,
+            backend
+        ));
+    }
+}
+
 #[test]
 fn analysis_benchmark_conformance_manifest_gates() {
     let store_root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -673,13 +763,37 @@ fn analysis_benchmark_conformance_manifest_gates() {
     }
     fs::write(&path, report_json).expect("write benchmark report artifact");
 
+    let baseline = baseline_config();
+    let core_failure_count = failures.len();
+    if let Some(path) = baseline.path {
+        match load_baseline_report(&path) {
+            Ok(previous) => {
+                check_baseline_drift(
+                    &previous,
+                    &report,
+                    baseline.max_slowdown_ratio,
+                    &mut failures,
+                );
+            }
+            Err(err) => {
+                if baseline.enforce {
+                    failures.push(format!("baseline load failed under enforce mode: {err}"));
+                }
+            }
+        }
+    }
+
     runmat_runtime::analysis::storage::configure_artifact_store(
         runmat_runtime::analysis::storage::AnalysisArtifactStoreConfig::InMemory,
     )
     .expect("reset artifact store to in-memory after harness");
 
     assert!(
-        failures.is_empty(),
+        if baseline.enforce {
+            failures.is_empty()
+        } else {
+            failures.len() == core_failure_count
+        },
         "analysis benchmark/conformance gates failed: {}",
         failures.join(" | ")
     );

@@ -3,6 +3,7 @@
 pub mod assembly;
 pub mod diagnostics;
 pub mod fixtures;
+pub mod operator;
 pub mod parity;
 pub mod post;
 pub mod solve;

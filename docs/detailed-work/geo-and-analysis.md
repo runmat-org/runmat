@@ -241,6 +241,12 @@ Initial operation set:
 - `analysis.run(model_handle, run_spec)`
 - `analysis.results(run_id, field_query)`
 
+Solver implementation direction (v1.1 progression):
+
+- adopt operator-centric internals (`apply_k`, `apply_m`, `apply_c`) as the stable numerical boundary
+- prefer matrix-free iterative solve paths for large-scale GPU portability
+- keep operation envelopes unchanged while solver internals advance
+
 ### Usage Modes (No Ambiguity)
 
 The same contracts are intended to be consumed in four equivalent ways:
@@ -960,9 +966,12 @@ For maintainers onboarding mid-project, verify:
 3. Add contract conformance tests for operation versions.
 4. Emit machine-readable benchmark/conformance artifacts and fail CI on gate regressions.
 5. Upload benchmark/conformance artifacts from CI for regression triage.
+6. Support optional baseline drift enforcement from prior benchmark artifacts.
 
 ## Progress Log (OSS)
 
+- 2026-03-06: Upgraded `runmat-analysis-fea` from placeholder solve to a matrix-free operator-backed linear static path: added operator API module (`apply_k/apply_m/apply_c`), assembly now produces an `OperatorSystem` with rhs/diagonals/constraints, linear solve uses iterative conjugate-gradient over operator application, and post-fields derive from solved displacement vectors (with existing runtime contracts preserved).
+- 2026-03-06: Added optional baseline drift comparison in benchmark harness (`RUNMAT_ANALYSIS_BASELINE_PATH`, `RUNMAT_ANALYSIS_ENFORCE_BASELINE`, `RUNMAT_ANALYSIS_MAX_SLOWDOWN_RATIO`) to compare CPU/GPU timing ratios against a prior artifact and enforce slowdown gates when requested.
 - 2026-03-06: Added run-artifact persistence boundary for analysis runtime (`AnalysisArtifactStore` adapter with in-memory default + filesystem adapter), introduced `run_id` on `analysis.run_linear_static` responses, and implemented `analysis.results` retrieval by run id with typed missing-lineage error (`ANALYSIS_RESULTS_RUN_NOT_FOUND`).
 - 2026-03-06: Implemented `analysis.results/v1` runtime operation with typed field filtering and metadata response (`fields`, `diagnostics`, status/provenance/summary), added typed unknown-field error mapping (`ANALYSIS_RESULTS_FIELD_NOT_FOUND`), and integrated results-op conformance checks into unit, contract, and benchmark harness tests.
 - 2026-03-06: Wired CI artifact publishing for analysis benchmark reports by uploading `target/runmat-analysis-artifacts/*.json` from `ci.yml` after test execution, enabling per-matrix run triage.

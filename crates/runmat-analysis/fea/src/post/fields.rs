@@ -22,10 +22,20 @@ pub fn recover_result_fields(
     }
 
     let dof_count = summary.dof_count.max(3);
-    let displacement_field = vec![0.0, -1e-5, 0.0]
-        .into_iter()
-        .chain(std::iter::repeat(0.0).take(dof_count.saturating_sub(3)))
-        .collect();
+    let mut displacement_field = solve_result.solution.clone();
+    if displacement_field.len() < dof_count {
+        displacement_field
+            .extend(std::iter::repeat(0.0).take(dof_count - displacement_field.len()));
+    }
+    if displacement_field.is_empty() {
+        displacement_field = vec![0.0; dof_count];
+    }
+
+    let max_abs_displacement = displacement_field
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    let von_mises = (max_abs_displacement * 1.0e11).max(0.0);
 
     PostFieldResult {
         displacement_field: AnalysisField::host_f64(
@@ -33,6 +43,6 @@ pub fn recover_result_fields(
             vec![dof_count],
             displacement_field,
         ),
-        von_mises_field: AnalysisField::host_f64("von_mises", vec![1], vec![12.5e6]),
+        von_mises_field: AnalysisField::host_f64("von_mises", vec![1], vec![von_mises]),
     }
 }
