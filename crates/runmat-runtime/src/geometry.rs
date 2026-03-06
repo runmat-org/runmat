@@ -156,6 +156,7 @@ mod tests {
     use super::*;
 
     const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
+    const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Bracket_A','',(#1));\nENDSEC;\nEND-ISO-10303-21;\n";
 
     #[test]
     fn inspect_detects_stl() {
@@ -185,6 +186,19 @@ mod tests {
         let stats = geometry_compute_stats(&asset).expect("stats should work");
         assert_eq!(stats.mesh_count, 1);
         assert_eq!(stats.total_elements, 1);
+    }
+
+    #[test]
+    fn inspect_and_load_step_work() {
+        let inspect = geometry_inspect("/assembly.step", SIMPLE_STEP.as_bytes())
+            .expect("inspect should work");
+        assert_eq!(inspect.format, "step");
+
+        let asset =
+            geometry_load("/assembly.step", SIMPLE_STEP.as_bytes()).expect("load should work");
+        assert_eq!(asset.source.importer_version, "step/v1");
+        assert_eq!(asset.regions.len(), 1);
+        assert!(asset.source_geometry.assembly.is_some());
     }
 
     #[test]

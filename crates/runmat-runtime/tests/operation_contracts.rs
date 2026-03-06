@@ -5,7 +5,8 @@ use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_results_by_run_id_op, analysis_results_op, analysis_run_linear_static_op,
     analysis_run_linear_static_with_options, analysis_validate, AnalysisResultsQuery,
-    AnalysisRunOptions, PrecisionMode, PreconditionerMode, QualityPolicy, RunStatus,
+    AnalysisRunOptions, PrecisionMode, PreconditionerMode, QualityPolicy, QualityReasonCode,
+    RunStatus,
 };
 use runmat_runtime::geometry::{geometry_inspect_op, geometry_load_op};
 use runmat_runtime::operations::OperationContext;
@@ -545,4 +546,269 @@ fn analysis_run_gpu_upload_failure_records_fallback_contract() {
         envelope.data.run.displacement_field.values,
         AnalysisFieldValues::HostF64(_)
     ));
+}
+
+#[test]
+fn strict_policy_quality_reasons_propagate_to_results_contracts() {
+    let model = fixture_model(FixtureId::MultiMaterialAssembly);
+    let run = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Auto,
+            quality_policy: QualityPolicy::Strict,
+        },
+        OperationContext::new(Some("trace-contract-11-run".to_string()), None),
+    )
+    .expect("run should succeed");
+
+    assert_eq!(run.data.run_status, RunStatus::Degraded);
+    assert!(!run.data.publishable);
+    assert_eq!(run.data.provenance.quality_policy, "strict");
+    assert!(run
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::MaterialAssignmentConflict));
+
+    let direct_results = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(Some("trace-contract-11-results".to_string()), None),
+    )
+    .expect("results should succeed");
+    assert_eq!(direct_results.data.run_status, RunStatus::Degraded);
+    assert!(!direct_results.data.publishable);
+    assert_eq!(direct_results.data.provenance.quality_policy, "strict");
+    assert!(direct_results
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::MaterialAssignmentConflict));
+
+    let by_id_results = analysis_results_by_run_id_op(
+        &run.data.run_id,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(Some("trace-contract-11-results-id".to_string()), None),
+    )
+    .expect("results by run_id should succeed");
+    assert_eq!(by_id_results.data.run_status, RunStatus::Degraded);
+    assert!(!by_id_results.data.publishable);
+    assert_eq!(by_id_results.data.provenance.quality_policy, "strict");
+    assert!(by_id_results
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::MaterialAssignmentConflict));
+}
+
+#[test]
+fn balanced_and_strict_diverge_for_same_field_promotion_fallback() {
+    struct UploadFailProvider;
+
+    impl runmat_accelerate_api::AccelProvider for UploadFailProvider {
+        fn upload(
+            &self,
+            _host: &runmat_accelerate_api::HostTensorView,
+        ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+            Err(anyhow::anyhow!("forced-upload-failure"))
+        }
+
+        fn download<'a>(
+            &'a self,
+            h: &'a runmat_accelerate_api::GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            Box::pin(async move {
+                Ok(runmat_accelerate_api::HostTensorOwned {
+                    data: vec![0.0; h.shape.iter().product()],
+                    shape: h.shape.clone(),
+                })
+            })
+        }
+
+        fn free(&self, _h: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "upload-fail-provider".to_string()
+        }
+    }
+
+    static PROVIDER: UploadFailProvider = UploadFailProvider;
+    let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+
+    let balanced = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Gpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Auto,
+            quality_policy: QualityPolicy::Balanced,
+        },
+        OperationContext::new(Some("trace-contract-12-balanced".to_string()), None),
+    )
+    .expect("balanced run should succeed");
+
+    let strict = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Gpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Auto,
+            quality_policy: QualityPolicy::Strict,
+        },
+        OperationContext::new(Some("trace-contract-12-strict".to_string()), None),
+    )
+    .expect("strict run should succeed");
+
+    assert_eq!(balanced.data.solver_convergence, strict.data.solver_convergence);
+    assert_eq!(balanced.data.result_quality, strict.data.result_quality);
+    assert_eq!(balanced.data.provenance.quality_policy, "balanced");
+    assert_eq!(strict.data.provenance.quality_policy, "strict");
+    assert!(balanced
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
+    assert!(strict
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
+
+    assert!(balanced.data.publishable);
+    assert_eq!(balanced.data.run_status, RunStatus::Publishable);
+    assert!(!strict.data.publishable);
+    assert_eq!(strict.data.run_status, RunStatus::Degraded);
+}
+
+#[test]
+fn balanced_and_strict_divergence_propagates_through_results_endpoints() {
+    struct UploadFailProvider;
+
+    impl runmat_accelerate_api::AccelProvider for UploadFailProvider {
+        fn upload(
+            &self,
+            _host: &runmat_accelerate_api::HostTensorView,
+        ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+            Err(anyhow::anyhow!("forced-upload-failure"))
+        }
+
+        fn download<'a>(
+            &'a self,
+            h: &'a runmat_accelerate_api::GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            Box::pin(async move {
+                Ok(runmat_accelerate_api::HostTensorOwned {
+                    data: vec![0.0; h.shape.iter().product()],
+                    shape: h.shape.clone(),
+                })
+            })
+        }
+
+        fn free(&self, _h: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "upload-fail-provider".to_string()
+        }
+    }
+
+    static PROVIDER: UploadFailProvider = UploadFailProvider;
+    let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+
+    let balanced_run = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Gpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Auto,
+            quality_policy: QualityPolicy::Balanced,
+        },
+        OperationContext::new(Some("trace-contract-13-balanced-run".to_string()), None),
+    )
+    .expect("balanced run should succeed");
+    let strict_run = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Gpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Auto,
+            quality_policy: QualityPolicy::Strict,
+        },
+        OperationContext::new(Some("trace-contract-13-strict-run".to_string()), None),
+    )
+    .expect("strict run should succeed");
+
+    let balanced_results = analysis_results_op(
+        &balanced_run.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(Some("trace-contract-13-balanced-results".to_string()), None),
+    )
+    .expect("balanced results should succeed");
+    let strict_results = analysis_results_op(
+        &strict_run.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(Some("trace-contract-13-strict-results".to_string()), None),
+    )
+    .expect("strict results should succeed");
+
+    assert_eq!(balanced_results.data.run_status, RunStatus::Publishable);
+    assert!(balanced_results.data.publishable);
+    assert_eq!(balanced_results.data.provenance.quality_policy, "balanced");
+    assert!(balanced_results
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
+
+    assert_eq!(strict_results.data.run_status, RunStatus::Degraded);
+    assert!(!strict_results.data.publishable);
+    assert_eq!(strict_results.data.provenance.quality_policy, "strict");
+    assert!(strict_results
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
+
+    let balanced_by_id = analysis_results_by_run_id_op(
+        &balanced_run.data.run_id,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(Some("trace-contract-13-balanced-by-id".to_string()), None),
+    )
+    .expect("balanced by-id results should succeed");
+    let strict_by_id = analysis_results_by_run_id_op(
+        &strict_run.data.run_id,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(Some("trace-contract-13-strict-by-id".to_string()), None),
+    )
+    .expect("strict by-id results should succeed");
+
+    assert_eq!(balanced_by_id.data.run_status, RunStatus::Publishable);
+    assert!(balanced_by_id.data.publishable);
+    assert_eq!(balanced_by_id.data.provenance.quality_policy, "balanced");
+    assert!(balanced_by_id
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
+
+    assert_eq!(strict_by_id.data.run_status, RunStatus::Degraded);
+    assert!(!strict_by_id.data.publishable);
+    assert_eq!(strict_by_id.data.provenance.quality_policy, "strict");
+    assert!(strict_by_id
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
 }

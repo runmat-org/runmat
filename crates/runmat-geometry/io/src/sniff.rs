@@ -35,3 +35,20 @@ pub fn detect_geometry_format(path: &str, bytes: &[u8]) -> GeometryFormat {
     }
     GeometryFormat::Unknown
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{detect_geometry_format, GeometryFormat};
+
+    #[test]
+    fn step_detected_from_extension() {
+        let format = detect_geometry_format("/model.step", b"not-needed");
+        assert_eq!(format, GeometryFormat::Step);
+    }
+
+    #[test]
+    fn step_detected_from_header_without_extension() {
+        let format = detect_geometry_format("/model.dat", b"ISO-10303-21;\nHEADER;\n");
+        assert_eq!(format, GeometryFormat::Step);
+    }
+}
