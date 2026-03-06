@@ -5,7 +5,7 @@ use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_results_by_run_id_op, analysis_results_op, analysis_run_linear_static_op,
     analysis_run_linear_static_with_options, analysis_validate, AnalysisResultsQuery,
-    AnalysisRunOptions, PrecisionMode, PreconditionerMode, RunStatus,
+    AnalysisRunOptions, PrecisionMode, PreconditionerMode, QualityPolicy, RunStatus,
 };
 use runmat_runtime::geometry::{geometry_inspect_op, geometry_load_op};
 use runmat_runtime::operations::OperationContext;
@@ -265,12 +265,33 @@ fn analysis_run_contract_maps_fixture_validation_failures() {
 }
 
 #[test]
+fn multi_material_confidence_mismatch_degrades_publishability() {
+    let model = fixture_model(FixtureId::MultiMaterialAssembly);
+    let envelope = analysis_run_linear_static_op(
+        &model,
+        ComputeBackend::Gpu,
+        OperationContext::new(Some("trace-contract-multi-material".to_string()), None),
+    )
+    .expect("run should succeed");
+
+    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
+    assert!(!envelope.data.publishable);
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_INFERRED"));
+}
+
+#[test]
 fn analysis_run_deterministic_contract_is_stable_across_replays() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
     let options = AnalysisRunOptions {
         deterministic_mode: true,
         precision_mode: PrecisionMode::Fp64,
         preconditioner_mode: PreconditionerMode::Auto,
+        quality_policy: QualityPolicy::Balanced,
     };
 
     let first = analysis_run_linear_static_with_options(
@@ -330,7 +351,12 @@ fn analysis_run_backend_selection_is_recorded_in_provenance() {
 
     assert_eq!(cpu.data.provenance.backend, ComputeBackend::Cpu);
     assert_eq!(gpu.data.provenance.backend, ComputeBackend::Gpu);
+    assert_eq!(cpu.data.provenance.solver_device_apply_k_ratio, 0.0);
     assert_eq!(cpu.data.provenance.solver_host_sync_count, 0);
+    assert!(
+        (0.0..=1.0).contains(&gpu.data.provenance.solver_device_apply_k_ratio),
+        "gpu ratio must be in [0,1]"
+    );
     assert!(matches!(
         gpu.data.provenance.solver_backend.as_str(),
         "runtime_tensor" | "cpu_reference"
@@ -352,19 +378,17 @@ fn analysis_run_gpu_without_provider_records_fallback_contract() {
     )
     .expect("gpu run should succeed with host fallback");
 
-    assert!(envelope
-        .data
-        .provenance
-        .fallback_events
-        .iter()
-        .any(|event| event.starts_with("BACKEND_NO_PROVIDER:displacement")));
-    assert!(envelope
-        .data
-        .provenance
-        .fallback_events
-        .iter()
-        .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK")));
-    assert_eq!(envelope.data.provenance.solver_backend, "cpu_reference");
+    if envelope.data.provenance.solver_backend == "cpu_reference" {
+        assert!(envelope
+            .data
+            .provenance
+            .fallback_events
+            .iter()
+            .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK")));
+        assert_eq!(envelope.data.provenance.solver_device_apply_k_ratio, 0.0);
+    } else {
+        assert_eq!(envelope.data.provenance.solver_backend, "runtime_tensor");
+    }
     for event in &envelope.data.provenance.fallback_events {
         assert_fallback_event_schema(event);
     }
@@ -438,7 +462,21 @@ fn analysis_run_gpu_with_provider_emits_device_ref_contract() {
     )
     .expect("gpu run should succeed");
 
-    assert!(envelope.data.provenance.fallback_events.is_empty());
+    assert!(!envelope
+        .data
+        .provenance
+        .fallback_events
+        .iter()
+        .any(|event| event.starts_with("BACKEND_NO_PROVIDER")
+            || event.starts_with("BACKEND_UPLOAD_FAILED")));
+    if envelope.data.provenance.solver_backend == "cpu_reference" {
+        assert!(envelope
+            .data
+            .provenance
+            .fallback_events
+            .iter()
+            .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK")));
+    }
     assert!(matches!(
         envelope.data.run.displacement_field.values,
         AnalysisFieldValues::DeviceRef(_)

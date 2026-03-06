@@ -26,10 +26,34 @@ pub enum PreconditionerMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QualityPolicy {
+    Strict,
+    Balanced,
+    Exploratory,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QualityReasonCode {
+    MaterialAssignmentConflict,
+    SolverNotConverged,
+    SolverBackendFallback,
+    FieldPromotionFallback,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QualityReason {
+    pub code: QualityReasonCode,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnalysisRunOptions {
     pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,
     pub preconditioner_mode: PreconditionerMode,
+    pub quality_policy: QualityPolicy,
 }
 
 impl Default for AnalysisRunOptions {
@@ -38,6 +62,7 @@ impl Default for AnalysisRunOptions {
             deterministic_mode: false,
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
+            quality_policy: QualityPolicy::Balanced,
         }
     }
 }
@@ -58,15 +83,17 @@ pub enum RunStatus {
     Rejected,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct RunProvenance {
     pub backend: ComputeBackend,
     pub solver_backend: String,
+    pub solver_device_apply_k_ratio: f64,
     pub solver_host_sync_count: u32,
     pub precision_mode: String,
     pub deterministic_mode: bool,
     pub solver_method: String,
     pub preconditioner: String,
+    pub quality_policy: String,
     pub fallback_events: Vec<String>,
 }
 
@@ -79,6 +106,7 @@ pub struct AnalysisRunResult {
     pub result_quality: QualityGate,
     pub run_status: RunStatus,
     pub publishable: bool,
+    pub quality_reasons: Vec<QualityReason>,
     pub provenance: RunProvenance,
 }
 
@@ -117,6 +145,7 @@ pub struct AnalysisResultsData {
     pub diagnostics: Option<Vec<FeaDiagnostic>>,
     pub run_status: RunStatus,
     pub publishable: bool,
+    pub quality_reasons: Vec<QualityReason>,
     pub provenance: RunProvenance,
     pub summary: AnalysisResultsSummary,
 }
@@ -126,5 +155,13 @@ pub(crate) fn format_precision_mode(mode: PrecisionMode) -> String {
         PrecisionMode::Fp32 => "fp32".to_string(),
         PrecisionMode::Fp64 => "fp64".to_string(),
         PrecisionMode::Mixed => "mixed".to_string(),
+    }
+}
+
+pub(crate) fn format_quality_policy(mode: QualityPolicy) -> String {
+    match mode {
+        QualityPolicy::Strict => "strict".to_string(),
+        QualityPolicy::Balanced => "balanced".to_string(),
+        QualityPolicy::Exploratory => "exploratory".to_string(),
     }
 }

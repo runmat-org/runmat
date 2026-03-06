@@ -8,7 +8,9 @@ pub mod parity;
 pub mod post;
 pub mod solve;
 
-use runmat_analysis_core::{validate_model, AnalysisField, AnalysisModel};
+use runmat_analysis_core::{
+    validate_model, AnalysisField, AnalysisModel, EvidenceConfidence, MaterialAssignment,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -34,6 +36,7 @@ pub enum ComputeBackend {
 pub struct FeaRunResult {
     pub backend: ComputeBackend,
     pub solver_backend: String,
+    pub solver_device_apply_k_ratio: f64,
     pub solver_method: String,
     pub preconditioner: String,
     pub solver_host_sync_count: u32,
@@ -86,6 +89,11 @@ pub fn run_linear_static_with_options(
         algebra_backend.as_ref(),
     );
     let fields = recover_result_fields(&summary, &solve_result);
+    let solver_device_apply_k_ratio = if solve_result.device_apply_k_attempt_count == 0 {
+        0.0
+    } else {
+        solve_result.device_apply_k_count as f64 / solve_result.device_apply_k_attempt_count as f64
+    };
 
     let mut diagnostics = vec![FeaDiagnostic {
         code: "FEA_CONVERGENCE".to_string(),
@@ -103,11 +111,13 @@ pub fn run_linear_static_with_options(
             solve_result.preconditioner,
         ),
     }];
+    diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
     diagnostics.extend(solve_result.diagnostics);
 
     Ok(FeaRunResult {
         backend,
         solver_backend: solve_result.solver_backend,
+        solver_device_apply_k_ratio,
         solver_method: solve_result.solver_method,
         preconditioner: solve_result.preconditioner,
         solver_host_sync_count: solve_result.host_sync_count,
@@ -115,6 +125,43 @@ pub fn run_linear_static_with_options(
         displacement_field: fields.displacement_field,
         von_mises_field: fields.von_mises_field,
     })
+}
+
+fn material_assignment_diagnostics(assignments: &[MaterialAssignment]) -> Vec<FeaDiagnostic> {
+    let mut out = Vec::new();
+    for assignment in assignments {
+        if assignment.expected_material_id == assignment.assigned_material_id {
+            continue;
+        }
+
+        let (code, severity) = match assignment.confidence {
+            EvidenceConfidence::Verified => (
+                "ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_VERIFIED",
+                FeaDiagnosticSeverity::Error,
+            ),
+            EvidenceConfidence::Probable => (
+                "ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_PROBABLE",
+                FeaDiagnosticSeverity::Warning,
+            ),
+            EvidenceConfidence::Inferred => (
+                "ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_INFERRED",
+                FeaDiagnosticSeverity::Warning,
+            ),
+        };
+
+        out.push(FeaDiagnostic {
+            code: code.to_string(),
+            severity,
+            message: format!(
+                "region={} expected_material={} assigned_material={} confidence={:?}",
+                assignment.region_id,
+                assignment.expected_material_id,
+                assignment.assigned_material_id,
+                assignment.confidence
+            ),
+        });
+    }
+    out
 }
 
 #[cfg(test)]
@@ -254,5 +301,58 @@ mod tests {
             .map(|value| value.abs())
             .fold(0.0_f64, f64::max);
         assert!(sweep_max > baseline_max);
+    }
+
+    #[test]
+    fn large_load_sweep_fixture_scales_dof_count() {
+        let model = fixture_model(FixtureId::CantileverLargeLoadSweep);
+        let result = run_linear_static(&model, ComputeBackend::Cpu).expect("solve should succeed");
+
+        assert!(result.displacement_field.element_count() >= 1536);
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "FEA_SOLVER_METHOD"));
+    }
+
+    #[test]
+    fn multi_material_fixture_has_distinct_response_profile() {
+        let baseline = run_linear_static(
+            &fixture_model(FixtureId::CantileverLinearStatic),
+            ComputeBackend::Cpu,
+        )
+        .expect("baseline solve should succeed");
+        let multi_material = run_linear_static(
+            &fixture_model(FixtureId::MultiMaterialAssembly),
+            ComputeBackend::Cpu,
+        )
+        .expect("multi-material solve should succeed");
+
+        assert!(multi_material.displacement_field.element_count() >= 9);
+        assert!(multi_material
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "FEA_SOLVER_METHOD"));
+
+        let baseline_peak = baseline
+            .displacement_field
+            .as_host_f64()
+            .expect("baseline displacement should be host-backed")
+            .iter()
+            .map(|v| v.abs())
+            .fold(0.0_f64, f64::max);
+        let multi_peak = multi_material
+            .displacement_field
+            .as_host_f64()
+            .expect("multi displacement should be host-backed")
+            .iter()
+            .map(|v| v.abs())
+            .fold(0.0_f64, f64::max);
+        assert!(multi_peak > baseline_peak);
+
+        assert!(multi_material
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_INFERRED"));
     }
 }

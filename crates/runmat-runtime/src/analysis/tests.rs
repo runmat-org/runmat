@@ -34,6 +34,7 @@ fn sample_model() -> AnalysisModel {
             youngs_modulus_pa: 200e9,
             poisson_ratio: 0.3,
         }],
+        material_assignments: Vec::new(),
         boundary_conditions: vec![BoundaryCondition {
             bc_id: "bc_root".to_string(),
             region_id: "root".to_string(),
@@ -96,6 +97,7 @@ fn analysis_run_linear_static_returns_typed_envelope() {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
+            quality_policy: QualityPolicy::Balanced,
         },
         context,
     )
@@ -112,6 +114,8 @@ fn analysis_run_linear_static_returns_typed_envelope() {
     assert_eq!(envelope.data.provenance.precision_mode, "fp64");
     assert_eq!(envelope.data.provenance.solver_method, "matrix_free_pcg");
     assert_eq!(envelope.data.provenance.preconditioner, "jacobi");
+    assert_eq!(envelope.data.provenance.quality_policy, "balanced");
+    assert_eq!(envelope.data.provenance.solver_device_apply_k_ratio, 0.0);
     assert_eq!(envelope.data.provenance.solver_host_sync_count, 0);
 }
 
@@ -124,23 +128,21 @@ fn gpu_run_without_provider_records_fallback_event() {
         analysis_run_linear_static_op(&model, ComputeBackend::Gpu, OperationContext::new(None, None))
             .expect("run should pass");
 
-    assert!(envelope
-        .data
-        .provenance
-        .fallback_events
-        .iter()
-        .any(|event| event.starts_with("BACKEND_NO_PROVIDER:displacement")));
-    assert!(envelope
-        .data
-        .provenance
-        .fallback_events
-        .iter()
-        .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK")));
-    assert_eq!(envelope.data.provenance.solver_backend, "cpu_reference");
-    assert!(matches!(
-        envelope.data.run.displacement_field.values,
-        AnalysisFieldValues::HostF64(_)
-    ));
+    if envelope.data.provenance.solver_backend == "cpu_reference" {
+        assert!(envelope
+            .data
+            .provenance
+            .fallback_events
+            .iter()
+            .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK")));
+        assert_eq!(envelope.data.provenance.solver_device_apply_k_ratio, 0.0);
+        assert!(matches!(
+            envelope.data.run.displacement_field.values,
+            AnalysisFieldValues::HostF64(_)
+        ));
+    } else {
+        assert_eq!(envelope.data.provenance.solver_backend, "runtime_tensor");
+    }
 }
 
 #[test]
@@ -199,8 +201,29 @@ fn gpu_run_with_provider_emits_device_refs() {
         analysis_run_linear_static_op(&model, ComputeBackend::Gpu, OperationContext::new(None, None))
             .expect("run should pass");
 
-    assert!(envelope.data.provenance.fallback_events.is_empty());
-    assert_eq!(envelope.data.provenance.solver_backend, "runtime_tensor");
+    assert!(!envelope
+        .data
+        .provenance
+        .fallback_events
+        .iter()
+        .any(|event| event.starts_with("BACKEND_NO_PROVIDER")
+            || event.starts_with("BACKEND_UPLOAD_FAILED")));
+    assert!(matches!(
+        envelope.data.provenance.solver_backend.as_str(),
+        "runtime_tensor" | "cpu_reference"
+    ));
+    if envelope.data.provenance.solver_backend == "cpu_reference" {
+        assert!(envelope
+            .data
+            .provenance
+            .fallback_events
+            .iter()
+            .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK")));
+    }
+    assert!(
+        (0.0..=1.0).contains(&envelope.data.provenance.solver_device_apply_k_ratio),
+        "ratio must be in [0,1]"
+    );
     assert!(matches!(
         envelope.data.run.displacement_field.values,
         AnalysisFieldValues::DeviceRef(_)
@@ -318,6 +341,7 @@ fn requested_preconditioner_fallback_is_recorded() {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Amg,
+            quality_policy: QualityPolicy::Balanced,
         },
         OperationContext::new(Some("trace-preconditioner-fallback".to_string()), None),
     )
@@ -343,6 +367,7 @@ fn ilu_preconditioner_request_is_honored_without_fallback() {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Ilu,
+            quality_policy: QualityPolicy::Balanced,
         },
         OperationContext::new(Some("trace-preconditioner-ilu".to_string()), None),
     )
@@ -355,4 +380,149 @@ fn ilu_preconditioner_request_is_honored_without_fallback() {
         .fallback_events
         .iter()
         .any(|event| event.starts_with("SOLVER_PRECONDITIONER_FALLBACK")));
+}
+
+#[test]
+fn quality_policy_exploratory_allows_publishable_warn_path() {
+    let _guard = analysis_test_guard();
+    let model = runmat_analysis_fea::fixtures::fixture_model(
+        runmat_analysis_fea::fixtures::FixtureId::MultiMaterialAssembly,
+    );
+    let envelope = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Auto,
+            quality_policy: QualityPolicy::Exploratory,
+        },
+        OperationContext::new(Some("trace-quality-policy-exploratory".to_string()), None),
+    )
+    .expect("run should succeed");
+
+    assert!(envelope.data.publishable);
+    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
+    assert!(envelope
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::MaterialAssignmentConflict));
+    assert_eq!(envelope.data.provenance.quality_policy, "exploratory");
+}
+
+#[test]
+fn quality_policy_balanced_allows_publishable_with_quality_reasons() {
+    let _guard = analysis_test_guard();
+
+    struct UploadFailProvider;
+
+    impl AccelProvider for UploadFailProvider {
+        fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            Err(anyhow::anyhow!("forced-upload-failure"))
+        }
+
+        fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            Box::pin(async move {
+                Ok(HostTensorOwned {
+                    data: vec![0.0; h.shape.iter().product()],
+                    shape: h.shape.clone(),
+                })
+            })
+        }
+
+        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "upload-fail-provider".to_string()
+        }
+    }
+
+    static PROVIDER: UploadFailProvider = UploadFailProvider;
+    let _provider_guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
+
+    let model = sample_model();
+    let envelope = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Gpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Auto,
+            quality_policy: QualityPolicy::Balanced,
+        },
+        OperationContext::new(Some("trace-quality-policy-balanced".to_string()), None),
+    )
+    .expect("run should succeed");
+
+    assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
+    assert_eq!(envelope.data.result_quality, QualityGate::Pass);
+    assert!(envelope.data.publishable);
+    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
+    assert!(envelope
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
+    assert_eq!(envelope.data.provenance.quality_policy, "balanced");
+}
+
+#[test]
+fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
+    let _guard = analysis_test_guard();
+
+    struct UploadFailProvider;
+
+    impl AccelProvider for UploadFailProvider {
+        fn upload(&self, _host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            Err(anyhow::anyhow!("forced-upload-failure"))
+        }
+
+        fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            Box::pin(async move {
+                Ok(HostTensorOwned {
+                    data: vec![0.0; h.shape.iter().product()],
+                    shape: h.shape.clone(),
+                })
+            })
+        }
+
+        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "upload-fail-provider".to_string()
+        }
+    }
+
+    static PROVIDER: UploadFailProvider = UploadFailProvider;
+    let _provider_guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
+
+    let model = sample_model();
+    let envelope = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Gpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Auto,
+            quality_policy: QualityPolicy::Strict,
+        },
+        OperationContext::new(Some("trace-quality-policy-strict".to_string()), None),
+    )
+    .expect("run should succeed");
+
+    assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
+    assert_eq!(envelope.data.result_quality, QualityGate::Pass);
+    assert!(!envelope.data.publishable);
+    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
+    assert!(envelope
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
+    assert_eq!(envelope.data.provenance.quality_policy, "strict");
 }

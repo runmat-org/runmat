@@ -22,7 +22,7 @@ pub mod storage;
 pub use contracts::{
     AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunOptions,
     AnalysisRunResult, AnalysisValidateResult, PrecisionMode, PreconditionerMode, QualityGate,
-    RunProvenance, RunStatus,
+    QualityPolicy, QualityReason, QualityReasonCode, RunProvenance, RunStatus,
 };
 
 const ANALYSIS_VALIDATE_OPERATION: &str = "analysis.validate";
@@ -134,18 +134,68 @@ pub fn analysis_run_linear_static_with_options(
         QualityGate::Warn
     };
 
-    let result_quality = if !run.displacement_field.is_empty() && !run.von_mises_field.is_empty() {
-        QualityGate::Pass
-    } else {
+    let has_material_assignment_conflict = run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code.starts_with("ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_"));
+    let result_quality = if run.displacement_field.is_empty() || run.von_mises_field.is_empty() {
         QualityGate::Fail
+    } else if has_material_assignment_conflict {
+        QualityGate::Warn
+    } else {
+        QualityGate::Pass
     };
+
+    let mut quality_reasons = Vec::new();
+    if has_material_assignment_conflict {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::MaterialAssignmentConflict,
+            detail: "material assignment confidence conflict detected".to_string(),
+        });
+    }
+    if solver_convergence == QualityGate::Warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::SolverNotConverged,
+            detail: "solver convergence gate is warning".to_string(),
+        });
+    }
+    if fallback_events
+        .iter()
+        .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK"))
+    {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::SolverBackendFallback,
+            detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
+        });
+    }
+    if fallback_events
+        .iter()
+        .any(|event| event.starts_with("BACKEND_NO_PROVIDER") || event.starts_with("BACKEND_UPLOAD_FAILED"))
+    {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::FieldPromotionFallback,
+            detail: "field promotion fell back to host-backed values".to_string(),
+        });
+    }
     let solver_backend = run.solver_backend.clone();
+    let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
     let solver_host_sync_count = run.solver_host_sync_count;
     let solver_method = run.solver_method.clone();
     let selected_preconditioner = run.preconditioner.clone();
 
-    let publishable =
-        solver_convergence == QualityGate::Pass && result_quality == QualityGate::Pass;
+    let publishable = match options.quality_policy {
+        QualityPolicy::Strict => {
+            solver_convergence == QualityGate::Pass
+                && result_quality == QualityGate::Pass
+                && quality_reasons.is_empty()
+        }
+        QualityPolicy::Balanced => {
+            solver_convergence == QualityGate::Pass && result_quality == QualityGate::Pass
+        }
+        QualityPolicy::Exploratory => {
+            solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
+        }
+    };
     let run_status = if publishable {
         RunStatus::Publishable
     } else if result_quality == QualityGate::Fail {
@@ -162,14 +212,17 @@ pub fn analysis_run_linear_static_with_options(
         result_quality,
         run_status,
         publishable,
+        quality_reasons,
         provenance: RunProvenance {
             backend,
             solver_backend,
+            solver_device_apply_k_ratio,
             solver_host_sync_count,
             precision_mode: contracts::format_precision_mode(options.precision_mode),
             deterministic_mode: options.deterministic_mode,
             solver_method,
             preconditioner: selected_preconditioner,
+            quality_policy: contracts::format_quality_policy(options.quality_policy),
             fallback_events,
         },
     };
@@ -255,6 +308,7 @@ pub fn analysis_results_op(
         },
         run_status: run_result.run_status,
         publishable: run_result.publishable,
+        quality_reasons: run_result.quality_reasons.clone(),
         provenance: run_result.provenance.clone(),
         summary,
     };

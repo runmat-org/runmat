@@ -286,7 +286,16 @@ For analysis solve responses, `data` must include:
 
 - tier gates: `model_validity`, `solver_convergence`, `result_quality`
 - publication decision: `run_status` and `publishable`
-- provenance core: `backend`, `solver_backend`, `solver_host_sync_count`, `precision_mode`, `deterministic_mode`, `solver_method`, `preconditioner`, `fallback_events`
+- provenance core: `backend`, `solver_backend`, `solver_device_apply_k_ratio`, `solver_host_sync_count`, `precision_mode`, `deterministic_mode`, `solver_method`, `preconditioner`, `fallback_events`
+
+Material assignment confidence diagnostics policy:
+
+- model may carry `material_assignments` with confidence tier (`verified`, `probable`, `inferred`)
+- mismatched assignment diagnostics must be emitted with stable codes:
+  - `ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_VERIFIED` (error)
+  - `ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_PROBABLE` (warning)
+  - `ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_INFERRED` (warning)
+- any emitted assignment conflict warning/error downgrades result quality to at least `warn`
 
 For result retrieval (`analysis.results/v1`), query/response semantics are:
 
@@ -971,6 +980,17 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-06: Added runtime quality policy and reason contracts for analysis runs/results (`quality_policy`, `quality_reasons`) with policy-dependent publishability behavior (`strict`, `balanced`, `exploratory`), and aligned runtime tests/conformance harness defaults to the explicit balanced policy.
+- 2026-03-06: Added explicit runtime tests for quality-policy divergence: `balanced` remains publishable when core quality gates pass but quality reasons exist (field-promotion fallback), while `strict` degrades publishability under the same conditions.
+- 2026-03-06: Added material-assignment confidence modeling to analysis domain (`material_assignments` + confidence tiers), emitted trust-tier conflict diagnostics from FEA runs, and validated degraded publishability behavior for low-confidence mismatches via multi-material fixture coverage in runtime contract/harness tests.
+- 2026-03-06: Added multi-material assembly fixture coverage (`MultiMaterialAssembly`) with mixed material set + heterogeneous load kinds, validated distinct response behavior in FEA tests, and expanded benchmark harness with provider-backed multi-material residency/sync/ratio gates.
+- 2026-03-06: Expanded scale validation with `CantileverLargeLoadSweep` fixture (512 load cases) across FEA + benchmark harness, and added stricter provider-backed residency gates for the extra-large case (`min_solver_device_apply_k_ratio=1.0`, bounded host-sync budget) to verify higher-DOF behavior under the runtime-tensor path.
+- 2026-03-06: Tightened GPU-provider conformance gates in benchmark harness by raising minimum device operator application ratio to `1.0` and lowering maximum solver host-sync budget to `32` for provider-backed fixtures, confirming stricter residency expectations pass under current runtime-tensor path.
+- 2026-03-06: Added provider-capability-aware harness provider implementation for benchmark conformance (supports elementwise/reduction/gather/scatter operations), raised device-operator telemetry gates for provider-backed fixtures (`min_solver_device_apply_k_ratio`), and validated ratio-driven conformance checks with upgraded runtime-tensor coverage.
+- 2026-03-06: Added provider-capability telemetry for device operator application progress (`solver_device_apply_k_ratio`) and integrated fixture-level minimum-ratio + sync-budget gating into benchmark conformance harness, alongside runtime-tensor preconditioner/workspace reuse improvements.
+- 2026-03-06: Added runtime-tensor scratch workspace reuse for preconditioner sweeps (`RuntimeTensorWorkspace` with reusable device buffers for `y/z`) and switched preconditioner update loops to in-place scatter updates, reducing per-iteration allocation/free churn in GPU solve loops.
+- 2026-03-06: Added device-resident preconditioner application paths in runtime-tensor solver for both Jacobi and ILU(0)-style modes (`apply_preconditioner_device` + iterative device sweeps for ILU approximation), removing additional host-dependent preconditioner work from the GPU solve loop.
+- 2026-03-06: Reduced runtime-tensor PCG host synchronization overhead by removing the initial `z -> p` host roundtrip (device-side initialization) and including explicit fallback-download/output-download accounting in `solver_host_sync_count`, improving fidelity of residency telemetry and sync-budget gates.
 - 2026-03-06: Added sync-budget conformance controls in benchmark harness (`max_solver_host_sync_count` per fixture) and wired `solver_host_sync_count` checks into GPU fixture gating, so host-sync regression thresholds are enforced alongside parity/residency/error contracts.
 - 2026-03-06: Hardened runtime-tensor backend selection semantics: GPU solve requests now choose `runtime_tensor` only when an acceleration provider is available, otherwise explicitly fall back to `cpu_reference` with typed fallback telemetry (`SOLVER_BACKEND_FALLBACK`), while provenance reports the actual solver backend used.
 - 2026-03-06: Added solver host-sync accounting (`solver_host_sync_count`) into solve/runtime provenance and reduced duplicate scalar syncs in runtime-tensor PCG by reusing residual reductions; this makes GPU residency progress measurable in contracts/harness artifacts.

@@ -3,6 +3,7 @@
 pub mod problem {
     pub mod bc;
     pub mod loads;
+    pub mod material_assignment;
     pub mod materials;
     pub mod model;
     pub mod steps;
@@ -13,6 +14,7 @@ pub mod validate;
 pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
 pub use problem::bc::{BoundaryCondition, BoundaryConditionKind};
 pub use problem::loads::{LoadCase, LoadKind};
+pub use problem::material_assignment::{EvidenceConfidence, MaterialAssignment};
 pub use problem::materials::MaterialModel;
 pub use problem::model::{AnalysisModel, AnalysisModelId, ReferenceFrame};
 pub use problem::steps::{AnalysisStep, AnalysisStepKind};
@@ -37,6 +39,7 @@ mod tests {
                 youngs_modulus_pa: 200e9,
                 poisson_ratio: 0.3,
             }],
+            material_assignments: Vec::new(),
             boundary_conditions: vec![BoundaryCondition {
                 bc_id: "bc_fixed_root".to_string(),
                 region_id: "root".to_string(),

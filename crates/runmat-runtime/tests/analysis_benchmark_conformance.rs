@@ -1,10 +1,12 @@
 use std::fs;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorOwned,
+    AccelDownloadFuture, AccelProvider, AccelProviderFuture, ApiDeviceInfo, GpuTensorHandle, HostTensorOwned,
     HostTensorView, ThreadProviderGuard,
 };
 use runmat_analysis_core::{AnalysisFieldValues, AnalysisModel, ReferenceFrame};
@@ -14,7 +16,7 @@ use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_results_by_run_id_op, analysis_results_op, analysis_run_linear_static_with_options,
     analysis_validate,
-    AnalysisResultsQuery, AnalysisRunOptions, PrecisionMode, PreconditionerMode,
+    AnalysisResultsQuery, AnalysisRunOptions, PrecisionMode, PreconditionerMode, QualityPolicy,
 };
 use runmat_runtime::operations::OperationContext;
 use serde::{Deserialize, Serialize};
@@ -49,6 +51,7 @@ struct FixtureSpec {
     gpu_mode: Option<GpuMode>,
     residency_expectation: Option<ResidencyExpectation>,
     max_solver_host_sync_count: Option<u32>,
+    min_solver_device_apply_k_ratio: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -63,6 +66,7 @@ struct FixtureManifestEntry {
     gpu_mode: Option<String>,
     residency_expectation: Option<String>,
     max_solver_host_sync_count: Option<u32>,
+    min_solver_device_apply_k_ratio: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -89,6 +93,7 @@ struct FixtureRunRecord {
     gpu_fallback_events: Vec<String>,
     gpu_displacement_residency: Option<String>,
     gpu_solver_host_sync_count: Option<u32>,
+    gpu_solver_device_apply_k_ratio: Option<f64>,
     publishable: Option<bool>,
     parity: Option<ParitySummary>,
     failures: Vec<String>,
@@ -121,7 +126,8 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             parity_tolerance: None,
             gpu_mode: Some(GpuMode::WithProvider),
             residency_expectation: Some(ResidencyExpectation::DeviceRef),
-            max_solver_host_sync_count: Some(220),
+            max_solver_host_sync_count: Some(32),
+            min_solver_device_apply_k_ratio: Some(1.0),
         },
         FixtureSpec {
             id: "cantilever_gpu_fallback",
@@ -137,6 +143,7 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             gpu_mode: Some(GpuMode::WithoutProvider),
             residency_expectation: Some(ResidencyExpectation::HostFallback),
             max_solver_host_sync_count: Some(0),
+            min_solver_device_apply_k_ratio: Some(0.0),
         },
         FixtureSpec {
             id: "cantilever_load_sweep_gpu_provider",
@@ -148,7 +155,34 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             parity_tolerance: None,
             gpu_mode: Some(GpuMode::WithProvider),
             residency_expectation: Some(ResidencyExpectation::DeviceRef),
-            max_solver_host_sync_count: Some(220),
+            max_solver_host_sync_count: Some(32),
+            min_solver_device_apply_k_ratio: Some(1.0),
+        },
+        FixtureSpec {
+            id: "cantilever_large_load_sweep_gpu_provider",
+            description: "extra-large load sweep fixture with provider-backed GPU residency",
+            model: || fixture_model(FixtureId::CantileverLargeLoadSweep),
+            expect_validate_error: None,
+            expect_run_error: None,
+            expected_publishable: Some(true),
+            parity_tolerance: None,
+            gpu_mode: Some(GpuMode::WithProvider),
+            residency_expectation: Some(ResidencyExpectation::DeviceRef),
+            max_solver_host_sync_count: Some(64),
+            min_solver_device_apply_k_ratio: Some(1.0),
+        },
+        FixtureSpec {
+            id: "multi_material_assembly_gpu_provider",
+            description: "multi-material, multi-load assembly fixture with provider-backed GPU residency",
+            model: || fixture_model(FixtureId::MultiMaterialAssembly),
+            expect_validate_error: None,
+            expect_run_error: None,
+            expected_publishable: Some(false),
+            parity_tolerance: None,
+            gpu_mode: Some(GpuMode::WithProvider),
+            residency_expectation: Some(ResidencyExpectation::DeviceRef),
+            max_solver_host_sync_count: Some(48),
+            min_solver_device_apply_k_ratio: Some(1.0),
         },
         FixtureSpec {
             id: "missing_materials",
@@ -161,6 +195,7 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             gpu_mode: None,
             residency_expectation: None,
             max_solver_host_sync_count: None,
+            min_solver_device_apply_k_ratio: None,
         },
         FixtureSpec {
             id: "unit_mismatch",
@@ -177,6 +212,7 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             gpu_mode: None,
             residency_expectation: None,
             max_solver_host_sync_count: None,
+            min_solver_device_apply_k_ratio: None,
         },
     ]
 }
@@ -203,6 +239,7 @@ fn fixture_manifest(specs: &[FixtureSpec]) -> FixtureManifest {
                     ResidencyExpectation::HostFallback => "host_fallback".to_string(),
                 }),
                 max_solver_host_sync_count: spec.max_solver_host_sync_count,
+                min_solver_device_apply_k_ratio: spec.min_solver_device_apply_k_ratio,
             })
             .collect(),
     }
@@ -213,6 +250,7 @@ fn default_options() -> AnalysisRunOptions {
         deterministic_mode: true,
         precision_mode: PrecisionMode::Fp64,
         preconditioner_mode: PreconditionerMode::Auto,
+        quality_policy: QualityPolicy::Balanced,
     }
 }
 
@@ -304,6 +342,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
     let mut gpu_fallback_events = Vec::new();
     let mut gpu_displacement_residency = None;
     let mut gpu_solver_host_sync_count = None;
+    let mut gpu_solver_device_apply_k_ratio = None;
     let mut publishable = None;
     let mut parity = None;
 
@@ -335,6 +374,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                     gpu_fallback_events,
                     gpu_displacement_residency,
                     gpu_solver_host_sync_count,
+                    gpu_solver_device_apply_k_ratio,
                     publishable,
                     parity,
                     failures,
@@ -381,6 +421,8 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                     gpu_fallback_events = gpu_envelope.data.provenance.fallback_events.clone();
                     gpu_solver_host_sync_count =
                         Some(gpu_envelope.data.provenance.solver_host_sync_count);
+                    gpu_solver_device_apply_k_ratio =
+                        Some(gpu_envelope.data.provenance.solver_device_apply_k_ratio);
 
                     for event in &gpu_fallback_events {
                         if !validate_fallback_event_schema(event) {
@@ -430,6 +472,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                                 gpu_fallback_events,
                                 gpu_displacement_residency,
                                 gpu_solver_host_sync_count,
+                                gpu_solver_device_apply_k_ratio,
                                 publishable,
                                 parity,
                                 failures,
@@ -487,6 +530,15 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                             ));
                         }
                     }
+                    if let Some(min_ratio) = spec.min_solver_device_apply_k_ratio {
+                        let observed = gpu_envelope.data.provenance.solver_device_apply_k_ratio;
+                        if observed < min_ratio {
+                            failures.push(format!(
+                                "solver_device_apply_k_ratio below target for fixture {}: observed={} min={}",
+                                spec.id, observed, min_ratio
+                            ));
+                        }
+                    }
 
                     if let Some(expectation) = spec.residency_expectation {
                         match expectation {
@@ -539,6 +591,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                                 gpu_fallback_events,
                                 gpu_displacement_residency,
                                 gpu_solver_host_sync_count,
+                                gpu_solver_device_apply_k_ratio,
                                 publishable,
                                 parity,
                                 failures,
@@ -618,6 +671,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
         gpu_fallback_events,
         gpu_displacement_residency,
         gpu_solver_host_sync_count,
+        gpu_solver_device_apply_k_ratio,
         publishable,
         parity,
         failures,
@@ -626,26 +680,76 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
 
 struct HarnessProvider;
 
+fn harness_store() -> &'static Mutex<HashMap<u64, HostTensorOwned>> {
+    static STORE: OnceLock<Mutex<HashMap<u64, HostTensorOwned>>> = OnceLock::new();
+    STORE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn store_get(handle: &GpuTensorHandle) -> anyhow::Result<HostTensorOwned> {
+    let guard = harness_store()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("harness store lock poisoned"))?;
+    guard
+        .get(&handle.buffer_id)
+        .cloned()
+        .ok_or_else(|| anyhow::anyhow!("missing tensor for buffer_id={}", handle.buffer_id))
+}
+
+fn store_insert(shape: Vec<usize>, data: Vec<f64>) -> anyhow::Result<GpuTensorHandle> {
+    let expected: usize = shape.iter().product();
+    if expected != data.len() {
+        return Err(anyhow::anyhow!(
+            "tensor data len {} does not match shape product {}",
+            data.len(),
+            expected
+        ));
+    }
+    static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(5000);
+    let buffer_id = NEXT_BUFFER_ID.fetch_add(1, Ordering::Relaxed);
+    let mut guard = harness_store()
+        .lock()
+        .map_err(|_| anyhow::anyhow!("harness store lock poisoned"))?;
+    guard.insert(buffer_id, HostTensorOwned { data, shape: shape.clone() });
+    Ok(GpuTensorHandle {
+        shape,
+        device_id: 21,
+        buffer_id,
+    })
+}
+
+fn elementwise_binary(
+    a: &GpuTensorHandle,
+    b: &GpuTensorHandle,
+    op: impl Fn(f64, f64) -> f64,
+) -> anyhow::Result<GpuTensorHandle> {
+    let ah = store_get(a)?;
+    let bh = store_get(b)?;
+    if ah.shape != bh.shape {
+        return Err(anyhow::anyhow!("shape mismatch in elementwise operation"));
+    }
+    let data = ah
+        .data
+        .iter()
+        .zip(bh.data.iter())
+        .map(|(&x, &y)| op(x, y))
+        .collect();
+    store_insert(ah.shape, data)
+}
+
 impl AccelProvider for HarnessProvider {
     fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
-        static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(5000);
-        Ok(GpuTensorHandle {
-            shape: host.shape.to_vec(),
-            device_id: 21,
-            buffer_id: NEXT_BUFFER_ID.fetch_add(1, Ordering::Relaxed),
-        })
+        store_insert(host.shape.to_vec(), host.data.to_vec())
     }
 
     fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
-        Box::pin(async move {
-            Ok(HostTensorOwned {
-                data: vec![0.0; h.shape.iter().product()],
-                shape: h.shape.clone(),
-            })
-        })
+        Box::pin(async move { store_get(h) })
     }
 
-    fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
+    fn free(&self, h: &GpuTensorHandle) -> anyhow::Result<()> {
+        let mut guard = harness_store()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("harness store lock poisoned"))?;
+        guard.remove(&h.buffer_id);
         Ok(())
     }
 
@@ -665,6 +769,111 @@ impl AccelProvider for HarnessProvider {
             memory_bytes: None,
             backend: Some("harness_gpu".to_string()),
         }
+    }
+
+    fn elem_add<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { elementwise_binary(a, b, |x, y| x + y) })
+    }
+
+    fn elem_sub<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { elementwise_binary(a, b, |x, y| x - y) })
+    }
+
+    fn elem_mul<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+        b: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { elementwise_binary(a, b, |x, y| x * y) })
+    }
+
+    fn scalar_mul(&self, a: &GpuTensorHandle, scalar: f64) -> anyhow::Result<GpuTensorHandle> {
+        let ah = store_get(a)?;
+        let data = ah.data.iter().map(|&x| x * scalar).collect();
+        store_insert(ah.shape, data)
+    }
+
+    fn reduce_sum<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let ah = store_get(a)?;
+            let sum = ah.data.iter().sum::<f64>();
+            store_insert(vec![1], vec![sum])
+        })
+    }
+
+    fn read_scalar(&self, h: &GpuTensorHandle, linear_index: usize) -> anyhow::Result<f64> {
+        let ah = store_get(h)?;
+        ah.data
+            .get(linear_index)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("read_scalar index out of bounds"))
+    }
+
+    fn gather_linear(
+        &self,
+        source: &GpuTensorHandle,
+        indices: &[u32],
+        output_shape: &[usize],
+    ) -> anyhow::Result<GpuTensorHandle> {
+        let src = store_get(source)?;
+        let out_len: usize = output_shape.iter().product();
+        if indices.len() != out_len {
+            return Err(anyhow::anyhow!(
+                "indices len {} does not match output len {}",
+                indices.len(),
+                out_len
+            ));
+        }
+        let mut out = Vec::with_capacity(indices.len());
+        for &idx in indices {
+            let idx = idx as usize;
+            let value = src
+                .data
+                .get(idx)
+                .copied()
+                .ok_or_else(|| anyhow::anyhow!("gather index out of bounds"))?;
+            out.push(value);
+        }
+        store_insert(output_shape.to_vec(), out)
+    }
+
+    fn scatter_linear(
+        &self,
+        target: &GpuTensorHandle,
+        indices: &[u32],
+        values: &GpuTensorHandle,
+    ) -> anyhow::Result<()> {
+        let values_host = store_get(values)?;
+        if values_host.data.len() != indices.len() {
+            return Err(anyhow::anyhow!(
+                "scatter values len {} != indices len {}",
+                values_host.data.len(),
+                indices.len()
+            ));
+        }
+
+        let mut guard = harness_store()
+            .lock()
+            .map_err(|_| anyhow::anyhow!("harness store lock poisoned"))?;
+        let target_host = guard
+            .get_mut(&target.buffer_id)
+            .ok_or_else(|| anyhow::anyhow!("missing target tensor for scatter"))?;
+        for (i, &idx) in indices.iter().enumerate() {
+            let idx = idx as usize;
+            if idx >= target_host.data.len() {
+                return Err(anyhow::anyhow!("scatter index out of bounds"));
+            }
+            target_host.data[idx] = values_host.data[i];
+        }
+        Ok(())
     }
 }
 

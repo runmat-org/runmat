@@ -1,6 +1,7 @@
 use runmat_analysis_core::{
     AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind, BoundaryCondition,
-    BoundaryConditionKind, LoadCase, LoadKind, MaterialModel, ReferenceFrame,
+    BoundaryConditionKind, EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment,
+    MaterialModel, ReferenceFrame,
 };
 use runmat_geometry_core::UnitSystem;
 
@@ -8,6 +9,8 @@ use runmat_geometry_core::UnitSystem;
 pub enum FixtureId {
     CantileverLinearStatic,
     CantileverLoadSweep,
+    CantileverLargeLoadSweep,
+    MultiMaterialAssembly,
     MissingMaterials,
     MissingLoads,
 }
@@ -16,6 +19,8 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
     match fixture {
         FixtureId::CantileverLinearStatic => cantilever_linear_static(),
         FixtureId::CantileverLoadSweep => cantilever_load_sweep(),
+        FixtureId::CantileverLargeLoadSweep => cantilever_large_load_sweep(),
+        FixtureId::MultiMaterialAssembly => multi_material_assembly(),
         FixtureId::MissingMaterials => missing_materials(),
         FixtureId::MissingLoads => missing_loads(),
     }
@@ -33,6 +38,12 @@ fn cantilever_linear_static() -> AnalysisModel {
             name: "Steel".to_string(),
             youngs_modulus_pa: 200e9,
             poisson_ratio: 0.3,
+        }],
+        material_assignments: vec![MaterialAssignment {
+            region_id: "tip".to_string(),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Verified,
         }],
         boundary_conditions: vec![BoundaryCondition {
             bc_id: "bc_root".to_string(),
@@ -72,6 +83,115 @@ fn cantilever_load_sweep() -> AnalysisModel {
             }
         })
         .collect();
+    model
+}
+
+fn cantilever_large_load_sweep() -> AnalysisModel {
+    let mut model = cantilever_linear_static();
+    model.model_id = AnalysisModelId("cantilever_large_load_sweep".to_string());
+    model.loads = (0..512)
+        .map(|i| {
+            let scale = 1.0 + (i as f64) * 0.005;
+            LoadCase {
+                load_id: format!("tip_load_large_{i}"),
+                region_id: format!("tip_large_{i}"),
+                kind: LoadKind::Force {
+                    fx: 0.0,
+                    fy: -800.0 * scale,
+                    fz: 0.0,
+                },
+            }
+        })
+        .collect();
+    model
+}
+
+fn multi_material_assembly() -> AnalysisModel {
+    let mut model = cantilever_linear_static();
+    model.model_id = AnalysisModelId("multi_material_assembly".to_string());
+    model.materials = vec![
+        MaterialModel {
+            material_id: "mat_steel".to_string(),
+            name: "Steel".to_string(),
+            youngs_modulus_pa: 200e9,
+            poisson_ratio: 0.3,
+        },
+        MaterialModel {
+            material_id: "mat_aluminum".to_string(),
+            name: "Aluminum".to_string(),
+            youngs_modulus_pa: 69e9,
+            poisson_ratio: 0.33,
+        },
+        MaterialModel {
+            material_id: "mat_polymer".to_string(),
+            name: "Polymer".to_string(),
+            youngs_modulus_pa: 3.2e9,
+            poisson_ratio: 0.37,
+        },
+    ];
+
+    model.boundary_conditions = vec![
+        BoundaryCondition {
+            bc_id: "bc_root".to_string(),
+            region_id: "root".to_string(),
+            kind: BoundaryConditionKind::Fixed,
+        },
+        BoundaryCondition {
+            bc_id: "bc_interface".to_string(),
+            region_id: "interface".to_string(),
+            kind: BoundaryConditionKind::PrescribedDisplacement,
+        },
+    ];
+
+    model.loads = vec![
+        LoadCase {
+            load_id: "load_tip_force".to_string(),
+            region_id: "tip_steel".to_string(),
+            kind: LoadKind::Force {
+                fx: 0.0,
+                fy: -1200.0,
+                fz: 0.0,
+            },
+        },
+        LoadCase {
+            load_id: "load_mid_pressure".to_string(),
+            region_id: "mid_aluminum".to_string(),
+            kind: LoadKind::Pressure {
+                magnitude_pa: 8.5e5,
+            },
+        },
+        LoadCase {
+            load_id: "load_body".to_string(),
+            region_id: "polymer_segment".to_string(),
+            kind: LoadKind::BodyForce {
+                gx: 0.0,
+                gy: -9.81,
+                gz: 0.0,
+            },
+        },
+    ];
+
+    model.material_assignments = vec![
+        MaterialAssignment {
+            region_id: "tip_steel".to_string(),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+        MaterialAssignment {
+            region_id: "mid_aluminum".to_string(),
+            expected_material_id: "mat_aluminum".to_string(),
+            assigned_material_id: "mat_polymer".to_string(),
+            confidence: EvidenceConfidence::Inferred,
+        },
+        MaterialAssignment {
+            region_id: "polymer_segment".to_string(),
+            expected_material_id: "mat_polymer".to_string(),
+            assigned_material_id: "mat_polymer".to_string(),
+            confidence: EvidenceConfidence::Probable,
+        },
+    ];
+
     model
 }
 

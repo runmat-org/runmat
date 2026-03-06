@@ -18,6 +18,8 @@ pub struct LinearSolveResult {
     pub converged: bool,
     pub host_sync_count: u32,
     pub solver_backend: String,
+    pub device_apply_k_count: u32,
+    pub device_apply_k_attempt_count: u32,
     pub solution: Vec<f64>,
     pub solver_method: String,
     pub preconditioner: String,
@@ -30,10 +32,14 @@ pub fn solve_linear_system(
     backend_kind: LinearAlgebraBackendKind,
     algebra_backend: &dyn LinearAlgebraBackend,
 ) -> LinearSolveResult {
+    let mut effective_backend_kind = backend_kind;
+    let mut runtime_tensor_fallback = false;
     if backend_kind == LinearAlgebraBackendKind::RuntimeTensor {
         if let Some(result) = solve_linear_system_runtime_tensor(summary, preconditioner_kind) {
             return result;
         }
+        effective_backend_kind = LinearAlgebraBackendKind::CpuReference;
+        runtime_tensor_fallback = true;
     }
 
     let has_dofs = summary.dof_count > 0;
@@ -43,7 +49,9 @@ pub fn solve_linear_system(
             residual_norm: 0.0,
             converged: false,
             host_sync_count: 0,
-            solver_backend: backend_kind.as_str().to_string(),
+            solver_backend: effective_backend_kind.as_str().to_string(),
+            device_apply_k_count: 0,
+            device_apply_k_attempt_count: 0,
             solution: Vec::new(),
             solver_method: "matrix_free_pcg".to_string(),
             preconditioner: preconditioner_kind.as_str().to_string(),
@@ -75,6 +83,14 @@ pub fn solve_linear_system(
             preconditioner.kind().as_str()
         ),
     }];
+    if runtime_tensor_fallback {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_RUNTIME_TENSOR_FALLBACK".to_string(),
+            severity: FeaDiagnosticSeverity::Warning,
+            message: "runtime-tensor backend unavailable for current provider; fell back to cpu_reference solver"
+                .to_string(),
+        });
+    }
 
     if algebra_backend.dot(&r, &r).sqrt() / b_norm <= tol {
         return LinearSolveResult {
@@ -82,7 +98,9 @@ pub fn solve_linear_system(
             residual_norm: algebra_backend.dot(&r, &r).sqrt(),
             converged: true,
             host_sync_count: 0,
-            solver_backend: backend_kind.as_str().to_string(),
+            solver_backend: effective_backend_kind.as_str().to_string(),
+            device_apply_k_count: 0,
+            device_apply_k_attempt_count: 0,
             solution: x,
             solver_method: "matrix_free_pcg".to_string(),
             preconditioner: preconditioner.kind().as_str().to_string(),
@@ -136,7 +154,9 @@ pub fn solve_linear_system(
         residual_norm,
         converged,
         host_sync_count: 0,
-        solver_backend: backend_kind.as_str().to_string(),
+        solver_backend: effective_backend_kind.as_str().to_string(),
+        device_apply_k_count: 0,
+        device_apply_k_attempt_count: 0,
         solution: x,
         solver_method: "matrix_free_pcg".to_string(),
         preconditioner: preconditioner.kind().as_str().to_string(),

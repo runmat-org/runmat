@@ -199,6 +199,7 @@ mod tests {
                 youngs_modulus_pa: 200e9,
                 poisson_ratio: 0.3,
             }],
+            material_assignments: Vec::new(),
             boundary_conditions: vec![BoundaryCondition {
                 bc_id: "bc".to_string(),
                 region_id: "root".to_string(),
