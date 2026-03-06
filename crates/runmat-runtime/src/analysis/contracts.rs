@@ -8,6 +8,21 @@ pub struct AnalysisValidateResult {
     pub valid: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisCreateModelIntentSpec {
+    pub model_id: String,
+    pub profile: AnalysisCreateModelProfile,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisCreateModelProfile {
+    LinearStaticStructural,
+    ModalStructural,
+    TransientStructural,
+    NonlinearStructural,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PrecisionMode {
@@ -40,6 +55,7 @@ pub enum QualityReasonCode {
     SolverNotConverged,
     SolverBackendFallback,
     FieldPromotionFallback,
+    ModalPlaceholder,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -101,6 +117,7 @@ pub struct RunProvenance {
 pub struct AnalysisRunResult {
     pub run_id: String,
     pub run: FeaRunResult,
+    pub modal_results: Option<ModalResultsData>,
     pub model_validity: QualityGate,
     pub solver_convergence: QualityGate,
     pub result_quality: QualityGate,
@@ -142,12 +159,19 @@ pub struct AnalysisResultsSummary {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisResultsData {
     pub fields: Vec<AnalysisField>,
+    pub modal_results: Option<ModalResultsData>,
     pub diagnostics: Option<Vec<FeaDiagnostic>>,
     pub run_status: RunStatus,
     pub publishable: bool,
     pub quality_reasons: Vec<QualityReason>,
     pub provenance: RunProvenance,
     pub summary: AnalysisResultsSummary,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ModalResultsData {
+    pub eigenvalues_hz: Vec<f64>,
+    pub mode_shapes: Vec<AnalysisField>,
 }
 
 pub(crate) fn format_precision_mode(mode: PrecisionMode) -> String {

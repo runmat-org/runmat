@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
+use self::capture::DEFAULT_SVG_CAPTURE_ADAPTER;
 use runmat_geometry_core::{EntityKind, EntityRef, GeometryAsset, Region};
 use runmat_geometry_io::{
     import::GeometryImportError, import_geometry, GeometryFormat, GeometryImportOptions,
@@ -81,6 +82,8 @@ thread_local! {
     static GEOMETRY_CAPTURE_ADAPTER: RefCell<Option<&'static dyn GeometryViewCaptureAdapter>> =
         RefCell::new(None);
 }
+
+mod capture;
 
 pub struct ThreadGeometryCaptureAdapterGuard {
     previous: Option<&'static dyn GeometryViewCaptureAdapter>,
@@ -337,6 +340,38 @@ pub fn geometry_capture_view_op(
                 ]),
             )
         })?;
+        return Ok(OperationEnvelope::new(
+            GEOMETRY_CAPTURE_VIEW_OPERATION,
+            GEOMETRY_CAPTURE_VIEW_OP_VERSION,
+            &context,
+            capture,
+        ));
+    }
+
+    if view_spec.format.eq_ignore_ascii_case("svg") {
+        let capture = DEFAULT_SVG_CAPTURE_ADAPTER
+            .capture(asset, &view_spec)
+            .map_err(|message| {
+                operation_error(
+                    GEOMETRY_CAPTURE_VIEW_OPERATION,
+                    GEOMETRY_CAPTURE_VIEW_OP_VERSION,
+                    &context,
+                    OperationErrorSpec {
+                        error_code: "GEOMETRY_CAPTURE_BACKEND_FAILED",
+                        error_type: OperationErrorType::Backend,
+                        retryable: true,
+                        severity: OperationErrorSeverity::Error,
+                    },
+                    message,
+                    BTreeMap::from([
+                        ("geometry_id".to_string(), asset.geometry_id.clone()),
+                        (
+                            "adapter".to_string(),
+                            DEFAULT_SVG_CAPTURE_ADAPTER.adapter_name().to_string(),
+                        ),
+                    ]),
+                )
+            })?;
         return Ok(OperationEnvelope::new(
             GEOMETRY_CAPTURE_VIEW_OPERATION,
             GEOMETRY_CAPTURE_VIEW_OP_VERSION,

@@ -138,6 +138,30 @@ fn capture_view_op_returns_typed_unsupported_error() {
 }
 
 #[test]
+fn capture_view_op_uses_default_svg_renderer_without_adapter() {
+    let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
+    let envelope = geometry_capture_view_op(
+        &asset,
+        GeometryCaptureViewSpec {
+            format: "svg".to_string(),
+            width: 640,
+            height: 360,
+        },
+        OperationContext::new(Some("trace-g4-svg".to_string()), None),
+    )
+    .expect("svg capture should succeed");
+
+    assert_eq!(envelope.operation, "geometry.capture_view");
+    assert_eq!(envelope.op_version, "geometry.capture_view/v1");
+    assert_eq!(envelope.data.format, "svg");
+    assert_eq!(envelope.data.width, 640);
+    assert_eq!(envelope.data.height, 360);
+    let payload = std::str::from_utf8(&envelope.data.payload).expect("svg payload utf8");
+    assert!(payload.starts_with("<svg"));
+    assert!(payload.contains("Geometry Snapshot"));
+}
+
+#[test]
 fn capture_view_op_validates_non_zero_dimensions() {
     let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
     let error = geometry_capture_view_op(

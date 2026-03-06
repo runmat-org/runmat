@@ -4,10 +4,11 @@ use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
-    analysis_results_by_run_id_op, analysis_results_op, analysis_run_linear_static_op,
-    analysis_run_linear_static_with_options, analysis_validate, AnalysisResultsQuery,
-    AnalysisRunOptions, PrecisionMode, PreconditionerMode, QualityPolicy, QualityReasonCode,
-    RunStatus,
+    analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_op,
+    analysis_run_linear_static_op, analysis_run_linear_static_with_options, analysis_run_modal_op,
+    analysis_validate, AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile,
+    AnalysisResultsQuery, AnalysisRunOptions, PrecisionMode, PreconditionerMode, QualityPolicy,
+    QualityReasonCode, RunStatus,
 };
 use runmat_runtime::geometry::{
     geometry_capture_view_op, geometry_inspect_op, geometry_list_regions_op, geometry_load_op,
@@ -95,6 +96,20 @@ fn geometry_operation_contracts_are_v1_and_versioned() {
     assert_eq!(capture_view.op_version, "geometry.capture_view/v1");
     assert_eq!(capture_view.error_code, "GEOMETRY_CAPTURE_UNSUPPORTED");
 
+    let svg_capture = geometry_capture_view_op(
+        &load.data,
+        GeometryCaptureViewSpec {
+            format: "svg".to_string(),
+            width: 800,
+            height: 600,
+        },
+        OperationContext::new(Some("trace-contract-1e-svg".to_string()), None),
+    )
+    .expect("svg capture should succeed via default adapter");
+    assert_eq!(svg_capture.operation, "geometry.capture_view");
+    assert_eq!(svg_capture.op_version, "geometry.capture_view/v1");
+    assert_eq!(svg_capture.data.format, "svg");
+
     let invalid_capture_view = geometry_capture_view_op(
         &load.data,
         GeometryCaptureViewSpec {
@@ -131,6 +146,76 @@ fn analysis_validate_contract_is_v1_and_maps_codes() {
     assert_eq!(err.operation, "analysis.validate");
     assert_eq!(err.op_version, "analysis.validate/v1");
     assert_eq!(err.error_code, "ANALYSIS_VALIDATION_MISSING_MATERIALS");
+}
+
+#[test]
+fn analysis_create_model_contract_is_v1_and_maps_codes() {
+    let geometry = geometry_load_op(
+        "/part.stl",
+        TRIANGLE_STL.as_bytes(),
+        OperationContext::new(Some("trace-contract-create-1".to_string()), None),
+    )
+    .expect("geometry load should succeed");
+
+    let envelope = analysis_create_model_op(
+        &geometry.data,
+        AnalysisCreateModelIntentSpec {
+            model_id: "contract_generated_model".to_string(),
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+        },
+        OperationContext::new(Some("trace-contract-create-2".to_string()), None),
+    )
+    .expect("create model should succeed");
+    assert_eq!(envelope.operation, "analysis.create_model");
+    assert_eq!(envelope.op_version, "analysis.create_model/v1");
+    assert_eq!(envelope.data.model_id.0, "contract_generated_model");
+
+    let err = analysis_create_model_op(
+        &geometry.data,
+        AnalysisCreateModelIntentSpec {
+            model_id: "".to_string(),
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+        },
+        OperationContext::new(Some("trace-contract-create-3".to_string()), None),
+    )
+    .expect_err("create model should fail for empty model id");
+    assert_eq!(err.operation, "analysis.create_model");
+    assert_eq!(err.op_version, "analysis.create_model/v1");
+    assert_eq!(err.error_code, "ANALYSIS_CREATE_MODEL_INVALID_INTENT");
+
+    let modal = analysis_create_model_op(
+        &geometry.data,
+        AnalysisCreateModelIntentSpec {
+            model_id: "contract_modal_model".to_string(),
+            profile: AnalysisCreateModelProfile::ModalStructural,
+        },
+        OperationContext::new(Some("trace-contract-create-4-modal".to_string()), None),
+    )
+    .expect("modal profile should be supported");
+    assert_eq!(modal.operation, "analysis.create_model");
+    assert_eq!(modal.op_version, "analysis.create_model/v1");
+    assert_eq!(modal.data.steps[0].kind, runmat_analysis_core::AnalysisStepKind::Modal);
+
+    for profile in [
+        AnalysisCreateModelProfile::TransientStructural,
+        AnalysisCreateModelProfile::NonlinearStructural,
+    ] {
+        let unsupported_profile = analysis_create_model_op(
+            &geometry.data,
+            AnalysisCreateModelIntentSpec {
+                model_id: "contract_unsupported_model".to_string(),
+                profile,
+            },
+            OperationContext::new(Some("trace-contract-create-4".to_string()), None),
+        )
+        .expect_err("profile should be unsupported");
+        assert_eq!(unsupported_profile.operation, "analysis.create_model");
+        assert_eq!(unsupported_profile.op_version, "analysis.create_model/v1");
+        assert_eq!(
+            unsupported_profile.error_code,
+            "ANALYSIS_CREATE_MODEL_PROFILE_UNSUPPORTED"
+        );
+    }
 }
 
 #[test]
@@ -198,6 +283,64 @@ fn analysis_run_contract_is_v1_and_publishable_for_fixture() {
         envelope.data.run.displacement_field.values,
         AnalysisFieldValues::HostF64(_)
     ));
+}
+
+#[test]
+fn analysis_run_modal_contract_is_v1_and_typed() {
+    let geometry = geometry_load_op(
+        "/part.stl",
+        TRIANGLE_STL.as_bytes(),
+        OperationContext::new(Some("trace-contract-modal-1".to_string()), None),
+    )
+    .expect("geometry load should succeed");
+
+    let modal_model = analysis_create_model_op(
+        &geometry.data,
+        AnalysisCreateModelIntentSpec {
+            model_id: "contract_modal_model".to_string(),
+            profile: AnalysisCreateModelProfile::ModalStructural,
+        },
+        OperationContext::new(Some("trace-contract-modal-2".to_string()), None),
+    )
+    .expect("modal model should be created");
+
+    let modal_envelope = analysis_run_modal_op(
+        &modal_model.data,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-modal-3".to_string()), None),
+    )
+    .expect("modal run should produce placeholder envelope");
+    assert_eq!(modal_envelope.operation, "analysis.run_modal");
+    assert_eq!(modal_envelope.op_version, "analysis.run_modal/v1");
+    assert_eq!(
+        modal_envelope.data.run.solver_method,
+        "modal_placeholder_from_linear_static"
+    );
+    let modal_results = modal_envelope
+        .data
+        .modal_results
+        .as_ref()
+        .expect("modal results payload should exist");
+    assert_eq!(modal_results.eigenvalues_hz.len(), 1);
+    assert_eq!(modal_results.mode_shapes.len(), 1);
+    assert_eq!(modal_results.mode_shapes[0].field_id, "mode_shape_1");
+    assert_eq!(modal_envelope.data.run_status, RunStatus::Degraded);
+    assert!(!modal_envelope.data.publishable);
+    assert!(modal_envelope
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::ModalPlaceholder));
+
+    let invalid = analysis_run_modal_op(
+        &fixture_model(FixtureId::CantileverLinearStatic),
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-modal-4".to_string()), None),
+    )
+    .expect_err("modal run should reject models without modal step");
+    assert_eq!(invalid.operation, "analysis.run_modal");
+    assert_eq!(invalid.op_version, "analysis.run_modal/v1");
+    assert_eq!(invalid.error_code, "ANALYSIS_RUN_MODAL_INVALID_MODEL");
 }
 
 #[test]

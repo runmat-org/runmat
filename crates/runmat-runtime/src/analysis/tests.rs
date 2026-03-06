@@ -10,7 +10,10 @@ use runmat_analysis_core::{
     BoundaryCondition, BoundaryConditionKind, LoadCase, LoadKind, MaterialModel, ReferenceFrame,
 };
 use runmat_analysis_fea::ComputeBackend;
-use runmat_geometry_core::UnitSystem;
+use runmat_geometry_core::{
+    GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, SourceGeometry, SourceGeometryKind,
+    TessellationProfile, UnitSystem,
+};
 
 use super::*;
 
@@ -54,6 +57,123 @@ fn sample_model() -> AnalysisModel {
             kind: AnalysisStepKind::Static,
         }],
     }
+}
+
+fn sample_geometry_asset() -> GeometryAsset {
+    GeometryAsset {
+        geometry_id: "geo:beam".to_string(),
+        source: GeometrySource {
+            path: "/fixtures/beam.stl".to_string(),
+            sha256: "hash-beam".to_string(),
+            importer_version: "stl/v1".to_string(),
+        },
+        source_geometry: SourceGeometry {
+            kind: SourceGeometryKind::Mesh,
+            assembly: None,
+            material_evidence: Vec::new(),
+        },
+        tessellation_profile: TessellationProfile::default(),
+        units: UnitSystem::Meter,
+        revision: 2,
+        meshes: vec![MeshDescriptor {
+            mesh_id: "mesh_1".to_string(),
+            kind: MeshKind::Surface,
+            vertex_count: 3,
+            element_count: 1,
+        }],
+        regions: Vec::new(),
+        diagnostics: Vec::new(),
+    }
+}
+
+#[test]
+fn analysis_create_model_returns_v1_envelope() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let envelope = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "model_from_geo".to_string(),
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+        },
+        OperationContext::new(Some("trace-create-1".to_string()), None),
+    )
+    .expect("create model should pass");
+
+    assert_eq!(envelope.operation, "analysis.create_model");
+    assert_eq!(envelope.op_version, "analysis.create_model/v1");
+    assert_eq!(envelope.data.model_id.0, "model_from_geo");
+    assert_eq!(envelope.data.geometry_id, "geo:beam");
+    assert_eq!(envelope.data.geometry_revision, 2);
+    assert_eq!(envelope.data.units, UnitSystem::Meter);
+    assert_eq!(envelope.data.frame, ReferenceFrame::Global);
+    assert!(!envelope.data.materials.is_empty());
+    assert!(!envelope.data.boundary_conditions.is_empty());
+    assert!(!envelope.data.loads.is_empty());
+    assert!(!envelope.data.steps.is_empty());
+    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Static);
+}
+
+#[test]
+fn analysis_create_model_maps_invalid_intent_error() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let err = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "   ".to_string(),
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect_err("create model should fail");
+
+    assert_eq!(err.error_code, "ANALYSIS_CREATE_MODEL_INVALID_INTENT");
+    assert_eq!(err.operation, "analysis.create_model");
+    assert_eq!(err.op_version, "analysis.create_model/v1");
+}
+
+#[test]
+fn analysis_create_model_maps_unsupported_profile_error() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    for profile in [
+        AnalysisCreateModelProfile::TransientStructural,
+        AnalysisCreateModelProfile::NonlinearStructural,
+    ] {
+        let err = analysis_create_model_op(
+            &geometry,
+            AnalysisCreateModelIntentSpec {
+                model_id: "unsupported_model".to_string(),
+                profile,
+            },
+            OperationContext::new(None, None),
+        )
+        .expect_err("profile should be unsupported");
+
+        assert_eq!(err.error_code, "ANALYSIS_CREATE_MODEL_PROFILE_UNSUPPORTED");
+        assert_eq!(err.operation, "analysis.create_model");
+        assert_eq!(err.op_version, "analysis.create_model/v1");
+    }
+}
+
+#[test]
+fn analysis_create_model_supports_modal_profile_template() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let envelope = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "modal_model".to_string(),
+            profile: AnalysisCreateModelProfile::ModalStructural,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("modal profile should be supported");
+
+    assert_eq!(envelope.data.model_id.0, "modal_model");
+    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Modal);
+    assert_eq!(envelope.data.loads[0].load_id, "load_default_modal_seed");
 }
 
 #[test]
@@ -109,6 +229,7 @@ fn analysis_run_linear_static_returns_typed_envelope() {
     assert!(!envelope.data.run.displacement_field.is_empty());
     assert_eq!(envelope.data.run_status, RunStatus::Publishable);
     assert!(envelope.data.publishable);
+    assert!(envelope.data.modal_results.is_none());
     assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
     assert!(envelope.data.provenance.deterministic_mode);
     assert_eq!(envelope.data.provenance.precision_mode, "fp64");
@@ -525,4 +646,101 @@ fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
         .iter()
         .any(|reason| reason.code == QualityReasonCode::FieldPromotionFallback));
     assert_eq!(envelope.data.provenance.quality_policy, "strict");
+}
+
+#[test]
+fn analysis_run_modal_rejects_models_without_modal_step() {
+    let _guard = analysis_test_guard();
+    let model = sample_model();
+    let err = analysis_run_modal_op(&model, ComputeBackend::Cpu, OperationContext::new(None, None))
+        .expect_err("modal run should fail for missing modal step");
+
+    assert_eq!(err.operation, "analysis.run_modal");
+    assert_eq!(err.op_version, "analysis.run_modal/v1");
+    assert_eq!(err.error_code, "ANALYSIS_RUN_MODAL_INVALID_MODEL");
+}
+
+#[test]
+fn analysis_run_modal_returns_degraded_placeholder_result() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let modal_model = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "modal_model_run".to_string(),
+            profile: AnalysisCreateModelProfile::ModalStructural,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("modal model should be created");
+
+    let envelope = analysis_run_modal_op(
+        &modal_model.data,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("modal run should produce placeholder result");
+
+    assert_eq!(envelope.operation, "analysis.run_modal");
+    assert_eq!(envelope.op_version, "analysis.run_modal/v1");
+    assert_eq!(envelope.data.run.solver_method, "modal_placeholder_from_linear_static");
+    assert_eq!(envelope.data.provenance.solver_method, "modal_placeholder_from_linear_static");
+    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
+    assert!(!envelope.data.publishable);
+    let modal = envelope
+        .data
+        .modal_results
+        .as_ref()
+        .expect("modal placeholder payload should exist");
+    assert_eq!(modal.eigenvalues_hz.len(), 1);
+    assert_eq!(modal.mode_shapes.len(), 1);
+    assert_eq!(modal.mode_shapes[0].field_id, "mode_shape_1");
+    assert!(envelope
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::ModalPlaceholder));
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_MODAL_PLACEHOLDER"));
+}
+
+#[test]
+fn analysis_results_include_modal_payload_for_modal_runs() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let modal_model = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "modal_model_results".to_string(),
+            profile: AnalysisCreateModelProfile::ModalStructural,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("modal model should be created");
+
+    let run = analysis_run_modal_op(
+        &modal_model.data,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("modal run placeholder should succeed");
+
+    let results = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("results should succeed");
+
+    let modal = results
+        .data
+        .modal_results
+        .as_ref()
+        .expect("modal payload should propagate to results");
+    assert_eq!(modal.eigenvalues_hz.len(), 1);
+    assert_eq!(modal.mode_shapes.len(), 1);
 }

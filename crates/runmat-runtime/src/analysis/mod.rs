@@ -1,14 +1,16 @@
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{
-    validate_model_against_geometry, AnalysisModel, AnalysisValidationError, ReferenceFrame,
+    validate_model_against_geometry, AnalysisModel, AnalysisModelId, AnalysisStep,
+    AnalysisStepKind, AnalysisValidationError, BoundaryCondition, BoundaryConditionKind,
+    LoadCase, LoadKind, MaterialModel, ReferenceFrame,
 };
 use runmat_analysis_fea::{
     run_linear_static_with_options, ComputeBackend, LinearStaticSolveOptions,
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
-use runmat_geometry_core::UnitSystem;
+use runmat_geometry_core::{GeometryAsset, UnitSystem};
 
 use crate::operations::{
     operation_error, OperationContext, OperationEnvelope, OperationErrorEnvelope,
@@ -20,17 +22,209 @@ mod promotion;
 pub mod storage;
 
 pub use contracts::{
-    AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunOptions,
-    AnalysisRunResult, AnalysisValidateResult, PrecisionMode, PreconditionerMode, QualityGate,
+    AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisResultsData,
+    AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunOptions, AnalysisRunResult,
+    AnalysisValidateResult, ModalResultsData, PrecisionMode, PreconditionerMode, QualityGate,
     QualityPolicy, QualityReason, QualityReasonCode, RunProvenance, RunStatus,
 };
 
+const ANALYSIS_CREATE_MODEL_OPERATION: &str = "analysis.create_model";
+const ANALYSIS_CREATE_MODEL_OP_VERSION: &str = "analysis.create_model/v1";
 const ANALYSIS_VALIDATE_OPERATION: &str = "analysis.validate";
 const ANALYSIS_VALIDATE_OP_VERSION: &str = "analysis.validate/v1";
 const ANALYSIS_RUN_OPERATION: &str = "analysis.run_linear_static";
 const ANALYSIS_RUN_OP_VERSION: &str = "analysis.run_linear_static/v1";
+const ANALYSIS_RUN_MODAL_OPERATION: &str = "analysis.run_modal";
+const ANALYSIS_RUN_MODAL_OP_VERSION: &str = "analysis.run_modal/v1";
 const ANALYSIS_RESULTS_OPERATION: &str = "analysis.results";
 const ANALYSIS_RESULTS_OP_VERSION: &str = "analysis.results/v1";
+
+pub fn analysis_create_model_op(
+    geometry: &GeometryAsset,
+    intent: AnalysisCreateModelIntentSpec,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisModel>, OperationErrorEnvelope> {
+    if intent.model_id.trim().is_empty() {
+        return Err(operation_error(
+            ANALYSIS_CREATE_MODEL_OPERATION,
+            ANALYSIS_CREATE_MODEL_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_CREATE_MODEL_INVALID_INTENT",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis model intent requires a non-empty model_id",
+            BTreeMap::from([("geometry_id".to_string(), geometry.geometry_id.clone())]),
+        ));
+    }
+
+    if geometry.meshes.is_empty() {
+        return Err(operation_error(
+            ANALYSIS_CREATE_MODEL_OPERATION,
+            ANALYSIS_CREATE_MODEL_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_CREATE_MODEL_GEOMETRY_EMPTY",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "geometry must contain at least one mesh to create an analysis model",
+            BTreeMap::from([("geometry_id".to_string(), geometry.geometry_id.clone())]),
+        ));
+    }
+
+    if geometry.units == UnitSystem::Unspecified {
+        return Err(operation_error(
+            ANALYSIS_CREATE_MODEL_OPERATION,
+            ANALYSIS_CREATE_MODEL_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_CREATE_MODEL_UNIT_UNSPECIFIED",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "geometry units must be specified before creating an analysis model",
+            BTreeMap::from([("geometry_id".to_string(), geometry.geometry_id.clone())]),
+        ));
+    }
+
+    let fixed_region_id = geometry
+        .regions
+        .first()
+        .map(|region| region.region_id.clone())
+        .unwrap_or_else(|| "region_default".to_string());
+    let load_region_id = geometry
+        .regions
+        .last()
+        .map(|region| region.region_id.clone())
+        .unwrap_or_else(|| fixed_region_id.clone());
+
+    if matches!(
+        intent.profile,
+        AnalysisCreateModelProfile::TransientStructural
+            | AnalysisCreateModelProfile::NonlinearStructural
+    ) {
+        let profile = create_model_profile_name(intent.profile);
+        return Err(operation_error(
+            ANALYSIS_CREATE_MODEL_OPERATION,
+            ANALYSIS_CREATE_MODEL_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_CREATE_MODEL_PROFILE_UNSUPPORTED",
+                error_type: OperationErrorType::Contract,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("analysis.create_model profile '{profile}' is not implemented yet"),
+            BTreeMap::from([
+                ("geometry_id".to_string(), geometry.geometry_id.clone()),
+                ("profile".to_string(), profile.to_string()),
+            ]),
+        ));
+    }
+
+    let (default_material, default_bc, default_load, default_step) = match intent.profile {
+        AnalysisCreateModelProfile::LinearStaticStructural => (
+            MaterialModel {
+                material_id: "mat_default_steel".to_string(),
+                name: "Steel (Default)".to_string(),
+                youngs_modulus_pa: 200e9,
+                poisson_ratio: 0.3,
+            },
+            BoundaryCondition {
+                bc_id: "bc_default_fixed".to_string(),
+                region_id: fixed_region_id,
+                kind: BoundaryConditionKind::Fixed,
+            },
+            LoadCase {
+                load_id: "load_default_force".to_string(),
+                region_id: load_region_id,
+                kind: LoadKind::Force {
+                    fx: 0.0,
+                    fy: -1000.0,
+                    fz: 0.0,
+                },
+            },
+            AnalysisStep {
+                step_id: "step_default_static".to_string(),
+                kind: AnalysisStepKind::Static,
+            },
+        ),
+        AnalysisCreateModelProfile::ModalStructural => (
+            MaterialModel {
+                material_id: "mat_default_steel".to_string(),
+                name: "Steel (Default)".to_string(),
+                youngs_modulus_pa: 200e9,
+                poisson_ratio: 0.3,
+            },
+            BoundaryCondition {
+                bc_id: "bc_default_fixed".to_string(),
+                region_id: fixed_region_id,
+                kind: BoundaryConditionKind::Fixed,
+            },
+            LoadCase {
+                load_id: "load_default_modal_seed".to_string(),
+                region_id: load_region_id,
+                kind: LoadKind::BodyForce {
+                    gx: 0.0,
+                    gy: 0.0,
+                    gz: 0.0,
+                },
+            },
+            AnalysisStep {
+                step_id: "step_default_modal".to_string(),
+                kind: AnalysisStepKind::Modal,
+            },
+        ),
+        AnalysisCreateModelProfile::TransientStructural => unreachable!("guarded above"),
+        AnalysisCreateModelProfile::NonlinearStructural => unreachable!("guarded above"),
+    };
+
+    let model = AnalysisModel {
+        model_id: AnalysisModelId(intent.model_id),
+        geometry_id: geometry.geometry_id.clone(),
+        geometry_revision: geometry.revision,
+        units: geometry.units,
+        frame: ReferenceFrame::Global,
+        materials: vec![default_material],
+        material_assignments: Vec::new(),
+        boundary_conditions: vec![default_bc],
+        loads: vec![default_load],
+        steps: vec![default_step],
+    };
+
+    validate_model_against_geometry(&model, geometry.units, &ReferenceFrame::Global).map_err(
+        |error| {
+            operation_error(
+                ANALYSIS_CREATE_MODEL_OPERATION,
+                ANALYSIS_CREATE_MODEL_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_CREATE_MODEL_INVALID",
+                    error_type: OperationErrorType::Validation,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("created analysis model failed validation: {error:?}"),
+                BTreeMap::from([
+                    ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                    ("geometry_id".to_string(), geometry.geometry_id.clone()),
+                ]),
+            )
+        },
+    )?;
+
+    Ok(OperationEnvelope::new(
+        ANALYSIS_CREATE_MODEL_OPERATION,
+        ANALYSIS_CREATE_MODEL_OP_VERSION,
+        &context,
+        model,
+    ))
+}
 
 pub fn analysis_validate(
     model: &AnalysisModel,
@@ -55,6 +249,73 @@ pub fn analysis_run_linear_static_op(
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     analysis_run_linear_static_with_options(model, backend, AnalysisRunOptions::default(), context)
+}
+
+pub fn analysis_run_modal_op(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let has_modal_step = model
+        .steps
+        .iter()
+        .any(|step| step.kind == AnalysisStepKind::Modal);
+    if !has_modal_step {
+        return Err(operation_error(
+            ANALYSIS_RUN_MODAL_OPERATION,
+            ANALYSIS_RUN_MODAL_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_MODAL_INVALID_MODEL",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis model must include at least one modal step for analysis.run_modal",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("geometry_id".to_string(), model.geometry_id.clone()),
+            ]),
+        ));
+    }
+
+    let mut envelope = match analysis_run_linear_static_with_options(
+        model,
+        backend,
+        AnalysisRunOptions::default(),
+        context.clone(),
+    ) {
+        Ok(envelope) => envelope,
+        Err(mut error) => {
+            error.operation = ANALYSIS_RUN_MODAL_OPERATION.to_string();
+            error.op_version = ANALYSIS_RUN_MODAL_OP_VERSION.to_string();
+            return Err(error);
+        }
+    };
+
+    envelope.operation = ANALYSIS_RUN_MODAL_OPERATION.to_string();
+    envelope.op_version = ANALYSIS_RUN_MODAL_OP_VERSION.to_string();
+    envelope.data.run.solver_method = "modal_placeholder_from_linear_static".to_string();
+    envelope.data.provenance.solver_method = "modal_placeholder_from_linear_static".to_string();
+    envelope.data.run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
+        code: "FEA_MODAL_PLACEHOLDER".to_string(),
+        severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning,
+        message: "analysis.run_modal currently uses placeholder modal extraction from linear-static solve path".to_string(),
+    });
+    let mut mode_shape = envelope.data.run.displacement_field.clone();
+    mode_shape.field_id = "mode_shape_1".to_string();
+    envelope.data.modal_results = Some(ModalResultsData {
+        eigenvalues_hz: vec![1.0],
+        mode_shapes: vec![mode_shape],
+    });
+    envelope.data.quality_reasons.push(QualityReason {
+        code: QualityReasonCode::ModalPlaceholder,
+        detail: "modal run path currently uses linear-static placeholder backend".to_string(),
+    });
+    envelope.data.publishable = false;
+    envelope.data.run_status = RunStatus::Degraded;
+
+    Ok(envelope)
 }
 
 pub fn analysis_run_linear_static_with_options(
@@ -207,6 +468,7 @@ pub fn analysis_run_linear_static_with_options(
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
+        modal_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -301,6 +563,7 @@ pub fn analysis_results_op(
 
     let data = AnalysisResultsData {
         fields,
+        modal_results: run_result.modal_results.clone(),
         diagnostics: if query.include_diagnostics {
             Some(run_result.run.diagnostics.clone())
         } else {
@@ -359,6 +622,15 @@ pub fn analysis_results_by_run_id_op(
     };
 
     analysis_results_op(&run_result, query, context)
+}
+
+fn create_model_profile_name(profile: AnalysisCreateModelProfile) -> &'static str {
+    match profile {
+        AnalysisCreateModelProfile::LinearStaticStructural => "linear_static_structural",
+        AnalysisCreateModelProfile::ModalStructural => "modal_structural",
+        AnalysisCreateModelProfile::TransientStructural => "transient_structural",
+        AnalysisCreateModelProfile::NonlinearStructural => "nonlinear_structural",
+    }
 }
 
 fn map_validate_error(
