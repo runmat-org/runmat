@@ -286,7 +286,7 @@ For analysis solve responses, `data` must include:
 
 - tier gates: `model_validity`, `solver_convergence`, `result_quality`
 - publication decision: `run_status` and `publishable`
-- provenance core: `backend`, `solver_backend`, `precision_mode`, `deterministic_mode`, `solver_method`, `preconditioner`, `fallback_events`
+- provenance core: `backend`, `solver_backend`, `solver_host_sync_count`, `precision_mode`, `deterministic_mode`, `solver_method`, `preconditioner`, `fallback_events`
 
 For result retrieval (`analysis.results/v1`), query/response semantics are:
 
@@ -971,6 +971,7 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-06: Added solver host-sync accounting (`solver_host_sync_count`) into solve/runtime provenance and reduced duplicate scalar syncs in runtime-tensor PCG by reusing residual reductions; this makes GPU residency progress measurable in contracts/harness artifacts.
 - 2026-03-06: Reduced host round-trips in runtime-tensor PCG by adding device-side operator application composition (`apply_k_device`) using provider gather/elementwise/reduction primitives, while retaining guarded fallback to host operator application when provider capabilities are missing.
 - 2026-03-06: Added initial runtime-tensor PCG solver path (`solve/runtime_tensor_solver.rs`) that keeps iterative vector algebra on provider-backed tensors with limited host interaction for operator application/scalars, and wired backend dispatch to prefer runtime-tensor solve when available while preserving guarded per-op fallback behavior.
 - 2026-03-06: Added initial `runtime_tensor` linear-algebra backend implementation in FEA solve backend layer (provider-backed vector ops via `runmat-accelerate-api` with guarded CPU-reference fallback per operation), and updated runtime GPU solve mapping to request runtime-tensor backend through the new backend-kind interface.

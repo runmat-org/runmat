@@ -133,6 +133,7 @@ pub fn analysis_run_linear_static_with_options(
         QualityGate::Fail
     };
     let solver_backend = run.solver_backend.clone();
+    let solver_host_sync_count = run.solver_host_sync_count;
     let solver_method = run.solver_method.clone();
     let selected_preconditioner = run.preconditioner.clone();
 
@@ -157,6 +158,7 @@ pub fn analysis_run_linear_static_with_options(
         provenance: RunProvenance {
             backend,
             solver_backend,
+            solver_host_sync_count,
             precision_mode: contracts::format_precision_mode(options.precision_mode),
             deterministic_mode: options.deterministic_mode,
             solver_method,

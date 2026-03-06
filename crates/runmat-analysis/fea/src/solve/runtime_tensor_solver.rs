@@ -117,7 +117,8 @@ pub fn solve_linear_system_runtime_tensor(
         })
         .ok()?;
 
-    let mut rz_old = dot_handle(provider, &r, &z)?;
+    let mut host_sync_count: u32 = 0;
+    let mut rz_old = dot_handle(provider, &r, &z, &mut host_sync_count)?;
     let b_norm = summary
         .operator
         .rhs
@@ -130,6 +131,7 @@ pub fn solve_linear_system_runtime_tensor(
     let max_iters = 64;
     let mut converged = false;
     let mut iterations = 0u32;
+    let mut last_rr: Option<f64> = None;
 
     for _ in 0..max_iters {
         let ap = match apply_k_device(
@@ -157,7 +159,7 @@ pub fn solve_linear_system_runtime_tensor(
             }
         };
 
-        let denom = dot_handle(provider, &p, &ap)?;
+        let denom = dot_handle(provider, &p, &ap, &mut host_sync_count)?;
         if denom.abs() <= 1.0e-18 {
             let _ = provider.free(&ap);
             break;
@@ -178,7 +180,8 @@ pub fn solve_linear_system_runtime_tensor(
         let _ = provider.free(&ap);
         r = new_r;
 
-        let rr = dot_handle(provider, &r, &r)?;
+        let rr = dot_handle(provider, &r, &r, &mut host_sync_count)?;
+        last_rr = Some(rr);
         let residual_norm = rr.sqrt();
         iterations += 1;
         if residual_norm / b_norm <= tol {
@@ -187,7 +190,7 @@ pub fn solve_linear_system_runtime_tensor(
         }
 
         let new_z = block_on(provider.elem_mul(&r, &inv)).ok()?;
-        let rz_new = dot_handle(provider, &r, &new_z)?;
+        let rz_new = dot_handle(provider, &r, &new_z, &mut host_sync_count)?;
         if rz_old.abs() <= 1.0e-18 {
             let _ = provider.free(&z);
             z = new_z;
@@ -206,7 +209,11 @@ pub fn solve_linear_system_runtime_tensor(
     }
 
     let x_host = block_on(provider.download(&x)).ok()?;
-    let residual_norm = dot_handle(provider, &r, &r)?.sqrt();
+    let residual_norm = if let Some(rr) = last_rr {
+        rr.sqrt()
+    } else {
+        dot_handle(provider, &r, &r, &mut host_sync_count)?.sqrt()
+    };
     let mut diagnostics = vec![FeaDiagnostic {
         code: "FEA_SOLVER_METHOD".to_string(),
         severity: FeaDiagnosticSeverity::Info,
@@ -238,6 +245,7 @@ pub fn solve_linear_system_runtime_tensor(
         iterations,
         residual_norm,
         converged,
+        host_sync_count,
         solution: x_host.data,
         solver_method: "matrix_free_pcg".to_string(),
         preconditioner: "jacobi".to_string(),
@@ -307,6 +315,7 @@ fn dot_handle(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     a: &GpuTensorHandle,
     b: &GpuTensorHandle,
+    host_sync_count: &mut u32,
 ) -> Option<f64> {
     let mul = block_on(provider.elem_mul(a, b)).ok()?;
     let sum = block_on(provider.reduce_sum(&mul)).ok()?;
@@ -316,6 +325,7 @@ fn dot_handle(
             .ok()
             .and_then(|host| host.data.first().copied()),
     };
+    *host_sync_count = host_sync_count.saturating_add(1);
     let _ = provider.free(&sum);
     let _ = provider.free(&mul);
     out

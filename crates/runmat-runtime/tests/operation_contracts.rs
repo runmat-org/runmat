@@ -330,6 +330,8 @@ fn analysis_run_backend_selection_is_recorded_in_provenance() {
 
     assert_eq!(cpu.data.provenance.backend, ComputeBackend::Cpu);
     assert_eq!(gpu.data.provenance.backend, ComputeBackend::Gpu);
+    assert_eq!(cpu.data.provenance.solver_host_sync_count, 0);
+    assert_eq!(gpu.data.provenance.solver_backend, "runtime_tensor");
     assert_eq!(cpu.data.run_status, RunStatus::Publishable);
     assert_eq!(gpu.data.run_status, RunStatus::Publishable);
 }

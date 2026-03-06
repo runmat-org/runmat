@@ -62,6 +62,7 @@ pub enum RunStatus {
 pub struct RunProvenance {
     pub backend: ComputeBackend,
     pub solver_backend: String,
+    pub solver_host_sync_count: u32,
     pub precision_mode: String,
     pub deterministic_mode: bool,
     pub solver_method: String,

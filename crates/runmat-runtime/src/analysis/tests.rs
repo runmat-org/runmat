@@ -112,6 +112,7 @@ fn analysis_run_linear_static_returns_typed_envelope() {
     assert_eq!(envelope.data.provenance.precision_mode, "fp64");
     assert_eq!(envelope.data.provenance.solver_method, "matrix_free_pcg");
     assert_eq!(envelope.data.provenance.preconditioner, "jacobi");
+    assert_eq!(envelope.data.provenance.solver_host_sync_count, 0);
 }
 
 #[test]
@@ -192,6 +193,7 @@ fn gpu_run_with_provider_emits_device_refs() {
             .expect("run should pass");
 
     assert!(envelope.data.provenance.fallback_events.is_empty());
+    assert_eq!(envelope.data.provenance.solver_backend, "runtime_tensor");
     assert!(matches!(
         envelope.data.run.displacement_field.values,
         AnalysisFieldValues::DeviceRef(_)
