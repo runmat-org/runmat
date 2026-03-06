@@ -5631,6 +5631,14 @@ name = "runmat-gc-api"
 version = "0.2.8"
 
 [[package]]
+name = "runmat-geometry-core"
+version = "0.2.8"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "runmat-hir"
 version = "0.2.8"
 dependencies = [
