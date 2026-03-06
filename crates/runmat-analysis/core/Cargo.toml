@@ -1,0 +1,14 @@
+[package]
+name = "runmat-analysis-core"
+version = "0.2.8"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../../LICENSE.md"
+description = "Solver-agnostic analysis model and validation for RunMat"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+runmat-geometry-core = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }

@@ -23,6 +23,11 @@ runmat-accelerate-api = { workspace = true, features = ["wgpu"] }
 runmat-gc = { workspace = true }
 runmat-gc-api = { workspace = true }
 runmat-filesystem = { workspace = true }
+runmat-geometry-core = { workspace = true }
+runmat-geometry-io = { workspace = true }
+runmat-geometry-ops = { workspace = true }
+runmat-analysis-core = { workspace = true }
+runmat-analysis-fea = { workspace = true }
 runmat-time = { workspace = true }
 runmat-thread-local = { workspace = true }
 serde = { workspace = true, features = ["derive"] }

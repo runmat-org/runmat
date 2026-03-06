@@ -241,6 +241,41 @@ Initial operation set:
 - `analysis.run(model_handle, run_spec)`
 - `analysis.results(run_id, field_query)`
 
+### Usage Modes (No Ambiguity)
+
+The same contracts are intended to be consumed in four equivalent ways:
+
+1. Desktop UI flow (interactive):
+   - open file -> `geometry.inspect` -> `geometry.load`
+   - author/adjust model -> `analysis.validate`
+   - run solve -> `analysis.run_linear_static`
+   - inspect outputs -> `analysis.results`
+2. Scripted runtime flow (batch/non-UI):
+   - call the same operations from runtime/harness code with explicit `trace_id` and `request_id`.
+3. Tool integration flow (agent/automation):
+   - compose operation calls as explicit steps; consume typed envelopes and typed errors only.
+4. Remote execution flow (server):
+   - submit operation requests over API; preserve `op_version`, `error_code`, and trace fields end-to-end.
+
+No consumer may reinterpret geometry or solver semantics locally; all semantics come from operation contracts.
+
+### Minimal v1 User Flow
+
+1. Import a part/assembly (`geometry.load`) from STL first, STEP next.
+2. Build an analysis model from geometry regions/material evidence.
+3. Validate model (`analysis.validate`) against units/frame and required constructs.
+4. Run linear static solve (`analysis.run_linear_static`) with explicit backend preference.
+5. Consume fields/diagnostics and gate publishability on validity + convergence + quality tiers.
+
+### Runtime Envelope Contract (v1)
+
+Each operation returns either:
+
+- success envelope: `{ operation, op_version, trace_id, request_id, data }`
+- error envelope: `{ error_code, error_type, message, operation, op_version, retryable, severity, context, trace_id, request_id, timestamp }`
+
+`error_code` is stable API. `message` is human-readable only.
+
 ## Contract Versioning and Compatibility
 
 - Every operation request/response must carry a contract version (`op_version`).
@@ -893,5 +928,8 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-06: Runtime operation envelopes added for geometry and analysis. Introduced typed `OperationEnvelope`/`OperationErrorEnvelope`, implemented `analysis.validate/v1` and `analysis.run_linear_static/v1` runtime ops, upgraded geometry ops to `geometry.inspect/load/compute_stats` envelopes, and aligned machine error families (`GEOMETRY_*`, `ANALYSIS_*`, `SOLVER_*`, `CAPACITY_*`) with tests.
+- 2026-03-06: Track B started. Added `runmat-analysis-core` (`problem/*` + `validate`) and `runmat-analysis-fea` (`assembly`, `solve/linear`, `post/fields`, `diagnostics`) with workspace wiring and scaffold tests for validation failures, unit/frame mismatch rejection, canonical cantilever run, convergence diagnostic emission, and CPU/GPU parity behavior.
+- 2026-03-06: Track A scaffolding validated end-to-end. Fixed `runmat-geometry-io` compile regressions (`import_stl` module path and test `ImportResult` import), then passed `cargo test -p runmat-geometry-io -p runmat-geometry-ops` and runtime geometry smoke tests via `cargo test -p runmat-runtime geometry::tests::`.
 - 2026-03-06: Track A started. Added new crate `runmat-geometry-core` at `crates/runmat-geometry/core`, wired workspace membership/dependency, scaffolded canonical domain modules (`model`, `selection`, `diagnostics`), and added initial invariant tests (identity stability within revision, JSON round-trip, unit metadata validation).
 - 2026-03-05: Architecture finalized for geometry + analysis stack; docs now include typed error model, invariants, implementation manifest, CAD/STEP prioritization, and crate layout under `crates/runmat-geometry/*` and `crates/runmat-analysis/*`.

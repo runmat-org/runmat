@@ -5514,6 +5514,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-analysis-core"
+version = "0.2.8"
+dependencies = [
+ "runmat-geometry-core",
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "runmat-analysis-fea"
+version = "0.2.8"
+dependencies = [
+ "runmat-analysis-core",
+ "runmat-geometry-core",
+ "serde",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "runmat-async"
 version = "0.2.8"
 dependencies = [
@@ -5636,6 +5655,26 @@ version = "0.2.8"
 dependencies = [
  "serde",
  "serde_json",
+]
+
+[[package]]
+name = "runmat-geometry-io"
+version = "0.2.8"
+dependencies = [
+ "anyhow",
+ "runmat-geometry-core",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "runmat-geometry-ops"
+version = "0.2.8"
+dependencies = [
+ "runmat-geometry-core",
+ "serde",
 ]
 
 [[package]]
@@ -5856,11 +5895,16 @@ dependencies = [
  "reqwest 0.12.23",
  "runmat-accelerate",
  "runmat-accelerate-api",
+ "runmat-analysis-core",
+ "runmat-analysis-fea",
  "runmat-async",
  "runmat-builtins",
  "runmat-filesystem",
  "runmat-gc",
  "runmat-gc-api",
+ "runmat-geometry-core",
+ "runmat-geometry-io",
+ "runmat-geometry-ops",
  "runmat-hir",
  "runmat-macros",
  "runmat-plot",

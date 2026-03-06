@@ -16,6 +16,9 @@ use runmat_builtins::Value;
 use runmat_gc_api::GcPtr;
 
 pub mod dispatcher;
+pub mod analysis;
+pub mod geometry;
+pub mod operations;
 
 pub mod callsite;
 pub mod console;
