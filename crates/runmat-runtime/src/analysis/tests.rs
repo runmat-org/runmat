@@ -371,6 +371,8 @@ fn analysis_results_returns_filtered_fields_and_metadata() {
         AnalysisResultsQuery {
             include_fields: vec!["displacement".to_string()],
             include_diagnostics: false,
+            include_modal_results: true,
+            mode_indices: Vec::new(),
         },
         OperationContext::new(Some("trace-results-2".to_string()), None),
     )
@@ -400,6 +402,8 @@ fn analysis_results_unknown_field_maps_typed_error() {
         AnalysisResultsQuery {
             include_fields: vec!["strain_energy".to_string()],
             include_diagnostics: true,
+            include_modal_results: true,
+            mode_indices: Vec::new(),
         },
         OperationContext::new(Some("trace-results-4".to_string()), None),
     )
@@ -743,4 +747,76 @@ fn analysis_results_include_modal_payload_for_modal_runs() {
         .expect("modal payload should propagate to results");
     assert_eq!(modal.eigenvalues_hz.len(), 1);
     assert_eq!(modal.mode_shapes.len(), 1);
+}
+
+#[test]
+fn analysis_results_query_can_exclude_modal_payload() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let modal_model = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "modal_model_results_filter".to_string(),
+            profile: AnalysisCreateModelProfile::ModalStructural,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("modal model should be created");
+    let run = analysis_run_modal_op(
+        &modal_model.data,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("modal run placeholder should succeed");
+
+    let results = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery {
+            include_fields: Vec::new(),
+            include_diagnostics: true,
+            include_modal_results: false,
+            mode_indices: Vec::new(),
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("results should succeed");
+
+    assert!(results.data.modal_results.is_none());
+}
+
+#[test]
+fn analysis_results_query_rejects_unknown_modal_mode_index() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let modal_model = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "modal_model_results_index".to_string(),
+            profile: AnalysisCreateModelProfile::ModalStructural,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("modal model should be created");
+    let run = analysis_run_modal_op(
+        &modal_model.data,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("modal run placeholder should succeed");
+
+    let err = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery {
+            include_fields: Vec::new(),
+            include_diagnostics: true,
+            include_modal_results: true,
+            mode_indices: vec![10],
+        },
+        OperationContext::new(None, None),
+    )
+    .expect_err("results should fail for unknown mode index");
+
+    assert_eq!(err.error_code, "ANALYSIS_RESULTS_MODE_NOT_FOUND");
+    assert_eq!(err.operation, "analysis.results");
+    assert_eq!(err.op_version, "analysis.results/v1");
 }

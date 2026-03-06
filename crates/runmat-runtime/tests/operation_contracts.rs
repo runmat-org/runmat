@@ -358,6 +358,8 @@ fn analysis_results_contract_is_v1_and_filterable() {
         AnalysisResultsQuery {
             include_fields: vec!["von_mises".to_string()],
             include_diagnostics: false,
+            include_modal_results: true,
+            mode_indices: Vec::new(),
         },
         OperationContext::new(Some("trace-contract-3b-results".to_string()), None),
     )
@@ -385,6 +387,8 @@ fn analysis_results_unknown_field_maps_typed_error_contract() {
         AnalysisResultsQuery {
             include_fields: vec!["nonexistent".to_string()],
             include_diagnostics: true,
+            include_modal_results: true,
+            mode_indices: Vec::new(),
         },
         OperationContext::new(Some("trace-contract-3c-results".to_string()), None),
     )
@@ -393,6 +397,59 @@ fn analysis_results_unknown_field_maps_typed_error_contract() {
     assert_eq!(err.operation, "analysis.results");
     assert_eq!(err.op_version, "analysis.results/v1");
     assert_eq!(err.error_code, "ANALYSIS_RESULTS_FIELD_NOT_FOUND");
+}
+
+#[test]
+fn analysis_results_modal_query_controls_are_typed() {
+    let geometry = geometry_load_op(
+        "/part.stl",
+        TRIANGLE_STL.as_bytes(),
+        OperationContext::new(Some("trace-contract-modal-results-1".to_string()), None),
+    )
+    .expect("geometry load should succeed");
+    let modal_model = analysis_create_model_op(
+        &geometry.data,
+        AnalysisCreateModelIntentSpec {
+            model_id: "contract_modal_results_model".to_string(),
+            profile: AnalysisCreateModelProfile::ModalStructural,
+        },
+        OperationContext::new(Some("trace-contract-modal-results-2".to_string()), None),
+    )
+    .expect("modal model should be created");
+    let modal_run = analysis_run_modal_op(
+        &modal_model.data,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-modal-results-3".to_string()), None),
+    )
+    .expect("modal run placeholder should succeed");
+
+    let excluded = analysis_results_op(
+        &modal_run.data,
+        AnalysisResultsQuery {
+            include_fields: Vec::new(),
+            include_diagnostics: true,
+            include_modal_results: false,
+            mode_indices: Vec::new(),
+        },
+        OperationContext::new(Some("trace-contract-modal-results-4".to_string()), None),
+    )
+    .expect("results should succeed");
+    assert!(excluded.data.modal_results.is_none());
+
+    let invalid_mode = analysis_results_op(
+        &modal_run.data,
+        AnalysisResultsQuery {
+            include_fields: Vec::new(),
+            include_diagnostics: true,
+            include_modal_results: true,
+            mode_indices: vec![99],
+        },
+        OperationContext::new(Some("trace-contract-modal-results-5".to_string()), None),
+    )
+    .expect_err("unknown mode index should fail");
+    assert_eq!(invalid_mode.error_code, "ANALYSIS_RESULTS_MODE_NOT_FOUND");
+    assert_eq!(invalid_mode.operation, "analysis.results");
+    assert_eq!(invalid_mode.op_version, "analysis.results/v1");
 }
 
 #[test]

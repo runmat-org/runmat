@@ -451,6 +451,8 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                         AnalysisResultsQuery {
                             include_fields: vec!["displacement".to_string()],
                             include_diagnostics: false,
+                            include_modal_results: false,
+                            mode_indices: Vec::new(),
                         },
                         OperationContext::new(Some(format!("trace-results-gpu-{}", spec.id)), None),
                     );
@@ -498,6 +500,8 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                             AnalysisResultsQuery {
                                 include_fields: vec!["displacement".to_string()],
                                 include_diagnostics: false,
+                                include_modal_results: false,
+                                mode_indices: Vec::new(),
                             },
                             OperationContext::new(
                                 Some(format!("trace-results-gpu-by-id-{}", spec.id)),
@@ -567,6 +571,8 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                             AnalysisResultsQuery {
                                 include_fields: vec!["displacement".to_string()],
                                 include_diagnostics: false,
+                                include_modal_results: false,
+                                mode_indices: Vec::new(),
                             },
                             OperationContext::new(
                                 Some(format!("trace-results-cpu-{}", spec.id)),

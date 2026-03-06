@@ -139,6 +139,8 @@ pub struct AnalysisArtifactRecord {
 pub struct AnalysisResultsQuery {
     pub include_fields: Vec<String>,
     pub include_diagnostics: bool,
+    pub include_modal_results: bool,
+    pub mode_indices: Vec<usize>,
 }
 
 impl Default for AnalysisResultsQuery {
@@ -146,6 +148,8 @@ impl Default for AnalysisResultsQuery {
         Self {
             include_fields: Vec::new(),
             include_diagnostics: true,
+            include_modal_results: true,
+            mode_indices: Vec::new(),
         }
     }
 }

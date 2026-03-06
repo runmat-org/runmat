@@ -561,9 +561,74 @@ pub fn analysis_results_op(
         total_elements: fields.iter().map(|field| field.element_count()).sum(),
     };
 
+    let modal_results = if query.include_modal_results {
+        if let Some(modal) = run_result.modal_results.as_ref() {
+            if query.mode_indices.is_empty() {
+                Some(modal.clone())
+            } else {
+                let mut eigenvalues_hz = Vec::with_capacity(query.mode_indices.len());
+                let mut mode_shapes = Vec::with_capacity(query.mode_indices.len());
+                for &index in &query.mode_indices {
+                    let eigenvalue = modal.eigenvalues_hz.get(index).copied().ok_or_else(|| {
+                        operation_error(
+                            ANALYSIS_RESULTS_OPERATION,
+                            ANALYSIS_RESULTS_OP_VERSION,
+                            &context,
+                            OperationErrorSpec {
+                                error_code: "ANALYSIS_RESULTS_MODE_NOT_FOUND",
+                                error_type: OperationErrorType::Input,
+                                retryable: false,
+                                severity: OperationErrorSeverity::Error,
+                            },
+                            format!("requested modal mode index '{index}' was not produced by run"),
+                            BTreeMap::from([
+                                ("requested_mode_index".to_string(), index.to_string()),
+                                (
+                                    "available_mode_count".to_string(),
+                                    modal.eigenvalues_hz.len().to_string(),
+                                ),
+                            ]),
+                        )
+                    })?;
+                    let mode_shape = modal.mode_shapes.get(index).cloned().ok_or_else(|| {
+                        operation_error(
+                            ANALYSIS_RESULTS_OPERATION,
+                            ANALYSIS_RESULTS_OP_VERSION,
+                            &context,
+                            OperationErrorSpec {
+                                error_code: "ANALYSIS_RESULTS_MODE_NOT_FOUND",
+                                error_type: OperationErrorType::Input,
+                                retryable: false,
+                                severity: OperationErrorSeverity::Error,
+                            },
+                            format!("requested modal mode index '{index}' is missing mode shape data"),
+                            BTreeMap::from([
+                                ("requested_mode_index".to_string(), index.to_string()),
+                                (
+                                    "available_shape_count".to_string(),
+                                    modal.mode_shapes.len().to_string(),
+                                ),
+                            ]),
+                        )
+                    })?;
+                    eigenvalues_hz.push(eigenvalue);
+                    mode_shapes.push(mode_shape);
+                }
+                Some(ModalResultsData {
+                    eigenvalues_hz,
+                    mode_shapes,
+                })
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let data = AnalysisResultsData {
         fields,
-        modal_results: run_result.modal_results.clone(),
+        modal_results,
         diagnostics: if query.include_diagnostics {
             Some(run_result.run.diagnostics.clone())
         } else {
