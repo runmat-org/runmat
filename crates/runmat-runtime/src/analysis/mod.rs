@@ -3,14 +3,15 @@ use std::collections::BTreeMap;
 use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisModel, AnalysisModelId, AnalysisStep,
     AnalysisStepKind, AnalysisValidationError, BoundaryCondition, BoundaryConditionKind,
-    LoadCase, LoadKind, MaterialModel, ReferenceFrame,
+    EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment, MaterialModel, ReferenceFrame,
 };
 use runmat_analysis_fea::{
-    run_linear_static_with_options, ComputeBackend, LinearStaticSolveOptions,
+    run_linear_static_with_options, run_modal_with_options, ComputeBackend,
+    LinearStaticSolveOptions, ModalSolveOptions,
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
-use runmat_geometry_core::{GeometryAsset, UnitSystem};
+use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 
 use crate::operations::{
     operation_error, OperationContext, OperationEnvelope, OperationErrorEnvelope,
@@ -93,15 +94,11 @@ pub fn analysis_create_model_op(
         ));
     }
 
-    let fixed_region_id = geometry
-        .regions
-        .first()
-        .map(|region| region.region_id.clone())
+    let fixed_region_id = select_fixed_region_id(geometry)
+        .or_else(|| geometry.regions.first().map(|region| region.region_id.clone()))
         .unwrap_or_else(|| "region_default".to_string());
-    let load_region_id = geometry
-        .regions
-        .last()
-        .map(|region| region.region_id.clone())
+    let load_region_id = select_load_region_id(geometry)
+        .or_else(|| geometry.regions.last().map(|region| region.region_id.clone()))
         .unwrap_or_else(|| fixed_region_id.clone());
 
     if matches!(
@@ -128,14 +125,11 @@ pub fn analysis_create_model_op(
         ));
     }
 
-    let (default_material, default_bc, default_load, default_step) = match intent.profile {
+    let inferred_materials = infer_material_models(geometry);
+    let inferred_assignments = infer_material_assignments(geometry, &inferred_materials);
+
+    let (default_bc, default_load, default_step) = match intent.profile {
         AnalysisCreateModelProfile::LinearStaticStructural => (
-            MaterialModel {
-                material_id: "mat_default_steel".to_string(),
-                name: "Steel (Default)".to_string(),
-                youngs_modulus_pa: 200e9,
-                poisson_ratio: 0.3,
-            },
             BoundaryCondition {
                 bc_id: "bc_default_fixed".to_string(),
                 region_id: fixed_region_id,
@@ -156,12 +150,6 @@ pub fn analysis_create_model_op(
             },
         ),
         AnalysisCreateModelProfile::ModalStructural => (
-            MaterialModel {
-                material_id: "mat_default_steel".to_string(),
-                name: "Steel (Default)".to_string(),
-                youngs_modulus_pa: 200e9,
-                poisson_ratio: 0.3,
-            },
             BoundaryCondition {
                 bc_id: "bc_default_fixed".to_string(),
                 region_id: fixed_region_id,
@@ -191,8 +179,8 @@ pub fn analysis_create_model_op(
         geometry_revision: geometry.revision,
         units: geometry.units,
         frame: ReferenceFrame::Global,
-        materials: vec![default_material],
-        material_assignments: Vec::new(),
+        materials: inferred_materials,
+        material_assignments: inferred_assignments,
         boundary_conditions: vec![default_bc],
         loads: vec![default_load],
         steps: vec![default_step],
@@ -280,46 +268,136 @@ pub fn analysis_run_modal_op(
         ));
     }
 
-    let mut envelope = match analysis_run_linear_static_with_options(
-        model,
-        backend,
-        AnalysisRunOptions::default(),
-        context.clone(),
-    ) {
-        Ok(envelope) => envelope,
-        Err(mut error) => {
-            error.operation = ANALYSIS_RUN_MODAL_OPERATION.to_string();
-            error.op_version = ANALYSIS_RUN_MODAL_OP_VERSION.to_string();
-            return Err(error);
-        }
+    let modal_run = run_modal_with_options(model, backend, ModalSolveOptions::default()).map_err(
+        |err| {
+            operation_error(
+                ANALYSIS_RUN_MODAL_OPERATION,
+                ANALYSIS_RUN_MODAL_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "SOLVER_MODEL_INVALID",
+                    error_type: OperationErrorType::Validation,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                err.to_string(),
+                BTreeMap::from([
+                    ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                    ("geometry_id".to_string(), model.geometry_id.clone()),
+                ]),
+            )
+        },
+    )?;
+
+    let run = modal_run.run;
+    let fallback_events = Vec::new();
+    let solver_convergence = if run.diagnostics.iter().any(|item| {
+        item.code == "FEA_MODAL_CONVERGENCE"
+            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+    }) {
+        QualityGate::Pass
+    } else {
+        QualityGate::Warn
+    };
+    let result_quality = if modal_run.eigenvalues_hz.is_empty() || modal_run.mode_shapes.is_empty()
+    {
+        QualityGate::Fail
+    } else {
+        QualityGate::Pass
     };
 
-    envelope.operation = ANALYSIS_RUN_MODAL_OPERATION.to_string();
-    envelope.op_version = ANALYSIS_RUN_MODAL_OP_VERSION.to_string();
-    envelope.data.run.solver_method = "modal_placeholder_from_linear_static".to_string();
-    envelope.data.provenance.solver_method = "modal_placeholder_from_linear_static".to_string();
-    envelope.data.run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
-        code: "FEA_MODAL_PLACEHOLDER".to_string(),
-        severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning,
-        message: "analysis.run_modal currently uses placeholder modal extraction from linear-static solve path".to_string(),
-    });
-    let mut mode_shape = envelope.data.run.displacement_field.clone();
-    mode_shape.field_id = "mode_shape_1".to_string();
-    envelope.data.modal_results = Some(ModalResultsData {
-        modal_payload_version: "modal_results/v1".to_string(),
-        eigenvalues_hz: vec![1.0],
-        mode_shapes: vec![mode_shape],
-        mode_units: ModalFrequencyUnits::Hz,
-        frequency_basis: ModalFrequencyBasis::PlaceholderLinearStatic,
-    });
-    envelope.data.quality_reasons.push(QualityReason {
-        code: QualityReasonCode::ModalPlaceholder,
-        detail: "modal run path currently uses linear-static placeholder backend".to_string(),
-    });
-    envelope.data.publishable = false;
-    envelope.data.run_status = RunStatus::Degraded;
+    let mut quality_reasons = Vec::new();
+    if solver_convergence == QualityGate::Warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::SolverNotConverged,
+            detail: "modal solver convergence gate is warning".to_string(),
+        });
+    }
 
-    Ok(envelope)
+    let frequency_basis = if run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_MODAL_PLACEHOLDER")
+    {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ModalPlaceholder,
+            detail: "modal run path currently uses linear-static placeholder backend"
+                .to_string(),
+        });
+        ModalFrequencyBasis::PlaceholderLinearStatic
+    } else {
+        ModalFrequencyBasis::NativeEigenSolve
+    };
+
+    let publishable = solver_convergence == QualityGate::Pass
+        && result_quality == QualityGate::Pass
+        && quality_reasons.is_empty();
+    let run_status = if publishable {
+        RunStatus::Publishable
+    } else if result_quality == QualityGate::Fail {
+        RunStatus::Rejected
+    } else {
+        RunStatus::Degraded
+    };
+
+    let solver_backend = run.solver_backend.clone();
+    let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
+    let solver_host_sync_count = run.solver_host_sync_count;
+    let solver_method = run.solver_method.clone();
+    let selected_preconditioner = run.preconditioner.clone();
+
+    let result = AnalysisRunResult {
+        run_id: storage::next_run_id(),
+        run,
+        modal_results: Some(ModalResultsData {
+            modal_payload_version: "modal_results/v1".to_string(),
+            eigenvalues_hz: modal_run.eigenvalues_hz,
+            mode_shapes: modal_run.mode_shapes,
+            mode_units: ModalFrequencyUnits::Hz,
+            frequency_basis,
+        }),
+        model_validity: QualityGate::Pass,
+        solver_convergence,
+        result_quality,
+        run_status,
+        publishable,
+        quality_reasons,
+        provenance: RunProvenance {
+            backend,
+            solver_backend,
+            solver_device_apply_k_ratio,
+            solver_host_sync_count,
+            precision_mode: contracts::format_precision_mode(PrecisionMode::Fp64),
+            deterministic_mode: false,
+            solver_method,
+            preconditioner: selected_preconditioner,
+            quality_policy: contracts::format_quality_policy(QualityPolicy::Balanced),
+            fallback_events,
+        },
+    };
+
+    storage::persist_run_result(&result).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_MODAL_OPERATION,
+            ANALYSIS_RUN_MODAL_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist analysis run artifact: {err}"),
+            BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
+        )
+    })?;
+
+    Ok(OperationEnvelope::new(
+        ANALYSIS_RUN_MODAL_OPERATION,
+        ANALYSIS_RUN_MODAL_OP_VERSION,
+        &context,
+        result,
+    ))
 }
 
 pub fn analysis_run_linear_static_with_options(
@@ -722,6 +800,158 @@ pub fn analysis_results_by_run_id_op(
     };
 
     analysis_results_op(&run_result, query, context)
+}
+
+fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
+    let mut materials = Vec::new();
+    for evidence in &geometry.source_geometry.material_evidence {
+        let value = evidence.value.to_ascii_lowercase();
+        let (material_id, name, youngs_modulus_pa, poisson_ratio) = if value.contains("aluminum") {
+            ("mat_aluminum", "Aluminum", 69e9, 0.33)
+        } else if value.contains("steel") {
+            ("mat_steel", "Steel", 200e9, 0.30)
+        } else if value.contains("polymer") || value.contains("plastic") {
+            ("mat_polymer", "Polymer", 3.2e9, 0.37)
+        } else {
+            ("mat_inferred", "Inferred Material", 100e9, 0.32)
+        };
+
+        if materials.iter().any(|m: &MaterialModel| m.material_id == material_id) {
+            continue;
+        }
+        materials.push(MaterialModel {
+            material_id: material_id.to_string(),
+            name: name.to_string(),
+            youngs_modulus_pa,
+            poisson_ratio,
+        });
+    }
+
+    if materials.is_empty() {
+        materials.push(MaterialModel {
+            material_id: "mat_default_steel".to_string(),
+            name: "Steel (Default)".to_string(),
+            youngs_modulus_pa: 200e9,
+            poisson_ratio: 0.3,
+        });
+    }
+
+    materials
+}
+
+fn select_fixed_region_id(geometry: &GeometryAsset) -> Option<String> {
+    geometry
+        .regions
+        .iter()
+        .find(|region| {
+            let key = format!(
+                "{} {}",
+                region.name.to_ascii_lowercase(),
+                region
+                    .tag
+                    .as_deref()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+            );
+            key.contains("root")
+                || key.contains("base")
+                || key.contains("fixed")
+                || key.contains("mount")
+        })
+        .map(|region| region.region_id.clone())
+}
+
+fn select_load_region_id(geometry: &GeometryAsset) -> Option<String> {
+    geometry
+        .regions
+        .iter()
+        .find(|region| {
+            let key = format!(
+                "{} {}",
+                region.name.to_ascii_lowercase(),
+                region
+                    .tag
+                    .as_deref()
+                    .unwrap_or_default()
+                    .to_ascii_lowercase()
+            );
+            key.contains("tip")
+                || key.contains("load")
+                || key.contains("force")
+                || key.contains("free")
+        })
+        .map(|region| region.region_id.clone())
+}
+
+fn infer_material_assignments(
+    geometry: &GeometryAsset,
+    materials: &[MaterialModel],
+) -> Vec<MaterialAssignment> {
+    let default_material = materials
+        .first()
+        .map(|m| m.material_id.clone())
+        .unwrap_or_else(|| "mat_default_steel".to_string());
+    let mut assignments = Vec::new();
+
+    for region in &geometry.regions {
+        let key = format!(
+            "{} {}",
+            region.name.to_ascii_lowercase(),
+            region
+                .tag
+                .as_deref()
+                .unwrap_or_default()
+                .to_ascii_lowercase()
+        );
+        let assigned_material = if key.contains("aluminum") {
+            materials
+                .iter()
+                .find(|m| m.material_id.contains("aluminum"))
+                .map(|m| m.material_id.clone())
+                .unwrap_or_else(|| default_material.clone())
+        } else if key.contains("steel") {
+            materials
+                .iter()
+                .find(|m| m.material_id.contains("steel"))
+                .map(|m| m.material_id.clone())
+                .unwrap_or_else(|| default_material.clone())
+        } else if key.contains("polymer") || key.contains("plastic") {
+            materials
+                .iter()
+                .find(|m| m.material_id.contains("polymer"))
+                .map(|m| m.material_id.clone())
+                .unwrap_or_else(|| default_material.clone())
+        } else {
+            default_material.clone()
+        };
+
+        let confidence = if geometry
+            .source_geometry
+            .material_evidence
+            .iter()
+            .any(|e| e.confidence == MaterialEvidenceConfidence::High)
+        {
+            EvidenceConfidence::Verified
+        } else if geometry
+            .source_geometry
+            .material_evidence
+            .iter()
+            .any(|e| e.confidence == MaterialEvidenceConfidence::Medium)
+        {
+            EvidenceConfidence::Probable
+        } else {
+            EvidenceConfidence::Inferred
+        };
+
+        assignments.push(MaterialAssignment {
+            region_id: region.region_id.clone(),
+            expected_material_id: assigned_material.clone(),
+            assigned_material_id: assigned_material,
+            confidence,
+        });
+    }
+
+    assignments
 }
 
 fn create_model_profile_name(profile: AnalysisCreateModelProfile) -> &'static str {

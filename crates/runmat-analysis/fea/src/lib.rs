@@ -21,6 +21,7 @@ use crate::{
     solve::{
         backend::{build_backend, kind::LinearAlgebraBackendKind},
         linear::solve_linear_system,
+        modal::solve_modal_system,
         preconditioner::SpdPreconditionerKind,
     },
 };
@@ -49,6 +50,24 @@ pub struct FeaRunResult {
 pub struct LinearStaticSolveOptions {
     pub preconditioner_kind: SpdPreconditionerKind,
     pub algebra_backend_kind: LinearAlgebraBackendKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ModalSolveOptions {
+    pub mode_count: usize,
+}
+
+impl Default for ModalSolveOptions {
+    fn default() -> Self {
+        Self { mode_count: 3 }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeaModalRunResult {
+    pub run: FeaRunResult,
+    pub eigenvalues_hz: Vec<f64>,
+    pub mode_shapes: Vec<AnalysisField>,
 }
 
 impl Default for LinearStaticSolveOptions {
@@ -124,6 +143,72 @@ pub fn run_linear_static_with_options(
         diagnostics,
         displacement_field: fields.displacement_field,
         von_mises_field: fields.von_mises_field,
+    })
+}
+
+pub fn run_modal(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+) -> Result<FeaModalRunResult, FeaRunError> {
+    run_modal_with_options(model, backend, ModalSolveOptions::default())
+}
+
+pub fn run_modal_with_options(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: ModalSolveOptions,
+) -> Result<FeaModalRunResult, FeaRunError> {
+    validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
+
+    let summary = assemble_linear_system(model);
+    let modal = solve_modal_system(&summary, options.mode_count);
+    let mut diagnostics = modal.diagnostics.clone();
+    diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
+
+    let displacement = modal
+        .mode_shapes
+        .first()
+        .cloned()
+        .unwrap_or_else(|| vec![0.0; summary.dof_count.max(3)]);
+    let von_mises = displacement
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max)
+        * 1.0e11;
+
+    let run = FeaRunResult {
+        backend,
+        solver_backend: "cpu_reference".to_string(),
+        solver_device_apply_k_ratio: 0.0,
+        solver_method: modal.solver_method,
+        preconditioner: "none".to_string(),
+        solver_host_sync_count: 0,
+        diagnostics,
+        displacement_field: AnalysisField::host_f64(
+            "displacement",
+            vec![displacement.len()],
+            displacement,
+        ),
+        von_mises_field: AnalysisField::host_f64("von_mises", vec![1], vec![von_mises]),
+    };
+
+    let mode_shapes = modal
+        .mode_shapes
+        .into_iter()
+        .enumerate()
+        .map(|(index, shape)| {
+            AnalysisField::host_f64(
+                format!("mode_shape_{}", index + 1),
+                vec![shape.len()],
+                shape,
+            )
+        })
+        .collect();
+
+    Ok(FeaModalRunResult {
+        run,
+        eigenvalues_hz: modal.eigenvalues_hz,
+        mode_shapes,
     })
 }
 
@@ -262,6 +347,24 @@ mod tests {
         assert!(err
             .to_string()
             .contains("ANALYSIS_VALIDATION_MISSING_LOADS"));
+    }
+
+    #[test]
+    fn modal_solver_emits_modes_for_modal_step_fixture() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.steps = vec![runmat_analysis_core::AnalysisStep {
+            step_id: "modal_1".to_string(),
+            kind: runmat_analysis_core::AnalysisStepKind::Modal,
+        }];
+        let result = run_modal(&model, ComputeBackend::Cpu).expect("modal solve should succeed");
+
+        assert!(!result.eigenvalues_hz.is_empty());
+        assert_eq!(result.eigenvalues_hz.len(), result.mode_shapes.len());
+        assert!(result
+            .run
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "FEA_MODAL_CONVERGENCE"));
     }
 
     #[test]

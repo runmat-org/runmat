@@ -11,8 +11,8 @@ use runmat_analysis_core::{
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{
-    GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, SourceGeometry, SourceGeometryKind,
-    TessellationProfile, UnitSystem,
+    GeometryAsset, GeometrySource, MaterialEvidence, MaterialEvidenceConfidence, MeshDescriptor,
+    MeshKind, Region, SourceGeometry, SourceGeometryKind, TessellationProfile, UnitSystem,
 };
 
 use super::*;
@@ -84,6 +84,32 @@ fn sample_geometry_asset() -> GeometryAsset {
         regions: Vec::new(),
         diagnostics: Vec::new(),
     }
+}
+
+fn sample_step_like_geometry_asset() -> GeometryAsset {
+    let mut asset = sample_geometry_asset();
+    asset.source_geometry.kind = SourceGeometryKind::Cad;
+    asset.source_geometry.material_evidence = vec![MaterialEvidence {
+        source_key: "STEP:MATERIAL".to_string(),
+        normalized_key: "material_name".to_string(),
+        value: "Aluminum 6061".to_string(),
+        confidence: MaterialEvidenceConfidence::High,
+        unit_basis: None,
+        assumptions: vec!["imported".to_string()],
+    }];
+    asset.regions = vec![
+        Region {
+            region_id: "region_root".to_string(),
+            name: "Base_Mount".to_string(),
+            tag: Some("fixed".to_string()),
+        },
+        Region {
+            region_id: "region_tip".to_string(),
+            name: "Tip_Load".to_string(),
+            tag: Some("load".to_string()),
+        },
+    ];
+    asset
 }
 
 #[test]
@@ -174,6 +200,35 @@ fn analysis_create_model_supports_modal_profile_template() {
     assert_eq!(envelope.data.model_id.0, "modal_model");
     assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Modal);
     assert_eq!(envelope.data.loads[0].load_id, "load_default_modal_seed");
+}
+
+#[test]
+fn analysis_create_model_infers_materials_and_assignments_from_geometry_evidence() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_step_like_geometry_asset();
+    let envelope = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "model_from_step_like".to_string(),
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("create model should succeed");
+
+    assert!(envelope
+        .data
+        .materials
+        .iter()
+        .any(|material| material.material_id == "mat_aluminum"));
+    assert_eq!(envelope.data.material_assignments.len(), 2);
+    assert!(envelope
+        .data
+        .material_assignments
+        .iter()
+        .all(|assignment| assignment.assigned_material_id == "mat_aluminum"));
+    assert_eq!(envelope.data.boundary_conditions[0].region_id, "region_root");
+    assert_eq!(envelope.data.loads[0].region_id, "region_tip");
 }
 
 #[test]
@@ -673,7 +728,7 @@ fn analysis_run_modal_rejects_models_without_modal_step() {
 }
 
 #[test]
-fn analysis_run_modal_returns_degraded_placeholder_result() {
+fn analysis_run_modal_returns_native_modal_result() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
     let modal_model = analysis_create_model_op(
@@ -691,29 +746,29 @@ fn analysis_run_modal_returns_degraded_placeholder_result() {
         ComputeBackend::Cpu,
         OperationContext::new(None, None),
     )
-    .expect("modal run should produce placeholder result");
+    .expect("modal run should produce modal result");
 
     assert_eq!(envelope.operation, "analysis.run_modal");
     assert_eq!(envelope.op_version, "analysis.run_modal/v1");
-    assert_eq!(envelope.data.run.solver_method, "modal_placeholder_from_linear_static");
-    assert_eq!(envelope.data.provenance.solver_method, "modal_placeholder_from_linear_static");
-    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
-    assert!(!envelope.data.publishable);
+    assert_eq!(envelope.data.run.solver_method, "diag_generalized_eigen");
+    assert_eq!(envelope.data.provenance.solver_method, "diag_generalized_eigen");
+    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
+    assert!(envelope.data.publishable);
     let modal = envelope
         .data
         .modal_results
         .as_ref()
-        .expect("modal placeholder payload should exist");
-    assert_eq!(modal.eigenvalues_hz.len(), 1);
-    assert_eq!(modal.mode_shapes.len(), 1);
+        .expect("modal payload should exist");
+    assert!(!modal.eigenvalues_hz.is_empty());
+    assert_eq!(modal.eigenvalues_hz.len(), modal.mode_shapes.len());
     assert_eq!(modal.mode_shapes[0].field_id, "mode_shape_1");
     assert_eq!(modal.modal_payload_version, "modal_results/v1");
     assert_eq!(modal.mode_units, ModalFrequencyUnits::Hz);
     assert_eq!(
         modal.frequency_basis,
-        ModalFrequencyBasis::PlaceholderLinearStatic
+        ModalFrequencyBasis::NativeEigenSolve
     );
-    assert!(envelope
+    assert!(!envelope
         .data
         .quality_reasons
         .iter()
@@ -723,7 +778,7 @@ fn analysis_run_modal_returns_degraded_placeholder_result() {
         .run
         .diagnostics
         .iter()
-        .any(|diag| diag.code == "FEA_MODAL_PLACEHOLDER"));
+        .any(|diag| diag.code == "FEA_MODAL_CONVERGENCE"));
 }
 
 #[test]
@@ -745,7 +800,7 @@ fn analysis_results_include_modal_payload_for_modal_runs() {
         ComputeBackend::Cpu,
         OperationContext::new(None, None),
     )
-    .expect("modal run placeholder should succeed");
+    .expect("modal run should succeed");
 
     let results = analysis_results_op(
         &run.data,
@@ -759,18 +814,21 @@ fn analysis_results_include_modal_payload_for_modal_runs() {
         .modal_results
         .as_ref()
         .expect("modal payload should propagate to results");
-    assert_eq!(modal.eigenvalues_hz.len(), 1);
-    assert_eq!(modal.mode_shapes.len(), 1);
+    assert!(!modal.eigenvalues_hz.is_empty());
+    assert_eq!(modal.eigenvalues_hz.len(), modal.mode_shapes.len());
     assert_eq!(modal.modal_payload_version, "modal_results/v1");
     assert_eq!(modal.mode_units, ModalFrequencyUnits::Hz);
     assert_eq!(
         modal.frequency_basis,
-        ModalFrequencyBasis::PlaceholderLinearStatic
+        ModalFrequencyBasis::NativeEigenSolve
     );
-    assert_eq!(results.data.summary.mode_count, 1);
-    assert_eq!(results.data.summary.available_mode_indices, vec![0]);
-    assert_eq!(results.data.summary.min_frequency_hz, Some(1.0));
-    assert_eq!(results.data.summary.max_frequency_hz, Some(1.0));
+    assert!(results.data.summary.mode_count > 0);
+    assert_eq!(
+        results.data.summary.mode_count,
+        results.data.summary.available_mode_indices.len()
+    );
+    assert!(results.data.summary.min_frequency_hz.is_some());
+    assert!(results.data.summary.max_frequency_hz.is_some());
 }
 
 #[test]
@@ -791,7 +849,7 @@ fn analysis_results_query_can_exclude_modal_payload() {
         ComputeBackend::Cpu,
         OperationContext::new(None, None),
     )
-    .expect("modal run placeholder should succeed");
+    .expect("modal run should succeed");
 
     let results = analysis_results_op(
         &run.data,
@@ -826,7 +884,7 @@ fn analysis_results_query_rejects_unknown_modal_mode_index() {
         ComputeBackend::Cpu,
         OperationContext::new(None, None),
     )
-    .expect("modal run placeholder should succeed");
+    .expect("modal run should succeed");
 
     let err = analysis_results_op(
         &run.data,

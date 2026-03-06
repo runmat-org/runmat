@@ -980,6 +980,9 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-06: Added initial native modal solve path in `runmat-analysis-fea` (`solve/modal.rs`, `run_modal_with_options`) using assembled generalized diagonal stiffness/mass extraction, emitting modal diagnostics (`FEA_MODAL_METHOD`, `FEA_MODAL_CONVERGENCE`) and deterministic mode-shape fields.
+- 2026-03-06: Switched runtime `analysis.run_modal/v1` to consume native FEA modal execution (instead of linear-static placeholder), including modal quality-gate evaluation and publishability/status decisions from modal convergence + modal payload validity.
+- 2026-03-06: Upgraded `analysis.create_model/v1` synthesis heuristics to use geometry regions and CAD material evidence (`MaterialEvidence`) for inferred material models/assignments plus boundary/load region targeting, with new contract and unit coverage.
 - 2026-03-06: Added `analysis.run_modal/v1` operation contract scaffold with typed gating: explicit model-shape validation (`ANALYSIS_RUN_MODAL_INVALID_MODEL` when no modal step) and explicit unsupported solver-path contract (`ANALYSIS_RUN_MODAL_UNSUPPORTED`) while modal execution implementation is pending.
 - 2026-03-06: Upgraded `analysis.run_modal/v1` from unsupported scaffold to a deterministic placeholder execution path that reuses linear-static infrastructure, emits explicit `FEA_MODAL_PLACEHOLDER` diagnostics + `ModalPlaceholder` quality reason, and forces degraded/non-publishable status until native modal solver implementation lands.
 - 2026-03-06: Added first-class modal payload schema (`modal_results`) to analysis run/results contracts with placeholder eigenvalue/mode-shape data (`eigenvalues_hz`, `mode_shapes`) so modal outputs are forward-compatible before native eigen-solver rollout.

@@ -18,6 +18,7 @@ use runmat_runtime::operations::OperationContext;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
+const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Base_Mount','',(#1));\n#11=PRODUCT('Tip_Load','',(#1));\n#20=MATERIAL_DESIGNATION('Aluminum 6061');\nENDSEC;\nEND-ISO-10303-21;\n";
 
 fn assert_fallback_event_schema(event: &str) {
     let parts: Vec<&str> = event.splitn(3, ':').collect();
@@ -219,6 +220,35 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
 }
 
 #[test]
+fn analysis_create_model_infers_materials_from_step_metadata_contract() {
+    let geometry = geometry_load_op(
+        "/assembly.step",
+        SIMPLE_STEP.as_bytes(),
+        OperationContext::new(Some("trace-contract-create-step-1".to_string()), None),
+    )
+    .expect("step geometry load should succeed");
+
+    let envelope = analysis_create_model_op(
+        &geometry.data,
+        AnalysisCreateModelIntentSpec {
+            model_id: "contract_step_model".to_string(),
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+        },
+        OperationContext::new(Some("trace-contract-create-step-2".to_string()), None),
+    )
+    .expect("create model should succeed");
+
+    assert!(envelope
+        .data
+        .materials
+        .iter()
+        .any(|material| material.material_id == "mat_aluminum"));
+    assert_eq!(envelope.data.boundary_conditions[0].region_id, "region_1");
+    assert_eq!(envelope.data.loads[0].region_id, "region_2");
+    assert_eq!(envelope.data.material_assignments.len(), 2);
+}
+
+#[test]
 fn analysis_validate_maps_unit_and_frame_mismatch_codes() {
     let mut unit_mismatch = fixture_model(FixtureId::CantileverLinearStatic);
     unit_mismatch.units = UnitSystem::Inch;
@@ -309,30 +339,30 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
         ComputeBackend::Cpu,
         OperationContext::new(Some("trace-contract-modal-3".to_string()), None),
     )
-    .expect("modal run should produce placeholder envelope");
+    .expect("modal run should produce envelope");
     assert_eq!(modal_envelope.operation, "analysis.run_modal");
     assert_eq!(modal_envelope.op_version, "analysis.run_modal/v1");
     assert_eq!(
         modal_envelope.data.run.solver_method,
-        "modal_placeholder_from_linear_static"
+        "diag_generalized_eigen"
     );
     let modal_results = modal_envelope
         .data
         .modal_results
         .as_ref()
         .expect("modal results payload should exist");
-    assert_eq!(modal_results.eigenvalues_hz.len(), 1);
-    assert_eq!(modal_results.mode_shapes.len(), 1);
+    assert!(!modal_results.eigenvalues_hz.is_empty());
+    assert_eq!(modal_results.eigenvalues_hz.len(), modal_results.mode_shapes.len());
     assert_eq!(modal_results.mode_shapes[0].field_id, "mode_shape_1");
     assert_eq!(modal_results.modal_payload_version, "modal_results/v1");
     assert_eq!(modal_results.mode_units, ModalFrequencyUnits::Hz);
     assert_eq!(
         modal_results.frequency_basis,
-        ModalFrequencyBasis::PlaceholderLinearStatic
+        ModalFrequencyBasis::NativeEigenSolve
     );
-    assert_eq!(modal_envelope.data.run_status, RunStatus::Degraded);
-    assert!(!modal_envelope.data.publishable);
-    assert!(modal_envelope
+    assert_eq!(modal_envelope.data.run_status, RunStatus::Publishable);
+    assert!(modal_envelope.data.publishable);
+    assert!(!modal_envelope
         .data
         .quality_reasons
         .iter()
@@ -427,7 +457,7 @@ fn analysis_results_modal_query_controls_are_typed() {
         ComputeBackend::Cpu,
         OperationContext::new(Some("trace-contract-modal-results-3".to_string()), None),
     )
-    .expect("modal run placeholder should succeed");
+    .expect("modal run should succeed");
 
     let excluded = analysis_results_op(
         &modal_run.data,
@@ -441,10 +471,13 @@ fn analysis_results_modal_query_controls_are_typed() {
     )
     .expect("results should succeed");
     assert!(excluded.data.modal_results.is_none());
-    assert_eq!(excluded.data.summary.mode_count, 1);
-    assert_eq!(excluded.data.summary.available_mode_indices, vec![0]);
-    assert_eq!(excluded.data.summary.min_frequency_hz, Some(1.0));
-    assert_eq!(excluded.data.summary.max_frequency_hz, Some(1.0));
+    assert!(excluded.data.summary.mode_count > 0);
+    assert_eq!(
+        excluded.data.summary.mode_count,
+        excluded.data.summary.available_mode_indices.len()
+    );
+    assert!(excluded.data.summary.min_frequency_hz.is_some());
+    assert!(excluded.data.summary.max_frequency_hz.is_some());
 
     let invalid_mode = analysis_results_op(
         &modal_run.data,
