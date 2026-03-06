@@ -1,0 +1,187 @@
+use std::sync::atomic::{AtomicU64, Ordering};
+
+use runmat_accelerate_api::{
+    AccelDownloadFuture, AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorOwned,
+    HostTensorView,
+};
+use runmat_analysis_core::{
+    AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind,
+    BoundaryCondition, BoundaryConditionKind, LoadCase, LoadKind, MaterialModel, ReferenceFrame,
+};
+use runmat_analysis_fea::ComputeBackend;
+use runmat_geometry_core::UnitSystem;
+
+use super::*;
+
+fn sample_model() -> AnalysisModel {
+    AnalysisModel {
+        model_id: AnalysisModelId("beam_model".to_string()),
+        geometry_id: "geo:beam".to_string(),
+        geometry_revision: 1,
+        units: UnitSystem::Meter,
+        frame: ReferenceFrame::Global,
+        materials: vec![MaterialModel {
+            material_id: "mat_steel".to_string(),
+            name: "Steel".to_string(),
+            youngs_modulus_pa: 200e9,
+            poisson_ratio: 0.3,
+        }],
+        boundary_conditions: vec![BoundaryCondition {
+            bc_id: "bc_root".to_string(),
+            region_id: "root".to_string(),
+            kind: BoundaryConditionKind::Fixed,
+        }],
+        loads: vec![LoadCase {
+            load_id: "load_tip".to_string(),
+            region_id: "tip".to_string(),
+            kind: LoadKind::Force {
+                fx: 0.0,
+                fy: -1000.0,
+                fz: 0.0,
+            },
+        }],
+        steps: vec![AnalysisStep {
+            step_id: "step_static".to_string(),
+            kind: AnalysisStepKind::Static,
+        }],
+    }
+}
+
+#[test]
+fn analysis_validate_returns_typed_envelope() {
+    let model = sample_model();
+    let context = OperationContext::new(Some("trace-a1".to_string()), Some("request-a1".to_string()));
+    let envelope = analysis_validate(&model, UnitSystem::Meter, &ReferenceFrame::Global, context)
+        .expect("validation should pass");
+
+    assert_eq!(envelope.operation, "analysis.validate");
+    assert_eq!(envelope.op_version, "analysis.validate/v1");
+    assert!(envelope.data.valid);
+    assert_eq!(envelope.trace_id.as_deref(), Some("trace-a1"));
+}
+
+#[test]
+fn analysis_validate_maps_typed_error_code() {
+    let mut model = sample_model();
+    model.materials.clear();
+    let context = OperationContext::new(None, None);
+    let error =
+        analysis_validate(&model, UnitSystem::Meter, &ReferenceFrame::Global, context)
+            .expect_err("validation should fail");
+
+    assert_eq!(error.error_code, "ANALYSIS_VALIDATION_MISSING_MATERIALS");
+    assert_eq!(error.operation, "analysis.validate");
+    assert_eq!(error.op_version, "analysis.validate/v1");
+}
+
+#[test]
+fn analysis_run_linear_static_returns_typed_envelope() {
+    let model = sample_model();
+    let context = OperationContext::new(Some("trace-a2".to_string()), Some("request-a2".to_string()));
+    let envelope = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+        },
+        context,
+    )
+    .expect("run should pass");
+
+    assert_eq!(envelope.operation, "analysis.run_linear_static");
+    assert_eq!(envelope.op_version, "analysis.run_linear_static/v1");
+    assert_eq!(envelope.data.run.backend, ComputeBackend::Cpu);
+    assert!(!envelope.data.run.displacement_field.is_empty());
+    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
+    assert!(envelope.data.publishable);
+    assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
+    assert!(envelope.data.provenance.deterministic_mode);
+    assert_eq!(envelope.data.provenance.precision_mode, "fp64");
+}
+
+#[test]
+fn gpu_run_without_provider_records_fallback_event() {
+    let _guard = runmat_accelerate_api::ThreadProviderGuard::set(None);
+    let model = sample_model();
+    let envelope =
+        analysis_run_linear_static_op(&model, ComputeBackend::Gpu, OperationContext::new(None, None))
+            .expect("run should pass");
+
+    assert!(envelope
+        .data
+        .provenance
+        .fallback_events
+        .iter()
+        .any(|event| event.starts_with("BACKEND_NO_PROVIDER:displacement")));
+    assert!(matches!(
+        envelope.data.run.displacement_field.values,
+        AnalysisFieldValues::HostF64(_)
+    ));
+}
+
+#[test]
+fn gpu_run_with_provider_emits_device_refs() {
+    static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(1000);
+
+    struct AnalysisTestProvider;
+
+    impl AccelProvider for AnalysisTestProvider {
+        fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+            Ok(GpuTensorHandle {
+                shape: host.shape.to_vec(),
+                device_id: 7,
+                buffer_id: NEXT_BUFFER_ID.fetch_add(1, Ordering::Relaxed),
+            })
+        }
+
+        fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+            Box::pin(async move {
+                Ok(HostTensorOwned {
+                    data: vec![0.0; h.shape.iter().product()],
+                    shape: h.shape.clone(),
+                })
+            })
+        }
+
+        fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "analysis-test-provider".to_string()
+        }
+
+        fn device_id(&self) -> u32 {
+            7
+        }
+
+        fn device_info_struct(&self) -> ApiDeviceInfo {
+            ApiDeviceInfo {
+                device_id: 7,
+                name: "analysis-test-provider".to_string(),
+                vendor: "runmat-tests".to_string(),
+                memory_bytes: None,
+                backend: Some("test_gpu".to_string()),
+            }
+        }
+    }
+
+    static PROVIDER: AnalysisTestProvider = AnalysisTestProvider;
+    let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
+
+    let model = sample_model();
+    let envelope =
+        analysis_run_linear_static_op(&model, ComputeBackend::Gpu, OperationContext::new(None, None))
+            .expect("run should pass");
+
+    assert!(envelope.data.provenance.fallback_events.is_empty());
+    assert!(matches!(
+        envelope.data.run.displacement_field.values,
+        AnalysisFieldValues::DeviceRef(_)
+    ));
+    assert!(matches!(
+        envelope.data.run.von_mises_field.values,
+        AnalysisFieldValues::DeviceRef(_)
+    ));
+}

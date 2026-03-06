@@ -947,6 +947,7 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-06: Refactored runtime analysis module into directory layout (`runmat-runtime/src/analysis/{mod,contracts,promotion,tests}.rs`) to separate operation surface, contract types, device-ref promotion logic, and tests without changing operation semantics.
 - 2026-03-06: Extended runtime operation contract integration tests to lock GPU field residency behavior: explicit fallback-event contract when no provider is present, and `AnalysisFieldValues::DeviceRef` contract when provider-backed promotion is available.
 - 2026-03-06: Runtime analysis now opportunistically promotes GPU solve output fields to `AnalysisFieldValues::DeviceRef` via `runmat-accelerate-api` provider upload hooks, and records explicit fallback events (`BACKEND_NO_PROVIDER`, `BACKEND_UPLOAD_FAILED`) when promotion cannot happen.
 - 2026-03-06: Added explicit runtime solve options for `analysis.run_linear_static` (`deterministic_mode`, `precision_mode`) and extended contract tests to assert deterministic replay stability plus provenance backend/precision recording across CPU/GPU runs.
