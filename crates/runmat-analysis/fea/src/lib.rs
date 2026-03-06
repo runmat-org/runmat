@@ -68,6 +68,7 @@ pub struct FeaModalRunResult {
     pub run: FeaRunResult,
     pub eigenvalues_hz: Vec<f64>,
     pub mode_shapes: Vec<AnalysisField>,
+    pub residual_norms: Vec<f64>,
 }
 
 impl Default for LinearStaticSolveOptions {
@@ -209,6 +210,7 @@ pub fn run_modal_with_options(
         run,
         eigenvalues_hz: modal.eigenvalues_hz,
         mode_shapes,
+        residual_norms: modal.residual_norms,
     })
 }
 

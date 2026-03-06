@@ -38,8 +38,11 @@ const ANALYSIS_RUN_OPERATION: &str = "analysis.run_linear_static";
 const ANALYSIS_RUN_OP_VERSION: &str = "analysis.run_linear_static/v1";
 const ANALYSIS_RUN_MODAL_OPERATION: &str = "analysis.run_modal";
 const ANALYSIS_RUN_MODAL_OP_VERSION: &str = "analysis.run_modal/v1";
+const ANALYSIS_RUN_TRANSIENT_OPERATION: &str = "analysis.run_transient";
+const ANALYSIS_RUN_TRANSIENT_OP_VERSION: &str = "analysis.run_transient/v1";
 const ANALYSIS_RESULTS_OPERATION: &str = "analysis.results";
 const ANALYSIS_RESULTS_OP_VERSION: &str = "analysis.results/v1";
+const MODAL_RESIDUAL_WARN_THRESHOLD: f64 = 1.0e-3;
 
 pub fn analysis_create_model_op(
     geometry: &GeometryAsset,
@@ -302,6 +305,14 @@ pub fn analysis_run_modal_op(
     let result_quality = if modal_run.eigenvalues_hz.is_empty() || modal_run.mode_shapes.is_empty()
     {
         QualityGate::Fail
+    } else if modal_run
+        .residual_norms
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max)
+        > MODAL_RESIDUAL_WARN_THRESHOLD
+    {
+        QualityGate::Warn
     } else {
         QualityGate::Pass
     };
@@ -311,6 +322,15 @@ pub fn analysis_run_modal_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverNotConverged,
             detail: "modal solver convergence gate is warning".to_string(),
+        });
+    }
+    if result_quality == QualityGate::Warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ModalResidualExceeded,
+            detail: format!(
+                "modal residual exceeds threshold {}",
+                MODAL_RESIDUAL_WARN_THRESHOLD
+            ),
         });
     }
 
@@ -353,6 +373,7 @@ pub fn analysis_run_modal_op(
             modal_payload_version: "modal_results/v1".to_string(),
             eigenvalues_hz: modal_run.eigenvalues_hz,
             mode_shapes: modal_run.mode_shapes,
+            residual_norms: modal_run.residual_norms,
             mode_units: ModalFrequencyUnits::Hz,
             frequency_basis,
         }),
@@ -398,6 +419,60 @@ pub fn analysis_run_modal_op(
         &context,
         result,
     ))
+}
+
+pub fn analysis_run_transient_op(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let has_transient_step = model
+        .steps
+        .iter()
+        .any(|step| step.kind == AnalysisStepKind::Transient);
+    if !has_transient_step {
+        return Err(operation_error(
+            ANALYSIS_RUN_TRANSIENT_OPERATION,
+            ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_TRANSIENT_INVALID_MODEL",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis model must include at least one transient step for analysis.run_transient",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("geometry_id".to_string(), model.geometry_id.clone()),
+            ]),
+        ));
+    }
+
+    let mut envelope = analysis_run_linear_static_with_options(
+        model,
+        backend,
+        AnalysisRunOptions::default(),
+        context.clone(),
+    )?;
+    envelope.operation = ANALYSIS_RUN_TRANSIENT_OPERATION.to_string();
+    envelope.op_version = ANALYSIS_RUN_TRANSIENT_OP_VERSION.to_string();
+    envelope.data.run.solver_method = "transient_placeholder_from_linear_static".to_string();
+    envelope.data.provenance.solver_method = "transient_placeholder_from_linear_static".to_string();
+    envelope.data.run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
+        code: "FEA_TRANSIENT_PLACEHOLDER".to_string(),
+        severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning,
+        message: "analysis.run_transient currently uses placeholder execution from linear-static solve path"
+            .to_string(),
+    });
+    envelope.data.quality_reasons.push(QualityReason {
+        code: QualityReasonCode::TransientPlaceholder,
+        detail: "transient run path currently uses linear-static placeholder backend"
+            .to_string(),
+    });
+    envelope.data.publishable = false;
+    envelope.data.run_status = RunStatus::Degraded;
+    Ok(envelope)
 }
 
 pub fn analysis_run_linear_static_with_options(
@@ -678,6 +753,7 @@ pub fn analysis_results_op(
             } else {
                 let mut eigenvalues_hz = Vec::with_capacity(query.mode_indices.len());
                 let mut mode_shapes = Vec::with_capacity(query.mode_indices.len());
+                let mut residual_norms = Vec::with_capacity(query.mode_indices.len());
                 for &index in &query.mode_indices {
                     let eigenvalue = modal.eigenvalues_hz.get(index).copied().ok_or_else(|| {
                         operation_error(
@@ -721,13 +797,38 @@ pub fn analysis_results_op(
                             ]),
                         )
                     })?;
+                    let residual_norm = modal.residual_norms.get(index).copied().ok_or_else(|| {
+                        operation_error(
+                            ANALYSIS_RESULTS_OPERATION,
+                            ANALYSIS_RESULTS_OP_VERSION,
+                            &context,
+                            OperationErrorSpec {
+                                error_code: "ANALYSIS_RESULTS_MODE_NOT_FOUND",
+                                error_type: OperationErrorType::Input,
+                                retryable: false,
+                                severity: OperationErrorSeverity::Error,
+                            },
+                            format!(
+                                "requested modal mode index '{index}' is missing residual data"
+                            ),
+                            BTreeMap::from([
+                                ("requested_mode_index".to_string(), index.to_string()),
+                                (
+                                    "available_residual_count".to_string(),
+                                    modal.residual_norms.len().to_string(),
+                                ),
+                            ]),
+                        )
+                    })?;
                     eigenvalues_hz.push(eigenvalue);
                     mode_shapes.push(mode_shape);
+                    residual_norms.push(residual_norm);
                 }
                 Some(ModalResultsData {
                     modal_payload_version: modal.modal_payload_version.clone(),
                     eigenvalues_hz,
                     mode_shapes,
+                    residual_norms,
                     mode_units: modal.mode_units.clone(),
                     frequency_basis: modal.frequency_basis.clone(),
                 })

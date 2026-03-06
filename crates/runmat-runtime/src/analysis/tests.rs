@@ -282,8 +282,8 @@ fn analysis_run_linear_static_returns_typed_envelope() {
     assert_eq!(envelope.op_version, "analysis.run_linear_static/v1");
     assert_eq!(envelope.data.run.backend, ComputeBackend::Cpu);
     assert!(!envelope.data.run.displacement_field.is_empty());
-    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
-    assert!(envelope.data.publishable);
+    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
+    assert!(!envelope.data.publishable);
     assert!(envelope.data.modal_results.is_none());
     assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
     assert!(envelope.data.provenance.deterministic_mode);
@@ -728,6 +728,59 @@ fn analysis_run_modal_rejects_models_without_modal_step() {
 }
 
 #[test]
+fn analysis_run_transient_rejects_models_without_transient_step() {
+    let _guard = analysis_test_guard();
+    let model = sample_model();
+    let err = analysis_run_transient_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("transient run should fail for missing transient step");
+
+    assert_eq!(err.operation, "analysis.run_transient");
+    assert_eq!(err.op_version, "analysis.run_transient/v1");
+    assert_eq!(err.error_code, "ANALYSIS_RUN_TRANSIENT_INVALID_MODEL");
+}
+
+#[test]
+fn analysis_run_transient_returns_degraded_placeholder_result() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "transient_1".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
+
+    let envelope = analysis_run_transient_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("transient run should return placeholder envelope");
+
+    assert_eq!(envelope.operation, "analysis.run_transient");
+    assert_eq!(envelope.op_version, "analysis.run_transient/v1");
+    assert_eq!(
+        envelope.data.run.solver_method,
+        "transient_placeholder_from_linear_static"
+    );
+    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
+    assert!(!envelope.data.publishable);
+    assert!(envelope
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::TransientPlaceholder));
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_TRANSIENT_PLACEHOLDER"));
+}
+
+#[test]
 fn analysis_run_modal_returns_native_modal_result() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
@@ -752,8 +805,8 @@ fn analysis_run_modal_returns_native_modal_result() {
     assert_eq!(envelope.op_version, "analysis.run_modal/v1");
     assert_eq!(envelope.data.run.solver_method, "diag_generalized_eigen");
     assert_eq!(envelope.data.provenance.solver_method, "diag_generalized_eigen");
-    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
-    assert!(envelope.data.publishable);
+    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
+    assert!(!envelope.data.publishable);
     let modal = envelope
         .data
         .modal_results
@@ -762,6 +815,8 @@ fn analysis_run_modal_returns_native_modal_result() {
     assert!(!modal.eigenvalues_hz.is_empty());
     assert_eq!(modal.eigenvalues_hz.len(), modal.mode_shapes.len());
     assert_eq!(modal.mode_shapes[0].field_id, "mode_shape_1");
+    assert_eq!(modal.eigenvalues_hz.len(), modal.residual_norms.len());
+    assert!(modal.residual_norms.iter().all(|value| value.is_finite()));
     assert_eq!(modal.modal_payload_version, "modal_results/v1");
     assert_eq!(modal.mode_units, ModalFrequencyUnits::Hz);
     assert_eq!(
@@ -773,6 +828,11 @@ fn analysis_run_modal_returns_native_modal_result() {
         .quality_reasons
         .iter()
         .any(|reason| reason.code == QualityReasonCode::ModalPlaceholder));
+    assert!(envelope
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::ModalResidualExceeded));
     assert!(envelope
         .data
         .run
@@ -816,6 +876,7 @@ fn analysis_results_include_modal_payload_for_modal_runs() {
         .expect("modal payload should propagate to results");
     assert!(!modal.eigenvalues_hz.is_empty());
     assert_eq!(modal.eigenvalues_hz.len(), modal.mode_shapes.len());
+    assert_eq!(modal.eigenvalues_hz.len(), modal.residual_norms.len());
     assert_eq!(modal.modal_payload_version, "modal_results/v1");
     assert_eq!(modal.mode_units, ModalFrequencyUnits::Hz);
     assert_eq!(

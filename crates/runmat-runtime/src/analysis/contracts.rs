@@ -56,6 +56,8 @@ pub enum QualityReasonCode {
     SolverBackendFallback,
     FieldPromotionFallback,
     ModalPlaceholder,
+    ModalResidualExceeded,
+    TransientPlaceholder,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -181,6 +183,7 @@ pub struct ModalResultsData {
     pub modal_payload_version: String,
     pub eigenvalues_hz: Vec<f64>,
     pub mode_shapes: Vec<AnalysisField>,
+    pub residual_norms: Vec<f64>,
     pub mode_units: ModalFrequencyUnits,
     pub frequency_basis: ModalFrequencyBasis,
 }

@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     assembly::AssemblySummary,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
+    operator::{apply_k, apply_m},
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -10,6 +11,7 @@ pub struct ModalSolveResult {
     pub converged: bool,
     pub eigenvalues_hz: Vec<f64>,
     pub mode_shapes: Vec<Vec<f64>>,
+    pub residual_norms: Vec<f64>,
     pub diagnostics: Vec<FeaDiagnostic>,
     pub solver_method: String,
 }
@@ -20,6 +22,7 @@ pub fn solve_modal_system(summary: &AssemblySummary, mode_count: usize) -> Modal
             converged: false,
             eigenvalues_hz: Vec::new(),
             mode_shapes: Vec::new(),
+            residual_norms: Vec::new(),
             diagnostics: vec![FeaDiagnostic {
                 code: "FEA_MODAL_EMPTY_SYSTEM".to_string(),
                 severity: FeaDiagnosticSeverity::Warning,
@@ -47,6 +50,7 @@ pub fn solve_modal_system(summary: &AssemblySummary, mode_count: usize) -> Modal
 
     let mut eigenvalues_hz = Vec::with_capacity(selected.len());
     let mut mode_shapes = Vec::with_capacity(selected.len());
+    let mut residual_norms = Vec::with_capacity(selected.len());
     for (mode_idx, (dof_index, freq_hz)) in selected.into_iter().enumerate() {
         eigenvalues_hz.push(freq_hz);
 
@@ -62,6 +66,25 @@ pub fn solve_modal_system(summary: &AssemblySummary, mode_count: usize) -> Modal
         for value in &mut shape {
             *value /= norm;
         }
+        let lambda = (2.0 * std::f64::consts::PI * freq_hz).powi(2);
+        let kq = apply_k(&summary.operator, &shape);
+        let mq = apply_m(&summary.operator, &shape);
+        let residual = kq
+            .iter()
+            .zip(mq.iter())
+            .map(|(k_value, m_value)| {
+                let diff = *k_value - lambda * *m_value;
+                diff * diff
+            })
+            .sum::<f64>()
+            .sqrt();
+        let kq_norm = kq
+            .iter()
+            .map(|value| value * value)
+            .sum::<f64>()
+            .sqrt()
+            .max(1.0e-12);
+        residual_norms.push(residual / kq_norm);
         let _ = mode_idx;
         mode_shapes.push(shape);
     }
@@ -86,11 +109,24 @@ pub fn solve_modal_system(summary: &AssemblySummary, mode_count: usize) -> Modal
             converged
         ),
     });
+    if !residual_norms.is_empty() {
+        let max_residual = residual_norms.iter().copied().fold(0.0_f64, f64::max);
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_MODAL_RESIDUAL".to_string(),
+            severity: if max_residual <= 1.0e-3 {
+                FeaDiagnosticSeverity::Info
+            } else {
+                FeaDiagnosticSeverity::Warning
+            },
+            message: format!("max_modal_residual_norm={max_residual}"),
+        });
+    }
 
     ModalSolveResult {
         converged,
         eigenvalues_hz,
         mode_shapes,
+        residual_norms,
         diagnostics,
         solver_method: "diag_generalized_eigen".to_string(),
     }

@@ -6,9 +6,10 @@ use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_op,
     analysis_run_linear_static_op, analysis_run_linear_static_with_options, analysis_run_modal_op,
-    analysis_validate, AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile,
-    AnalysisResultsQuery, AnalysisRunOptions, ModalFrequencyBasis, ModalFrequencyUnits,
-    PrecisionMode, PreconditionerMode, QualityPolicy, QualityReasonCode, RunStatus,
+    analysis_run_transient_op, analysis_validate, AnalysisCreateModelIntentSpec,
+    AnalysisCreateModelProfile, AnalysisResultsQuery, AnalysisRunOptions, ModalFrequencyBasis,
+    ModalFrequencyUnits, PrecisionMode, PreconditionerMode, QualityPolicy, QualityReasonCode,
+    RunStatus,
 };
 use runmat_runtime::geometry::{
     geometry_capture_view_op, geometry_inspect_op, geometry_list_regions_op, geometry_load_op,
@@ -355,18 +356,24 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
     assert_eq!(modal_results.eigenvalues_hz.len(), modal_results.mode_shapes.len());
     assert_eq!(modal_results.mode_shapes[0].field_id, "mode_shape_1");
     assert_eq!(modal_results.modal_payload_version, "modal_results/v1");
+    assert_eq!(modal_results.eigenvalues_hz.len(), modal_results.residual_norms.len());
     assert_eq!(modal_results.mode_units, ModalFrequencyUnits::Hz);
     assert_eq!(
         modal_results.frequency_basis,
         ModalFrequencyBasis::NativeEigenSolve
     );
-    assert_eq!(modal_envelope.data.run_status, RunStatus::Publishable);
-    assert!(modal_envelope.data.publishable);
+    assert_eq!(modal_envelope.data.run_status, RunStatus::Degraded);
+    assert!(!modal_envelope.data.publishable);
     assert!(!modal_envelope
         .data
         .quality_reasons
         .iter()
         .any(|reason| reason.code == QualityReasonCode::ModalPlaceholder));
+    assert!(modal_envelope
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::ModalResidualExceeded));
 
     let invalid = analysis_run_modal_op(
         &fixture_model(FixtureId::CantileverLinearStatic),
@@ -377,6 +384,45 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
     assert_eq!(invalid.operation, "analysis.run_modal");
     assert_eq!(invalid.op_version, "analysis.run_modal/v1");
     assert_eq!(invalid.error_code, "ANALYSIS_RUN_MODAL_INVALID_MODEL");
+}
+
+#[test]
+fn analysis_run_transient_contract_is_v1_and_typed() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.steps = vec![runmat_analysis_core::AnalysisStep {
+        step_id: "transient_1".to_string(),
+        kind: runmat_analysis_core::AnalysisStepKind::Transient,
+    }];
+
+    let envelope = analysis_run_transient_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-transient-1".to_string()), None),
+    )
+    .expect("transient run should return placeholder envelope");
+    assert_eq!(envelope.operation, "analysis.run_transient");
+    assert_eq!(envelope.op_version, "analysis.run_transient/v1");
+    assert_eq!(
+        envelope.data.run.solver_method,
+        "transient_placeholder_from_linear_static"
+    );
+    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
+    assert!(!envelope.data.publishable);
+    assert!(envelope
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::TransientPlaceholder));
+
+    let invalid = analysis_run_transient_op(
+        &fixture_model(FixtureId::CantileverLinearStatic),
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-transient-2".to_string()), None),
+    )
+    .expect_err("transient run should reject models without transient step");
+    assert_eq!(invalid.operation, "analysis.run_transient");
+    assert_eq!(invalid.op_version, "analysis.run_transient/v1");
+    assert_eq!(invalid.error_code, "ANALYSIS_RUN_TRANSIENT_INVALID_MODEL");
 }
 
 #[test]
