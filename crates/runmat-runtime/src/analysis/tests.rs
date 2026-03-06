@@ -384,6 +384,10 @@ fn analysis_results_returns_filtered_fields_and_metadata() {
     assert_eq!(results.data.fields[0].field_id, "displacement");
     assert!(results.data.diagnostics.is_none());
     assert_eq!(results.data.summary.field_count, 1);
+    assert_eq!(results.data.summary.mode_count, 0);
+    assert!(results.data.summary.available_mode_indices.is_empty());
+    assert_eq!(results.data.summary.min_frequency_hz, None);
+    assert_eq!(results.data.summary.max_frequency_hz, None);
 }
 
 #[test]
@@ -436,6 +440,10 @@ fn analysis_results_by_run_id_roundtrip_works() {
     assert_eq!(fetched.operation, "analysis.results");
     assert_eq!(fetched.op_version, "analysis.results/v1");
     assert_eq!(fetched.data.summary.field_count, 2);
+    assert_eq!(fetched.data.summary.mode_count, 0);
+    assert!(fetched.data.summary.available_mode_indices.is_empty());
+    assert_eq!(fetched.data.summary.min_frequency_hz, None);
+    assert_eq!(fetched.data.summary.max_frequency_hz, None);
 
     storage::reset_artifact_store_for_tests();
 }
@@ -699,6 +707,12 @@ fn analysis_run_modal_returns_degraded_placeholder_result() {
     assert_eq!(modal.eigenvalues_hz.len(), 1);
     assert_eq!(modal.mode_shapes.len(), 1);
     assert_eq!(modal.mode_shapes[0].field_id, "mode_shape_1");
+    assert_eq!(modal.modal_payload_version, "modal_results/v1");
+    assert_eq!(modal.mode_units, ModalFrequencyUnits::Hz);
+    assert_eq!(
+        modal.frequency_basis,
+        ModalFrequencyBasis::PlaceholderLinearStatic
+    );
     assert!(envelope
         .data
         .quality_reasons
@@ -747,6 +761,16 @@ fn analysis_results_include_modal_payload_for_modal_runs() {
         .expect("modal payload should propagate to results");
     assert_eq!(modal.eigenvalues_hz.len(), 1);
     assert_eq!(modal.mode_shapes.len(), 1);
+    assert_eq!(modal.modal_payload_version, "modal_results/v1");
+    assert_eq!(modal.mode_units, ModalFrequencyUnits::Hz);
+    assert_eq!(
+        modal.frequency_basis,
+        ModalFrequencyBasis::PlaceholderLinearStatic
+    );
+    assert_eq!(results.data.summary.mode_count, 1);
+    assert_eq!(results.data.summary.available_mode_indices, vec![0]);
+    assert_eq!(results.data.summary.min_frequency_hz, Some(1.0));
+    assert_eq!(results.data.summary.max_frequency_hz, Some(1.0));
 }
 
 #[test]

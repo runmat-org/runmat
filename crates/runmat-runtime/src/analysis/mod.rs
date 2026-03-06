@@ -24,8 +24,9 @@ pub mod storage;
 pub use contracts::{
     AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisResultsData,
     AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunOptions, AnalysisRunResult,
-    AnalysisValidateResult, ModalResultsData, PrecisionMode, PreconditionerMode, QualityGate,
-    QualityPolicy, QualityReason, QualityReasonCode, RunProvenance, RunStatus,
+    AnalysisValidateResult, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
+    PrecisionMode, PreconditionerMode, QualityGate, QualityPolicy, QualityReason,
+    QualityReasonCode, RunProvenance, RunStatus,
 };
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "analysis.create_model";
@@ -305,8 +306,11 @@ pub fn analysis_run_modal_op(
     let mut mode_shape = envelope.data.run.displacement_field.clone();
     mode_shape.field_id = "mode_shape_1".to_string();
     envelope.data.modal_results = Some(ModalResultsData {
+        modal_payload_version: "modal_results/v1".to_string(),
         eigenvalues_hz: vec![1.0],
         mode_shapes: vec![mode_shape],
+        mode_units: ModalFrequencyUnits::Hz,
+        frequency_basis: ModalFrequencyBasis::PlaceholderLinearStatic,
     });
     envelope.data.quality_reasons.push(QualityReason {
         code: QualityReasonCode::ModalPlaceholder,
@@ -556,9 +560,37 @@ pub fn analysis_results_op(
         fields = filtered;
     }
 
+    let (mode_count, available_mode_indices, min_frequency_hz, max_frequency_hz) =
+        if let Some(modal) = run_result.modal_results.as_ref() {
+            let count = modal.eigenvalues_hz.len().min(modal.mode_shapes.len());
+            let (min_frequency_hz, max_frequency_hz) = if count == 0 {
+                (None, None)
+            } else {
+                let mut min_value = f64::INFINITY;
+                let mut max_value = f64::NEG_INFINITY;
+                for value in modal.eigenvalues_hz.iter().copied().take(count) {
+                    min_value = min_value.min(value);
+                    max_value = max_value.max(value);
+                }
+                (Some(min_value), Some(max_value))
+            };
+            (
+                count,
+                (0..count).collect(),
+                min_frequency_hz,
+                max_frequency_hz,
+            )
+        } else {
+            (0, Vec::new(), None, None)
+        };
+
     let summary = AnalysisResultsSummary {
         field_count: fields.len(),
         total_elements: fields.iter().map(|field| field.element_count()).sum(),
+        mode_count,
+        available_mode_indices,
+        min_frequency_hz,
+        max_frequency_hz,
     };
 
     let modal_results = if query.include_modal_results {
@@ -615,8 +647,11 @@ pub fn analysis_results_op(
                     mode_shapes.push(mode_shape);
                 }
                 Some(ModalResultsData {
+                    modal_payload_version: modal.modal_payload_version.clone(),
                     eigenvalues_hz,
                     mode_shapes,
+                    mode_units: modal.mode_units.clone(),
+                    frequency_basis: modal.frequency_basis.clone(),
                 })
             }
         } else {

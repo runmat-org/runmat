@@ -7,8 +7,8 @@ use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_op,
     analysis_run_linear_static_op, analysis_run_linear_static_with_options, analysis_run_modal_op,
     analysis_validate, AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile,
-    AnalysisResultsQuery, AnalysisRunOptions, PrecisionMode, PreconditionerMode, QualityPolicy,
-    QualityReasonCode, RunStatus,
+    AnalysisResultsQuery, AnalysisRunOptions, ModalFrequencyBasis, ModalFrequencyUnits,
+    PrecisionMode, PreconditionerMode, QualityPolicy, QualityReasonCode, RunStatus,
 };
 use runmat_runtime::geometry::{
     geometry_capture_view_op, geometry_inspect_op, geometry_list_regions_op, geometry_load_op,
@@ -324,6 +324,12 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
     assert_eq!(modal_results.eigenvalues_hz.len(), 1);
     assert_eq!(modal_results.mode_shapes.len(), 1);
     assert_eq!(modal_results.mode_shapes[0].field_id, "mode_shape_1");
+    assert_eq!(modal_results.modal_payload_version, "modal_results/v1");
+    assert_eq!(modal_results.mode_units, ModalFrequencyUnits::Hz);
+    assert_eq!(
+        modal_results.frequency_basis,
+        ModalFrequencyBasis::PlaceholderLinearStatic
+    );
     assert_eq!(modal_envelope.data.run_status, RunStatus::Degraded);
     assert!(!modal_envelope.data.publishable);
     assert!(modal_envelope
@@ -435,6 +441,10 @@ fn analysis_results_modal_query_controls_are_typed() {
     )
     .expect("results should succeed");
     assert!(excluded.data.modal_results.is_none());
+    assert_eq!(excluded.data.summary.mode_count, 1);
+    assert_eq!(excluded.data.summary.available_mode_indices, vec![0]);
+    assert_eq!(excluded.data.summary.min_frequency_hz, Some(1.0));
+    assert_eq!(excluded.data.summary.max_frequency_hz, Some(1.0));
 
     let invalid_mode = analysis_results_op(
         &modal_run.data,
@@ -472,6 +482,10 @@ fn analysis_results_by_run_id_contract_roundtrip() {
     assert_eq!(results.operation, "analysis.results");
     assert_eq!(results.op_version, "analysis.results/v1");
     assert_eq!(results.data.summary.field_count, 2);
+    assert_eq!(results.data.summary.mode_count, 0);
+    assert!(results.data.summary.available_mode_indices.is_empty());
+    assert_eq!(results.data.summary.min_frequency_hz, None);
+    assert_eq!(results.data.summary.max_frequency_hz, None);
 }
 
 #[test]

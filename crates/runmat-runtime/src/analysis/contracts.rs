@@ -154,10 +154,14 @@ impl Default for AnalysisResultsQuery {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisResultsSummary {
     pub field_count: usize,
     pub total_elements: usize,
+    pub mode_count: usize,
+    pub available_mode_indices: Vec<usize>,
+    pub min_frequency_hz: Option<f64>,
+    pub max_frequency_hz: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -174,8 +178,24 @@ pub struct AnalysisResultsData {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModalResultsData {
+    pub modal_payload_version: String,
     pub eigenvalues_hz: Vec<f64>,
     pub mode_shapes: Vec<AnalysisField>,
+    pub mode_units: ModalFrequencyUnits,
+    pub frequency_basis: ModalFrequencyBasis,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModalFrequencyUnits {
+    Hz,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModalFrequencyBasis {
+    PlaceholderLinearStatic,
+    NativeEigenSolve,
 }
 
 pub(crate) fn format_precision_mode(mode: PrecisionMode) -> String {
