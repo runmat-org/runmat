@@ -4,8 +4,11 @@ use crate::{
     assembly::AssemblySummary,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     operator::apply_k,
-    solve::backend::linear_algebra::LinearAlgebraBackend,
     solve::preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
+    solve::{
+        backend::{kind::LinearAlgebraBackendKind, linear_algebra::LinearAlgebraBackend},
+        runtime_tensor_solver::solve_linear_system_runtime_tensor,
+    },
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -22,8 +25,15 @@ pub struct LinearSolveResult {
 pub fn solve_linear_system(
     summary: &AssemblySummary,
     preconditioner_kind: SpdPreconditionerKind,
+    backend_kind: LinearAlgebraBackendKind,
     algebra_backend: &dyn LinearAlgebraBackend,
 ) -> LinearSolveResult {
+    if backend_kind == LinearAlgebraBackendKind::RuntimeTensor {
+        if let Some(result) = solve_linear_system_runtime_tensor(summary, preconditioner_kind) {
+            return result;
+        }
+    }
+
     let has_dofs = summary.dof_count > 0;
     if !has_dofs {
         return LinearSolveResult {

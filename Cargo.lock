@@ -5526,6 +5526,8 @@ dependencies = [
 name = "runmat-analysis-fea"
 version = "0.2.8"
 dependencies = [
+ "futures",
+ "runmat-accelerate-api",
  "runmat-analysis-core",
  "runmat-geometry-core",
  "serde",

@@ -18,15 +18,26 @@ fn assert_fallback_event_schema(event: &str) {
     assert_eq!(parts.len(), 3, "fallback event must have 3 parts");
 
     assert!(
-        matches!(parts[0], "BACKEND_NO_PROVIDER" | "BACKEND_UPLOAD_FAILED"),
+        matches!(
+            parts[0],
+            "BACKEND_NO_PROVIDER" | "BACKEND_UPLOAD_FAILED" | "SOLVER_BACKEND_FALLBACK"
+        ),
         "unexpected fallback category: {}",
         parts[0]
     );
-    assert!(
-        matches!(parts[1], "displacement" | "von_mises"),
-        "unexpected fallback stage: {}",
-        parts[1]
-    );
+    if parts[0] == "SOLVER_BACKEND_FALLBACK" {
+        assert!(
+            parts[1].starts_with("requested="),
+            "unexpected solver backend fallback stage: {}",
+            parts[1]
+        );
+    } else {
+        assert!(
+            matches!(parts[1], "displacement" | "von_mises"),
+            "unexpected fallback stage: {}",
+            parts[1]
+        );
+    }
     assert!(!parts[2].is_empty(), "fallback reason must be non-empty");
 }
 

@@ -212,8 +212,15 @@ fn validate_fallback_event_schema(event: &str) -> bool {
     if parts.len() != 3 {
         return false;
     }
-    let category_ok = matches!(parts[0], "BACKEND_NO_PROVIDER" | "BACKEND_UPLOAD_FAILED");
-    let stage_ok = matches!(parts[1], "displacement" | "von_mises");
+    let category_ok = matches!(
+        parts[0],
+        "BACKEND_NO_PROVIDER" | "BACKEND_UPLOAD_FAILED" | "SOLVER_BACKEND_FALLBACK"
+    );
+    let stage_ok = if parts[0] == "SOLVER_BACKEND_FALLBACK" {
+        parts[1].starts_with("requested=")
+    } else {
+        matches!(parts[1], "displacement" | "von_mises")
+    };
     let reason_ok = !parts[2].is_empty();
     category_ok && stage_ok && reason_ok
 }

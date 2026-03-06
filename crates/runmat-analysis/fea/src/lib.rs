@@ -17,7 +17,8 @@ use crate::{
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     post::fields::recover_result_fields,
     solve::{
-        backend::cpu_reference::CpuReferenceBackend, linear::solve_linear_system,
+        backend::{build_backend, kind::LinearAlgebraBackendKind},
+        linear::solve_linear_system,
         preconditioner::SpdPreconditionerKind,
     },
 };
@@ -43,12 +44,14 @@ pub struct FeaRunResult {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct LinearStaticSolveOptions {
     pub preconditioner_kind: SpdPreconditionerKind,
+    pub algebra_backend_kind: LinearAlgebraBackendKind,
 }
 
 impl Default for LinearStaticSolveOptions {
     fn default() -> Self {
         Self {
             preconditioner_kind: SpdPreconditionerKind::Jacobi,
+            algebra_backend_kind: LinearAlgebraBackendKind::CpuReference,
         }
     }
 }
@@ -74,8 +77,13 @@ pub fn run_linear_static_with_options(
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
 
     let summary = assemble_linear_system(model);
-    let algebra_backend = CpuReferenceBackend;
-    let solve_result = solve_linear_system(&summary, options.preconditioner_kind, &algebra_backend);
+    let algebra_backend = build_backend(options.algebra_backend_kind);
+    let solve_result = solve_linear_system(
+        &summary,
+        options.preconditioner_kind,
+        options.algebra_backend_kind,
+        algebra_backend.as_ref(),
+    );
     let fields = recover_result_fields(&summary, &solve_result);
 
     let mut diagnostics = vec![FeaDiagnostic {
@@ -98,7 +106,7 @@ pub fn run_linear_static_with_options(
 
     Ok(FeaRunResult {
         backend,
-        solver_backend: "cpu_reference".to_string(),
+        solver_backend: options.algebra_backend_kind.as_str().to_string(),
         solver_method: solve_result.solver_method,
         preconditioner: solve_result.preconditioner,
         diagnostics,

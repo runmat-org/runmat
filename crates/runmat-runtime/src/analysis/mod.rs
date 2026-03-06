@@ -6,6 +6,7 @@ use runmat_analysis_core::{
 use runmat_analysis_fea::{
     run_linear_static_with_options, ComputeBackend, LinearStaticSolveOptions,
 };
+use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_geometry_core::UnitSystem;
 
@@ -67,11 +68,16 @@ pub fn analysis_run_linear_static_with_options(
         PreconditionerMode::Ilu => SpdPreconditionerKind::Ilu0,
         PreconditionerMode::Amg => SpdPreconditionerKind::Jacobi,
     };
+    let requested_solver_backend = match backend {
+        ComputeBackend::Cpu => LinearAlgebraBackendKind::CpuReference,
+        ComputeBackend::Gpu => LinearAlgebraBackendKind::RuntimeTensor,
+    };
     let run = run_linear_static_with_options(
         model,
         backend,
         LinearStaticSolveOptions {
             preconditioner_kind: requested_preconditioner,
+            algebra_backend_kind: requested_solver_backend,
         },
     )
     .map_err(|err| {
@@ -104,6 +110,12 @@ pub fn analysis_run_linear_static_with_options(
                 "SOLVER_PRECONDITIONER_FALLBACK:requested=amg:using=jacobi".to_string(),
             );
         }
+    }
+
+    if backend == ComputeBackend::Gpu && run.solver_backend != "runtime_tensor" {
+        fallback_events.push(
+            "SOLVER_BACKEND_FALLBACK:requested=runtime_tensor:using=cpu_reference".to_string(),
+        );
     }
 
     let solver_convergence = if run.diagnostics.iter().any(|item| {

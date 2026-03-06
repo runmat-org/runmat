@@ -11,6 +11,8 @@ repository = "https://github.com/runmat-org/runmat"
 [dependencies]
 runmat-analysis-core = { workspace = true }
 runmat-geometry-core = { workspace = true }
+runmat-accelerate-api = { workspace = true }
+futures = "0.3"
 serde = { workspace = true }
 thiserror = { workspace = true }
 
