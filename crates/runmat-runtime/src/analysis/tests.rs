@@ -760,7 +760,7 @@ fn analysis_run_transient_rejects_models_without_transient_step() {
 }
 
 #[test]
-fn analysis_run_transient_returns_degraded_placeholder_result() {
+fn analysis_run_transient_returns_native_transient_result() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
     model.steps = vec![AnalysisStep {
@@ -773,17 +773,15 @@ fn analysis_run_transient_returns_degraded_placeholder_result() {
         ComputeBackend::Cpu,
         OperationContext::new(None, None),
     )
-    .expect("transient run should return placeholder envelope");
+    .expect("transient run should return envelope");
 
     assert_eq!(envelope.operation, "analysis.run_transient");
     assert_eq!(envelope.op_version, "analysis.run_transient/v1");
-    assert_eq!(
-        envelope.data.run.solver_method,
-        "transient_placeholder_from_linear_static"
-    );
-    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
-    assert!(!envelope.data.publishable);
-    assert!(envelope
+    assert_eq!(envelope.data.run.solver_method, "implicit_euler_pcg");
+    assert_eq!(envelope.data.provenance.solver_method, "implicit_euler_pcg");
+    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
+    assert!(envelope.data.publishable);
+    assert!(!envelope
         .data
         .quality_reasons
         .iter()
@@ -793,7 +791,18 @@ fn analysis_run_transient_returns_degraded_placeholder_result() {
         .run
         .diagnostics
         .iter()
-        .any(|diag| diag.code == "FEA_TRANSIENT_PLACEHOLDER"));
+        .any(|diag| diag.code == "FEA_TRANSIENT_CONVERGENCE"));
+    let transient = envelope
+        .data
+        .transient_results
+        .as_ref()
+        .expect("transient payload should exist");
+    assert_eq!(transient.integration_method, TransientIntegrationMethod::ImplicitEuler);
+    assert!(!transient.time_points_s.is_empty());
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.displacement_snapshots.len()
+    );
 }
 
 #[test]
@@ -984,4 +993,39 @@ fn analysis_results_query_rejects_unknown_modal_mode_index() {
     assert_eq!(err.error_code, "ANALYSIS_RESULTS_MODE_NOT_FOUND");
     assert_eq!(err.operation, "analysis.results");
     assert_eq!(err.op_version, "analysis.results/v1");
+}
+
+#[test]
+fn analysis_results_include_transient_payload_for_transient_runs() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "transient_1".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
+    let run = analysis_run_transient_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("transient run should succeed");
+
+    let results = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("results should succeed");
+
+    let transient = results
+        .data
+        .transient_results
+        .as_ref()
+        .expect("transient payload should propagate");
+    assert_eq!(transient.integration_method, TransientIntegrationMethod::ImplicitEuler);
+    assert!(!transient.time_points_s.is_empty());
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.displacement_snapshots.len()
+    );
 }

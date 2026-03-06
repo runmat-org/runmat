@@ -412,20 +412,27 @@ fn analysis_run_transient_contract_is_v1_and_typed() {
         ComputeBackend::Cpu,
         OperationContext::new(Some("trace-contract-transient-1".to_string()), None),
     )
-    .expect("transient run should return placeholder envelope");
+    .expect("transient run should return envelope");
     assert_eq!(envelope.operation, "analysis.run_transient");
     assert_eq!(envelope.op_version, "analysis.run_transient/v1");
-    assert_eq!(
-        envelope.data.run.solver_method,
-        "transient_placeholder_from_linear_static"
-    );
-    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
-    assert!(!envelope.data.publishable);
-    assert!(envelope
+    assert_eq!(envelope.data.run.solver_method, "implicit_euler_pcg");
+    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
+    assert!(envelope.data.publishable);
+    assert!(!envelope
         .data
         .quality_reasons
         .iter()
         .any(|reason| reason.code == QualityReasonCode::TransientPlaceholder));
+    let transient = envelope
+        .data
+        .transient_results
+        .as_ref()
+        .expect("transient payload should exist");
+    assert_eq!(transient.integration_method, runmat_runtime::analysis::TransientIntegrationMethod::ImplicitEuler);
+    assert_eq!(
+        transient.time_points_s.len(),
+        transient.displacement_snapshots.len()
+    );
 
     let invalid = analysis_run_transient_op(
         &fixture_model(FixtureId::CantileverLinearStatic),

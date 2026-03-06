@@ -23,6 +23,7 @@ use crate::{
         linear::solve_linear_system,
         modal::solve_modal_system,
         preconditioner::SpdPreconditionerKind,
+        transient::{solve_transient_system, TransientSolveOptions},
     },
 };
 
@@ -68,6 +69,14 @@ pub struct FeaModalRunResult {
     pub run: FeaRunResult,
     pub eigenvalues_hz: Vec<f64>,
     pub mode_shapes: Vec<AnalysisField>,
+    pub residual_norms: Vec<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeaTransientRunResult {
+    pub run: FeaRunResult,
+    pub time_points_s: Vec<f64>,
+    pub displacement_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
 }
 
@@ -211,6 +220,73 @@ pub fn run_modal_with_options(
         eigenvalues_hz: modal.eigenvalues_hz,
         mode_shapes,
         residual_norms: modal.residual_norms,
+    })
+}
+
+pub fn run_transient(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+) -> Result<FeaTransientRunResult, FeaRunError> {
+    run_transient_with_options(model, backend, TransientSolveOptions::default())
+}
+
+pub fn run_transient_with_options(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: TransientSolveOptions,
+) -> Result<FeaTransientRunResult, FeaRunError> {
+    validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
+
+    let summary = assemble_linear_system(model);
+    let transient = solve_transient_system(&summary, options);
+    let mut diagnostics = transient.diagnostics.clone();
+    diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
+
+    let displacement = transient
+        .displacement_snapshots
+        .last()
+        .cloned()
+        .unwrap_or_else(|| vec![0.0; summary.dof_count.max(3)]);
+    let von_mises = displacement
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max)
+        * 1.0e11;
+
+    let run = FeaRunResult {
+        backend,
+        solver_backend: "cpu_reference".to_string(),
+        solver_device_apply_k_ratio: 0.0,
+        solver_method: transient.solver_method,
+        preconditioner: "none".to_string(),
+        solver_host_sync_count: 0,
+        diagnostics,
+        displacement_field: AnalysisField::host_f64(
+            "displacement",
+            vec![displacement.len()],
+            displacement,
+        ),
+        von_mises_field: AnalysisField::host_f64("von_mises", vec![1], vec![von_mises]),
+    };
+
+    let displacement_snapshots = transient
+        .displacement_snapshots
+        .into_iter()
+        .enumerate()
+        .map(|(index, snapshot)| {
+            AnalysisField::host_f64(
+                format!("displacement_t{}", index),
+                vec![snapshot.len()],
+                snapshot,
+            )
+        })
+        .collect();
+
+    Ok(FeaTransientRunResult {
+        run,
+        time_points_s: transient.time_points_s,
+        displacement_snapshots,
+        residual_norms: transient.residual_norms,
     })
 }
 
@@ -367,6 +443,29 @@ mod tests {
             .diagnostics
             .iter()
             .any(|diag| diag.code == "FEA_MODAL_CONVERGENCE"));
+    }
+
+    #[test]
+    fn transient_solver_emits_time_snapshots_for_transient_step_fixture() {
+        let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+        model.steps = vec![runmat_analysis_core::AnalysisStep {
+            step_id: "transient_1".to_string(),
+            kind: runmat_analysis_core::AnalysisStepKind::Transient,
+        }];
+        let result =
+            run_transient(&model, ComputeBackend::Cpu).expect("transient solve should succeed");
+
+        assert!(!result.time_points_s.is_empty());
+        assert_eq!(
+            result.time_points_s.len(),
+            result.displacement_snapshots.len()
+        );
+        assert!(!result.residual_norms.is_empty());
+        assert!(result
+            .run
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "FEA_TRANSIENT_CONVERGENCE"));
     }
 
     #[test]

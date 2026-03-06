@@ -6,8 +6,8 @@ use runmat_analysis_core::{
     EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment, MaterialModel, ReferenceFrame,
 };
 use runmat_analysis_fea::{
-    run_linear_static_with_options, run_modal_with_options, ComputeBackend,
-    LinearStaticSolveOptions, ModalSolveOptions,
+    run_linear_static_with_options, run_modal_with_options, run_transient_with_options,
+    ComputeBackend, LinearStaticSolveOptions, ModalSolveOptions,
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
@@ -27,7 +27,8 @@ pub use contracts::{
     AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunOptions, AnalysisRunResult,
     AnalysisValidateResult, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
     PrecisionMode, PreconditionerMode, QualityGate, QualityPolicy, QualityReason,
-    QualityReasonCode, RunProvenance, RunStatus,
+    QualityReasonCode, RunProvenance, RunStatus, TransientIntegrationMethod,
+    TransientResultsData,
 };
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "analysis.create_model";
@@ -395,6 +396,7 @@ pub fn analysis_run_modal_op(
             mode_units: ModalFrequencyUnits::Hz,
             frequency_basis,
         }),
+        transient_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -467,31 +469,113 @@ pub fn analysis_run_transient_op(
         ));
     }
 
-    let mut envelope = analysis_run_linear_static_with_options(
+    let transient_run = run_transient_with_options(
         model,
         backend,
-        AnalysisRunOptions::default(),
-        context.clone(),
-    )?;
-    envelope.operation = ANALYSIS_RUN_TRANSIENT_OPERATION.to_string();
-    envelope.op_version = ANALYSIS_RUN_TRANSIENT_OP_VERSION.to_string();
-    envelope.data.run.solver_method = "transient_placeholder_from_linear_static".to_string();
-    envelope.data.provenance.solver_method = "transient_placeholder_from_linear_static".to_string();
-    envelope.data.run.diagnostics.push(runmat_analysis_fea::diagnostics::FeaDiagnostic {
-        code: "FEA_TRANSIENT_PLACEHOLDER".to_string(),
-        severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning,
-        message: "analysis.run_transient currently uses placeholder execution from linear-static solve path"
-            .to_string(),
-    });
-    envelope.data.quality_reasons.push(QualityReason {
-        code: QualityReasonCode::TransientPlaceholder,
-        detail: "transient run path currently uses linear-static placeholder backend"
-            .to_string(),
-    });
-    envelope.data.publishable = false;
-    envelope.data.run_status = RunStatus::Degraded;
+        runmat_analysis_fea::solve::transient::TransientSolveOptions::default(),
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_TRANSIENT_OPERATION,
+            ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "SOLVER_MODEL_INVALID",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            err.to_string(),
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("geometry_id".to_string(), model.geometry_id.clone()),
+            ]),
+        )
+    })?;
 
-    storage::persist_run_result(&envelope.data).map_err(|err| {
+    let run = transient_run.run;
+    let solver_convergence = if run.diagnostics.iter().any(|item| {
+        item.code == "FEA_TRANSIENT_CONVERGENCE"
+            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+    }) {
+        QualityGate::Pass
+    } else {
+        QualityGate::Warn
+    };
+    let result_quality = if transient_run.displacement_snapshots.is_empty()
+        || transient_run.time_points_s.is_empty()
+        || transient_run
+            .residual_norms
+            .iter()
+            .any(|residual| !residual.is_finite())
+    {
+        QualityGate::Fail
+    } else {
+        QualityGate::Pass
+    };
+
+    let mut quality_reasons = Vec::new();
+    if solver_convergence == QualityGate::Warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::SolverNotConverged,
+            detail: "transient solver convergence gate is warning".to_string(),
+        });
+    }
+    if run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_TRANSIENT_PLACEHOLDER")
+    {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::TransientPlaceholder,
+            detail: "transient run path currently uses linear-static placeholder backend"
+                .to_string(),
+        });
+    }
+
+    let publishable = solver_convergence == QualityGate::Pass
+        && result_quality == QualityGate::Pass
+        && quality_reasons.is_empty();
+    let run_status = if publishable {
+        RunStatus::Publishable
+    } else if result_quality == QualityGate::Fail {
+        RunStatus::Rejected
+    } else {
+        RunStatus::Degraded
+    };
+
+    let result = AnalysisRunResult {
+        run_id: storage::next_run_id(),
+        run,
+        modal_results: None,
+        transient_results: Some(TransientResultsData {
+            transient_payload_version: "transient_results/v1".to_string(),
+            time_points_s: transient_run.time_points_s,
+            displacement_snapshots: transient_run.displacement_snapshots,
+            residual_norms: transient_run.residual_norms,
+            integration_method: TransientIntegrationMethod::ImplicitEuler,
+        }),
+        model_validity: QualityGate::Pass,
+        solver_convergence,
+        result_quality,
+        run_status,
+        publishable,
+        quality_reasons,
+        provenance: RunProvenance {
+            backend,
+            solver_backend: "cpu_reference".to_string(),
+            solver_device_apply_k_ratio: 0.0,
+            solver_host_sync_count: 0,
+            precision_mode: contracts::format_precision_mode(PrecisionMode::Fp64),
+            deterministic_mode: false,
+            solver_method: "implicit_euler_pcg".to_string(),
+            preconditioner: "none".to_string(),
+            quality_policy: contracts::format_quality_policy(QualityPolicy::Balanced),
+            fallback_events: Vec::new(),
+        },
+    };
+
+    storage::persist_run_result(&result).map_err(|err| {
         operation_error(
             ANALYSIS_RUN_TRANSIENT_OPERATION,
             ANALYSIS_RUN_TRANSIENT_OP_VERSION,
@@ -503,10 +587,16 @@ pub fn analysis_run_transient_op(
                 severity: OperationErrorSeverity::Error,
             },
             format!("failed to persist analysis run artifact: {err}"),
-            BTreeMap::from([("run_id".to_string(), envelope.data.run_id.clone())]),
+            BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
         )
     })?;
-    Ok(envelope)
+
+    Ok(OperationEnvelope::new(
+        ANALYSIS_RUN_TRANSIENT_OPERATION,
+        ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+        &context,
+        result,
+    ))
 }
 
 pub fn analysis_run_linear_static_with_options(
@@ -660,6 +750,7 @@ pub fn analysis_run_linear_static_with_options(
         run_id: storage::next_run_id(),
         run,
         modal_results: None,
+        transient_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -877,6 +968,7 @@ pub fn analysis_results_op(
     let data = AnalysisResultsData {
         fields,
         modal_results,
+        transient_results: run_result.transient_results.clone(),
         diagnostics: if query.include_diagnostics {
             Some(run_result.run.diagnostics.clone())
         } else {
