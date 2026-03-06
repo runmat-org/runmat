@@ -980,6 +980,7 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-06: Refactored runtime geometry module from single-file layout to directory layout (`runmat-runtime/src/geometry/{mod,tests}.rs`) to keep operation implementation and test growth maintainable while preserving existing geometry operation contracts.
 - 2026-03-06: Implemented STEP import MVP in `runmat-geometry-io` through `io/src/cad` integration: STEP payloads now parse basic CAD metadata (`FILE_NAME`, `PRODUCT`, material tokens), emit CAD-kind source geometry with assembly/regions/material evidence, and are covered by deterministic import + runtime geometry operation tests.
 - 2026-03-06: Added runtime quality policy and reason contracts for analysis runs/results (`quality_policy`, `quality_reasons`) with policy-dependent publishability behavior (`strict`, `balanced`, `exploratory`), and aligned runtime tests/conformance harness defaults to the explicit balanced policy.
 - 2026-03-06: Added explicit runtime tests for quality-policy divergence: `balanced` remains publishable when core quality gates pass but quality reasons exist (field-promotion fallback), while `strict` degrades publishability under the same conditions.
