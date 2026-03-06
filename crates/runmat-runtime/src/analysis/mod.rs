@@ -106,8 +106,7 @@ pub fn analysis_create_model_op(
 
     if matches!(
         intent.profile,
-        AnalysisCreateModelProfile::TransientStructural
-            | AnalysisCreateModelProfile::NonlinearStructural
+        AnalysisCreateModelProfile::NonlinearStructural
     ) {
         let profile = create_model_profile_name(intent.profile);
         return Err(operation_error(
@@ -172,7 +171,26 @@ pub fn analysis_create_model_op(
                 kind: AnalysisStepKind::Modal,
             },
         ),
-        AnalysisCreateModelProfile::TransientStructural => unreachable!("guarded above"),
+        AnalysisCreateModelProfile::TransientStructural => (
+            BoundaryCondition {
+                bc_id: "bc_default_fixed".to_string(),
+                region_id: fixed_region_id,
+                kind: BoundaryConditionKind::Fixed,
+            },
+            LoadCase {
+                load_id: "load_default_transient_force".to_string(),
+                region_id: load_region_id,
+                kind: LoadKind::Force {
+                    fx: 0.0,
+                    fy: -500.0,
+                    fz: 0.0,
+                },
+            },
+            AnalysisStep {
+                step_id: "step_default_transient".to_string(),
+                kind: AnalysisStepKind::Transient,
+            },
+        ),
         AnalysisCreateModelProfile::NonlinearStructural => unreachable!("guarded above"),
     };
 
@@ -472,6 +490,22 @@ pub fn analysis_run_transient_op(
     });
     envelope.data.publishable = false;
     envelope.data.run_status = RunStatus::Degraded;
+
+    storage::persist_run_result(&envelope.data).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_TRANSIENT_OPERATION,
+            ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist analysis run artifact: {err}"),
+            BTreeMap::from([("run_id".to_string(), envelope.data.run_id.clone())]),
+        )
+    })?;
     Ok(envelope)
 }
 

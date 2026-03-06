@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     assembly::AssemblySummary,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    operator::{apply_k, apply_m},
+    operator::{apply_k, apply_m, OperatorSystem},
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -26,49 +26,43 @@ pub fn solve_modal_system(summary: &AssemblySummary, mode_count: usize) -> Modal
             diagnostics: vec![FeaDiagnostic {
                 code: "FEA_MODAL_EMPTY_SYSTEM".to_string(),
                 severity: FeaDiagnosticSeverity::Warning,
-                message: "modal solve skipped because assembled system has zero DOFs or requested mode_count is zero"
-                    .to_string(),
+                message:
+                    "modal solve skipped because assembled system has zero DOFs or requested mode_count is zero"
+                        .to_string(),
             }],
-            solver_method: "diag_generalized_eigen".to_string(),
+            solver_method: "matrix_free_subspace_iteration".to_string(),
         };
     }
 
-    let mut candidates = Vec::new();
-    for i in 0..summary.operator.dof_count {
-        if summary.operator.constrained[i] {
-            continue;
-        }
-        let k = summary.operator.stiffness_diag[i].max(1.0e-12);
-        let m = summary.operator.mass_diag[i].max(1.0e-12);
-        let omega = (k / m).sqrt();
-        let freq_hz = omega / (2.0 * std::f64::consts::PI);
-        candidates.push((i, freq_hz));
-    }
+    let unconstrained: Vec<usize> = summary
+        .operator
+        .constrained
+        .iter()
+        .enumerate()
+        .filter_map(|(i, is_constrained)| if *is_constrained { None } else { Some(i) })
+        .collect();
+    let target_mode_count = mode_count.min(unconstrained.len());
 
-    candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-    let selected: Vec<(usize, f64)> = candidates.into_iter().take(mode_count).collect();
+    let mut basis: Vec<Vec<f64>> = Vec::with_capacity(target_mode_count);
+    let mut modes: Vec<(f64, Vec<f64>, f64)> = Vec::with_capacity(target_mode_count);
+    for mode_idx in 0..target_mode_count {
+        let mut q = vec![0.0; summary.operator.dof_count];
+        q[unconstrained[mode_idx]] = 1.0;
+        normalize_mass(&summary.operator, &mut q);
 
-    let mut eigenvalues_hz = Vec::with_capacity(selected.len());
-    let mut mode_shapes = Vec::with_capacity(selected.len());
-    let mut residual_norms = Vec::with_capacity(selected.len());
-    for (mode_idx, (dof_index, freq_hz)) in selected.into_iter().enumerate() {
-        eigenvalues_hz.push(freq_hz);
+        for _ in 0..8 {
+            let mq = apply_m(&summary.operator, &q);
+            let mut z = solve_k_cg(&summary.operator, &mq, 64, 1.0e-10);
+            orthonormalize_mass(&summary.operator, &mut z, &basis);
+            normalize_mass(&summary.operator, &mut z);
+            q = z;
+        }
 
-        let mut shape = vec![0.0; summary.operator.dof_count];
-        shape[dof_index] = 1.0;
-        if dof_index > 0 && !summary.operator.constrained[dof_index - 1] {
-            shape[dof_index - 1] = -0.25;
-        }
-        if dof_index + 1 < shape.len() && !summary.operator.constrained[dof_index + 1] {
-            shape[dof_index + 1] = 0.25;
-        }
-        let norm = shape.iter().map(|v| v * v).sum::<f64>().sqrt().max(1.0e-12);
-        for value in &mut shape {
-            *value /= norm;
-        }
-        let lambda = (2.0 * std::f64::consts::PI * freq_hz).powi(2);
-        let kq = apply_k(&summary.operator, &shape);
-        let mq = apply_m(&summary.operator, &shape);
+        let kq = apply_k(&summary.operator, &q);
+        let mq = apply_m(&summary.operator, &q);
+        let lambda = (dot(&q, &kq) / dot(&q, &mq).abs().max(1.0e-12)).max(0.0);
+        let freq_hz = lambda.sqrt() / (2.0 * std::f64::consts::PI);
+
         let residual = kq
             .iter()
             .zip(mq.iter())
@@ -84,16 +78,26 @@ pub fn solve_modal_system(summary: &AssemblySummary, mode_count: usize) -> Modal
             .sum::<f64>()
             .sqrt()
             .max(1.0e-12);
-        residual_norms.push(residual / kq_norm);
-        let _ = mode_idx;
+
+        basis.push(q.clone());
+        modes.push((freq_hz, q, residual / kq_norm));
+    }
+
+    modes.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    let mut eigenvalues_hz = Vec::with_capacity(modes.len());
+    let mut mode_shapes = Vec::with_capacity(modes.len());
+    let mut residual_norms = Vec::with_capacity(modes.len());
+    for (freq_hz, shape, residual) in modes {
+        eigenvalues_hz.push(freq_hz);
         mode_shapes.push(shape);
+        residual_norms.push(residual);
     }
 
     let converged = !eigenvalues_hz.is_empty();
     let mut diagnostics = vec![FeaDiagnostic {
         code: "FEA_MODAL_METHOD".to_string(),
         severity: FeaDiagnosticSeverity::Info,
-        message: "solver=diag_generalized_eigen matrix_free=false".to_string(),
+        message: "solver=matrix_free_subspace_iteration inverse_k=true".to_string(),
     }];
     diagnostics.push(FeaDiagnostic {
         code: "FEA_MODAL_CONVERGENCE".to_string(),
@@ -109,6 +113,7 @@ pub fn solve_modal_system(summary: &AssemblySummary, mode_count: usize) -> Modal
             converged
         ),
     });
+
     if !residual_norms.is_empty() {
         let max_residual = residual_norms.iter().copied().fold(0.0_f64, f64::max);
         diagnostics.push(FeaDiagnostic {
@@ -128,6 +133,59 @@ pub fn solve_modal_system(summary: &AssemblySummary, mode_count: usize) -> Modal
         mode_shapes,
         residual_norms,
         diagnostics,
-        solver_method: "diag_generalized_eigen".to_string(),
+        solver_method: "matrix_free_subspace_iteration".to_string(),
     }
+}
+
+fn dot(a: &[f64], b: &[f64]) -> f64 {
+    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum::<f64>()
+}
+
+fn normalize_mass(system: &OperatorSystem, vector: &mut [f64]) {
+    let mv = apply_m(system, vector);
+    let mass_norm = dot(vector, &mv).abs().sqrt().max(1.0e-12);
+    for value in vector.iter_mut() {
+        *value /= mass_norm;
+    }
+}
+
+fn orthonormalize_mass(system: &OperatorSystem, vector: &mut [f64], basis: &[Vec<f64>]) {
+    for mode in basis {
+        let mv = apply_m(system, mode);
+        let projection = dot(vector, &mv);
+        for (value, base) in vector.iter_mut().zip(mode.iter()) {
+            *value -= projection * *base;
+        }
+    }
+}
+
+fn solve_k_cg(system: &OperatorSystem, rhs: &[f64], max_iters: usize, tol: f64) -> Vec<f64> {
+    let mut x = vec![0.0; rhs.len()];
+    let mut r = rhs.to_vec();
+    let mut p = r.clone();
+    let mut rr_old = dot(&r, &r);
+    if rr_old.sqrt() <= tol {
+        return x;
+    }
+
+    for _ in 0..max_iters {
+        let ap = apply_k(system, &p);
+        let denom = dot(&p, &ap).abs().max(1.0e-12);
+        let alpha = rr_old / denom;
+        for i in 0..x.len() {
+            x[i] += alpha * p[i];
+            r[i] -= alpha * ap[i];
+        }
+        let rr_new = dot(&r, &r);
+        if rr_new.sqrt() <= tol {
+            break;
+        }
+        let beta = rr_new / rr_old.max(1.0e-12);
+        for i in 0..p.len() {
+            p[i] = r[i] + beta * p[i];
+        }
+        rr_old = rr_new;
+    }
+
+    x
 }

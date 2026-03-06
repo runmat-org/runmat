@@ -163,10 +163,7 @@ fn analysis_create_model_maps_invalid_intent_error() {
 fn analysis_create_model_maps_unsupported_profile_error() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    for profile in [
-        AnalysisCreateModelProfile::TransientStructural,
-        AnalysisCreateModelProfile::NonlinearStructural,
-    ] {
+    for profile in [AnalysisCreateModelProfile::NonlinearStructural] {
         let err = analysis_create_model_op(
             &geometry,
             AnalysisCreateModelIntentSpec {
@@ -181,6 +178,25 @@ fn analysis_create_model_maps_unsupported_profile_error() {
         assert_eq!(err.operation, "analysis.create_model");
         assert_eq!(err.op_version, "analysis.create_model/v1");
     }
+}
+
+#[test]
+fn analysis_create_model_supports_transient_profile_template() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let envelope = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "transient_model".to_string(),
+            profile: AnalysisCreateModelProfile::TransientStructural,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("transient profile should be supported");
+
+    assert_eq!(envelope.data.model_id.0, "transient_model");
+    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Transient);
+    assert_eq!(envelope.data.loads[0].load_id, "load_default_transient_force");
 }
 
 #[test]
@@ -803,8 +819,14 @@ fn analysis_run_modal_returns_native_modal_result() {
 
     assert_eq!(envelope.operation, "analysis.run_modal");
     assert_eq!(envelope.op_version, "analysis.run_modal/v1");
-    assert_eq!(envelope.data.run.solver_method, "diag_generalized_eigen");
-    assert_eq!(envelope.data.provenance.solver_method, "diag_generalized_eigen");
+    assert_eq!(
+        envelope.data.run.solver_method,
+        "matrix_free_subspace_iteration"
+    );
+    assert_eq!(
+        envelope.data.provenance.solver_method,
+        "matrix_free_subspace_iteration"
+    );
     assert_eq!(envelope.data.run_status, RunStatus::Degraded);
     assert!(!envelope.data.publishable);
     let modal = envelope

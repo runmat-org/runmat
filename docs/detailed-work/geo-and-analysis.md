@@ -980,6 +980,8 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-06: Upgraded native modal solver core from diagonal extraction to matrix-free subspace iteration with inverse-K inner solves and M-orthonormalization, exposing richer modal residual telemetry while preserving operation contract shape.
+- 2026-03-06: Extended create-model profile support so `transient_structural` now synthesizes a valid transient template (step/load defaults) while retaining explicit unsupported semantics only for `nonlinear_structural`.
 - 2026-03-06: Added initial native modal solve path in `runmat-analysis-fea` (`solve/modal.rs`, `run_modal_with_options`) using assembled generalized diagonal stiffness/mass extraction, emitting modal diagnostics (`FEA_MODAL_METHOD`, `FEA_MODAL_CONVERGENCE`) and deterministic mode-shape fields.
 - 2026-03-06: Switched runtime `analysis.run_modal/v1` to consume native FEA modal execution (instead of linear-static placeholder), including modal quality-gate evaluation and publishability/status decisions from modal convergence + modal payload validity.
 - 2026-03-06: Added modal residual tracking (`residual_norms`) to modal payloads and FEA diagnostics (`FEA_MODAL_RESIDUAL`), with runtime quality gating that emits `ModalResidualExceeded` when residual thresholds are exceeded.

@@ -198,10 +198,23 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
     assert_eq!(modal.op_version, "analysis.create_model/v1");
     assert_eq!(modal.data.steps[0].kind, runmat_analysis_core::AnalysisStepKind::Modal);
 
-    for profile in [
-        AnalysisCreateModelProfile::TransientStructural,
-        AnalysisCreateModelProfile::NonlinearStructural,
-    ] {
+    let transient = analysis_create_model_op(
+        &geometry.data,
+        AnalysisCreateModelIntentSpec {
+            model_id: "contract_transient_model".to_string(),
+            profile: AnalysisCreateModelProfile::TransientStructural,
+        },
+        OperationContext::new(Some("trace-contract-create-4-transient".to_string()), None),
+    )
+    .expect("transient profile should be supported");
+    assert_eq!(transient.operation, "analysis.create_model");
+    assert_eq!(transient.op_version, "analysis.create_model/v1");
+    assert_eq!(
+        transient.data.steps[0].kind,
+        runmat_analysis_core::AnalysisStepKind::Transient
+    );
+
+    for profile in [AnalysisCreateModelProfile::NonlinearStructural] {
         let unsupported_profile = analysis_create_model_op(
             &geometry.data,
             AnalysisCreateModelIntentSpec {
@@ -345,7 +358,7 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
     assert_eq!(modal_envelope.op_version, "analysis.run_modal/v1");
     assert_eq!(
         modal_envelope.data.run.solver_method,
-        "diag_generalized_eigen"
+        "matrix_free_subspace_iteration"
     );
     let modal_results = modal_envelope
         .data
