@@ -1,4 +1,5 @@
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorOwned,
@@ -12,6 +13,13 @@ use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::UnitSystem;
 
 use super::*;
+
+fn analysis_test_guard() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| Mutex::new(()))
+        .lock()
+        .expect("analysis test lock poisoned")
+}
 
 fn sample_model() -> AnalysisModel {
     AnalysisModel {
@@ -49,6 +57,7 @@ fn sample_model() -> AnalysisModel {
 
 #[test]
 fn analysis_validate_returns_typed_envelope() {
+    let _guard = analysis_test_guard();
     let model = sample_model();
     let context = OperationContext::new(Some("trace-a1".to_string()), Some("request-a1".to_string()));
     let envelope = analysis_validate(&model, UnitSystem::Meter, &ReferenceFrame::Global, context)
@@ -62,6 +71,7 @@ fn analysis_validate_returns_typed_envelope() {
 
 #[test]
 fn analysis_validate_maps_typed_error_code() {
+    let _guard = analysis_test_guard();
     let mut model = sample_model();
     model.materials.clear();
     let context = OperationContext::new(None, None);
@@ -76,6 +86,7 @@ fn analysis_validate_maps_typed_error_code() {
 
 #[test]
 fn analysis_run_linear_static_returns_typed_envelope() {
+    let _guard = analysis_test_guard();
     let model = sample_model();
     let context = OperationContext::new(Some("trace-a2".to_string()), Some("request-a2".to_string()));
     let envelope = analysis_run_linear_static_with_options(
@@ -84,6 +95,7 @@ fn analysis_run_linear_static_returns_typed_envelope() {
         AnalysisRunOptions {
             deterministic_mode: true,
             precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Auto,
         },
         context,
     )
@@ -98,10 +110,13 @@ fn analysis_run_linear_static_returns_typed_envelope() {
     assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
     assert!(envelope.data.provenance.deterministic_mode);
     assert_eq!(envelope.data.provenance.precision_mode, "fp64");
+    assert_eq!(envelope.data.provenance.solver_method, "matrix_free_pcg");
+    assert_eq!(envelope.data.provenance.preconditioner, "jacobi");
 }
 
 #[test]
 fn gpu_run_without_provider_records_fallback_event() {
+    let _guard = analysis_test_guard();
     let _guard = runmat_accelerate_api::ThreadProviderGuard::set(None);
     let model = sample_model();
     let envelope =
@@ -122,6 +137,7 @@ fn gpu_run_without_provider_records_fallback_event() {
 
 #[test]
 fn gpu_run_with_provider_emits_device_refs() {
+    let _guard = analysis_test_guard();
     static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(1000);
 
     struct AnalysisTestProvider;
@@ -188,6 +204,7 @@ fn gpu_run_with_provider_emits_device_refs() {
 
 #[test]
 fn analysis_results_returns_filtered_fields_and_metadata() {
+    let _guard = analysis_test_guard();
     let model = sample_model();
     let run = analysis_run_linear_static_op(
         &model,
@@ -216,6 +233,7 @@ fn analysis_results_returns_filtered_fields_and_metadata() {
 
 #[test]
 fn analysis_results_unknown_field_maps_typed_error() {
+    let _guard = analysis_test_guard();
     let model = sample_model();
     let run = analysis_run_linear_static_op(
         &model,
@@ -241,6 +259,7 @@ fn analysis_results_unknown_field_maps_typed_error() {
 
 #[test]
 fn analysis_results_by_run_id_roundtrip_works() {
+    let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
     let model = sample_model();
     let run = analysis_run_linear_static_op(
@@ -266,6 +285,7 @@ fn analysis_results_by_run_id_roundtrip_works() {
 
 #[test]
 fn analysis_results_by_run_id_missing_maps_typed_error() {
+    let _guard = analysis_test_guard();
     storage::reset_artifact_store_for_tests();
     let err = analysis_results_by_run_id_op(
         "run_missing",
@@ -276,4 +296,54 @@ fn analysis_results_by_run_id_missing_maps_typed_error() {
 
     assert_eq!(err.error_code, "ANALYSIS_RESULTS_RUN_NOT_FOUND");
     storage::reset_artifact_store_for_tests();
+}
+
+#[test]
+fn requested_preconditioner_fallback_is_recorded() {
+    let _guard = analysis_test_guard();
+    let model = sample_model();
+    let envelope = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Amg,
+        },
+        OperationContext::new(Some("trace-preconditioner-fallback".to_string()), None),
+    )
+    .expect("run should succeed");
+
+    assert_eq!(envelope.data.provenance.preconditioner, "jacobi");
+    assert!(envelope
+        .data
+        .provenance
+        .fallback_events
+        .iter()
+        .any(|event| event.starts_with("SOLVER_PRECONDITIONER_FALLBACK")));
+}
+
+#[test]
+fn ilu_preconditioner_request_is_honored_without_fallback() {
+    let _guard = analysis_test_guard();
+    let model = sample_model();
+    let envelope = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Ilu,
+        },
+        OperationContext::new(Some("trace-preconditioner-ilu".to_string()), None),
+    )
+    .expect("run should succeed");
+
+    assert_eq!(envelope.data.provenance.preconditioner, "ilu0");
+    assert!(!envelope
+        .data
+        .provenance
+        .fallback_events
+        .iter()
+        .any(|event| event.starts_with("SOLVER_PRECONDITIONER_FALLBACK")));
 }

@@ -7,6 +7,7 @@ use runmat_geometry_core::UnitSystem;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FixtureId {
     CantileverLinearStatic,
+    CantileverLoadSweep,
     MissingMaterials,
     MissingLoads,
 }
@@ -14,6 +15,7 @@ pub enum FixtureId {
 pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
     match fixture {
         FixtureId::CantileverLinearStatic => cantilever_linear_static(),
+        FixtureId::CantileverLoadSweep => cantilever_load_sweep(),
         FixtureId::MissingMaterials => missing_materials(),
         FixtureId::MissingLoads => missing_loads(),
     }
@@ -51,6 +53,26 @@ fn cantilever_linear_static() -> AnalysisModel {
             kind: AnalysisStepKind::Static,
         }],
     }
+}
+
+fn cantilever_load_sweep() -> AnalysisModel {
+    let mut model = cantilever_linear_static();
+    model.model_id = AnalysisModelId("cantilever_load_sweep".to_string());
+    model.loads = (0..128)
+        .map(|i| {
+            let scale = 1.0 + (i as f64) * 0.01;
+            LoadCase {
+                load_id: format!("tip_load_{i}"),
+                region_id: format!("tip_{i}"),
+                kind: LoadKind::Force {
+                    fx: 0.0,
+                    fy: -1000.0 * scale,
+                    fz: 0.0,
+                },
+            }
+        })
+        .collect();
+    model
 }
 
 fn missing_materials() -> AnalysisModel {

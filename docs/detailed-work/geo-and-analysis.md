@@ -286,7 +286,7 @@ For analysis solve responses, `data` must include:
 
 - tier gates: `model_validity`, `solver_convergence`, `result_quality`
 - publication decision: `run_status` and `publishable`
-- provenance core: `backend`, `precision_mode`, `deterministic_mode`, `fallback_events`
+- provenance core: `backend`, `solver_backend`, `precision_mode`, `deterministic_mode`, `solver_method`, `preconditioner`, `fallback_events`
 
 For result retrieval (`analysis.results/v1`), query/response semantics are:
 
@@ -306,6 +306,7 @@ Solve requests should carry explicit run options, at minimum:
 
 - `deterministic_mode` (true/false)
 - `precision_mode` (`fp32` | `fp64` | `mixed`)
+- `preconditioner_mode` (`auto` | `jacobi` | `amg` | `ilu`), with explicit fallback events when unsupported
 
 Field payloads must use a domain field container (not raw numeric arrays in operation contracts):
 
@@ -970,6 +971,11 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-06: Added solver math backend seam in FEA (`solve/backend/{linear_algebra,cpu_reference}.rs`) and routed linear solve through backend trait operations, so CPU reference kernels are isolated implementation details and future runtime tensor backend integration can slot in without changing solver contracts.
+- 2026-03-06: Implemented second preconditioner path with tridiagonal ILU(0)-style preconditioning (selectable via `preconditioner_mode=ilu`), upgraded solve selection to pass requested mode into FEA internals, and retained explicit fallback telemetry only for unsupported requested modes (currently `amg -> jacobi`).
+- 2026-03-06: Introduced SPD preconditioner abstraction in FEA solve path (`solve/preconditioner.rs`) with pluggable interface and Jacobi implementation, surfaced solver/preconditioner selection in runtime provenance, and added explicit preconditioner fallback telemetry (`SOLVER_PRECONDITIONER_FALLBACK`) when unsupported modes are requested.
+- 2026-03-06: Added non-diagonal stiffness coupling to matrix-free operator application (`Kx` tridiagonal-style neighbor coupling with constrained-DOF treatment), upgraded iterative solve to PCG + Jacobi preconditioning, and added tighter physics-oriented fixture checks (cantilever displacement/stress tolerances plus load-sweep magnitude scaling assertions).
+- 2026-03-06: Advanced solver depth with preconditioned matrix-free iterative solve details: upgraded linear path to PCG + Jacobi preconditioner diagnostics (`FEA_SOLVER_METHOD`), added large-load fixture (`CantileverLoadSweep`) for scale-oriented validation, and expanded benchmark/conformance manifest with the larger GPU-provider fixture.
 - 2026-03-06: Upgraded `runmat-analysis-fea` from placeholder solve to a matrix-free operator-backed linear static path: added operator API module (`apply_k/apply_m/apply_c`), assembly now produces an `OperatorSystem` with rhs/diagonals/constraints, linear solve uses iterative conjugate-gradient over operator application, and post-fields derive from solved displacement vectors (with existing runtime contracts preserved).
 - 2026-03-06: Added optional baseline drift comparison in benchmark harness (`RUNMAT_ANALYSIS_BASELINE_PATH`, `RUNMAT_ANALYSIS_ENFORCE_BASELINE`, `RUNMAT_ANALYSIS_MAX_SLOWDOWN_RATIO`) to compare CPU/GPU timing ratios against a prior artifact and enforce slowdown gates when requested.
 - 2026-03-06: Added run-artifact persistence boundary for analysis runtime (`AnalysisArtifactStore` adapter with in-memory default + filesystem adapter), introduced `run_id` on `analysis.run_linear_static` responses, and implemented `analysis.results` retrieval by run id with typed missing-lineage error (`ANALYSIS_RESULTS_RUN_NOT_FOUND`).

@@ -3,7 +3,10 @@ use std::collections::BTreeMap;
 use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisModel, AnalysisValidationError, ReferenceFrame,
 };
-use runmat_analysis_fea::{run_linear_static, ComputeBackend};
+use runmat_analysis_fea::{
+    run_linear_static_with_options, ComputeBackend, LinearStaticSolveOptions,
+};
+use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_geometry_core::UnitSystem;
 
 use crate::operations::{
@@ -17,8 +20,8 @@ pub mod storage;
 
 pub use contracts::{
     AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunOptions,
-    AnalysisRunResult, AnalysisValidateResult, PrecisionMode, QualityGate, RunProvenance,
-    RunStatus,
+    AnalysisRunResult, AnalysisValidateResult, PrecisionMode, PreconditionerMode, QualityGate,
+    RunProvenance, RunStatus,
 };
 
 const ANALYSIS_VALIDATE_OPERATION: &str = "analysis.validate";
@@ -59,7 +62,19 @@ pub fn analysis_run_linear_static_with_options(
     options: AnalysisRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    let run = run_linear_static(model, backend).map_err(|err| {
+    let requested_preconditioner = match options.preconditioner_mode {
+        PreconditionerMode::Auto | PreconditionerMode::Jacobi => SpdPreconditionerKind::Jacobi,
+        PreconditionerMode::Ilu => SpdPreconditionerKind::Ilu0,
+        PreconditionerMode::Amg => SpdPreconditionerKind::Jacobi,
+    };
+    let run = run_linear_static_with_options(
+        model,
+        backend,
+        LinearStaticSolveOptions {
+            preconditioner_kind: requested_preconditioner,
+        },
+    )
+    .map_err(|err| {
         operation_error(
             ANALYSIS_RUN_OPERATION,
             ANALYSIS_RUN_OP_VERSION,
@@ -82,6 +97,15 @@ pub fn analysis_run_linear_static_with_options(
     let mut fallback_events = Vec::new();
     promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
 
+    match options.preconditioner_mode {
+        PreconditionerMode::Auto | PreconditionerMode::Jacobi | PreconditionerMode::Ilu => {}
+        PreconditionerMode::Amg => {
+            fallback_events.push(
+                "SOLVER_PRECONDITIONER_FALLBACK:requested=amg:using=jacobi".to_string(),
+            );
+        }
+    }
+
     let solver_convergence = if run.diagnostics.iter().any(|item| {
         item.code == "FEA_CONVERGENCE"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
@@ -96,6 +120,9 @@ pub fn analysis_run_linear_static_with_options(
     } else {
         QualityGate::Fail
     };
+    let solver_backend = run.solver_backend.clone();
+    let solver_method = run.solver_method.clone();
+    let selected_preconditioner = run.preconditioner.clone();
 
     let publishable =
         solver_convergence == QualityGate::Pass && result_quality == QualityGate::Pass;
@@ -117,8 +144,11 @@ pub fn analysis_run_linear_static_with_options(
         publishable,
         provenance: RunProvenance {
             backend,
+            solver_backend,
             precision_mode: contracts::format_precision_mode(options.precision_mode),
             deterministic_mode: options.deterministic_mode,
+            solver_method,
+            preconditioner: selected_preconditioner,
             fallback_events,
         },
     };

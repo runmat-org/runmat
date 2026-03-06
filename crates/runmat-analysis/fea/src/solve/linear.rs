@@ -4,6 +4,8 @@ use crate::{
     assembly::AssemblySummary,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     operator::apply_k,
+    solve::backend::linear_algebra::LinearAlgebraBackend,
+    solve::preconditioner::{build_spd_preconditioner, SpdPreconditionerKind},
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -12,10 +14,16 @@ pub struct LinearSolveResult {
     pub residual_norm: f64,
     pub converged: bool,
     pub solution: Vec<f64>,
+    pub solver_method: String,
+    pub preconditioner: String,
     pub diagnostics: Vec<FeaDiagnostic>,
 }
 
-pub fn solve_linear_system(summary: &AssemblySummary) -> LinearSolveResult {
+pub fn solve_linear_system(
+    summary: &AssemblySummary,
+    preconditioner_kind: SpdPreconditionerKind,
+    algebra_backend: &dyn LinearAlgebraBackend,
+) -> LinearSolveResult {
     let has_dofs = summary.dof_count > 0;
     if !has_dofs {
         return LinearSolveResult {
@@ -23,6 +31,8 @@ pub fn solve_linear_system(summary: &AssemblySummary) -> LinearSolveResult {
             residual_norm: 0.0,
             converged: false,
             solution: Vec::new(),
+            solver_method: "matrix_free_pcg".to_string(),
+            preconditioner: preconditioner_kind.as_str().to_string(),
             diagnostics: vec![FeaDiagnostic {
                 code: "FEA_EMPTY_SYSTEM".to_string(),
                 severity: FeaDiagnosticSeverity::Warning,
@@ -33,21 +43,34 @@ pub fn solve_linear_system(summary: &AssemblySummary) -> LinearSolveResult {
 
     let max_iters = 64;
     let tol = 1.0e-8;
+    let preconditioner = build_spd_preconditioner(summary, preconditioner_kind);
     let b = &summary.operator.rhs;
     let mut x = vec![0.0; summary.dof_count];
 
-    let mut r = vec_sub(b, &apply_k(&summary.operator, &x));
-    let mut p = r.clone();
-    let mut rsold = dot(&r, &r);
-    let b_norm = rsold.sqrt().max(1.0);
+    let mut r = algebra_backend.vec_sub(b, &apply_k(&summary.operator, &x));
+    let mut z = preconditioner.apply(&r);
+    let mut p = z.clone();
+    let mut rz_old = algebra_backend.dot(&r, &z);
+    let b_norm = algebra_backend.dot(b, b).sqrt().max(1.0);
 
-    if rsold.sqrt() / b_norm <= tol {
+    let mut diagnostics = vec![FeaDiagnostic {
+        code: "FEA_SOLVER_METHOD".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "solver=pcg preconditioner={} matrix_free=true",
+            preconditioner.kind().as_str()
+        ),
+    }];
+
+    if algebra_backend.dot(&r, &r).sqrt() / b_norm <= tol {
         return LinearSolveResult {
             iterations: 0,
-            residual_norm: rsold.sqrt(),
+            residual_norm: algebra_backend.dot(&r, &r).sqrt(),
             converged: true,
             solution: x,
-            diagnostics: Vec::new(),
+            solver_method: "matrix_free_pcg".to_string(),
+            preconditioner: preconditioner.kind().as_str().to_string(),
+            diagnostics,
         };
     }
 
@@ -55,30 +78,33 @@ pub fn solve_linear_system(summary: &AssemblySummary) -> LinearSolveResult {
     let mut converged = false;
     for _ in 0..max_iters {
         let ap = apply_k(&summary.operator, &p);
-        let denom = dot(&p, &ap);
+        let denom = algebra_backend.dot(&p, &ap);
         if denom.abs() <= 1.0e-18 {
             break;
         }
-        let alpha = rsold / denom;
-        axpy(alpha, &p, &mut x);
-        axpy(-alpha, &ap, &mut r);
-        let rsnew = dot(&r, &r);
+        let alpha = rz_old / denom;
+        algebra_backend.axpy(alpha, &p, &mut x);
+        algebra_backend.axpy(-alpha, &ap, &mut r);
+        let residual_norm = algebra_backend.dot(&r, &r).sqrt();
         iterations += 1;
-        if rsnew.sqrt() / b_norm <= tol {
-            rsold = rsnew;
+        if residual_norm / b_norm <= tol {
             converged = true;
             break;
         }
 
-        let beta = rsnew / rsold;
-        for i in 0..p.len() {
-            p[i] = r[i] + beta * p[i];
+        z = preconditioner.apply(&r);
+        let rz_new = algebra_backend.dot(&r, &z);
+        if rz_old.abs() <= 1.0e-18 {
+            break;
         }
-        rsold = rsnew;
+        let beta = rz_new / rz_old;
+        for i in 0..p.len() {
+            p[i] = z[i] + beta * p[i];
+        }
+        rz_old = rz_new;
     }
 
-    let residual_norm = rsold.sqrt();
-    let mut diagnostics = Vec::new();
+    let residual_norm = algebra_backend.dot(&r, &r).sqrt();
     if !converged {
         diagnostics.push(FeaDiagnostic {
             code: "FEA_CG_MAX_ITERS".to_string(),
@@ -94,20 +120,8 @@ pub fn solve_linear_system(summary: &AssemblySummary) -> LinearSolveResult {
         residual_norm,
         converged,
         solution: x,
+        solver_method: "matrix_free_pcg".to_string(),
+        preconditioner: preconditioner.kind().as_str().to_string(),
         diagnostics,
     }
-}
-
-fn dot(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum()
-}
-
-fn axpy(alpha: f64, x: &[f64], y: &mut [f64]) {
-    for (yi, xi) in y.iter_mut().zip(x.iter()) {
-        *yi += alpha * xi;
-    }
-}
-
-fn vec_sub(a: &[f64], b: &[f64]) -> Vec<f64> {
-    a.iter().zip(b.iter()).map(|(x, y)| x - y).collect()
 }

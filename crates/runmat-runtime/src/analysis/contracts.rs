@@ -17,9 +17,19 @@ pub enum PrecisionMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PreconditionerMode {
+    Auto,
+    Jacobi,
+    Amg,
+    Ilu,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AnalysisRunOptions {
     pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,
+    pub preconditioner_mode: PreconditionerMode,
 }
 
 impl Default for AnalysisRunOptions {
@@ -27,6 +37,7 @@ impl Default for AnalysisRunOptions {
         Self {
             deterministic_mode: false,
             precision_mode: PrecisionMode::Fp64,
+            preconditioner_mode: PreconditionerMode::Auto,
         }
     }
 }
@@ -50,8 +61,11 @@ pub enum RunStatus {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RunProvenance {
     pub backend: ComputeBackend,
+    pub solver_backend: String,
     pub precision_mode: String,
     pub deterministic_mode: bool,
+    pub solver_method: String,
+    pub preconditioner: String,
     pub fallback_events: Vec<String>,
 }
 

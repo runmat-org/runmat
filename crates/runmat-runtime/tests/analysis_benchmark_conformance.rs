@@ -14,7 +14,7 @@ use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_results_by_run_id_op, analysis_results_op, analysis_run_linear_static_with_options,
     analysis_validate,
-    AnalysisResultsQuery, AnalysisRunOptions, PrecisionMode,
+    AnalysisResultsQuery, AnalysisRunOptions, PrecisionMode, PreconditionerMode,
 };
 use runmat_runtime::operations::OperationContext;
 use serde::{Deserialize, Serialize};
@@ -134,6 +134,17 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             residency_expectation: Some(ResidencyExpectation::HostFallback),
         },
         FixtureSpec {
+            id: "cantilever_load_sweep_gpu_provider",
+            description: "larger load sweep fixture with provider-backed GPU residency",
+            model: || fixture_model(FixtureId::CantileverLoadSweep),
+            expect_validate_error: None,
+            expect_run_error: None,
+            expected_publishable: Some(true),
+            parity_tolerance: None,
+            gpu_mode: Some(GpuMode::WithProvider),
+            residency_expectation: Some(ResidencyExpectation::DeviceRef),
+        },
+        FixtureSpec {
             id: "missing_materials",
             description: "invalid fixture must fail validation and run with typed errors",
             model: || fixture_model(FixtureId::MissingMaterials),
@@ -192,6 +203,7 @@ fn default_options() -> AnalysisRunOptions {
     AnalysisRunOptions {
         deterministic_mode: true,
         precision_mode: PrecisionMode::Fp64,
+        preconditioner_mode: PreconditionerMode::Auto,
     }
 }
 

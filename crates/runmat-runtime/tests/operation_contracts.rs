@@ -5,7 +5,7 @@ use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_results_by_run_id_op, analysis_results_op, analysis_run_linear_static_op,
     analysis_run_linear_static_with_options, analysis_validate, AnalysisResultsQuery,
-    AnalysisRunOptions, PrecisionMode, RunStatus,
+    AnalysisRunOptions, PrecisionMode, PreconditionerMode, RunStatus,
 };
 use runmat_runtime::geometry::{geometry_inspect_op, geometry_load_op};
 use runmat_runtime::operations::OperationContext;
@@ -259,6 +259,7 @@ fn analysis_run_deterministic_contract_is_stable_across_replays() {
     let options = AnalysisRunOptions {
         deterministic_mode: true,
         precision_mode: PrecisionMode::Fp64,
+        preconditioner_mode: PreconditionerMode::Auto,
     };
 
     let first = analysis_run_linear_static_with_options(

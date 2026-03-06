@@ -27,6 +27,7 @@ pub fn assemble_linear_system(model: &AnalysisModel) -> AssemblySummary {
     let stiffness_base = (avg_youngs_modulus / 2.0e3).max(1.0e5);
 
     let mut stiffness_diag = vec![0.0; dof_count];
+    let mut stiffness_upper = vec![0.0; dof_count.saturating_sub(1)];
     let mut mass_diag = vec![0.0; dof_count];
     let mut damping_diag = vec![0.0; dof_count];
     for i in 0..dof_count {
@@ -74,6 +75,15 @@ pub fn assemble_linear_system(model: &AnalysisModel) -> AssemblySummary {
         rhs[idx] = 0.0;
     }
 
+    for i in 0..stiffness_upper.len() {
+        let coupling = 0.05 * stiffness_diag[i].min(stiffness_diag[i + 1]);
+        stiffness_upper[i] = if constrained[i] || constrained[i + 1] {
+            0.0
+        } else {
+            coupling
+        };
+    }
+
     AssemblySummary {
         dof_count,
         constrained_dof_count,
@@ -82,6 +92,7 @@ pub fn assemble_linear_system(model: &AnalysisModel) -> AssemblySummary {
             dof_count,
             constrained,
             stiffness_diag,
+            stiffness_upper,
             mass_diag,
             damping_diag,
             rhs,

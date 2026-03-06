@@ -16,7 +16,10 @@ use crate::{
     assembly::assemble_linear_system,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     post::fields::recover_result_fields,
-    solve::linear::solve_linear_system,
+    solve::{
+        backend::cpu_reference::CpuReferenceBackend, linear::solve_linear_system,
+        preconditioner::SpdPreconditionerKind,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -29,9 +32,25 @@ pub enum ComputeBackend {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaRunResult {
     pub backend: ComputeBackend,
+    pub solver_backend: String,
+    pub solver_method: String,
+    pub preconditioner: String,
     pub diagnostics: Vec<FeaDiagnostic>,
     pub displacement_field: AnalysisField,
     pub von_mises_field: AnalysisField,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LinearStaticSolveOptions {
+    pub preconditioner_kind: SpdPreconditionerKind,
+}
+
+impl Default for LinearStaticSolveOptions {
+    fn default() -> Self {
+        Self {
+            preconditioner_kind: SpdPreconditionerKind::Jacobi,
+        }
+    }
 }
 
 #[derive(Debug, Error)]
@@ -44,10 +63,19 @@ pub fn run_linear_static(
     model: &AnalysisModel,
     backend: ComputeBackend,
 ) -> Result<FeaRunResult, FeaRunError> {
+    run_linear_static_with_options(model, backend, LinearStaticSolveOptions::default())
+}
+
+pub fn run_linear_static_with_options(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: LinearStaticSolveOptions,
+) -> Result<FeaRunResult, FeaRunError> {
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
 
     let summary = assemble_linear_system(model);
-    let solve_result = solve_linear_system(&summary);
+    let algebra_backend = CpuReferenceBackend;
+    let solve_result = solve_linear_system(&summary, options.preconditioner_kind, &algebra_backend);
     let fields = recover_result_fields(&summary, &solve_result);
 
     let mut diagnostics = vec![FeaDiagnostic {
@@ -58,14 +86,21 @@ pub fn run_linear_static(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "iterations={} residual_norm={} converged={}",
-            solve_result.iterations, solve_result.residual_norm, solve_result.converged
+            "iterations={} residual_norm={} converged={} solver_method={} preconditioner={}",
+            solve_result.iterations,
+            solve_result.residual_norm,
+            solve_result.converged,
+            solve_result.solver_method,
+            solve_result.preconditioner,
         ),
     }];
     diagnostics.extend(solve_result.diagnostics);
 
     Ok(FeaRunResult {
         backend,
+        solver_backend: "cpu_reference".to_string(),
+        solver_method: solve_result.solver_method,
+        preconditioner: solve_result.preconditioner,
         diagnostics,
         displacement_field: fields.displacement_field,
         von_mises_field: fields.von_mises_field,
@@ -92,6 +127,13 @@ mod tests {
             .as_host_f64()
             .expect("scaffold emits host displacement field");
         assert!(displacement[1] < 0.0);
+        assert!(displacement[1] < -8.0e-6 && displacement[1] > -1.2e-5);
+
+        let stress = result
+            .von_mises_field
+            .as_host_f64()
+            .expect("stress field should be host-backed");
+        assert!(stress[0] > 8.0e5 && stress[0] < 1.2e6);
     }
 
     #[test]
@@ -163,5 +205,44 @@ mod tests {
         assert!(err
             .to_string()
             .contains("ANALYSIS_VALIDATION_MISSING_LOADS"));
+    }
+
+    #[test]
+    fn load_sweep_fixture_uses_operator_solver_path() {
+        let baseline = run_linear_static(
+            &fixture_model(FixtureId::CantileverLinearStatic),
+            ComputeBackend::Cpu,
+        )
+        .expect("baseline solve should succeed");
+        let model = fixture_model(FixtureId::CantileverLoadSweep);
+        let result = run_linear_static(&model, ComputeBackend::Cpu).expect("solve should succeed");
+
+        let convergence = result
+            .diagnostics
+            .iter()
+            .find(|diag| diag.code == "FEA_CONVERGENCE")
+            .expect("convergence diagnostic should be present");
+        assert!(convergence.message.contains("residual_norm="));
+        assert!(result
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "FEA_SOLVER_METHOD"));
+        assert!(result.displacement_field.element_count() >= 384);
+
+        let baseline_max = baseline
+            .displacement_field
+            .as_host_f64()
+            .expect("baseline displacement should be host-backed")
+            .iter()
+            .map(|value| value.abs())
+            .fold(0.0_f64, f64::max);
+        let sweep_max = result
+            .displacement_field
+            .as_host_f64()
+            .expect("sweep displacement should be host-backed")
+            .iter()
+            .map(|value| value.abs())
+            .fold(0.0_f64, f64::max);
+        assert!(sweep_max > baseline_max);
     }
 }
