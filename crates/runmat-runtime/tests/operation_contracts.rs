@@ -8,6 +8,7 @@ use runmat_runtime::analysis::{
 };
 use runmat_runtime::geometry::{geometry_inspect_op, geometry_load_op};
 use runmat_runtime::operations::OperationContext;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
 
@@ -213,4 +214,104 @@ fn analysis_run_backend_selection_is_recorded_in_provenance() {
     assert_eq!(gpu.data.provenance.backend, ComputeBackend::Gpu);
     assert_eq!(cpu.data.run_status, RunStatus::Publishable);
     assert_eq!(gpu.data.run_status, RunStatus::Publishable);
+}
+
+#[test]
+fn analysis_run_gpu_without_provider_records_fallback_contract() {
+    let _guard = runmat_accelerate_api::ThreadProviderGuard::set(None);
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+
+    let envelope = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Gpu,
+        AnalysisRunOptions::default(),
+        OperationContext::new(Some("trace-contract-8".to_string()), None),
+    )
+    .expect("gpu run should succeed with host fallback");
+
+    assert!(envelope
+        .data
+        .provenance
+        .fallback_events
+        .iter()
+        .any(|event| event.starts_with("BACKEND_NO_PROVIDER:displacement")));
+    assert!(matches!(
+        envelope.data.run.displacement_field.values,
+        AnalysisFieldValues::HostF64(_)
+    ));
+}
+
+#[test]
+fn analysis_run_gpu_with_provider_emits_device_ref_contract() {
+    struct ContractTestProvider;
+
+    impl runmat_accelerate_api::AccelProvider for ContractTestProvider {
+        fn upload(
+            &self,
+            host: &runmat_accelerate_api::HostTensorView,
+        ) -> anyhow::Result<runmat_accelerate_api::GpuTensorHandle> {
+            static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(2000);
+            Ok(runmat_accelerate_api::GpuTensorHandle {
+                shape: host.shape.to_vec(),
+                device_id: 11,
+                buffer_id: NEXT_BUFFER_ID.fetch_add(1, Ordering::Relaxed),
+            })
+        }
+
+        fn download<'a>(
+            &'a self,
+            h: &'a runmat_accelerate_api::GpuTensorHandle,
+        ) -> runmat_accelerate_api::AccelDownloadFuture<'a> {
+            Box::pin(async move {
+                Ok(runmat_accelerate_api::HostTensorOwned {
+                    data: vec![0.0; h.shape.iter().product()],
+                    shape: h.shape.clone(),
+                })
+            })
+        }
+
+        fn free(&self, _h: &runmat_accelerate_api::GpuTensorHandle) -> anyhow::Result<()> {
+            Ok(())
+        }
+
+        fn device_info(&self) -> String {
+            "contract-test-provider".to_string()
+        }
+
+        fn device_id(&self) -> u32 {
+            11
+        }
+
+        fn device_info_struct(&self) -> runmat_accelerate_api::ApiDeviceInfo {
+            runmat_accelerate_api::ApiDeviceInfo {
+                device_id: 11,
+                name: "contract-test-provider".to_string(),
+                vendor: "runmat-tests".to_string(),
+                memory_bytes: None,
+                backend: Some("contract_gpu".to_string()),
+            }
+        }
+    }
+
+    static PROVIDER: ContractTestProvider = ContractTestProvider;
+    let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
+    let model = fixture_model(FixtureId::CantileverLinearStatic);
+
+    let envelope = analysis_run_linear_static_with_options(
+        &model,
+        ComputeBackend::Gpu,
+        AnalysisRunOptions::default(),
+        OperationContext::new(Some("trace-contract-9".to_string()), None),
+    )
+    .expect("gpu run should succeed");
+
+    assert!(envelope.data.provenance.fallback_events.is_empty());
+    assert!(matches!(
+        envelope.data.run.displacement_field.values,
+        AnalysisFieldValues::DeviceRef(_)
+    ));
+    assert!(matches!(
+        envelope.data.run.von_mises_field.values,
+        AnalysisFieldValues::DeviceRef(_)
+    ));
 }

@@ -1,7 +1,8 @@
 use std::collections::BTreeMap;
 
 use runmat_analysis_core::{
-    validate_model_against_geometry, AnalysisModel, AnalysisValidationError, ReferenceFrame,
+    validate_model_against_geometry, AnalysisField, AnalysisFieldValues, AnalysisModel,
+    AnalysisValidationError, DeviceFieldRef, ReferenceFrame,
 };
 use runmat_analysis_fea::{run_linear_static, ComputeBackend, FeaRunResult};
 use runmat_geometry_core::UnitSystem;
@@ -130,6 +131,10 @@ pub fn analysis_run_linear_static_with_options(
         )
     })?;
 
+    let mut run = run;
+    let mut fallback_events = Vec::new();
+    promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
+
     let solver_convergence = if run.diagnostics.iter().any(|item| {
         item.code == "FEA_CONVERGENCE"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
@@ -166,7 +171,7 @@ pub fn analysis_run_linear_static_with_options(
             backend,
             precision_mode: format_precision_mode(options.precision_mode),
             deterministic_mode: options.deterministic_mode,
-            fallback_events: Vec::new(),
+            fallback_events,
         },
     };
 
@@ -243,11 +248,67 @@ fn format_precision_mode(mode: PrecisionMode) -> String {
     }
 }
 
+fn promote_run_fields_to_device_refs(run: &mut FeaRunResult, fallback_events: &mut Vec<String>) {
+    if run.backend != ComputeBackend::Gpu {
+        return;
+    }
+
+    promote_field_to_device_ref("displacement", &mut run.displacement_field, fallback_events);
+    promote_field_to_device_ref("von_mises", &mut run.von_mises_field, fallback_events);
+}
+
+fn promote_field_to_device_ref(
+    field_label: &str,
+    field: &mut AnalysisField,
+    fallback_events: &mut Vec<String>,
+) {
+    let host_values = match &field.values {
+        AnalysisFieldValues::HostF64(values) => values.clone(),
+        AnalysisFieldValues::DeviceRef(_) => return,
+    };
+
+    let Some(provider) = runmat_accelerate_api::provider() else {
+        fallback_events.push(format!(
+            "BACKEND_NO_PROVIDER:{field_label}:retained_host_field"
+        ));
+        return;
+    };
+
+    let shape = field.shape.clone();
+    let view = runmat_accelerate_api::HostTensorView {
+        data: &host_values,
+        shape: &shape,
+    };
+    match provider.upload(&view) {
+        Ok(handle) => {
+            let backend = provider
+                .device_info_struct()
+                .backend
+                .unwrap_or_else(|| "gpu".to_string());
+            field.values = AnalysisFieldValues::DeviceRef(DeviceFieldRef {
+                backend,
+                token: format!("device:{}:buffer:{}", handle.device_id, handle.buffer_id),
+                element_count: host_values.len(),
+            });
+        }
+        Err(error) => fallback_events.push(format!(
+            "BACKEND_UPLOAD_FAILED:{field_label}:{}",
+            error
+        )),
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    use runmat_accelerate_api::{
+        AccelDownloadFuture, AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorOwned,
+        HostTensorView,
+    };
     use runmat_analysis_core::{
-        AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind, BoundaryCondition,
-        BoundaryConditionKind, LoadCase, LoadKind, MaterialModel,
+        AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind,
+        BoundaryCondition, BoundaryConditionKind, LoadCase, LoadKind, MaterialModel,
     };
 
     use super::*;
@@ -339,5 +400,97 @@ mod tests {
         assert_eq!(envelope.data.solver_convergence, QualityGate::Pass);
         assert!(envelope.data.provenance.deterministic_mode);
         assert_eq!(envelope.data.provenance.precision_mode, "fp64");
+    }
+
+    #[test]
+    fn gpu_run_without_provider_records_fallback_event() {
+        let _guard = runmat_accelerate_api::ThreadProviderGuard::set(None);
+        let model = sample_model();
+        let envelope = analysis_run_linear_static_op(
+            &model,
+            ComputeBackend::Gpu,
+            OperationContext::new(None, None),
+        )
+        .expect("run should pass");
+
+        assert!(envelope
+            .data
+            .provenance
+            .fallback_events
+            .iter()
+            .any(|event| event.starts_with("BACKEND_NO_PROVIDER:displacement")));
+        assert!(matches!(
+            envelope.data.run.displacement_field.values,
+            AnalysisFieldValues::HostF64(_)
+        ));
+    }
+
+    #[test]
+    fn gpu_run_with_provider_emits_device_refs() {
+        static NEXT_BUFFER_ID: AtomicU64 = AtomicU64::new(1000);
+
+        struct AnalysisTestProvider;
+
+        impl AccelProvider for AnalysisTestProvider {
+            fn upload(&self, host: &HostTensorView) -> anyhow::Result<GpuTensorHandle> {
+                Ok(GpuTensorHandle {
+                    shape: host.shape.to_vec(),
+                    device_id: 7,
+                    buffer_id: NEXT_BUFFER_ID.fetch_add(1, Ordering::Relaxed),
+                })
+            }
+
+            fn download<'a>(&'a self, h: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
+                Box::pin(async move {
+                    Ok(HostTensorOwned {
+                        data: vec![0.0; h.shape.iter().product()],
+                        shape: h.shape.clone(),
+                    })
+                })
+            }
+
+            fn free(&self, _h: &GpuTensorHandle) -> anyhow::Result<()> {
+                Ok(())
+            }
+
+            fn device_info(&self) -> String {
+                "analysis-test-provider".to_string()
+            }
+
+            fn device_id(&self) -> u32 {
+                7
+            }
+
+            fn device_info_struct(&self) -> ApiDeviceInfo {
+                ApiDeviceInfo {
+                    device_id: 7,
+                    name: "analysis-test-provider".to_string(),
+                    vendor: "runmat-tests".to_string(),
+                    memory_bytes: None,
+                    backend: Some("test_gpu".to_string()),
+                }
+            }
+        }
+
+        static PROVIDER: AnalysisTestProvider = AnalysisTestProvider;
+        let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
+
+        let model = sample_model();
+        let envelope = analysis_run_linear_static_op(
+            &model,
+            ComputeBackend::Gpu,
+            OperationContext::new(None, None),
+        )
+        .expect("run should pass");
+
+        assert!(envelope.data.provenance.fallback_events.is_empty());
+        assert!(matches!(
+            envelope.data.run.displacement_field.values,
+            AnalysisFieldValues::DeviceRef(_)
+        ));
+        assert!(matches!(
+            envelope.data.run.von_mises_field.values,
+            AnalysisFieldValues::DeviceRef(_)
+        ));
     }
 }

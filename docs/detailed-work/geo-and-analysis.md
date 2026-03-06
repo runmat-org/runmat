@@ -293,6 +293,8 @@ Field payloads must use a domain field container (not raw numeric arrays in oper
 - `values` supports `host_f64` and `device_ref` variants
 - runtime adapters may project to host tensors or provider handles, but contract shape remains stable
 
+GPU-targeted analysis runs should attempt to promote host-backed fields to `device_ref` values when an acceleration provider is available; when promotion is not possible, the run remains valid but must record explicit fallback events.
+
 ## Contract Versioning and Compatibility
 
 - Every operation request/response must carry a contract version (`op_version`).
@@ -945,6 +947,8 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-06: Extended runtime operation contract integration tests to lock GPU field residency behavior: explicit fallback-event contract when no provider is present, and `AnalysisFieldValues::DeviceRef` contract when provider-backed promotion is available.
+- 2026-03-06: Runtime analysis now opportunistically promotes GPU solve output fields to `AnalysisFieldValues::DeviceRef` via `runmat-accelerate-api` provider upload hooks, and records explicit fallback events (`BACKEND_NO_PROVIDER`, `BACKEND_UPLOAD_FAILED`) when promotion cannot happen.
 - 2026-03-06: Added explicit runtime solve options for `analysis.run_linear_static` (`deterministic_mode`, `precision_mode`) and extended contract tests to assert deterministic replay stability plus provenance backend/precision recording across CPU/GPU runs.
 - 2026-03-06: Extended runtime contract conformance tests for `analysis.validate` mismatch scenarios to assert exact typed envelope mapping for `ANALYSIS_VALIDATION_UNIT_MISMATCH` and `ANALYSIS_VALIDATION_FRAME_MISMATCH` (including structured mismatch context fields).
 - 2026-03-06: Expanded Track C fixture coverage: added invalid analysis fixtures (`MissingMaterials`, `MissingLoads`) in `runmat-analysis-fea::fixtures`, added fixture rejection tests in FEA, and extended runtime contract conformance tests to assert failure envelope mapping (`SOLVER_MODEL_INVALID`) and field-contract shape (`AnalysisFieldValues`).
