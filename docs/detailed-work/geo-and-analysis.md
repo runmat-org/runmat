@@ -980,6 +980,9 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-06: Added versioned runtime contract placeholder for `geometry.capture_view/v1` with explicit typed unsupported-capability mapping (`GEOMETRY_CAPTURE_UNSUPPORTED`) and contract/unit test coverage to keep the unified geometry operation surface stable while renderer wiring remains pending.
+- 2026-03-06: Wired `geometry.capture_view/v1` behind a thread-scoped runtime capture adapter seam (`GeometryViewCaptureAdapter` + guard), added typed spec validation (`GEOMETRY_CAPTURE_INVALID_SPEC`) and backend-failure mapping (`GEOMETRY_CAPTURE_BACKEND_FAILED`), and retained explicit unsupported fallback when no adapter is installed.
+- 2026-03-06: Added runtime geometry operation contracts for `geometry.list_regions/v1` and `geometry.query_entities/v1` (with typed validation errors such as `GEOMETRY_REGION_NOT_FOUND` / `GEOMETRY_QUERY_INVALID_LIMIT`), plus unit/integration contract coverage in the new `runmat-runtime/src/geometry/` module layout.
 - 2026-03-06: Refactored runtime geometry module from single-file layout to directory layout (`runmat-runtime/src/geometry/{mod,tests}.rs`) to keep operation implementation and test growth maintainable while preserving existing geometry operation contracts.
 - 2026-03-06: Implemented STEP import MVP in `runmat-geometry-io` through `io/src/cad` integration: STEP payloads now parse basic CAD metadata (`FILE_NAME`, `PRODUCT`, material tokens), emit CAD-kind source geometry with assembly/regions/material evidence, and are covered by deterministic import + runtime geometry operation tests.
 - 2026-03-06: Added runtime quality policy and reason contracts for analysis runs/results (`quality_policy`, `quality_reasons`) with policy-dependent publishability behavior (`strict`, `balanced`, `exploratory`), and aligned runtime tests/conformance harness defaults to the explicit balanced policy.

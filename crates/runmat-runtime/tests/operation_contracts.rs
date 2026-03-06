@@ -1,4 +1,5 @@
 use runmat_analysis_core::{AnalysisFieldValues, ReferenceFrame};
+use runmat_geometry_core::EntityKind;
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::UnitSystem;
@@ -8,7 +9,10 @@ use runmat_runtime::analysis::{
     AnalysisRunOptions, PrecisionMode, PreconditionerMode, QualityPolicy, QualityReasonCode,
     RunStatus,
 };
-use runmat_runtime::geometry::{geometry_inspect_op, geometry_load_op};
+use runmat_runtime::geometry::{
+    geometry_capture_view_op, geometry_inspect_op, geometry_list_regions_op, geometry_load_op,
+    geometry_query_entities_op, GeometryCaptureViewSpec, GeometryEntityQuery,
+};
 use runmat_runtime::operations::OperationContext;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -54,6 +58,56 @@ fn geometry_operation_contracts_are_v1_and_versioned() {
         .expect("load should succeed");
     assert_eq!(load.operation, "geometry.load");
     assert_eq!(load.op_version, "geometry.load/v1");
+
+    let list_regions = geometry_list_regions_op(
+        &load.data,
+        OperationContext::new(Some("trace-contract-1c".to_string()), None),
+    )
+    .expect("list regions should succeed");
+    assert_eq!(list_regions.operation, "geometry.list_regions");
+    assert_eq!(list_regions.op_version, "geometry.list_regions/v1");
+
+    let query_entities = geometry_query_entities_op(
+        &load.data,
+        GeometryEntityQuery {
+            region_id: None,
+            mesh_id: None,
+            entity_kind: EntityKind::Node,
+            limit: Some(2),
+        },
+        OperationContext::new(Some("trace-contract-1d".to_string()), None),
+    )
+    .expect("query entities should succeed");
+    assert_eq!(query_entities.operation, "geometry.query_entities");
+    assert_eq!(query_entities.op_version, "geometry.query_entities/v1");
+
+    let capture_view = geometry_capture_view_op(
+        &load.data,
+        GeometryCaptureViewSpec {
+            format: "png".to_string(),
+            width: 800,
+            height: 600,
+        },
+        OperationContext::new(Some("trace-contract-1e".to_string()), None),
+    )
+    .expect_err("capture view is not wired yet");
+    assert_eq!(capture_view.operation, "geometry.capture_view");
+    assert_eq!(capture_view.op_version, "geometry.capture_view/v1");
+    assert_eq!(capture_view.error_code, "GEOMETRY_CAPTURE_UNSUPPORTED");
+
+    let invalid_capture_view = geometry_capture_view_op(
+        &load.data,
+        GeometryCaptureViewSpec {
+            format: "png".to_string(),
+            width: 0,
+            height: 600,
+        },
+        OperationContext::new(Some("trace-contract-1f".to_string()), None),
+    )
+    .expect_err("invalid capture dimensions should fail");
+    assert_eq!(invalid_capture_view.operation, "geometry.capture_view");
+    assert_eq!(invalid_capture_view.op_version, "geometry.capture_view/v1");
+    assert_eq!(invalid_capture_view.error_code, "GEOMETRY_CAPTURE_INVALID_SPEC");
 }
 
 #[test]

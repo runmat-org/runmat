@@ -339,8 +339,7 @@ pub fn lint_shapes(result: &LoweringResult) -> Vec<HirDiagnostic> {
                         _ => None,
                     };
                     let mask_shape = match idx_ty {
-                        Type::Logical { shape: Some(shape) }
-                        | Type::Tensor { shape: Some(shape) } => Some(shape),
+                        Type::Logical { shape: Some(shape) } => Some(shape),
                         _ => None,
                     };
                     if let (Some(base_shape), Some(mask_shape)) = (base_shape, mask_shape) {

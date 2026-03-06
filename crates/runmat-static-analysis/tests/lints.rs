@@ -78,6 +78,35 @@ fn shape_lint_reports_logical_index_mismatch() {
 }
 
 #[test]
+fn shape_lint_allows_numeric_range_indexing() {
+    let result = lower_result("a = 0:pi/100:2*pi; b = sin(a); c = a(1:10);");
+    let diags = runmat_static_analysis::lint_shapes(&result);
+    assert!(!diags.iter().any(|d| d.code == "lint.shape.logical_index"));
+}
+
+#[test]
+fn shape_lint_allows_numeric_vector_and_scalar_indexing() {
+    let vector_result = lower_result("a = ones(1,10); idx = [1 3 5 7]; b = a(idx);");
+    let vector_diags = runmat_static_analysis::lint_shapes(&vector_result);
+    assert!(!vector_diags
+        .iter()
+        .any(|d| d.code == "lint.shape.logical_index"));
+
+    let scalar_result = lower_result("a = ones(1,10); b = a(3);");
+    let scalar_diags = runmat_static_analysis::lint_shapes(&scalar_result);
+    assert!(!scalar_diags
+        .iter()
+        .any(|d| d.code == "lint.shape.logical_index"));
+}
+
+#[test]
+fn shape_lint_allows_matching_logical_indexing() {
+    let result = lower_result("a = ones(2,2); m = ones(2,2) > 0; b = a(m);");
+    let diags = runmat_static_analysis::lint_shapes(&result);
+    assert!(!diags.iter().any(|d| d.code == "lint.shape.logical_index"));
+}
+
+#[test]
 fn shape_lint_reports_repmat_and_permute() {
     let bad_result = lower_result(
         "a = ones(2,2); b = repmat(a, 1.5, 2); c = permute(a, [1 2 3]); d = permute(a, [1 1]);",
