@@ -331,7 +331,10 @@ fn analysis_run_backend_selection_is_recorded_in_provenance() {
     assert_eq!(cpu.data.provenance.backend, ComputeBackend::Cpu);
     assert_eq!(gpu.data.provenance.backend, ComputeBackend::Gpu);
     assert_eq!(cpu.data.provenance.solver_host_sync_count, 0);
-    assert_eq!(gpu.data.provenance.solver_backend, "runtime_tensor");
+    assert!(matches!(
+        gpu.data.provenance.solver_backend.as_str(),
+        "runtime_tensor" | "cpu_reference"
+    ));
     assert_eq!(cpu.data.run_status, RunStatus::Publishable);
     assert_eq!(gpu.data.run_status, RunStatus::Publishable);
 }
@@ -355,6 +358,13 @@ fn analysis_run_gpu_without_provider_records_fallback_contract() {
         .fallback_events
         .iter()
         .any(|event| event.starts_with("BACKEND_NO_PROVIDER:displacement")));
+    assert!(envelope
+        .data
+        .provenance
+        .fallback_events
+        .iter()
+        .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK")));
+    assert_eq!(envelope.data.provenance.solver_backend, "cpu_reference");
     for event in &envelope.data.provenance.fallback_events {
         assert_fallback_event_schema(event);
     }

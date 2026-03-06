@@ -971,6 +971,8 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-06: Added sync-budget conformance controls in benchmark harness (`max_solver_host_sync_count` per fixture) and wired `solver_host_sync_count` checks into GPU fixture gating, so host-sync regression thresholds are enforced alongside parity/residency/error contracts.
+- 2026-03-06: Hardened runtime-tensor backend selection semantics: GPU solve requests now choose `runtime_tensor` only when an acceleration provider is available, otherwise explicitly fall back to `cpu_reference` with typed fallback telemetry (`SOLVER_BACKEND_FALLBACK`), while provenance reports the actual solver backend used.
 - 2026-03-06: Added solver host-sync accounting (`solver_host_sync_count`) into solve/runtime provenance and reduced duplicate scalar syncs in runtime-tensor PCG by reusing residual reductions; this makes GPU residency progress measurable in contracts/harness artifacts.
 - 2026-03-06: Reduced host round-trips in runtime-tensor PCG by adding device-side operator application composition (`apply_k_device`) using provider gather/elementwise/reduction primitives, while retaining guarded fallback to host operator application when provider capabilities are missing.
 - 2026-03-06: Added initial runtime-tensor PCG solver path (`solve/runtime_tensor_solver.rs`) that keeps iterative vector algebra on provider-backed tensors with limited host interaction for operator application/scalars, and wired backend dispatch to prefer runtime-tensor solve when available while preserving guarded per-op fallback behavior.

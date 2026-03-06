@@ -68,9 +68,16 @@ pub fn analysis_run_linear_static_with_options(
         PreconditionerMode::Ilu => SpdPreconditionerKind::Ilu0,
         PreconditionerMode::Amg => SpdPreconditionerKind::Jacobi,
     };
+    let runtime_tensor_available = runmat_accelerate_api::provider().is_some();
     let requested_solver_backend = match backend {
         ComputeBackend::Cpu => LinearAlgebraBackendKind::CpuReference,
-        ComputeBackend::Gpu => LinearAlgebraBackendKind::RuntimeTensor,
+        ComputeBackend::Gpu => {
+            if runtime_tensor_available {
+                LinearAlgebraBackendKind::RuntimeTensor
+            } else {
+                LinearAlgebraBackendKind::CpuReference
+            }
+        }
     };
     let run = run_linear_static_with_options(
         model,

@@ -107,7 +107,7 @@ pub fn run_linear_static_with_options(
 
     Ok(FeaRunResult {
         backend,
-        solver_backend: options.algebra_backend_kind.as_str().to_string(),
+        solver_backend: solve_result.solver_backend,
         solver_method: solve_result.solver_method,
         preconditioner: solve_result.preconditioner,
         solver_host_sync_count: solve_result.host_sync_count,

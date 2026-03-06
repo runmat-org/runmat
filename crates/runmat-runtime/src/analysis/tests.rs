@@ -130,6 +130,13 @@ fn gpu_run_without_provider_records_fallback_event() {
         .fallback_events
         .iter()
         .any(|event| event.starts_with("BACKEND_NO_PROVIDER:displacement")));
+    assert!(envelope
+        .data
+        .provenance
+        .fallback_events
+        .iter()
+        .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK")));
+    assert_eq!(envelope.data.provenance.solver_backend, "cpu_reference");
     assert!(matches!(
         envelope.data.run.displacement_field.values,
         AnalysisFieldValues::HostF64(_)

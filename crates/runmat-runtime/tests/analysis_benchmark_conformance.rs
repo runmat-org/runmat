@@ -48,6 +48,7 @@ struct FixtureSpec {
     parity_tolerance: Option<ParityTolerance>,
     gpu_mode: Option<GpuMode>,
     residency_expectation: Option<ResidencyExpectation>,
+    max_solver_host_sync_count: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -61,6 +62,7 @@ struct FixtureManifestEntry {
     parity_tolerance_rel: Option<f64>,
     gpu_mode: Option<String>,
     residency_expectation: Option<String>,
+    max_solver_host_sync_count: Option<u32>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -86,6 +88,7 @@ struct FixtureRunRecord {
     gpu_run_ms: Option<f64>,
     gpu_fallback_events: Vec<String>,
     gpu_displacement_residency: Option<String>,
+    gpu_solver_host_sync_count: Option<u32>,
     publishable: Option<bool>,
     parity: Option<ParitySummary>,
     failures: Vec<String>,
@@ -118,6 +121,7 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             parity_tolerance: None,
             gpu_mode: Some(GpuMode::WithProvider),
             residency_expectation: Some(ResidencyExpectation::DeviceRef),
+            max_solver_host_sync_count: Some(220),
         },
         FixtureSpec {
             id: "cantilever_gpu_fallback",
@@ -132,6 +136,7 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             }),
             gpu_mode: Some(GpuMode::WithoutProvider),
             residency_expectation: Some(ResidencyExpectation::HostFallback),
+            max_solver_host_sync_count: Some(0),
         },
         FixtureSpec {
             id: "cantilever_load_sweep_gpu_provider",
@@ -143,6 +148,7 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             parity_tolerance: None,
             gpu_mode: Some(GpuMode::WithProvider),
             residency_expectation: Some(ResidencyExpectation::DeviceRef),
+            max_solver_host_sync_count: Some(220),
         },
         FixtureSpec {
             id: "missing_materials",
@@ -154,6 +160,7 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             parity_tolerance: None,
             gpu_mode: None,
             residency_expectation: None,
+            max_solver_host_sync_count: None,
         },
         FixtureSpec {
             id: "unit_mismatch",
@@ -169,6 +176,7 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             parity_tolerance: None,
             gpu_mode: None,
             residency_expectation: None,
+            max_solver_host_sync_count: None,
         },
     ]
 }
@@ -194,6 +202,7 @@ fn fixture_manifest(specs: &[FixtureSpec]) -> FixtureManifest {
                     ResidencyExpectation::DeviceRef => "device_ref".to_string(),
                     ResidencyExpectation::HostFallback => "host_fallback".to_string(),
                 }),
+                max_solver_host_sync_count: spec.max_solver_host_sync_count,
             })
             .collect(),
     }
@@ -294,6 +303,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
     let mut gpu_run_ms = None;
     let mut gpu_fallback_events = Vec::new();
     let mut gpu_displacement_residency = None;
+    let mut gpu_solver_host_sync_count = None;
     let mut publishable = None;
     let mut parity = None;
 
@@ -324,6 +334,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                     gpu_run_ms,
                     gpu_fallback_events,
                     gpu_displacement_residency,
+                    gpu_solver_host_sync_count,
                     publishable,
                     parity,
                     failures,
@@ -368,6 +379,8 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                     run_ok = true;
                     publishable = Some(gpu_envelope.data.publishable);
                     gpu_fallback_events = gpu_envelope.data.provenance.fallback_events.clone();
+                    gpu_solver_host_sync_count =
+                        Some(gpu_envelope.data.provenance.solver_host_sync_count);
 
                     for event in &gpu_fallback_events {
                         if !validate_fallback_event_schema(event) {
@@ -416,6 +429,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                                 gpu_run_ms,
                                 gpu_fallback_events,
                                 gpu_displacement_residency,
+                                gpu_solver_host_sync_count,
                                 publishable,
                                 parity,
                                 failures,
@@ -449,7 +463,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                         );
                         match persisted {
                             Ok(by_id) => {
-                                if by_id.operation != "analysis.results"
+                            if by_id.operation != "analysis.results"
                                     || by_id.op_version != "analysis.results/v1"
                                 {
                                     failures.push(
@@ -461,6 +475,16 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                                 "analysis.results by-run-id failed for fixture {}: {}",
                                 spec.id, err.error_code
                             )),
+                        }
+                    }
+
+                    if let Some(max_sync) = spec.max_solver_host_sync_count {
+                        let observed = gpu_envelope.data.provenance.solver_host_sync_count;
+                        if observed > max_sync {
+                            failures.push(format!(
+                                "solver_host_sync_count exceeded for fixture {}: observed={} limit={}",
+                                spec.id, observed, max_sync
+                            ));
                         }
                     }
 
@@ -510,13 +534,14 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                                     validate_error_code,
                                     run_ok,
                                     run_error_code,
-                                    cpu_run_ms,
-                                    gpu_run_ms,
-                                    gpu_fallback_events,
-                                    gpu_displacement_residency,
-                                    publishable,
-                                    parity,
-                                    failures,
+                                cpu_run_ms,
+                                gpu_run_ms,
+                                gpu_fallback_events,
+                                gpu_displacement_residency,
+                                gpu_solver_host_sync_count,
+                                publishable,
+                                parity,
+                                failures,
                                 };
                             }
                         };
@@ -592,6 +617,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
         gpu_run_ms,
         gpu_fallback_events,
         gpu_displacement_residency,
+        gpu_solver_host_sync_count,
         publishable,
         parity,
         failures,

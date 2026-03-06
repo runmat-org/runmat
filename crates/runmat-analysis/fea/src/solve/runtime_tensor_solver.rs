@@ -246,6 +246,7 @@ pub fn solve_linear_system_runtime_tensor(
         residual_norm,
         converged,
         host_sync_count,
+        solver_backend: "runtime_tensor".to_string(),
         solution: x_host.data,
         solver_method: "matrix_free_pcg".to_string(),
         preconditioner: "jacobi".to_string(),
@@ -329,4 +330,22 @@ fn dot_handle(
     let _ = provider.free(&sum);
     let _ = provider.free(&mul);
     out
+}
+
+pub fn estimate_runtime_tensor_pcg_host_syncs(max_iters: u32) -> u32 {
+    // Initial rz dot + per-iteration (denom dot + residual dot + rz dot)
+    // plus one final residual read for report path.
+    1 + max_iters.saturating_mul(3) + 1
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn host_sync_estimator_matches_formula() {
+        assert_eq!(estimate_runtime_tensor_pcg_host_syncs(0), 2);
+        assert_eq!(estimate_runtime_tensor_pcg_host_syncs(1), 5);
+        assert_eq!(estimate_runtime_tensor_pcg_host_syncs(64), 194);
+    }
 }
