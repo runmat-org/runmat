@@ -36,14 +36,6 @@ export type {
   FusionPlanAdapter,
   FusionPlanAdapterOptions
 } from "./fusion-plan.js";
-export {
-  hydrateFigureSceneDataRefs,
-} from "./replay/scene-resolver.js";
-export type {
-  SceneHydrationDiagnostics,
-  SceneHydrationOptions,
-} from "./replay/scene-resolver.js";
-
 export type LanguageCompatMode = "matlab" | "strict";
 type RunMatPresetLogLevel = "trace" | "debug" | "info" | "warn" | "error";
 export type RunMatLogLevel = RunMatPresetLogLevel | (string & Record<never, never>);

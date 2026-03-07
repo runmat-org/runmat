@@ -48,7 +48,9 @@ pub struct FigureScene {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ScenePlot {
     Line {
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         x: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
         color_rgba: [f32; 4],
         line_width: f32,
@@ -58,7 +60,9 @@ pub enum ScenePlot {
         visible: bool,
     },
     Scatter {
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         x: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
         color_rgba: [f32; 4],
         marker_size: f32,
@@ -68,9 +72,13 @@ pub enum ScenePlot {
         visible: bool,
     },
     ErrorBar {
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         x: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         err_low: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         err_high: Vec<f64>,
         color_rgba: [f32; 4],
         line_width: f32,
@@ -80,7 +88,9 @@ pub enum ScenePlot {
         visible: bool,
     },
     Stairs {
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         x: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
         color_rgba: [f32; 4],
         line_width: f32,
@@ -89,8 +99,11 @@ pub enum ScenePlot {
         visible: bool,
     },
     Stem {
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         x: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_f64_lossy")]
         baseline: f64,
         color_rgba: [f32; 4],
         marker_color_rgba: [f32; 4],
@@ -99,8 +112,11 @@ pub enum ScenePlot {
         visible: bool,
     },
     Area {
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         x: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_f64_lossy")]
         baseline: f64,
         color_rgba: [f32; 4],
         axes_index: u32,
@@ -108,14 +124,18 @@ pub enum ScenePlot {
         visible: bool,
     },
     Surface {
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         x: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_matrix_f64_lossy")]
         z: Vec<Vec<f64>>,
         colormap: String,
         shading_mode: String,
         wireframe: bool,
         alpha: f32,
         flatten_z: bool,
+        #[serde(default, deserialize_with = "deserialize_option_pair_f64_lossy")]
         color_limits: Option<[f64; 2]>,
         axes_index: u32,
         label: Option<String>,
@@ -699,6 +719,48 @@ fn vec4_to_rgba(value: Vec4) -> [f32; 4] {
     [value.x, value.y, value.z, value.w]
 }
 
+fn deserialize_f64_lossy<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<f64>::deserialize(deserializer)?;
+    Ok(value.unwrap_or(f64::NAN))
+}
+
+fn deserialize_vec_f64_lossy<'de, D>(deserializer: D) -> Result<Vec<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let values = Vec::<Option<f64>>::deserialize(deserializer)?;
+    Ok(values
+        .into_iter()
+        .map(|value| value.unwrap_or(f64::NAN))
+        .collect())
+}
+
+fn deserialize_matrix_f64_lossy<'de, D>(deserializer: D) -> Result<Vec<Vec<f64>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let rows = Vec::<Vec<Option<f64>>>::deserialize(deserializer)?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            row.into_iter()
+                .map(|value| value.unwrap_or(f64::NAN))
+                .collect()
+        })
+        .collect())
+}
+
+fn deserialize_option_pair_f64_lossy<'de, D>(deserializer: D) -> Result<Option<[f64; 2]>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<[Option<f64>; 2]>::deserialize(deserializer)?;
+    Ok(value.map(|pair| [pair[0].unwrap_or(f64::NAN), pair[1].unwrap_or(f64::NAN)]))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -776,5 +838,44 @@ mod tests {
             rebuilt.plots().nth(1),
             Some(PlotElement::Scatter3(_))
         ));
+    }
+
+    #[test]
+    fn scene_plot_deserialize_maps_null_numeric_values_to_nan() {
+        let json = r#"{
+          "schemaVersion": 1,
+          "layout": { "axesRows": 1, "axesCols": 1, "axesIndices": [0] },
+          "metadata": {
+            "gridEnabled": true,
+            "legendEnabled": false,
+            "colorbarEnabled": false,
+            "axisEqual": false,
+            "backgroundRgba": [1,1,1,1],
+            "legendEntries": []
+          },
+          "plots": [
+            {
+              "kind": "surface",
+              "x": [0.0, null],
+              "y": [0.0, 1.0],
+              "z": [[0.0, null], [1.0, 2.0]],
+              "colormap": "Parula",
+              "shading_mode": "Smooth",
+              "wireframe": false,
+              "alpha": 1.0,
+              "flatten_z": false,
+              "color_limits": null,
+              "axes_index": 0,
+              "label": null,
+              "visible": true
+            }
+          ]
+        }"#;
+        let scene: FigureScene = serde_json::from_str(json).expect("scene should deserialize");
+        let ScenePlot::Surface { x, z, .. } = &scene.plots[0] else {
+            panic!("expected surface plot");
+        };
+        assert!(x[1].is_nan());
+        assert!(z[0][1].is_nan());
     }
 }
