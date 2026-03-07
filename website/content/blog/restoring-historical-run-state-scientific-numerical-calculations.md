@@ -43,7 +43,7 @@ jsonLd:
       headline: "Restoring Historical Run State for Scientific and Numerical Calculations"
       alternativeHeadline: "Debug Faster by Inspecting Past Runs Instead of Rerunning"
       description: "How computational teams restore historical run state to debug faster, reduce reruns, and improve confidence in incident analysis."
-      image: "#### TODO: ADD IMAGE URL HERE ####"
+      image: "https://web.runmatstatic.com/blog-images/restoring-historical-run-state.png"
       datePublished: "2026-03-05T00:00:00Z"
       dateModified: "2026-03-05T00:00:00Z"
       author:
@@ -52,12 +52,10 @@ jsonLd:
         url: "https://www.linkedin.com/in/julie-ruiz-64b24328/"
       publisher:
         "@type": "Organization"
-        name: "Dystr Inc."
+        name: "RunMat by Dystr"
         logo:
           "@type": "ImageObject"
           url: "/runmat-logo.svg"
-          width: 600
-          height: 60
       about:
         - "@type": "Thing"
           name: "Historical Run State Restoration"

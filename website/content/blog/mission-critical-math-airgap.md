@@ -57,12 +57,10 @@ jsonLd:
           url: "https://x.com/nabeelallana"
       publisher:
         "@type": "Organization"
-        name: "Dystr Inc."
+        name: "RunMat by Dystr"
         logo:
           "@type": "ImageObject"
           url: "/runmat-logo.svg"
-          width: 600
-          height: 60
       about:
         - "@type": "SoftwareApplication"
           name: "RunMat"

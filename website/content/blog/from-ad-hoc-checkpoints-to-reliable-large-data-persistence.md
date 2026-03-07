@@ -52,12 +52,10 @@ jsonLd:
         url: "https://www.linkedin.com/in/julie-ruiz-64b24328/"
       publisher:
         "@type": "Organization"
-        name: "Dystr Inc."
+        name: "RunMat by Dystr"
         logo:
           "@type": "ImageObject"
           url: "/runmat-logo.svg"
-          width: 600
-          height: 60
       about:
         - "@type": "Thing"
           name: "Large Data Persistence"
