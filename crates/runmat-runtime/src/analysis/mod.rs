@@ -343,8 +343,14 @@ pub fn analysis_run_modal_with_options_op(
         },
     )?;
 
-    let run = modal_run.run;
-    let fallback_events = Vec::new();
+    let mut run = modal_run.run;
+    let mut fallback_events = Vec::new();
+    promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
+    if backend == ComputeBackend::Gpu && run.solver_backend != "runtime_tensor" {
+        fallback_events.push(
+            "SOLVER_BACKEND_FALLBACK:requested=runtime_tensor:using=cpu_reference".to_string(),
+        );
+    }
     let solver_convergence = if run.diagnostics.iter().any(|item| {
         item.code == "FEA_MODAL_CONVERGENCE"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
@@ -402,6 +408,23 @@ pub fn analysis_run_modal_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::ModalSeparationLow,
             detail: "modal frequency separation threshold is low".to_string(),
+        });
+    }
+    if fallback_events
+        .iter()
+        .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK"))
+    {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::SolverBackendFallback,
+            detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
+        });
+    }
+    if fallback_events.iter().any(|event| {
+        event.starts_with("BACKEND_NO_PROVIDER") || event.starts_with("BACKEND_UPLOAD_FAILED")
+    }) {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::FieldPromotionFallback,
+            detail: "field promotion fell back to host-backed values".to_string(),
         });
     }
 
@@ -589,7 +612,14 @@ pub fn analysis_run_transient_with_options_op(
         )
     })?;
 
-    let run = transient_run.run;
+    let mut run = transient_run.run;
+    let mut fallback_events = Vec::new();
+    promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
+    if backend == ComputeBackend::Gpu && run.solver_backend != "runtime_tensor" {
+        fallback_events.push(
+            "SOLVER_BACKEND_FALLBACK:requested=runtime_tensor:using=cpu_reference".to_string(),
+        );
+    }
     let solver_convergence = if run.diagnostics.iter().any(|item| {
         item.code == "FEA_TRANSIENT_CONVERGENCE"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
@@ -657,6 +687,23 @@ pub fn analysis_run_transient_with_options_op(
             detail: "transient step retry budget was exhausted".to_string(),
         });
     }
+    if fallback_events
+        .iter()
+        .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK"))
+    {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::SolverBackendFallback,
+            detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
+        });
+    }
+    if fallback_events.iter().any(|event| {
+        event.starts_with("BACKEND_NO_PROVIDER") || event.starts_with("BACKEND_UPLOAD_FAILED")
+    }) {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::FieldPromotionFallback,
+            detail: "field promotion fell back to host-backed values".to_string(),
+        });
+    }
     if run
         .diagnostics
         .iter()
@@ -698,6 +745,12 @@ pub fn analysis_run_transient_with_options_op(
         RunStatus::Degraded
     };
 
+    let solver_backend = run.solver_backend.clone();
+    let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
+    let solver_host_sync_count = run.solver_host_sync_count;
+    let solver_method = run.solver_method.clone();
+    let selected_preconditioner = run.preconditioner.clone();
+
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
         run,
@@ -717,15 +770,15 @@ pub fn analysis_run_transient_with_options_op(
         quality_reasons,
         provenance: RunProvenance {
             backend,
-            solver_backend: "cpu_reference".to_string(),
-            solver_device_apply_k_ratio: 0.0,
-            solver_host_sync_count: 0,
+            solver_backend,
+            solver_device_apply_k_ratio,
+            solver_host_sync_count,
             precision_mode: contracts::format_precision_mode(options.precision_mode),
             deterministic_mode: options.deterministic_mode,
-            solver_method: "implicit_euler_pcg".to_string(),
-            preconditioner: "none".to_string(),
+            solver_method,
+            preconditioner: selected_preconditioner,
             quality_policy: contracts::format_quality_policy(options.quality_policy),
-            fallback_events: Vec::new(),
+            fallback_events,
         },
     };
 

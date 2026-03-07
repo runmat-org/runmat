@@ -171,7 +171,7 @@ pub fn run_modal_with_options(
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
 
     let summary = assemble_linear_system(model);
-    let modal = solve_modal_system(&summary, options.mode_count);
+    let modal = solve_modal_system(&summary, options.mode_count, backend);
     let mut diagnostics = modal.diagnostics.clone();
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
 
@@ -188,11 +188,19 @@ pub fn run_modal_with_options(
 
     let run = FeaRunResult {
         backend,
-        solver_backend: "cpu_reference".to_string(),
-        solver_device_apply_k_ratio: 0.0,
+        solver_backend: modal.solver_backend,
+        solver_device_apply_k_ratio: if modal.device_apply_k_attempt_count == 0 {
+            0.0
+        } else {
+            modal.device_apply_k_count as f64 / modal.device_apply_k_attempt_count as f64
+        },
         solver_method: modal.solver_method,
-        preconditioner: "none".to_string(),
-        solver_host_sync_count: 0,
+        preconditioner: if backend == ComputeBackend::Gpu {
+            "jacobi".to_string()
+        } else {
+            "none".to_string()
+        },
+        solver_host_sync_count: modal.solver_host_sync_count,
         diagnostics,
         displacement_field: AnalysisField::host_f64(
             "displacement",
@@ -238,7 +246,7 @@ pub fn run_transient_with_options(
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
 
     let summary = assemble_linear_system(model);
-    let transient = solve_transient_system(&summary, options);
+    let transient = solve_transient_system(&summary, options, backend);
     let mut diagnostics = transient.diagnostics.clone();
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
 
@@ -255,11 +263,15 @@ pub fn run_transient_with_options(
 
     let run = FeaRunResult {
         backend,
-        solver_backend: "cpu_reference".to_string(),
-        solver_device_apply_k_ratio: 0.0,
+        solver_backend: transient.solver_backend,
+        solver_device_apply_k_ratio: if transient.device_apply_k_attempt_count == 0 {
+            0.0
+        } else {
+            transient.device_apply_k_count as f64 / transient.device_apply_k_attempt_count as f64
+        },
         solver_method: transient.solver_method,
-        preconditioner: "none".to_string(),
-        solver_host_sync_count: 0,
+        preconditioner: transient.preconditioner,
+        solver_host_sync_count: transient.solver_host_sync_count,
         diagnostics,
         displacement_field: AnalysisField::host_f64(
             "displacement",

@@ -61,6 +61,7 @@ struct FixtureSpec {
     residency_expectation: Option<ResidencyExpectation>,
     max_solver_host_sync_count: Option<u32>,
     min_solver_device_apply_k_ratio: Option<f64>,
+    expected_solver_backend: Option<&'static str>,
     modal_mode_count: Option<usize>,
     transient_step_count: Option<usize>,
     max_modal_orthogonality_offdiag: Option<f64>,
@@ -83,6 +84,7 @@ struct FixtureManifestEntry {
     residency_expectation: Option<String>,
     max_solver_host_sync_count: Option<u32>,
     min_solver_device_apply_k_ratio: Option<f64>,
+    expected_solver_backend: Option<String>,
     modal_mode_count: Option<usize>,
     transient_step_count: Option<usize>,
     max_modal_orthogonality_offdiag: Option<f64>,
@@ -126,6 +128,7 @@ struct FixtureRunRecord {
     gpu_displacement_residency: Option<String>,
     gpu_solver_host_sync_count: Option<u32>,
     gpu_solver_device_apply_k_ratio: Option<f64>,
+    gpu_solver_backend: Option<String>,
     publishable: Option<bool>,
     parity: Option<ParitySummary>,
     threshold_assertions: Vec<ThresholdAssertionRecord>,
@@ -162,6 +165,7 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             residency_expectation: Some(ResidencyExpectation::DeviceRef),
             max_solver_host_sync_count: Some(32),
             min_solver_device_apply_k_ratio: Some(1.0),
+            expected_solver_backend: Some("runtime_tensor"),
             modal_mode_count: None,
             transient_step_count: None,
             max_modal_orthogonality_offdiag: None,
@@ -185,6 +189,7 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             residency_expectation: Some(ResidencyExpectation::HostFallback),
             max_solver_host_sync_count: Some(0),
             min_solver_device_apply_k_ratio: Some(0.0),
+            expected_solver_backend: Some("cpu_reference"),
             modal_mode_count: None,
             transient_step_count: None,
             max_modal_orthogonality_offdiag: None,
@@ -205,6 +210,7 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             residency_expectation: Some(ResidencyExpectation::DeviceRef),
             max_solver_host_sync_count: Some(32),
             min_solver_device_apply_k_ratio: Some(1.0),
+            expected_solver_backend: Some("runtime_tensor"),
             modal_mode_count: None,
             transient_step_count: None,
             max_modal_orthogonality_offdiag: None,
@@ -225,6 +231,7 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             residency_expectation: Some(ResidencyExpectation::DeviceRef),
             max_solver_host_sync_count: Some(64),
             min_solver_device_apply_k_ratio: Some(1.0),
+            expected_solver_backend: Some("runtime_tensor"),
             modal_mode_count: None,
             transient_step_count: None,
             max_modal_orthogonality_offdiag: None,
@@ -245,6 +252,7 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             residency_expectation: Some(ResidencyExpectation::DeviceRef),
             max_solver_host_sync_count: Some(48),
             min_solver_device_apply_k_ratio: Some(1.0),
+            expected_solver_backend: Some("runtime_tensor"),
             modal_mode_count: None,
             transient_step_count: None,
             max_modal_orthogonality_offdiag: None,
@@ -259,12 +267,58 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             run_kind: AnalysisRunKind::Modal,
             expect_validate_error: None,
             expect_run_error: None,
-            expected_publishable: Some(true),
+            expected_publishable: Some(false),
             parity_tolerance: None,
             gpu_mode: None,
             residency_expectation: None,
             max_solver_host_sync_count: None,
             min_solver_device_apply_k_ratio: None,
+            expected_solver_backend: None,
+            modal_mode_count: Some(8),
+            transient_step_count: None,
+            max_modal_orthogonality_offdiag: Some(5.0e-3),
+            min_modal_relative_frequency_separation: Some(1.0e-5),
+            max_transient_residual_norm: None,
+            max_transient_energy_growth_ratio: None,
+        },
+        FixtureSpec {
+            id: "modal_large_gpu_provider",
+            description: "large modal fixture with provider-backed field residency",
+            model: || fixture_model(FixtureId::ModalLarge),
+            run_kind: AnalysisRunKind::Modal,
+            expect_validate_error: None,
+            expect_run_error: None,
+            expected_publishable: Some(false),
+            parity_tolerance: None,
+            gpu_mode: Some(GpuMode::WithProvider),
+            residency_expectation: Some(ResidencyExpectation::DeviceRef),
+            max_solver_host_sync_count: Some(1200),
+            min_solver_device_apply_k_ratio: Some(1.0),
+            expected_solver_backend: Some("runtime_tensor"),
+            modal_mode_count: Some(8),
+            transient_step_count: None,
+            max_modal_orthogonality_offdiag: Some(5.0e-3),
+            min_modal_relative_frequency_separation: Some(1.0e-5),
+            max_transient_residual_norm: None,
+            max_transient_energy_growth_ratio: None,
+        },
+        FixtureSpec {
+            id: "modal_large_gpu_fallback",
+            description: "large modal fixture with no-provider host fallback",
+            model: || fixture_model(FixtureId::ModalLarge),
+            run_kind: AnalysisRunKind::Modal,
+            expect_validate_error: None,
+            expect_run_error: None,
+            expected_publishable: Some(false),
+            parity_tolerance: Some(ParityTolerance {
+                abs: 1e-12,
+                rel: 1e-12,
+            }),
+            gpu_mode: Some(GpuMode::WithoutProvider),
+            residency_expectation: Some(ResidencyExpectation::HostFallback),
+            max_solver_host_sync_count: Some(0),
+            min_solver_device_apply_k_ratio: Some(0.0),
+            expected_solver_backend: Some("cpu_reference"),
             modal_mode_count: Some(8),
             transient_step_count: None,
             max_modal_orthogonality_offdiag: Some(5.0e-3),
@@ -285,6 +339,52 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             residency_expectation: None,
             max_solver_host_sync_count: None,
             min_solver_device_apply_k_ratio: None,
+            expected_solver_backend: None,
+            modal_mode_count: None,
+            transient_step_count: Some(24),
+            max_modal_orthogonality_offdiag: None,
+            min_modal_relative_frequency_separation: None,
+            max_transient_residual_norm: Some(1.0e-2),
+            max_transient_energy_growth_ratio: Some(5.0),
+        },
+        FixtureSpec {
+            id: "transient_long_gpu_provider",
+            description: "long transient fixture with provider-backed field residency",
+            model: || fixture_model(FixtureId::TransientLong),
+            run_kind: AnalysisRunKind::Transient,
+            expect_validate_error: None,
+            expect_run_error: None,
+            expected_publishable: Some(true),
+            parity_tolerance: None,
+            gpu_mode: Some(GpuMode::WithProvider),
+            residency_expectation: Some(ResidencyExpectation::DeviceRef),
+            max_solver_host_sync_count: Some(600),
+            min_solver_device_apply_k_ratio: Some(1.0),
+            expected_solver_backend: Some("runtime_tensor"),
+            modal_mode_count: None,
+            transient_step_count: Some(24),
+            max_modal_orthogonality_offdiag: None,
+            min_modal_relative_frequency_separation: None,
+            max_transient_residual_norm: Some(1.0e-2),
+            max_transient_energy_growth_ratio: Some(5.0),
+        },
+        FixtureSpec {
+            id: "transient_long_gpu_fallback",
+            description: "long transient fixture with no-provider host fallback",
+            model: || fixture_model(FixtureId::TransientLong),
+            run_kind: AnalysisRunKind::Transient,
+            expect_validate_error: None,
+            expect_run_error: None,
+            expected_publishable: Some(true),
+            parity_tolerance: Some(ParityTolerance {
+                abs: 1e-12,
+                rel: 1e-12,
+            }),
+            gpu_mode: Some(GpuMode::WithoutProvider),
+            residency_expectation: Some(ResidencyExpectation::HostFallback),
+            max_solver_host_sync_count: Some(0),
+            min_solver_device_apply_k_ratio: Some(0.0),
+            expected_solver_backend: Some("cpu_reference"),
             modal_mode_count: None,
             transient_step_count: Some(24),
             max_modal_orthogonality_offdiag: None,
@@ -305,6 +405,7 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             residency_expectation: None,
             max_solver_host_sync_count: None,
             min_solver_device_apply_k_ratio: None,
+            expected_solver_backend: None,
             modal_mode_count: None,
             transient_step_count: None,
             max_modal_orthogonality_offdiag: None,
@@ -329,6 +430,7 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             residency_expectation: None,
             max_solver_host_sync_count: None,
             min_solver_device_apply_k_ratio: None,
+            expected_solver_backend: None,
             modal_mode_count: None,
             transient_step_count: None,
             max_modal_orthogonality_offdiag: None,
@@ -367,6 +469,7 @@ fn fixture_manifest(specs: &[FixtureSpec]) -> FixtureManifest {
                 }),
                 max_solver_host_sync_count: spec.max_solver_host_sync_count,
                 min_solver_device_apply_k_ratio: spec.min_solver_device_apply_k_ratio,
+                expected_solver_backend: spec.expected_solver_backend.map(|s| s.to_string()),
                 modal_mode_count: spec.modal_mode_count,
                 transient_step_count: spec.transient_step_count,
                 max_modal_orthogonality_offdiag: spec.max_modal_orthogonality_offdiag,
@@ -433,13 +536,33 @@ fn run_fixture_gpu(
     runmat_runtime::operations::OperationEnvelope<runmat_runtime::analysis::AnalysisRunResult>,
     runmat_runtime::operations::OperationErrorEnvelope,
 > {
-    let run = || {
-        analysis_run_linear_static_with_options(
+    let run = || match spec.run_kind {
+        AnalysisRunKind::LinearStatic => analysis_run_linear_static_with_options(
             model,
             ComputeBackend::Gpu,
             default_options(),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
-        )
+        ),
+        AnalysisRunKind::Modal => analysis_run_modal_with_options_op(
+            model,
+            ComputeBackend::Gpu,
+            AnalysisModalRunOptions {
+                mode_count: spec.modal_mode_count.unwrap_or(AnalysisModalRunOptions::default().mode_count),
+                ..AnalysisModalRunOptions::balanced()
+            },
+            OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
+        ),
+        AnalysisRunKind::Transient => analysis_run_transient_with_options_op(
+            model,
+            ComputeBackend::Gpu,
+            AnalysisTransientRunOptions {
+                step_count: spec
+                    .transient_step_count
+                    .unwrap_or(AnalysisTransientRunOptions::default().step_count),
+                ..AnalysisTransientRunOptions::balanced()
+            },
+            OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
+        ),
     };
     match mode {
         GpuMode::WithProvider => with_harness_provider(run),
@@ -590,6 +713,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
     let mut gpu_displacement_residency = None;
     let mut gpu_solver_host_sync_count = None;
     let mut gpu_solver_device_apply_k_ratio = None;
+    let mut gpu_solver_backend = None;
     let mut publishable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
@@ -618,6 +742,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                     gpu_displacement_residency,
                     gpu_solver_host_sync_count,
                     gpu_solver_device_apply_k_ratio,
+                    gpu_solver_backend,
                     publishable,
                     parity,
                     threshold_assertions,
@@ -720,6 +845,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                         Some(gpu_envelope.data.provenance.solver_host_sync_count);
                     gpu_solver_device_apply_k_ratio =
                         Some(gpu_envelope.data.provenance.solver_device_apply_k_ratio);
+                    gpu_solver_backend = Some(gpu_envelope.data.provenance.solver_backend.clone());
 
                     for event in &gpu_fallback_events {
                         if !validate_fallback_event_schema(event) {
@@ -739,6 +865,17 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                             failures.push(format!(
                                 "gpu publishable mismatch: expected {expected_publishable}, got {}",
                                 gpu_envelope.data.publishable
+                            ));
+                        }
+                    }
+
+                    if let Some(expected_solver_backend) = spec.expected_solver_backend {
+                        if gpu_envelope.data.provenance.solver_backend != expected_solver_backend {
+                            failures.push(format!(
+                                "solver_backend mismatch for fixture {}: expected={} got={}",
+                                spec.id,
+                                expected_solver_backend,
+                                gpu_envelope.data.provenance.solver_backend
                             ));
                         }
                     }
@@ -774,6 +911,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                                 gpu_displacement_residency,
                                 gpu_solver_host_sync_count,
                                 gpu_solver_device_apply_k_ratio,
+                                gpu_solver_backend,
                                 publishable,
                                 parity,
                                 threshold_assertions,
@@ -902,6 +1040,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                                     gpu_displacement_residency,
                                     gpu_solver_host_sync_count,
                                     gpu_solver_device_apply_k_ratio,
+                                    gpu_solver_backend,
                                     publishable,
                                     parity,
                                     threshold_assertions,
@@ -978,6 +1117,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
         gpu_displacement_residency,
         gpu_solver_host_sync_count,
         gpu_solver_device_apply_k_ratio,
+        gpu_solver_backend,
         publishable,
         parity,
         threshold_assertions,
@@ -1349,12 +1489,14 @@ fn analysis_benchmark_conformance_manifest_gates() {
     )
     .expect("reset artifact store to in-memory after harness");
 
+    let core_passed = core_failure_count == 0;
+    let baseline_passed = if baseline.enforce {
+        failures.is_empty()
+    } else {
+        true
+    };
     assert!(
-        if baseline.enforce {
-            failures.is_empty()
-        } else {
-            failures.len() == core_failure_count
-        },
+        core_passed && baseline_passed,
         "analysis benchmark/conformance gates failed: {}",
         failures.join(" | ")
     );

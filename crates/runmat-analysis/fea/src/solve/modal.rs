@@ -4,6 +4,11 @@ use crate::{
     assembly::AssemblySummary,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     operator::{apply_k, apply_m, OperatorSystem},
+    solve::{
+        preconditioner::SpdPreconditionerKind,
+        runtime_tensor_solver::solve_linear_system_runtime_tensor,
+    },
+    ComputeBackend,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -14,9 +19,17 @@ pub struct ModalSolveResult {
     pub residual_norms: Vec<f64>,
     pub diagnostics: Vec<FeaDiagnostic>,
     pub solver_method: String,
+    pub solver_backend: String,
+    pub solver_host_sync_count: u32,
+    pub device_apply_k_count: u32,
+    pub device_apply_k_attempt_count: u32,
 }
 
-pub fn solve_modal_system(summary: &AssemblySummary, mode_count: usize) -> ModalSolveResult {
+pub fn solve_modal_system(
+    summary: &AssemblySummary,
+    mode_count: usize,
+    backend: ComputeBackend,
+) -> ModalSolveResult {
     if summary.dof_count == 0 || mode_count == 0 {
         return ModalSolveResult {
             converged: false,
@@ -31,8 +44,18 @@ pub fn solve_modal_system(summary: &AssemblySummary, mode_count: usize) -> Modal
                         .to_string(),
             }],
             solver_method: "matrix_free_subspace_iteration".to_string(),
+            solver_backend: "cpu_reference".to_string(),
+            solver_host_sync_count: 0,
+            device_apply_k_count: 0,
+            device_apply_k_attempt_count: 0,
         };
     }
+
+    let use_runtime_tensor = backend == ComputeBackend::Gpu;
+    let mut solver_backend = "cpu_reference".to_string();
+    let mut solver_host_sync_count = 0u32;
+    let mut device_apply_k_count = 0u32;
+    let mut device_apply_k_attempt_count = 0u32;
 
     let unconstrained: Vec<usize> = summary
         .operator
@@ -52,10 +75,27 @@ pub fn solve_modal_system(summary: &AssemblySummary, mode_count: usize) -> Modal
 
         for _ in 0..8 {
             let mq = apply_m(&summary.operator, &q);
-            let mut z = solve_k_cg(&summary.operator, &mq, 64, 1.0e-10);
-            orthonormalize_mass(&summary.operator, &mut z, &basis);
-            normalize_mass(&summary.operator, &mut z);
-            q = z;
+            let z = solve_k_cg(
+                summary,
+                &summary.operator,
+                &mq,
+                64,
+                1.0e-10,
+                use_runtime_tensor,
+            );
+            if let Some(solve) = z.runtime_tensor {
+                solver_backend = solve.solver_backend;
+                solver_host_sync_count =
+                    solver_host_sync_count.saturating_add(solve.host_sync_count);
+                device_apply_k_count =
+                    device_apply_k_count.saturating_add(solve.device_apply_k_count);
+                device_apply_k_attempt_count =
+                    device_apply_k_attempt_count.saturating_add(solve.device_apply_k_attempt_count);
+            }
+            let mut z_vec = z.vector;
+            orthonormalize_mass(&summary.operator, &mut z_vec, &basis);
+            normalize_mass(&summary.operator, &mut z_vec);
+            q = z_vec;
         }
 
         let kq = apply_k(&summary.operator, &q);
@@ -158,7 +198,16 @@ pub fn solve_modal_system(summary: &AssemblySummary, mode_count: usize) -> Modal
         residual_norms,
         diagnostics,
         solver_method: "matrix_free_subspace_iteration".to_string(),
+        solver_backend,
+        solver_host_sync_count,
+        device_apply_k_count,
+        device_apply_k_attempt_count,
     }
+}
+
+struct SolveKResult {
+    vector: Vec<f64>,
+    runtime_tensor: Option<crate::solve::linear::LinearSolveResult>,
 }
 
 fn dot(a: &[f64], b: &[f64]) -> f64 {
@@ -183,13 +232,36 @@ fn orthonormalize_mass(system: &OperatorSystem, vector: &mut [f64], basis: &[Vec
     }
 }
 
-fn solve_k_cg(system: &OperatorSystem, rhs: &[f64], max_iters: usize, tol: f64) -> Vec<f64> {
+fn solve_k_cg(
+    summary: &AssemblySummary,
+    system: &OperatorSystem,
+    rhs: &[f64],
+    max_iters: usize,
+    tol: f64,
+    use_runtime_tensor: bool,
+) -> SolveKResult {
+    if use_runtime_tensor {
+        let mut summary_with_rhs = summary.clone();
+        summary_with_rhs.operator.rhs = rhs.to_vec();
+        if let Some(result) =
+            solve_linear_system_runtime_tensor(&summary_with_rhs, SpdPreconditionerKind::Jacobi)
+        {
+            return SolveKResult {
+                vector: result.solution.clone(),
+                runtime_tensor: Some(result),
+            };
+        }
+    }
+
     let mut x = vec![0.0; rhs.len()];
     let mut r = rhs.to_vec();
     let mut p = r.clone();
     let mut rr_old = dot(&r, &r);
     if rr_old.sqrt() <= tol {
-        return x;
+        return SolveKResult {
+            vector: x,
+            runtime_tensor: None,
+        };
     }
 
     for _ in 0..max_iters {
@@ -211,7 +283,10 @@ fn solve_k_cg(system: &OperatorSystem, rhs: &[f64], max_iters: usize, tol: f64) 
         rr_old = rr_new;
     }
 
-    x
+    SolveKResult {
+        vector: x,
+        runtime_tensor: None,
+    }
 }
 
 fn modal_max_m_orthogonality_offdiag(system: &OperatorSystem, modes: &[Vec<f64>]) -> f64 {

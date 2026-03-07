@@ -3,6 +3,11 @@ use serde::{Deserialize, Serialize};
 use crate::{
     assembly::AssemblySummary,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
+    solve::{
+        preconditioner::SpdPreconditionerKind,
+        runtime_tensor_solver::solve_linear_system_runtime_tensor,
+    },
+    ComputeBackend,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -44,11 +49,17 @@ pub struct TransientSolveResult {
     pub accepted_time_steps_s: Vec<f64>,
     pub diagnostics: Vec<FeaDiagnostic>,
     pub solver_method: String,
+    pub solver_backend: String,
+    pub solver_host_sync_count: u32,
+    pub device_apply_k_count: u32,
+    pub device_apply_k_attempt_count: u32,
+    pub preconditioner: String,
 }
 
 pub fn solve_transient_system(
     summary: &AssemblySummary,
     options: TransientSolveOptions,
+    backend: ComputeBackend,
 ) -> TransientSolveResult {
     if summary.dof_count == 0 || options.step_count == 0 {
         return TransientSolveResult {
@@ -65,8 +76,15 @@ pub fn solve_transient_system(
                     .to_string(),
             }],
             solver_method: "implicit_euler_pcg".to_string(),
+            solver_backend: "cpu_reference".to_string(),
+            solver_host_sync_count: 0,
+            device_apply_k_count: 0,
+            device_apply_k_attempt_count: 0,
+            preconditioner: "none".to_string(),
         };
     }
+
+    let use_runtime_tensor = backend == ComputeBackend::Gpu;
 
     let min_dt = options.min_time_step_s.max(1.0e-9);
     let max_dt = options.max_time_step_s.max(min_dt);
@@ -80,27 +98,51 @@ pub fn solve_transient_system(
     let mut retry_budget_hits = 0usize;
     let mut energies = Vec::with_capacity(options.step_count + 1);
     energies.push(strain_energy(summary, &x));
+    let mut solver_backend = "cpu_reference".to_string();
+    let mut solver_host_sync_count = 0u32;
+    let mut device_apply_k_count = 0u32;
+    let mut device_apply_k_attempt_count = 0u32;
+    let mut selected_preconditioner = "none".to_string();
 
     for step in 0..options.step_count {
         let mut step_dt = dt;
         let mut retries = 0usize;
-        let (next_x, residual_norm, converged) = loop {
+        let (next_x, residual_norm, converged, step_stats) = loop {
             let rhs = build_step_rhs(summary, &x, step_dt);
-            let solved = solve_implicit_step(summary, &rhs, step_dt, options);
+            let solved = solve_implicit_step(summary, &rhs, step_dt, options, use_runtime_tensor);
             if !options.adaptive_time_step {
                 break solved;
             }
-            let (candidate_x, candidate_residual, candidate_converged) = solved;
+            let (candidate_x, candidate_residual, candidate_converged, candidate_stats) = solved;
             if candidate_converged && candidate_residual <= options.residual_target * 4.0 {
-                break (candidate_x, candidate_residual, candidate_converged);
+                break (
+                    candidate_x,
+                    candidate_residual,
+                    candidate_converged,
+                    candidate_stats,
+                );
             }
             if retries >= options.max_step_retries || step_dt <= min_dt * 1.01 {
                 retry_budget_hits += 1;
-                break (candidate_x, candidate_residual, candidate_converged);
+                break (
+                    candidate_x,
+                    candidate_residual,
+                    candidate_converged,
+                    candidate_stats,
+                );
             }
             step_dt = (step_dt * 0.5).clamp(min_dt, max_dt);
             retries += 1;
         };
+
+        if let Some(stats) = step_stats {
+            solver_backend = stats.solver_backend;
+            solver_host_sync_count = solver_host_sync_count.saturating_add(stats.host_sync_count);
+            device_apply_k_count = device_apply_k_count.saturating_add(stats.device_apply_k_count);
+            device_apply_k_attempt_count =
+                device_apply_k_attempt_count.saturating_add(stats.device_apply_k_attempt_count);
+            selected_preconditioner = stats.preconditioner;
+        }
 
         x = next_x;
         let next_time = time_points_s.last().copied().unwrap_or(0.0) + step_dt;
@@ -201,6 +243,11 @@ pub fn solve_transient_system(
         accepted_time_steps_s,
         diagnostics,
         solver_method: "implicit_euler_pcg".to_string(),
+        solver_backend,
+        solver_host_sync_count,
+        device_apply_k_count,
+        device_apply_k_attempt_count,
+        preconditioner: selected_preconditioner,
     }
 }
 
@@ -217,14 +264,37 @@ fn solve_implicit_step(
     rhs: &[f64],
     dt: f64,
     options: TransientSolveOptions,
-) -> (Vec<f64>, f64, bool) {
+    use_runtime_tensor: bool,
+) -> (
+    Vec<f64>,
+    f64,
+    bool,
+    Option<crate::solve::linear::LinearSolveResult>,
+) {
+    if use_runtime_tensor {
+        let implicit_summary = build_implicit_summary(summary, rhs, dt);
+        if let Some(result) =
+            solve_linear_system_runtime_tensor(&implicit_summary, SpdPreconditionerKind::Jacobi)
+        {
+            let rhs_norm = dot(rhs, rhs).sqrt().max(1.0);
+            let relative_residual = result.residual_norm / rhs_norm;
+            let converged = result.converged || relative_residual <= options.tolerance;
+            return (
+                result.solution.clone(),
+                relative_residual,
+                converged,
+                Some(result),
+            );
+        }
+    }
+
     let mut x = vec![0.0; summary.dof_count];
     let mut r = rhs.to_vec();
     let mut p = r.clone();
     let rhs_norm = dot(rhs, rhs).sqrt().max(1.0);
     let mut rr_old = dot(&r, &r);
     if rr_old.sqrt() / rhs_norm <= options.tolerance {
-        return (x, rr_old.sqrt(), true);
+        return (x, rr_old.sqrt(), true, None);
     }
 
     let mut converged = false;
@@ -249,7 +319,28 @@ fn solve_implicit_step(
         rr_old = rr_new;
     }
 
-    (x, rr_old.sqrt() / rhs_norm, converged)
+    (x, rr_old.sqrt() / rhs_norm, converged, None)
+}
+
+fn build_implicit_summary(summary: &AssemblySummary, rhs: &[f64], dt: f64) -> AssemblySummary {
+    let mut implicit = summary.clone();
+    implicit.operator.rhs = rhs.to_vec();
+    for i in 0..implicit.operator.dof_count {
+        if implicit.operator.constrained[i] {
+            implicit.operator.stiffness_diag[i] = 1.0;
+            continue;
+        }
+        implicit.operator.stiffness_diag[i] =
+            summary.operator.mass_diag[i] + dt * summary.operator.stiffness_diag[i];
+    }
+    for i in 0..implicit.operator.stiffness_upper.len() {
+        if summary.operator.constrained[i] || summary.operator.constrained[i + 1] {
+            implicit.operator.stiffness_upper[i] = 0.0;
+        } else {
+            implicit.operator.stiffness_upper[i] = dt * summary.operator.stiffness_upper[i];
+        }
+    }
+    implicit
 }
 
 fn apply_implicit_operator(summary: &AssemblySummary, x: &[f64], dt: f64) -> Vec<f64> {
