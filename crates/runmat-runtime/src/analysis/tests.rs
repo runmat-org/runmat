@@ -444,6 +444,8 @@ fn analysis_results_returns_filtered_fields_and_metadata() {
             include_diagnostics: false,
             include_modal_results: true,
             mode_indices: Vec::new(),
+            include_transient_results: true,
+            transient_snapshot_indices: Vec::new(),
         },
         OperationContext::new(Some("trace-results-2".to_string()), None),
     )
@@ -459,6 +461,9 @@ fn analysis_results_returns_filtered_fields_and_metadata() {
     assert!(results.data.summary.available_mode_indices.is_empty());
     assert_eq!(results.data.summary.min_frequency_hz, None);
     assert_eq!(results.data.summary.max_frequency_hz, None);
+    assert_eq!(results.data.summary.snapshot_count, 0);
+    assert_eq!(results.data.summary.time_start_s, None);
+    assert_eq!(results.data.summary.time_end_s, None);
 }
 
 #[test]
@@ -479,6 +484,8 @@ fn analysis_results_unknown_field_maps_typed_error() {
             include_diagnostics: true,
             include_modal_results: true,
             mode_indices: Vec::new(),
+            include_transient_results: true,
+            transient_snapshot_indices: Vec::new(),
         },
         OperationContext::new(Some("trace-results-4".to_string()), None),
     )
@@ -515,6 +522,9 @@ fn analysis_results_by_run_id_roundtrip_works() {
     assert!(fetched.data.summary.available_mode_indices.is_empty());
     assert_eq!(fetched.data.summary.min_frequency_hz, None);
     assert_eq!(fetched.data.summary.max_frequency_hz, None);
+    assert_eq!(fetched.data.summary.snapshot_count, 0);
+    assert_eq!(fetched.data.summary.time_start_s, None);
+    assert_eq!(fetched.data.summary.time_end_s, None);
 
     storage::reset_artifact_store_for_tests();
 }
@@ -950,6 +960,8 @@ fn analysis_results_query_can_exclude_modal_payload() {
             include_diagnostics: true,
             include_modal_results: false,
             mode_indices: Vec::new(),
+            include_transient_results: true,
+            transient_snapshot_indices: Vec::new(),
         },
         OperationContext::new(None, None),
     )
@@ -985,6 +997,8 @@ fn analysis_results_query_rejects_unknown_modal_mode_index() {
             include_diagnostics: true,
             include_modal_results: true,
             mode_indices: vec![10],
+            include_transient_results: true,
+            transient_snapshot_indices: Vec::new(),
         },
         OperationContext::new(None, None),
     )
@@ -1028,4 +1042,73 @@ fn analysis_results_include_transient_payload_for_transient_runs() {
         transient.time_points_s.len(),
         transient.displacement_snapshots.len()
     );
+}
+
+#[test]
+fn analysis_results_query_can_exclude_transient_payload() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "transient_1".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
+    let run = analysis_run_transient_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("transient run should succeed");
+
+    let results = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery {
+            include_fields: Vec::new(),
+            include_diagnostics: true,
+            include_modal_results: true,
+            mode_indices: Vec::new(),
+            include_transient_results: false,
+            transient_snapshot_indices: Vec::new(),
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("results should succeed");
+
+    assert!(results.data.transient_results.is_none());
+    assert!(results.data.summary.snapshot_count > 0);
+    assert_eq!(results.data.summary.time_start_s, Some(0.0));
+    assert!(results.data.summary.time_end_s.unwrap_or(0.0) > 0.0);
+}
+
+#[test]
+fn analysis_results_query_rejects_unknown_transient_snapshot_index() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "transient_1".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
+    let run = analysis_run_transient_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("transient run should succeed");
+
+    let err = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery {
+            include_fields: Vec::new(),
+            include_diagnostics: true,
+            include_modal_results: true,
+            mode_indices: Vec::new(),
+            include_transient_results: true,
+            transient_snapshot_indices: vec![999],
+        },
+        OperationContext::new(None, None),
+    )
+    .expect_err("results should fail for unknown transient snapshot index");
+
+    assert_eq!(err.error_code, "ANALYSIS_RESULTS_TRANSIENT_SNAPSHOT_NOT_FOUND");
+    assert_eq!(err.operation, "analysis.results");
+    assert_eq!(err.op_version, "analysis.results/v1");
 }

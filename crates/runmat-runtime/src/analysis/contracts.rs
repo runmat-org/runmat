@@ -144,6 +144,8 @@ pub struct AnalysisResultsQuery {
     pub include_diagnostics: bool,
     pub include_modal_results: bool,
     pub mode_indices: Vec<usize>,
+    pub include_transient_results: bool,
+    pub transient_snapshot_indices: Vec<usize>,
 }
 
 impl Default for AnalysisResultsQuery {
@@ -153,6 +155,8 @@ impl Default for AnalysisResultsQuery {
             include_diagnostics: true,
             include_modal_results: true,
             mode_indices: Vec::new(),
+            include_transient_results: true,
+            transient_snapshot_indices: Vec::new(),
         }
     }
 }
@@ -165,6 +169,9 @@ pub struct AnalysisResultsSummary {
     pub available_mode_indices: Vec<usize>,
     pub min_frequency_hz: Option<f64>,
     pub max_frequency_hz: Option<f64>,
+    pub snapshot_count: usize,
+    pub time_start_s: Option<f64>,
+    pub time_end_s: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

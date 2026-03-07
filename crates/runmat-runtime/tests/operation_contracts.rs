@@ -462,6 +462,8 @@ fn analysis_results_contract_is_v1_and_filterable() {
             include_diagnostics: false,
             include_modal_results: true,
             mode_indices: Vec::new(),
+            include_transient_results: true,
+            transient_snapshot_indices: Vec::new(),
         },
         OperationContext::new(Some("trace-contract-3b-results".to_string()), None),
     )
@@ -491,6 +493,8 @@ fn analysis_results_unknown_field_maps_typed_error_contract() {
             include_diagnostics: true,
             include_modal_results: true,
             mode_indices: Vec::new(),
+            include_transient_results: true,
+            transient_snapshot_indices: Vec::new(),
         },
         OperationContext::new(Some("trace-contract-3c-results".to_string()), None),
     )
@@ -532,6 +536,8 @@ fn analysis_results_modal_query_controls_are_typed() {
             include_diagnostics: true,
             include_modal_results: false,
             mode_indices: Vec::new(),
+            include_transient_results: true,
+            transient_snapshot_indices: Vec::new(),
         },
         OperationContext::new(Some("trace-contract-modal-results-4".to_string()), None),
     )
@@ -544,6 +550,9 @@ fn analysis_results_modal_query_controls_are_typed() {
     );
     assert!(excluded.data.summary.min_frequency_hz.is_some());
     assert!(excluded.data.summary.max_frequency_hz.is_some());
+    assert_eq!(excluded.data.summary.snapshot_count, 0);
+    assert_eq!(excluded.data.summary.time_start_s, None);
+    assert_eq!(excluded.data.summary.time_end_s, None);
 
     let invalid_mode = analysis_results_op(
         &modal_run.data,
@@ -552,6 +561,8 @@ fn analysis_results_modal_query_controls_are_typed() {
             include_diagnostics: true,
             include_modal_results: true,
             mode_indices: vec![99],
+            include_transient_results: true,
+            transient_snapshot_indices: Vec::new(),
         },
         OperationContext::new(Some("trace-contract-modal-results-5".to_string()), None),
     )
@@ -559,6 +570,59 @@ fn analysis_results_modal_query_controls_are_typed() {
     assert_eq!(invalid_mode.error_code, "ANALYSIS_RESULTS_MODE_NOT_FOUND");
     assert_eq!(invalid_mode.operation, "analysis.results");
     assert_eq!(invalid_mode.op_version, "analysis.results/v1");
+}
+
+#[test]
+fn analysis_results_transient_query_controls_are_typed() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.steps = vec![runmat_analysis_core::AnalysisStep {
+        step_id: "transient_1".to_string(),
+        kind: runmat_analysis_core::AnalysisStepKind::Transient,
+    }];
+    let transient_run = analysis_run_transient_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-transient-results-1".to_string()), None),
+    )
+    .expect("transient run should succeed");
+
+    let excluded = analysis_results_op(
+        &transient_run.data,
+        AnalysisResultsQuery {
+            include_fields: Vec::new(),
+            include_diagnostics: true,
+            include_modal_results: true,
+            mode_indices: Vec::new(),
+            include_transient_results: false,
+            transient_snapshot_indices: Vec::new(),
+        },
+        OperationContext::new(Some("trace-contract-transient-results-2".to_string()), None),
+    )
+    .expect("results should succeed");
+    assert!(excluded.data.transient_results.is_none());
+    assert!(excluded.data.summary.snapshot_count > 0);
+    assert_eq!(excluded.data.summary.time_start_s, Some(0.0));
+    assert!(excluded.data.summary.time_end_s.unwrap_or(0.0) > 0.0);
+
+    let invalid_snapshot = analysis_results_op(
+        &transient_run.data,
+        AnalysisResultsQuery {
+            include_fields: Vec::new(),
+            include_diagnostics: true,
+            include_modal_results: true,
+            mode_indices: Vec::new(),
+            include_transient_results: true,
+            transient_snapshot_indices: vec![999],
+        },
+        OperationContext::new(Some("trace-contract-transient-results-3".to_string()), None),
+    )
+    .expect_err("unknown transient snapshot index should fail");
+    assert_eq!(
+        invalid_snapshot.error_code,
+        "ANALYSIS_RESULTS_TRANSIENT_SNAPSHOT_NOT_FOUND"
+    );
+    assert_eq!(invalid_snapshot.operation, "analysis.results");
+    assert_eq!(invalid_snapshot.op_version, "analysis.results/v1");
 }
 
 #[test]
@@ -585,6 +649,9 @@ fn analysis_results_by_run_id_contract_roundtrip() {
     assert!(results.data.summary.available_mode_indices.is_empty());
     assert_eq!(results.data.summary.min_frequency_hz, None);
     assert_eq!(results.data.summary.max_frequency_hz, None);
+    assert_eq!(results.data.summary.snapshot_count, 0);
+    assert_eq!(results.data.summary.time_start_s, None);
+    assert_eq!(results.data.summary.time_end_s, None);
 }
 
 #[test]

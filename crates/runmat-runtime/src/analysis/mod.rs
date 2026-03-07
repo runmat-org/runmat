@@ -862,6 +862,22 @@ pub fn analysis_results_op(
             (0, Vec::new(), None, None)
         };
 
+    let (snapshot_count, time_start_s, time_end_s) =
+        if let Some(transient) = run_result.transient_results.as_ref() {
+            let count = transient.time_points_s.len().min(transient.displacement_snapshots.len());
+            if count == 0 {
+                (0, None, None)
+            } else {
+                (
+                    count,
+                    transient.time_points_s.first().copied(),
+                    transient.time_points_s.get(count - 1).copied(),
+                )
+            }
+        } else {
+            (0, None, None)
+        };
+
     let summary = AnalysisResultsSummary {
         field_count: fields.len(),
         total_elements: fields.iter().map(|field| field.element_count()).sum(),
@@ -869,6 +885,9 @@ pub fn analysis_results_op(
         available_mode_indices,
         min_frequency_hz,
         max_frequency_hz,
+        snapshot_count,
+        time_start_s,
+        time_end_s,
     };
 
     let modal_results = if query.include_modal_results {
@@ -965,10 +984,118 @@ pub fn analysis_results_op(
         None
     };
 
+    let transient_results = if query.include_transient_results {
+        if let Some(transient) = run_result.transient_results.as_ref() {
+            if query.transient_snapshot_indices.is_empty() {
+                Some(transient.clone())
+            } else {
+                let mut time_points_s = Vec::with_capacity(query.transient_snapshot_indices.len());
+                let mut displacement_snapshots =
+                    Vec::with_capacity(query.transient_snapshot_indices.len());
+                let mut residual_norms = Vec::with_capacity(query.transient_snapshot_indices.len());
+
+                for &index in &query.transient_snapshot_indices {
+                    let time_point = transient.time_points_s.get(index).copied().ok_or_else(|| {
+                        operation_error(
+                            ANALYSIS_RESULTS_OPERATION,
+                            ANALYSIS_RESULTS_OP_VERSION,
+                            &context,
+                            OperationErrorSpec {
+                                error_code: "ANALYSIS_RESULTS_TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                error_type: OperationErrorType::Input,
+                                retryable: false,
+                                severity: OperationErrorSeverity::Error,
+                            },
+                            format!(
+                                "requested transient snapshot index '{index}' was not produced by run"
+                            ),
+                            BTreeMap::from([
+                                ("requested_snapshot_index".to_string(), index.to_string()),
+                                (
+                                    "available_snapshot_count".to_string(),
+                                    transient.time_points_s.len().to_string(),
+                                ),
+                            ]),
+                        )
+                    })?;
+                    let snapshot = transient
+                        .displacement_snapshots
+                        .get(index)
+                        .cloned()
+                        .ok_or_else(|| {
+                            operation_error(
+                                ANALYSIS_RESULTS_OPERATION,
+                                ANALYSIS_RESULTS_OP_VERSION,
+                                &context,
+                                OperationErrorSpec {
+                                    error_code: "ANALYSIS_RESULTS_TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                    error_type: OperationErrorType::Input,
+                                    retryable: false,
+                                    severity: OperationErrorSeverity::Error,
+                                },
+                                format!(
+                                    "requested transient snapshot index '{index}' is missing displacement data"
+                                ),
+                                BTreeMap::from([
+                                    ("requested_snapshot_index".to_string(), index.to_string()),
+                                    (
+                                        "available_displacement_snapshot_count".to_string(),
+                                        transient.displacement_snapshots.len().to_string(),
+                                    ),
+                                ]),
+                            )
+                        })?;
+
+                    if index > 0 {
+                        let residual = transient.residual_norms.get(index - 1).copied().ok_or_else(|| {
+                            operation_error(
+                                ANALYSIS_RESULTS_OPERATION,
+                                ANALYSIS_RESULTS_OP_VERSION,
+                                &context,
+                                OperationErrorSpec {
+                                    error_code: "ANALYSIS_RESULTS_TRANSIENT_SNAPSHOT_NOT_FOUND",
+                                    error_type: OperationErrorType::Input,
+                                    retryable: false,
+                                    severity: OperationErrorSeverity::Error,
+                                },
+                                format!(
+                                    "requested transient snapshot index '{index}' is missing residual data"
+                                ),
+                                BTreeMap::from([
+                                    ("requested_snapshot_index".to_string(), index.to_string()),
+                                    (
+                                        "available_residual_count".to_string(),
+                                        transient.residual_norms.len().to_string(),
+                                    ),
+                                ]),
+                            )
+                        })?;
+                        residual_norms.push(residual);
+                    }
+
+                    time_points_s.push(time_point);
+                    displacement_snapshots.push(snapshot);
+                }
+
+                Some(TransientResultsData {
+                    transient_payload_version: transient.transient_payload_version.clone(),
+                    time_points_s,
+                    displacement_snapshots,
+                    residual_norms,
+                    integration_method: transient.integration_method,
+                })
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
     let data = AnalysisResultsData {
         fields,
         modal_results,
-        transient_results: run_result.transient_results.clone(),
+        transient_results,
         diagnostics: if query.include_diagnostics {
             Some(run_result.run.diagnostics.clone())
         } else {
