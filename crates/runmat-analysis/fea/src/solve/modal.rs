@@ -6,7 +6,7 @@ use crate::{
     operator::{apply_k, apply_m, OperatorSystem},
     solve::{
         preconditioner::SpdPreconditionerKind,
-        runtime_tensor_solver::solve_linear_system_runtime_tensor,
+        runtime_tensor_solver::solve_linear_system_runtime_tensor_with_initial_guess,
     },
     ComputeBackend,
 };
@@ -68,12 +68,16 @@ pub fn solve_modal_system(
 
     let mut basis: Vec<Vec<f64>> = Vec::with_capacity(target_mode_count);
     let mut modes: Vec<(f64, Vec<f64>, f64)> = Vec::with_capacity(target_mode_count);
+    let max_inverse_iters = 8usize;
+    let min_inverse_iters = 3usize;
     for mode_idx in 0..target_mode_count {
         let mut q = vec![0.0; summary.operator.dof_count];
         q[unconstrained[mode_idx]] = 1.0;
         normalize_mass(&summary.operator, &mut q);
+        let mut linear_guess: Option<Vec<f64>> = None;
 
-        for _ in 0..8 {
+        for iter in 0..max_inverse_iters {
+            let q_prev = q.clone();
             let mq = apply_m(&summary.operator, &q);
             let z = solve_k_cg(
                 summary,
@@ -82,6 +86,7 @@ pub fn solve_modal_system(
                 64,
                 1.0e-10,
                 use_runtime_tensor,
+                linear_guess.as_deref(),
             );
             if let Some(solve) = z.runtime_tensor {
                 solver_backend = solve.solver_backend;
@@ -93,9 +98,17 @@ pub fn solve_modal_system(
                     device_apply_k_attempt_count.saturating_add(solve.device_apply_k_attempt_count);
             }
             let mut z_vec = z.vector;
+            linear_guess = Some(z_vec.clone());
             orthonormalize_mass(&summary.operator, &mut z_vec, &basis);
             normalize_mass(&summary.operator, &mut z_vec);
             q = z_vec;
+
+            if iter + 1 >= min_inverse_iters {
+                let rel_update = relative_l2_update(&q_prev, &q);
+                if rel_update <= 1.0e-4 {
+                    break;
+                }
+            }
         }
 
         let kq = apply_k(&summary.operator, &q);
@@ -239,13 +252,16 @@ fn solve_k_cg(
     max_iters: usize,
     tol: f64,
     use_runtime_tensor: bool,
+    initial_guess: Option<&[f64]>,
 ) -> SolveKResult {
     if use_runtime_tensor {
         let mut summary_with_rhs = summary.clone();
         summary_with_rhs.operator.rhs = rhs.to_vec();
-        if let Some(result) =
-            solve_linear_system_runtime_tensor(&summary_with_rhs, SpdPreconditionerKind::Jacobi)
-        {
+        if let Some(result) = solve_linear_system_runtime_tensor_with_initial_guess(
+            &summary_with_rhs,
+            SpdPreconditionerKind::Jacobi,
+            None,
+        ) {
             return SolveKResult {
                 vector: result.solution.clone(),
                 runtime_tensor: Some(result),
@@ -253,8 +269,17 @@ fn solve_k_cg(
         }
     }
 
-    let mut x = vec![0.0; rhs.len()];
-    let mut r = rhs.to_vec();
+    let mut x = match initial_guess {
+        Some(values) if values.len() == rhs.len() => values.to_vec(),
+        _ => vec![0.0; rhs.len()],
+    };
+    let mut r = {
+        let kx = apply_k(system, &x);
+        rhs.iter()
+            .zip(kx.iter())
+            .map(|(rhs_i, kx_i)| rhs_i - kx_i)
+            .collect::<Vec<f64>>()
+    };
     let mut p = r.clone();
     let mut rr_old = dot(&r, &r);
     if rr_old.sqrt() <= tol {
@@ -318,4 +343,25 @@ fn modal_min_frequency_separation(freqs: &[f64]) -> f64 {
         min_sep = min_sep.min(sep);
     }
     min_sep
+}
+
+fn relative_l2_update(previous: &[f64], current: &[f64]) -> f64 {
+    if previous.len() != current.len() || previous.is_empty() {
+        return 0.0;
+    }
+    let delta_norm = previous
+        .iter()
+        .zip(current.iter())
+        .map(|(a, b)| {
+            let d = b - a;
+            d * d
+        })
+        .sum::<f64>()
+        .sqrt();
+    let current_norm = current
+        .iter()
+        .map(|value| value * value)
+        .sum::<f64>()
+        .sqrt();
+    delta_norm / current_norm.max(1.0e-12)
 }

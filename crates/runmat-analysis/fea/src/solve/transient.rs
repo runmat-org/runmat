@@ -5,7 +5,7 @@ use crate::{
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     solve::{
         preconditioner::SpdPreconditionerKind,
-        runtime_tensor_solver::solve_linear_system_runtime_tensor,
+        runtime_tensor_solver::solve_linear_system_runtime_tensor_with_initial_guess,
     },
     ComputeBackend,
 };
@@ -273,9 +273,11 @@ fn solve_implicit_step(
 ) {
     if use_runtime_tensor {
         let implicit_summary = build_implicit_summary(summary, rhs, dt);
-        if let Some(result) =
-            solve_linear_system_runtime_tensor(&implicit_summary, SpdPreconditionerKind::Jacobi)
-        {
+        if let Some(result) = solve_linear_system_runtime_tensor_with_initial_guess(
+            &implicit_summary,
+            SpdPreconditionerKind::Jacobi,
+            None,
+        ) {
             let rhs_norm = dot(rhs, rhs).sqrt().max(1.0);
             let relative_residual = result.residual_norm / rhs_norm;
             let converged = result.converged || relative_residual <= options.tolerance;

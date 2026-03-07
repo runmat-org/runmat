@@ -40,6 +40,14 @@ pub fn solve_linear_system_runtime_tensor(
     summary: &AssemblySummary,
     preconditioner_kind: SpdPreconditionerKind,
 ) -> Option<LinearSolveResult> {
+    solve_linear_system_runtime_tensor_with_initial_guess(summary, preconditioner_kind, None)
+}
+
+pub fn solve_linear_system_runtime_tensor_with_initial_guess(
+    summary: &AssemblySummary,
+    preconditioner_kind: SpdPreconditionerKind,
+    initial_guess: Option<&[f64]>,
+) -> Option<LinearSolveResult> {
     let provider = provider()?;
     let n = summary.dof_count;
     if n == 0 {
@@ -86,9 +94,13 @@ pub fn solve_linear_system_runtime_tensor(
     let next_indices = linear_shift_indices(n, 1)?;
     let mut workspace = RuntimeTensorWorkspace::new(n)?;
 
+    let initial_x = match initial_guess {
+        Some(values) if values.len() == n => values.to_vec(),
+        _ => zeros.clone(),
+    };
     let mut x = provider
         .upload(&HostTensorView {
-            data: &zeros,
+            data: &initial_x,
             shape: &shape,
         })
         .ok()?;
@@ -98,7 +110,7 @@ pub fn solve_linear_system_runtime_tensor(
             shape: &shape,
         })
         .ok()?;
-    let mut r = provider
+    let rhs_h = provider
         .upload(&HostTensorView {
             data: &summary.operator.rhs,
             shape: &shape,
@@ -158,6 +170,26 @@ pub fn solve_linear_system_runtime_tensor(
             shape: &shape,
         })
         .ok()?;
+
+    let mut r = if initial_guess.is_some() {
+        let ax = apply_k_device(
+            provider,
+            &x,
+            &diag_h,
+            &upper_left_h,
+            &upper_right_h,
+            &constrained_mask_h,
+            &unconstrained_mask_h,
+            &prev_indices,
+            &next_indices,
+            &shape,
+        )?;
+        let residual = block_on(provider.elem_sub(&rhs_h, &ax)).ok()?;
+        let _ = provider.free(&ax);
+        residual
+    } else {
+        block_on(provider.elem_add(&rhs_h, &zero_h)).ok()?
+    };
 
     let preconditioner_ctx = PreconditionerDeviceContext {
         provider,
@@ -320,6 +352,7 @@ pub fn solve_linear_system_runtime_tensor(
     let _ = provider.free(&upper_right_h);
     let _ = provider.free(&constrained_mask_h);
     let _ = provider.free(&unconstrained_mask_h);
+    let _ = provider.free(&rhs_h);
     workspace.release(provider);
 
     Some(LinearSolveResult {
@@ -600,20 +633,23 @@ fn dot_handle(
     let sum = block_on(provider.reduce_sum(&mul)).ok()?;
     let out = match provider.read_scalar(&sum, 0) {
         Ok(value) => Some(value),
-        Err(_) => block_on(provider.download(&sum))
-            .ok()
-            .and_then(|host| host.data.first().copied()),
+        Err(_) => {
+            *host_sync_count = host_sync_count.saturating_add(1);
+            block_on(provider.download(&sum))
+                .ok()
+                .and_then(|host| host.data.first().copied())
+        }
     };
-    *host_sync_count = host_sync_count.saturating_add(1);
     let _ = provider.free(&sum);
     let _ = provider.free(&mul);
     out
 }
 
 pub fn estimate_runtime_tensor_pcg_host_syncs(max_iters: u32) -> u32 {
-    // Initial rz dot + per-iteration (denom dot + residual dot + rz dot)
-    // plus one final residual read for report path.
-    1 + max_iters.saturating_mul(3) + 1
+    // With providers that support read_scalar, only final x download is required.
+    // Fallback dot downloads are provider-specific and not counted by this baseline estimator.
+    let _ = max_iters;
+    1
 }
 
 #[cfg(test)]
@@ -622,8 +658,8 @@ mod tests {
 
     #[test]
     fn host_sync_estimator_matches_formula() {
-        assert_eq!(estimate_runtime_tensor_pcg_host_syncs(0), 2);
-        assert_eq!(estimate_runtime_tensor_pcg_host_syncs(1), 5);
-        assert_eq!(estimate_runtime_tensor_pcg_host_syncs(64), 194);
+        assert_eq!(estimate_runtime_tensor_pcg_host_syncs(0), 1);
+        assert_eq!(estimate_runtime_tensor_pcg_host_syncs(1), 1);
+        assert_eq!(estimate_runtime_tensor_pcg_host_syncs(64), 1);
     }
 }
