@@ -1093,6 +1093,7 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-06: Extended `analysis_benchmark_conformance.rs` beyond linear-static-only coverage by adding modal (`ModalLarge`) and transient (`TransientLong`) fixture gates, run-kind aware execution paths, and structured threshold assertion records in benchmark artifacts for modal orthogonality/separation and transient stability/energy diagnostics.
 - 2026-03-06: Hardened modal/transient quality diagnostics integration by wiring new modal (`FEA_MODAL_ORTHOGONALITY`, `FEA_MODAL_SEPARATION`) and transient (`FEA_TRANSIENT_STABILITY`, `FEA_TRANSIENT_STEP_FAILURE`, `FEA_TRANSIENT_ENERGY`) signals into runtime quality-reason policy gating, then stabilized transient energy growth checking to use first non-trivial baseline energy so default transient runs remain publishable while long-horizon fixtures still emit stability telemetry.
 - 2026-03-06: Added runtime transient execution tuning surface (`analysis_run_transient_with_options_op` + `AnalysisTransientRunOptions`) exposing timestep bounds, adaptive-step controls, solver tolerances, and retry budget while preserving `analysis.run_transient/v1` envelope compatibility.
 - 2026-03-06: Added transient option preset helpers (`coarse`, `balanced`, `high_accuracy`) on `AnalysisTransientRunOptions` to provide stable cost-vs-accuracy starting points for clients without custom knob tuning.

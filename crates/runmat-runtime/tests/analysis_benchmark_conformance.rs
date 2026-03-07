@@ -15,8 +15,9 @@ use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_results_by_run_id_op, analysis_results_op, analysis_run_linear_static_with_options,
-    analysis_validate,
-    AnalysisResultsQuery, AnalysisRunOptions, PrecisionMode, PreconditionerMode, QualityPolicy,
+    analysis_run_modal_with_options_op, analysis_run_transient_with_options_op, analysis_validate,
+    AnalysisModalRunOptions, AnalysisResultsQuery, AnalysisRunOptions, AnalysisTransientRunOptions,
+    PrecisionMode, PreconditionerMode, QualityPolicy,
 };
 use runmat_runtime::operations::OperationContext;
 use serde::{Deserialize, Serialize};
@@ -34,6 +35,13 @@ enum ResidencyExpectation {
 }
 
 #[derive(Debug, Clone, Copy)]
+enum AnalysisRunKind {
+    LinearStatic,
+    Modal,
+    Transient,
+}
+
+#[derive(Debug, Clone, Copy)]
 struct ParityTolerance {
     abs: f64,
     rel: f64,
@@ -44,6 +52,7 @@ struct FixtureSpec {
     id: &'static str,
     description: &'static str,
     model: fn() -> AnalysisModel,
+    run_kind: AnalysisRunKind,
     expect_validate_error: Option<&'static str>,
     expect_run_error: Option<&'static str>,
     expected_publishable: Option<bool>,
@@ -52,12 +61,19 @@ struct FixtureSpec {
     residency_expectation: Option<ResidencyExpectation>,
     max_solver_host_sync_count: Option<u32>,
     min_solver_device_apply_k_ratio: Option<f64>,
+    modal_mode_count: Option<usize>,
+    transient_step_count: Option<usize>,
+    max_modal_orthogonality_offdiag: Option<f64>,
+    min_modal_relative_frequency_separation: Option<f64>,
+    max_transient_residual_norm: Option<f64>,
+    max_transient_energy_growth_ratio: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 struct FixtureManifestEntry {
     id: String,
     description: String,
+    run_kind: String,
     expect_validate_error: Option<String>,
     expect_run_error: Option<String>,
     expected_publishable: Option<bool>,
@@ -67,6 +83,22 @@ struct FixtureManifestEntry {
     residency_expectation: Option<String>,
     max_solver_host_sync_count: Option<u32>,
     min_solver_device_apply_k_ratio: Option<f64>,
+    modal_mode_count: Option<usize>,
+    transient_step_count: Option<usize>,
+    max_modal_orthogonality_offdiag: Option<f64>,
+    min_modal_relative_frequency_separation: Option<f64>,
+    max_transient_residual_norm: Option<f64>,
+    max_transient_energy_growth_ratio: Option<f64>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ThresholdAssertionRecord {
+    name: String,
+    source_diagnostic: String,
+    observed: Option<f64>,
+    min_allowed: Option<f64>,
+    max_allowed: Option<f64>,
+    passed: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -96,6 +128,7 @@ struct FixtureRunRecord {
     gpu_solver_device_apply_k_ratio: Option<f64>,
     publishable: Option<bool>,
     parity: Option<ParitySummary>,
+    threshold_assertions: Vec<ThresholdAssertionRecord>,
     failures: Vec<String>,
 }
 
@@ -120,6 +153,7 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             id: "cantilever_gpu_provider",
             description: "canonical linear static fixture with provider-backed GPU residency",
             model: || fixture_model(FixtureId::CantileverLinearStatic),
+            run_kind: AnalysisRunKind::LinearStatic,
             expect_validate_error: None,
             expect_run_error: None,
             expected_publishable: Some(true),
@@ -128,11 +162,18 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             residency_expectation: Some(ResidencyExpectation::DeviceRef),
             max_solver_host_sync_count: Some(32),
             min_solver_device_apply_k_ratio: Some(1.0),
+            modal_mode_count: None,
+            transient_step_count: None,
+            max_modal_orthogonality_offdiag: None,
+            min_modal_relative_frequency_separation: None,
+            max_transient_residual_norm: None,
+            max_transient_energy_growth_ratio: None,
         },
         FixtureSpec {
             id: "cantilever_gpu_fallback",
             description: "canonical linear static fixture with no provider fallback",
             model: || fixture_model(FixtureId::CantileverLinearStatic),
+            run_kind: AnalysisRunKind::LinearStatic,
             expect_validate_error: None,
             expect_run_error: None,
             expected_publishable: Some(true),
@@ -144,11 +185,18 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             residency_expectation: Some(ResidencyExpectation::HostFallback),
             max_solver_host_sync_count: Some(0),
             min_solver_device_apply_k_ratio: Some(0.0),
+            modal_mode_count: None,
+            transient_step_count: None,
+            max_modal_orthogonality_offdiag: None,
+            min_modal_relative_frequency_separation: None,
+            max_transient_residual_norm: None,
+            max_transient_energy_growth_ratio: None,
         },
         FixtureSpec {
             id: "cantilever_load_sweep_gpu_provider",
             description: "larger load sweep fixture with provider-backed GPU residency",
             model: || fixture_model(FixtureId::CantileverLoadSweep),
+            run_kind: AnalysisRunKind::LinearStatic,
             expect_validate_error: None,
             expect_run_error: None,
             expected_publishable: Some(true),
@@ -157,11 +205,18 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             residency_expectation: Some(ResidencyExpectation::DeviceRef),
             max_solver_host_sync_count: Some(32),
             min_solver_device_apply_k_ratio: Some(1.0),
+            modal_mode_count: None,
+            transient_step_count: None,
+            max_modal_orthogonality_offdiag: None,
+            min_modal_relative_frequency_separation: None,
+            max_transient_residual_norm: None,
+            max_transient_energy_growth_ratio: None,
         },
         FixtureSpec {
             id: "cantilever_large_load_sweep_gpu_provider",
             description: "extra-large load sweep fixture with provider-backed GPU residency",
             model: || fixture_model(FixtureId::CantileverLargeLoadSweep),
+            run_kind: AnalysisRunKind::LinearStatic,
             expect_validate_error: None,
             expect_run_error: None,
             expected_publishable: Some(true),
@@ -170,11 +225,18 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             residency_expectation: Some(ResidencyExpectation::DeviceRef),
             max_solver_host_sync_count: Some(64),
             min_solver_device_apply_k_ratio: Some(1.0),
+            modal_mode_count: None,
+            transient_step_count: None,
+            max_modal_orthogonality_offdiag: None,
+            min_modal_relative_frequency_separation: None,
+            max_transient_residual_norm: None,
+            max_transient_energy_growth_ratio: None,
         },
         FixtureSpec {
             id: "multi_material_assembly_gpu_provider",
             description: "multi-material, multi-load assembly fixture with provider-backed GPU residency",
             model: || fixture_model(FixtureId::MultiMaterialAssembly),
+            run_kind: AnalysisRunKind::LinearStatic,
             expect_validate_error: None,
             expect_run_error: None,
             expected_publishable: Some(false),
@@ -183,11 +245,58 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             residency_expectation: Some(ResidencyExpectation::DeviceRef),
             max_solver_host_sync_count: Some(48),
             min_solver_device_apply_k_ratio: Some(1.0),
+            modal_mode_count: None,
+            transient_step_count: None,
+            max_modal_orthogonality_offdiag: None,
+            min_modal_relative_frequency_separation: None,
+            max_transient_residual_norm: None,
+            max_transient_energy_growth_ratio: None,
+        },
+        FixtureSpec {
+            id: "modal_large_cpu",
+            description: "large modal fixture with thresholded orthogonality/separation diagnostics",
+            model: || fixture_model(FixtureId::ModalLarge),
+            run_kind: AnalysisRunKind::Modal,
+            expect_validate_error: None,
+            expect_run_error: None,
+            expected_publishable: Some(true),
+            parity_tolerance: None,
+            gpu_mode: None,
+            residency_expectation: None,
+            max_solver_host_sync_count: None,
+            min_solver_device_apply_k_ratio: None,
+            modal_mode_count: Some(8),
+            transient_step_count: None,
+            max_modal_orthogonality_offdiag: Some(5.0e-3),
+            min_modal_relative_frequency_separation: Some(1.0e-5),
+            max_transient_residual_norm: None,
+            max_transient_energy_growth_ratio: None,
+        },
+        FixtureSpec {
+            id: "transient_long_cpu",
+            description: "long transient fixture with thresholded stability diagnostics",
+            model: || fixture_model(FixtureId::TransientLong),
+            run_kind: AnalysisRunKind::Transient,
+            expect_validate_error: None,
+            expect_run_error: None,
+            expected_publishable: Some(true),
+            parity_tolerance: None,
+            gpu_mode: None,
+            residency_expectation: None,
+            max_solver_host_sync_count: None,
+            min_solver_device_apply_k_ratio: None,
+            modal_mode_count: None,
+            transient_step_count: Some(24),
+            max_modal_orthogonality_offdiag: None,
+            min_modal_relative_frequency_separation: None,
+            max_transient_residual_norm: Some(1.0e-2),
+            max_transient_energy_growth_ratio: Some(5.0),
         },
         FixtureSpec {
             id: "missing_materials",
             description: "invalid fixture must fail validation and run with typed errors",
             model: || fixture_model(FixtureId::MissingMaterials),
+            run_kind: AnalysisRunKind::LinearStatic,
             expect_validate_error: Some("ANALYSIS_VALIDATION_MISSING_MATERIALS"),
             expect_run_error: Some("SOLVER_MODEL_INVALID"),
             expected_publishable: None,
@@ -196,6 +305,12 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             residency_expectation: None,
             max_solver_host_sync_count: None,
             min_solver_device_apply_k_ratio: None,
+            modal_mode_count: None,
+            transient_step_count: None,
+            max_modal_orthogonality_offdiag: None,
+            min_modal_relative_frequency_separation: None,
+            max_transient_residual_norm: None,
+            max_transient_energy_growth_ratio: None,
         },
         FixtureSpec {
             id: "unit_mismatch",
@@ -205,6 +320,7 @@ fn manifest_specs() -> Vec<FixtureSpec> {
                 model.units = UnitSystem::Inch;
                 model
             },
+            run_kind: AnalysisRunKind::LinearStatic,
             expect_validate_error: Some("ANALYSIS_VALIDATION_UNIT_MISMATCH"),
             expect_run_error: None,
             expected_publishable: None,
@@ -213,6 +329,12 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             residency_expectation: None,
             max_solver_host_sync_count: None,
             min_solver_device_apply_k_ratio: None,
+            modal_mode_count: None,
+            transient_step_count: None,
+            max_modal_orthogonality_offdiag: None,
+            min_modal_relative_frequency_separation: None,
+            max_transient_residual_norm: None,
+            max_transient_energy_growth_ratio: None,
         },
     ]
 }
@@ -225,6 +347,11 @@ fn fixture_manifest(specs: &[FixtureSpec]) -> FixtureManifest {
             .map(|spec| FixtureManifestEntry {
                 id: spec.id.to_string(),
                 description: spec.description.to_string(),
+                run_kind: match spec.run_kind {
+                    AnalysisRunKind::LinearStatic => "linear_static".to_string(),
+                    AnalysisRunKind::Modal => "modal".to_string(),
+                    AnalysisRunKind::Transient => "transient".to_string(),
+                },
                 expect_validate_error: spec.expect_validate_error.map(|s| s.to_string()),
                 expect_run_error: spec.expect_run_error.map(|s| s.to_string()),
                 expected_publishable: spec.expected_publishable,
@@ -240,6 +367,13 @@ fn fixture_manifest(specs: &[FixtureSpec]) -> FixtureManifest {
                 }),
                 max_solver_host_sync_count: spec.max_solver_host_sync_count,
                 min_solver_device_apply_k_ratio: spec.min_solver_device_apply_k_ratio,
+                modal_mode_count: spec.modal_mode_count,
+                transient_step_count: spec.transient_step_count,
+                max_modal_orthogonality_offdiag: spec.max_modal_orthogonality_offdiag,
+                min_modal_relative_frequency_separation: spec
+                    .min_modal_relative_frequency_separation,
+                max_transient_residual_norm: spec.max_transient_residual_norm,
+                max_transient_energy_growth_ratio: spec.max_transient_energy_growth_ratio,
             })
             .collect(),
     }
@@ -251,6 +385,119 @@ fn default_options() -> AnalysisRunOptions {
         precision_mode: PrecisionMode::Fp64,
         preconditioner_mode: PreconditionerMode::Auto,
         quality_policy: QualityPolicy::Balanced,
+    }
+}
+
+fn run_fixture_cpu(
+    spec: &FixtureSpec,
+    model: &AnalysisModel,
+) -> Result<
+    runmat_runtime::operations::OperationEnvelope<runmat_runtime::analysis::AnalysisRunResult>,
+    runmat_runtime::operations::OperationErrorEnvelope,
+> {
+    match spec.run_kind {
+        AnalysisRunKind::LinearStatic => analysis_run_linear_static_with_options(
+            model,
+            ComputeBackend::Cpu,
+            default_options(),
+            OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
+        ),
+        AnalysisRunKind::Modal => analysis_run_modal_with_options_op(
+            model,
+            ComputeBackend::Cpu,
+            AnalysisModalRunOptions {
+                mode_count: spec.modal_mode_count.unwrap_or(AnalysisModalRunOptions::default().mode_count),
+                ..AnalysisModalRunOptions::balanced()
+            },
+            OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
+        ),
+        AnalysisRunKind::Transient => analysis_run_transient_with_options_op(
+            model,
+            ComputeBackend::Cpu,
+            AnalysisTransientRunOptions {
+                step_count: spec
+                    .transient_step_count
+                    .unwrap_or(AnalysisTransientRunOptions::default().step_count),
+                ..AnalysisTransientRunOptions::balanced()
+            },
+            OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
+        ),
+    }
+}
+
+fn run_fixture_gpu(
+    spec: &FixtureSpec,
+    model: &AnalysisModel,
+    mode: GpuMode,
+) -> Result<
+    runmat_runtime::operations::OperationEnvelope<runmat_runtime::analysis::AnalysisRunResult>,
+    runmat_runtime::operations::OperationErrorEnvelope,
+> {
+    let run = || {
+        analysis_run_linear_static_with_options(
+            model,
+            ComputeBackend::Gpu,
+            default_options(),
+            OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
+        )
+    };
+    match mode {
+        GpuMode::WithProvider => with_harness_provider(run),
+        GpuMode::WithoutProvider => {
+            let _guard = ThreadProviderGuard::set(None);
+            run()
+        }
+    }
+}
+
+fn parse_metric_value(message: &str, key: &str) -> Option<f64> {
+    message
+        .split_whitespace()
+        .find_map(|token| token.strip_prefix(&format!("{key}=")))
+        .and_then(|value| value.parse::<f64>().ok())
+}
+
+fn diagnostic_metric(
+    run: &runmat_runtime::analysis::AnalysisRunResult,
+    code: &str,
+    key: &str,
+) -> Option<f64> {
+    run.run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == code)
+        .and_then(|diag| parse_metric_value(&diag.message, key))
+}
+
+fn push_threshold_assertion(
+    fixture_id: &str,
+    assertions: &mut Vec<ThresholdAssertionRecord>,
+    failures: &mut Vec<String>,
+    name: &str,
+    source_diagnostic: &str,
+    observed: Option<f64>,
+    min_allowed: Option<f64>,
+    max_allowed: Option<f64>,
+) {
+    let passed = observed
+        .map(|value| {
+            min_allowed.map(|min| value >= min).unwrap_or(true)
+                && max_allowed.map(|max| value <= max).unwrap_or(true)
+        })
+        .unwrap_or(false);
+    assertions.push(ThresholdAssertionRecord {
+        name: name.to_string(),
+        source_diagnostic: source_diagnostic.to_string(),
+        observed,
+        min_allowed,
+        max_allowed,
+        passed,
+    });
+    if !passed {
+        failures.push(format!(
+            "threshold assertion failed for fixture {}: {} observed={:?} min={:?} max={:?}",
+            fixture_id, name, observed, min_allowed, max_allowed
+        ));
     }
 }
 
@@ -345,15 +592,11 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
     let mut gpu_solver_device_apply_k_ratio = None;
     let mut publishable = None;
     let mut parity = None;
+    let mut threshold_assertions = Vec::new();
 
     if spec.expect_validate_error.is_none() {
         let cpu_start = Instant::now();
-        let cpu_result = analysis_run_linear_static_with_options(
-            &model,
-            ComputeBackend::Cpu,
-            default_options(),
-            OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
-        );
+        let cpu_result = run_fixture_cpu(spec, &model);
         cpu_run_ms = Some(cpu_start.elapsed().as_secs_f64() * 1_000.0);
 
         let cpu_envelope = match cpu_result {
@@ -377,10 +620,13 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                     gpu_solver_device_apply_k_ratio,
                     publishable,
                     parity,
+                    threshold_assertions,
                     failures,
                 };
             }
         };
+        run_ok = true;
+        publishable = Some(cpu_envelope.data.publishable);
 
         if let Some(expected_publishable) = spec.expected_publishable {
             if cpu_envelope.data.publishable != expected_publishable {
@@ -391,27 +637,78 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
             }
         }
 
+        if let Some(max_offdiag) = spec.max_modal_orthogonality_offdiag {
+            let observed = diagnostic_metric(
+                &cpu_envelope.data,
+                "FEA_MODAL_ORTHOGONALITY",
+                "max_m_orthogonality_offdiag",
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "modal_max_m_orthogonality_offdiag",
+                "FEA_MODAL_ORTHOGONALITY",
+                observed,
+                None,
+                Some(max_offdiag),
+            );
+        }
+        if let Some(min_separation) = spec.min_modal_relative_frequency_separation {
+            let observed = diagnostic_metric(
+                &cpu_envelope.data,
+                "FEA_MODAL_SEPARATION",
+                "min_relative_frequency_separation",
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "modal_min_relative_frequency_separation",
+                "FEA_MODAL_SEPARATION",
+                observed,
+                Some(min_separation),
+                None,
+            );
+        }
+        if let Some(max_residual) = spec.max_transient_residual_norm {
+            let observed = diagnostic_metric(
+                &cpu_envelope.data,
+                "FEA_TRANSIENT_STABILITY",
+                "max_residual_norm",
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "transient_max_residual_norm",
+                "FEA_TRANSIENT_STABILITY",
+                observed,
+                None,
+                Some(max_residual),
+            );
+        }
+        if let Some(max_growth) = spec.max_transient_energy_growth_ratio {
+            let observed = diagnostic_metric(
+                &cpu_envelope.data,
+                "FEA_TRANSIENT_ENERGY",
+                "max_energy_growth_ratio",
+            );
+            push_threshold_assertion(
+                spec.id,
+                &mut threshold_assertions,
+                &mut failures,
+                "transient_max_energy_growth_ratio",
+                "FEA_TRANSIENT_ENERGY",
+                observed,
+                None,
+                Some(max_growth),
+            );
+        }
+
         if let Some(gpu_mode) = spec.gpu_mode {
             let gpu_start = Instant::now();
-            let gpu_result = match gpu_mode {
-                GpuMode::WithProvider => with_harness_provider(|| {
-                    analysis_run_linear_static_with_options(
-                        &model,
-                        ComputeBackend::Gpu,
-                        default_options(),
-                        OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
-                    )
-                }),
-                GpuMode::WithoutProvider => {
-                    let _guard = ThreadProviderGuard::set(None);
-                    analysis_run_linear_static_with_options(
-                        &model,
-                        ComputeBackend::Gpu,
-                        default_options(),
-                        OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
-                    )
-                }
-            };
+            let gpu_result = run_fixture_gpu(spec, &model, gpu_mode);
             gpu_run_ms = Some(gpu_start.elapsed().as_secs_f64() * 1_000.0);
 
             match gpu_result {
@@ -479,6 +776,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                                 gpu_solver_device_apply_k_ratio,
                                 publishable,
                                 parity,
+                                threshold_assertions,
                                 failures,
                             };
                         }
@@ -598,15 +896,16 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                                     validate_error_code,
                                     run_ok,
                                     run_error_code,
-                                cpu_run_ms,
-                                gpu_run_ms,
-                                gpu_fallback_events,
-                                gpu_displacement_residency,
-                                gpu_solver_host_sync_count,
-                                gpu_solver_device_apply_k_ratio,
-                                publishable,
-                                parity,
-                                failures,
+                                    cpu_run_ms,
+                                    gpu_run_ms,
+                                    gpu_fallback_events,
+                                    gpu_displacement_residency,
+                                    gpu_solver_host_sync_count,
+                                    gpu_solver_device_apply_k_ratio,
+                                    publishable,
+                                    parity,
+                                    threshold_assertions,
+                                    failures,
                                 };
                             }
                         };
@@ -650,12 +949,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
     }
 
     if let Some(expected_run_error) = spec.expect_run_error {
-        let result = analysis_run_linear_static_with_options(
-            &model,
-            ComputeBackend::Cpu,
-            default_options(),
-            OperationContext::new(Some(format!("trace-run-error-{}", spec.id)), None),
-        );
+        let result = run_fixture_cpu(spec, &model);
         match result {
             Ok(_) => failures.push(format!(
                 "expected run error code {expected_run_error}, but run succeeded"
@@ -686,6 +980,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
         gpu_solver_device_apply_k_ratio,
         publishable,
         parity,
+        threshold_assertions,
         failures,
     }
 }
