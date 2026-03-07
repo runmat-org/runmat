@@ -24,11 +24,11 @@ pub mod storage;
 
 pub use contracts::{
     AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisResultsData,
-    AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunOptions, AnalysisRunResult,
-    AnalysisValidateResult, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
-    PrecisionMode, PreconditionerMode, QualityGate, QualityPolicy, QualityReason,
-    QualityReasonCode, RunProvenance, RunStatus, TransientIntegrationMethod,
-    TransientResultsData,
+    AnalysisModalRunOptions, AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunOptions,
+    AnalysisRunResult, AnalysisTransientRunOptions, AnalysisValidateResult,
+    ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, PrecisionMode,
+    PreconditionerMode, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
+    RunProvenance, RunStatus, TransientIntegrationMethod, TransientResultsData,
 };
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "analysis.create_model";
@@ -43,7 +43,7 @@ const ANALYSIS_RUN_TRANSIENT_OPERATION: &str = "analysis.run_transient";
 const ANALYSIS_RUN_TRANSIENT_OP_VERSION: &str = "analysis.run_transient/v1";
 const ANALYSIS_RESULTS_OPERATION: &str = "analysis.results";
 const ANALYSIS_RESULTS_OP_VERSION: &str = "analysis.results/v1";
-const MODAL_RESIDUAL_WARN_THRESHOLD: f64 = 1.0e-3;
+const TRANSIENT_RESIDUAL_WARN_THRESHOLD: f64 = 1.0e-4;
 
 pub fn analysis_create_model_op(
     geometry: &GeometryAsset,
@@ -267,6 +267,15 @@ pub fn analysis_run_modal_op(
     backend: ComputeBackend,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    analysis_run_modal_with_options_op(model, backend, AnalysisModalRunOptions::default(), context)
+}
+
+pub fn analysis_run_modal_with_options_op(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: AnalysisModalRunOptions,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let has_modal_step = model
         .steps
         .iter()
@@ -290,7 +299,30 @@ pub fn analysis_run_modal_op(
         ));
     }
 
-    let modal_run = run_modal_with_options(model, backend, ModalSolveOptions::default()).map_err(
+    if options.mode_count == 0 {
+        return Err(operation_error(
+            ANALYSIS_RUN_MODAL_OPERATION,
+            ANALYSIS_RUN_MODAL_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_MODAL_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_modal options require mode_count greater than zero",
+            BTreeMap::from([("mode_count".to_string(), options.mode_count.to_string())]),
+        ));
+    }
+
+    let modal_run = run_modal_with_options(
+        model,
+        backend,
+        ModalSolveOptions {
+            mode_count: options.mode_count,
+        },
+    )
+    .map_err(
         |err| {
             operation_error(
                 ANALYSIS_RUN_MODAL_OPERATION,
@@ -329,7 +361,7 @@ pub fn analysis_run_modal_op(
         .iter()
         .copied()
         .fold(0.0_f64, f64::max)
-        > MODAL_RESIDUAL_WARN_THRESHOLD
+        > options.residual_warn_threshold
     {
         QualityGate::Warn
     } else {
@@ -348,7 +380,7 @@ pub fn analysis_run_modal_op(
             code: QualityReasonCode::ModalResidualExceeded,
             detail: format!(
                 "modal residual exceeds threshold {}",
-                MODAL_RESIDUAL_WARN_THRESHOLD
+                options.residual_warn_threshold
             ),
         });
     }
@@ -408,11 +440,11 @@ pub fn analysis_run_modal_op(
             solver_backend,
             solver_device_apply_k_ratio,
             solver_host_sync_count,
-            precision_mode: contracts::format_precision_mode(PrecisionMode::Fp64),
-            deterministic_mode: false,
+            precision_mode: contracts::format_precision_mode(options.precision_mode),
+            deterministic_mode: options.deterministic_mode,
             solver_method,
             preconditioner: selected_preconditioner,
-            quality_policy: contracts::format_quality_policy(QualityPolicy::Balanced),
+            quality_policy: contracts::format_quality_policy(options.quality_policy),
             fallback_events,
         },
     };
@@ -446,6 +478,20 @@ pub fn analysis_run_transient_op(
     backend: ComputeBackend,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    analysis_run_transient_with_options_op(
+        model,
+        backend,
+        AnalysisTransientRunOptions::default(),
+        context,
+    )
+}
+
+pub fn analysis_run_transient_with_options_op(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: AnalysisTransientRunOptions,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
     let has_transient_step = model
         .steps
         .iter()
@@ -472,7 +518,17 @@ pub fn analysis_run_transient_op(
     let transient_run = run_transient_with_options(
         model,
         backend,
-        runmat_analysis_fea::solve::transient::TransientSolveOptions::default(),
+        runmat_analysis_fea::solve::transient::TransientSolveOptions {
+            time_step_s: options.time_step_s,
+            min_time_step_s: options.min_time_step_s,
+            max_time_step_s: options.max_time_step_s,
+            step_count: options.step_count,
+            max_linear_iters: options.max_linear_iters,
+            tolerance: options.tolerance,
+            residual_target: options.residual_target,
+            adaptive_time_step: options.adaptive_time_step,
+            max_step_retries: options.max_step_retries,
+        },
     )
     .map_err(|err| {
         operation_error(
@@ -510,6 +566,14 @@ pub fn analysis_run_transient_op(
             .any(|residual| !residual.is_finite())
     {
         QualityGate::Fail
+    } else if transient_run
+        .residual_norms
+        .iter()
+        .copied()
+        .fold(0.0_f64, f64::max)
+        > TRANSIENT_RESIDUAL_WARN_THRESHOLD
+    {
+        QualityGate::Warn
     } else {
         QualityGate::Pass
     };
@@ -519,6 +583,15 @@ pub fn analysis_run_transient_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::SolverNotConverged,
             detail: "transient solver convergence gate is warning".to_string(),
+        });
+    }
+    if result_quality == QualityGate::Warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::TransientResidualExceeded,
+            detail: format!(
+                "transient residual exceeds threshold {}",
+                TRANSIENT_RESIDUAL_WARN_THRESHOLD
+            ),
         });
     }
     if run
@@ -566,11 +639,11 @@ pub fn analysis_run_transient_op(
             solver_backend: "cpu_reference".to_string(),
             solver_device_apply_k_ratio: 0.0,
             solver_host_sync_count: 0,
-            precision_mode: contracts::format_precision_mode(PrecisionMode::Fp64),
-            deterministic_mode: false,
+            precision_mode: contracts::format_precision_mode(options.precision_mode),
+            deterministic_mode: options.deterministic_mode,
             solver_method: "implicit_euler_pcg".to_string(),
             preconditioner: "none".to_string(),
-            quality_policy: contracts::format_quality_policy(QualityPolicy::Balanced),
+            quality_policy: contracts::format_quality_policy(options.quality_policy),
             fallback_events: Vec::new(),
         },
     };

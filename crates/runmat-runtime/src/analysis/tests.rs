@@ -141,6 +141,34 @@ fn analysis_create_model_returns_v1_envelope() {
 }
 
 #[test]
+fn transient_run_option_presets_are_ordered_for_cost_vs_accuracy() {
+    let coarse = AnalysisTransientRunOptions::coarse();
+    let balanced = AnalysisTransientRunOptions::balanced();
+    let high_accuracy = AnalysisTransientRunOptions::high_accuracy();
+
+    assert!(coarse.step_count < balanced.step_count);
+    assert!(balanced.step_count < high_accuracy.step_count);
+
+    assert!(coarse.tolerance > balanced.tolerance);
+    assert!(balanced.tolerance > high_accuracy.tolerance);
+
+    assert!(coarse.time_step_s > balanced.time_step_s);
+    assert!(balanced.time_step_s > high_accuracy.time_step_s);
+}
+
+#[test]
+fn modal_run_option_presets_are_ordered_for_cost_vs_accuracy() {
+    let coarse = AnalysisModalRunOptions::coarse();
+    let balanced = AnalysisModalRunOptions::balanced();
+    let high_accuracy = AnalysisModalRunOptions::high_accuracy();
+
+    assert!(coarse.mode_count < balanced.mode_count);
+    assert!(balanced.mode_count < high_accuracy.mode_count);
+    assert!(coarse.residual_warn_threshold > balanced.residual_warn_threshold);
+    assert!(balanced.residual_warn_threshold > high_accuracy.residual_warn_threshold);
+}
+
+#[test]
 fn analysis_create_model_maps_invalid_intent_error() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
@@ -824,6 +852,47 @@ fn analysis_run_transient_returns_native_transient_result() {
 }
 
 #[test]
+fn analysis_run_transient_with_options_controls_timeline() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "transient_1".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
+
+    let envelope = analysis_run_transient_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisTransientRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            time_step_s: 2.0e-3,
+            min_time_step_s: 2.0e-3,
+            max_time_step_s: 2.0e-3,
+            step_count: 3,
+            max_linear_iters: 64,
+            tolerance: 1.0e-8,
+            residual_target: 1.0e-6,
+            adaptive_time_step: false,
+            max_step_retries: 0,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("transient run should succeed with options");
+
+    let transient = envelope
+        .data
+        .transient_results
+        .as_ref()
+        .expect("transient payload should exist");
+    assert_eq!(transient.time_points_s.len(), 4);
+    assert_eq!(transient.time_points_s[0], 0.0);
+    assert!((transient.time_points_s[3] - 6.0e-3).abs() < 1.0e-12);
+    assert_eq!(envelope.data.provenance.deterministic_mode, true);
+}
+
+#[test]
 fn analysis_run_modal_returns_native_modal_result() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
@@ -888,6 +957,44 @@ fn analysis_run_modal_returns_native_modal_result() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_MODAL_CONVERGENCE"));
+}
+
+#[test]
+fn analysis_run_modal_with_options_controls_requested_mode_count() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_geometry_asset();
+    let modal_model = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "modal_model_run_opts".to_string(),
+            profile: AnalysisCreateModelProfile::ModalStructural,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("modal model should be created");
+
+    let envelope = analysis_run_modal_with_options_op(
+        &modal_model.data,
+        ComputeBackend::Cpu,
+        AnalysisModalRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            mode_count: 2,
+            residual_warn_threshold: 1.0e-2,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("modal run should succeed with options");
+
+    let modal = envelope
+        .data
+        .modal_results
+        .as_ref()
+        .expect("modal payload should exist");
+    assert!(modal.eigenvalues_hz.len() > 0);
+    assert!(modal.eigenvalues_hz.len() <= 2);
+    assert!(envelope.data.provenance.deterministic_mode);
 }
 
 #[test]

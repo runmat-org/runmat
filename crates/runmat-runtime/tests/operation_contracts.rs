@@ -6,10 +6,11 @@ use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_op,
     analysis_run_linear_static_op, analysis_run_linear_static_with_options, analysis_run_modal_op,
-    analysis_run_transient_op, analysis_validate, AnalysisCreateModelIntentSpec,
-    AnalysisCreateModelProfile, AnalysisResultsQuery, AnalysisRunOptions, ModalFrequencyBasis,
-    ModalFrequencyUnits, PrecisionMode, PreconditionerMode, QualityPolicy, QualityReasonCode,
-    RunStatus,
+    analysis_run_modal_with_options_op, analysis_run_transient_op,
+    analysis_run_transient_with_options_op, analysis_validate, AnalysisCreateModelIntentSpec,
+    AnalysisCreateModelProfile, AnalysisModalRunOptions, AnalysisResultsQuery, AnalysisRunOptions,
+    AnalysisTransientRunOptions, ModalFrequencyBasis, ModalFrequencyUnits, PrecisionMode,
+    PreconditionerMode, QualityPolicy, QualityReasonCode, RunStatus,
 };
 use runmat_runtime::geometry::{
     geometry_capture_view_op, geometry_inspect_op, geometry_list_regions_op, geometry_load_op,
@@ -400,6 +401,68 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
 }
 
 #[test]
+fn analysis_run_modal_with_options_contract_controls_mode_budget() {
+    let geometry = geometry_load_op(
+        "/part.stl",
+        TRIANGLE_STL.as_bytes(),
+        OperationContext::new(Some("trace-contract-modal-opts-1".to_string()), None),
+    )
+    .expect("geometry load should succeed");
+
+    let modal_model = analysis_create_model_op(
+        &geometry.data,
+        AnalysisCreateModelIntentSpec {
+            model_id: "contract_modal_model_opts".to_string(),
+            profile: AnalysisCreateModelProfile::ModalStructural,
+        },
+        OperationContext::new(Some("trace-contract-modal-opts-2".to_string()), None),
+    )
+    .expect("modal model should be created");
+
+    let envelope = analysis_run_modal_with_options_op(
+        &modal_model.data,
+        ComputeBackend::Cpu,
+        AnalysisModalRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            mode_count: 2,
+            residual_warn_threshold: 1.0e-2,
+        },
+        OperationContext::new(Some("trace-contract-modal-opts-3".to_string()), None),
+    )
+    .expect("modal run with options should succeed");
+
+    assert_eq!(envelope.operation, "analysis.run_modal");
+    assert_eq!(envelope.op_version, "analysis.run_modal/v1");
+    let modal = envelope
+        .data
+        .modal_results
+        .as_ref()
+        .expect("modal payload should exist");
+    assert!(modal.eigenvalues_hz.len() > 0);
+    assert!(modal.eigenvalues_hz.len() <= 2);
+    assert!(envelope.data.provenance.deterministic_mode);
+
+    let invalid = analysis_run_modal_with_options_op(
+        &modal_model.data,
+        ComputeBackend::Cpu,
+        AnalysisModalRunOptions {
+            deterministic_mode: false,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            mode_count: 0,
+            residual_warn_threshold: 1.0e-3,
+        },
+        OperationContext::new(Some("trace-contract-modal-opts-4".to_string()), None),
+    )
+    .expect_err("mode_count=0 should fail");
+    assert_eq!(invalid.error_code, "ANALYSIS_RUN_MODAL_INVALID_OPTIONS");
+    assert_eq!(invalid.operation, "analysis.run_modal");
+    assert_eq!(invalid.op_version, "analysis.run_modal/v1");
+}
+
+#[test]
 fn analysis_run_transient_contract_is_v1_and_typed() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.steps = vec![runmat_analysis_core::AnalysisStep {
@@ -443,6 +506,47 @@ fn analysis_run_transient_contract_is_v1_and_typed() {
     assert_eq!(invalid.operation, "analysis.run_transient");
     assert_eq!(invalid.op_version, "analysis.run_transient/v1");
     assert_eq!(invalid.error_code, "ANALYSIS_RUN_TRANSIENT_INVALID_MODEL");
+}
+
+#[test]
+fn analysis_run_transient_with_options_contract_controls_execution_window() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.steps = vec![runmat_analysis_core::AnalysisStep {
+        step_id: "transient_1".to_string(),
+        kind: runmat_analysis_core::AnalysisStepKind::Transient,
+    }];
+
+    let envelope = analysis_run_transient_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisTransientRunOptions {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            time_step_s: 1.5e-3,
+            min_time_step_s: 1.5e-3,
+            max_time_step_s: 1.5e-3,
+            step_count: 4,
+            max_linear_iters: 64,
+            tolerance: 1.0e-8,
+            residual_target: 1.0e-6,
+            adaptive_time_step: false,
+            max_step_retries: 0,
+        },
+        OperationContext::new(Some("trace-contract-transient-opts-1".to_string()), None),
+    )
+    .expect("transient run with options should succeed");
+
+    assert_eq!(envelope.operation, "analysis.run_transient");
+    assert_eq!(envelope.op_version, "analysis.run_transient/v1");
+    let transient = envelope
+        .data
+        .transient_results
+        .as_ref()
+        .expect("transient payload should exist");
+    assert_eq!(transient.time_points_s.len(), 5);
+    assert!((transient.time_points_s[4] - 6.0e-3).abs() < 1.0e-12);
+    assert!(envelope.data.provenance.deterministic_mode);
 }
 
 #[test]

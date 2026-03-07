@@ -8,18 +8,28 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct TransientSolveOptions {
     pub time_step_s: f64,
+    pub min_time_step_s: f64,
+    pub max_time_step_s: f64,
     pub step_count: usize,
     pub max_linear_iters: usize,
     pub tolerance: f64,
+    pub residual_target: f64,
+    pub adaptive_time_step: bool,
+    pub max_step_retries: usize,
 }
 
 impl Default for TransientSolveOptions {
     fn default() -> Self {
         Self {
             time_step_s: 1.0e-3,
+            min_time_step_s: 1.0e-6,
+            max_time_step_s: 2.0e-2,
             step_count: 10,
             max_linear_iters: 128,
             tolerance: 1.0e-8,
+            residual_target: 1.0e-6,
+            adaptive_time_step: true,
+            max_step_retries: 4,
         }
     }
 }
@@ -31,6 +41,7 @@ pub struct TransientSolveResult {
     pub time_points_s: Vec<f64>,
     pub displacement_snapshots: Vec<Vec<f64>>,
     pub residual_norms: Vec<f64>,
+    pub accepted_time_steps_s: Vec<f64>,
     pub diagnostics: Vec<FeaDiagnostic>,
     pub solver_method: String,
 }
@@ -46,6 +57,7 @@ pub fn solve_transient_system(
             time_points_s: vec![0.0],
             displacement_snapshots: vec![vec![0.0; summary.dof_count]],
             residual_norms: Vec::new(),
+            accepted_time_steps_s: Vec::new(),
             diagnostics: vec![FeaDiagnostic {
                 code: "FEA_TRANSIENT_EMPTY_SYSTEM".to_string(),
                 severity: FeaDiagnosticSeverity::Warning,
@@ -56,23 +68,53 @@ pub fn solve_transient_system(
         };
     }
 
-    let dt = options.time_step_s.max(1.0e-9);
+    let min_dt = options.min_time_step_s.max(1.0e-9);
+    let max_dt = options.max_time_step_s.max(min_dt);
+    let mut dt = options.time_step_s.clamp(min_dt, max_dt);
     let mut x = vec![0.0; summary.dof_count];
     let mut time_points_s = vec![0.0];
     let mut displacement_snapshots = vec![x.clone()];
     let mut residual_norms = Vec::with_capacity(options.step_count);
+    let mut accepted_time_steps_s = Vec::with_capacity(options.step_count);
     let mut converged_steps = 0usize;
 
     for step in 0..options.step_count {
-        let rhs = build_step_rhs(summary, &x, dt);
-        let (next_x, residual_norm, converged) = solve_implicit_step(summary, &rhs, dt, options);
+        let mut step_dt = dt;
+        let mut retries = 0usize;
+        let (next_x, residual_norm, converged) = loop {
+            let rhs = build_step_rhs(summary, &x, step_dt);
+            let solved = solve_implicit_step(summary, &rhs, step_dt, options);
+            if !options.adaptive_time_step {
+                break solved;
+            }
+            let (candidate_x, candidate_residual, candidate_converged) = solved;
+            if candidate_converged && candidate_residual <= options.residual_target * 4.0 {
+                break (candidate_x, candidate_residual, candidate_converged);
+            }
+            if retries >= options.max_step_retries || step_dt <= min_dt * 1.01 {
+                break (candidate_x, candidate_residual, candidate_converged);
+            }
+            step_dt = (step_dt * 0.5).clamp(min_dt, max_dt);
+            retries += 1;
+        };
+
         x = next_x;
-        time_points_s.push((step + 1) as f64 * dt);
+        let next_time = time_points_s.last().copied().unwrap_or(0.0) + step_dt;
+        time_points_s.push(next_time);
         displacement_snapshots.push(x.clone());
         residual_norms.push(residual_norm);
+        accepted_time_steps_s.push(step_dt);
         if converged {
             converged_steps += 1;
         }
+
+        if options.adaptive_time_step && converged && residual_norm < options.residual_target * 0.1
+        {
+            dt = (step_dt * 1.2).clamp(min_dt, max_dt);
+        } else {
+            dt = step_dt;
+        }
+        let _ = step;
     }
 
     let converged_all = converged_steps == options.step_count;
@@ -89,10 +131,35 @@ pub fn solve_transient_system(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "step_count={} converged_steps={} dt={}",
-            options.step_count, converged_steps, dt
+            "step_count={} converged_steps={} dt_initial={} dt_final={}",
+            options.step_count, converged_steps, options.time_step_s, dt
         ),
     });
+    if !accepted_time_steps_s.is_empty() {
+        let min_accepted_dt = accepted_time_steps_s
+            .iter()
+            .copied()
+            .reduce(f64::min)
+            .unwrap_or(min_dt);
+        let max_accepted_dt = accepted_time_steps_s
+            .iter()
+            .copied()
+            .reduce(f64::max)
+            .unwrap_or(max_dt);
+        let max_residual = residual_norms.iter().copied().fold(0.0_f64, f64::max);
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_TRANSIENT_STABILITY".to_string(),
+            severity: if max_residual <= options.residual_target * 4.0 {
+                FeaDiagnosticSeverity::Info
+            } else {
+                FeaDiagnosticSeverity::Warning
+            },
+            message: format!(
+                "adaptive={} dt_min={} dt_max={} max_residual_norm={}",
+                options.adaptive_time_step, min_accepted_dt, max_accepted_dt, max_residual
+            ),
+        });
+    }
 
     TransientSolveResult {
         converged_steps,
@@ -100,6 +167,7 @@ pub fn solve_transient_system(
         time_points_s,
         displacement_snapshots,
         residual_norms,
+        accepted_time_steps_s,
         diagnostics,
         solver_method: "implicit_euler_pcg".to_string(),
     }

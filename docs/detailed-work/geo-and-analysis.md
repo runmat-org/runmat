@@ -980,6 +980,9 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-06: Added runtime transient execution tuning surface (`analysis_run_transient_with_options_op` + `AnalysisTransientRunOptions`) exposing timestep bounds, adaptive-step controls, solver tolerances, and retry budget while preserving `analysis.run_transient/v1` envelope compatibility.
+- 2026-03-06: Added transient option preset helpers (`coarse`, `balanced`, `high_accuracy`) on `AnalysisTransientRunOptions` to provide stable cost-vs-accuracy starting points for clients without custom knob tuning.
+- 2026-03-06: Added modal run tuning surface (`analysis_run_modal_with_options_op` + `AnalysisModalRunOptions`) with stable presets (`coarse`, `balanced`, `high_accuracy`) for mode-budget and residual gate tuning while preserving `analysis.run_modal/v1` contract shape.
 - 2026-03-06: Implemented native transient execution baseline in `runmat-analysis-fea` (`implicit_euler_pcg`) and wired runtime `analysis.run_transient/v1` to native results payloads (`transient_results`) with typed integration metadata and publishability/quality gating.
 - 2026-03-06: Added first-class transient payload contract (`transient_payload_version`, `time_points_s`, `displacement_snapshots`, `residual_norms`, `integration_method`) and runtime results propagation for transient runs.
 - 2026-03-06: Added transient results query controls (`include_transient_results`, `transient_snapshot_indices`) with typed out-of-range snapshot mapping (`ANALYSIS_RESULTS_TRANSIENT_SNAPSHOT_NOT_FOUND`) to bound transient payload retrieval for long time histories.

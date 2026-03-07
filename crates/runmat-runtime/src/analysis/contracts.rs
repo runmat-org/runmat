@@ -58,6 +58,7 @@ pub enum QualityReasonCode {
     ModalPlaceholder,
     ModalResidualExceeded,
     TransientPlaceholder,
+    TransientResidualExceeded,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -81,6 +82,128 @@ impl Default for AnalysisRunOptions {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisTransientRunOptions {
+    pub deterministic_mode: bool,
+    pub precision_mode: PrecisionMode,
+    pub quality_policy: QualityPolicy,
+    pub time_step_s: f64,
+    pub min_time_step_s: f64,
+    pub max_time_step_s: f64,
+    pub step_count: usize,
+    pub max_linear_iters: usize,
+    pub tolerance: f64,
+    pub residual_target: f64,
+    pub adaptive_time_step: bool,
+    pub max_step_retries: usize,
+}
+
+impl Default for AnalysisTransientRunOptions {
+    fn default() -> Self {
+        Self {
+            deterministic_mode: false,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            time_step_s: 1.0e-3,
+            min_time_step_s: 1.0e-6,
+            max_time_step_s: 2.0e-2,
+            step_count: 10,
+            max_linear_iters: 128,
+            tolerance: 1.0e-8,
+            residual_target: 1.0e-6,
+            adaptive_time_step: true,
+            max_step_retries: 4,
+        }
+    }
+}
+
+impl AnalysisTransientRunOptions {
+    pub fn coarse() -> Self {
+        Self {
+            deterministic_mode: false,
+            precision_mode: PrecisionMode::Fp32,
+            quality_policy: QualityPolicy::Exploratory,
+            time_step_s: 5.0e-3,
+            min_time_step_s: 5.0e-4,
+            max_time_step_s: 2.0e-2,
+            step_count: 6,
+            max_linear_iters: 64,
+            tolerance: 1.0e-6,
+            residual_target: 1.0e-4,
+            adaptive_time_step: true,
+            max_step_retries: 2,
+        }
+    }
+
+    pub fn balanced() -> Self {
+        Self::default()
+    }
+
+    pub fn high_accuracy() -> Self {
+        Self {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Strict,
+            time_step_s: 5.0e-4,
+            min_time_step_s: 5.0e-6,
+            max_time_step_s: 2.0e-3,
+            step_count: 24,
+            max_linear_iters: 256,
+            tolerance: 1.0e-10,
+            residual_target: 1.0e-7,
+            adaptive_time_step: true,
+            max_step_retries: 8,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisModalRunOptions {
+    pub deterministic_mode: bool,
+    pub precision_mode: PrecisionMode,
+    pub quality_policy: QualityPolicy,
+    pub mode_count: usize,
+    pub residual_warn_threshold: f64,
+}
+
+impl Default for AnalysisModalRunOptions {
+    fn default() -> Self {
+        Self {
+            deterministic_mode: false,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            mode_count: 3,
+            residual_warn_threshold: 1.0e-3,
+        }
+    }
+}
+
+impl AnalysisModalRunOptions {
+    pub fn coarse() -> Self {
+        Self {
+            deterministic_mode: false,
+            precision_mode: PrecisionMode::Fp32,
+            quality_policy: QualityPolicy::Exploratory,
+            mode_count: 2,
+            residual_warn_threshold: 5.0e-3,
+        }
+    }
+
+    pub fn balanced() -> Self {
+        Self::default()
+    }
+
+    pub fn high_accuracy() -> Self {
+        Self {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Strict,
+            mode_count: 8,
+            residual_warn_threshold: 5.0e-4,
         }
     }
 }
