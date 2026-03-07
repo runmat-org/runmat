@@ -1,7 +1,4 @@
 import { Metadata } from "next";
-import { Card, CardContent } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import Link from "next/link";
 import { ContentCard } from "@/components/content-card";
 import { getPublicBlogPosts } from "@/lib/blog";
 
@@ -45,32 +42,6 @@ export default function BlogPage() {
               ctaLabel="Read"
             />
           ))}
-        </div>
-
-        {/* Call to Action */}
-        <div className="mt-16 text-center">
-          <Card className="inline-block">
-            <CardContent className="p-6">
-              <h3 className="text-lg font-semibold mb-2">
-                Stay Updated
-              </h3>
-              <p className="text-muted-foreground mb-4">
-                Follow our development progress and get notified of new releases
-              </p>
-              <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                <Button variant="outline" size="sm" asChild>
-                  <Link href="https://github.com/runmat-org/runmat" target="_blank">
-                    Star on GitHub
-                  </Link>
-                </Button>
-                <Button variant="outline" size="sm" asChild>
-                  <Link href="/download">
-                    Try RunMat
-                  </Link>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
         </div>
       </div>
     </div>
