@@ -550,6 +550,152 @@ fn analysis_run_transient_with_options_contract_controls_execution_window() {
 }
 
 #[test]
+fn analysis_modal_large_fixture_quality_signals_propagate_to_results() {
+    let model = fixture_model(FixtureId::ModalLarge);
+    let envelope = analysis_run_modal_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisModalRunOptions {
+            mode_count: 8,
+            ..AnalysisModalRunOptions::balanced()
+        },
+        OperationContext::new(Some("trace-contract-modal-large-1".to_string()), None),
+    )
+    .expect("modal large fixture run should succeed");
+
+    let has_orthogonality_warning = envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_MODAL_ORTHOGONALITY"
+            && diag.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    });
+    let has_separation_warning = envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_MODAL_SEPARATION"
+            && diag.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    });
+
+    assert_eq!(
+        envelope
+            .data
+            .quality_reasons
+            .iter()
+            .any(|reason| reason.code == QualityReasonCode::ModalOrthogonalityExceeded),
+        has_orthogonality_warning
+    );
+    assert_eq!(
+        envelope
+            .data
+            .quality_reasons
+            .iter()
+            .any(|reason| reason.code == QualityReasonCode::ModalSeparationLow),
+        has_separation_warning
+    );
+    if has_orthogonality_warning || has_separation_warning {
+        assert!(!envelope.data.publishable);
+        assert_eq!(envelope.data.run_status, RunStatus::Degraded);
+    }
+
+    let results = analysis_results_op(
+        &envelope.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(Some("trace-contract-modal-large-2".to_string()), None),
+    )
+    .expect("modal large fixture results should succeed");
+
+    assert!(results.data.summary.mode_count >= 2);
+    assert_eq!(
+        results.data.summary.mode_count,
+        results.data.summary.available_mode_indices.len()
+    );
+    assert!(results.data.summary.max_modal_residual_norm.is_some());
+    assert!(results.data.summary.first_mode_converged.is_some());
+    assert!(results
+        .data
+        .diagnostics
+        .as_ref()
+        .expect("diagnostics should be included")
+        .iter()
+        .any(|diag| diag.code == "FEA_MODAL_ORTHOGONALITY"));
+    assert!(results
+        .data
+        .diagnostics
+        .as_ref()
+        .expect("diagnostics should be included")
+        .iter()
+        .any(|diag| diag.code == "FEA_MODAL_SEPARATION"));
+}
+
+#[test]
+fn analysis_transient_long_fixture_quality_signals_propagate_to_results() {
+    let model = fixture_model(FixtureId::TransientLong);
+    let envelope = analysis_run_transient_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisTransientRunOptions {
+            step_count: 24,
+            ..AnalysisTransientRunOptions::balanced()
+        },
+        OperationContext::new(Some("trace-contract-transient-long-1".to_string()), None),
+    )
+    .expect("transient long fixture run should succeed");
+
+    let has_stability_warning = envelope.data.run.diagnostics.iter().any(|diag| {
+        (diag.code == "FEA_TRANSIENT_STABILITY" || diag.code == "FEA_TRANSIENT_ENERGY")
+            && diag.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    });
+    let has_step_failure_warning = envelope.data.run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_TRANSIENT_STEP_FAILURE"
+            && diag.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    });
+
+    assert_eq!(
+        envelope
+            .data
+            .quality_reasons
+            .iter()
+            .any(|reason| reason.code == QualityReasonCode::TransientStabilityExceeded),
+        has_stability_warning
+    );
+    assert_eq!(
+        envelope
+            .data
+            .quality_reasons
+            .iter()
+            .any(|reason| reason.code == QualityReasonCode::TransientStepFailure),
+        has_step_failure_warning
+    );
+    if has_stability_warning || has_step_failure_warning {
+        assert!(!envelope.data.publishable);
+        assert_eq!(envelope.data.run_status, RunStatus::Degraded);
+    }
+
+    let results = analysis_results_op(
+        &envelope.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(Some("trace-contract-transient-long-2".to_string()), None),
+    )
+    .expect("transient long fixture results should succeed");
+
+    assert!(results.data.summary.snapshot_count > 8);
+    assert_eq!(results.data.summary.time_start_s, Some(0.0));
+    assert!(results.data.summary.time_end_s.unwrap_or(0.0) > 0.0);
+    assert!(results.data.summary.max_transient_residual_norm.is_some());
+    assert!(results.data.summary.final_step_converged.is_some());
+    assert!(results
+        .data
+        .diagnostics
+        .as_ref()
+        .expect("diagnostics should be included")
+        .iter()
+        .any(|diag| diag.code == "FEA_TRANSIENT_STABILITY"));
+    assert!(results
+        .data
+        .diagnostics
+        .as_ref()
+        .expect("diagnostics should be included")
+        .iter()
+        .any(|diag| diag.code == "FEA_TRANSIENT_ENERGY"));
+}
+
+#[test]
 fn analysis_results_contract_is_v1_and_filterable() {
     let model = fixture_model(FixtureId::CantileverLinearStatic);
     let run = analysis_run_linear_static_op(

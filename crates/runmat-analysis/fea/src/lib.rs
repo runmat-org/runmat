@@ -469,6 +469,56 @@ mod tests {
     }
 
     #[test]
+    fn modal_large_fixture_emits_orthogonality_and_separation_diagnostics() {
+        let model = fixture_model(FixtureId::ModalLarge);
+        let result = run_modal_with_options(
+            &model,
+            ComputeBackend::Cpu,
+            ModalSolveOptions { mode_count: 8 },
+        )
+        .expect("modal large fixture should solve");
+
+        assert!(!result.eigenvalues_hz.is_empty());
+        assert_eq!(result.eigenvalues_hz.len(), result.mode_shapes.len());
+        assert!(result
+            .run
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "FEA_MODAL_ORTHOGONALITY"));
+        assert!(result
+            .run
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "FEA_MODAL_SEPARATION"));
+    }
+
+    #[test]
+    fn transient_long_fixture_emits_stability_diagnostics() {
+        let model = fixture_model(FixtureId::TransientLong);
+        let result = run_transient_with_options(
+            &model,
+            ComputeBackend::Cpu,
+            TransientSolveOptions {
+                step_count: 24,
+                ..TransientSolveOptions::default()
+            },
+        )
+        .expect("transient long fixture should solve");
+
+        assert!(result.time_points_s.len() > 8);
+        assert!(result
+            .run
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "FEA_TRANSIENT_STABILITY"));
+        assert!(result
+            .run
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "FEA_TRANSIENT_ENERGY"));
+    }
+
+    #[test]
     fn load_sweep_fixture_uses_operator_solver_path() {
         let baseline = run_linear_static(
             &fixture_model(FixtureId::CantileverLinearStatic),

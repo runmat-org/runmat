@@ -367,6 +367,14 @@ pub fn analysis_run_modal_with_options_op(
     } else {
         QualityGate::Pass
     };
+    let modal_orthogonality_warn = run.diagnostics.iter().any(|item| {
+        item.code == "FEA_MODAL_ORTHOGONALITY"
+            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    });
+    let modal_separation_warn = run.diagnostics.iter().any(|item| {
+        item.code == "FEA_MODAL_SEPARATION"
+            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    });
 
     let mut quality_reasons = Vec::new();
     if solver_convergence == QualityGate::Warn {
@@ -382,6 +390,18 @@ pub fn analysis_run_modal_with_options_op(
                 "modal residual exceeds threshold {}",
                 options.residual_warn_threshold
             ),
+        });
+    }
+    if modal_orthogonality_warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ModalOrthogonalityExceeded,
+            detail: "modal M-orthogonality off-diagonal threshold exceeded".to_string(),
+        });
+    }
+    if modal_separation_warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ModalSeparationLow,
+            detail: "modal frequency separation threshold is low".to_string(),
         });
     }
 
@@ -400,9 +420,29 @@ pub fn analysis_run_modal_with_options_op(
         ModalFrequencyBasis::NativeEigenSolve
     };
 
-    let publishable = solver_convergence == QualityGate::Pass
-        && result_quality == QualityGate::Pass
-        && quality_reasons.is_empty();
+    let publishable = match options.quality_policy {
+        QualityPolicy::Strict => {
+            solver_convergence == QualityGate::Pass
+                && result_quality == QualityGate::Pass
+                && quality_reasons.is_empty()
+        }
+        QualityPolicy::Balanced => {
+            solver_convergence == QualityGate::Pass
+                && result_quality == QualityGate::Pass
+                && !quality_reasons
+                    .iter()
+                    .any(|r| {
+                        matches!(
+                            r.code,
+                            QualityReasonCode::ModalOrthogonalityExceeded
+                                | QualityReasonCode::ModalSeparationLow
+                        )
+                    })
+        }
+        QualityPolicy::Exploratory => {
+            solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
+        }
+    };
     let run_status = if publishable {
         RunStatus::Publishable
     } else if result_quality == QualityGate::Fail {
@@ -577,6 +617,17 @@ pub fn analysis_run_transient_with_options_op(
     } else {
         QualityGate::Pass
     };
+    let transient_stability_warn = run.diagnostics.iter().any(|item| {
+        item.code == "FEA_TRANSIENT_STABILITY"
+            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    }) || run.diagnostics.iter().any(|item| {
+        item.code == "FEA_TRANSIENT_ENERGY"
+            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    });
+    let transient_step_failure_warn = run.diagnostics.iter().any(|item| {
+        item.code == "FEA_TRANSIENT_STEP_FAILURE"
+            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    });
 
     let mut quality_reasons = Vec::new();
     if solver_convergence == QualityGate::Warn {
@@ -594,6 +645,18 @@ pub fn analysis_run_transient_with_options_op(
             ),
         });
     }
+    if transient_stability_warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::TransientStabilityExceeded,
+            detail: "transient stability diagnostic exceeded threshold".to_string(),
+        });
+    }
+    if transient_step_failure_warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::TransientStepFailure,
+            detail: "transient step retry budget was exhausted".to_string(),
+        });
+    }
     if run
         .diagnostics
         .iter()
@@ -606,9 +669,27 @@ pub fn analysis_run_transient_with_options_op(
         });
     }
 
-    let publishable = solver_convergence == QualityGate::Pass
-        && result_quality == QualityGate::Pass
-        && quality_reasons.is_empty();
+    let publishable = match options.quality_policy {
+        QualityPolicy::Strict => {
+            solver_convergence == QualityGate::Pass
+                && result_quality == QualityGate::Pass
+                && quality_reasons.is_empty()
+        }
+        QualityPolicy::Balanced => {
+            solver_convergence == QualityGate::Pass
+                && result_quality == QualityGate::Pass
+                && !quality_reasons.iter().any(|r| {
+                    matches!(
+                        r.code,
+                        QualityReasonCode::TransientStabilityExceeded
+                            | QualityReasonCode::TransientStepFailure
+                    )
+                })
+        }
+        QualityPolicy::Exploratory => {
+            solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
+        }
+    };
     let run_status = if publishable {
         RunStatus::Publishable
     } else if result_quality == QualityGate::Fail {

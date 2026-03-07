@@ -10,6 +10,8 @@ pub enum FixtureId {
     CantileverLinearStatic,
     CantileverLoadSweep,
     CantileverLargeLoadSweep,
+    ModalLarge,
+    TransientLong,
     MultiMaterialAssembly,
     MissingMaterials,
     MissingLoads,
@@ -20,6 +22,8 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
         FixtureId::CantileverLinearStatic => cantilever_linear_static(),
         FixtureId::CantileverLoadSweep => cantilever_load_sweep(),
         FixtureId::CantileverLargeLoadSweep => cantilever_large_load_sweep(),
+        FixtureId::ModalLarge => modal_large_fixture(),
+        FixtureId::TransientLong => transient_long_fixture(),
         FixtureId::MultiMaterialAssembly => multi_material_assembly(),
         FixtureId::MissingMaterials => missing_materials(),
         FixtureId::MissingLoads => missing_loads(),
@@ -103,6 +107,26 @@ fn cantilever_large_load_sweep() -> AnalysisModel {
             }
         })
         .collect();
+    model
+}
+
+fn modal_large_fixture() -> AnalysisModel {
+    let mut model = cantilever_large_load_sweep();
+    model.model_id = AnalysisModelId("modal_large_fixture".to_string());
+    model.steps = vec![AnalysisStep {
+        step_id: "modal_large_1".to_string(),
+        kind: AnalysisStepKind::Modal,
+    }];
+    model
+}
+
+fn transient_long_fixture() -> AnalysisModel {
+    let mut model = cantilever_load_sweep();
+    model.model_id = AnalysisModelId("transient_long_fixture".to_string());
+    model.steps = vec![AnalysisStep {
+        step_id: "transient_long_1".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
     model
 }
 

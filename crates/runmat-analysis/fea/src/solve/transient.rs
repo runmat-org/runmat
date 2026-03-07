@@ -173,9 +173,14 @@ pub fn solve_transient_system(
         });
     }
     if !energies.is_empty() {
-        let initial = energies[0].abs().max(1.0e-12);
+        let baseline_energy = energies
+            .iter()
+            .copied()
+            .skip(1)
+            .find(|energy| *energy > 1.0e-12)
+            .unwrap_or_else(|| energies[0].abs().max(1.0e-12));
         let max_energy = energies.iter().copied().fold(0.0_f64, f64::max);
-        let growth_ratio = max_energy / initial;
+        let growth_ratio = max_energy / baseline_energy;
         diagnostics.push(FeaDiagnostic {
             code: "FEA_TRANSIENT_ENERGY".to_string(),
             severity: if growth_ratio <= 5.0 {
