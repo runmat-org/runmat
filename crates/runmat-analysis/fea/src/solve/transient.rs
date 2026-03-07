@@ -77,6 +77,9 @@ pub fn solve_transient_system(
     let mut residual_norms = Vec::with_capacity(options.step_count);
     let mut accepted_time_steps_s = Vec::with_capacity(options.step_count);
     let mut converged_steps = 0usize;
+    let mut retry_budget_hits = 0usize;
+    let mut energies = Vec::with_capacity(options.step_count + 1);
+    energies.push(strain_energy(summary, &x));
 
     for step in 0..options.step_count {
         let mut step_dt = dt;
@@ -92,6 +95,7 @@ pub fn solve_transient_system(
                 break (candidate_x, candidate_residual, candidate_converged);
             }
             if retries >= options.max_step_retries || step_dt <= min_dt * 1.01 {
+                retry_budget_hits += 1;
                 break (candidate_x, candidate_residual, candidate_converged);
             }
             step_dt = (step_dt * 0.5).clamp(min_dt, max_dt);
@@ -104,6 +108,7 @@ pub fn solve_transient_system(
         displacement_snapshots.push(x.clone());
         residual_norms.push(residual_norm);
         accepted_time_steps_s.push(step_dt);
+        energies.push(strain_energy(summary, &x));
         if converged {
             converged_steps += 1;
         }
@@ -158,6 +163,27 @@ pub fn solve_transient_system(
                 "adaptive={} dt_min={} dt_max={} max_residual_norm={}",
                 options.adaptive_time_step, min_accepted_dt, max_accepted_dt, max_residual
             ),
+        });
+    }
+    if retry_budget_hits > 0 {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_TRANSIENT_STEP_FAILURE".to_string(),
+            severity: FeaDiagnosticSeverity::Warning,
+            message: format!("retry_budget_hits={retry_budget_hits}"),
+        });
+    }
+    if !energies.is_empty() {
+        let initial = energies[0].abs().max(1.0e-12);
+        let max_energy = energies.iter().copied().fold(0.0_f64, f64::max);
+        let growth_ratio = max_energy / initial;
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_TRANSIENT_ENERGY".to_string(),
+            severity: if growth_ratio <= 5.0 {
+                FeaDiagnosticSeverity::Info
+            } else {
+                FeaDiagnosticSeverity::Warning
+            },
+            message: format!("max_energy_growth_ratio={growth_ratio}"),
         });
     }
 
@@ -244,4 +270,28 @@ fn apply_implicit_operator(summary: &AssemblySummary, x: &[f64], dt: f64) -> Vec
 
 fn dot(a: &[f64], b: &[f64]) -> f64 {
     a.iter().zip(b.iter()).map(|(x, y)| x * y).sum::<f64>()
+}
+
+fn strain_energy(summary: &AssemblySummary, x: &[f64]) -> f64 {
+    let kx = apply_stiffness(summary, x);
+    0.5 * dot(x, &kx).abs()
+}
+
+fn apply_stiffness(summary: &AssemblySummary, x: &[f64]) -> Vec<f64> {
+    let mut y = vec![0.0; x.len()];
+    for i in 0..x.len() {
+        if summary.operator.constrained[i] {
+            y[i] = x[i];
+            continue;
+        }
+        let mut stiffness_value = summary.operator.stiffness_diag[i] * x[i];
+        if i > 0 && !summary.operator.constrained[i - 1] {
+            stiffness_value -= summary.operator.stiffness_upper[i - 1] * x[i - 1];
+        }
+        if i + 1 < x.len() && !summary.operator.constrained[i + 1] {
+            stiffness_value -= summary.operator.stiffness_upper[i] * x[i + 1];
+        }
+        y[i] = stiffness_value;
+    }
+    y
 }

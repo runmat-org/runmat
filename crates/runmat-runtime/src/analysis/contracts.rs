@@ -57,8 +57,12 @@ pub enum QualityReasonCode {
     FieldPromotionFallback,
     ModalPlaceholder,
     ModalResidualExceeded,
+    ModalOrthogonalityExceeded,
+    ModalSeparationLow,
     TransientPlaceholder,
     TransientResidualExceeded,
+    TransientStabilityExceeded,
+    TransientStepFailure,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
