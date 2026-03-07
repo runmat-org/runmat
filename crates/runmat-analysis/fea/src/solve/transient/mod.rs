@@ -13,9 +13,7 @@ mod diagnostics;
 mod linear_step;
 
 use diagnostics::push_transient_quality_diagnostics;
-use linear_step::{
-    build_step_rhs, solve_implicit_step, strain_energy, StepSolveStats,
-};
+use linear_step::{build_step_rhs, solve_implicit_step_system, strain_energy, LinearStepStats};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct TransientSolveOptions {
@@ -124,7 +122,7 @@ pub fn solve_transient_system(
         let (next_x, residual_norm, converged, step_stats) = loop {
             let rhs = build_step_rhs(summary, &x, step_dt);
             let solve_start = Instant::now();
-            let solved = solve_implicit_step(
+            let solved = solve_implicit_step_system(
                 summary,
                 &rhs,
                 step_dt,
@@ -162,7 +160,7 @@ pub fn solve_transient_system(
             retries += 1;
         };
 
-        if let Some(StepSolveStats {
+        if let Some(LinearStepStats {
             solver_backend: step_solver_backend,
             host_sync_count,
             device_apply_k_count: step_device_apply_k_count,
@@ -192,7 +190,8 @@ pub fn solve_transient_system(
             converged_steps += 1;
         }
 
-        if options.adaptive_time_step && converged && residual_norm < options.residual_target * 0.1 {
+        if options.adaptive_time_step && converged && residual_norm < options.residual_target * 0.1
+        {
             dt = (step_dt * 1.2).clamp(min_dt, max_dt);
         } else {
             dt = step_dt;

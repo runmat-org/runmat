@@ -15,7 +15,7 @@ mod linear_solve;
 mod math;
 
 use diagnostics::push_modal_quality_diagnostics;
-use linear_solve::solve_k_cg;
+use linear_solve::solve_k_system_cg;
 use math::{dot, normalize_mass, orthonormalize_mass, relative_l2_update};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -103,7 +103,7 @@ pub fn solve_modal_system(
             let q_prev = q.clone();
             let mq = apply_m(&summary.operator, &q);
             let solve_start = Instant::now();
-            let z = solve_k_cg(
+            let z = solve_k_system_cg(
                 summary,
                 &summary.operator,
                 &mq,

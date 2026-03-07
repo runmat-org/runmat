@@ -16,7 +16,7 @@ use crate::{
 use super::TransientSolveOptions;
 
 #[derive(Debug, Clone)]
-pub(super) struct StepSolveStats {
+pub(super) struct LinearStepStats {
     pub(super) solver_backend: String,
     pub(super) host_sync_count: u32,
     pub(super) device_apply_k_count: u32,
@@ -32,7 +32,7 @@ pub(super) fn build_step_rhs(summary: &AssemblySummary, x_prev: &[f64], dt: f64)
     rhs
 }
 
-pub(super) fn solve_implicit_step(
+pub(super) fn solve_implicit_step_system(
     summary: &AssemblySummary,
     rhs: &[f64],
     dt: f64,
@@ -43,7 +43,7 @@ pub(super) fn solve_implicit_step(
     prepared_runtime_cache_hits: &mut usize,
     prepared_runtime_cache_misses: &mut usize,
     prepared_build_ms: &mut f64,
-) -> (Vec<f64>, f64, bool, Option<StepSolveStats>) {
+) -> (Vec<f64>, f64, bool, Option<LinearStepStats>) {
     const PREPARED_RUNTIME_CACHE_CAPACITY: usize = 12;
     if use_runtime_tensor {
         let dt_key = dt.to_bits();
@@ -84,7 +84,7 @@ pub(super) fn solve_implicit_step(
                     result.solution.clone(),
                     relative_residual,
                     converged,
-                    Some(StepSolveStats {
+                    Some(LinearStepStats {
                         solver_backend: result.solver_backend,
                         host_sync_count: result.host_sync_count,
                         device_apply_k_count: result.device_apply_k_count,
@@ -108,7 +108,7 @@ pub(super) fn solve_implicit_step(
                 result.solution.clone(),
                 relative_residual,
                 converged,
-                Some(StepSolveStats {
+                Some(LinearStepStats {
                     solver_backend: result.solver_backend,
                     host_sync_count: result.host_sync_count,
                     device_apply_k_count: result.device_apply_k_count,

@@ -12,12 +12,12 @@ use crate::{
 
 use super::math::dot;
 
-pub(super) struct SolveKResult {
+pub(super) struct LinearSolveAttempt {
     pub(super) vector: Vec<f64>,
     pub(super) runtime_tensor: Option<crate::solve::linear::LinearSolveResult>,
 }
 
-pub(super) fn solve_k_cg(
+pub(super) fn solve_k_system_cg(
     summary: &AssemblySummary,
     system: &OperatorSystem,
     rhs: &[f64],
@@ -26,7 +26,7 @@ pub(super) fn solve_k_cg(
     use_runtime_tensor: bool,
     prepared_runtime_system: Option<&RuntimeTensorPreparedLinearSystem>,
     initial_guess: Option<&[f64]>,
-) -> SolveKResult {
+) -> LinearSolveAttempt {
     if use_runtime_tensor {
         if let Some(prepared) = prepared_runtime_system {
             if let Some(result) = solve_prepared_linear_system_runtime_tensor(
@@ -36,7 +36,7 @@ pub(super) fn solve_k_cg(
                 SpdPreconditionerKind::Jacobi,
                 None,
             ) {
-                return SolveKResult {
+                return LinearSolveAttempt {
                     vector: result.solution.clone(),
                     runtime_tensor: Some(result),
                 };
@@ -49,7 +49,7 @@ pub(super) fn solve_k_cg(
                 SpdPreconditionerKind::Jacobi,
                 None,
             ) {
-                return SolveKResult {
+                return LinearSolveAttempt {
                     vector: result.solution.clone(),
                     runtime_tensor: Some(result),
                 };
@@ -71,7 +71,7 @@ pub(super) fn solve_k_cg(
     let mut p = r.clone();
     let mut rr_old = dot(&r, &r);
     if rr_old.sqrt() <= tol {
-        return SolveKResult {
+        return LinearSolveAttempt {
             vector: x,
             runtime_tensor: None,
         };
@@ -96,7 +96,7 @@ pub(super) fn solve_k_cg(
         rr_old = rr_new;
     }
 
-    SolveKResult {
+    LinearSolveAttempt {
         vector: x,
         runtime_tensor: None,
     }

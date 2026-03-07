@@ -10,9 +10,7 @@ use crate::{
 mod operator_impl;
 mod preconditioner_impl;
 
-use operator_impl::{
-    apply_k_device, apply_k_host_from_prepared, dot_handle, linear_shift_indices,
-};
+use operator_impl::{apply_k_device, apply_k_host_from_prepared, dot_handle, linear_shift_indices};
 use preconditioner_impl::{
     apply_preconditioner_device, build_ilu0_factors, PreconditionerDeviceContext,
 };
@@ -74,7 +72,7 @@ pub fn solve_linear_system_runtime_tensor_with_initial_guess(
     preconditioner_kind: SpdPreconditionerKind,
     initial_guess: Option<&[f64]>,
 ) -> Option<LinearSolveResult> {
-    solve_linear_system_runtime_tensor_with_components(
+    solve_runtime_tensor_linear_system_internal(
         summary,
         None,
         &summary.operator.rhs,
@@ -151,7 +149,7 @@ pub fn solve_prepared_linear_system_runtime_tensor(
     preconditioner_kind: SpdPreconditionerKind,
     initial_guess: Option<&[f64]>,
 ) -> Option<LinearSolveResult> {
-    solve_linear_system_runtime_tensor_with_components(
+    solve_runtime_tensor_linear_system_internal(
         summary,
         Some(prepared),
         rhs,
@@ -160,7 +158,7 @@ pub fn solve_prepared_linear_system_runtime_tensor(
     )
 }
 
-fn solve_linear_system_runtime_tensor_with_components(
+fn solve_runtime_tensor_linear_system_internal(
     summary: &AssemblySummary,
     prepared: Option<&RuntimeTensorPreparedLinearSystem>,
     rhs: &[f64],
@@ -168,27 +166,31 @@ fn solve_linear_system_runtime_tensor_with_components(
     initial_guess: Option<&[f64]>,
 ) -> Option<LinearSolveResult> {
     let provider = provider()?;
-    let n = prepared.map(|value| value.dof_count).unwrap_or(summary.dof_count);
-    if n == 0 || rhs.len() != n {
+    let dof_count = prepared
+        .map(|value| value.dof_count)
+        .unwrap_or(summary.dof_count);
+    if dof_count == 0 || rhs.len() != dof_count {
         return None;
     }
 
     let shape_storage = prepared
         .map(|value| value.shape.clone())
-        .unwrap_or_else(|| vec![n]);
+        .unwrap_or_else(|| vec![dof_count]);
     let shape = shape_storage.as_slice();
-    let zeros = vec![0.0; n];
-    let inv_diag = prepared.map(|value| value.inv_diag.clone()).unwrap_or_else(|| {
-        (0..n)
-            .map(|i| {
-                if summary.operator.constrained[i] {
-                    1.0
-                } else {
-                    1.0 / summary.operator.stiffness_diag[i].abs().max(1.0e-12)
-                }
-            })
-            .collect()
-    });
+    let zeros = vec![0.0; dof_count];
+    let inv_diag = prepared
+        .map(|value| value.inv_diag.clone())
+        .unwrap_or_else(|| {
+            (0..dof_count)
+                .map(|i| {
+                    if summary.operator.constrained[i] {
+                        1.0
+                    } else {
+                        1.0 / summary.operator.stiffness_diag[i].abs().max(1.0e-12)
+                    }
+                })
+                .collect()
+        });
     let (ilu_l_subdiag, ilu_upper_superdiag, ilu_inv_u_diag) = prepared
         .map(|value| {
             (
@@ -208,13 +210,14 @@ fn solve_linear_system_runtime_tensor_with_components(
         })
         .unwrap_or_else(|| {
             let diag = summary.operator.stiffness_diag.clone();
-            let mut upper_left = vec![0.0; n];
-            let mut upper_right = vec![0.0; n];
-            for i in 0..n {
-                if i > 0 && !summary.operator.constrained[i - 1] && !summary.operator.constrained[i] {
+            let mut upper_left = vec![0.0; dof_count];
+            let mut upper_right = vec![0.0; dof_count];
+            for i in 0..dof_count {
+                if i > 0 && !summary.operator.constrained[i - 1] && !summary.operator.constrained[i]
+                {
                     upper_left[i] = summary.operator.stiffness_upper[i - 1];
                 }
-                if i + 1 < n
+                if i + 1 < dof_count
                     && !summary.operator.constrained[i + 1]
                     && !summary.operator.constrained[i]
                 {
@@ -247,14 +250,14 @@ fn solve_linear_system_runtime_tensor_with_components(
         });
     let prev_indices = prepared
         .map(|value| value.prev_indices.clone())
-        .unwrap_or(linear_shift_indices(n, -1)?);
+        .unwrap_or(linear_shift_indices(dof_count, -1)?);
     let next_indices = prepared
         .map(|value| value.next_indices.clone())
-        .unwrap_or(linear_shift_indices(n, 1)?);
-    let mut workspace = RuntimeTensorWorkspace::new(n)?;
+        .unwrap_or(linear_shift_indices(dof_count, 1)?);
+    let mut workspace = RuntimeTensorWorkspace::new(dof_count)?;
 
     let initial_x = match initial_guess {
-        Some(values) if values.len() == n => values.to_vec(),
+        Some(values) if values.len() == dof_count => values.to_vec(),
         _ => zeros.clone(),
     };
     let mut x = provider
@@ -263,7 +266,12 @@ fn solve_linear_system_runtime_tensor_with_components(
             shape,
         })
         .ok()?;
-    let zero_h = provider.upload(&HostTensorView { data: &zeros, shape }).ok()?;
+    let zero_h = provider
+        .upload(&HostTensorView {
+            data: &zeros,
+            shape,
+        })
+        .ok()?;
     let rhs_h = provider.upload(&HostTensorView { data: rhs, shape }).ok()?;
     let inv = provider
         .upload(&HostTensorView {
@@ -289,7 +297,9 @@ fn solve_linear_system_runtime_tensor_with_components(
             shape,
         })
         .ok()?;
-    let diag_h = provider.upload(&HostTensorView { data: &diag, shape }).ok()?;
+    let diag_h = provider
+        .upload(&HostTensorView { data: &diag, shape })
+        .ok()?;
     let upper_left_h = provider
         .upload(&HostTensorView {
             data: &upper_left,
@@ -349,7 +359,8 @@ fn solve_linear_system_runtime_tensor_with_components(
         zero_like: &zero_h,
     };
 
-    let mut z = apply_preconditioner_device(&preconditioner_ctx, preconditioner_kind, &r, &mut workspace)?;
+    let mut z =
+        apply_preconditioner_device(&preconditioner_ctx, preconditioner_kind, &r, &mut workspace)?;
     let mut p = block_on(provider.elem_add(&z, &x)).ok()?;
 
     let mut host_sync_count: u32 = 0;
@@ -430,7 +441,12 @@ fn solve_linear_system_runtime_tensor_with_components(
             break;
         }
 
-        let new_z = apply_preconditioner_device(&preconditioner_ctx, preconditioner_kind, &r, &mut workspace)?;
+        let new_z = apply_preconditioner_device(
+            &preconditioner_ctx,
+            preconditioner_kind,
+            &r,
+            &mut workspace,
+        )?;
         let rz_new = dot_handle(provider, &r, &new_z, &mut host_sync_count)?;
         if rz_old.abs() <= 1.0e-18 {
             let _ = provider.free(&z);
