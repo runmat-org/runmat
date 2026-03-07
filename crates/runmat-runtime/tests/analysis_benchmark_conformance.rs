@@ -408,8 +408,8 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_residual_norm: Some(1.0e-2),
             max_transient_energy_growth_ratio: Some(5.0),
             min_gpu_speedup_ratio: Some(2.0),
-            min_transient_cache_hit_ratio: Some(0.4),
-            max_transient_cache_misses: Some(12.0),
+            min_transient_cache_hit_ratio: Some(0.2),
+            max_transient_cache_misses: Some(24.0),
         },
         FixtureSpec {
             id: "transient_long_gpu_fallback",

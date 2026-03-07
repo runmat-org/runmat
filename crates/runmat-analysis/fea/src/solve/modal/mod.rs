@@ -5,16 +5,18 @@ use std::time::Instant;
 use crate::{
     assembly::AssemblySummary,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    operator::{apply_k, apply_m, OperatorSystem},
-    solve::{
-        preconditioner::SpdPreconditionerKind,
-        runtime_tensor_solver::{
-            prepare_runtime_tensor_linear_system, solve_prepared_linear_system_runtime_tensor,
-            RuntimeTensorPreparedLinearSystem,
-        },
-    },
+    operator::{apply_k, apply_m},
+    solve::runtime_tensor_solver::prepare_runtime_tensor_linear_system,
     ComputeBackend,
 };
+
+mod diagnostics;
+mod linear_solve;
+mod math;
+
+use diagnostics::push_modal_quality_diagnostics;
+use linear_solve::solve_k_cg;
+use math::{dot, normalize_mass, orthonormalize_mass, relative_l2_update};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModalSolveResult {
@@ -90,6 +92,7 @@ pub fn solve_modal_system(
     } else {
         (8usize, 3usize, 1.0e-4)
     };
+
     for mode_idx in 0..target_mode_count {
         let mut q = vec![0.0; summary.operator.dof_count];
         q[unconstrained[mode_idx]] = 1.0;
@@ -195,42 +198,13 @@ pub fn solve_modal_system(
         ),
     });
 
-    if !residual_norms.is_empty() {
-        let max_residual = residual_norms.iter().copied().fold(0.0_f64, f64::max);
-        diagnostics.push(FeaDiagnostic {
-            code: "FEA_MODAL_RESIDUAL".to_string(),
-            severity: if max_residual <= 1.0e-3 {
-                FeaDiagnosticSeverity::Info
-            } else {
-                FeaDiagnosticSeverity::Warning
-            },
-            message: format!("max_modal_residual_norm={max_residual}"),
-        });
-    }
-
-    if mode_shapes.len() >= 2 {
-        let max_offdiag = modal_max_m_orthogonality_offdiag(&summary.operator, &mode_shapes);
-        diagnostics.push(FeaDiagnostic {
-            code: "FEA_MODAL_ORTHOGONALITY".to_string(),
-            severity: if max_offdiag <= 1.0e-3 {
-                FeaDiagnosticSeverity::Info
-            } else {
-                FeaDiagnosticSeverity::Warning
-            },
-            message: format!("max_m_orthogonality_offdiag={max_offdiag}"),
-        });
-
-        let min_separation = modal_min_frequency_separation(&eigenvalues_hz);
-        diagnostics.push(FeaDiagnostic {
-            code: "FEA_MODAL_SEPARATION".to_string(),
-            severity: if min_separation >= 1.0e-3 {
-                FeaDiagnosticSeverity::Info
-            } else {
-                FeaDiagnosticSeverity::Warning
-            },
-            message: format!("min_relative_frequency_separation={min_separation}"),
-        });
-    }
+    push_modal_quality_diagnostics(
+        &mut diagnostics,
+        &summary.operator,
+        &eigenvalues_hz,
+        &mode_shapes,
+        &residual_norms,
+    );
     diagnostics.push(FeaDiagnostic {
         code: "FEA_MODAL_COST".to_string(),
         severity: FeaDiagnosticSeverity::Info,
@@ -252,168 +226,4 @@ pub fn solve_modal_system(
         device_apply_k_count,
         device_apply_k_attempt_count,
     }
-}
-
-struct SolveKResult {
-    vector: Vec<f64>,
-    runtime_tensor: Option<crate::solve::linear::LinearSolveResult>,
-}
-
-fn dot(a: &[f64], b: &[f64]) -> f64 {
-    a.iter().zip(b.iter()).map(|(x, y)| x * y).sum::<f64>()
-}
-
-fn normalize_mass(system: &OperatorSystem, vector: &mut [f64]) {
-    let mv = apply_m(system, vector);
-    let mass_norm = dot(vector, &mv).abs().sqrt().max(1.0e-12);
-    for value in vector.iter_mut() {
-        *value /= mass_norm;
-    }
-}
-
-fn orthonormalize_mass(system: &OperatorSystem, vector: &mut [f64], basis: &[Vec<f64>]) {
-    for mode in basis {
-        let mv = apply_m(system, mode);
-        let projection = dot(vector, &mv);
-        for (value, base) in vector.iter_mut().zip(mode.iter()) {
-            *value -= projection * *base;
-        }
-    }
-}
-
-fn solve_k_cg(
-    summary: &AssemblySummary,
-    system: &OperatorSystem,
-    rhs: &[f64],
-    max_iters: usize,
-    tol: f64,
-    use_runtime_tensor: bool,
-    prepared_runtime_system: Option<&RuntimeTensorPreparedLinearSystem>,
-    initial_guess: Option<&[f64]>,
-) -> SolveKResult {
-    if use_runtime_tensor {
-        if let Some(prepared) = prepared_runtime_system {
-            if let Some(result) = solve_prepared_linear_system_runtime_tensor(
-                summary,
-                prepared,
-                rhs,
-                SpdPreconditionerKind::Jacobi,
-                None,
-            ) {
-                return SolveKResult {
-                    vector: result.solution.clone(),
-                    runtime_tensor: Some(result),
-                };
-            }
-        } else if let Some(fallback_prepared) = prepare_runtime_tensor_linear_system(summary) {
-            if let Some(result) = solve_prepared_linear_system_runtime_tensor(
-                summary,
-                &fallback_prepared,
-                rhs,
-                SpdPreconditionerKind::Jacobi,
-                None,
-            ) {
-                return SolveKResult {
-                    vector: result.solution.clone(),
-                    runtime_tensor: Some(result),
-                };
-            }
-        }
-    }
-
-    let mut x = match initial_guess {
-        Some(values) if values.len() == rhs.len() => values.to_vec(),
-        _ => vec![0.0; rhs.len()],
-    };
-    let mut r = {
-        let kx = apply_k(system, &x);
-        rhs.iter()
-            .zip(kx.iter())
-            .map(|(rhs_i, kx_i)| rhs_i - kx_i)
-            .collect::<Vec<f64>>()
-    };
-    let mut p = r.clone();
-    let mut rr_old = dot(&r, &r);
-    if rr_old.sqrt() <= tol {
-        return SolveKResult {
-            vector: x,
-            runtime_tensor: None,
-        };
-    }
-
-    for _ in 0..max_iters {
-        let ap = apply_k(system, &p);
-        let denom = dot(&p, &ap).abs().max(1.0e-12);
-        let alpha = rr_old / denom;
-        for i in 0..x.len() {
-            x[i] += alpha * p[i];
-            r[i] -= alpha * ap[i];
-        }
-        let rr_new = dot(&r, &r);
-        if rr_new.sqrt() <= tol {
-            break;
-        }
-        let beta = rr_new / rr_old.max(1.0e-12);
-        for i in 0..p.len() {
-            p[i] = r[i] + beta * p[i];
-        }
-        rr_old = rr_new;
-    }
-
-    SolveKResult {
-        vector: x,
-        runtime_tensor: None,
-    }
-}
-
-fn modal_max_m_orthogonality_offdiag(system: &OperatorSystem, modes: &[Vec<f64>]) -> f64 {
-    let mut max_offdiag = 0.0_f64;
-    for i in 0..modes.len() {
-        for j in 0..modes.len() {
-            if i == j {
-                continue;
-            }
-            let mphi = apply_m(system, &modes[j]);
-            let value = dot(&modes[i], &mphi).abs();
-            if value > max_offdiag {
-                max_offdiag = value;
-            }
-        }
-    }
-    max_offdiag
-}
-
-fn modal_min_frequency_separation(freqs: &[f64]) -> f64 {
-    if freqs.len() < 2 {
-        return 1.0;
-    }
-    let mut min_sep = f64::INFINITY;
-    for window in freqs.windows(2) {
-        let a = window[0].abs().max(1.0e-12);
-        let b = window[1].abs().max(1.0e-12);
-        let sep = ((b - a).abs()) / a.max(b);
-        min_sep = min_sep.min(sep);
-    }
-    min_sep
-}
-
-fn relative_l2_update(previous: &[f64], current: &[f64]) -> f64 {
-    if previous.len() != current.len() || previous.is_empty() {
-        return 0.0;
-    }
-    let delta_norm = previous
-        .iter()
-        .zip(current.iter())
-        .map(|(a, b)| {
-            let d = b - a;
-            d * d
-        })
-        .sum::<f64>()
-        .sqrt();
-    let current_norm = current
-        .iter()
-        .map(|value| value * value)
-        .sum::<f64>()
-        .sqrt();
-    delta_norm / current_norm.max(1.0e-12)
 }

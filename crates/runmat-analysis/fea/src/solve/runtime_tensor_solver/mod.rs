@@ -7,27 +7,37 @@ use crate::{
     solve::{linear::LinearSolveResult, preconditioner::SpdPreconditionerKind},
 };
 
+mod operator_impl;
+mod preconditioner_impl;
+
+use operator_impl::{
+    apply_k_device, apply_k_host_from_prepared, dot_handle, linear_shift_indices,
+};
+use preconditioner_impl::{
+    apply_preconditioner_device, build_ilu0_factors, PreconditionerDeviceContext,
+};
+
 #[derive(Debug, Clone)]
 pub struct RuntimeTensorPreparedLinearSystem {
-    dof_count: usize,
-    shape: Vec<usize>,
-    diag: Vec<f64>,
-    upper_left: Vec<f64>,
-    upper_right: Vec<f64>,
-    inv_diag: Vec<f64>,
-    ilu_l_subdiag: Vec<f64>,
-    ilu_upper_superdiag: Vec<f64>,
-    ilu_inv_u_diag: Vec<f64>,
-    constrained_mask: Vec<f64>,
-    unconstrained_mask: Vec<f64>,
-    prev_indices: Vec<u32>,
-    next_indices: Vec<u32>,
+    pub(crate) dof_count: usize,
+    pub(crate) shape: Vec<usize>,
+    pub(crate) diag: Vec<f64>,
+    pub(crate) upper_left: Vec<f64>,
+    pub(crate) upper_right: Vec<f64>,
+    pub(crate) inv_diag: Vec<f64>,
+    pub(crate) ilu_l_subdiag: Vec<f64>,
+    pub(crate) ilu_upper_superdiag: Vec<f64>,
+    pub(crate) ilu_inv_u_diag: Vec<f64>,
+    pub(crate) constrained_mask: Vec<f64>,
+    pub(crate) unconstrained_mask: Vec<f64>,
+    pub(crate) prev_indices: Vec<u32>,
+    pub(crate) next_indices: Vec<u32>,
 }
 
-struct RuntimeTensorWorkspace {
-    full_indices: Vec<u32>,
-    precond_y: Option<GpuTensorHandle>,
-    precond_z: Option<GpuTensorHandle>,
+pub(crate) struct RuntimeTensorWorkspace {
+    pub(crate) full_indices: Vec<u32>,
+    pub(crate) precond_y: Option<GpuTensorHandle>,
+    pub(crate) precond_z: Option<GpuTensorHandle>,
 }
 
 impl RuntimeTensorWorkspace {
@@ -158,13 +168,8 @@ fn solve_linear_system_runtime_tensor_with_components(
     initial_guess: Option<&[f64]>,
 ) -> Option<LinearSolveResult> {
     let provider = provider()?;
-    let n = prepared
-        .map(|value| value.dof_count)
-        .unwrap_or(summary.dof_count);
-    if n == 0 {
-        return None;
-    }
-    if rhs.len() != n {
+    let n = prepared.map(|value| value.dof_count).unwrap_or(summary.dof_count);
+    if n == 0 || rhs.len() != n {
         return None;
     }
 
@@ -173,19 +178,17 @@ fn solve_linear_system_runtime_tensor_with_components(
         .unwrap_or_else(|| vec![n]);
     let shape = shape_storage.as_slice();
     let zeros = vec![0.0; n];
-    let inv_diag = prepared
-        .map(|value| value.inv_diag.clone())
-        .unwrap_or_else(|| {
-            (0..n)
-                .map(|i| {
-                    if summary.operator.constrained[i] {
-                        1.0
-                    } else {
-                        1.0 / summary.operator.stiffness_diag[i].abs().max(1.0e-12)
-                    }
-                })
-                .collect()
-        });
+    let inv_diag = prepared.map(|value| value.inv_diag.clone()).unwrap_or_else(|| {
+        (0..n)
+            .map(|i| {
+                if summary.operator.constrained[i] {
+                    1.0
+                } else {
+                    1.0 / summary.operator.stiffness_diag[i].abs().max(1.0e-12)
+                }
+            })
+            .collect()
+    });
     let (ilu_l_subdiag, ilu_upper_superdiag, ilu_inv_u_diag) = prepared
         .map(|value| {
             (
@@ -208,8 +211,7 @@ fn solve_linear_system_runtime_tensor_with_components(
             let mut upper_left = vec![0.0; n];
             let mut upper_right = vec![0.0; n];
             for i in 0..n {
-                if i > 0 && !summary.operator.constrained[i - 1] && !summary.operator.constrained[i]
-                {
+                if i > 0 && !summary.operator.constrained[i - 1] && !summary.operator.constrained[i] {
                     upper_left[i] = summary.operator.stiffness_upper[i - 1];
                 }
                 if i + 1 < n
@@ -243,7 +245,6 @@ fn solve_linear_system_runtime_tensor_with_components(
                 .collect();
             (constrained_mask, unconstrained_mask)
         });
-
     let prev_indices = prepared
         .map(|value| value.prev_indices.clone())
         .unwrap_or(linear_shift_indices(n, -1)?);
@@ -262,12 +263,7 @@ fn solve_linear_system_runtime_tensor_with_components(
             shape,
         })
         .ok()?;
-    let zero_h = provider
-        .upload(&HostTensorView {
-            data: &zeros,
-            shape,
-        })
-        .ok()?;
+    let zero_h = provider.upload(&HostTensorView { data: &zeros, shape }).ok()?;
     let rhs_h = provider.upload(&HostTensorView { data: rhs, shape }).ok()?;
     let inv = provider
         .upload(&HostTensorView {
@@ -293,9 +289,7 @@ fn solve_linear_system_runtime_tensor_with_components(
             shape,
         })
         .ok()?;
-    let diag_h = provider
-        .upload(&HostTensorView { data: &diag, shape })
-        .ok()?;
+    let diag_h = provider.upload(&HostTensorView { data: &diag, shape }).ok()?;
     let upper_left_h = provider
         .upload(&HostTensorView {
             data: &upper_left,
@@ -332,7 +326,7 @@ fn solve_linear_system_runtime_tensor_with_components(
             &unconstrained_mask_h,
             &prev_indices,
             &next_indices,
-            &shape,
+            shape,
         )?;
         let residual = block_on(provider.elem_sub(&rhs_h, &ax)).ok()?;
         let _ = provider.free(&ax);
@@ -355,21 +349,12 @@ fn solve_linear_system_runtime_tensor_with_components(
         zero_like: &zero_h,
     };
 
-    let mut z =
-        apply_preconditioner_device(&preconditioner_ctx, preconditioner_kind, &r, &mut workspace)?;
-    // Initialize p = z without host roundtrip by adding device zero vector x.
+    let mut z = apply_preconditioner_device(&preconditioner_ctx, preconditioner_kind, &r, &mut workspace)?;
     let mut p = block_on(provider.elem_add(&z, &x)).ok()?;
 
     let mut host_sync_count: u32 = 0;
     let mut rz_old = dot_handle(provider, &r, &z, &mut host_sync_count)?;
-    let b_norm = summary
-        .operator
-        .rhs
-        .iter()
-        .map(|v| v * v)
-        .sum::<f64>()
-        .sqrt()
-        .max(1.0);
+    let b_norm = rhs.iter().map(|v| v * v).sum::<f64>().sqrt().max(1.0);
     let tol = 1.0e-8;
     let max_iters = 64;
     let mut converged = false;
@@ -390,7 +375,7 @@ fn solve_linear_system_runtime_tensor_with_components(
             &unconstrained_mask_h,
             &prev_indices,
             &next_indices,
-            &shape,
+            shape,
         ) {
             Some(value) => {
                 device_apply_k_count = device_apply_k_count.saturating_add(1);
@@ -421,7 +406,6 @@ fn solve_linear_system_runtime_tensor_with_components(
             let _ = provider.free(&ap);
             break;
         }
-
         let alpha = rz_old / denom;
 
         let scaled_p = provider.scalar_mul(&p, alpha).ok()?;
@@ -446,12 +430,7 @@ fn solve_linear_system_runtime_tensor_with_components(
             break;
         }
 
-        let new_z = apply_preconditioner_device(
-            &preconditioner_ctx,
-            preconditioner_kind,
-            &r,
-            &mut workspace,
-        )?;
+        let new_z = apply_preconditioner_device(&preconditioner_ctx, preconditioner_kind, &r, &mut workspace)?;
         let rz_new = dot_handle(provider, &r, &new_z, &mut host_sync_count)?;
         if rz_old.abs() <= 1.0e-18 {
             let _ = provider.free(&z);
@@ -527,303 +506,7 @@ fn solve_linear_system_runtime_tensor_with_components(
     })
 }
 
-struct PreconditionerDeviceContext<'a> {
-    provider: &'a dyn runmat_accelerate_api::AccelProvider,
-    inv_diag: &'a GpuTensorHandle,
-    ilu_l_subdiag: &'a GpuTensorHandle,
-    ilu_upper_superdiag: &'a GpuTensorHandle,
-    ilu_inv_u_diag: &'a GpuTensorHandle,
-    constrained_mask: &'a GpuTensorHandle,
-    unconstrained_mask: &'a GpuTensorHandle,
-    prev_indices: &'a [u32],
-    next_indices: &'a [u32],
-    shape: &'a [usize],
-    zero_like: &'a GpuTensorHandle,
-}
-
-fn apply_preconditioner_device(
-    ctx: &PreconditionerDeviceContext<'_>,
-    preconditioner_kind: SpdPreconditionerKind,
-    r: &GpuTensorHandle,
-    workspace: &mut RuntimeTensorWorkspace,
-) -> Option<GpuTensorHandle> {
-    match preconditioner_kind {
-        SpdPreconditionerKind::Jacobi => {
-            let values = block_on(ctx.provider.elem_mul(r, ctx.inv_diag)).ok()?;
-            let z_target = ensure_workspace_slot(
-                ctx.provider,
-                &mut workspace.precond_z,
-                ctx.zero_like,
-                &workspace.full_indices,
-                &values,
-            )?;
-            let _ = ctx.provider.free(&values);
-            block_on(ctx.provider.elem_add(&z_target, ctx.zero_like)).ok()
-        }
-        SpdPreconditionerKind::Ilu0 => apply_ilu0_approx_device(ctx, r, workspace),
-    }
-}
-
-fn apply_ilu0_approx_device(
-    ctx: &PreconditionerDeviceContext<'_>,
-    r: &GpuTensorHandle,
-    workspace: &mut RuntimeTensorWorkspace,
-) -> Option<GpuTensorHandle> {
-    const SWEEPS: usize = 3;
-
-    let y = ensure_workspace_slot(
-        ctx.provider,
-        &mut workspace.precond_y,
-        ctx.zero_like,
-        &workspace.full_indices,
-        r,
-    )?;
-    for _ in 0..SWEEPS {
-        let y_prev_shift = ctx
-            .provider
-            .gather_linear(&y, ctx.prev_indices, ctx.shape)
-            .ok()?;
-        let l_term = block_on(ctx.provider.elem_mul(ctx.ilu_l_subdiag, &y_prev_shift)).ok()?;
-        let tmp = block_on(ctx.provider.elem_sub(r, &l_term)).ok()?;
-        let unconstrained = block_on(ctx.provider.elem_mul(ctx.unconstrained_mask, &tmp)).ok()?;
-        let constrained = block_on(ctx.provider.elem_mul(ctx.constrained_mask, r)).ok()?;
-        let y_next = block_on(ctx.provider.elem_add(&unconstrained, &constrained)).ok()?;
-        let _ = ctx
-            .provider
-            .scatter_linear(&y, &workspace.full_indices, &y_next);
-
-        let _ = ctx.provider.free(&constrained);
-        let _ = ctx.provider.free(&unconstrained);
-        let _ = ctx.provider.free(&tmp);
-        let _ = ctx.provider.free(&l_term);
-        let _ = ctx.provider.free(&y_prev_shift);
-        let _ = ctx.provider.free(&y_next);
-    }
-
-    let z = ensure_workspace_slot(
-        ctx.provider,
-        &mut workspace.precond_z,
-        ctx.zero_like,
-        &workspace.full_indices,
-        &y,
-    )?;
-    for _ in 0..SWEEPS {
-        let z_next_shift = ctx
-            .provider
-            .gather_linear(&z, ctx.next_indices, ctx.shape)
-            .ok()?;
-        let u_term = block_on(
-            ctx.provider
-                .elem_mul(ctx.ilu_upper_superdiag, &z_next_shift),
-        )
-        .ok()?;
-        let tmp = block_on(ctx.provider.elem_sub(&y, &u_term)).ok()?;
-        let scaled = block_on(ctx.provider.elem_mul(&tmp, ctx.ilu_inv_u_diag)).ok()?;
-        let unconstrained =
-            block_on(ctx.provider.elem_mul(ctx.unconstrained_mask, &scaled)).ok()?;
-        let constrained = block_on(ctx.provider.elem_mul(ctx.constrained_mask, &y)).ok()?;
-        let z_new = block_on(ctx.provider.elem_add(&unconstrained, &constrained)).ok()?;
-        let _ = ctx
-            .provider
-            .scatter_linear(&z, &workspace.full_indices, &z_new);
-
-        let _ = ctx.provider.free(&constrained);
-        let _ = ctx.provider.free(&unconstrained);
-        let _ = ctx.provider.free(&scaled);
-        let _ = ctx.provider.free(&tmp);
-        let _ = ctx.provider.free(&u_term);
-        let _ = ctx.provider.free(&z_next_shift);
-        let _ = ctx.provider.free(&z_new);
-    }
-
-    block_on(ctx.provider.elem_add(&z, ctx.zero_like)).ok()
-}
-
-fn ensure_workspace_slot(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    slot: &mut Option<GpuTensorHandle>,
-    zero_like: &GpuTensorHandle,
-    full_indices: &[u32],
-    values: &GpuTensorHandle,
-) -> Option<GpuTensorHandle> {
-    if slot.is_none() {
-        *slot = Some(block_on(provider.elem_add(zero_like, zero_like)).ok()?);
-    }
-    let handle = slot.as_ref()?.clone();
-    provider
-        .scatter_linear(&handle, full_indices, values)
-        .ok()?;
-    Some(handle)
-}
-
-fn build_ilu0_factors(summary: &AssemblySummary) -> (Vec<f64>, Vec<f64>, Vec<f64>) {
-    let n = summary.dof_count;
-    let constrained = &summary.operator.constrained;
-
-    let mut lower = vec![0.0; n.saturating_sub(1)];
-    let mut upper = vec![0.0; n.saturating_sub(1)];
-    for i in 0..n.saturating_sub(1) {
-        if constrained[i] || constrained[i + 1] {
-            continue;
-        }
-        let coupling = summary.operator.stiffness_upper[i];
-        lower[i] = -coupling;
-        upper[i] = -coupling;
-    }
-
-    let mut u_diag = vec![1.0; n];
-    if n > 0 {
-        u_diag[0] = if constrained[0] {
-            1.0
-        } else {
-            summary.operator.stiffness_diag[0].max(1.0e-12)
-        };
-    }
-
-    let mut l_subdiag = vec![0.0; n];
-    let mut upper_superdiag = vec![0.0; n];
-    for i in 1..n {
-        if constrained[i] {
-            u_diag[i] = 1.0;
-            continue;
-        }
-        let prev_u = u_diag[i - 1].abs().max(1.0e-12);
-        let l = if constrained[i - 1] {
-            0.0
-        } else {
-            lower[i - 1] / prev_u
-        };
-        let mut value = summary.operator.stiffness_diag[i] - l * upper[i - 1];
-        if value.abs() < 1.0e-12 {
-            value = 1.0e-12;
-        }
-        u_diag[i] = value;
-        l_subdiag[i] = l;
-    }
-
-    for i in 0..n.saturating_sub(1) {
-        if !(constrained[i] || constrained[i + 1]) {
-            upper_superdiag[i] = upper[i];
-        }
-    }
-
-    let inv_u_diag = u_diag
-        .iter()
-        .enumerate()
-        .map(|(i, value)| {
-            if constrained[i] {
-                1.0
-            } else {
-                1.0 / value.abs().max(1.0e-12)
-            }
-        })
-        .collect();
-
-    (l_subdiag, upper_superdiag, inv_u_diag)
-}
-
-fn apply_k_device(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    x: &GpuTensorHandle,
-    diag: &GpuTensorHandle,
-    upper_left: &GpuTensorHandle,
-    upper_right: &GpuTensorHandle,
-    constrained_mask: &GpuTensorHandle,
-    unconstrained_mask: &GpuTensorHandle,
-    prev_indices: &[u32],
-    next_indices: &[u32],
-    shape: &[usize],
-) -> Option<GpuTensorHandle> {
-    let x_prev = provider.gather_linear(x, prev_indices, shape).ok()?;
-    let x_next = provider.gather_linear(x, next_indices, shape).ok()?;
-
-    let diag_term = block_on(provider.elem_mul(diag, x)).ok()?;
-    let left_term = block_on(provider.elem_mul(upper_left, &x_prev)).ok()?;
-    let right_term = block_on(provider.elem_mul(upper_right, &x_next)).ok()?;
-    let tmp = block_on(provider.elem_sub(&diag_term, &left_term)).ok()?;
-    let unconstrained_value = block_on(provider.elem_sub(&tmp, &right_term)).ok()?;
-
-    let unconstrained_part =
-        block_on(provider.elem_mul(unconstrained_mask, &unconstrained_value)).ok()?;
-    let constrained_part = block_on(provider.elem_mul(constrained_mask, x)).ok()?;
-    let y = block_on(provider.elem_add(&unconstrained_part, &constrained_part)).ok()?;
-
-    let _ = provider.free(&constrained_part);
-    let _ = provider.free(&unconstrained_part);
-    let _ = provider.free(&unconstrained_value);
-    let _ = provider.free(&tmp);
-    let _ = provider.free(&right_term);
-    let _ = provider.free(&left_term);
-    let _ = provider.free(&diag_term);
-    let _ = provider.free(&x_next);
-    let _ = provider.free(&x_prev);
-    Some(y)
-}
-
-fn apply_k_host_from_prepared(
-    diag: &[f64],
-    upper_left: &[f64],
-    upper_right: &[f64],
-    constrained_mask: &[f64],
-    unconstrained_mask: &[f64],
-    x: &[f64],
-) -> Vec<f64> {
-    let n = x.len();
-    let mut y = vec![0.0; n];
-    for i in 0..n {
-        let prev = if i == 0 { x[0] } else { x[i - 1] };
-        let next = if i + 1 >= n { x[n - 1] } else { x[i + 1] };
-        let unconstrained_value = diag[i] * x[i] - upper_left[i] * prev - upper_right[i] * next;
-        y[i] = unconstrained_mask[i] * unconstrained_value + constrained_mask[i] * x[i];
-    }
-    y
-}
-
-fn linear_shift_indices(n: usize, shift: isize) -> Option<Vec<u32>> {
-    if n > u32::MAX as usize {
-        return None;
-    }
-
-    let mut out = Vec::with_capacity(n);
-    for i in 0..n {
-        let shifted = (i as isize) + shift;
-        let index = if shifted < 0 {
-            0
-        } else if shifted >= n as isize {
-            n.saturating_sub(1)
-        } else {
-            shifted as usize
-        };
-        out.push(index as u32);
-    }
-    Some(out)
-}
-
-fn dot_handle(
-    provider: &dyn runmat_accelerate_api::AccelProvider,
-    a: &GpuTensorHandle,
-    b: &GpuTensorHandle,
-    host_sync_count: &mut u32,
-) -> Option<f64> {
-    let mul = block_on(provider.elem_mul(a, b)).ok()?;
-    let sum = block_on(provider.reduce_sum(&mul)).ok()?;
-    let out = match provider.read_scalar(&sum, 0) {
-        Ok(value) => Some(value),
-        Err(_) => {
-            *host_sync_count = host_sync_count.saturating_add(1);
-            block_on(provider.download(&sum))
-                .ok()
-                .and_then(|host| host.data.first().copied())
-        }
-    };
-    let _ = provider.free(&sum);
-    let _ = provider.free(&mul);
-    out
-}
-
 pub fn estimate_runtime_tensor_pcg_host_syncs(max_iters: u32) -> u32 {
-    // With providers that support read_scalar, only final x download is required.
-    // Fallback dot downloads are provider-specific and not counted by this baseline estimator.
     let _ = max_iters;
     1
 }
