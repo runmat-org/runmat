@@ -159,9 +159,15 @@ struct BenchmarkConformanceReport {
 #[derive(Debug)]
 struct BaselineConfig {
     path: Option<PathBuf>,
+    rolling_dir: Option<PathBuf>,
+    rolling_window: usize,
     enforce: bool,
     max_slowdown_ratio: f64,
+    min_speedup_retention: f64,
 }
+
+const ROLLING_TARGET_FIXTURES: &[&str] =
+    &["modal_large_gpu_provider", "transient_long_gpu_provider"];
 
 fn manifest_specs() -> Vec<FixtureSpec> {
     vec![
@@ -1524,6 +1530,14 @@ fn baseline_config() -> BaselineConfig {
     let path = std::env::var("RUNMAT_ANALYSIS_BASELINE_PATH")
         .ok()
         .map(PathBuf::from);
+    let rolling_dir = std::env::var("RUNMAT_ANALYSIS_BASELINE_DIR")
+        .ok()
+        .map(PathBuf::from);
+    let rolling_window = std::env::var("RUNMAT_ANALYSIS_BASELINE_WINDOW")
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(5)
+        .max(1);
     let enforce = std::env::var("RUNMAT_ANALYSIS_ENFORCE_BASELINE")
         .ok()
         .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
@@ -1532,10 +1546,17 @@ fn baseline_config() -> BaselineConfig {
         .ok()
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(1.5);
+    let min_speedup_retention = std::env::var("RUNMAT_ANALYSIS_MIN_SPEEDUP_RETENTION")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(0.75);
     BaselineConfig {
         path,
+        rolling_dir,
+        rolling_window,
         enforce,
         max_slowdown_ratio,
+        min_speedup_retention,
     }
 }
 
@@ -1543,6 +1564,110 @@ fn load_baseline_report(path: &PathBuf) -> Result<BenchmarkConformanceReport, St
     let bytes = fs::read(path).map_err(|err| format!("failed to read baseline report: {err}"))?;
     serde_json::from_slice::<BenchmarkConformanceReport>(&bytes)
         .map_err(|err| format!("failed to parse baseline report: {err}"))
+}
+
+fn load_rolling_reports(
+    dir: &PathBuf,
+    limit: usize,
+    exclude_path: &PathBuf,
+) -> Result<Vec<BenchmarkConformanceReport>, String> {
+    let entries = fs::read_dir(dir).map_err(|err| format!("failed to read baseline dir: {err}"))?;
+    let mut json_paths = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|err| format!("failed to read baseline dir entry: {err}"))?;
+        let path = entry.path();
+        if path == *exclude_path {
+            continue;
+        }
+        if path.extension().and_then(|value| value.to_str()) != Some("json") {
+            continue;
+        }
+        let modified = fs::metadata(&path)
+            .and_then(|metadata| metadata.modified())
+            .map_err(|err| format!("failed to stat baseline report {}: {err}", path.display()))?;
+        json_paths.push((path, modified));
+    }
+    json_paths.sort_by(|a, b| b.1.cmp(&a.1));
+
+    let mut reports = Vec::new();
+    for (path, _) in json_paths.into_iter().take(limit) {
+        if let Ok(report) = load_baseline_report(&path) {
+            reports.push(report);
+        }
+    }
+    Ok(reports)
+}
+
+fn median(values: &mut [f64]) -> Option<f64> {
+    if values.is_empty() {
+        return None;
+    }
+    values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mid = values.len() / 2;
+    if values.len() % 2 == 1 {
+        Some(values[mid])
+    } else {
+        Some((values[mid - 1] + values[mid]) * 0.5)
+    }
+}
+
+fn check_rolling_baseline_drift(
+    history: &[BenchmarkConformanceReport],
+    current: &BenchmarkConformanceReport,
+    max_slowdown_ratio: f64,
+    min_speedup_retention: f64,
+    failures: &mut Vec<String>,
+) {
+    for fixture_id in ROLLING_TARGET_FIXTURES {
+        let Some(current_record) = current.records.iter().find(|record| record.fixture_id == *fixture_id)
+        else {
+            continue;
+        };
+
+        let mut gpu_ms_history = Vec::new();
+        let mut speedup_history = Vec::new();
+        for report in history {
+            if let Some(record) = report.records.iter().find(|value| value.fixture_id == *fixture_id) {
+                if let Some(gpu_ms) = record.gpu_run_ms {
+                    if gpu_ms > 0.0 {
+                        gpu_ms_history.push(gpu_ms);
+                    }
+                }
+                if let Some(speedup) = record.gpu_speedup_ratio {
+                    if speedup > 0.0 {
+                        speedup_history.push(speedup);
+                    }
+                }
+            }
+        }
+
+        if gpu_ms_history.len() >= 2 {
+            if let (Some(now), Some(base_median)) = (current_record.gpu_run_ms, median(&mut gpu_ms_history)) {
+                let ratio = now / base_median.max(1.0e-12);
+                if ratio > max_slowdown_ratio {
+                    failures.push(format!(
+                        "rolling baseline slowdown exceeded for fixture={} backend=gpu ratio={ratio:.3} limit={max_slowdown_ratio:.3} (median_ms={base_median:.3}, current_ms={now:.3})",
+                        fixture_id
+                    ));
+                }
+            }
+        }
+
+        if speedup_history.len() >= 2 {
+            if let (Some(now), Some(base_median)) = (
+                current_record.gpu_speedup_ratio,
+                median(&mut speedup_history),
+            ) {
+                let min_allowed = base_median * min_speedup_retention;
+                if now < min_allowed {
+                    failures.push(format!(
+                        "rolling baseline speedup retention failed for fixture={} speedup={now:.3} min_allowed={min_allowed:.3} (median_speedup={base_median:.3}, retention={min_speedup_retention:.3})",
+                        fixture_id
+                    ));
+                }
+            }
+        }
+    }
 }
 
 fn check_baseline_drift(
@@ -1661,6 +1786,26 @@ fn analysis_benchmark_conformance_manifest_gates() {
             Err(err) => {
                 if baseline.enforce {
                     failures.push(format!("baseline load failed under enforce mode: {err}"));
+                }
+            }
+        }
+    }
+    if let Some(rolling_dir) = baseline.rolling_dir.clone() {
+        match load_rolling_reports(&rolling_dir, baseline.rolling_window, &path) {
+            Ok(history) => {
+                check_rolling_baseline_drift(
+                    &history,
+                    &report,
+                    baseline.max_slowdown_ratio,
+                    baseline.min_speedup_retention,
+                    &mut failures,
+                );
+            }
+            Err(err) => {
+                if baseline.enforce {
+                    failures.push(format!(
+                        "rolling baseline load failed under enforce mode: {err}"
+                    ));
                 }
             }
         }

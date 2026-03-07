@@ -18,6 +18,12 @@ pub(super) fn push_transient_quality_diagnostics(
     prepared_build_ms: f64,
     solve_ms: f64,
     fallback_apply_count: u32,
+    adapt_increase_steps: usize,
+    adapt_decrease_steps: usize,
+    adapt_hold_steps: usize,
+    adapt_scale_mean: f64,
+    adapt_scale_min: f64,
+    adapt_scale_max: f64,
 ) {
     let converged_all = converged_steps == options.step_count;
     diagnostics.push(FeaDiagnostic {
@@ -80,6 +86,19 @@ pub(super) fn push_transient_quality_diagnostics(
         message: format!(
             "prepared_build_ms={} solve_ms={} fallback_apply_count={}",
             prepared_build_ms, solve_ms, fallback_apply_count
+        ),
+    });
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_TRANSIENT_ADAPTIVITY".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "increase_steps={} decrease_steps={} hold_steps={} scale_min={} scale_max={} scale_mean={}",
+            adapt_increase_steps,
+            adapt_decrease_steps,
+            adapt_hold_steps,
+            adapt_scale_min,
+            adapt_scale_max,
+            adapt_scale_mean
         ),
     });
 

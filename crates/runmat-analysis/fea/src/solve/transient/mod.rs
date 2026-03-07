@@ -115,6 +115,12 @@ pub fn solve_transient_system(
     let mut prepared_build_ms = 0.0_f64;
     let mut solve_ms = 0.0_f64;
     let mut fallback_apply_count = 0u32;
+    let mut adapt_increase_steps = 0usize;
+    let mut adapt_decrease_steps = 0usize;
+    let mut adapt_hold_steps = 0usize;
+    let mut adapt_scale_sum = 0.0_f64;
+    let mut adapt_scale_min = f64::INFINITY;
+    let mut adapt_scale_max = 0.0_f64;
 
     for _step in 0..options.step_count {
         let mut step_dt = dt;
@@ -190,9 +196,28 @@ pub fn solve_transient_system(
             converged_steps += 1;
         }
 
-        if options.adaptive_time_step && converged && residual_norm < options.residual_target * 0.1
-        {
-            dt = (step_dt * 1.2).clamp(min_dt, max_dt);
+        if options.adaptive_time_step {
+            let next_dt = recommend_next_time_step(
+                step_dt,
+                residual_norm,
+                options.residual_target,
+                min_dt,
+                max_dt,
+                converged,
+                retries,
+            );
+            let scale = next_dt / step_dt.max(1.0e-12);
+            adapt_scale_sum += scale;
+            adapt_scale_min = adapt_scale_min.min(scale);
+            adapt_scale_max = adapt_scale_max.max(scale);
+            if scale > 1.01 {
+                adapt_increase_steps += 1;
+            } else if scale < 0.99 {
+                adapt_decrease_steps += 1;
+            } else {
+                adapt_hold_steps += 1;
+            }
+            dt = next_dt;
         } else {
             dt = step_dt;
         }
@@ -219,6 +244,24 @@ pub fn solve_transient_system(
         prepared_build_ms,
         solve_ms,
         fallback_apply_count,
+        adapt_increase_steps,
+        adapt_decrease_steps,
+        adapt_hold_steps,
+        if accepted_time_steps_s.is_empty() {
+            1.0
+        } else {
+            adapt_scale_sum / accepted_time_steps_s.len() as f64
+        },
+        if adapt_scale_min.is_finite() {
+            adapt_scale_min
+        } else {
+            1.0
+        },
+        if adapt_scale_max > 0.0 {
+            adapt_scale_max
+        } else {
+            1.0
+        },
     );
 
     TransientSolveResult {
@@ -236,4 +279,28 @@ pub fn solve_transient_system(
         device_apply_k_attempt_count,
         preconditioner: selected_preconditioner,
     }
+}
+
+fn recommend_next_time_step(
+    step_dt: f64,
+    residual_norm: f64,
+    residual_target: f64,
+    min_dt: f64,
+    max_dt: f64,
+    converged: bool,
+    retries: usize,
+) -> f64 {
+    if !converged {
+        return (step_dt * 0.75).clamp(min_dt, max_dt);
+    }
+
+    let target = residual_target.max(1.0e-12);
+    let ratio = (target / residual_norm.max(1.0e-12)).clamp(0.25, 4.0);
+    let mut factor = ratio.powf(0.35).clamp(0.8, 1.25);
+    if retries > 0 {
+        factor = factor.min(1.05);
+    } else if residual_norm <= target * 0.1 {
+        factor = factor.max(1.15);
+    }
+    (step_dt * factor).clamp(min_dt, max_dt)
 }
