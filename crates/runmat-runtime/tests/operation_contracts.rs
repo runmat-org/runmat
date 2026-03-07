@@ -550,9 +550,13 @@ fn analysis_results_modal_query_controls_are_typed() {
     );
     assert!(excluded.data.summary.min_frequency_hz.is_some());
     assert!(excluded.data.summary.max_frequency_hz.is_some());
+    assert!(excluded.data.summary.max_modal_residual_norm.is_some());
+    assert!(excluded.data.summary.first_mode_converged.is_some());
     assert_eq!(excluded.data.summary.snapshot_count, 0);
     assert_eq!(excluded.data.summary.time_start_s, None);
     assert_eq!(excluded.data.summary.time_end_s, None);
+    assert_eq!(excluded.data.summary.max_transient_residual_norm, None);
+    assert_eq!(excluded.data.summary.final_step_converged, None);
 
     let invalid_mode = analysis_results_op(
         &modal_run.data,
@@ -603,6 +607,8 @@ fn analysis_results_transient_query_controls_are_typed() {
     assert!(excluded.data.summary.snapshot_count > 0);
     assert_eq!(excluded.data.summary.time_start_s, Some(0.0));
     assert!(excluded.data.summary.time_end_s.unwrap_or(0.0) > 0.0);
+    assert!(excluded.data.summary.max_transient_residual_norm.is_some());
+    assert!(excluded.data.summary.final_step_converged.is_some());
 
     let invalid_snapshot = analysis_results_op(
         &transient_run.data,
@@ -649,9 +655,13 @@ fn analysis_results_by_run_id_contract_roundtrip() {
     assert!(results.data.summary.available_mode_indices.is_empty());
     assert_eq!(results.data.summary.min_frequency_hz, None);
     assert_eq!(results.data.summary.max_frequency_hz, None);
+    assert_eq!(results.data.summary.max_modal_residual_norm, None);
+    assert_eq!(results.data.summary.first_mode_converged, None);
     assert_eq!(results.data.summary.snapshot_count, 0);
     assert_eq!(results.data.summary.time_start_s, None);
     assert_eq!(results.data.summary.time_end_s, None);
+    assert_eq!(results.data.summary.max_transient_residual_norm, None);
+    assert_eq!(results.data.summary.final_step_converged, None);
 }
 
 #[test]

@@ -461,9 +461,13 @@ fn analysis_results_returns_filtered_fields_and_metadata() {
     assert!(results.data.summary.available_mode_indices.is_empty());
     assert_eq!(results.data.summary.min_frequency_hz, None);
     assert_eq!(results.data.summary.max_frequency_hz, None);
+    assert_eq!(results.data.summary.max_modal_residual_norm, None);
+    assert_eq!(results.data.summary.first_mode_converged, None);
     assert_eq!(results.data.summary.snapshot_count, 0);
     assert_eq!(results.data.summary.time_start_s, None);
     assert_eq!(results.data.summary.time_end_s, None);
+    assert_eq!(results.data.summary.max_transient_residual_norm, None);
+    assert_eq!(results.data.summary.final_step_converged, None);
 }
 
 #[test]
@@ -522,9 +526,13 @@ fn analysis_results_by_run_id_roundtrip_works() {
     assert!(fetched.data.summary.available_mode_indices.is_empty());
     assert_eq!(fetched.data.summary.min_frequency_hz, None);
     assert_eq!(fetched.data.summary.max_frequency_hz, None);
+    assert_eq!(fetched.data.summary.max_modal_residual_norm, None);
+    assert_eq!(fetched.data.summary.first_mode_converged, None);
     assert_eq!(fetched.data.summary.snapshot_count, 0);
     assert_eq!(fetched.data.summary.time_start_s, None);
     assert_eq!(fetched.data.summary.time_end_s, None);
+    assert_eq!(fetched.data.summary.max_transient_residual_norm, None);
+    assert_eq!(fetched.data.summary.final_step_converged, None);
 
     storage::reset_artifact_store_for_tests();
 }
@@ -931,6 +939,8 @@ fn analysis_results_include_modal_payload_for_modal_runs() {
     );
     assert!(results.data.summary.min_frequency_hz.is_some());
     assert!(results.data.summary.max_frequency_hz.is_some());
+    assert!(results.data.summary.max_modal_residual_norm.is_some());
+    assert!(results.data.summary.first_mode_converged.is_some());
 }
 
 #[test]
@@ -1077,6 +1087,8 @@ fn analysis_results_query_can_exclude_transient_payload() {
     assert!(results.data.summary.snapshot_count > 0);
     assert_eq!(results.data.summary.time_start_s, Some(0.0));
     assert!(results.data.summary.time_end_s.unwrap_or(0.0) > 0.0);
+    assert!(results.data.summary.max_transient_residual_norm.is_some());
+    assert!(results.data.summary.final_step_converged.is_some());
 }
 
 #[test]

@@ -838,9 +838,22 @@ pub fn analysis_results_op(
         fields = filtered;
     }
 
-    let (mode_count, available_mode_indices, min_frequency_hz, max_frequency_hz) =
+    let (
+        mode_count,
+        available_mode_indices,
+        min_frequency_hz,
+        max_frequency_hz,
+        max_modal_residual_norm,
+        first_mode_converged,
+    ) =
         if let Some(modal) = run_result.modal_results.as_ref() {
             let count = modal.eigenvalues_hz.len().min(modal.mode_shapes.len());
+            let max_modal_residual_norm = modal
+                .residual_norms
+                .iter()
+                .copied()
+                .reduce(f64::max);
+            let first_mode_converged = modal.residual_norms.first().copied().map(|v| v <= 1.0e-6);
             let (min_frequency_hz, max_frequency_hz) = if count == 0 {
                 (None, None)
             } else {
@@ -857,25 +870,41 @@ pub fn analysis_results_op(
                 (0..count).collect(),
                 min_frequency_hz,
                 max_frequency_hz,
+                max_modal_residual_norm,
+                first_mode_converged,
             )
         } else {
-            (0, Vec::new(), None, None)
+            (0, Vec::new(), None, None, None, None)
         };
 
-    let (snapshot_count, time_start_s, time_end_s) =
+    let (
+        snapshot_count,
+        time_start_s,
+        time_end_s,
+        max_transient_residual_norm,
+        final_step_converged,
+    ) =
         if let Some(transient) = run_result.transient_results.as_ref() {
             let count = transient.time_points_s.len().min(transient.displacement_snapshots.len());
+            let max_residual = transient
+                .residual_norms
+                .iter()
+                .copied()
+                .reduce(f64::max);
+            let final_step_converged = max_residual.map(|value| value <= 1.0e-6);
             if count == 0 {
-                (0, None, None)
+                (0, None, None, max_residual, final_step_converged)
             } else {
                 (
                     count,
                     transient.time_points_s.first().copied(),
                     transient.time_points_s.get(count - 1).copied(),
+                    max_residual,
+                    final_step_converged,
                 )
             }
         } else {
-            (0, None, None)
+            (0, None, None, None, None)
         };
 
     let summary = AnalysisResultsSummary {
@@ -885,9 +914,13 @@ pub fn analysis_results_op(
         available_mode_indices,
         min_frequency_hz,
         max_frequency_hz,
+        max_modal_residual_norm,
+        first_mode_converged,
         snapshot_count,
         time_start_s,
         time_end_s,
+        max_transient_residual_norm,
+        final_step_converged,
     };
 
     let modal_results = if query.include_modal_results {
