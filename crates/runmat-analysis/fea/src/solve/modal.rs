@@ -1,3 +1,4 @@
+use runmat_accelerate_api::provider as accel_provider;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -6,7 +7,10 @@ use crate::{
     operator::{apply_k, apply_m, OperatorSystem},
     solve::{
         preconditioner::SpdPreconditionerKind,
-        runtime_tensor_solver::solve_linear_system_runtime_tensor_with_initial_guess,
+        runtime_tensor_solver::{
+            prepare_runtime_tensor_linear_system, solve_prepared_linear_system_runtime_tensor,
+            RuntimeTensorPreparedLinearSystem,
+        },
     },
     ComputeBackend,
 };
@@ -68,8 +72,17 @@ pub fn solve_modal_system(
 
     let mut basis: Vec<Vec<f64>> = Vec::with_capacity(target_mode_count);
     let mut modes: Vec<(f64, Vec<f64>, f64)> = Vec::with_capacity(target_mode_count);
-    let max_inverse_iters = 8usize;
-    let min_inverse_iters = 3usize;
+    let has_accel_provider = use_runtime_tensor && accel_provider().is_some();
+    let prepared_runtime_system = if has_accel_provider {
+        prepare_runtime_tensor_linear_system(summary)
+    } else {
+        None
+    };
+    let (max_inverse_iters, min_inverse_iters, update_tol) = if has_accel_provider {
+        (6usize, 2usize, 5.0e-4)
+    } else {
+        (8usize, 3usize, 1.0e-4)
+    };
     for mode_idx in 0..target_mode_count {
         let mut q = vec![0.0; summary.operator.dof_count];
         q[unconstrained[mode_idx]] = 1.0;
@@ -86,6 +99,7 @@ pub fn solve_modal_system(
                 64,
                 1.0e-10,
                 use_runtime_tensor,
+                prepared_runtime_system.as_ref(),
                 linear_guess.as_deref(),
             );
             if let Some(solve) = z.runtime_tensor {
@@ -105,7 +119,7 @@ pub fn solve_modal_system(
 
             if iter + 1 >= min_inverse_iters {
                 let rel_update = relative_l2_update(&q_prev, &q);
-                if rel_update <= 1.0e-4 {
+                if rel_update <= update_tol {
                     break;
                 }
             }
@@ -252,20 +266,36 @@ fn solve_k_cg(
     max_iters: usize,
     tol: f64,
     use_runtime_tensor: bool,
+    prepared_runtime_system: Option<&RuntimeTensorPreparedLinearSystem>,
     initial_guess: Option<&[f64]>,
 ) -> SolveKResult {
     if use_runtime_tensor {
-        let mut summary_with_rhs = summary.clone();
-        summary_with_rhs.operator.rhs = rhs.to_vec();
-        if let Some(result) = solve_linear_system_runtime_tensor_with_initial_guess(
-            &summary_with_rhs,
-            SpdPreconditionerKind::Jacobi,
-            None,
-        ) {
-            return SolveKResult {
-                vector: result.solution.clone(),
-                runtime_tensor: Some(result),
-            };
+        if let Some(prepared) = prepared_runtime_system {
+            if let Some(result) = solve_prepared_linear_system_runtime_tensor(
+                summary,
+                prepared,
+                rhs,
+                SpdPreconditionerKind::Jacobi,
+                None,
+            ) {
+                return SolveKResult {
+                    vector: result.solution.clone(),
+                    runtime_tensor: Some(result),
+                };
+            }
+        } else if let Some(fallback_prepared) = prepare_runtime_tensor_linear_system(summary) {
+            if let Some(result) = solve_prepared_linear_system_runtime_tensor(
+                summary,
+                &fallback_prepared,
+                rhs,
+                SpdPreconditionerKind::Jacobi,
+                None,
+            ) {
+                return SolveKResult {
+                    vector: result.solution.clone(),
+                    runtime_tensor: Some(result),
+                };
+            }
         }
     }
 

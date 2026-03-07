@@ -4,9 +4,25 @@ use runmat_accelerate_api::{provider, GpuTensorHandle, HostTensorView};
 use crate::{
     assembly::AssemblySummary,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    operator::apply_k,
     solve::{linear::LinearSolveResult, preconditioner::SpdPreconditionerKind},
 };
+
+#[derive(Debug, Clone)]
+pub struct RuntimeTensorPreparedLinearSystem {
+    dof_count: usize,
+    shape: Vec<usize>,
+    diag: Vec<f64>,
+    upper_left: Vec<f64>,
+    upper_right: Vec<f64>,
+    inv_diag: Vec<f64>,
+    ilu_l_subdiag: Vec<f64>,
+    ilu_upper_superdiag: Vec<f64>,
+    ilu_inv_u_diag: Vec<f64>,
+    constrained_mask: Vec<f64>,
+    unconstrained_mask: Vec<f64>,
+    prev_indices: Vec<u32>,
+    next_indices: Vec<u32>,
+}
 
 struct RuntimeTensorWorkspace {
     full_indices: Vec<u32>,
@@ -48,14 +64,23 @@ pub fn solve_linear_system_runtime_tensor_with_initial_guess(
     preconditioner_kind: SpdPreconditionerKind,
     initial_guess: Option<&[f64]>,
 ) -> Option<LinearSolveResult> {
-    let provider = provider()?;
+    solve_linear_system_runtime_tensor_with_components(
+        summary,
+        None,
+        &summary.operator.rhs,
+        preconditioner_kind,
+        initial_guess,
+    )
+}
+
+pub fn prepare_runtime_tensor_linear_system(
+    summary: &AssemblySummary,
+) -> Option<RuntimeTensorPreparedLinearSystem> {
     let n = summary.dof_count;
     if n == 0 {
         return None;
     }
 
-    let shape = [n];
-    let zeros = vec![0.0; n];
     let inv_diag: Vec<f64> = (0..n)
         .map(|i| {
             if summary.operator.constrained[i] {
@@ -89,9 +114,142 @@ pub fn solve_linear_system_runtime_tensor_with_initial_guess(
         .iter()
         .map(|&value| if value { 0.0 } else { 1.0 })
         .collect();
-
     let prev_indices = linear_shift_indices(n, -1)?;
     let next_indices = linear_shift_indices(n, 1)?;
+
+    Some(RuntimeTensorPreparedLinearSystem {
+        dof_count: n,
+        shape: vec![n],
+        diag,
+        upper_left,
+        upper_right,
+        inv_diag,
+        ilu_l_subdiag,
+        ilu_upper_superdiag,
+        ilu_inv_u_diag,
+        constrained_mask,
+        unconstrained_mask,
+        prev_indices,
+        next_indices,
+    })
+}
+
+pub fn solve_prepared_linear_system_runtime_tensor(
+    summary: &AssemblySummary,
+    prepared: &RuntimeTensorPreparedLinearSystem,
+    rhs: &[f64],
+    preconditioner_kind: SpdPreconditionerKind,
+    initial_guess: Option<&[f64]>,
+) -> Option<LinearSolveResult> {
+    solve_linear_system_runtime_tensor_with_components(
+        summary,
+        Some(prepared),
+        rhs,
+        preconditioner_kind,
+        initial_guess,
+    )
+}
+
+fn solve_linear_system_runtime_tensor_with_components(
+    summary: &AssemblySummary,
+    prepared: Option<&RuntimeTensorPreparedLinearSystem>,
+    rhs: &[f64],
+    preconditioner_kind: SpdPreconditionerKind,
+    initial_guess: Option<&[f64]>,
+) -> Option<LinearSolveResult> {
+    let provider = provider()?;
+    let n = prepared
+        .map(|value| value.dof_count)
+        .unwrap_or(summary.dof_count);
+    if n == 0 {
+        return None;
+    }
+    if rhs.len() != n {
+        return None;
+    }
+
+    let shape_storage = prepared
+        .map(|value| value.shape.clone())
+        .unwrap_or_else(|| vec![n]);
+    let shape = shape_storage.as_slice();
+    let zeros = vec![0.0; n];
+    let inv_diag = prepared
+        .map(|value| value.inv_diag.clone())
+        .unwrap_or_else(|| {
+            (0..n)
+                .map(|i| {
+                    if summary.operator.constrained[i] {
+                        1.0
+                    } else {
+                        1.0 / summary.operator.stiffness_diag[i].abs().max(1.0e-12)
+                    }
+                })
+                .collect()
+        });
+    let (ilu_l_subdiag, ilu_upper_superdiag, ilu_inv_u_diag) = prepared
+        .map(|value| {
+            (
+                value.ilu_l_subdiag.clone(),
+                value.ilu_upper_superdiag.clone(),
+                value.ilu_inv_u_diag.clone(),
+            )
+        })
+        .unwrap_or_else(|| build_ilu0_factors(summary));
+    let (diag, upper_left, upper_right) = prepared
+        .map(|value| {
+            (
+                value.diag.clone(),
+                value.upper_left.clone(),
+                value.upper_right.clone(),
+            )
+        })
+        .unwrap_or_else(|| {
+            let diag = summary.operator.stiffness_diag.clone();
+            let mut upper_left = vec![0.0; n];
+            let mut upper_right = vec![0.0; n];
+            for i in 0..n {
+                if i > 0 && !summary.operator.constrained[i - 1] && !summary.operator.constrained[i]
+                {
+                    upper_left[i] = summary.operator.stiffness_upper[i - 1];
+                }
+                if i + 1 < n
+                    && !summary.operator.constrained[i + 1]
+                    && !summary.operator.constrained[i]
+                {
+                    upper_right[i] = summary.operator.stiffness_upper[i];
+                }
+            }
+            (diag, upper_left, upper_right)
+        });
+    let (constrained_mask, unconstrained_mask) = prepared
+        .map(|value| {
+            (
+                value.constrained_mask.clone(),
+                value.unconstrained_mask.clone(),
+            )
+        })
+        .unwrap_or_else(|| {
+            let constrained_mask: Vec<f64> = summary
+                .operator
+                .constrained
+                .iter()
+                .map(|&value| if value { 1.0 } else { 0.0 })
+                .collect();
+            let unconstrained_mask: Vec<f64> = summary
+                .operator
+                .constrained
+                .iter()
+                .map(|&value| if value { 0.0 } else { 1.0 })
+                .collect();
+            (constrained_mask, unconstrained_mask)
+        });
+
+    let prev_indices = prepared
+        .map(|value| value.prev_indices.clone())
+        .unwrap_or(linear_shift_indices(n, -1)?);
+    let next_indices = prepared
+        .map(|value| value.next_indices.clone())
+        .unwrap_or(linear_shift_indices(n, 1)?);
     let mut workspace = RuntimeTensorWorkspace::new(n)?;
 
     let initial_x = match initial_guess {
@@ -101,73 +259,65 @@ pub fn solve_linear_system_runtime_tensor_with_initial_guess(
     let mut x = provider
         .upload(&HostTensorView {
             data: &initial_x,
-            shape: &shape,
+            shape,
         })
         .ok()?;
     let zero_h = provider
         .upload(&HostTensorView {
             data: &zeros,
-            shape: &shape,
+            shape,
         })
         .ok()?;
-    let rhs_h = provider
-        .upload(&HostTensorView {
-            data: &summary.operator.rhs,
-            shape: &shape,
-        })
-        .ok()?;
+    let rhs_h = provider.upload(&HostTensorView { data: rhs, shape }).ok()?;
     let inv = provider
         .upload(&HostTensorView {
             data: &inv_diag,
-            shape: &shape,
+            shape,
         })
         .ok()?;
     let ilu_l_subdiag_h = provider
         .upload(&HostTensorView {
             data: &ilu_l_subdiag,
-            shape: &shape,
+            shape,
         })
         .ok()?;
     let ilu_upper_superdiag_h = provider
         .upload(&HostTensorView {
             data: &ilu_upper_superdiag,
-            shape: &shape,
+            shape,
         })
         .ok()?;
     let ilu_inv_u_diag_h = provider
         .upload(&HostTensorView {
             data: &ilu_inv_u_diag,
-            shape: &shape,
+            shape,
         })
         .ok()?;
     let diag_h = provider
-        .upload(&HostTensorView {
-            data: &diag,
-            shape: &shape,
-        })
+        .upload(&HostTensorView { data: &diag, shape })
         .ok()?;
     let upper_left_h = provider
         .upload(&HostTensorView {
             data: &upper_left,
-            shape: &shape,
+            shape,
         })
         .ok()?;
     let upper_right_h = provider
         .upload(&HostTensorView {
             data: &upper_right,
-            shape: &shape,
+            shape,
         })
         .ok()?;
     let constrained_mask_h = provider
         .upload(&HostTensorView {
             data: &constrained_mask,
-            shape: &shape,
+            shape,
         })
         .ok()?;
     let unconstrained_mask_h = provider
         .upload(&HostTensorView {
             data: &unconstrained_mask,
-            shape: &shape,
+            shape,
         })
         .ok()?;
 
@@ -201,7 +351,7 @@ pub fn solve_linear_system_runtime_tensor_with_initial_guess(
         unconstrained_mask: &unconstrained_mask_h,
         prev_indices: &prev_indices,
         next_indices: &next_indices,
-        shape: &shape,
+        shape,
         zero_like: &zero_h,
     };
 
@@ -249,11 +399,18 @@ pub fn solve_linear_system_runtime_tensor_with_initial_guess(
             None => {
                 host_sync_count = host_sync_count.saturating_add(1);
                 let p_host = block_on(provider.download(&p)).ok()?;
-                let ap_host = apply_k(&summary.operator, &p_host.data);
+                let ap_host = apply_k_host_from_prepared(
+                    &diag,
+                    &upper_left,
+                    &upper_right,
+                    &constrained_mask,
+                    &unconstrained_mask,
+                    &p_host.data,
+                );
                 provider
                     .upload(&HostTensorView {
                         data: &ap_host,
-                        shape: &shape,
+                        shape,
                     })
                     .ok()?
             }
@@ -601,6 +758,25 @@ fn apply_k_device(
     let _ = provider.free(&x_next);
     let _ = provider.free(&x_prev);
     Some(y)
+}
+
+fn apply_k_host_from_prepared(
+    diag: &[f64],
+    upper_left: &[f64],
+    upper_right: &[f64],
+    constrained_mask: &[f64],
+    unconstrained_mask: &[f64],
+    x: &[f64],
+) -> Vec<f64> {
+    let n = x.len();
+    let mut y = vec![0.0; n];
+    for i in 0..n {
+        let prev = if i == 0 { x[0] } else { x[i - 1] };
+        let next = if i + 1 >= n { x[n - 1] } else { x[i + 1] };
+        let unconstrained_value = diag[i] * x[i] - upper_left[i] * prev - upper_right[i] * next;
+        y[i] = unconstrained_mask[i] * unconstrained_value + constrained_mask[i] * x[i];
+    }
+    y
 }
 
 fn linear_shift_indices(n: usize, shift: isize) -> Option<Vec<u32>> {
