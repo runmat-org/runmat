@@ -24,6 +24,7 @@ pub(super) fn push_transient_quality_diagnostics(
     adapt_scale_mean: f64,
     adapt_scale_min: f64,
     adapt_scale_max: f64,
+    dt_bucket_rel_tolerance: f64,
 ) {
     let converged_all = converged_steps == options.step_count;
     diagnostics.push(FeaDiagnostic {
@@ -99,6 +100,15 @@ pub(super) fn push_transient_quality_diagnostics(
             adapt_scale_min,
             adapt_scale_max,
             adapt_scale_mean
+        ),
+    });
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_TRANSIENT_BUCKETING".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "enabled={} rel_tolerance={}",
+            dt_bucket_rel_tolerance > 0.0,
+            dt_bucket_rel_tolerance
         ),
     });
 

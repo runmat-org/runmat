@@ -163,6 +163,7 @@ struct BaselineConfig {
     rolling_window: usize,
     enforce: bool,
     max_slowdown_ratio: f64,
+    max_cost_slowdown_ratio: f64,
     min_speedup_retention: f64,
 }
 
@@ -980,6 +981,31 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                             "fallback_apply_count",
                         )
                     });
+                    let transient_adapt_scale_min = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_TRANSIENT_ADAPTIVITY",
+                        "scale_min",
+                    );
+                    let transient_adapt_scale_max = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_TRANSIENT_ADAPTIVITY",
+                        "scale_max",
+                    );
+                    let transient_adapt_scale_mean = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_TRANSIENT_ADAPTIVITY",
+                        "scale_mean",
+                    );
+                    let transient_adapt_decrease_steps = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_TRANSIENT_ADAPTIVITY",
+                        "decrease_steps",
+                    );
+                    let transient_bucket_rel_tolerance = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_TRANSIENT_BUCKETING",
+                        "rel_tolerance",
+                    );
 
                     for event in &gpu_fallback_events {
                         if !validate_fallback_event_schema(event) {
@@ -1045,6 +1071,79 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                             None,
                             Some(max_cache_misses),
                         );
+                    }
+                    if spec.id == "transient_long_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "transient_adapt_scale_min",
+                            "FEA_TRANSIENT_ADAPTIVITY",
+                            transient_adapt_scale_min,
+                            Some(0.65),
+                            None,
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "transient_adapt_scale_max",
+                            "FEA_TRANSIENT_ADAPTIVITY",
+                            transient_adapt_scale_max,
+                            None,
+                            Some(1.35),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "transient_adapt_scale_mean",
+                            "FEA_TRANSIENT_ADAPTIVITY",
+                            transient_adapt_scale_mean,
+                            Some(0.8),
+                            Some(1.2),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "transient_adapt_decrease_steps",
+                            "FEA_TRANSIENT_ADAPTIVITY",
+                            transient_adapt_decrease_steps,
+                            None,
+                            Some(16.0),
+                        );
+                        let requested_bucket_tol = std::env::var("RUNMAT_TRANSIENT_DT_BUCKET_REL_TOL")
+                            .ok()
+                            .and_then(|value| value.parse::<f64>().ok())
+                            .unwrap_or(0.0)
+                            .max(0.0);
+                        if requested_bucket_tol > 0.0 {
+                            push_threshold_assertion(
+                                spec.id,
+                                &mut threshold_assertions,
+                                &mut failures,
+                                "transient_bucket_rel_tolerance",
+                                "FEA_TRANSIENT_BUCKETING",
+                                transient_bucket_rel_tolerance,
+                                Some(requested_bucket_tol * 0.99),
+                                Some(requested_bucket_tol * 1.01 + 1.0e-12),
+                            );
+                            push_threshold_assertion(
+                                spec.id,
+                                &mut threshold_assertions,
+                                &mut failures,
+                                "transient_bucket_quality_residual",
+                                "FEA_TRANSIENT_STABILITY",
+                                diagnostic_metric(
+                                    &gpu_envelope.data,
+                                    "FEA_TRANSIENT_STABILITY",
+                                    "max_residual_norm",
+                                ),
+                                None,
+                                Some(1.0e-2),
+                            );
+                        }
                     }
 
                     let gpu_results = analysis_results_op(
@@ -1538,14 +1637,19 @@ fn baseline_config() -> BaselineConfig {
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(5)
         .max(1);
-    let enforce = std::env::var("RUNMAT_ANALYSIS_ENFORCE_BASELINE")
+    let enforce_explicit = std::env::var("RUNMAT_ANALYSIS_ENFORCE_BASELINE")
         .ok()
         .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
         .unwrap_or(false);
+    let enforce = enforce_explicit || enforce_on_protected_branch();
     let max_slowdown_ratio = std::env::var("RUNMAT_ANALYSIS_MAX_SLOWDOWN_RATIO")
         .ok()
         .and_then(|value| value.parse::<f64>().ok())
         .unwrap_or(1.5);
+    let max_cost_slowdown_ratio = std::env::var("RUNMAT_ANALYSIS_MAX_COST_SLOWDOWN_RATIO")
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(1.75);
     let min_speedup_retention = std::env::var("RUNMAT_ANALYSIS_MIN_SPEEDUP_RETENTION")
         .ok()
         .and_then(|value| value.parse::<f64>().ok())
@@ -1556,8 +1660,38 @@ fn baseline_config() -> BaselineConfig {
         rolling_window,
         enforce,
         max_slowdown_ratio,
+        max_cost_slowdown_ratio,
         min_speedup_retention,
     }
+}
+
+fn enforce_on_protected_branch() -> bool {
+    let opt_in = std::env::var("RUNMAT_ANALYSIS_ENFORCE_BASELINE_ON_PROTECTED")
+        .ok()
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if !opt_in {
+        return false;
+    }
+    let ci = std::env::var("CI")
+        .ok()
+        .map(|value| value == "1" || value.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if !ci {
+        return false;
+    }
+    let branch = std::env::var("GITHUB_REF_NAME")
+        .or_else(|_| std::env::var("CI_COMMIT_REF_NAME"))
+        .unwrap_or_default();
+    if branch.is_empty() {
+        return false;
+    }
+    let protected = std::env::var("RUNMAT_ANALYSIS_PROTECTED_BRANCHES")
+        .unwrap_or_else(|_| "main,master".to_string());
+    protected
+        .split(',')
+        .map(|value| value.trim())
+        .any(|value| !value.is_empty() && value == branch)
 }
 
 fn load_baseline_report(path: &PathBuf) -> Result<BenchmarkConformanceReport, String> {
@@ -1615,6 +1749,7 @@ fn check_rolling_baseline_drift(
     history: &[BenchmarkConformanceReport],
     current: &BenchmarkConformanceReport,
     max_slowdown_ratio: f64,
+    max_cost_slowdown_ratio: f64,
     min_speedup_retention: f64,
     failures: &mut Vec<String>,
 ) {
@@ -1662,6 +1797,51 @@ fn check_rolling_baseline_drift(
                 if now < min_allowed {
                     failures.push(format!(
                         "rolling baseline speedup retention failed for fixture={} speedup={now:.3} min_allowed={min_allowed:.3} (median_speedup={base_median:.3}, retention={min_speedup_retention:.3})",
+                        fixture_id
+                    ));
+                }
+            }
+        }
+
+        let mut solve_ms_history = Vec::new();
+        let mut prepared_build_ms_history = Vec::new();
+        for report in history {
+            if let Some(record) = report.records.iter().find(|value| value.fixture_id == *fixture_id) {
+                if let Some(value) = record.gpu_solver_solve_ms {
+                    if value > 0.0 {
+                        solve_ms_history.push(value);
+                    }
+                }
+                if let Some(value) = record.gpu_solver_prepared_build_ms {
+                    if value > 0.0 {
+                        prepared_build_ms_history.push(value);
+                    }
+                }
+            }
+        }
+        if solve_ms_history.len() >= 2 {
+            if let (Some(now), Some(base_median)) = (
+                current_record.gpu_solver_solve_ms,
+                median(&mut solve_ms_history),
+            ) {
+                let ratio = now / base_median.max(1.0e-12);
+                if ratio > max_cost_slowdown_ratio {
+                    failures.push(format!(
+                        "rolling baseline solve_ms slowdown exceeded for fixture={} ratio={ratio:.3} limit={max_cost_slowdown_ratio:.3} (median_ms={base_median:.3}, current_ms={now:.3})",
+                        fixture_id
+                    ));
+                }
+            }
+        }
+        if prepared_build_ms_history.len() >= 2 {
+            if let (Some(now), Some(base_median)) = (
+                current_record.gpu_solver_prepared_build_ms,
+                median(&mut prepared_build_ms_history),
+            ) {
+                let ratio = now / base_median.max(1.0e-12);
+                if ratio > max_cost_slowdown_ratio {
+                    failures.push(format!(
+                        "rolling baseline prepared_build_ms slowdown exceeded for fixture={} ratio={ratio:.3} limit={max_cost_slowdown_ratio:.3} (median_ms={base_median:.3}, current_ms={now:.3})",
                         fixture_id
                     ));
                 }
@@ -1769,7 +1949,19 @@ fn analysis_benchmark_conformance_manifest_gates() {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).expect("create artifact directory");
     }
-    fs::write(&path, report_json).expect("write benchmark report artifact");
+    fs::write(&path, &report_json).expect("write benchmark report artifact");
+
+    if let Ok(dir) = std::env::var("RUNMAT_ANALYSIS_BASELINE_DIR") {
+        let dir_path = PathBuf::from(dir);
+        if fs::create_dir_all(&dir_path).is_ok() {
+            let stamp = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|value| value.as_secs())
+                .unwrap_or(0);
+            let snapshot_path = dir_path.join(format!("analysis_benchmark_report_{stamp}.json"));
+            let _ = fs::write(snapshot_path, &report_json);
+        }
+    }
 
     let baseline = baseline_config();
     let core_failure_count = failures.len();
@@ -1797,6 +1989,7 @@ fn analysis_benchmark_conformance_manifest_gates() {
                     &history,
                     &report,
                     baseline.max_slowdown_ratio,
+                    baseline.max_cost_slowdown_ratio,
                     baseline.min_speedup_retention,
                     &mut failures,
                 );

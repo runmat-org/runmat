@@ -13,7 +13,10 @@ mod diagnostics;
 mod linear_step;
 
 use diagnostics::push_transient_quality_diagnostics;
-use linear_step::{build_step_rhs, solve_implicit_step_system, strain_energy, LinearStepStats};
+use linear_step::{
+    build_step_rhs, solve_implicit_step_system, strain_energy, transient_dt_bucket_rel_tolerance,
+    LinearStepStats,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct TransientSolveOptions {
@@ -121,6 +124,7 @@ pub fn solve_transient_system(
     let mut adapt_scale_sum = 0.0_f64;
     let mut adapt_scale_min = f64::INFINITY;
     let mut adapt_scale_max = 0.0_f64;
+    let dt_bucket_rel_tolerance = transient_dt_bucket_rel_tolerance();
 
     for _step in 0..options.step_count {
         let mut step_dt = dt;
@@ -262,6 +266,7 @@ pub fn solve_transient_system(
         } else {
             1.0
         },
+        dt_bucket_rel_tolerance,
     );
 
     TransientSolveResult {
