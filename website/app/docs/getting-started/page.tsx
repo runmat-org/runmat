@@ -173,7 +173,7 @@ export default function GettingStartedPage() {
                 </thead>
                 <tbody>
                   {([
-                    ["Installation required", "yes", "no", "no"],
+                    ["Works without install", "no", "yes", "yes"],
                     ["Account required", "no", "no", "yes-text:Yes (free)"],
                     ["GPU acceleration", "text:Native (Metal, Vulkan, DX12)", "text:WebGPU (browser-throttled)", "text:WebGPU (browser-throttled)"],
                     ["Interactive IDE", "no", "yes", "yes"],

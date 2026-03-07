@@ -111,7 +111,12 @@ export default function CloudPricingCard() {
             })}
           </div>
 
-          <div className="space-y-2">
+          <div
+            role="tabpanel"
+            id={`pricing-cloud-panel-${activeTier}`}
+            aria-labelledby={`pricing-cloud-tab-${activeTier}`}
+            className="space-y-2"
+          >
             {currentTier.inheritsFrom && (
               <p className="text-xs font-medium text-muted-foreground/70">
                 {currentTier.inheritsFrom}
