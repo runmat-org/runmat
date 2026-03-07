@@ -785,6 +785,119 @@ Rationale:
 }
 ```
 
+### Solver Option Presets (Client JSON Guidance)
+
+The runtime now exposes explicit option structs for modal and transient runs. Clients can either
+use helper presets (`coarse`, `balanced`, `high_accuracy`) in Rust, or send equivalent JSON-like
+payloads through host bindings.
+
+`AnalysisModalRunOptions` (coarse):
+
+```json
+{
+  "deterministicMode": false,
+  "precisionMode": "fp32",
+  "qualityPolicy": "exploratory",
+  "modeCount": 2,
+  "residualWarnThreshold": 0.005
+}
+```
+
+`AnalysisModalRunOptions` (balanced/default):
+
+```json
+{
+  "deterministicMode": false,
+  "precisionMode": "fp64",
+  "qualityPolicy": "balanced",
+  "modeCount": 3,
+  "residualWarnThreshold": 0.001
+}
+```
+
+`AnalysisModalRunOptions` (high accuracy):
+
+```json
+{
+  "deterministicMode": true,
+  "precisionMode": "fp64",
+  "qualityPolicy": "strict",
+  "modeCount": 8,
+  "residualWarnThreshold": 0.0005
+}
+```
+
+`AnalysisTransientRunOptions` (coarse):
+
+```json
+{
+  "deterministicMode": false,
+  "precisionMode": "fp32",
+  "qualityPolicy": "exploratory",
+  "timeStepS": 0.005,
+  "minTimeStepS": 0.0005,
+  "maxTimeStepS": 0.02,
+  "stepCount": 6,
+  "maxLinearIters": 64,
+  "tolerance": 0.000001,
+  "residualTarget": 0.0001,
+  "adaptiveTimeStep": true,
+  "maxStepRetries": 2
+}
+```
+
+`AnalysisTransientRunOptions` (balanced/default):
+
+```json
+{
+  "deterministicMode": false,
+  "precisionMode": "fp64",
+  "qualityPolicy": "balanced",
+  "timeStepS": 0.001,
+  "minTimeStepS": 0.000001,
+  "maxTimeStepS": 0.02,
+  "stepCount": 10,
+  "maxLinearIters": 128,
+  "tolerance": 0.00000001,
+  "residualTarget": 0.000001,
+  "adaptiveTimeStep": true,
+  "maxStepRetries": 4
+}
+```
+
+`AnalysisTransientRunOptions` (high accuracy):
+
+```json
+{
+  "deterministicMode": true,
+  "precisionMode": "fp64",
+  "qualityPolicy": "strict",
+  "timeStepS": 0.0005,
+  "minTimeStepS": 0.000005,
+  "maxTimeStepS": 0.002,
+  "stepCount": 24,
+  "maxLinearIters": 256,
+  "tolerance": 0.0000000001,
+  "residualTarget": 0.0000001,
+  "adaptiveTimeStep": true,
+  "maxStepRetries": 8
+}
+```
+
+Preset selection quick guide:
+
+- `coarse`: use for fast exploratory loops, UI previews, and broad parameter sweeps where speed is prioritized over strict numerical confidence.
+- `balanced`: default choice for day-to-day engineering workflows where runtime cost and result quality should both remain stable.
+- `high_accuracy`: use for final verification/regression baselines, deterministic replay, and stricter publishability expectations.
+
+Recommended starting matrix:
+
+| Scenario | Modal preset | Transient preset |
+| --- | --- | --- |
+| Interactive design iteration | `coarse` | `coarse` |
+| Standard analysis pipeline | `balanced` | `balanced` |
+| Release/sign-off quality gate | `high_accuracy` | `high_accuracy` |
+
 ## Numeric Tolerance Policy
 
 - CPU vs CPU deterministic replay: exact match for topology + metadata; numeric fields within `1e-12` relative tolerance.
