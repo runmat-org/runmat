@@ -69,6 +69,8 @@ struct FixtureSpec {
     max_transient_residual_norm: Option<f64>,
     max_transient_energy_growth_ratio: Option<f64>,
     min_gpu_speedup_ratio: Option<f64>,
+    min_transient_cache_hit_ratio: Option<f64>,
+    max_transient_cache_misses: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -93,6 +95,8 @@ struct FixtureManifestEntry {
     max_transient_residual_norm: Option<f64>,
     max_transient_energy_growth_ratio: Option<f64>,
     min_gpu_speedup_ratio: Option<f64>,
+    min_transient_cache_hit_ratio: Option<f64>,
+    max_transient_cache_misses: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -132,6 +136,9 @@ struct FixtureRunRecord {
     gpu_solver_device_apply_k_ratio: Option<f64>,
     gpu_speedup_ratio: Option<f64>,
     gpu_solver_backend: Option<String>,
+    gpu_transient_cache_hit_ratio: Option<f64>,
+    gpu_transient_cache_misses: Option<f64>,
+    gpu_transient_cache_entries: Option<f64>,
     publishable: Option<bool>,
     parity: Option<ParitySummary>,
     threshold_assertions: Vec<ThresholdAssertionRecord>,
@@ -176,6 +183,8 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_residual_norm: None,
             max_transient_energy_growth_ratio: None,
             min_gpu_speedup_ratio: None,
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
         },
         FixtureSpec {
             id: "cantilever_gpu_fallback",
@@ -201,6 +210,8 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_residual_norm: None,
             max_transient_energy_growth_ratio: None,
             min_gpu_speedup_ratio: None,
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
         },
         FixtureSpec {
             id: "cantilever_load_sweep_gpu_provider",
@@ -223,6 +234,8 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_residual_norm: None,
             max_transient_energy_growth_ratio: None,
             min_gpu_speedup_ratio: None,
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
         },
         FixtureSpec {
             id: "cantilever_large_load_sweep_gpu_provider",
@@ -245,6 +258,8 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_residual_norm: None,
             max_transient_energy_growth_ratio: None,
             min_gpu_speedup_ratio: None,
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
         },
         FixtureSpec {
             id: "multi_material_assembly_gpu_provider",
@@ -267,6 +282,8 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_residual_norm: None,
             max_transient_energy_growth_ratio: None,
             min_gpu_speedup_ratio: None,
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
         },
         FixtureSpec {
             id: "modal_large_cpu",
@@ -289,6 +306,8 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_residual_norm: None,
             max_transient_energy_growth_ratio: None,
             min_gpu_speedup_ratio: None,
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
         },
         FixtureSpec {
             id: "modal_large_gpu_provider",
@@ -301,7 +320,7 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             parity_tolerance: None,
             gpu_mode: Some(GpuMode::WithProvider),
             residency_expectation: Some(ResidencyExpectation::DeviceRef),
-            max_solver_host_sync_count: Some(128),
+            max_solver_host_sync_count: Some(96),
             min_solver_device_apply_k_ratio: Some(1.0),
             expected_solver_backend: Some("runtime_tensor"),
             modal_mode_count: Some(8),
@@ -310,7 +329,9 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             min_modal_relative_frequency_separation: Some(1.0e-5),
             max_transient_residual_norm: None,
             max_transient_energy_growth_ratio: None,
-            min_gpu_speedup_ratio: Some(2.2),
+            min_gpu_speedup_ratio: Some(2.8),
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
         },
         FixtureSpec {
             id: "modal_large_gpu_fallback",
@@ -336,6 +357,8 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_residual_norm: None,
             max_transient_energy_growth_ratio: None,
             min_gpu_speedup_ratio: None,
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
         },
         FixtureSpec {
             id: "transient_long_cpu",
@@ -358,6 +381,8 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_residual_norm: Some(1.0e-2),
             max_transient_energy_growth_ratio: Some(5.0),
             min_gpu_speedup_ratio: None,
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
         },
         FixtureSpec {
             id: "transient_long_gpu_provider",
@@ -370,7 +395,7 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             parity_tolerance: None,
             gpu_mode: Some(GpuMode::WithProvider),
             residency_expectation: Some(ResidencyExpectation::DeviceRef),
-            max_solver_host_sync_count: Some(64),
+            max_solver_host_sync_count: Some(48),
             min_solver_device_apply_k_ratio: Some(1.0),
             expected_solver_backend: Some("runtime_tensor"),
             modal_mode_count: None,
@@ -379,7 +404,9 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             min_modal_relative_frequency_separation: None,
             max_transient_residual_norm: Some(1.0e-2),
             max_transient_energy_growth_ratio: Some(5.0),
-            min_gpu_speedup_ratio: Some(1.8),
+            min_gpu_speedup_ratio: Some(2.0),
+            min_transient_cache_hit_ratio: Some(0.4),
+            max_transient_cache_misses: Some(12.0),
         },
         FixtureSpec {
             id: "transient_long_gpu_fallback",
@@ -405,6 +432,8 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_residual_norm: Some(1.0e-2),
             max_transient_energy_growth_ratio: Some(5.0),
             min_gpu_speedup_ratio: None,
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
         },
         FixtureSpec {
             id: "missing_materials",
@@ -427,6 +456,8 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_residual_norm: None,
             max_transient_energy_growth_ratio: None,
             min_gpu_speedup_ratio: None,
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
         },
         FixtureSpec {
             id: "unit_mismatch",
@@ -453,6 +484,8 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_residual_norm: None,
             max_transient_energy_growth_ratio: None,
             min_gpu_speedup_ratio: None,
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
         },
     ]
 }
@@ -494,6 +527,8 @@ fn fixture_manifest(specs: &[FixtureSpec]) -> FixtureManifest {
                 max_transient_residual_norm: spec.max_transient_residual_norm,
                 max_transient_energy_growth_ratio: spec.max_transient_energy_growth_ratio,
                 min_gpu_speedup_ratio: spec.min_gpu_speedup_ratio,
+                min_transient_cache_hit_ratio: spec.min_transient_cache_hit_ratio,
+                max_transient_cache_misses: spec.max_transient_cache_misses,
             })
             .collect(),
     }
@@ -732,6 +767,9 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
     let mut gpu_solver_device_apply_k_ratio = None;
     let mut gpu_speedup_ratio = None;
     let mut gpu_solver_backend = None;
+    let mut gpu_transient_cache_hit_ratio = None;
+    let mut gpu_transient_cache_misses = None;
+    let mut gpu_transient_cache_entries = None;
     let mut publishable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
@@ -762,6 +800,9 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                     gpu_solver_device_apply_k_ratio,
                     gpu_speedup_ratio,
                     gpu_solver_backend,
+                    gpu_transient_cache_hit_ratio,
+                    gpu_transient_cache_misses,
+                    gpu_transient_cache_entries,
                     publishable,
                     parity,
                     threshold_assertions,
@@ -869,6 +910,29 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                         (Some(cpu_ms), Some(gpu_ms)) if gpu_ms > 0.0 => Some(cpu_ms / gpu_ms),
                         _ => None,
                     };
+                    let cache_hits = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_TRANSIENT_CACHE",
+                        "prepared_cache_hits",
+                    );
+                    let cache_misses = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_TRANSIENT_CACHE",
+                        "prepared_cache_misses",
+                    );
+                    let cache_entries = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_TRANSIENT_CACHE",
+                        "prepared_cache_entries",
+                    );
+                    gpu_transient_cache_misses = cache_misses;
+                    gpu_transient_cache_entries = cache_entries;
+                    gpu_transient_cache_hit_ratio = match (cache_hits, cache_misses) {
+                        (Some(hits), Some(misses)) if (hits + misses) > 0.0 => {
+                            Some(hits / (hits + misses))
+                        }
+                        _ => None,
+                    };
 
                     for event in &gpu_fallback_events {
                         if !validate_fallback_event_schema(event) {
@@ -911,6 +975,30 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                             ));
                         }
                     }
+                    if let Some(min_cache_hit_ratio) = spec.min_transient_cache_hit_ratio {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "transient_prepared_cache_hit_ratio",
+                            "FEA_TRANSIENT_CACHE",
+                            gpu_transient_cache_hit_ratio,
+                            Some(min_cache_hit_ratio),
+                            None,
+                        );
+                    }
+                    if let Some(max_cache_misses) = spec.max_transient_cache_misses {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "transient_prepared_cache_misses",
+                            "FEA_TRANSIENT_CACHE",
+                            gpu_transient_cache_misses,
+                            None,
+                            Some(max_cache_misses),
+                        );
+                    }
 
                     let gpu_results = analysis_results_op(
                         &gpu_envelope.data,
@@ -945,6 +1033,9 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                                 gpu_solver_device_apply_k_ratio,
                                 gpu_speedup_ratio,
                                 gpu_solver_backend,
+                                gpu_transient_cache_hit_ratio,
+                                gpu_transient_cache_misses,
+                                gpu_transient_cache_entries,
                                 publishable,
                                 parity,
                                 threshold_assertions,
@@ -1075,6 +1166,9 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                                     gpu_solver_device_apply_k_ratio,
                                     gpu_speedup_ratio,
                                     gpu_solver_backend,
+                                    gpu_transient_cache_hit_ratio,
+                                    gpu_transient_cache_misses,
+                                    gpu_transient_cache_entries,
                                     publishable,
                                     parity,
                                     threshold_assertions,
@@ -1153,6 +1247,9 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
         gpu_solver_device_apply_k_ratio,
         gpu_speedup_ratio,
         gpu_solver_backend,
+        gpu_transient_cache_hit_ratio,
+        gpu_transient_cache_misses,
+        gpu_transient_cache_entries,
         publishable,
         parity,
         threshold_assertions,

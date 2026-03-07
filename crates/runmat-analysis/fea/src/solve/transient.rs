@@ -1,11 +1,16 @@
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, VecDeque};
 
 use crate::{
     assembly::AssemblySummary,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     solve::{
         preconditioner::SpdPreconditionerKind,
-        runtime_tensor_solver::solve_linear_system_runtime_tensor_with_initial_guess,
+        runtime_tensor_solver::{
+            prepare_runtime_tensor_linear_system,
+            solve_linear_system_runtime_tensor_with_initial_guess,
+            solve_prepared_linear_system_runtime_tensor, RuntimeTensorPreparedLinearSystem,
+        },
     },
     ComputeBackend,
 };
@@ -103,13 +108,28 @@ pub fn solve_transient_system(
     let mut device_apply_k_count = 0u32;
     let mut device_apply_k_attempt_count = 0u32;
     let mut selected_preconditioner = "none".to_string();
+    let mut prepared_runtime_systems_by_dt: HashMap<u64, RuntimeTensorPreparedLinearSystem> =
+        HashMap::new();
+    let mut prepared_runtime_system_lru = VecDeque::new();
+    let mut prepared_runtime_cache_hits = 0usize;
+    let mut prepared_runtime_cache_misses = 0usize;
 
     for step in 0..options.step_count {
         let mut step_dt = dt;
         let mut retries = 0usize;
         let (next_x, residual_norm, converged, step_stats) = loop {
             let rhs = build_step_rhs(summary, &x, step_dt);
-            let solved = solve_implicit_step(summary, &rhs, step_dt, options, use_runtime_tensor);
+            let solved = solve_implicit_step(
+                summary,
+                &rhs,
+                step_dt,
+                options,
+                use_runtime_tensor,
+                &mut prepared_runtime_systems_by_dt,
+                &mut prepared_runtime_system_lru,
+                &mut prepared_runtime_cache_hits,
+                &mut prepared_runtime_cache_misses,
+            );
             if !options.adaptive_time_step {
                 break solved;
             }
@@ -214,6 +234,18 @@ pub fn solve_transient_system(
             message: format!("retry_budget_hits={retry_budget_hits}"),
         });
     }
+    if use_runtime_tensor {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_TRANSIENT_CACHE".to_string(),
+            severity: FeaDiagnosticSeverity::Info,
+            message: format!(
+                "prepared_cache_entries={} prepared_cache_hits={} prepared_cache_misses={}",
+                prepared_runtime_systems_by_dt.len(),
+                prepared_runtime_cache_hits,
+                prepared_runtime_cache_misses
+            ),
+        });
+    }
     if !energies.is_empty() {
         let baseline_energy = energies
             .iter()
@@ -265,13 +297,57 @@ fn solve_implicit_step(
     dt: f64,
     options: TransientSolveOptions,
     use_runtime_tensor: bool,
+    prepared_runtime_systems_by_dt: &mut HashMap<u64, RuntimeTensorPreparedLinearSystem>,
+    prepared_runtime_system_lru: &mut VecDeque<u64>,
+    prepared_runtime_cache_hits: &mut usize,
+    prepared_runtime_cache_misses: &mut usize,
 ) -> (
     Vec<f64>,
     f64,
     bool,
     Option<crate::solve::linear::LinearSolveResult>,
 ) {
+    const PREPARED_RUNTIME_CACHE_CAPACITY: usize = 12;
     if use_runtime_tensor {
+        let dt_key = dt.to_bits();
+        if prepared_runtime_systems_by_dt.contains_key(&dt_key) {
+            *prepared_runtime_cache_hits += 1;
+            prepared_runtime_system_lru.retain(|value| *value != dt_key);
+            prepared_runtime_system_lru.push_back(dt_key);
+        } else {
+            *prepared_runtime_cache_misses += 1;
+            let implicit_summary = build_implicit_summary(summary, rhs, dt);
+            if let Some(prepared) = prepare_runtime_tensor_linear_system(&implicit_summary) {
+                if prepared_runtime_systems_by_dt.len() >= PREPARED_RUNTIME_CACHE_CAPACITY {
+                    if let Some(evicted_key) = prepared_runtime_system_lru.pop_front() {
+                        prepared_runtime_systems_by_dt.remove(&evicted_key);
+                    }
+                }
+                prepared_runtime_systems_by_dt.insert(dt_key, prepared);
+                prepared_runtime_system_lru.push_back(dt_key);
+            }
+        }
+
+        if let Some(prepared) = prepared_runtime_systems_by_dt.get(&dt_key) {
+            if let Some(result) = solve_prepared_linear_system_runtime_tensor(
+                summary,
+                prepared,
+                rhs,
+                SpdPreconditionerKind::Jacobi,
+                None,
+            ) {
+                let rhs_norm = dot(rhs, rhs).sqrt().max(1.0);
+                let relative_residual = result.residual_norm / rhs_norm;
+                let converged = result.converged || relative_residual <= options.tolerance;
+                return (
+                    result.solution.clone(),
+                    relative_residual,
+                    converged,
+                    Some(result),
+                );
+            }
+        }
+
         let implicit_summary = build_implicit_summary(summary, rhs, dt);
         if let Some(result) = solve_linear_system_runtime_tensor_with_initial_guess(
             &implicit_summary,
