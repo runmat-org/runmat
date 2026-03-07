@@ -179,7 +179,7 @@ export default function HomePage() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">
-              Interactive 3D plotting, built in
+              See your math in 3D
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-lg">
               GPU-accelerated 2D and 3D plotting, built into the same environment as your code. Your plots are part of the same computation chain as your math. No copying data between systems, no separate plotting library.

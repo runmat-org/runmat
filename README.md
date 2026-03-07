@@ -91,7 +91,7 @@ and full GPU acceleration.<br/><br/>
 </td>
 <td align="center" width="20%">
 <h3>☁️ Cloud</h3>
-Free tier available<br/><br/>
+Hobby tier available<br/><br/>
 Versioning, collaboration,<br/>
 team management.<br/><br/>
 <a href="https://runmat.com/pricing"><strong>Pricing →</strong></a>

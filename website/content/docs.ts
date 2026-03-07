@@ -114,6 +114,17 @@ export const docsTree: DocsNode[] = [
         },
       },
       {
+        title: "Large Dataset Persistence",
+        slug: ["large-dataset-persistence"],
+        file: "docs/LARGE_DATASET_PERSISTENCE.md",
+        seo: {
+          description: "How RunMat stores and operates on large numerical datasets using chunked, content-addressed objects with the data.* API.",
+          keywords: ["large datasets", "chunked storage", "content-addressed", "data API", "multi-terabyte arrays", "scientific data", "RunMat data"],
+          ogTitle: "Large Dataset Persistence",
+          ogDescription: "Read and write subregions of multi-terabyte arrays without loading the full file. Same API on local and cloud projects.",
+        },
+      },
+      {
         title: "Filesystem",
         slug: ["filesystem"],
         file: "docs/FILESYSTEM.md",
@@ -160,6 +171,7 @@ export const docsTree: DocsNode[] = [
     title: "Meta",
     children: [
       { title: "License", slug: ["license"], file: "LICENSE.md", seo: { description: "RunMat software license." } },
+      { title: "Terms and Conditions", slug: ["terms"], file: "docs/TERMS.md", seo: { description: "Dystr Terms and Conditions governing the use of the RunMat platform and related services.", keywords: ["terms and conditions", "terms of service", "legal", "RunMat", "Dystr"] } },
       { title: "Telemetry", slug: ["telemetry"], file: "docs/TELEMETRY.md", seo: { description: "RunMat telemetry: what information is collected and how it is used." } },
       { title: "Contributing", slug: ["contributing"], file: "docs/CONTRIBUTING.md", seo: { description: "How to contribute to RunMat: branch workflow, PR scope, and coding style." } },
     ],

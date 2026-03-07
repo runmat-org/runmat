@@ -77,8 +77,8 @@ const faqItems: { question: string; answer: string; answerContent?: React.ReactN
   {
     question: "Is RunMat really free?",
     answer:
-      "The RunMat runtime is open source under the MIT license. You can run MATLAB-syntax code in the browser without usage fees or time limits. Cloud features like storage, versioning, and project sharing start on a free tier (100 MB). Paid plans add more storage and team features -- see pricing.",
-    answerContent: <>The RunMat runtime is open source under the MIT license. You can run MATLAB-syntax code in the browser without usage fees or time limits. Cloud features like storage, versioning, and project sharing start on a free tier (100 MB). Paid plans add more storage and team features -- see <Link href="/pricing" className="underline hover:text-foreground">pricing</Link>.</>,
+      "The RunMat runtime is open source under the MIT license. You can run MATLAB-syntax code in the browser without usage fees or time limits. Cloud features like storage, versioning, and project sharing start on the Hobby tier (100 MB). Paid plans add more storage and team features -- see pricing.",
+    answerContent: <>The RunMat runtime is open source under the MIT license. You can run MATLAB-syntax code in the browser without usage fees or time limits. Cloud features like storage, versioning, and project sharing start on the Hobby tier (100 MB). Paid plans add more storage and team features -- see <Link href="/pricing" className="underline hover:text-foreground">pricing</Link>.</>,
   },
   {
     question: "Do I need to create an account?",
@@ -566,7 +566,7 @@ export default function MatlabOnlinePage() {
             <h2 className="text-3xl md:text-4xl font-bold text-foreground">Every change versioned. No git required.</h2>
             <p className="text-muted-foreground text-lg">
               Every save creates a version automatically. Per-file history and full project snapshots are included on all{" "}
-              <Link href="/pricing" className="underline hover:text-foreground">Cloud tiers</Link>, starting free with 100 MB storage. Paid plans add project sharing with your team -- no git setup or merge conflicts.
+              <Link href="/pricing" className="underline hover:text-foreground">Cloud tiers</Link>, starting at $0 with 100 MB on the Hobby tier. Paid plans add project sharing with your team -- no git setup or merge conflicts.
             </p>
           </div>
           <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-3">
@@ -592,7 +592,7 @@ export default function MatlabOnlinePage() {
               </span>
               <h3 className="text-lg font-semibold text-gray-100">Cloud project sharing</h3>
               <p className="text-sm text-gray-300 mt-1">Share projects with colleagues instantly. No shared drives, no emailing files back and forth.</p>
-              <Link href="/blog/sharing-calculation-results-across-teams-without-reruns" className="text-xs text-muted-foreground hover:text-foreground underline mt-2 inline-block">Learn more</Link>
+              <Link href="/blog/ad-hoc-checkpoints-to-large-data-persistence" className="text-xs text-muted-foreground hover:text-foreground underline mt-2 inline-block">Learn more</Link>
             </div>
           </div>
         </section>

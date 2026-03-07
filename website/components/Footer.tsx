@@ -94,6 +94,8 @@ export default function Footer() {
           <div className="text-sm text-center md:text-left" style={{ color: 'hsl(var(--muted-foreground))' }}>
             <p>
             © {currentYear} Dystr Inc. All rights reserved. MIT+ Licensed.
+            {" · "}
+            <Link href="/terms" className="hover:underline underline-offset-2">Terms</Link>
             </p>
             <p>
               MATLAB is a registered trademark of The MathWorks, Inc.

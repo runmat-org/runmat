@@ -10,20 +10,20 @@ import CloudPricingCard from "@/components/pricing/CloudPricingCard";
 import { CompareProductsTable } from "@/components/pricing/ComparisonTables";
 
 export const metadata: Metadata = {
-  title: "RunMat Pricing | Free, Cloud, and Enterprise",
+  title: "RunMat Pricing | Hobby, Pro, Team, and Enterprise",
   description:
-    "Simple RunMat pricing: free runtime and cloud tier. Pro from $30/mo per user, Team from $100/mo per user. Enterprise for on-prem and air-gapped deployment.",
+    "Simple RunMat pricing: free runtime, $0 Hobby cloud tier. Pro from $30/mo per user, Team from $100/mo per user. Enterprise for on-prem and air-gapped deployment.",
   alternates: { canonical: "https://runmat.com/pricing" },
   openGraph: {
-    title: "RunMat Pricing | Free, Cloud, and Enterprise",
+    title: "RunMat Pricing | Hobby, Pro, Team, and Enterprise",
     description:
-      "Free runtime and cloud tier. Pro from $30/mo per user, Team from $100/mo per user. RunMat Enterprise for on-prem and air-gapped deployment.",
+      "Free runtime, $0 Hobby cloud tier. Pro from $30/mo per user, Team from $100/mo per user. RunMat Enterprise for on-prem and air-gapped deployment.",
   },
   twitter: {
     card: "summary_large_image",
-    title: "RunMat Pricing | Free, Cloud, and Enterprise",
+    title: "RunMat Pricing | Hobby, Pro, Team, and Enterprise",
     description:
-      "Free runtime and cloud tier. Pro from $30/mo per user, Team from $100/mo per user. RunMat Enterprise for on-prem and air-gapped deployment.",
+      "Free runtime, $0 Hobby cloud tier. Pro from $30/mo per user, Team from $100/mo per user. RunMat Enterprise for on-prem and air-gapped deployment.",
   },
 };
 
@@ -46,12 +46,12 @@ const pricingFaqItems: { question: string; answer: string; answerContent?: React
   {
     question: "What's the difference between RunMat, Cloud, and Enterprise?",
     answer:
-      "RunMat is the free, open-source runtime — GPU acceleration, plotting, CLI, and browser sandbox. The desktop app is coming soon. RunMat Cloud adds cloud storage, project sharing, and version history on top, with Free, Pro, and Team tiers. RunMat Enterprise is everything in Cloud, deployed on your own infrastructure for air-gapped, compliance-ready environments.",
+      "RunMat is the free, open-source runtime — GPU acceleration, plotting, CLI, and browser sandbox. The desktop app is coming soon. RunMat Cloud adds cloud storage, project sharing, and version history on top, with Hobby, Pro, and Team tiers. RunMat Enterprise is everything in Cloud, deployed on your own infrastructure for air-gapped, compliance-ready environments.",
   },
   {
     question: "Is RunMat really free?",
     answer:
-      "Yes. The RunMat runtime is open source and the browser sandbox is free. The desktop app is coming soon and will also be free. RunMat Cloud has a free tier with unlimited projects and 100 MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.",
+      "Yes. The RunMat runtime is open source and the browser sandbox is free. The desktop app is coming soon and will also be free. RunMat Cloud has a $0 Hobby tier with unlimited projects and 100 MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.",
   },
   {
     question: "Do I need an account to use RunMat?",
@@ -59,9 +59,9 @@ const pricingFaqItems: { question: string; answer: string; answerContent?: React
       "No. The browser sandbox works without an account. The desktop app (coming soon) will also work without one. An account is only required for cloud storage and team features.",
   },
   {
-    question: "What's included in Cloud Free vs Pro vs Team?",
+    question: "What's included in Cloud Hobby vs Pro vs Team?",
     answer:
-      "Free: unlimited projects, 100 MB storage, version history (counts toward storage). Pro: unlimited projects, 10GB storage, version history (counts toward storage) ($30/mo per user). Team: unlimited projects, SSO / SAML (and SCIM), 100GB storage, version history (counts toward storage), priority support ($100/mo per user).",
+      "Hobby: unlimited projects, 100 MB storage, version history (counts toward storage). Pro: unlimited projects, 10GB storage, version history (counts toward storage) ($30/mo per user). Team: unlimited projects, SSO / SAML (and SCIM), 100GB storage, version history (counts toward storage), priority support ($100/mo per user).",
   },
   {
     question: "How does RunMat Cloud billing work?",
@@ -75,7 +75,7 @@ const pricingFaqItems: { question: string; answer: string; answerContent?: React
   },
   {
     question: "Is there a free trial for Pro or Team?",
-    answer: "Start on the free tier and upgrade to Pro or Team from your account when you're ready. No sales call needed.",
+    answer: "Start on the Hobby tier and upgrade to Pro or Team from your account when you're ready. No sales call needed.",
   },
   {
     question: "Who do I contact for Enterprise pricing?",
@@ -113,7 +113,7 @@ export default function PricingPage() {
               Simple, transparent pricing
             </h1>
             <p className="mx-auto max-w-[42rem] leading-relaxed text-base text-muted-foreground sm:text-lg">
-              Free runtime, free cloud tier, no account required. Paid plans for teams that need more.
+              Free runtime, $0 cloud tier, no account required. Paid plans for teams that need more.
             </p>
           </div>
         </section>
@@ -126,10 +126,8 @@ export default function PricingPage() {
                   Open Source Runtime
                 </Badge>
                 <CardTitle className="text-xl text-foreground">RunMat</CardTitle>
+                <p className="text-xs text-muted-foreground">Open-source, GPU-accelerated math runtime. MATLAB syntax, no account required.</p>
                 <p className="text-3xl font-bold text-foreground">Free, forever</p>
-                <p className="text-sm text-muted-foreground">
-                  Blazing fast, MIT licensed math runtime
-                </p>
               </CardHeader>
               <CardContent className="flex flex-1 min-h-0 flex-col space-y-6">
                 <div className="flex min-h-0 flex-1 flex-col">
@@ -155,7 +153,7 @@ export default function PricingPage() {
                     asChild
                     className="w-full rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow border-0 hover:from-blue-600 hover:to-purple-700 transition-colors"
                   >
-                    <Link href="/sandbox">Try in Browser</Link>
+                    <Link href="/sandbox">Open Sandbox</Link>
                   </Button>
                 </div>
               </CardContent>

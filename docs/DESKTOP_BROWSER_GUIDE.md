@@ -207,13 +207,13 @@ Without signing in, the sandbox runs entirely in your browser. Your files are st
 
 Sign in to get cloud storage, automatic file versioning, and access to your projects from any device. Your files sync to RunMat Cloud and persist across sessions.
 
-- **Free tier** — 100 MB storage, unlimited projects, automatic version history
+- **Hobby tier** — 100 MB storage, unlimited projects, automatic version history
 - **Pro** — 10 GB storage, version history ($30/mo per user)
 - **Team** — 100 GB storage, project sharing, SSO ($100/mo per user)
 
 #### File versioning
 
-Every time you save a file, RunMat Cloud records a version automatically. You can browse and restore previous versions of any file at any time. Version history is available on all Cloud tiers (Free, Pro, and Team). Stored versions count toward your storage quota.
+Every time you save a file, RunMat Cloud records a version automatically. You can browse and restore previous versions of any file at any time. Version history is available on all Cloud tiers (Hobby, Pro, and Team). Stored versions count toward your storage quota.
 
 When signed in, your code is transmitted to RunMat Cloud for storage and sync. Execution still happens locally in your browser—your code is not executed on our servers.
 
