@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+use std::time::Instant;
 
 use crate::{
     assembly::AssemblySummary,
@@ -113,12 +114,16 @@ pub fn solve_transient_system(
     let mut prepared_runtime_system_lru = VecDeque::new();
     let mut prepared_runtime_cache_hits = 0usize;
     let mut prepared_runtime_cache_misses = 0usize;
+    let mut prepared_build_ms = 0.0_f64;
+    let mut solve_ms = 0.0_f64;
+    let mut fallback_apply_count = 0u32;
 
     for step in 0..options.step_count {
         let mut step_dt = dt;
         let mut retries = 0usize;
         let (next_x, residual_norm, converged, step_stats) = loop {
             let rhs = build_step_rhs(summary, &x, step_dt);
+            let solve_start = Instant::now();
             let solved = solve_implicit_step(
                 summary,
                 &rhs,
@@ -129,7 +134,9 @@ pub fn solve_transient_system(
                 &mut prepared_runtime_system_lru,
                 &mut prepared_runtime_cache_hits,
                 &mut prepared_runtime_cache_misses,
+                &mut prepared_build_ms,
             );
+            solve_ms += solve_start.elapsed().as_secs_f64() * 1_000.0;
             if !options.adaptive_time_step {
                 break solved;
             }
@@ -161,6 +168,11 @@ pub fn solve_transient_system(
             device_apply_k_count = device_apply_k_count.saturating_add(stats.device_apply_k_count);
             device_apply_k_attempt_count =
                 device_apply_k_attempt_count.saturating_add(stats.device_apply_k_attempt_count);
+            fallback_apply_count = fallback_apply_count.saturating_add(
+                stats
+                    .device_apply_k_attempt_count
+                    .saturating_sub(stats.device_apply_k_count),
+            );
             selected_preconditioner = stats.preconditioner;
         }
 
@@ -246,6 +258,14 @@ pub fn solve_transient_system(
             ),
         });
     }
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_TRANSIENT_COST".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "prepared_build_ms={} solve_ms={} fallback_apply_count={}",
+            prepared_build_ms, solve_ms, fallback_apply_count
+        ),
+    });
     if !energies.is_empty() {
         let baseline_energy = energies
             .iter()
@@ -301,6 +321,7 @@ fn solve_implicit_step(
     prepared_runtime_system_lru: &mut VecDeque<u64>,
     prepared_runtime_cache_hits: &mut usize,
     prepared_runtime_cache_misses: &mut usize,
+    prepared_build_ms: &mut f64,
 ) -> (
     Vec<f64>,
     f64,
@@ -316,8 +337,10 @@ fn solve_implicit_step(
             prepared_runtime_system_lru.push_back(dt_key);
         } else {
             *prepared_runtime_cache_misses += 1;
+            let prepare_start = Instant::now();
             let implicit_summary = build_implicit_summary(summary, rhs, dt);
             if let Some(prepared) = prepare_runtime_tensor_linear_system(&implicit_summary) {
+                *prepared_build_ms += prepare_start.elapsed().as_secs_f64() * 1_000.0;
                 if prepared_runtime_systems_by_dt.len() >= PREPARED_RUNTIME_CACHE_CAPACITY {
                     if let Some(evicted_key) = prepared_runtime_system_lru.pop_front() {
                         prepared_runtime_systems_by_dt.remove(&evicted_key);
@@ -325,6 +348,8 @@ fn solve_implicit_step(
                 }
                 prepared_runtime_systems_by_dt.insert(dt_key, prepared);
                 prepared_runtime_system_lru.push_back(dt_key);
+            } else {
+                *prepared_build_ms += prepare_start.elapsed().as_secs_f64() * 1_000.0;
             }
         }
 

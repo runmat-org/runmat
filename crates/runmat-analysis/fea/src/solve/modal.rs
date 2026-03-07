@@ -1,5 +1,6 @@
 use runmat_accelerate_api::provider as accel_provider;
 use serde::{Deserialize, Serialize};
+use std::time::Instant;
 
 use crate::{
     assembly::AssemblySummary,
@@ -73,11 +74,17 @@ pub fn solve_modal_system(
     let mut basis: Vec<Vec<f64>> = Vec::with_capacity(target_mode_count);
     let mut modes: Vec<(f64, Vec<f64>, f64)> = Vec::with_capacity(target_mode_count);
     let has_accel_provider = use_runtime_tensor && accel_provider().is_some();
+    let mut prepared_build_ms = 0.0_f64;
     let prepared_runtime_system = if has_accel_provider {
-        prepare_runtime_tensor_linear_system(summary)
+        let prepared_start = Instant::now();
+        let prepared = prepare_runtime_tensor_linear_system(summary);
+        prepared_build_ms = prepared_start.elapsed().as_secs_f64() * 1_000.0;
+        prepared
     } else {
         None
     };
+    let mut solve_ms = 0.0_f64;
+    let mut fallback_apply_count = 0u32;
     let (max_inverse_iters, min_inverse_iters, update_tol) = if has_accel_provider {
         (6usize, 2usize, 5.0e-4)
     } else {
@@ -92,6 +99,7 @@ pub fn solve_modal_system(
         for iter in 0..max_inverse_iters {
             let q_prev = q.clone();
             let mq = apply_m(&summary.operator, &q);
+            let solve_start = Instant::now();
             let z = solve_k_cg(
                 summary,
                 &summary.operator,
@@ -102,6 +110,7 @@ pub fn solve_modal_system(
                 prepared_runtime_system.as_ref(),
                 linear_guess.as_deref(),
             );
+            solve_ms += solve_start.elapsed().as_secs_f64() * 1_000.0;
             if let Some(solve) = z.runtime_tensor {
                 solver_backend = solve.solver_backend;
                 solver_host_sync_count =
@@ -110,6 +119,11 @@ pub fn solve_modal_system(
                     device_apply_k_count.saturating_add(solve.device_apply_k_count);
                 device_apply_k_attempt_count =
                     device_apply_k_attempt_count.saturating_add(solve.device_apply_k_attempt_count);
+                fallback_apply_count = fallback_apply_count.saturating_add(
+                    solve
+                        .device_apply_k_attempt_count
+                        .saturating_sub(solve.device_apply_k_count),
+                );
             }
             let mut z_vec = z.vector;
             linear_guess = Some(z_vec.clone());
@@ -217,6 +231,14 @@ pub fn solve_modal_system(
             message: format!("min_relative_frequency_separation={min_separation}"),
         });
     }
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_MODAL_COST".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "prepared_build_ms={} solve_ms={} fallback_apply_count={}",
+            prepared_build_ms, solve_ms, fallback_apply_count
+        ),
+    });
 
     ModalSolveResult {
         converged,

@@ -139,6 +139,9 @@ struct FixtureRunRecord {
     gpu_transient_cache_hit_ratio: Option<f64>,
     gpu_transient_cache_misses: Option<f64>,
     gpu_transient_cache_entries: Option<f64>,
+    gpu_solver_prepared_build_ms: Option<f64>,
+    gpu_solver_solve_ms: Option<f64>,
+    gpu_solver_fallback_apply_count: Option<f64>,
     publishable: Option<bool>,
     parity: Option<ParitySummary>,
     threshold_assertions: Vec<ThresholdAssertionRecord>,
@@ -770,6 +773,9 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
     let mut gpu_transient_cache_hit_ratio = None;
     let mut gpu_transient_cache_misses = None;
     let mut gpu_transient_cache_entries = None;
+    let mut gpu_solver_prepared_build_ms = None;
+    let mut gpu_solver_solve_ms = None;
+    let mut gpu_solver_fallback_apply_count = None;
     let mut publishable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
@@ -803,6 +809,9 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                     gpu_transient_cache_hit_ratio,
                     gpu_transient_cache_misses,
                     gpu_transient_cache_entries,
+                    gpu_solver_prepared_build_ms,
+                    gpu_solver_solve_ms,
+                    gpu_solver_fallback_apply_count,
                     publishable,
                     parity,
                     threshold_assertions,
@@ -933,6 +942,38 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                         }
                         _ => None,
                     };
+                    gpu_solver_prepared_build_ms = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_MODAL_COST",
+                        "prepared_build_ms",
+                    )
+                    .or_else(|| {
+                        diagnostic_metric(
+                            &gpu_envelope.data,
+                            "FEA_TRANSIENT_COST",
+                            "prepared_build_ms",
+                        )
+                    });
+                    gpu_solver_solve_ms = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_MODAL_COST",
+                        "solve_ms",
+                    )
+                    .or_else(|| {
+                        diagnostic_metric(&gpu_envelope.data, "FEA_TRANSIENT_COST", "solve_ms")
+                    });
+                    gpu_solver_fallback_apply_count = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_MODAL_COST",
+                        "fallback_apply_count",
+                    )
+                    .or_else(|| {
+                        diagnostic_metric(
+                            &gpu_envelope.data,
+                            "FEA_TRANSIENT_COST",
+                            "fallback_apply_count",
+                        )
+                    });
 
                     for event in &gpu_fallback_events {
                         if !validate_fallback_event_schema(event) {
@@ -1036,6 +1077,9 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                                 gpu_transient_cache_hit_ratio,
                                 gpu_transient_cache_misses,
                                 gpu_transient_cache_entries,
+                                gpu_solver_prepared_build_ms,
+                                gpu_solver_solve_ms,
+                                gpu_solver_fallback_apply_count,
                                 publishable,
                                 parity,
                                 threshold_assertions,
@@ -1169,6 +1213,9 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                                     gpu_transient_cache_hit_ratio,
                                     gpu_transient_cache_misses,
                                     gpu_transient_cache_entries,
+                                    gpu_solver_prepared_build_ms,
+                                    gpu_solver_solve_ms,
+                                    gpu_solver_fallback_apply_count,
                                     publishable,
                                     parity,
                                     threshold_assertions,
@@ -1250,6 +1297,9 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
         gpu_transient_cache_hit_ratio,
         gpu_transient_cache_misses,
         gpu_transient_cache_entries,
+        gpu_solver_prepared_build_ms,
+        gpu_solver_solve_ms,
+        gpu_solver_fallback_apply_count,
         publishable,
         parity,
         threshold_assertions,
