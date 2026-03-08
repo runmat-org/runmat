@@ -884,6 +884,8 @@ fn analysis_run_nonlinear_returns_native_nonlinear_result() {
     assert_eq!(nonlinear.residual_norms.len(), nonlinear.increment_norms.len());
     assert_eq!(nonlinear.residual_norms.len(), nonlinear.iteration_counts.len());
     assert!(nonlinear.tangent_rebuild_count > 0);
+    assert!(nonlinear.iteration_spike_count <= nonlinear.load_factors.len());
+    assert!(nonlinear.max_line_search_backtracks_per_increment > 0);
     assert!(envelope
         .data
         .run
@@ -1009,7 +1011,15 @@ fn analysis_results_query_can_exclude_nonlinear_payload() {
     assert!(results.data.summary.max_nonlinear_iteration_count.is_some());
     assert!(results.data.summary.final_increment_converged.is_some());
     assert!(results.data.summary.nonlinear_line_search_backtracks.is_some());
+    assert!(results
+        .data
+        .summary
+        .nonlinear_max_backtracks_per_increment
+        .is_some());
     assert!(results.data.summary.nonlinear_tangent_rebuild_count.is_some());
+    assert!(results.data.summary.nonlinear_iteration_spike_count.is_some());
+    assert!(results.data.summary.nonlinear_convergence_stall_count.is_some());
+    assert!(results.data.summary.nonlinear_backtrack_burst_count.is_some());
 }
 
 #[test]

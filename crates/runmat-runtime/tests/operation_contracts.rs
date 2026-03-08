@@ -529,6 +529,9 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
     assert_eq!(nonlinear.load_factors.len(), nonlinear.residual_norms.len());
     assert_eq!(nonlinear.residual_norms.len(), nonlinear.increment_norms.len());
     assert_eq!(nonlinear.increment_norms.len(), nonlinear.iteration_counts.len());
+    assert!(nonlinear.max_line_search_backtracks_per_increment > 0);
+    assert!(nonlinear.iteration_spike_count <= nonlinear.load_factors.len());
+    assert!(nonlinear.backtrack_burst_count > 0);
     assert!(envelope
         .data
         .run
@@ -553,7 +556,15 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
     assert!(results.data.summary.max_nonlinear_increment_norm.is_some());
     assert!(results.data.summary.max_nonlinear_iteration_count.is_some());
     assert!(results.data.summary.nonlinear_line_search_backtracks.is_some());
+    assert!(results
+        .data
+        .summary
+        .nonlinear_max_backtracks_per_increment
+        .is_some());
     assert!(results.data.summary.nonlinear_tangent_rebuild_count.is_some());
+    assert!(results.data.summary.nonlinear_iteration_spike_count.is_some());
+    assert!(results.data.summary.nonlinear_convergence_stall_count.is_some());
+    assert!(results.data.summary.nonlinear_backtrack_burst_count.is_some());
 
     let invalid = analysis_run_nonlinear_op(
         &fixture_model(FixtureId::CantileverLinearStatic),
@@ -628,6 +639,38 @@ fn analysis_run_nonlinear_policy_contract_divergence_is_explicit() {
             .iter()
             .any(|reason| reason.code == QualityReasonCode::NonlinearIncrementFailure));
     }
+}
+
+#[test]
+fn analysis_run_nonlinear_policy_diverges_on_harder_fixture_profile() {
+    let model = fixture_model(FixtureId::NonlinearSofteningProxy);
+    let run_with_policy = |policy| {
+        analysis_run_nonlinear_with_options_op(
+            &model,
+            ComputeBackend::Cpu,
+            AnalysisNonlinearRunOptions {
+                quality_policy: policy,
+                max_newton_iters: 3,
+                ..AnalysisNonlinearRunOptions::production_recommended()
+            },
+            OperationContext::new(
+                Some(format!("trace-contract-nonlinear-hard-policy-{policy:?}")),
+                None,
+            ),
+        )
+        .expect("hard nonlinear fixture should produce typed envelope")
+    };
+
+    let exploratory = run_with_policy(QualityPolicy::Exploratory);
+    let balanced = run_with_policy(QualityPolicy::Balanced);
+    let strict = run_with_policy(QualityPolicy::Strict);
+
+    assert!(exploratory.data.publishable);
+    assert_eq!(exploratory.data.run_status, RunStatus::Publishable);
+    assert!(!balanced.data.publishable);
+    assert_eq!(balanced.data.run_status, RunStatus::Degraded);
+    assert!(!strict.data.publishable);
+    assert_eq!(strict.data.run_status, RunStatus::Degraded);
 }
 
 #[test]

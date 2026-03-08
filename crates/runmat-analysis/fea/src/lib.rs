@@ -91,7 +91,11 @@ pub struct FeaNonlinearRunResult {
     pub iteration_counts: Vec<usize>,
     pub failed_increments: usize,
     pub line_search_backtracks: usize,
+    pub max_line_search_backtracks_per_increment: usize,
     pub tangent_rebuild_count: usize,
+    pub iteration_spike_count: usize,
+    pub convergence_stall_count: usize,
+    pub backtrack_burst_count: usize,
 }
 
 impl Default for LinearStaticSolveOptions {
@@ -388,7 +392,12 @@ pub fn run_nonlinear_with_options(
         iteration_counts: nonlinear.iteration_counts,
         failed_increments: nonlinear.failed_increments,
         line_search_backtracks: nonlinear.line_search_backtracks,
+        max_line_search_backtracks_per_increment: nonlinear
+            .max_line_search_backtracks_per_increment,
         tangent_rebuild_count: nonlinear.tangent_rebuild_count,
+        iteration_spike_count: nonlinear.iteration_spike_count,
+        convergence_stall_count: nonlinear.convergence_stall_count,
+        backtrack_burst_count: nonlinear.backtrack_burst_count,
     })
 }
 
@@ -670,6 +679,36 @@ mod tests {
             .diagnostics
             .iter()
             .any(|diag| diag.code == "FEA_NONLINEAR_COST"));
+        let convergence = result
+            .run
+            .diagnostics
+            .iter()
+            .find(|diag| diag.code == "FEA_NONLINEAR_CONVERGENCE")
+            .expect("nonlinear convergence diagnostic should be present");
+        assert!(convergence.message.contains("iteration_spike_count="));
+        assert!(convergence.message.contains("convergence_stall_count="));
+        assert!(convergence.message.contains("backtrack_burst_count="));
+    }
+
+    #[test]
+    fn nonlinear_harder_fixtures_emit_difficulty_profile_signals() {
+        for fixture in [
+            FixtureId::NonlinearSofteningProxy,
+            FixtureId::NonlinearLoadPathMix,
+        ] {
+            let model = fixture_model(fixture);
+            let result =
+                run_nonlinear(&model, ComputeBackend::Cpu).expect("hard nonlinear fixture solves");
+            assert!(!result.load_factors.is_empty());
+            assert!(result.backtrack_burst_count > 0);
+            assert!(result.iteration_spike_count > 0);
+            assert!(result.max_line_search_backtracks_per_increment > 0);
+            assert!(result
+                .run
+                .diagnostics
+                .iter()
+                .any(|diag| diag.code == "FEA_NONLINEAR_CONVERGENCE"));
+        }
     }
 
     #[test]

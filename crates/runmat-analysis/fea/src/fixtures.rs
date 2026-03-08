@@ -15,6 +15,8 @@ pub enum FixtureId {
     TransientShock,
     NonlinearAssembly,
     NonlinearAssemblyStress,
+    NonlinearSofteningProxy,
+    NonlinearLoadPathMix,
     MultiMaterialAssembly,
     MissingMaterials,
     MissingLoads,
@@ -30,6 +32,8 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
         FixtureId::TransientShock => transient_shock_fixture(),
         FixtureId::NonlinearAssembly => nonlinear_assembly_fixture(),
         FixtureId::NonlinearAssemblyStress => nonlinear_assembly_stress_fixture(),
+        FixtureId::NonlinearSofteningProxy => nonlinear_softening_proxy_fixture(),
+        FixtureId::NonlinearLoadPathMix => nonlinear_load_path_mix_fixture(),
         FixtureId::MultiMaterialAssembly => multi_material_assembly(),
         FixtureId::MissingMaterials => missing_materials(),
         FixtureId::MissingLoads => missing_loads(),
@@ -201,6 +205,109 @@ fn nonlinear_assembly_stress_fixture() -> AnalysisModel {
         .collect();
     model.steps = vec![AnalysisStep {
         step_id: "nonlinear_stress_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+    model
+}
+
+fn nonlinear_softening_proxy_fixture() -> AnalysisModel {
+    let mut model = nonlinear_assembly_stress_fixture();
+    model.model_id = AnalysisModelId("nonlinear_softening_proxy_fixture".to_string());
+    model.materials = vec![
+        MaterialModel {
+            material_id: "mat_soft_polymer".to_string(),
+            name: "Soft Polymer".to_string(),
+            youngs_modulus_pa: 1.4e9,
+            poisson_ratio: 0.39,
+        },
+        MaterialModel {
+            material_id: "mat_aluminum".to_string(),
+            name: "Aluminum".to_string(),
+            youngs_modulus_pa: 69e9,
+            poisson_ratio: 0.33,
+        },
+    ];
+    model.material_assignments = vec![
+        MaterialAssignment {
+            region_id: "nonlinear_soft_region_root".to_string(),
+            expected_material_id: "mat_soft_polymer".to_string(),
+            assigned_material_id: "mat_soft_polymer".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+        MaterialAssignment {
+            region_id: "nonlinear_soft_region_tip".to_string(),
+            expected_material_id: "mat_aluminum".to_string(),
+            assigned_material_id: "mat_aluminum".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+    ];
+    model.loads = (0..720)
+        .map(|i| {
+            let phase = if i % 4 == 0 { -1.0 } else { 1.0 };
+            let drift = 1.0 + (i as f64) * 0.0025;
+            LoadCase {
+                load_id: format!("nonlinear_softening_load_{i}"),
+                region_id: format!("nonlinear_softening_region_{}", i % 64),
+                kind: LoadKind::Force {
+                    fx: 65.0 * drift,
+                    fy: phase * -2100.0 * drift,
+                    fz: 28.0 * drift,
+                },
+            }
+        })
+        .collect();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_softening_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+    model
+}
+
+fn nonlinear_load_path_mix_fixture() -> AnalysisModel {
+    let mut model = multi_material_assembly();
+    model.model_id = AnalysisModelId("nonlinear_load_path_mix_fixture".to_string());
+    model.boundary_conditions.push(BoundaryCondition {
+        bc_id: "bc_mix_path_support".to_string(),
+        region_id: "mix_path_support".to_string(),
+        kind: BoundaryConditionKind::PrescribedDisplacement,
+    });
+    model.loads = (0..480)
+        .map(|i| {
+            let scale = 1.0 + (i as f64) * 0.0035;
+            if i % 3 == 0 {
+                LoadCase {
+                    load_id: format!("mix_force_{i}"),
+                    region_id: format!("mix_force_region_{}", i % 36),
+                    kind: LoadKind::Force {
+                        fx: 90.0 * scale,
+                        fy: -1300.0 * scale,
+                        fz: 40.0 * scale,
+                    },
+                }
+            } else if i % 3 == 1 {
+                LoadCase {
+                    load_id: format!("mix_pressure_{i}"),
+                    region_id: format!("mix_pressure_region_{}", i % 24),
+                    kind: LoadKind::Pressure {
+                        magnitude_pa: 9.0e5 * scale,
+                    },
+                }
+            } else {
+                let sign = if i % 2 == 0 { 1.0 } else { -1.0 };
+                LoadCase {
+                    load_id: format!("mix_body_{i}"),
+                    region_id: format!("mix_body_region_{}", i % 18),
+                    kind: LoadKind::BodyForce {
+                        gx: 0.35 * scale,
+                        gy: sign * -9.81 * scale,
+                        gz: 0.12 * scale,
+                    },
+                }
+            }
+        })
+        .collect();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_mix_1".to_string(),
         kind: AnalysisStepKind::Nonlinear,
     }];
     model

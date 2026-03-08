@@ -514,7 +514,7 @@ pub fn analysis_run_modal_with_options_op(
 
     if let Some(nonlinear) = result.nonlinear_results.as_ref() {
         let event = format!(
-            "analysis.run_nonlinear outcome run_id={} model_id={} backend={:?} run_status={:?} publishable={} failed_increments={} max_iteration_count={} line_search_backtracks={} tangent_rebuild_count={} max_residual_norm={} max_increment_norm={} quality_reason_count={}",
+            "analysis.run_nonlinear outcome run_id={} model_id={} backend={:?} run_status={:?} publishable={} failed_increments={} max_iteration_count={} line_search_backtracks={} tangent_rebuild_count={} max_residual_norm={} max_increment_norm={} max_backtracks_per_increment={} quality_reason_count={}",
             result.run_id,
             model.model_id.0,
             backend,
@@ -536,6 +536,7 @@ pub fn analysis_run_modal_with_options_op(
                 .copied()
                 .reduce(f64::max)
                 .unwrap_or(0.0),
+            nonlinear.max_line_search_backtracks_per_increment,
             result.quality_reasons.len()
         );
         if matches!(result.run_status, RunStatus::Degraded | RunStatus::Rejected) {
@@ -1206,7 +1207,12 @@ pub fn analysis_run_nonlinear_with_options_op(
             iteration_counts: nonlinear_run.iteration_counts,
             failed_increments: nonlinear_run.failed_increments,
             line_search_backtracks: nonlinear_run.line_search_backtracks,
+            max_line_search_backtracks_per_increment: nonlinear_run
+                .max_line_search_backtracks_per_increment,
             tangent_rebuild_count: nonlinear_run.tangent_rebuild_count,
+            iteration_spike_count: nonlinear_run.iteration_spike_count,
+            convergence_stall_count: nonlinear_run.convergence_stall_count,
+            backtrack_burst_count: nonlinear_run.backtrack_burst_count,
             method: NonlinearMethod::IncrementalNewtonRaphson,
         }),
         model_validity: QualityGate::Pass,
@@ -1570,7 +1576,11 @@ pub fn analysis_results_op(
         max_nonlinear_iteration_count,
         final_increment_converged,
         nonlinear_line_search_backtracks,
+        nonlinear_max_backtracks_per_increment,
         nonlinear_tangent_rebuild_count,
+        nonlinear_iteration_spike_count,
+        nonlinear_convergence_stall_count,
+        nonlinear_backtrack_burst_count,
     ) =
         if let Some(nonlinear) = run_result.nonlinear_results.as_ref() {
             let count = nonlinear.load_factors.len();
@@ -1587,10 +1597,16 @@ pub fn analysis_results_op(
                 max_iteration_count,
                 final_converged,
                 Some(nonlinear.line_search_backtracks),
+                Some(nonlinear.max_line_search_backtracks_per_increment),
                 Some(nonlinear.tangent_rebuild_count),
+                Some(nonlinear.iteration_spike_count),
+                Some(nonlinear.convergence_stall_count),
+                Some(nonlinear.backtrack_burst_count),
             )
         } else {
-            (0, None, None, None, None, None, None, None)
+            (
+                0, None, None, None, None, None, None, None, None, None, None, None,
+            )
         };
 
     let summary = AnalysisResultsSummary {
@@ -1614,7 +1630,11 @@ pub fn analysis_results_op(
         max_nonlinear_iteration_count,
         final_increment_converged,
         nonlinear_line_search_backtracks,
+        nonlinear_max_backtracks_per_increment,
         nonlinear_tangent_rebuild_count,
+        nonlinear_iteration_spike_count,
+        nonlinear_convergence_stall_count,
+        nonlinear_backtrack_burst_count,
     };
 
     let modal_results = if query.include_modal_results {

@@ -48,7 +48,11 @@ pub struct NonlinearSolveResult {
     pub iteration_counts: Vec<usize>,
     pub failed_increments: usize,
     pub line_search_backtracks: usize,
+    pub max_line_search_backtracks_per_increment: usize,
     pub tangent_rebuild_count: usize,
+    pub iteration_spike_count: usize,
+    pub convergence_stall_count: usize,
+    pub backtrack_burst_count: usize,
     pub diagnostics: Vec<FeaDiagnostic>,
     pub solver_method: String,
     pub solver_backend: String,
@@ -74,7 +78,11 @@ pub fn solve_nonlinear_system(
             iteration_counts: Vec::new(),
             failed_increments: 0,
             line_search_backtracks: 0,
+            max_line_search_backtracks_per_increment: 0,
             tangent_rebuild_count: 0,
+            iteration_spike_count: 0,
+            convergence_stall_count: 0,
+            backtrack_burst_count: 0,
             diagnostics: vec![FeaDiagnostic {
                 code: "FEA_NONLINEAR_EMPTY_SYSTEM".to_string(),
                 severity: FeaDiagnosticSeverity::Warning,
@@ -128,9 +136,16 @@ pub fn solve_nonlinear_system(
     let mut converged_increments = 0usize;
     let mut failed_increments = 0usize;
     let mut line_search_backtracks = 0usize;
+    let mut max_line_search_backtracks_per_increment = 0usize;
     let mut tangent_rebuild_count = 0usize;
+    let mut iteration_spike_count = 0usize;
+    let mut convergence_stall_count = 0usize;
+    let mut backtrack_burst_count = 0usize;
     let mut tangent_age = tangent_refresh_interval;
     let mut previous = vec![0.0; summary.dof_count];
+    let complexity_scale = ((summary.load_count as f64 / 512.0).max(1.0))
+        * ((summary.dof_count as f64 / 384.0).max(1.0));
+    let burst_backtrack_threshold = (options.max_line_search_backtracks / 2).max(2);
 
     for index in 0..options.increment_count {
         let candidate = transient
@@ -147,6 +162,9 @@ pub fn solve_nonlinear_system(
             .max(0.0);
         let mut iterations = 0usize;
         let mut converged = false;
+        let mut line_search_backtracks_in_increment = 0usize;
+        let mut stall_steps_in_increment = 0usize;
+        let mut prior_residual = residual;
         while iterations < options.max_newton_iters.max(1) {
             let refresh_tangent = tangent_age >= tangent_refresh_interval;
             if refresh_tangent {
@@ -174,6 +192,8 @@ pub fn solve_nonlinear_system(
                 for _ in 0..options.max_line_search_backtracks {
                     trial_scale *= line_search_reduction;
                     line_search_backtracks = line_search_backtracks.saturating_add(1);
+                    line_search_backtracks_in_increment =
+                        line_search_backtracks_in_increment.saturating_add(1);
                     let trial_residual = residual * (0.85 * trial_scale + 0.1);
                     if trial_residual < residual * 0.95 {
                         residual = trial_residual;
@@ -190,6 +210,25 @@ pub fn solve_nonlinear_system(
                 residual *= damping;
                 increment_norm *= 0.85;
             }
+
+            if residual > prior_residual * 0.9 {
+                stall_steps_in_increment = stall_steps_in_increment.saturating_add(1);
+            }
+            prior_residual = residual;
+        }
+
+        max_line_search_backtracks_per_increment =
+            max_line_search_backtracks_per_increment.max(line_search_backtracks_in_increment);
+        if line_search_backtracks_in_increment >= burst_backtrack_threshold {
+            backtrack_burst_count = backtrack_burst_count.saturating_add(1);
+        }
+        if stall_steps_in_increment >= 2 {
+            convergence_stall_count = convergence_stall_count.saturating_add(1);
+        }
+        let spike_threshold =
+            ((options.max_newton_iters as f64) * 0.7 / complexity_scale.sqrt()).ceil() as usize;
+        if iterations.max(1) >= spike_threshold.max(2) {
+            iteration_spike_count = iteration_spike_count.saturating_add(1);
         }
 
         if converged {
@@ -244,19 +283,23 @@ pub fn solve_nonlinear_system(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "increments={} converged_increments={} failed_increments={} max_newton_iters={} max_iterations_used={} mean_iterations_used={} tolerance={} residual_convergence_target={} max_residual_norm={} max_increment_norm={} line_search_backtracks={} tangent_rebuild_count={}",
+            "increments={} converged_increments={} failed_increments={} max_newton_iters={} max_iterations_used={} mean_iterations_used={} tolerance={} residual_convergence_target={} max_residual_norm={} max_increment_norm={} line_search_backtracks={} max_line_search_backtracks_per_increment={} tangent_rebuild_count={} iteration_spike_count={} convergence_stall_count={} backtrack_burst_count={}",
             options.increment_count,
             converged_increments,
             failed_increments,
             options.max_newton_iters,
             max_iteration_count,
             mean_iteration_count,
-            options.tolerance
-            ,convergence_residual_target,
+            options.tolerance,
+            convergence_residual_target,
             max_residual_norm,
             max_increment_norm,
             line_search_backtracks,
-            tangent_rebuild_count
+            max_line_search_backtracks_per_increment,
+            tangent_rebuild_count,
+            iteration_spike_count,
+            convergence_stall_count,
+            backtrack_burst_count
         ),
     });
     diagnostics.push(FeaDiagnostic {
@@ -279,7 +322,11 @@ pub fn solve_nonlinear_system(
         iteration_counts,
         failed_increments,
         line_search_backtracks,
+        max_line_search_backtracks_per_increment,
         tangent_rebuild_count,
+        iteration_spike_count,
+        convergence_stall_count,
+        backtrack_burst_count,
         diagnostics,
         solver_method: "incremental_newton_raphson".to_string(),
         solver_backend: transient.solver_backend,

@@ -619,10 +619,30 @@ pub(super) fn run_fixture(
                         "FEA_NONLINEAR_CONVERGENCE",
                         "line_search_backtracks",
                     );
+                    let nonlinear_max_backtracks_per_increment = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_NONLINEAR_CONVERGENCE",
+                        "max_line_search_backtracks_per_increment",
+                    );
                     let nonlinear_tangent_rebuild_count = diagnostic_metric(
                         &gpu_envelope.data,
                         "FEA_NONLINEAR_CONVERGENCE",
                         "tangent_rebuild_count",
+                    );
+                    let nonlinear_iteration_spike_count = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_NONLINEAR_CONVERGENCE",
+                        "iteration_spike_count",
+                    );
+                    let nonlinear_convergence_stall_count = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_NONLINEAR_CONVERGENCE",
+                        "convergence_stall_count",
+                    );
+                    let nonlinear_backtrack_burst_count = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_NONLINEAR_CONVERGENCE",
+                        "backtrack_burst_count",
                     );
 
                     for event in &gpu_fallback_events {
@@ -856,6 +876,16 @@ pub(super) fn run_fixture(
                             None,
                             Some(5.0e-3),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_iteration_spike_count",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_iteration_spike_count,
+                            None,
+                            Some(4.0),
+                        );
                     }
                     if spec.id == "nonlinear_assembly_stress_gpu_provider" {
                         push_threshold_assertion(
@@ -927,6 +957,120 @@ pub(super) fn run_fixture(
                             nonlinear_tangent_rebuild_count,
                             Some(4.0),
                             Some(24.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_stress_iteration_spike_count",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_iteration_spike_count,
+                            None,
+                            Some(8.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_stress_stall_count",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_convergence_stall_count,
+                            None,
+                            Some(6.0),
+                        );
+                    }
+                    if spec.id == "nonlinear_softening_proxy_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_softening_total_increments",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_total_increments,
+                            Some(40.0),
+                            Some(40.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_softening_failed_increments",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_failed_increments,
+                            None,
+                            Some(3.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_softening_stall_count",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_convergence_stall_count,
+                            Some(0.0),
+                            Some(10.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_softening_spike_count",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_iteration_spike_count,
+                            Some(1.0),
+                            Some(12.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_softening_backtrack_bursts",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_backtrack_burst_count,
+                            Some(1.0),
+                            Some(12.0),
+                        );
+                    }
+                    if spec.id == "nonlinear_load_path_mix_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_path_mix_total_increments",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_total_increments,
+                            Some(36.0),
+                            Some(36.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_path_mix_max_backtracks_per_increment",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_max_backtracks_per_increment,
+                            Some(1.0),
+                            Some(12.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_path_mix_backtrack_bursts",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_backtrack_burst_count,
+                            Some(1.0),
+                            Some(10.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_path_mix_spike_count",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_iteration_spike_count,
+                            Some(0.0),
+                            Some(10.0),
                         );
                     }
 

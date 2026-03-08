@@ -441,7 +441,11 @@ pub struct AnalysisResultsSummary {
     pub max_nonlinear_iteration_count: Option<usize>,
     pub final_increment_converged: Option<bool>,
     pub nonlinear_line_search_backtracks: Option<usize>,
+    pub nonlinear_max_backtracks_per_increment: Option<usize>,
     pub nonlinear_tangent_rebuild_count: Option<usize>,
+    pub nonlinear_iteration_spike_count: Option<usize>,
+    pub nonlinear_convergence_stall_count: Option<usize>,
+    pub nonlinear_backtrack_burst_count: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -487,7 +491,11 @@ pub struct NonlinearResultsData {
     pub iteration_counts: Vec<usize>,
     pub failed_increments: usize,
     pub line_search_backtracks: usize,
+    pub max_line_search_backtracks_per_increment: usize,
     pub tangent_rebuild_count: usize,
+    pub iteration_spike_count: usize,
+    pub convergence_stall_count: usize,
+    pub backtrack_burst_count: usize,
     pub method: NonlinearMethod,
 }
 
