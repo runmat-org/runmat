@@ -2339,6 +2339,9 @@ fn to_fea_prep_context(context: Option<AnalysisRunPrepContext>) -> Option<runmat
         min_scaled_jacobian: prep.min_scaled_jacobian,
         mean_aspect_ratio: prep.mean_aspect_ratio,
         inverted_element_count: prep.inverted_element_count,
+        mapped_load_count: prep.mapped_load_count,
+        mapped_bc_count: prep.mapped_bc_count,
+        layout_seed: prep.layout_seed,
     })
 }
 
@@ -2470,6 +2473,38 @@ fn resolve_run_prep_context(
         min_scaled_jacobian: artifact.prep.quality.min_scaled_jacobian,
         mean_aspect_ratio: artifact.prep.quality.mean_aspect_ratio,
         inverted_element_count: artifact.prep.quality.inverted_element_count as usize,
+        mapped_load_count: model
+            .loads
+            .iter()
+            .filter(|load| {
+                artifact
+                    .prep
+                    .region_mappings
+                    .iter()
+                    .any(|mapping| mapping.region_id == load.region_id)
+            })
+            .count(),
+        mapped_bc_count: model
+            .boundary_conditions
+            .iter()
+            .filter(|bc| {
+                artifact
+                    .prep
+                    .region_mappings
+                    .iter()
+                    .any(|mapping| mapping.region_id == bc.region_id)
+            })
+            .count(),
+        layout_seed: {
+            let mut seed = 1469598103934665603_u64;
+            for mapping in &artifact.prep.region_mappings {
+                for byte in mapping.region_id.as_bytes() {
+                    seed ^= *byte as u64;
+                    seed = seed.wrapping_mul(1099511628211_u64);
+                }
+            }
+            seed
+        },
     }))
 }
 

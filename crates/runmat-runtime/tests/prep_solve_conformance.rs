@@ -64,6 +64,12 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_PREP_CONTEXT"));
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_ASSEMBLY"));
 
     let base_nonlinear = baseline
         .data

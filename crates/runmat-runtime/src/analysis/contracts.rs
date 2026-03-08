@@ -33,6 +33,9 @@ pub struct AnalysisRunPrepContext {
     pub min_scaled_jacobian: f64,
     pub mean_aspect_ratio: f64,
     pub inverted_element_count: usize,
+    pub mapped_load_count: usize,
+    pub mapped_bc_count: usize,
+    pub layout_seed: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

@@ -1072,6 +1072,14 @@ Prep-aware solve semantics (current MVP):
 - FEA emits `FEA_PREP_CONTEXT` diagnostics for prep-aware runs and applies deterministic assembly scaling based on prep mesh density/quality counters.
 - Current guarantee: prep-aware runs are deterministic and observable, but still use surrogate prep influence (not full remeshed element-topology solve yet).
 
+Prep-aware assembly fidelity tier (updated):
+
+- assembly now uses prep-derived load/boundary mapping participation (`mapped_load_count`, `mapped_bc_count`) and deterministic layout seeds to alter DOF load placement and constrained-DOF layout,
+- prep-aware runs emit both:
+  - `FEA_PREP_CONTEXT` (artifact-level prep metadata),
+  - `FEA_PREP_ASSEMBLY` (assembly participation/distribution metrics),
+- this represents deterministic prep-driven operator structure changes, while still not replacing the core operator with full remeshed element topology assembly.
+
 Trusted prep-reference semantics:
 
 - `geometry.prep_for_analysis/v1` now persists prep artifacts and returns `prep_artifact_id`.
@@ -1316,6 +1324,8 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-08: Upgraded prep-aware assembly from scalar-only surrogate scaling to deterministic prep-driven operator structure changes by incorporating prep-derived mapped load/BC participation and layout seeds into DOF load/constrained distribution, and emitting `FEA_PREP_ASSEMBLY` diagnostics with mapped-load ratio, constrained-prep ratio, active-region count, and layout seed.
+- 2026-03-08: Extended resolved prep context contracts/runtime mapping with derived participation metrics (`mapped_load_count`, `mapped_bc_count`, `layout_seed`) computed from trusted prep artifact mappings against model regions, preserving lineage/schema enforcement while making prep-vs-non-prep solve behavior structurally distinguishable.
 - 2026-03-08: Added trusted prep lineage enforcement by persisting geometry prep artifacts (`geometry_prep_artifact/v1`) with returned `prep_artifact_id`, introducing prep artifact lookup at analysis run time, and rejecting untrusted direct prep contexts when no artifact reference is provided.
 - 2026-03-08: Added typed prep-reference run failure mapping (`ANALYSIS_RUN_PREP_UNTRUSTED_CONTEXT`, `ANALYSIS_RUN_PREP_NOT_FOUND`, `ANALYSIS_RUN_PREP_SCHEMA_UNSUPPORTED`, `ANALYSIS_RUN_PREP_MISMATCH`) plus runtime/contract tests for missing and mismatched prep references.
 - 2026-03-08: Updated prep-aware conformance to use artifact references end-to-end (`geometry.load -> geometry.prep_for_analysis -> analysis.create_model -> analysis.run_*`), keeping bounded prep-vs-baseline nonlinear delta checks and explicit `FEA_PREP_CONTEXT` observability.

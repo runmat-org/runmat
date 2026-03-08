@@ -57,6 +57,9 @@ pub struct FeaPrepContext {
     pub min_scaled_jacobian: f64,
     pub mean_aspect_ratio: f64,
     pub inverted_element_count: usize,
+    pub mapped_load_count: usize,
+    pub mapped_bc_count: usize,
+    pub layout_seed: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -179,6 +182,9 @@ pub fn run_linear_static_with_options(
     if let Some(prep) = options.prep_context {
         diagnostics.push(prep_diagnostic(prep));
     }
+    if let Some(prep_summary) = summary.prep_assembly.as_ref() {
+        diagnostics.push(prep_assembly_diagnostic(prep_summary));
+    }
     diagnostics.extend(solve_result.diagnostics);
 
     Ok(FeaRunResult {
@@ -214,6 +220,9 @@ pub fn run_modal_with_options(
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
     if let Some(prep) = options.prep_context {
         diagnostics.push(prep_diagnostic(prep));
+    }
+    if let Some(prep_summary) = summary.prep_assembly.as_ref() {
+        diagnostics.push(prep_assembly_diagnostic(prep_summary));
     }
 
     let displacement = modal
@@ -293,6 +302,9 @@ pub fn run_transient_with_options(
     if let Some(prep) = options.prep_context {
         diagnostics.push(prep_diagnostic(prep));
     }
+    if let Some(prep_summary) = summary.prep_assembly.as_ref() {
+        diagnostics.push(prep_assembly_diagnostic(prep_summary));
+    }
 
     let displacement = transient
         .displacement_snapshots
@@ -366,6 +378,9 @@ pub fn run_nonlinear_with_options(
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
     if let Some(prep) = options.prep_context {
         diagnostics.push(prep_diagnostic(prep));
+    }
+    if let Some(prep_summary) = summary.prep_assembly.as_ref() {
+        diagnostics.push(prep_assembly_diagnostic(prep_summary));
     }
 
     let displacement = nonlinear
@@ -484,6 +499,26 @@ fn prep_diagnostic(prep: FeaPrepContext) -> FeaDiagnostic {
             prep.min_scaled_jacobian,
             prep.mean_aspect_ratio,
             prep.inverted_element_count,
+        ),
+    }
+}
+
+fn prep_assembly_diagnostic(summary: &assembly::PrepAssemblySummary) -> FeaDiagnostic {
+    FeaDiagnostic {
+        code: "FEA_PREP_ASSEMBLY".to_string(),
+        severity: if summary.mapped_load_ratio > 0.0 || summary.constrained_prep_ratio > 0.0 {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "active_region_count={} mapped_load_count={} mapped_bc_count={} mapped_load_ratio={} constrained_prep_ratio={} layout_seed={}",
+            summary.active_region_count,
+            summary.mapped_load_count,
+            summary.mapped_bc_count,
+            summary.mapped_load_ratio,
+            summary.constrained_prep_ratio,
+            summary.layout_seed
         ),
     }
 }
