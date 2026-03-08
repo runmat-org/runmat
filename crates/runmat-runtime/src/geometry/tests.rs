@@ -305,3 +305,36 @@ fn prep_artifact_retention_prunes_old_entries() {
     std::env::remove_var("RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS_PER_GEOMETRY");
     reset_prep_artifact_store_for_tests();
 }
+
+#[test]
+fn prep_artifact_health_reports_metrics_and_distribution() {
+    reset_prep_artifact_store_for_tests();
+    let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
+    for _ in 0..3 {
+        let _ = geometry_prep_for_analysis_op(
+            &asset,
+            GeometryPrepForAnalysisSpec::default(),
+            OperationContext::new(None, None),
+        )
+        .expect("prep should succeed");
+    }
+
+    let health = geometry_prep_artifact_health_op(
+        GeometryPrepArtifactHealthQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("health op should succeed");
+    assert_eq!(health.operation, "geometry.prep_artifact_health");
+    assert_eq!(health.op_version, "geometry.prep_artifact_health/v1");
+    assert_eq!(
+        health.data.schema_version,
+        "geometry-prep-artifact-health/v1"
+    );
+    assert!(health.data.current_artifact_count >= 1);
+    assert!(
+        health.data.age_p95_seconds.unwrap_or(0.0) >= health.data.age_p50_seconds.unwrap_or(0.0)
+    );
+    assert!(!health.data.per_geometry.is_empty());
+
+    reset_prep_artifact_store_for_tests();
+}

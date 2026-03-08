@@ -37,6 +37,8 @@ const GEOMETRY_CAPTURE_VIEW_OPERATION: &str = "geometry.capture_view";
 const GEOMETRY_CAPTURE_VIEW_OP_VERSION: &str = "geometry.capture_view/v1";
 const GEOMETRY_PREP_FOR_ANALYSIS_OPERATION: &str = "geometry.prep_for_analysis";
 const GEOMETRY_PREP_FOR_ANALYSIS_OP_VERSION: &str = "geometry.prep_for_analysis/v1";
+const GEOMETRY_PREP_ARTIFACT_HEALTH_OPERATION: &str = "geometry.prep_artifact_health";
+const GEOMETRY_PREP_ARTIFACT_HEALTH_OP_VERSION: &str = "geometry.prep_artifact_health/v1";
 const DEFAULT_QUERY_LIMIT: usize = 2048;
 
 #[derive(Debug, Clone)]
@@ -108,6 +110,45 @@ pub struct StoredGeometryPrepArtifact {
     pub prep: MeshingPrepResult,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PrepArtifactMetrics {
+    pub created_count: u64,
+    pub loaded_count: u64,
+    pub pruned_count: u64,
+    pub stale_reject_count: u64,
+    pub mismatch_reject_count: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GeometryPrepArtifactHealthQuery {
+    pub include_per_geometry: bool,
+}
+
+impl Default for GeometryPrepArtifactHealthQuery {
+    fn default() -> Self {
+        Self {
+            include_per_geometry: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GeometryPrepArtifactHealthEntry {
+    pub geometry_id: String,
+    pub latest_revision: u32,
+    pub artifact_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GeometryPrepArtifactHealthResult {
+    pub schema_version: String,
+    pub current_artifact_count: usize,
+    pub age_p50_seconds: Option<f64>,
+    pub age_p95_seconds: Option<f64>,
+    pub metrics: PrepArtifactMetrics,
+    pub per_geometry: Vec<GeometryPrepArtifactHealthEntry>,
+}
+
 type PrepStore = Arc<RwLock<HashMap<String, StoredGeometryPrepArtifact>>>;
 
 fn prep_store() -> &'static PrepStore {
@@ -118,6 +159,17 @@ fn prep_store() -> &'static PrepStore {
 fn prep_artifact_counter() -> &'static AtomicU64 {
     static COUNTER: OnceLock<AtomicU64> = OnceLock::new();
     COUNTER.get_or_init(|| AtomicU64::new(1))
+}
+
+fn prep_metrics() -> &'static Arc<RwLock<PrepArtifactMetrics>> {
+    static METRICS: OnceLock<Arc<RwLock<PrepArtifactMetrics>>> = OnceLock::new();
+    METRICS.get_or_init(|| Arc::new(RwLock::new(PrepArtifactMetrics::default())))
+}
+
+fn increment_metric(f: impl FnOnce(&mut PrepArtifactMetrics)) {
+    if let Ok(mut metrics) = prep_metrics().write() {
+        f(&mut metrics);
+    }
 }
 
 fn prep_artifact_root() -> Option<PathBuf> {
@@ -181,6 +233,14 @@ fn persist_prep_artifact(
         .write()
         .map_err(|_| "geometry prep artifact store lock poisoned".to_string())?
         .insert(prep_artifact_id.clone(), artifact.clone());
+    increment_metric(|metrics| metrics.created_count = metrics.created_count.saturating_add(1));
+    tracing::info!(
+        target: "runmat_geometry",
+        "prep_artifact_created id={} geometry_id={} revision={}",
+        prep_artifact_id,
+        geometry.geometry_id,
+        geometry.revision
+    );
 
     if let Some(root) = prep_artifact_root() {
         let path = prep_artifact_path(&root, &prep_artifact_id);
@@ -224,8 +284,130 @@ pub(crate) fn load_prep_artifact(
         .write()
         .map_err(|_| "geometry prep artifact store lock poisoned".to_string())?
         .insert(prep_artifact_id.to_string(), artifact.clone());
+    increment_metric(|metrics| metrics.loaded_count = metrics.loaded_count.saturating_add(1));
+    tracing::info!(
+        target: "runmat_geometry",
+        "prep_artifact_loaded id={} geometry_id={} revision={}",
+        prep_artifact_id,
+        artifact.source_geometry_id,
+        artifact.source_geometry_revision
+    );
     prune_prep_artifacts(PrepArtifactRetentionPolicy::from_env())?;
     Ok(Some(artifact))
+}
+
+pub(crate) fn record_prep_stale_reject() {
+    increment_metric(|metrics| {
+        metrics.stale_reject_count = metrics.stale_reject_count.saturating_add(1)
+    });
+    tracing::warn!(target: "runmat_geometry", "prep_artifact_rejected reason=stale");
+}
+
+pub(crate) fn record_prep_mismatch_reject() {
+    increment_metric(|metrics| {
+        metrics.mismatch_reject_count = metrics.mismatch_reject_count.saturating_add(1)
+    });
+    tracing::warn!(
+        target: "runmat_geometry",
+        "prep_artifact_rejected reason=mismatch"
+    );
+}
+
+pub fn geometry_prep_artifact_health_op(
+    query: GeometryPrepArtifactHealthQuery,
+    context: OperationContext,
+) -> Result<OperationEnvelope<GeometryPrepArtifactHealthResult>, OperationErrorEnvelope> {
+    let artifacts = list_prep_artifacts().map_err(|err| {
+        operation_error(
+            GEOMETRY_PREP_ARTIFACT_HEALTH_OPERATION,
+            GEOMETRY_PREP_ARTIFACT_HEALTH_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "GEOMETRY_PREP_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to list prep artifacts: {err}"),
+            BTreeMap::new(),
+        )
+    })?;
+
+    let now = Utc::now();
+    let mut age_seconds = Vec::new();
+    let mut per_geometry_map: HashMap<String, (u32, usize)> = HashMap::new();
+    for artifact in &artifacts {
+        if let Ok(created) = chrono::DateTime::parse_from_rfc3339(&artifact.created_at) {
+            let age = now.signed_duration_since(created.with_timezone(&Utc));
+            age_seconds.push(age.num_seconds().max(0) as f64);
+        }
+        let entry = per_geometry_map
+            .entry(artifact.source_geometry_id.clone())
+            .or_insert((artifact.source_geometry_revision, 0));
+        if artifact.source_geometry_revision > entry.0 {
+            entry.0 = artifact.source_geometry_revision;
+        }
+        entry.1 = entry.1.saturating_add(1);
+    }
+    age_seconds.sort_by(|a, b| a.total_cmp(b));
+
+    let per_geometry = if query.include_per_geometry {
+        let mut values = per_geometry_map
+            .into_iter()
+            .map(|(geometry_id, (latest_revision, artifact_count))| {
+                GeometryPrepArtifactHealthEntry {
+                    geometry_id,
+                    latest_revision,
+                    artifact_count,
+                }
+            })
+            .collect::<Vec<_>>();
+        values.sort_by(|a, b| a.geometry_id.cmp(&b.geometry_id));
+        values
+    } else {
+        Vec::new()
+    };
+
+    let metrics = prep_metrics()
+        .read()
+        .map_err(|_| {
+            operation_error(
+                GEOMETRY_PREP_ARTIFACT_HEALTH_OPERATION,
+                GEOMETRY_PREP_ARTIFACT_HEALTH_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "GEOMETRY_PREP_ARTIFACT_STORE_FAILED",
+                    error_type: OperationErrorType::Internal,
+                    retryable: true,
+                    severity: OperationErrorSeverity::Error,
+                },
+                "geometry prep metrics store lock poisoned",
+                BTreeMap::new(),
+            )
+        })?
+        .clone();
+
+    Ok(OperationEnvelope::new(
+        GEOMETRY_PREP_ARTIFACT_HEALTH_OPERATION,
+        GEOMETRY_PREP_ARTIFACT_HEALTH_OP_VERSION,
+        &context,
+        GeometryPrepArtifactHealthResult {
+            schema_version: "geometry-prep-artifact-health/v1".to_string(),
+            current_artifact_count: artifacts.len(),
+            age_p50_seconds: percentile(&age_seconds, 0.5),
+            age_p95_seconds: percentile(&age_seconds, 0.95),
+            metrics,
+            per_geometry,
+        },
+    ))
+}
+
+fn percentile(sorted: &[f64], ratio: f64) -> Option<f64> {
+    if sorted.is_empty() {
+        return None;
+    }
+    let index = ((sorted.len() - 1) as f64 * ratio.clamp(0.0, 1.0)).round() as usize;
+    sorted.get(index).copied()
 }
 
 pub(crate) fn latest_prep_revision_for_geometry(geometry_id: &str) -> Result<Option<u32>, String> {
@@ -339,6 +521,15 @@ fn prune_prep_artifacts(policy: PrepArtifactRetentionPolicy) -> Result<(), Strin
         }
     }
 
+    increment_metric(|metrics| {
+        metrics.pruned_count = metrics.pruned_count.saturating_add(remove_ids.len() as u64)
+    });
+    tracing::info!(
+        target: "runmat_geometry",
+        "prep_artifact_pruned count={}",
+        remove_ids.len()
+    );
+
     Ok(())
 }
 
@@ -348,6 +539,9 @@ pub fn reset_prep_artifact_store_for_tests() {
         store.clear();
     }
     prep_artifact_counter().store(1, Ordering::Relaxed);
+    if let Ok(mut metrics) = prep_metrics().write() {
+        *metrics = PrepArtifactMetrics::default();
+    }
 }
 
 impl Default for GeometryPrepForAnalysisSpec {

@@ -1103,6 +1103,18 @@ Prep artifact lifecycle policy knobs:
 
 Pruning occurs on prep artifact persist/load and removes stale/excess artifacts from in-memory store and optional filesystem-backed prep artifact root.
 
+Prep artifact observability and SLO monitoring:
+
+- Runtime now exposes `geometry.prep_artifact_health/v1` with:
+  - current prep artifact count,
+  - age distribution (`age_p50_seconds`, `age_p95_seconds`),
+  - lifecycle counters (`created_count`, `loaded_count`, `pruned_count`, `stale_reject_count`, `mismatch_reject_count`),
+  - optional per-geometry artifact distribution.
+- Runtime emits prep lifecycle events for creation/load/prune and stale/mismatch rejection paths.
+- CI includes prep artifact SLO summary via `scripts/summarize_prep_artifacts.py` with configurable warn/fail thresholds:
+  - `RUNMAT_PREP_SLO_WARN_ARTIFACT_COUNT`, `RUNMAT_PREP_SLO_FAIL_ARTIFACT_COUNT`,
+  - `RUNMAT_PREP_SLO_WARN_P95_AGE_SECONDS`, `RUNMAT_PREP_SLO_FAIL_P95_AGE_SECONDS`.
+
 Typed prep-reference run errors:
 
 - `ANALYSIS_RUN_PREP_UNTRUSTED_CONTEXT`
@@ -1337,6 +1349,8 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-08: Added prep artifact health observability with `geometry.prep_artifact_health/v1`, exposing lifecycle counters and age distribution summaries, plus runtime lifecycle event emission for prep artifact create/load/prune and stale/mismatch rejection outcomes.
+- 2026-03-08: Added CI prep artifact SLO summary (`scripts/summarize_prep_artifacts.py`) and workflow integration with configurable warn/fail thresholds for artifact count and p95 artifact age, including summary publication in CI step output.
 - 2026-03-08: Added prep artifact lifecycle governance with retention pruning controls (`RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS`, `RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS_PER_GEOMETRY`, `RUNMAT_GEOMETRY_PREP_MAX_AGE_SECONDS`) applied on prep artifact persist/load across in-memory and optional filesystem-backed prep stores.
 - 2026-03-08: Added prep staleness invalidation policy (`RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION`, default enabled) so prep references are rejected when newer revision prep artifacts exist for the same geometry id, with typed stale-run error mapping (`ANALYSIS_RUN_PREP_STALE`).
 - 2026-03-08: Added runtime/contract coverage for prep lifecycle failure modes (missing, mismatched, stale references) and retention behavior (old artifact pruning with latest artifact replay preserved).

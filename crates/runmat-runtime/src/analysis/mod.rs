@@ -2425,6 +2425,7 @@ fn resolve_run_prep_context(
     if artifact.source_geometry_id != model.geometry_id
         || artifact.source_geometry_revision != model.geometry_revision
     {
+        crate::geometry::record_prep_mismatch_reject();
         return Err(operation_error(
             operation,
             op_version,
@@ -2477,6 +2478,7 @@ fn resolve_run_prep_context(
                 )
             })? {
             if artifact.source_geometry_revision < latest_revision {
+                crate::geometry::record_prep_stale_reject();
                 return Err(operation_error(
                     operation,
                     op_version,

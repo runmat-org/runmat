@@ -17,8 +17,9 @@ use runmat_runtime::analysis::{
 };
 use runmat_runtime::geometry::{
     geometry_capture_view_op, geometry_inspect_op, geometry_list_regions_op, geometry_load_op,
-    geometry_prep_for_analysis_op, geometry_query_entities_op, GeometryCaptureViewSpec,
-    GeometryEntityQuery, GeometryPrepForAnalysisSpec, GeometryPrepProfile,
+    geometry_prep_artifact_health_op, geometry_prep_for_analysis_op, geometry_query_entities_op,
+    GeometryCaptureViewSpec, GeometryEntityQuery, GeometryPrepArtifactHealthQuery,
+    GeometryPrepForAnalysisSpec, GeometryPrepProfile,
 };
 use runmat_runtime::operations::OperationContext;
 use serde_json::Value;
@@ -143,6 +144,15 @@ fn geometry_operation_contracts_are_v1_and_versioned() {
     assert_eq!(prep.op_version, "geometry.prep_for_analysis/v1");
     assert!(!prep.data.prep_artifact_id.is_empty());
     assert!(!prep.data.prep.prepared_meshes.is_empty());
+
+    let prep_health = geometry_prep_artifact_health_op(
+        GeometryPrepArtifactHealthQuery::default(),
+        OperationContext::new(Some("trace-contract-1g".to_string()), None),
+    )
+    .expect("prep artifact health should succeed");
+    assert_eq!(prep_health.operation, "geometry.prep_artifact_health");
+    assert_eq!(prep_health.op_version, "geometry.prep_artifact_health/v1");
+    assert_eq!(prep_health.data.schema_version, "geometry-prep-artifact-health/v1");
     assert_eq!(svg_capture.data.format, "svg");
 
     let invalid_capture_view = geometry_capture_view_op(

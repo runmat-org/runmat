@@ -246,6 +246,7 @@ jobs:
       RUNMAT_ANALYSIS_MAX_SLOWDOWN_RATIO: "1.35"
       RUNMAT_ANALYSIS_MAX_COST_SLOWDOWN_RATIO: "1.5"
       RUNMAT_ANALYSIS_MIN_SPEEDUP_RETENTION: "0.8"
+      RUNMAT_GEOMETRY_PREP_ARTIFACT_ROOT: target/runmat-prep-artifacts
     steps:
       - uses: actions/checkout@v4
 
@@ -302,6 +303,17 @@ jobs:
           python3 scripts/summarize_analysis_report.py | tee nonlinear-summary.md
           cat nonlinear-summary.md >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Summarize prep artifact SLO
+        if: always()
+        env:
+          RUNMAT_PREP_SLO_WARN_ARTIFACT_COUNT: "64"
+          RUNMAT_PREP_SLO_FAIL_ARTIFACT_COUNT: "128"
+          RUNMAT_PREP_SLO_WARN_P95_AGE_SECONDS: "604800"
+          RUNMAT_PREP_SLO_FAIL_P95_AGE_SECONDS: "1209600"
+        run: |
+          python3 scripts/summarize_prep_artifacts.py | tee prep-artifact-slo.md
+          cat prep-artifact-slo.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Evaluate nonlinear release readiness
         if: always()
         env:
@@ -319,8 +331,10 @@ jobs:
             target/runmat-analysis-artifacts/analysis_benchmark_report.json
             target/runmat-analysis-artifacts/nonlinear_release_readiness.json
             target/runmat-analysis-artifacts/rolling/*.json
+            target/runmat-prep-artifacts/prep/*.json
             nonlinear-summary.md
             nonlinear-release-readiness.md
+            prep-artifact-slo.md
           if-no-files-found: warn
 
   cross-build:

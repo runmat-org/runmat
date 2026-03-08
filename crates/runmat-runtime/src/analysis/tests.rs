@@ -1445,6 +1445,13 @@ fn analysis_run_nonlinear_rejects_stale_prep_artifact_when_newer_revision_exists
     .expect_err("stale prep artifact should fail");
     assert_eq!(error.error_code, "ANALYSIS_RUN_PREP_STALE");
 
+    let health = crate::geometry::geometry_prep_artifact_health_op(
+        crate::geometry::GeometryPrepArtifactHealthQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("prep health should be queryable");
+    assert!(health.data.metrics.stale_reject_count >= 1);
+
     std::env::remove_var("RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION");
     crate::geometry::reset_prep_artifact_store_for_tests();
 }
