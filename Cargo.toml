@@ -33,6 +33,7 @@ members = [
     "crates/runmat-geometry/ops",
     "crates/runmat-analysis/core",
     "crates/runmat-analysis/fea",
+    "crates/runmat-meshing/core",
 ]
 resolver = "2"
 
@@ -93,3 +94,4 @@ runmat-geometry-io = { version = "=0.2.8", path = "crates/runmat-geometry/io" }
 runmat-geometry-ops = { version = "=0.2.8", path = "crates/runmat-geometry/ops" }
 runmat-analysis-core = { version = "=0.2.8", path = "crates/runmat-analysis/core" }
 runmat-analysis-fea = { version = "=0.2.8", path = "crates/runmat-analysis/fea" }
+runmat-meshing-core = { version = "=0.2.8", path = "crates/runmat-meshing/core" }

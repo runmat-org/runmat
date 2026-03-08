@@ -7,6 +7,9 @@ use runmat_geometry_io::{
     import::GeometryImportError, import_geometry, GeometryFormat, GeometryImportOptions,
 };
 use runmat_geometry_ops::{compute_stats, find_region, GeometryStats, QueryError};
+use runmat_meshing_core::{
+    prepare_geometry_for_analysis, MeshingOptions, MeshingPrepResult, MeshingProfile,
+};
 use serde::{Deserialize, Serialize};
 
 use crate::operations::{
@@ -27,6 +30,8 @@ const GEOMETRY_QUERY_ENTITIES_OPERATION: &str = "geometry.query_entities";
 const GEOMETRY_QUERY_ENTITIES_OP_VERSION: &str = "geometry.query_entities/v1";
 const GEOMETRY_CAPTURE_VIEW_OPERATION: &str = "geometry.capture_view";
 const GEOMETRY_CAPTURE_VIEW_OP_VERSION: &str = "geometry.capture_view/v1";
+const GEOMETRY_PREP_FOR_ANALYSIS_OPERATION: &str = "geometry.prep_for_analysis";
+const GEOMETRY_PREP_FOR_ANALYSIS_OP_VERSION: &str = "geometry.prep_for_analysis/v1";
 const DEFAULT_QUERY_LIMIT: usize = 2048;
 
 #[derive(Debug, Clone)]
@@ -67,6 +72,28 @@ pub struct GeometryCaptureViewResult {
     pub width: u32,
     pub height: u32,
     pub payload: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum GeometryPrepProfile {
+    SurfaceOnly,
+    AnalysisReady,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GeometryPrepForAnalysisSpec {
+    pub profile: GeometryPrepProfile,
+    pub target_element_budget: usize,
+}
+
+impl Default for GeometryPrepForAnalysisSpec {
+    fn default() -> Self {
+        Self {
+            profile: GeometryPrepProfile::AnalysisReady,
+            target_element_budget: 250_000,
+        }
+    }
 }
 
 pub trait GeometryViewCaptureAdapter {
@@ -404,6 +431,79 @@ pub fn geometry_capture_view(
             build_runtime_error(error.message)
                 .with_builtin(GEOMETRY_CAPTURE_VIEW_OPERATION)
                 .with_identifier("RunMat:GeometryCaptureViewFailed")
+                .build()
+        })?;
+    Ok(envelope.data)
+}
+
+pub fn geometry_prep_for_analysis_op(
+    asset: &GeometryAsset,
+    spec: GeometryPrepForAnalysisSpec,
+    context: OperationContext,
+) -> Result<OperationEnvelope<MeshingPrepResult>, OperationErrorEnvelope> {
+    if spec.target_element_budget == 0 {
+        return Err(operation_error(
+            GEOMETRY_PREP_FOR_ANALYSIS_OPERATION,
+            GEOMETRY_PREP_FOR_ANALYSIS_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "GEOMETRY_PREP_INVALID_SPEC",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "prep-for-analysis target_element_budget must be greater than zero",
+            BTreeMap::from([(
+                "target_element_budget".to_string(),
+                spec.target_element_budget.to_string(),
+            )]),
+        ));
+    }
+
+    let profile = match spec.profile {
+        GeometryPrepProfile::SurfaceOnly => MeshingProfile::SurfaceOnly,
+        GeometryPrepProfile::AnalysisReady => MeshingProfile::AnalysisReady,
+    };
+    let prepared = prepare_geometry_for_analysis(
+        asset,
+        MeshingOptions {
+            profile,
+            target_element_budget: spec.target_element_budget,
+        },
+    )
+    .map_err(|error| {
+        operation_error(
+            GEOMETRY_PREP_FOR_ANALYSIS_OPERATION,
+            GEOMETRY_PREP_FOR_ANALYSIS_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "GEOMETRY_PREP_FAILED",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to prepare geometry for analysis: {error}"),
+            BTreeMap::from([("geometry_id".to_string(), asset.geometry_id.clone())]),
+        )
+    })?;
+
+    Ok(OperationEnvelope::new(
+        GEOMETRY_PREP_FOR_ANALYSIS_OPERATION,
+        GEOMETRY_PREP_FOR_ANALYSIS_OP_VERSION,
+        &context,
+        prepared,
+    ))
+}
+
+pub fn geometry_prep_for_analysis(
+    asset: &GeometryAsset,
+    spec: GeometryPrepForAnalysisSpec,
+) -> BuiltinResult<MeshingPrepResult> {
+    let envelope = geometry_prep_for_analysis_op(asset, spec, OperationContext::new(None, None))
+        .map_err(|error| {
+            build_runtime_error(error.message)
+                .with_builtin(GEOMETRY_PREP_FOR_ANALYSIS_OPERATION)
+                .with_identifier("RunMat:GeometryPrepForAnalysisFailed")
                 .build()
         })?;
     Ok(envelope.data)

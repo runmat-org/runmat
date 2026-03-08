@@ -226,3 +226,45 @@ fn capture_view_op_uses_installed_adapter() {
     assert_eq!(envelope.data.height, 480);
     assert_eq!(envelope.data.payload, vec![1, 2, 3, 4]);
 }
+
+#[test]
+fn prep_for_analysis_op_returns_versioned_deterministic_result() {
+    let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
+    let first = geometry_prep_for_analysis_op(
+        &asset,
+        GeometryPrepForAnalysisSpec::default(),
+        OperationContext::new(Some("trace-g6".to_string()), None),
+    )
+    .expect("prep should work");
+    let second = geometry_prep_for_analysis_op(
+        &asset,
+        GeometryPrepForAnalysisSpec::default(),
+        OperationContext::new(Some("trace-g7".to_string()), None),
+    )
+    .expect("prep should be deterministic");
+
+    assert_eq!(first.operation, "geometry.prep_for_analysis");
+    assert_eq!(first.op_version, "geometry.prep_for_analysis/v1");
+    assert_eq!(first.data, second.data);
+    assert_eq!(first.data.schema_version, "geometry-prep-for-analysis/v1");
+    assert!(!first.data.prepared_meshes.is_empty());
+    assert!(!first.data.region_mappings.is_empty());
+}
+
+#[test]
+fn prep_for_analysis_op_maps_invalid_spec_error() {
+    let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
+    let error = geometry_prep_for_analysis_op(
+        &asset,
+        GeometryPrepForAnalysisSpec {
+            profile: GeometryPrepProfile::AnalysisReady,
+            target_element_budget: 0,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect_err("zero element budget should fail");
+
+    assert_eq!(error.operation, "geometry.prep_for_analysis");
+    assert_eq!(error.op_version, "geometry.prep_for_analysis/v1");
+    assert_eq!(error.error_code, "GEOMETRY_PREP_INVALID_SPEC");
+}

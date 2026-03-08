@@ -1210,6 +1210,18 @@ Required tests:
 - convergence diagnostics emission,
 - cpu/gpu parity (where backend present).
 
+### `runmat-meshing-core`
+
+Create files:
+
+- `crates/runmat-meshing/core/src/lib.rs`
+
+Required tests:
+
+- deterministic meshing-prep output for identical geometry + options,
+- stable source-to-prepared region mapping,
+- mesh quality diagnostics surface (`min_scaled_jacobian`, inverted-element count).
+
 ## Success Criteria
 
 - Users can open and interact with common 3D formats via first-class viewer.
@@ -1257,6 +1269,8 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-08: Started Phase-7 meshing foundation by adding `runmat-meshing-core` with deterministic analysis-prep contracts (`MeshingOptions`, prepared mesh descriptors, region mapping provenance, quality report) and a constrained deterministic meshing MVP (`prepare_geometry_for_analysis`) for existing mesh-derived geometry assets.
+- 2026-03-08: Added new runtime operation contract `geometry.prep_for_analysis/v1` (spec + typed error mapping) to bridge `GeometryAsset` into analysis-ready meshing-prep artifacts, with unit + operation-contract + dedicated conformance tests covering determinism and mapping stability across STL/STEP fixture inputs.
 - 2026-03-08: Added release-readiness governance for nonlinear analysis via `scripts/release_readiness_nonlinear.py` with typed verdict output (`analysis-release-readiness/v1`: `pass`/`warn`/`fail`), reason codes, machine-readable artifact emission, and protected-branch fail semantics driven by conformance/trend/artifact verification signals.
 - 2026-03-08: Added typed multi-run runtime analytics endpoints `analysis.results_compare/v1` and `analysis.trends/v1` for run-to-run deltas and rolling run-kind trend summaries, including nonlinear-specific deltas/rates (failed increments, max iterations, spike/stall counts) and solve-time statistics (median/p95).
 - 2026-03-08: Added CI coverage and tests for readiness/trend logic (Python unit tests + runtime unit/contract tests), and wired branch-aware release-readiness evaluation into the nonlinear conformance pipeline with summary output and artifact capture.

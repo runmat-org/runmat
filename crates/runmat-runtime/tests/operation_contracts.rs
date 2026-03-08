@@ -17,7 +17,8 @@ use runmat_runtime::analysis::{
 };
 use runmat_runtime::geometry::{
     geometry_capture_view_op, geometry_inspect_op, geometry_list_regions_op, geometry_load_op,
-    geometry_query_entities_op, GeometryCaptureViewSpec, GeometryEntityQuery,
+    geometry_prep_for_analysis_op, geometry_query_entities_op, GeometryCaptureViewSpec,
+    GeometryEntityQuery, GeometryPrepForAnalysisSpec, GeometryPrepProfile,
 };
 use runmat_runtime::operations::OperationContext;
 use serde_json::Value;
@@ -128,6 +129,19 @@ fn geometry_operation_contracts_are_v1_and_versioned() {
     .expect("svg capture should succeed via default adapter");
     assert_eq!(svg_capture.operation, "geometry.capture_view");
     assert_eq!(svg_capture.op_version, "geometry.capture_view/v1");
+
+    let prep = geometry_prep_for_analysis_op(
+        &load.data,
+        GeometryPrepForAnalysisSpec {
+            profile: GeometryPrepProfile::AnalysisReady,
+            target_element_budget: 100_000,
+        },
+        OperationContext::new(Some("trace-contract-1f".to_string()), None),
+    )
+    .expect("prep for analysis should succeed");
+    assert_eq!(prep.operation, "geometry.prep_for_analysis");
+    assert_eq!(prep.op_version, "geometry.prep_for_analysis/v1");
+    assert!(!prep.data.prepared_meshes.is_empty());
     assert_eq!(svg_capture.data.format, "svg");
 
     let invalid_capture_view = geometry_capture_view_op(

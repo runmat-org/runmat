@@ -5813,6 +5813,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-meshing-core"
+version = "0.2.8"
+dependencies = [
+ "runmat-geometry-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "runmat-parser"
 version = "0.2.8"
 dependencies = [
@@ -5909,6 +5918,7 @@ dependencies = [
  "runmat-geometry-ops",
  "runmat-hir",
  "runmat-macros",
+ "runmat-meshing-core",
  "runmat-plot",
  "runmat-thread-local",
  "runmat-time",
