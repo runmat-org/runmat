@@ -130,6 +130,34 @@ fn prep_artifact_path(root: &PathBuf, prep_artifact_id: &str) -> PathBuf {
     root.join("prep").join(format!("{prep_artifact_id}.json"))
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PrepArtifactRetentionPolicy {
+    max_artifacts: usize,
+    max_artifacts_per_geometry: usize,
+    max_age_seconds: u64,
+}
+
+impl PrepArtifactRetentionPolicy {
+    fn from_env() -> Self {
+        Self {
+            max_artifacts: std::env::var("RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS")
+                .ok()
+                .and_then(|value| value.parse::<usize>().ok())
+                .unwrap_or(0),
+            max_artifacts_per_geometry: std::env::var(
+                "RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS_PER_GEOMETRY",
+            )
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .unwrap_or(0),
+            max_age_seconds: std::env::var("RUNMAT_GEOMETRY_PREP_MAX_AGE_SECONDS")
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or(0),
+        }
+    }
+}
+
 fn persist_prep_artifact(
     geometry: &GeometryAsset,
     prep: MeshingPrepResult,
@@ -165,6 +193,8 @@ fn persist_prep_artifact(
         fs::write(&path, bytes).map_err(|err| format!("failed to write prep artifact: {err}"))?;
     }
 
+    prune_prep_artifacts(PrepArtifactRetentionPolicy::from_env())?;
+
     Ok(artifact)
 }
 
@@ -194,7 +224,130 @@ pub(crate) fn load_prep_artifact(
         .write()
         .map_err(|_| "geometry prep artifact store lock poisoned".to_string())?
         .insert(prep_artifact_id.to_string(), artifact.clone());
+    prune_prep_artifacts(PrepArtifactRetentionPolicy::from_env())?;
     Ok(Some(artifact))
+}
+
+pub(crate) fn latest_prep_revision_for_geometry(geometry_id: &str) -> Result<Option<u32>, String> {
+    let mut revisions = list_prep_artifacts()?
+        .into_iter()
+        .filter(|artifact| artifact.source_geometry_id == geometry_id)
+        .map(|artifact| artifact.source_geometry_revision)
+        .collect::<Vec<_>>();
+    revisions.sort_unstable();
+    Ok(revisions.pop())
+}
+
+fn list_prep_artifacts() -> Result<Vec<StoredGeometryPrepArtifact>, String> {
+    let mut artifacts = prep_store()
+        .read()
+        .map_err(|_| "geometry prep artifact store lock poisoned".to_string())?
+        .values()
+        .cloned()
+        .collect::<Vec<_>>();
+    if artifacts.is_empty() {
+        if let Some(root) = prep_artifact_root() {
+            let prep_dir = root.join("prep");
+            if prep_dir.exists() {
+                for entry in fs::read_dir(&prep_dir)
+                    .map_err(|err| format!("failed to scan prep artifacts: {err}"))?
+                {
+                    let entry = entry
+                        .map_err(|err| format!("failed to read prep artifact entry: {err}"))?;
+                    let path = entry.path();
+                    if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                        continue;
+                    }
+                    let bytes = fs::read(&path)
+                        .map_err(|err| format!("failed to read prep artifact: {err}"))?;
+                    if let Ok(artifact) =
+                        serde_json::from_slice::<StoredGeometryPrepArtifact>(&bytes)
+                    {
+                        artifacts.push(artifact);
+                    }
+                }
+            }
+        }
+    }
+    Ok(artifacts)
+}
+
+fn prune_prep_artifacts(policy: PrepArtifactRetentionPolicy) -> Result<(), String> {
+    if policy.max_artifacts == 0
+        && policy.max_artifacts_per_geometry == 0
+        && policy.max_age_seconds == 0
+    {
+        return Ok(());
+    }
+
+    let now = Utc::now();
+    let mut artifacts = list_prep_artifacts()?;
+    artifacts.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+    let mut remove_ids = Vec::new();
+    if policy.max_age_seconds > 0 {
+        for artifact in &artifacts {
+            if let Ok(created) = chrono::DateTime::parse_from_rfc3339(&artifact.created_at) {
+                let age = now.signed_duration_since(created.with_timezone(&Utc));
+                if age.num_seconds().max(0) as u64 > policy.max_age_seconds {
+                    remove_ids.push(artifact.prep_artifact_id.clone());
+                }
+            }
+        }
+    }
+
+    if policy.max_artifacts_per_geometry > 0 {
+        let mut per_geometry_counts: HashMap<String, usize> = HashMap::new();
+        for artifact in &artifacts {
+            let count = per_geometry_counts
+                .entry(artifact.source_geometry_id.clone())
+                .or_default();
+            *count += 1;
+            if *count > policy.max_artifacts_per_geometry {
+                remove_ids.push(artifact.prep_artifact_id.clone());
+            }
+        }
+    }
+
+    if policy.max_artifacts > 0 {
+        for (index, artifact) in artifacts.iter().enumerate() {
+            if index >= policy.max_artifacts {
+                remove_ids.push(artifact.prep_artifact_id.clone());
+            }
+        }
+    }
+
+    remove_ids.sort();
+    remove_ids.dedup();
+    if remove_ids.is_empty() {
+        return Ok(());
+    }
+
+    {
+        let mut store = prep_store()
+            .write()
+            .map_err(|_| "geometry prep artifact store lock poisoned".to_string())?;
+        for id in &remove_ids {
+            store.remove(id);
+        }
+    }
+
+    if let Some(root) = prep_artifact_root() {
+        for id in &remove_ids {
+            let path = prep_artifact_path(&root, id);
+            let _ = fs::remove_file(path);
+        }
+    }
+
+    Ok(())
+}
+
+#[doc(hidden)]
+pub fn reset_prep_artifact_store_for_tests() {
+    if let Ok(mut store) = prep_store().write() {
+        store.clear();
+    }
+    prep_artifact_counter().store(1, Ordering::Relaxed);
 }
 
 impl Default for GeometryPrepForAnalysisSpec {

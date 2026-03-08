@@ -2455,6 +2455,52 @@ fn resolve_run_prep_context(
         ));
     }
 
+    let require_latest_revision = std::env::var("RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION")
+        .ok()
+        .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .unwrap_or(true);
+    if require_latest_revision {
+        if let Some(latest_revision) =
+            crate::geometry::latest_prep_revision_for_geometry(&model.geometry_id).map_err(|err| {
+                operation_error(
+                    operation,
+                    op_version,
+                    context,
+                    OperationErrorSpec {
+                        error_code: "ANALYSIS_RUN_PREP_STORE_FAILED",
+                        error_type: OperationErrorType::Internal,
+                        retryable: true,
+                        severity: OperationErrorSeverity::Error,
+                    },
+                    format!("failed to evaluate prep artifact freshness: {err}"),
+                    BTreeMap::from([("prep_artifact_id".to_string(), prep_artifact_id.to_string())]),
+                )
+            })? {
+            if artifact.source_geometry_revision < latest_revision {
+                return Err(operation_error(
+                    operation,
+                    op_version,
+                    context,
+                    OperationErrorSpec {
+                        error_code: "ANALYSIS_RUN_PREP_STALE",
+                        error_type: OperationErrorType::Validation,
+                        retryable: false,
+                        severity: OperationErrorSeverity::Error,
+                    },
+                    "prep artifact is stale; a newer geometry revision prep artifact exists",
+                    BTreeMap::from([
+                        ("prep_artifact_id".to_string(), prep_artifact_id.to_string()),
+                        (
+                            "prep_geometry_revision".to_string(),
+                            artifact.source_geometry_revision.to_string(),
+                        ),
+                        ("latest_geometry_revision".to_string(), latest_revision.to_string()),
+                    ]),
+                ));
+            }
+        }
+    }
+
     Ok(Some(AnalysisRunPrepContext {
         prepared_mesh_count: artifact.prep.prepared_meshes.len(),
         prepared_node_count: artifact

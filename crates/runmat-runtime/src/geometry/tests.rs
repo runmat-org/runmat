@@ -229,6 +229,7 @@ fn capture_view_op_uses_installed_adapter() {
 
 #[test]
 fn prep_for_analysis_op_returns_versioned_deterministic_result() {
+    reset_prep_artifact_store_for_tests();
     let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
     let first = geometry_prep_for_analysis_op(
         &asset,
@@ -258,6 +259,7 @@ fn prep_for_analysis_op_returns_versioned_deterministic_result() {
 
 #[test]
 fn prep_for_analysis_op_maps_invalid_spec_error() {
+    reset_prep_artifact_store_for_tests();
     let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
     let error = geometry_prep_for_analysis_op(
         &asset,
@@ -272,4 +274,34 @@ fn prep_for_analysis_op_maps_invalid_spec_error() {
     assert_eq!(error.operation, "geometry.prep_for_analysis");
     assert_eq!(error.op_version, "geometry.prep_for_analysis/v1");
     assert_eq!(error.error_code, "GEOMETRY_PREP_INVALID_SPEC");
+}
+
+#[test]
+fn prep_artifact_retention_prunes_old_entries() {
+    reset_prep_artifact_store_for_tests();
+    std::env::set_var("RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS_PER_GEOMETRY", "2");
+    std::env::remove_var("RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS");
+    std::env::remove_var("RUNMAT_GEOMETRY_PREP_MAX_AGE_SECONDS");
+
+    let asset = geometry_load("/part.stl", TRIANGLE_STL.as_bytes()).expect("load should work");
+    let mut ids = Vec::new();
+    for _ in 0..4 {
+        let prep = geometry_prep_for_analysis_op(
+            &asset,
+            GeometryPrepForAnalysisSpec::default(),
+            OperationContext::new(None, None),
+        )
+        .expect("prep should succeed");
+        ids.push(prep.data.prep_artifact_id);
+    }
+
+    assert!(load_prep_artifact(&ids[0])
+        .expect("load prep should succeed")
+        .is_none());
+    assert!(load_prep_artifact(ids.last().expect("latest id"))
+        .expect("load latest prep should succeed")
+        .is_some());
+
+    std::env::remove_var("RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS_PER_GEOMETRY");
+    reset_prep_artifact_store_for_tests();
 }

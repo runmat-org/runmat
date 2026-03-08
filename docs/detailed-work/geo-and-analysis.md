@@ -1090,6 +1090,19 @@ Trusted prep-reference semantics:
   - artifact schema support,
   - model geometry id/revision lineage match.
 
+Prep artifact lifecycle policy knobs:
+
+- `RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS`
+  - global cap for stored prep artifacts (`0` = disabled)
+- `RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS_PER_GEOMETRY`
+  - cap per `source_geometry_id` (`0` = disabled)
+- `RUNMAT_GEOMETRY_PREP_MAX_AGE_SECONDS`
+  - age-based pruning threshold in seconds (`0` = disabled)
+- `RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION`
+  - when `true` (default), prep references are rejected as stale if a newer revision prep artifact exists for the same geometry id.
+
+Pruning occurs on prep artifact persist/load and removes stale/excess artifacts from in-memory store and optional filesystem-backed prep artifact root.
+
 Typed prep-reference run errors:
 
 - `ANALYSIS_RUN_PREP_UNTRUSTED_CONTEXT`
@@ -1324,6 +1337,9 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-08: Added prep artifact lifecycle governance with retention pruning controls (`RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS`, `RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS_PER_GEOMETRY`, `RUNMAT_GEOMETRY_PREP_MAX_AGE_SECONDS`) applied on prep artifact persist/load across in-memory and optional filesystem-backed prep stores.
+- 2026-03-08: Added prep staleness invalidation policy (`RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION`, default enabled) so prep references are rejected when newer revision prep artifacts exist for the same geometry id, with typed stale-run error mapping (`ANALYSIS_RUN_PREP_STALE`).
+- 2026-03-08: Added runtime/contract coverage for prep lifecycle failure modes (missing, mismatched, stale references) and retention behavior (old artifact pruning with latest artifact replay preserved).
 - 2026-03-08: Upgraded prep-aware assembly from scalar-only surrogate scaling to deterministic prep-driven operator structure changes by incorporating prep-derived mapped load/BC participation and layout seeds into DOF load/constrained distribution, and emitting `FEA_PREP_ASSEMBLY` diagnostics with mapped-load ratio, constrained-prep ratio, active-region count, and layout seed.
 - 2026-03-08: Extended resolved prep context contracts/runtime mapping with derived participation metrics (`mapped_load_count`, `mapped_bc_count`, `layout_seed`) computed from trusted prep artifact mappings against model regions, preserving lineage/schema enforcement while making prep-vs-non-prep solve behavior structurally distinguishable.
 - 2026-03-08: Added trusted prep lineage enforcement by persisting geometry prep artifacts (`geometry_prep_artifact/v1`) with returned `prep_artifact_id`, introducing prep artifact lookup at analysis run time, and rejecting untrusted direct prep contexts when no artifact reference is provided.

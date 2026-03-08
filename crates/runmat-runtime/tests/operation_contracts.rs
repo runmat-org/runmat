@@ -866,6 +866,65 @@ fn analysis_run_nonlinear_prep_reference_errors_are_typed() {
 }
 
 #[test]
+fn analysis_run_nonlinear_stale_prep_reference_is_typed() {
+    runmat_runtime::geometry::reset_prep_artifact_store_for_tests();
+    std::env::set_var("RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION", "true");
+
+    let mut geometry_v1 = geometry_load_op(
+        "/assembly.step",
+        SIMPLE_STEP.as_bytes(),
+        OperationContext::new(Some("trace-contract-prep-stale-1".to_string()), None),
+    )
+    .expect("geometry load should succeed")
+    .data;
+    geometry_v1.revision = 1;
+    let mut geometry_v2 = geometry_v1.clone();
+    geometry_v2.revision = 2;
+
+    let prep_v1 = geometry_prep_for_analysis_op(
+        &geometry_v1,
+        GeometryPrepForAnalysisSpec::default(),
+        OperationContext::new(Some("trace-contract-prep-stale-2".to_string()), None),
+    )
+    .expect("prep v1 should succeed");
+    let _prep_v2 = geometry_prep_for_analysis_op(
+        &geometry_v2,
+        GeometryPrepForAnalysisSpec::default(),
+        OperationContext::new(Some("trace-contract-prep-stale-3".to_string()), None),
+    )
+    .expect("prep v2 should succeed");
+
+    let model = analysis_create_model_op(
+        &geometry_v1,
+        AnalysisCreateModelIntentSpec {
+            model_id: "contract_stale_prep_model".to_string(),
+            profile: AnalysisCreateModelProfile::NonlinearStructural,
+            prep_context: None,
+        },
+        OperationContext::new(Some("trace-contract-prep-stale-4".to_string()), None),
+    )
+    .expect("create model should succeed")
+    .data;
+
+    let stale = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            prep_artifact_id: Some(prep_v1.data.prep_artifact_id),
+            ..AnalysisNonlinearRunOptions::production_recommended()
+        },
+        OperationContext::new(Some("trace-contract-prep-stale-5".to_string()), None),
+    )
+    .expect_err("stale prep artifact should fail");
+    assert_eq!(stale.operation, "analysis.run_nonlinear");
+    assert_eq!(stale.op_version, "analysis.run_nonlinear/v1");
+    assert_eq!(stale.error_code, "ANALYSIS_RUN_PREP_STALE");
+
+    std::env::remove_var("RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION");
+    runmat_runtime::geometry::reset_prep_artifact_store_for_tests();
+}
+
+#[test]
 fn analysis_results_compare_contract_is_v1_and_handles_missing_run_ids() {
     let model = fixture_model(FixtureId::NonlinearAssembly);
     let baseline = analysis_run_nonlinear_op(

@@ -1399,6 +1399,57 @@ fn analysis_run_nonlinear_rejects_mismatched_prep_artifact_reference() {
 }
 
 #[test]
+fn analysis_run_nonlinear_rejects_stale_prep_artifact_when_newer_revision_exists() {
+    let _guard = analysis_test_guard();
+    crate::geometry::reset_prep_artifact_store_for_tests();
+    std::env::set_var("RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION", "true");
+
+    let mut geometry_v1 = sample_step_like_geometry_asset();
+    geometry_v1.revision = 1;
+    let mut geometry_v2 = geometry_v1.clone();
+    geometry_v2.revision = 2;
+
+    let prep_v1 = crate::geometry::geometry_prep_for_analysis_op(
+        &geometry_v1,
+        crate::geometry::GeometryPrepForAnalysisSpec::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("prep v1 should succeed");
+    let _prep_v2 = crate::geometry::geometry_prep_for_analysis_op(
+        &geometry_v2,
+        crate::geometry::GeometryPrepForAnalysisSpec::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("prep v2 should succeed");
+
+    let created = analysis_create_model_op(
+        &geometry_v1,
+        AnalysisCreateModelIntentSpec {
+            model_id: "stale_prep_model".to_string(),
+            profile: AnalysisCreateModelProfile::NonlinearStructural,
+            prep_context: None,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("create model should succeed");
+
+    let error = analysis_run_nonlinear_with_options_op(
+        &created.data,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            prep_artifact_id: Some(prep_v1.data.prep_artifact_id),
+            ..AnalysisNonlinearRunOptions::production_recommended()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect_err("stale prep artifact should fail");
+    assert_eq!(error.error_code, "ANALYSIS_RUN_PREP_STALE");
+
+    std::env::remove_var("RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION");
+    crate::geometry::reset_prep_artifact_store_for_tests();
+}
+
+#[test]
 fn nonlinear_quality_policy_diverges_for_increment_failures() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
