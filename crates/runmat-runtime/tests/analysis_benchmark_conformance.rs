@@ -168,7 +168,12 @@ struct BaselineConfig {
 }
 
 const ROLLING_TARGET_FIXTURES: &[&str] =
-    &["modal_large_gpu_provider", "transient_long_gpu_provider"];
+    &[
+        "modal_large_gpu_provider",
+        "modal_large_gpu_provider_stress16",
+        "transient_long_gpu_provider",
+        "transient_shock_gpu_provider",
+    ];
 
 fn manifest_specs() -> Vec<FixtureSpec> {
     vec![
@@ -494,6 +499,54 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_cache_misses: None,
         },
         FixtureSpec {
+            id: "transient_shock_cpu",
+            description: "challenging transient fixture with mixed-load shock profile",
+            model: || fixture_model(FixtureId::TransientShock),
+            run_kind: AnalysisRunKind::Transient,
+            expect_validate_error: None,
+            expect_run_error: None,
+            expected_publishable: Some(true),
+            parity_tolerance: None,
+            gpu_mode: None,
+            residency_expectation: None,
+            max_solver_host_sync_count: None,
+            min_solver_device_apply_k_ratio: None,
+            expected_solver_backend: None,
+            modal_mode_count: None,
+            transient_step_count: Some(48),
+            max_modal_orthogonality_offdiag: None,
+            min_modal_relative_frequency_separation: None,
+            max_transient_residual_norm: Some(2.0e-2),
+            max_transient_energy_growth_ratio: Some(8.0),
+            min_gpu_speedup_ratio: None,
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
+        },
+        FixtureSpec {
+            id: "transient_shock_gpu_provider",
+            description: "challenging transient fixture with provider-backed acceleration",
+            model: || fixture_model(FixtureId::TransientShock),
+            run_kind: AnalysisRunKind::Transient,
+            expect_validate_error: None,
+            expect_run_error: None,
+            expected_publishable: Some(true),
+            parity_tolerance: None,
+            gpu_mode: Some(GpuMode::WithProvider),
+            residency_expectation: Some(ResidencyExpectation::DeviceRef),
+            max_solver_host_sync_count: Some(96),
+            min_solver_device_apply_k_ratio: Some(1.0),
+            expected_solver_backend: Some("runtime_tensor"),
+            modal_mode_count: None,
+            transient_step_count: Some(48),
+            max_modal_orthogonality_offdiag: None,
+            min_modal_relative_frequency_separation: None,
+            max_transient_residual_norm: Some(2.0e-2),
+            max_transient_energy_growth_ratio: Some(8.0),
+            min_gpu_speedup_ratio: Some(1.8),
+            min_transient_cache_hit_ratio: Some(0.15),
+            max_transient_cache_misses: Some(40.0),
+        },
+        FixtureSpec {
             id: "missing_materials",
             description: "invalid fixture must fail validation and run with typed errors",
             model: || fixture_model(FixtureId::MissingMaterials),
@@ -636,8 +689,8 @@ fn run_fixture_cpu(
                     .transient_step_count
                     .unwrap_or(AnalysisTransientRunOptions::default().step_count),
                 dt_bucket_rel_tolerance: requested_bucket_rel_tol
-                    .unwrap_or(AnalysisTransientRunOptions::balanced().dt_bucket_rel_tolerance),
-                ..AnalysisTransientRunOptions::balanced()
+                    .unwrap_or(AnalysisTransientRunOptions::production_recommended().dt_bucket_rel_tolerance),
+                ..AnalysisTransientRunOptions::production_recommended()
                 }
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
@@ -681,8 +734,8 @@ fn run_fixture_gpu(
                     .transient_step_count
                     .unwrap_or(AnalysisTransientRunOptions::default().step_count),
                 dt_bucket_rel_tolerance: requested_bucket_rel_tol
-                    .unwrap_or(AnalysisTransientRunOptions::balanced().dt_bucket_rel_tolerance),
-                ..AnalysisTransientRunOptions::balanced()
+                    .unwrap_or(AnalysisTransientRunOptions::production_recommended().dt_bucket_rel_tolerance),
+                ..AnalysisTransientRunOptions::production_recommended()
                 }
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
@@ -1068,6 +1121,16 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                         "FEA_TRANSIENT_BUCKETING",
                         "rel_tolerance",
                     );
+                    let transient_physics_jump_ratio = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_TRANSIENT_PHYSICS",
+                        "max_step_l2_jump_ratio",
+                    );
+                    let transient_physics_nonfinite = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_TRANSIENT_PHYSICS",
+                        "nonfinite_displacement_count",
+                    );
 
                     for event in &gpu_fallback_events {
                         if !validate_fallback_event_schema(event) {
@@ -1206,6 +1269,48 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                                 Some(1.0e-2),
                             );
                         }
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "transient_physics_jump_ratio",
+                            "FEA_TRANSIENT_PHYSICS",
+                            transient_physics_jump_ratio,
+                            None,
+                            Some(3.5),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "transient_physics_nonfinite_count",
+                            "FEA_TRANSIENT_PHYSICS",
+                            transient_physics_nonfinite,
+                            None,
+                            Some(0.0),
+                        );
+                    }
+                    if spec.id == "transient_shock_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "transient_shock_physics_jump_ratio",
+                            "FEA_TRANSIENT_PHYSICS",
+                            transient_physics_jump_ratio,
+                            None,
+                            Some(4.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "transient_shock_physics_nonfinite_count",
+                            "FEA_TRANSIENT_PHYSICS",
+                            transient_physics_nonfinite,
+                            None,
+                            Some(0.0),
+                        );
                     }
 
                     let gpu_results = analysis_results_op(

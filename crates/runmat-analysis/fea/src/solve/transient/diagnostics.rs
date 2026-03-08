@@ -25,6 +25,8 @@ pub(super) fn push_transient_quality_diagnostics(
     adapt_scale_min: f64,
     adapt_scale_max: f64,
     dt_bucket_rel_tolerance: f64,
+    max_step_l2_jump_ratio: f64,
+    nonfinite_displacement_count: usize,
 ) {
     let converged_all = converged_steps == options.step_count;
     diagnostics.push(FeaDiagnostic {
@@ -109,6 +111,18 @@ pub(super) fn push_transient_quality_diagnostics(
             "enabled={} rel_tolerance={}",
             dt_bucket_rel_tolerance > 0.0,
             dt_bucket_rel_tolerance
+        ),
+    });
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_TRANSIENT_PHYSICS".to_string(),
+        severity: if nonfinite_displacement_count == 0 && max_step_l2_jump_ratio <= 4.0 {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "max_step_l2_jump_ratio={} nonfinite_displacement_count={}",
+            max_step_l2_jump_ratio, nonfinite_displacement_count
         ),
     });
 

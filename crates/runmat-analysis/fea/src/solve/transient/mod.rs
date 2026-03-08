@@ -238,6 +238,26 @@ pub fn solve_transient_system(
         }
     }
 
+    let mut max_step_l2_jump_ratio = 0.0_f64;
+    let mut nonfinite_displacement_count = 0usize;
+    for window in displacement_snapshots.windows(2) {
+        let prev = &window[0];
+        let next = &window[1];
+        let prev_norm = prev.iter().map(|value| value * value).sum::<f64>().sqrt();
+        let next_norm = next.iter().map(|value| value * value).sum::<f64>().sqrt();
+        let mut jump_norm_sq = 0.0_f64;
+        for (a, b) in prev.iter().zip(next.iter()) {
+            let d = b - a;
+            jump_norm_sq += d * d;
+            if !b.is_finite() {
+                nonfinite_displacement_count += 1;
+            }
+        }
+        let jump_norm = jump_norm_sq.sqrt();
+        let jump_ratio = jump_norm / prev_norm.max(next_norm).max(1.0);
+        max_step_l2_jump_ratio = max_step_l2_jump_ratio.max(jump_ratio);
+    }
+
     let mut diagnostics = vec![FeaDiagnostic {
         code: "FEA_TRANSIENT_METHOD".to_string(),
         severity: FeaDiagnosticSeverity::Info,
@@ -278,6 +298,8 @@ pub fn solve_transient_system(
             1.0
         },
         dt_bucket_rel_tolerance,
+        max_step_l2_jump_ratio,
+        nonfinite_displacement_count,
     );
 
     TransientSolveResult {

@@ -165,6 +165,16 @@ impl AnalysisTransientRunOptions {
         Self::default()
     }
 
+    pub fn production_recommended() -> Self {
+        Self {
+            quality_policy: QualityPolicy::Balanced,
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            dt_bucket_rel_tolerance: 0.01,
+            ..Self::balanced()
+        }
+    }
+
     pub fn high_accuracy() -> Self {
         Self {
             deterministic_mode: true,

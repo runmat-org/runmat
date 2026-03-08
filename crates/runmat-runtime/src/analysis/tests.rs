@@ -144,6 +144,7 @@ fn analysis_create_model_returns_v1_envelope() {
 fn transient_run_option_presets_are_ordered_for_cost_vs_accuracy() {
     let coarse = AnalysisTransientRunOptions::coarse();
     let balanced = AnalysisTransientRunOptions::balanced();
+    let production = AnalysisTransientRunOptions::production_recommended();
     let high_accuracy = AnalysisTransientRunOptions::high_accuracy();
 
     assert!(coarse.step_count < balanced.step_count);
@@ -154,6 +155,11 @@ fn transient_run_option_presets_are_ordered_for_cost_vs_accuracy() {
 
     assert!(coarse.time_step_s > balanced.time_step_s);
     assert!(balanced.time_step_s > high_accuracy.time_step_s);
+
+    assert_eq!(production.quality_policy, QualityPolicy::Balanced);
+    assert!(production.deterministic_mode);
+    assert_eq!(production.precision_mode, PrecisionMode::Fp64);
+    assert_eq!(production.dt_bucket_rel_tolerance, 0.01);
 }
 
 #[test]

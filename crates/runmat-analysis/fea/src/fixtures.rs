@@ -12,6 +12,7 @@ pub enum FixtureId {
     CantileverLargeLoadSweep,
     ModalLarge,
     TransientLong,
+    TransientShock,
     MultiMaterialAssembly,
     MissingMaterials,
     MissingLoads,
@@ -24,6 +25,7 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
         FixtureId::CantileverLargeLoadSweep => cantilever_large_load_sweep(),
         FixtureId::ModalLarge => modal_large_fixture(),
         FixtureId::TransientLong => transient_long_fixture(),
+        FixtureId::TransientShock => transient_shock_fixture(),
         FixtureId::MultiMaterialAssembly => multi_material_assembly(),
         FixtureId::MissingMaterials => missing_materials(),
         FixtureId::MissingLoads => missing_loads(),
@@ -125,6 +127,36 @@ fn transient_long_fixture() -> AnalysisModel {
     model.model_id = AnalysisModelId("transient_long_fixture".to_string());
     model.steps = vec![AnalysisStep {
         step_id: "transient_long_1".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
+    model
+}
+
+fn transient_shock_fixture() -> AnalysisModel {
+    let mut model = cantilever_large_load_sweep();
+    model.model_id = AnalysisModelId("transient_shock_fixture".to_string());
+    model.boundary_conditions.push(BoundaryCondition {
+        bc_id: "bc_mid_prescribed".to_string(),
+        region_id: "mid_support".to_string(),
+        kind: BoundaryConditionKind::PrescribedDisplacement,
+    });
+    model.loads = (0..256)
+        .map(|i| {
+            let sign = if i % 2 == 0 { 1.0 } else { -1.0 };
+            let scale = 1.0 + (i as f64) * 0.01;
+            LoadCase {
+                load_id: format!("shock_load_{i}"),
+                region_id: format!("shock_region_{i}"),
+                kind: LoadKind::Force {
+                    fx: 50.0 * scale,
+                    fy: sign * -1500.0 * scale,
+                    fz: 0.0,
+                },
+            }
+        })
+        .collect();
+    model.steps = vec![AnalysisStep {
+        step_id: "transient_shock_1".to_string(),
         kind: AnalysisStepKind::Transient,
     }];
     model

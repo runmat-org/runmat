@@ -531,6 +531,32 @@ mod tests {
     }
 
     #[test]
+    fn transient_shock_fixture_emits_adaptivity_and_physics_diagnostics() {
+        let model = fixture_model(FixtureId::TransientShock);
+        let result = run_transient_with_options(
+            &model,
+            ComputeBackend::Cpu,
+            TransientSolveOptions {
+                step_count: 48,
+                ..TransientSolveOptions::default()
+            },
+        )
+        .expect("transient shock fixture should solve");
+
+        assert!(result.time_points_s.len() > 24);
+        assert!(result
+            .run
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "FEA_TRANSIENT_ADAPTIVITY"));
+        assert!(result
+            .run
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "FEA_TRANSIENT_PHYSICS"));
+    }
+
+    #[test]
     fn load_sweep_fixture_uses_operator_solver_path() {
         let baseline = run_linear_static(
             &fixture_model(FixtureId::CantileverLinearStatic),
