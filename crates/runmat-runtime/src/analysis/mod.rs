@@ -1851,7 +1851,19 @@ pub fn analysis_results_op(
         transient_results,
         nonlinear_results,
         diagnostics: if query.include_diagnostics {
-            Some(run_result.run.diagnostics.clone())
+            if query.diagnostic_codes.is_empty() {
+                Some(run_result.run.diagnostics.clone())
+            } else {
+                Some(
+                    run_result
+                        .run
+                        .diagnostics
+                        .iter()
+                        .filter(|diag| query.diagnostic_codes.iter().any(|code| code == &diag.code))
+                        .cloned()
+                        .collect(),
+                )
+            }
         } else {
             None
         },

@@ -265,6 +265,9 @@ jobs:
       - name: Run nonlinear benchmark conformance
         run: cargo test -p runmat-runtime --test analysis
 
+      - name: Validate nonlinear benchmark report keys
+        run: python3 scripts/validate_analysis_report_nonlinear.py
+
       - name: Summarize nonlinear report
         if: always()
         run: |

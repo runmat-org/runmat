@@ -398,6 +398,7 @@ pub struct AnalysisArtifactRecord {
 pub struct AnalysisResultsQuery {
     pub include_fields: Vec<String>,
     pub include_diagnostics: bool,
+    pub diagnostic_codes: Vec<String>,
     pub include_modal_results: bool,
     pub mode_indices: Vec<usize>,
     pub include_transient_results: bool,
@@ -410,6 +411,7 @@ impl Default for AnalysisResultsQuery {
         Self {
             include_fields: Vec::new(),
             include_diagnostics: true,
+            diagnostic_codes: Vec::new(),
             include_modal_results: true,
             mode_indices: Vec::new(),
             include_transient_results: true,
@@ -487,14 +489,23 @@ pub struct NonlinearResultsData {
     pub load_factors: Vec<f64>,
     pub displacement_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
+    #[serde(default)]
     pub increment_norms: Vec<f64>,
+    #[serde(default)]
     pub iteration_counts: Vec<usize>,
+    #[serde(default)]
     pub failed_increments: usize,
+    #[serde(default)]
     pub line_search_backtracks: usize,
+    #[serde(default)]
     pub max_line_search_backtracks_per_increment: usize,
+    #[serde(default)]
     pub tangent_rebuild_count: usize,
+    #[serde(default)]
     pub iteration_spike_count: usize,
+    #[serde(default)]
     pub convergence_stall_count: usize,
+    #[serde(default)]
     pub backtrack_burst_count: usize,
     pub method: NonlinearMethod,
 }

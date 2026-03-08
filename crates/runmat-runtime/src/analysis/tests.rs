@@ -500,6 +500,7 @@ fn analysis_results_returns_filtered_fields_and_metadata() {
         AnalysisResultsQuery {
             include_fields: vec!["displacement".to_string()],
             include_diagnostics: false,
+                            diagnostic_codes: Vec::new(),
             include_modal_results: true,
             mode_indices: Vec::new(),
             include_transient_results: true,
@@ -545,6 +546,7 @@ fn analysis_results_unknown_field_maps_typed_error() {
         AnalysisResultsQuery {
             include_fields: vec!["strain_energy".to_string()],
             include_diagnostics: true,
+            diagnostic_codes: Vec::new(),
             include_modal_results: true,
             mode_indices: Vec::new(),
             include_transient_results: true,
@@ -993,6 +995,7 @@ fn analysis_results_query_can_exclude_nonlinear_payload() {
         AnalysisResultsQuery {
             include_fields: Vec::new(),
             include_diagnostics: true,
+            diagnostic_codes: Vec::new(),
             include_modal_results: true,
             mode_indices: Vec::new(),
             include_transient_results: true,
@@ -1020,6 +1023,29 @@ fn analysis_results_query_can_exclude_nonlinear_payload() {
     assert!(results.data.summary.nonlinear_iteration_spike_count.is_some());
     assert!(results.data.summary.nonlinear_convergence_stall_count.is_some());
     assert!(results.data.summary.nonlinear_backtrack_burst_count.is_some());
+}
+
+#[test]
+fn nonlinear_results_deserialize_with_missing_new_fields() {
+    let payload = serde_json::json!({
+        "nonlinear_payload_version": "nonlinear_results/v1",
+        "load_factors": [0.5, 1.0],
+        "displacement_snapshots": [],
+        "residual_norms": [1.0e-6, 5.0e-7],
+        "method": "incremental_newton_raphson"
+    });
+    let parsed: NonlinearResultsData =
+        serde_json::from_value(payload).expect("legacy nonlinear payload should deserialize");
+
+    assert_eq!(parsed.increment_norms.len(), 0);
+    assert_eq!(parsed.iteration_counts.len(), 0);
+    assert_eq!(parsed.failed_increments, 0);
+    assert_eq!(parsed.line_search_backtracks, 0);
+    assert_eq!(parsed.max_line_search_backtracks_per_increment, 0);
+    assert_eq!(parsed.tangent_rebuild_count, 0);
+    assert_eq!(parsed.iteration_spike_count, 0);
+    assert_eq!(parsed.convergence_stall_count, 0);
+    assert_eq!(parsed.backtrack_burst_count, 0);
 }
 
 #[test]
@@ -1298,6 +1324,7 @@ fn analysis_results_query_can_exclude_modal_payload() {
         AnalysisResultsQuery {
             include_fields: Vec::new(),
             include_diagnostics: true,
+            diagnostic_codes: Vec::new(),
             include_modal_results: false,
             mode_indices: Vec::new(),
             include_transient_results: true,
@@ -1336,6 +1363,7 @@ fn analysis_results_query_rejects_unknown_modal_mode_index() {
         AnalysisResultsQuery {
             include_fields: Vec::new(),
             include_diagnostics: true,
+            diagnostic_codes: Vec::new(),
             include_modal_results: true,
             mode_indices: vec![10],
             include_transient_results: true,
@@ -1406,6 +1434,7 @@ fn analysis_results_query_can_exclude_transient_payload() {
         AnalysisResultsQuery {
             include_fields: Vec::new(),
             include_diagnostics: true,
+            diagnostic_codes: Vec::new(),
             include_modal_results: true,
             mode_indices: Vec::new(),
             include_transient_results: false,
@@ -1444,6 +1473,7 @@ fn analysis_results_query_rejects_unknown_transient_snapshot_index() {
         AnalysisResultsQuery {
             include_fields: Vec::new(),
             include_diagnostics: true,
+            diagnostic_codes: Vec::new(),
             include_modal_results: true,
             mode_indices: Vec::new(),
             include_transient_results: true,

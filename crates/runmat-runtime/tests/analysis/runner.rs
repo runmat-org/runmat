@@ -1079,6 +1079,7 @@ pub(super) fn run_fixture(
                         AnalysisResultsQuery {
                             include_fields: vec!["displacement".to_string()],
                             include_diagnostics: false,
+                            diagnostic_codes: Vec::new(),
                             include_modal_results: false,
                             mode_indices: Vec::new(),
                             include_transient_results: false,
@@ -1140,6 +1141,7 @@ pub(super) fn run_fixture(
                             AnalysisResultsQuery {
                                 include_fields: vec!["displacement".to_string()],
                                 include_diagnostics: false,
+                            diagnostic_codes: Vec::new(),
                                 include_modal_results: false,
                                 mode_indices: Vec::new(),
                                 include_transient_results: false,
@@ -1219,6 +1221,7 @@ pub(super) fn run_fixture(
                             AnalysisResultsQuery {
                                 include_fields: vec!["displacement".to_string()],
                                 include_diagnostics: false,
+                            diagnostic_codes: Vec::new(),
                                 include_modal_results: false,
                                 mode_indices: Vec::new(),
                                 include_transient_results: false,

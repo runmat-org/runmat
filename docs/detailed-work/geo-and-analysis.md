@@ -984,6 +984,32 @@ Use this quick map from failing gate to likely fix direction:
   - inspect `gpu_solver_solve_ms` and `gpu_solver_prepared_build_ms` drift,
   - check provider availability/fallback events before adjusting thresholds.
 
+### Integrator Contract Guidance (Nonlinear)
+
+When consuming `analysis.results/v1` with nonlinear payloads:
+
+- Minimum recommended fields:
+  - `run_status`, `publishable`, `quality_reasons`
+  - `summary.increment_count`, `summary.failed_increment_count`
+  - `summary.max_nonlinear_residual_norm`, `summary.max_nonlinear_iteration_count`
+- Optional-but-useful fields (newer runtimes):
+  - `summary.nonlinear_iteration_spike_count`
+  - `summary.nonlinear_convergence_stall_count`
+  - `summary.nonlinear_backtrack_burst_count`
+  - `summary.nonlinear_max_backtracks_per_increment`
+- Payload-level optional telemetry in `nonlinear_results`:
+  - `increment_norms`, `iteration_counts`
+  - `max_line_search_backtracks_per_increment`
+  - `iteration_spike_count`, `convergence_stall_count`, `backtrack_burst_count`
+
+Backward-compat fallback behavior:
+
+- Consumers must treat missing nonlinear telemetry fields as defaults:
+  - numeric counters default to `0`,
+  - vectors default to empty,
+  - optional summary fields default to `null`.
+- Prefer summary fields for stable dashboarding/gating; use full nonlinear payloads for deeper diagnostics and debug tooling.
+
 ## Numeric Tolerance Policy
 
 - CPU vs CPU deterministic replay: exact match for topology + metadata; numeric fields within `1e-12` relative tolerance.
@@ -1179,6 +1205,8 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-08: Added nonlinear contract-stability hardening for consumers: `analysis.results` now supports diagnostic-code filtering (`diagnostic_codes` query control), legacy nonlinear payload deserialization defaults for newly-added fields, and a golden contract-shape snapshot test (`tests/data/nonlinear_contract_snapshot.json`) to catch accidental payload/summary schema drift.
+- 2026-03-08: Added consumer-side nonlinear report utility validation (`scripts/validate_analysis_report_nonlinear.py`) and wired it into nonlinear CI governance so `analysis_benchmark_report.json` must include expected nonlinear fixture threshold keys before summary/artifact publication.
 - 2026-03-08: Added two harder nonlinear realism fixtures (`NonlinearSofteningProxy`, `NonlinearLoadPathMix`) and integrated provider-backed conformance variants (`nonlinear_softening_proxy_gpu_provider`, `nonlinear_load_path_mix_gpu_provider`) to exercise distinct nonlinear behavior classes beyond baseline/stress fixtures.
 - 2026-03-08: Extended nonlinear solver difficulty profiling with additional structured convergence metrics (`iteration_spike_count`, `convergence_stall_count`, `backtrack_burst_count`, `max_line_search_backtracks_per_increment`) surfaced via `FEA_NONLINEAR_CONVERGENCE`, plus runtime payload/summary propagation so `analysis.results` can gate and query these signals directly.
 - 2026-03-08: Added nonlinear behavior-shape conformance gates for the new fixtures (stall/spike/backtrack-burst and per-increment backtrack bounds), expanded rolling baseline targets to include the new nonlinear fixtures, and added policy-divergence contract coverage on a harder fixture profile to verify exploratory vs balanced/strict outcomes under constrained iteration budgets.

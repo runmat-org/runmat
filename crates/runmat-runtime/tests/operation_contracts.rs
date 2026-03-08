@@ -19,10 +19,24 @@ use runmat_runtime::geometry::{
     geometry_query_entities_op, GeometryCaptureViewSpec, GeometryEntityQuery,
 };
 use runmat_runtime::operations::OperationContext;
+use serde_json::Value;
+use std::fs;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 const TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
 const SIMPLE_STEP: &str = "ISO-10303-21;\nHEADER;\nFILE_NAME('Assembly_A');\nENDSEC;\nDATA;\n#10=PRODUCT('Base_Mount','',(#1));\n#11=PRODUCT('Tip_Load','',(#1));\n#20=MATERIAL_DESIGNATION('Aluminum 6061');\nENDSEC;\nEND-ISO-10303-21;\n";
+
+fn sorted_object_keys(value: &Value) -> Vec<String> {
+    let mut keys = value
+        .as_object()
+        .expect("snapshot target must be object")
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    keys.sort();
+    keys
+}
 
 fn assert_fallback_event_schema(event: &str) {
     let parts: Vec<&str> = event.splitn(3, ':').collect();
@@ -578,6 +592,91 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
 }
 
 #[test]
+fn analysis_results_can_filter_nonlinear_diagnostics_by_code() {
+    let model = fixture_model(FixtureId::NonlinearLoadPathMix);
+    let envelope = analysis_run_nonlinear_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-nonlinear-diagnostics-1".to_string()), None),
+    )
+    .expect("nonlinear run should succeed");
+
+    let results = analysis_results_op(
+        &envelope.data,
+        AnalysisResultsQuery {
+            include_fields: Vec::new(),
+            include_diagnostics: true,
+            diagnostic_codes: vec![
+                "FEA_NONLINEAR_CONVERGENCE".to_string(),
+                "FEA_NONLINEAR_COST".to_string(),
+            ],
+            include_modal_results: true,
+            mode_indices: Vec::new(),
+            include_transient_results: true,
+            transient_snapshot_indices: Vec::new(),
+            include_nonlinear_results: true,
+        },
+        OperationContext::new(Some("trace-contract-nonlinear-diagnostics-2".to_string()), None),
+    )
+    .expect("results query should succeed");
+
+    let diagnostics = results
+        .data
+        .diagnostics
+        .as_ref()
+        .expect("diagnostics should be included");
+    assert!(!diagnostics.is_empty());
+    assert!(diagnostics.iter().all(|diag| {
+        diag.code == "FEA_NONLINEAR_CONVERGENCE" || diag.code == "FEA_NONLINEAR_COST"
+    }));
+}
+
+#[test]
+fn nonlinear_contract_snapshot_matches_expected_shape() {
+    let model = fixture_model(FixtureId::NonlinearLoadPathMix);
+    let envelope = analysis_run_nonlinear_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-nonlinear-snapshot-1".to_string()), None),
+    )
+    .expect("nonlinear run should succeed");
+    let results = analysis_results_op(
+        &envelope.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(Some("trace-contract-nonlinear-snapshot-2".to_string()), None),
+    )
+    .expect("results should succeed");
+
+    let snapshot_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/data/nonlinear_contract_snapshot.json");
+    let expected: Value = serde_json::from_str(
+        &fs::read_to_string(&snapshot_path).expect("read nonlinear contract snapshot"),
+    )
+    .expect("parse nonlinear contract snapshot");
+
+    let nonlinear = serde_json::to_value(
+        results
+            .data
+            .nonlinear_results
+            .as_ref()
+            .expect("nonlinear payload expected"),
+    )
+    .expect("serialize nonlinear payload");
+    let summary = serde_json::to_value(&results.data.summary).expect("serialize summary");
+
+    let expected_nonlinear_keys = sorted_object_keys(
+        expected
+            .get("nonlinear_results")
+            .expect("snapshot nonlinear_results"),
+    );
+    let expected_summary_keys =
+        sorted_object_keys(expected.get("summary").expect("snapshot summary"));
+
+    assert_eq!(sorted_object_keys(&nonlinear), expected_nonlinear_keys);
+    assert_eq!(sorted_object_keys(&summary), expected_summary_keys);
+}
+
+#[test]
 fn analysis_run_nonlinear_strict_iteration_cap_sets_degraded_status() {
     let model = fixture_model(FixtureId::NonlinearAssembly);
     let envelope = analysis_run_nonlinear_with_options_op(
@@ -881,6 +980,7 @@ fn analysis_results_contract_is_v1_and_filterable() {
         AnalysisResultsQuery {
             include_fields: vec!["von_mises".to_string()],
             include_diagnostics: false,
+                            diagnostic_codes: Vec::new(),
             include_modal_results: true,
             mode_indices: Vec::new(),
             include_transient_results: true,
@@ -913,6 +1013,7 @@ fn analysis_results_unknown_field_maps_typed_error_contract() {
         AnalysisResultsQuery {
             include_fields: vec!["nonexistent".to_string()],
             include_diagnostics: true,
+            diagnostic_codes: Vec::new(),
             include_modal_results: true,
             mode_indices: Vec::new(),
             include_transient_results: true,
@@ -957,6 +1058,7 @@ fn analysis_results_modal_query_controls_are_typed() {
         AnalysisResultsQuery {
             include_fields: Vec::new(),
             include_diagnostics: true,
+            diagnostic_codes: Vec::new(),
             include_modal_results: false,
             mode_indices: Vec::new(),
             include_transient_results: true,
@@ -987,6 +1089,7 @@ fn analysis_results_modal_query_controls_are_typed() {
         AnalysisResultsQuery {
             include_fields: Vec::new(),
             include_diagnostics: true,
+            diagnostic_codes: Vec::new(),
             include_modal_results: true,
             mode_indices: vec![99],
             include_transient_results: true,
@@ -1020,6 +1123,7 @@ fn analysis_results_transient_query_controls_are_typed() {
         AnalysisResultsQuery {
             include_fields: Vec::new(),
             include_diagnostics: true,
+            diagnostic_codes: Vec::new(),
             include_modal_results: true,
             mode_indices: Vec::new(),
             include_transient_results: false,
@@ -1041,6 +1145,7 @@ fn analysis_results_transient_query_controls_are_typed() {
         AnalysisResultsQuery {
             include_fields: Vec::new(),
             include_diagnostics: true,
+            diagnostic_codes: Vec::new(),
             include_modal_results: true,
             mode_indices: Vec::new(),
             include_transient_results: true,
