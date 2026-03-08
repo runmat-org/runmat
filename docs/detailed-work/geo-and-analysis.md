@@ -1010,6 +1010,26 @@ Backward-compat fallback behavior:
   - optional summary fields default to `null`.
 - Prefer summary fields for stable dashboarding/gating; use full nonlinear payloads for deeper diagnostics and debug tooling.
 
+### Artifact Retention and Migration Guarantees
+
+Runtime artifact persistence now supports compatibility-aware loading for both:
+
+- legacy raw `AnalysisRunResult` JSON artifacts, and
+- schema-wrapped artifacts (`analysis_run_artifact/v1`) with metadata.
+
+Retention knobs for filesystem artifact stores:
+
+- `RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS`
+  - global cap across all stored run artifacts (0 = disabled)
+- `RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS_PER_KIND`
+  - per-run-kind cap (`analysis.run_linear_static`, `analysis.run_modal`, `analysis.run_transient`, `analysis.run_nonlinear`) (0 = disabled)
+
+Safe rollback and migration behavior:
+
+- Older artifacts missing newer nonlinear fields remain loadable with defaults.
+- Artifacts containing newer unknown fields are tolerated (ignored) by current readers.
+- `analysis.results_by_run_id` remains the stable replay boundary for contract consumers.
+
 ## Numeric Tolerance Policy
 
 - CPU vs CPU deterministic replay: exact match for topology + metadata; numeric fields within `1e-12` relative tolerance.
@@ -1205,6 +1225,9 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-08: Added artifact lifecycle hardening for analysis run persistence by introducing schema-wrapped filesystem artifacts (`analysis_run_artifact/v1`) with operation metadata, backward-compatible loading of legacy raw artifacts, and forward-compatible tolerance for unknown future fields at the storage boundary.
+- 2026-03-08: Added filesystem artifact retention controls (`RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS`, `RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS_PER_KIND`) with pruning-on-persist behavior and coverage for per-kind pruning semantics.
+- 2026-03-08: Added deterministic filesystem replay validation for `analysis.results_by_run_id` (stable summary/status/quality reasons across repeated loads) and wired the replay check into nonlinear CI governance alongside nonlinear report schema validation.
 - 2026-03-08: Added nonlinear contract-stability hardening for consumers: `analysis.results` now supports diagnostic-code filtering (`diagnostic_codes` query control), legacy nonlinear payload deserialization defaults for newly-added fields, and a golden contract-shape snapshot test (`tests/data/nonlinear_contract_snapshot.json`) to catch accidental payload/summary schema drift.
 - 2026-03-08: Added consumer-side nonlinear report utility validation (`scripts/validate_analysis_report_nonlinear.py`) and wired it into nonlinear CI governance so `analysis_benchmark_report.json` must include expected nonlinear fixture threshold keys before summary/artifact publication.
 - 2026-03-08: Added two harder nonlinear realism fixtures (`NonlinearSofteningProxy`, `NonlinearLoadPathMix`) and integrated provider-backed conformance variants (`nonlinear_softening_proxy_gpu_provider`, `nonlinear_load_path_mix_gpu_provider`) to exercise distinct nonlinear behavior classes beyond baseline/stress fixtures.

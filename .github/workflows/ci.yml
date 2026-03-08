@@ -265,6 +265,14 @@ jobs:
       - name: Run nonlinear benchmark conformance
         run: cargo test -p runmat-runtime --test analysis
 
+      - name: Verify filesystem artifact replay stability
+        env:
+          RUNMAT_ANALYSIS_ARTIFACT_STORE: filesystem
+          RUNMAT_ANALYSIS_ARTIFACT_ROOT: target/runmat-analysis-store
+          RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS: "0"
+          RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS_PER_KIND: "0"
+        run: cargo test -p runmat-runtime analysis::tests::analysis_results_by_run_id_filesystem_replay_is_stable
+
       - name: Validate nonlinear benchmark report keys
         run: python3 scripts/validate_analysis_report_nonlinear.py
 

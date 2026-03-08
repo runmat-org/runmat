@@ -1,6 +1,8 @@
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
+use std::{fs, path::PathBuf};
 
+use chrono::Utc;
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, ApiDeviceInfo, GpuTensorHandle, HostTensorOwned,
     HostTensorView,
@@ -612,6 +614,207 @@ fn analysis_results_by_run_id_missing_maps_typed_error() {
 
     assert_eq!(err.error_code, "ANALYSIS_RESULTS_RUN_NOT_FOUND");
     storage::reset_artifact_store_for_tests();
+}
+
+fn temp_artifact_root(test_name: &str) -> PathBuf {
+    std::env::temp_dir().join(format!(
+        "runmat-analysis-tests-{}-{}",
+        test_name,
+        Utc::now().timestamp_nanos_opt().unwrap_or_default()
+    ))
+}
+
+#[test]
+fn analysis_results_by_run_id_legacy_nonlinear_artifacts_remain_loadable() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("legacy-loadable");
+    let _ = fs::remove_dir_all(&root);
+    storage::configure_artifact_store(storage::AnalysisArtifactStoreConfig::Filesystem {
+        root: root.clone(),
+    })
+    .expect("configure filesystem artifact store");
+
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+    let run = analysis_run_nonlinear_op(&model, ComputeBackend::Cpu, OperationContext::new(None, None))
+        .expect("nonlinear run should succeed");
+    let run_id = run.data.run_id.clone();
+    let run_path = root.join("runs").join(format!("{run_id}.json"));
+
+    let mut legacy_value = serde_json::to_value(&run.data).expect("serialize nonlinear run");
+    let nonlinear = legacy_value
+        .get_mut("nonlinear_results")
+        .and_then(|value| value.as_object_mut())
+        .expect("nonlinear results should be object");
+    nonlinear.remove("increment_norms");
+    nonlinear.remove("iteration_counts");
+    nonlinear.remove("failed_increments");
+    nonlinear.remove("line_search_backtracks");
+    nonlinear.remove("max_line_search_backtracks_per_increment");
+    nonlinear.remove("tangent_rebuild_count");
+    nonlinear.remove("iteration_spike_count");
+    nonlinear.remove("convergence_stall_count");
+    nonlinear.remove("backtrack_burst_count");
+    fs::write(
+        &run_path,
+        serde_json::to_vec_pretty(&legacy_value).expect("encode legacy artifact"),
+    )
+    .expect("write legacy artifact");
+
+    let fetched = analysis_results_by_run_id_op(
+        &run_id,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("legacy nonlinear artifact should still load");
+    assert_eq!(fetched.data.summary.failed_increment_count, Some(0));
+    assert_eq!(
+        fetched.data.summary.nonlinear_iteration_spike_count,
+        Some(0)
+    );
+
+    storage::reset_artifact_store_for_tests();
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_results_by_run_id_future_artifact_extra_fields_are_ignored() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("future-extra-fields");
+    let _ = fs::remove_dir_all(&root);
+    storage::configure_artifact_store(storage::AnalysisArtifactStoreConfig::Filesystem {
+        root: root.clone(),
+    })
+    .expect("configure filesystem artifact store");
+
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+    let run = analysis_run_nonlinear_op(&model, ComputeBackend::Cpu, OperationContext::new(None, None))
+        .expect("nonlinear run should succeed");
+    let run_id = run.data.run_id.clone();
+    let run_path = root.join("runs").join(format!("{run_id}.json"));
+
+    let mut wrapped = serde_json::json!({
+        "schema_version": "analysis_run_artifact/v1",
+        "created_at": Utc::now().to_rfc3339(),
+        "op_version": "analysis.run_nonlinear/v1",
+        "run": run.data,
+        "future_metadata": {
+            "schema_hint": "analysis_run_artifact/v2",
+            "opaque": [1, 2, 3]
+        }
+    });
+    wrapped["run"]["nonlinear_results"]["future_spatial_difficulty"] =
+        serde_json::json!([0.1, 0.2, 0.3]);
+    fs::write(
+        &run_path,
+        serde_json::to_vec_pretty(&wrapped).expect("encode future artifact"),
+    )
+    .expect("write future artifact");
+
+    let fetched = analysis_results_by_run_id_op(
+        &run_id,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("future nonlinear artifact should still load");
+    assert!(fetched.data.summary.increment_count > 0);
+    assert!(fetched.data.summary.max_nonlinear_iteration_count.is_some());
+
+    storage::reset_artifact_store_for_tests();
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_artifact_retention_prunes_old_runs_per_kind() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("retention-prune");
+    let _ = fs::remove_dir_all(&root);
+    storage::configure_artifact_store(storage::AnalysisArtifactStoreConfig::Filesystem {
+        root: root.clone(),
+    })
+    .expect("configure filesystem artifact store");
+    std::env::set_var("RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS_PER_KIND", "2");
+    std::env::remove_var("RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS");
+
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+    let mut run_ids = Vec::new();
+    for _ in 0..5 {
+        let run =
+            analysis_run_nonlinear_op(&model, ComputeBackend::Cpu, OperationContext::new(None, None))
+                .expect("nonlinear run should succeed");
+        run_ids.push(run.data.run_id.clone());
+    }
+
+    let run_dir = root.join("runs");
+    let kept_files = fs::read_dir(&run_dir)
+        .expect("read run dir")
+        .filter_map(|entry| entry.ok())
+        .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("json"))
+        .count();
+    assert!(kept_files <= 2);
+    assert!(storage::load_run_result(&run_ids[0]).expect("load pruned result").is_none());
+    assert!(storage::load_run_result(run_ids.last().expect("latest run id"))
+        .expect("load latest result")
+        .is_some());
+
+    std::env::remove_var("RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS_PER_KIND");
+    storage::reset_artifact_store_for_tests();
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn analysis_results_by_run_id_filesystem_replay_is_stable() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("filesystem-replay");
+    let _ = fs::remove_dir_all(&root);
+    storage::configure_artifact_store(storage::AnalysisArtifactStoreConfig::Filesystem {
+        root: root.clone(),
+    })
+    .expect("configure filesystem artifact store");
+
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+    let run = analysis_run_nonlinear_op(&model, ComputeBackend::Cpu, OperationContext::new(None, None))
+        .expect("nonlinear run should succeed");
+
+    let first = analysis_results_by_run_id_op(
+        &run.data.run_id,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("load first replay");
+    let second = analysis_results_by_run_id_op(
+        &run.data.run_id,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("load second replay");
+
+    assert_eq!(first.data.summary, second.data.summary);
+    assert_eq!(first.data.run_status, second.data.run_status);
+    assert_eq!(first.data.publishable, second.data.publishable);
+    assert_eq!(first.data.quality_reasons, second.data.quality_reasons);
+
+    storage::reset_artifact_store_for_tests();
+    let _ = fs::remove_dir_all(&root);
 }
 
 #[test]
