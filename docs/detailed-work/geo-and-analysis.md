@@ -1011,6 +1011,7 @@ Release readiness criteria (default):
   - artifact replay + compatibility verification checks marked passed.
 - Trend guard:
   - nonlinear fixture `gpu_run_ms` slowdown ratio must stay below `RUNMAT_RELEASE_READINESS_MAX_SLOWDOWN_RATIO` vs rolling median baseline.
+  - missing trend history is tolerated on non-protected branches by default; set `RUNMAT_RELEASE_READINESS_REQUIRE_TRENDS=true` to force warning behavior.
 - Protected branches:
   - `fail` reasons block release,
   - `warn` reasons are surfaced and should be triaged before tagging.

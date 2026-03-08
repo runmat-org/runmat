@@ -58,11 +58,14 @@ def rolling_reports(rolling_dir: Path) -> List[dict]:
 
 
 def nonlinear_records(report: dict) -> Dict[str, dict]:
-    return {
-        rec.get("fixture_id"): rec
-        for rec in report.get("records", [])
-        if isinstance(rec, dict) and rec.get("fixture_id") in NONLINEAR_FIXTURES
-    }
+    records: Dict[str, dict] = {}
+    for rec in report.get("records", []):
+        if not isinstance(rec, dict):
+            continue
+        fixture_id = rec.get("fixture_id")
+        if isinstance(fixture_id, str) and fixture_id in NONLINEAR_FIXTURES:
+            records[fixture_id] = rec
+    return records
 
 
 def evaluate_release_readiness(latest: dict, rolling: List[dict], protected: bool) -> dict:
@@ -105,14 +108,16 @@ def evaluate_release_readiness(latest: dict, rolling: List[dict], protected: boo
     max_slowdown_ratio = float(
         os.getenv("RUNMAT_RELEASE_READINESS_MAX_SLOWDOWN_RATIO", "1.25")
     )
+    require_trends = is_true(os.getenv("RUNMAT_RELEASE_READINESS_REQUIRE_TRENDS", "false"))
     if not rolling:
-        reasons.append(
-            Reason(
-                code="TREND_DATA_MISSING",
-                severity="warn",
-                detail="no rolling reports available for trend comparison",
+        if protected or require_trends:
+            reasons.append(
+                Reason(
+                    code="TREND_DATA_MISSING",
+                    severity="warn",
+                    detail="no rolling reports available for trend comparison",
+                )
             )
-        )
     else:
         hist = {fixture: [] for fixture in NONLINEAR_FIXTURES}
         for report in rolling:
