@@ -218,7 +218,12 @@ pub struct AnalysisNonlinearRunOptions {
     pub increment_count: usize,
     pub max_newton_iters: usize,
     pub tolerance: f64,
+    pub residual_convergence_factor: f64,
+    pub increment_norm_tolerance: f64,
     pub line_search: bool,
+    pub max_line_search_backtracks: usize,
+    pub line_search_reduction: f64,
+    pub tangent_refresh_interval: usize,
 }
 
 impl Default for AnalysisNonlinearRunOptions {
@@ -230,7 +235,12 @@ impl Default for AnalysisNonlinearRunOptions {
             increment_count: 12,
             max_newton_iters: 24,
             tolerance: 1.0e-6,
+            residual_convergence_factor: 5.0,
+            increment_norm_tolerance: 1.0e-7,
             line_search: true,
+            max_line_search_backtracks: 6,
+            line_search_reduction: 0.5,
+            tangent_refresh_interval: 2,
         }
     }
 }
@@ -244,7 +254,12 @@ impl AnalysisNonlinearRunOptions {
             increment_count: 8,
             max_newton_iters: 16,
             tolerance: 5.0e-6,
+            residual_convergence_factor: 8.0,
+            increment_norm_tolerance: 5.0e-7,
             line_search: false,
+            max_line_search_backtracks: 0,
+            line_search_reduction: 0.6,
+            tangent_refresh_interval: 4,
         }
     }
 
@@ -260,7 +275,12 @@ impl AnalysisNonlinearRunOptions {
             increment_count: 24,
             max_newton_iters: 40,
             tolerance: 1.0e-7,
+            residual_convergence_factor: 3.0,
+            increment_norm_tolerance: 5.0e-8,
             line_search: true,
+            max_line_search_backtracks: 10,
+            line_search_reduction: 0.5,
+            tangent_refresh_interval: 1,
         }
     }
 }
@@ -398,8 +418,13 @@ pub struct AnalysisResultsSummary {
     pub max_transient_residual_norm: Option<f64>,
     pub final_step_converged: Option<bool>,
     pub increment_count: usize,
+    pub failed_increment_count: Option<usize>,
     pub max_nonlinear_residual_norm: Option<f64>,
+    pub max_nonlinear_increment_norm: Option<f64>,
+    pub max_nonlinear_iteration_count: Option<usize>,
     pub final_increment_converged: Option<bool>,
+    pub nonlinear_line_search_backtracks: Option<usize>,
+    pub nonlinear_tangent_rebuild_count: Option<usize>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -441,7 +466,11 @@ pub struct NonlinearResultsData {
     pub load_factors: Vec<f64>,
     pub displacement_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
+    pub increment_norms: Vec<f64>,
     pub iteration_counts: Vec<usize>,
+    pub failed_increments: usize,
+    pub line_search_backtracks: usize,
+    pub tangent_rebuild_count: usize,
     pub method: NonlinearMethod,
 }
 

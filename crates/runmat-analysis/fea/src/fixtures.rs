@@ -14,6 +14,7 @@ pub enum FixtureId {
     TransientLong,
     TransientShock,
     NonlinearAssembly,
+    NonlinearAssemblyStress,
     MultiMaterialAssembly,
     MissingMaterials,
     MissingLoads,
@@ -28,6 +29,7 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
         FixtureId::TransientLong => transient_long_fixture(),
         FixtureId::TransientShock => transient_shock_fixture(),
         FixtureId::NonlinearAssembly => nonlinear_assembly_fixture(),
+        FixtureId::NonlinearAssemblyStress => nonlinear_assembly_stress_fixture(),
         FixtureId::MultiMaterialAssembly => multi_material_assembly(),
         FixtureId::MissingMaterials => missing_materials(),
         FixtureId::MissingLoads => missing_loads(),
@@ -169,6 +171,36 @@ fn nonlinear_assembly_fixture() -> AnalysisModel {
     model.model_id = AnalysisModelId("nonlinear_assembly_fixture".to_string());
     model.steps = vec![AnalysisStep {
         step_id: "nonlinear_assembly_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+    model
+}
+
+fn nonlinear_assembly_stress_fixture() -> AnalysisModel {
+    let mut model = nonlinear_assembly_fixture();
+    model.model_id = AnalysisModelId("nonlinear_assembly_stress_fixture".to_string());
+    model.boundary_conditions.push(BoundaryCondition {
+        bc_id: "bc_stress_mid_support".to_string(),
+        region_id: "mid_support_stress".to_string(),
+        kind: BoundaryConditionKind::PrescribedDisplacement,
+    });
+    model.loads = (0..640)
+        .map(|i| {
+            let phase = if i % 3 == 0 { -1.0 } else { 1.0 };
+            let scale = 1.0 + (i as f64) * 0.003;
+            LoadCase {
+                load_id: format!("nonlinear_stress_load_{i}"),
+                region_id: format!("nonlinear_stress_region_{}", i % 48),
+                kind: LoadKind::Force {
+                    fx: 75.0 * scale,
+                    fy: phase * -1800.0 * scale,
+                    fz: 20.0 * scale,
+                },
+            }
+        })
+        .collect();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_stress_1".to_string(),
         kind: AnalysisStepKind::Nonlinear,
     }];
     model

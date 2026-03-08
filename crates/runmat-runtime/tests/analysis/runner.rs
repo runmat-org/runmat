@@ -456,6 +456,13 @@ pub(super) fn run_fixture(
                             "FEA_TRANSIENT_COST",
                             "prepared_build_ms",
                         )
+                    })
+                    .or_else(|| {
+                        diagnostic_metric(
+                            &gpu_envelope.data,
+                            "FEA_NONLINEAR_COST",
+                            "prepared_build_ms",
+                        )
                     });
                     gpu_solver_solve_ms =
                         diagnostic_metric(&gpu_envelope.data, "FEA_MODAL_COST", "solve_ms")
@@ -463,6 +470,13 @@ pub(super) fn run_fixture(
                                 diagnostic_metric(
                                     &gpu_envelope.data,
                                     "FEA_TRANSIENT_COST",
+                                    "solve_ms",
+                                )
+                            })
+                            .or_else(|| {
+                                diagnostic_metric(
+                                    &gpu_envelope.data,
+                                    "FEA_NONLINEAR_COST",
                                     "solve_ms",
                                 )
                             });
@@ -475,6 +489,13 @@ pub(super) fn run_fixture(
                         diagnostic_metric(
                             &gpu_envelope.data,
                             "FEA_TRANSIENT_COST",
+                            "fallback_apply_count",
+                        )
+                    })
+                    .or_else(|| {
+                        diagnostic_metric(
+                            &gpu_envelope.data,
+                            "FEA_NONLINEAR_COST",
                             "fallback_apply_count",
                         )
                     });
@@ -522,6 +543,31 @@ pub(super) fn run_fixture(
                         &gpu_envelope.data,
                         "FEA_NONLINEAR_CONVERGENCE",
                         "increments",
+                    );
+                    let nonlinear_failed_increments = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_NONLINEAR_CONVERGENCE",
+                        "failed_increments",
+                    );
+                    let nonlinear_max_residual_norm = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_NONLINEAR_CONVERGENCE",
+                        "max_residual_norm",
+                    );
+                    let nonlinear_max_increment_norm = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_NONLINEAR_CONVERGENCE",
+                        "max_increment_norm",
+                    );
+                    let nonlinear_line_search_backtracks = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_NONLINEAR_CONVERGENCE",
+                        "line_search_backtracks",
+                    );
+                    let nonlinear_tangent_rebuild_count = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_NONLINEAR_CONVERGENCE",
+                        "tangent_rebuild_count",
                     );
 
                     for event in &gpu_fallback_events {
@@ -724,6 +770,98 @@ pub(super) fn run_fixture(
                             nonlinear_total_increments,
                             Some(24.0),
                             Some(24.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_failed_increments",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_failed_increments,
+                            None,
+                            Some(8.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_max_increment_norm",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_max_increment_norm,
+                            None,
+                            Some(5.0e-3),
+                        );
+                    }
+                    if spec.id == "nonlinear_assembly_stress_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_stress_converged_increments",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_converged_increments,
+                            Some(20.0),
+                            None,
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_stress_total_increments",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_total_increments,
+                            Some(32.0),
+                            Some(32.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_stress_failed_increments",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_failed_increments,
+                            None,
+                            Some(12.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_stress_max_residual_norm",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_max_residual_norm,
+                            None,
+                            Some(1.0e-3),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_stress_max_increment_norm",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_max_increment_norm,
+                            None,
+                            Some(1.0e-2),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_stress_line_search_backtracks",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_line_search_backtracks,
+                            None,
+                            Some(320.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_stress_tangent_rebuild_count",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_tangent_rebuild_count,
+                            Some(4.0),
+                            None,
                         );
                     }
 

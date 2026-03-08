@@ -519,12 +519,39 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
     assert_eq!(envelope.operation, "analysis.run_nonlinear");
     assert_eq!(envelope.op_version, "analysis.run_nonlinear/v1");
     assert!(envelope.data.nonlinear_results.is_some());
+    let nonlinear = envelope
+        .data
+        .nonlinear_results
+        .as_ref()
+        .expect("nonlinear payload should be present");
+    assert_eq!(nonlinear.load_factors.len(), nonlinear.residual_norms.len());
+    assert_eq!(nonlinear.residual_norms.len(), nonlinear.increment_norms.len());
+    assert_eq!(nonlinear.increment_norms.len(), nonlinear.iteration_counts.len());
     assert!(envelope
         .data
         .run
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_NONLINEAR_CONVERGENCE"));
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_NONLINEAR_COST"));
+
+    let results = analysis_results_op(
+        &envelope.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(Some("trace-contract-nonlinear-results-1".to_string()), None),
+    )
+    .expect("analysis.results should succeed for nonlinear run");
+    assert!(results.data.summary.increment_count > 0);
+    assert!(results.data.summary.failed_increment_count.is_some());
+    assert!(results.data.summary.max_nonlinear_increment_norm.is_some());
+    assert!(results.data.summary.max_nonlinear_iteration_count.is_some());
+    assert!(results.data.summary.nonlinear_line_search_backtracks.is_some());
+    assert!(results.data.summary.nonlinear_tangent_rebuild_count.is_some());
 
     let invalid = analysis_run_nonlinear_op(
         &fixture_model(FixtureId::CantileverLinearStatic),

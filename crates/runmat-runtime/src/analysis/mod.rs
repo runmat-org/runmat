@@ -873,6 +873,114 @@ pub fn analysis_run_nonlinear_with_options_op(
             )]),
         ));
     }
+    if options.max_newton_iters == 0 {
+        return Err(operation_error(
+            ANALYSIS_RUN_NONLINEAR_OPERATION,
+            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_nonlinear options require max_newton_iters greater than zero",
+            BTreeMap::from([(
+                "max_newton_iters".to_string(),
+                options.max_newton_iters.to_string(),
+            )]),
+        ));
+    }
+    if options.tolerance <= 0.0 || !options.tolerance.is_finite() {
+        return Err(operation_error(
+            ANALYSIS_RUN_NONLINEAR_OPERATION,
+            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_nonlinear options require finite positive tolerance",
+            BTreeMap::from([("tolerance".to_string(), options.tolerance.to_string())]),
+        ));
+    }
+    if options.increment_norm_tolerance <= 0.0 || !options.increment_norm_tolerance.is_finite() {
+        return Err(operation_error(
+            ANALYSIS_RUN_NONLINEAR_OPERATION,
+            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_nonlinear options require finite positive increment_norm_tolerance",
+            BTreeMap::from([(
+                "increment_norm_tolerance".to_string(),
+                options.increment_norm_tolerance.to_string(),
+            )]),
+        ));
+    }
+    if options.residual_convergence_factor < 1.0 || !options.residual_convergence_factor.is_finite() {
+        return Err(operation_error(
+            ANALYSIS_RUN_NONLINEAR_OPERATION,
+            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_nonlinear options require residual_convergence_factor >= 1.0",
+            BTreeMap::from([(
+                "residual_convergence_factor".to_string(),
+                options.residual_convergence_factor.to_string(),
+            )]),
+        ));
+    }
+    if options.line_search_reduction <= 0.0
+        || options.line_search_reduction >= 1.0
+        || !options.line_search_reduction.is_finite()
+    {
+        return Err(operation_error(
+            ANALYSIS_RUN_NONLINEAR_OPERATION,
+            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_nonlinear options require line_search_reduction in (0, 1)",
+            BTreeMap::from([(
+                "line_search_reduction".to_string(),
+                options.line_search_reduction.to_string(),
+            )]),
+        ));
+    }
+    if options.tangent_refresh_interval == 0 {
+        return Err(operation_error(
+            ANALYSIS_RUN_NONLINEAR_OPERATION,
+            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_nonlinear options require tangent_refresh_interval greater than zero",
+            BTreeMap::from([(
+                "tangent_refresh_interval".to_string(),
+                options.tangent_refresh_interval.to_string(),
+            )]),
+        ));
+    }
 
     let nonlinear_run = run_nonlinear_with_options(
         model,
@@ -881,7 +989,12 @@ pub fn analysis_run_nonlinear_with_options_op(
             increment_count: options.increment_count,
             max_newton_iters: options.max_newton_iters,
             tolerance: options.tolerance,
+            residual_convergence_factor: options.residual_convergence_factor,
+            increment_norm_tolerance: options.increment_norm_tolerance,
             line_search: options.line_search,
+            max_line_search_backtracks: options.max_line_search_backtracks,
+            line_search_reduction: options.line_search_reduction,
+            tangent_refresh_interval: options.tangent_refresh_interval,
         },
     )
     .map_err(|err| {
@@ -926,12 +1039,21 @@ pub fn analysis_run_nonlinear_with_options_op(
         .copied()
         .reduce(f64::max)
         .unwrap_or(0.0);
+    let max_nonlinear_increment_norm = nonlinear_run
+        .increment_norms
+        .iter()
+        .copied()
+        .reduce(f64::max)
+        .unwrap_or(0.0);
     let result_quality = if nonlinear_run.load_factors.is_empty()
         || nonlinear_run.displacement_snapshots.is_empty()
         || nonlinear_run.residual_norms.iter().any(|r| !r.is_finite())
+        || nonlinear_run.increment_norms.iter().any(|v| !v.is_finite())
     {
         QualityGate::Fail
-    } else if max_nonlinear_residual > options.tolerance * 10.0 {
+    } else if max_nonlinear_residual > options.tolerance * options.residual_convergence_factor * 2.0
+        || max_nonlinear_increment_norm > options.increment_norm_tolerance * 4.0
+    {
         QualityGate::Warn
     } else {
         QualityGate::Pass
@@ -952,15 +1074,19 @@ pub fn analysis_run_nonlinear_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::NonlinearResidualExceeded,
             detail: format!(
-                "nonlinear residual exceeds threshold {}",
-                options.tolerance * 10.0
+                "nonlinear residual/increment norm exceeds thresholds residual={} increment_norm={}",
+                options.tolerance * options.residual_convergence_factor * 2.0,
+                options.increment_norm_tolerance * 4.0
             ),
         });
     }
-    if nonlinear_increment_warn {
+    if nonlinear_increment_warn || nonlinear_run.failed_increments > 0 {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::NonlinearIncrementFailure,
-            detail: "nonlinear increment convergence reported warnings".to_string(),
+            detail: format!(
+                "nonlinear increment convergence reported warnings failed_increments={}",
+                nonlinear_run.failed_increments
+            ),
         });
     }
     if fallback_events
@@ -1026,7 +1152,11 @@ pub fn analysis_run_nonlinear_with_options_op(
             load_factors: nonlinear_run.load_factors,
             displacement_snapshots: nonlinear_run.displacement_snapshots,
             residual_norms: nonlinear_run.residual_norms,
+            increment_norms: nonlinear_run.increment_norms,
             iteration_counts: nonlinear_run.iteration_counts,
+            failed_increments: nonlinear_run.failed_increments,
+            line_search_backtracks: nonlinear_run.line_search_backtracks,
+            tangent_rebuild_count: nonlinear_run.tangent_rebuild_count,
             method: NonlinearMethod::IncrementalNewtonRaphson,
         }),
         model_validity: QualityGate::Pass,
@@ -1382,14 +1512,35 @@ pub fn analysis_results_op(
             (0, None, None, None, None)
         };
 
-    let (increment_count, max_nonlinear_residual_norm, final_increment_converged) =
+    let (
+        increment_count,
+        failed_increment_count,
+        max_nonlinear_residual_norm,
+        max_nonlinear_increment_norm,
+        max_nonlinear_iteration_count,
+        final_increment_converged,
+        nonlinear_line_search_backtracks,
+        nonlinear_tangent_rebuild_count,
+    ) =
         if let Some(nonlinear) = run_result.nonlinear_results.as_ref() {
             let count = nonlinear.load_factors.len();
             let max_residual = nonlinear.residual_norms.iter().copied().reduce(f64::max);
-            let final_converged = max_residual.map(|value| value <= 1.0e-6);
-            (count, max_residual, final_converged)
+            let max_increment_norm = nonlinear.increment_norms.iter().copied().reduce(f64::max);
+            let max_iteration_count = nonlinear.iteration_counts.iter().copied().max();
+            let final_converged = max_residual
+                .map(|value| value <= 1.0e-6 && nonlinear.failed_increments == 0);
+            (
+                count,
+                Some(nonlinear.failed_increments),
+                max_residual,
+                max_increment_norm,
+                max_iteration_count,
+                final_converged,
+                Some(nonlinear.line_search_backtracks),
+                Some(nonlinear.tangent_rebuild_count),
+            )
         } else {
-            (0, None, None)
+            (0, None, None, None, None, None, None, None)
         };
 
     let summary = AnalysisResultsSummary {
@@ -1407,8 +1558,13 @@ pub fn analysis_results_op(
         max_transient_residual_norm,
         final_step_converged,
         increment_count,
+        failed_increment_count,
         max_nonlinear_residual_norm,
+        max_nonlinear_increment_norm,
+        max_nonlinear_iteration_count,
         final_increment_converged,
+        nonlinear_line_search_backtracks,
+        nonlinear_tangent_rebuild_count,
     };
 
     let modal_results = if query.include_modal_results {

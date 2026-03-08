@@ -87,7 +87,11 @@ pub struct FeaNonlinearRunResult {
     pub load_factors: Vec<f64>,
     pub displacement_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
+    pub increment_norms: Vec<f64>,
     pub iteration_counts: Vec<usize>,
+    pub failed_increments: usize,
+    pub line_search_backtracks: usize,
+    pub tangent_rebuild_count: usize,
 }
 
 impl Default for LinearStaticSolveOptions {
@@ -380,7 +384,11 @@ pub fn run_nonlinear_with_options(
         load_factors: nonlinear.load_factors,
         displacement_snapshots,
         residual_norms: nonlinear.residual_norms,
+        increment_norms: nonlinear.increment_norms,
         iteration_counts: nonlinear.iteration_counts,
+        failed_increments: nonlinear.failed_increments,
+        line_search_backtracks: nonlinear.line_search_backtracks,
+        tangent_rebuild_count: nonlinear.tangent_rebuild_count,
     })
 }
 
@@ -650,12 +658,18 @@ mod tests {
 
         assert!(!result.load_factors.is_empty());
         assert_eq!(result.load_factors.len(), result.residual_norms.len());
+        assert_eq!(result.residual_norms.len(), result.increment_norms.len());
         assert_eq!(result.residual_norms.len(), result.iteration_counts.len());
         assert!(result
             .run
             .diagnostics
             .iter()
             .any(|diag| diag.code == "FEA_NONLINEAR_CONVERGENCE"));
+        assert!(result
+            .run
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "FEA_NONLINEAR_COST"));
     }
 
     #[test]
