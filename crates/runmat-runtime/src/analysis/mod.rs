@@ -12,6 +12,7 @@ use runmat_analysis_fea::{
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
+use runmat_meshing_core::{ElementFamilyHint, MeshConnectivityClass};
 
 use crate::operations::{
     operation_error, OperationContext, OperationEnvelope, OperationErrorEnvelope,
@@ -2345,6 +2346,10 @@ fn to_fea_prep_context(context: Option<AnalysisRunPrepContext>) -> Option<runmat
         topology_dof_multiplier: prep.topology_dof_multiplier,
         topology_bandwidth_proxy: prep.topology_bandwidth_proxy,
         mapped_region_participation_ratio: prep.mapped_region_participation_ratio,
+        topology_surface_patch_ratio: prep.topology_surface_patch_ratio,
+        topology_volume_core_ratio: prep.topology_volume_core_ratio,
+        topology_mixed_family_ratio: prep.topology_mixed_family_ratio,
+        topology_region_span_mean: prep.topology_region_span_mean,
     })
 }
 
@@ -2506,6 +2511,7 @@ fn resolve_run_prep_context(
         }
     }
 
+    let prepared_mesh_count = artifact.prep.prepared_meshes.len();
     let prepared_node_count = artifact
         .prep
         .prepared_meshes
@@ -2518,6 +2524,35 @@ fn resolve_run_prep_context(
         .iter()
         .map(|mesh| mesh.element_count as usize)
         .sum::<usize>();
+    let mesh_count = prepared_mesh_count.max(1) as f64;
+    let topology_surface_patch_ratio = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .filter(|mesh| mesh.connectivity_class == MeshConnectivityClass::SurfacePatch)
+        .count() as f64
+        / mesh_count;
+    let topology_volume_core_ratio = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .filter(|mesh| mesh.connectivity_class == MeshConnectivityClass::VolumeCore)
+        .count() as f64
+        / mesh_count;
+    let topology_mixed_family_ratio = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .filter(|mesh| mesh.element_family_hint == ElementFamilyHint::Mixed)
+        .count() as f64
+        / mesh_count;
+    let topology_region_span_mean = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .map(|mesh| mesh.region_span_hint as f64)
+        .sum::<f64>()
+        / mesh_count;
     let topology_dof_multiplier = if model.loads.is_empty() {
         1.0
     } else {
@@ -2553,7 +2588,7 @@ fn resolve_run_prep_context(
     };
 
     Ok(Some(AnalysisRunPrepContext {
-        prepared_mesh_count: artifact.prep.prepared_meshes.len(),
+        prepared_mesh_count,
         prepared_node_count,
         prepared_element_count,
         mapped_region_count: artifact.prep.region_mappings.len(),
@@ -2595,6 +2630,10 @@ fn resolve_run_prep_context(
         topology_dof_multiplier,
         topology_bandwidth_proxy,
         mapped_region_participation_ratio,
+        topology_surface_patch_ratio,
+        topology_volume_core_ratio,
+        topology_mixed_family_ratio,
+        topology_region_span_mean,
     }))
 }
 

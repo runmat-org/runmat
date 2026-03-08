@@ -63,6 +63,10 @@ pub struct FeaPrepContext {
     pub topology_dof_multiplier: f64,
     pub topology_bandwidth_proxy: u32,
     pub mapped_region_participation_ratio: f64,
+    pub topology_surface_patch_ratio: f64,
+    pub topology_volume_core_ratio: f64,
+    pub topology_mixed_family_ratio: f64,
+    pub topology_region_span_mean: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -191,6 +195,9 @@ pub fn run_linear_static_with_options(
             diagnostics.push(prep_topology_diagnostic(prep, summary.dof_count));
         }
     }
+    if let Some(operator_topology) = summary.prep_operator_topology.as_ref() {
+        diagnostics.push(prep_operator_topology_diagnostic(operator_topology));
+    }
     diagnostics.extend(solve_result.diagnostics);
 
     Ok(FeaRunResult {
@@ -232,6 +239,9 @@ pub fn run_modal_with_options(
         if let Some(prep) = options.prep_context {
             diagnostics.push(prep_topology_diagnostic(prep, summary.dof_count));
         }
+    }
+    if let Some(operator_topology) = summary.prep_operator_topology.as_ref() {
+        diagnostics.push(prep_operator_topology_diagnostic(operator_topology));
     }
 
     let displacement = modal
@@ -317,6 +327,9 @@ pub fn run_transient_with_options(
             diagnostics.push(prep_topology_diagnostic(prep, summary.dof_count));
         }
     }
+    if let Some(operator_topology) = summary.prep_operator_topology.as_ref() {
+        diagnostics.push(prep_operator_topology_diagnostic(operator_topology));
+    }
 
     let displacement = transient
         .displacement_snapshots
@@ -396,6 +409,9 @@ pub fn run_nonlinear_with_options(
         if let Some(prep) = options.prep_context {
             diagnostics.push(prep_topology_diagnostic(prep, summary.dof_count));
         }
+    }
+    if let Some(operator_topology) = summary.prep_operator_topology.as_ref() {
+        diagnostics.push(prep_operator_topology_diagnostic(operator_topology));
     }
 
     let displacement = nonlinear
@@ -506,7 +522,7 @@ fn prep_diagnostic(prep: FeaPrepContext) -> FeaDiagnostic {
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "prepared_mesh_count={} prepared_node_count={} prepared_element_count={} mapped_region_count={} mapped_load_count={} mapped_bc_count={} min_scaled_jacobian={} mean_aspect_ratio={} inverted_element_count={} topology_dof_multiplier={} topology_bandwidth_proxy={} mapped_region_participation_ratio={}",
+            "prepared_mesh_count={} prepared_node_count={} prepared_element_count={} mapped_region_count={} mapped_load_count={} mapped_bc_count={} min_scaled_jacobian={} mean_aspect_ratio={} inverted_element_count={} topology_dof_multiplier={} topology_bandwidth_proxy={} mapped_region_participation_ratio={} topology_surface_patch_ratio={} topology_volume_core_ratio={} topology_mixed_family_ratio={} topology_region_span_mean={}",
             prep.prepared_mesh_count,
             prep.prepared_node_count,
             prep.prepared_element_count,
@@ -519,6 +535,10 @@ fn prep_diagnostic(prep: FeaPrepContext) -> FeaDiagnostic {
             prep.topology_dof_multiplier,
             prep.topology_bandwidth_proxy,
             prep.mapped_region_participation_ratio,
+            prep.topology_surface_patch_ratio,
+            prep.topology_volume_core_ratio,
+            prep.topology_mixed_family_ratio,
+            prep.topology_region_span_mean,
         ),
     }
 }
@@ -548,11 +568,34 @@ fn prep_topology_diagnostic(prep: FeaPrepContext, dof_count: usize) -> FeaDiagno
         code: "FEA_PREP_TOPOLOGY".to_string(),
         severity: FeaDiagnosticSeverity::Info,
         message: format!(
-            "effective_dof_multiplier={} effective_dof_count={} coupling_bandwidth_proxy={} mapped_region_participation_ratio={}",
+            "effective_dof_multiplier={} effective_dof_count={} coupling_bandwidth_proxy={} mapped_region_participation_ratio={} surface_patch_ratio={} volume_core_ratio={} mixed_family_ratio={} mean_region_span={}",
             prep.topology_dof_multiplier,
             dof_count,
             prep.topology_bandwidth_proxy,
             prep.mapped_region_participation_ratio,
+            prep.topology_surface_patch_ratio,
+            prep.topology_volume_core_ratio,
+            prep.topology_mixed_family_ratio,
+            prep.topology_region_span_mean,
+        ),
+    }
+}
+
+fn prep_operator_topology_diagnostic(
+    summary: &assembly::PrepOperatorTopologySummary,
+) -> FeaDiagnostic {
+    FeaDiagnostic {
+        code: "FEA_PREP_OPERATOR_TOPOLOGY".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "stiffness_scale={} mass_scale={} damping_scale={} rhs_scale={} coupling_nonzero_ratio={} stiffness_spread_ratio={} topology_fingerprint={}",
+            summary.stiffness_scale,
+            summary.mass_scale,
+            summary.damping_scale,
+            summary.rhs_scale,
+            summary.coupling_nonzero_ratio,
+            summary.stiffness_spread_ratio,
+            summary.topology_fingerprint,
         ),
     }
 }

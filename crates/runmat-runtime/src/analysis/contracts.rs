@@ -39,6 +39,10 @@ pub struct AnalysisRunPrepContext {
     pub topology_dof_multiplier: f64,
     pub topology_bandwidth_proxy: u32,
     pub mapped_region_participation_ratio: f64,
+    pub topology_surface_patch_ratio: f64,
+    pub topology_volume_core_ratio: f64,
+    pub topology_mixed_family_ratio: f64,
+    pub topology_region_span_mean: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

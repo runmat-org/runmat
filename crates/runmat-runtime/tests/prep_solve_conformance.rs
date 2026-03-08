@@ -74,6 +74,12 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         .diagnostics
         .iter()
         .all(|diag| diag.code != "FEA_PREP_TOPOLOGY"));
+    assert!(baseline
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .all(|diag| diag.code != "FEA_PREP_OPERATOR_TOPOLOGY"));
 
     assert!(prep_enhanced
         .data
@@ -93,6 +99,12 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_PREP_TOPOLOGY"));
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_OPERATOR_TOPOLOGY"));
 
     let base_nonlinear = baseline
         .data
@@ -138,4 +150,71 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         .find(|diag| diag.code == "FEA_PREP_TOPOLOGY")
         .expect("prep topology diagnostic should be present in replay");
     assert_eq!(prep_topology_diag.message, replay_topology_diag.message);
+
+    let prep_operator_topology_diag = prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_OPERATOR_TOPOLOGY")
+        .expect("prep operator topology diagnostic should be present");
+    let replay_operator_topology_diag = prep_enhanced_replay
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_OPERATOR_TOPOLOGY")
+        .expect("prep operator topology diagnostic should be present in replay");
+    assert_eq!(
+        prep_operator_topology_diag.message,
+        replay_operator_topology_diag.message
+    );
+
+    let base_peak_displacement = baseline
+        .data
+        .run
+        .displacement_field
+        .as_host_f64()
+        .expect("baseline displacement should be host-backed")
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    let prep_peak_displacement = prep_enhanced
+        .data
+        .run
+        .displacement_field
+        .as_host_f64()
+        .expect("prep displacement should be host-backed")
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    let displacement_delta_ratio = (prep_peak_displacement - base_peak_displacement).abs()
+        / base_peak_displacement
+            .max(prep_peak_displacement)
+            .max(1.0e-9);
+    assert!(displacement_delta_ratio > 1.0e-4);
+    assert!(displacement_delta_ratio < 0.95);
+
+    let base_peak_stress = baseline
+        .data
+        .run
+        .von_mises_field
+        .as_host_f64()
+        .expect("baseline stress should be host-backed")
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    let prep_peak_stress = prep_enhanced
+        .data
+        .run
+        .von_mises_field
+        .as_host_f64()
+        .expect("prep stress should be host-backed")
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max);
+    let stress_delta_ratio = (prep_peak_stress - base_peak_stress).abs()
+        / base_peak_stress.max(prep_peak_stress).max(1.0e-9);
+    assert!(stress_delta_ratio > 1.0e-4);
+    assert!(stress_delta_ratio < 0.95);
 }

@@ -1365,6 +1365,7 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-08: Advanced prep fidelity to a topology-informed operator-coefficient tier by deriving aggregate topology profile signals (surface/volume connectivity ratios, mixed-family ratio, mean region span) from prep artifacts, feeding them into FEA stiffness/mass/damping/rhs and coupling-strength shaping, and emitting deterministic `FEA_PREP_OPERATOR_TOPOLOGY` diagnostics (including structural coefficient stats and topology fingerprint) with conformance checks for replay stability plus bounded non-zero prep-vs-baseline structural deltas.
 - 2026-03-08: Added topology descriptors to prep artifacts (`connectivity_class`, `element_family_hint`, `region_span_hint`) and wired topology-derived prep context signals (`topology_dof_multiplier`, `topology_bandwidth_proxy`, `mapped_region_participation_ratio`) into prep-aware solve context resolution.
 - 2026-03-08: Implemented prep-topology assembly mode in FEA with deterministic DOF scaling from prep topology multipliers, coupling sparsity shaping from bandwidth proxies, and region-coupled load/constraint placement from mapping cardinalities, plus new `FEA_PREP_TOPOLOGY` diagnostics for structural topology statistics.
 - 2026-03-08: Added conformance assertions for topology-backed prep runs (`FEA_PREP_TOPOLOGY` + deterministic replay checks) and published customer-facing manuals in `docs/geometry/prep-for-analysis.md` and `docs/analysis/prep-aware-solves.md` with explicit prep fidelity tiers.

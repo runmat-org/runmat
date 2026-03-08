@@ -11,6 +11,9 @@
   - quality diagnostics (`min_scaled_jacobian`, `mean_aspect_ratio`, `inverted_element_count`),
   - topology hints per prepared mesh (`connectivity_class`, `element_family_hint`, `region_span_hint`).
 
+Analysis runtime derives a deterministic topology profile from prep descriptors (surface/volume connectivity mix,
+element-family mix, and mean region span) to shape assembly and operator coefficients.
+
 ## Prep artifact lifecycle
 
 Prep artifacts are persisted and can be filesystem-backed using:

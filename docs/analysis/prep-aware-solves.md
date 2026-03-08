@@ -28,6 +28,10 @@ Typed prep-reference failure families:
   - DOF scaling from prep topology multipliers,
   - coupling sparsity pattern shaping from bandwidth proxies,
   - load/constraint placement using mapped region participation.
+- **Tier 2.5**: topology-informed operator coefficient shaping.
+  - stiffness/mass/damping/right-hand-side scaling from topology profile ratios,
+  - deterministic coupling-strength anisotropy from topology family/participation signals,
+  - deterministic operator-topology fingerprint for replay verification.
 - **Tier 3 (future)**: full remeshed element operator assembly.
 
 ## Diagnostics
@@ -37,5 +41,6 @@ Prep-aware runs can emit:
 - `FEA_PREP_CONTEXT`
 - `FEA_PREP_ASSEMBLY`
 - `FEA_PREP_TOPOLOGY`
+- `FEA_PREP_OPERATOR_TOPOLOGY`
 
 These diagnostics are deterministic for the same model + prep artifact reference.
