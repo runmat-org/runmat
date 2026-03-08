@@ -1072,6 +1072,23 @@ Prep-aware solve semantics (current MVP):
 - FEA emits `FEA_PREP_CONTEXT` diagnostics for prep-aware runs and applies deterministic assembly scaling based on prep mesh density/quality counters.
 - Current guarantee: prep-aware runs are deterministic and observable, but still use surrogate prep influence (not full remeshed element-topology solve yet).
 
+Trusted prep-reference semantics:
+
+- `geometry.prep_for_analysis/v1` now persists prep artifacts and returns `prep_artifact_id`.
+- Analysis run options may reference prep artifacts via `prep_artifact_id`; runtime resolves prep lineage from artifact store.
+- Direct free-form solve `prep_context` is treated as untrusted without an artifact reference and is rejected.
+- Runtime enforces prep artifact constraints before solve:
+  - artifact existence,
+  - artifact schema support,
+  - model geometry id/revision lineage match.
+
+Typed prep-reference run errors:
+
+- `ANALYSIS_RUN_PREP_UNTRUSTED_CONTEXT`
+- `ANALYSIS_RUN_PREP_NOT_FOUND`
+- `ANALYSIS_RUN_PREP_SCHEMA_UNSUPPORTED`
+- `ANALYSIS_RUN_PREP_MISMATCH`
+
 ### Artifact Retention and Migration Guarantees
 
 Runtime artifact persistence now supports compatibility-aware loading for both:
@@ -1299,6 +1316,9 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-08: Added trusted prep lineage enforcement by persisting geometry prep artifacts (`geometry_prep_artifact/v1`) with returned `prep_artifact_id`, introducing prep artifact lookup at analysis run time, and rejecting untrusted direct prep contexts when no artifact reference is provided.
+- 2026-03-08: Added typed prep-reference run failure mapping (`ANALYSIS_RUN_PREP_UNTRUSTED_CONTEXT`, `ANALYSIS_RUN_PREP_NOT_FOUND`, `ANALYSIS_RUN_PREP_SCHEMA_UNSUPPORTED`, `ANALYSIS_RUN_PREP_MISMATCH`) plus runtime/contract tests for missing and mismatched prep references.
+- 2026-03-08: Updated prep-aware conformance to use artifact references end-to-end (`geometry.load -> geometry.prep_for_analysis -> analysis.create_model -> analysis.run_*`), keeping bounded prep-vs-baseline nonlinear delta checks and explicit `FEA_PREP_CONTEXT` observability.
 - 2026-03-08: Extended prep context from model synthesis into solve execution by adding optional run-level prep payloads across analysis run option contracts (`analysis.run_linear_static/modal/transient/nonlinear`), mapping prep summaries into FEA solve options, and emitting `FEA_PREP_CONTEXT` diagnostics for prep-aware runs.
 - 2026-03-08: Added deterministic prep-influenced assembly scaling in FEA (mesh density/quality driven stiffness/load shaping and prep-aware load-complexity augmentation), plus prep-vs-non-prep conformance coverage asserting bounded nonlinear quality deltas and explicit prep diagnostic presence.
 - 2026-03-08: Completed prep-aware analysis model integration by extending `analysis.create_model/v1` intent with optional `prep_context` (source geometry id/revision + region mappings), adding typed prep-consistency validation/error mapping, and prioritizing prep-mapped regions during default BC/load placement plus assignment-confidence promotion.

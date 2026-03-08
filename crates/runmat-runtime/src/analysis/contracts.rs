@@ -94,7 +94,7 @@ pub struct QualityReason {
     pub detail: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisRunOptions {
     pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,
@@ -102,6 +102,8 @@ pub struct AnalysisRunOptions {
     pub quality_policy: QualityPolicy,
     #[serde(default)]
     pub prep_context: Option<AnalysisRunPrepContext>,
+    #[serde(default)]
+    pub prep_artifact_id: Option<String>,
 }
 
 impl Default for AnalysisRunOptions {
@@ -112,11 +114,12 @@ impl Default for AnalysisRunOptions {
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
+            prep_artifact_id: None,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisTransientRunOptions {
     pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,
@@ -138,6 +141,8 @@ pub struct AnalysisTransientRunOptions {
     pub dt_bucket_rel_tolerance: f64,
     #[serde(default)]
     pub prep_context: Option<AnalysisRunPrepContext>,
+    #[serde(default)]
+    pub prep_artifact_id: Option<String>,
 }
 
 impl Default for AnalysisTransientRunOptions {
@@ -162,6 +167,7 @@ impl Default for AnalysisTransientRunOptions {
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
             prep_context: None,
+            prep_artifact_id: None,
         }
     }
 }
@@ -188,6 +194,7 @@ impl AnalysisTransientRunOptions {
             adapt_nonconverged_shrink: 0.7,
             dt_bucket_rel_tolerance: 0.02,
             prep_context: None,
+            prep_artifact_id: None,
         }
     }
 
@@ -226,11 +233,12 @@ impl AnalysisTransientRunOptions {
             adapt_nonconverged_shrink: 0.8,
             dt_bucket_rel_tolerance: 0.005,
             prep_context: None,
+            prep_artifact_id: None,
         }
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisModalRunOptions {
     pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,
@@ -239,9 +247,11 @@ pub struct AnalysisModalRunOptions {
     pub residual_warn_threshold: f64,
     #[serde(default)]
     pub prep_context: Option<AnalysisRunPrepContext>,
+    #[serde(default)]
+    pub prep_artifact_id: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisNonlinearRunOptions {
     pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,
@@ -257,6 +267,8 @@ pub struct AnalysisNonlinearRunOptions {
     pub tangent_refresh_interval: usize,
     #[serde(default)]
     pub prep_context: Option<AnalysisRunPrepContext>,
+    #[serde(default)]
+    pub prep_artifact_id: Option<String>,
 }
 
 impl Default for AnalysisNonlinearRunOptions {
@@ -275,6 +287,7 @@ impl Default for AnalysisNonlinearRunOptions {
             line_search_reduction: 0.5,
             tangent_refresh_interval: 2,
             prep_context: None,
+            prep_artifact_id: None,
         }
     }
 }
@@ -295,6 +308,7 @@ impl AnalysisNonlinearRunOptions {
             line_search_reduction: 0.6,
             tangent_refresh_interval: 4,
             prep_context: None,
+            prep_artifact_id: None,
         }
     }
 
@@ -317,6 +331,7 @@ impl AnalysisNonlinearRunOptions {
             line_search_reduction: 0.5,
             tangent_refresh_interval: 1,
             prep_context: None,
+            prep_artifact_id: None,
         }
     }
 
@@ -335,6 +350,7 @@ impl AnalysisNonlinearRunOptions {
             line_search_reduction: 0.5,
             tangent_refresh_interval: 2,
             prep_context: None,
+            prep_artifact_id: None,
         }
     }
 }
@@ -348,6 +364,7 @@ impl Default for AnalysisModalRunOptions {
             mode_count: 3,
             residual_warn_threshold: 1.0e-3,
             prep_context: None,
+            prep_artifact_id: None,
         }
     }
 }
@@ -361,6 +378,7 @@ impl AnalysisModalRunOptions {
             mode_count: 2,
             residual_warn_threshold: 5.0e-3,
             prep_context: None,
+            prep_artifact_id: None,
         }
     }
 
@@ -376,6 +394,7 @@ impl AnalysisModalRunOptions {
             mode_count: 8,
             residual_warn_threshold: 5.0e-4,
             prep_context: None,
+            prep_artifact_id: None,
         }
     }
 }

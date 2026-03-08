@@ -1,7 +1,12 @@
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::fs;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, OnceLock, RwLock};
 
 use self::capture::DEFAULT_SVG_CAPTURE_ADAPTER;
+use chrono::Utc;
 use runmat_geometry_core::{EntityKind, EntityRef, GeometryAsset, Region};
 use runmat_geometry_io::{
     import::GeometryImportError, import_geometry, GeometryFormat, GeometryImportOptions,
@@ -85,6 +90,111 @@ pub enum GeometryPrepProfile {
 pub struct GeometryPrepForAnalysisSpec {
     pub profile: GeometryPrepProfile,
     pub target_element_budget: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GeometryPrepForAnalysisResult {
+    pub prep_artifact_id: String,
+    pub prep: MeshingPrepResult,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StoredGeometryPrepArtifact {
+    pub prep_artifact_id: String,
+    pub schema_version: String,
+    pub created_at: String,
+    pub source_geometry_id: String,
+    pub source_geometry_revision: u32,
+    pub prep: MeshingPrepResult,
+}
+
+type PrepStore = Arc<RwLock<HashMap<String, StoredGeometryPrepArtifact>>>;
+
+fn prep_store() -> &'static PrepStore {
+    static STORE: OnceLock<PrepStore> = OnceLock::new();
+    STORE.get_or_init(|| Arc::new(RwLock::new(HashMap::new())))
+}
+
+fn prep_artifact_counter() -> &'static AtomicU64 {
+    static COUNTER: OnceLock<AtomicU64> = OnceLock::new();
+    COUNTER.get_or_init(|| AtomicU64::new(1))
+}
+
+fn prep_artifact_root() -> Option<PathBuf> {
+    std::env::var("RUNMAT_GEOMETRY_PREP_ARTIFACT_ROOT")
+        .ok()
+        .map(PathBuf::from)
+}
+
+fn prep_artifact_path(root: &PathBuf, prep_artifact_id: &str) -> PathBuf {
+    root.join("prep").join(format!("{prep_artifact_id}.json"))
+}
+
+fn persist_prep_artifact(
+    geometry: &GeometryAsset,
+    prep: MeshingPrepResult,
+) -> Result<StoredGeometryPrepArtifact, String> {
+    let prep_artifact_id = format!(
+        "prep:{}:{}:{}",
+        geometry.geometry_id,
+        geometry.revision,
+        prep_artifact_counter().fetch_add(1, Ordering::Relaxed)
+    );
+    let artifact = StoredGeometryPrepArtifact {
+        prep_artifact_id: prep_artifact_id.clone(),
+        schema_version: "geometry_prep_artifact/v1".to_string(),
+        created_at: Utc::now().to_rfc3339(),
+        source_geometry_id: geometry.geometry_id.clone(),
+        source_geometry_revision: geometry.revision,
+        prep,
+    };
+
+    prep_store()
+        .write()
+        .map_err(|_| "geometry prep artifact store lock poisoned".to_string())?
+        .insert(prep_artifact_id.clone(), artifact.clone());
+
+    if let Some(root) = prep_artifact_root() {
+        let path = prep_artifact_path(&root, &prep_artifact_id);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|err| format!("failed to create prep artifact directory: {err}"))?;
+        }
+        let bytes = serde_json::to_vec_pretty(&artifact)
+            .map_err(|err| format!("failed to encode prep artifact: {err}"))?;
+        fs::write(&path, bytes).map_err(|err| format!("failed to write prep artifact: {err}"))?;
+    }
+
+    Ok(artifact)
+}
+
+pub(crate) fn load_prep_artifact(
+    prep_artifact_id: &str,
+) -> Result<Option<StoredGeometryPrepArtifact>, String> {
+    if let Some(artifact) = prep_store()
+        .read()
+        .map_err(|_| "geometry prep artifact store lock poisoned".to_string())?
+        .get(prep_artifact_id)
+        .cloned()
+    {
+        return Ok(Some(artifact));
+    }
+
+    let Some(root) = prep_artifact_root() else {
+        return Ok(None);
+    };
+    let path = prep_artifact_path(&root, prep_artifact_id);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bytes = fs::read(&path).map_err(|err| format!("failed to read prep artifact: {err}"))?;
+    let artifact = serde_json::from_slice::<StoredGeometryPrepArtifact>(&bytes)
+        .map_err(|err| format!("failed to decode prep artifact: {err}"))?;
+    prep_store()
+        .write()
+        .map_err(|_| "geometry prep artifact store lock poisoned".to_string())?
+        .insert(prep_artifact_id.to_string(), artifact.clone());
+    Ok(Some(artifact))
 }
 
 impl Default for GeometryPrepForAnalysisSpec {
@@ -440,7 +550,7 @@ pub fn geometry_prep_for_analysis_op(
     asset: &GeometryAsset,
     spec: GeometryPrepForAnalysisSpec,
     context: OperationContext,
-) -> Result<OperationEnvelope<MeshingPrepResult>, OperationErrorEnvelope> {
+) -> Result<OperationEnvelope<GeometryPrepForAnalysisResult>, OperationErrorEnvelope> {
     if spec.target_element_budget == 0 {
         return Err(operation_error(
             GEOMETRY_PREP_FOR_ANALYSIS_OPERATION,
@@ -487,18 +597,37 @@ pub fn geometry_prep_for_analysis_op(
         )
     })?;
 
+    let artifact = persist_prep_artifact(asset, prepared).map_err(|error| {
+        operation_error(
+            GEOMETRY_PREP_FOR_ANALYSIS_OPERATION,
+            GEOMETRY_PREP_FOR_ANALYSIS_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "GEOMETRY_PREP_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist prep artifact: {error}"),
+            BTreeMap::from([("geometry_id".to_string(), asset.geometry_id.clone())]),
+        )
+    })?;
+
     Ok(OperationEnvelope::new(
         GEOMETRY_PREP_FOR_ANALYSIS_OPERATION,
         GEOMETRY_PREP_FOR_ANALYSIS_OP_VERSION,
         &context,
-        prepared,
+        GeometryPrepForAnalysisResult {
+            prep_artifact_id: artifact.prep_artifact_id,
+            prep: artifact.prep,
+        },
     ))
 }
 
 pub fn geometry_prep_for_analysis(
     asset: &GeometryAsset,
     spec: GeometryPrepForAnalysisSpec,
-) -> BuiltinResult<MeshingPrepResult> {
+) -> BuiltinResult<GeometryPrepForAnalysisResult> {
     let envelope = geometry_prep_for_analysis_op(asset, spec, OperationContext::new(None, None))
         .map_err(|error| {
             build_runtime_error(error.message)

@@ -260,9 +260,9 @@ fn analysis_create_model_accepts_prep_context_and_validates_model() {
             model_id: "prep_model".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
             prep_context: Some(AnalysisCreateModelPrepContext {
-                source_geometry_id: prep.data.provenance.source_geometry_id.clone(),
-                source_geometry_revision: prep.data.provenance.source_geometry_revision,
-                region_mappings: prep.data.region_mappings.clone(),
+                source_geometry_id: prep.data.prep.provenance.source_geometry_id.clone(),
+                source_geometry_revision: prep.data.prep.provenance.source_geometry_revision,
+                region_mappings: prep.data.prep.region_mappings.clone(),
             }),
         },
         OperationContext::new(None, None),
@@ -419,6 +419,7 @@ fn analysis_run_linear_static_returns_typed_envelope() {
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
         prep_context: None,
+        prep_artifact_id: None,
         },
         context,
     )
@@ -1035,6 +1036,7 @@ fn requested_preconditioner_fallback_is_recorded() {
             preconditioner_mode: PreconditionerMode::Amg,
             quality_policy: QualityPolicy::Balanced,
         prep_context: None,
+        prep_artifact_id: None,
         },
         OperationContext::new(Some("trace-preconditioner-fallback".to_string()), None),
     )
@@ -1062,6 +1064,7 @@ fn ilu_preconditioner_request_is_honored_without_fallback() {
             preconditioner_mode: PreconditionerMode::Ilu,
             quality_policy: QualityPolicy::Balanced,
         prep_context: None,
+        prep_artifact_id: None,
         },
         OperationContext::new(Some("trace-preconditioner-ilu".to_string()), None),
     )
@@ -1091,6 +1094,7 @@ fn quality_policy_exploratory_allows_publishable_warn_path() {
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Exploratory,
         prep_context: None,
+        prep_artifact_id: None,
         },
         OperationContext::new(Some("trace-quality-policy-exploratory".to_string()), None),
     )
@@ -1148,6 +1152,7 @@ fn quality_policy_balanced_allows_publishable_with_quality_reasons() {
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
         prep_context: None,
+        prep_artifact_id: None,
         },
         OperationContext::new(Some("trace-quality-policy-balanced".to_string()), None),
     )
@@ -1207,6 +1212,7 @@ fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Strict,
         prep_context: None,
+        prep_artifact_id: None,
         },
         OperationContext::new(Some("trace-quality-policy-strict".to_string()), None),
     )
@@ -1338,6 +1344,58 @@ fn analysis_run_nonlinear_strict_rejects_iteration_cap_exhaustion() {
         .quality_reasons
         .iter()
         .any(|reason| reason.code == QualityReasonCode::NonlinearIncrementFailure));
+}
+
+#[test]
+fn analysis_run_nonlinear_rejects_missing_prep_artifact_reference() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+
+    let error = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            prep_artifact_id: Some("prep:missing".to_string()),
+            ..AnalysisNonlinearRunOptions::production_recommended()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect_err("missing prep artifact reference should fail");
+    assert_eq!(error.error_code, "ANALYSIS_RUN_PREP_NOT_FOUND");
+}
+
+#[test]
+fn analysis_run_nonlinear_rejects_mismatched_prep_artifact_reference() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_step_like_geometry_asset();
+    let prep = crate::geometry::geometry_prep_for_analysis_op(
+        &geometry,
+        crate::geometry::GeometryPrepForAnalysisSpec::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("prep should succeed");
+
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+
+    let error = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            prep_artifact_id: Some(prep.data.prep_artifact_id.clone()),
+            ..AnalysisNonlinearRunOptions::production_recommended()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect_err("mismatched prep artifact reference should fail");
+    assert_eq!(error.error_code, "ANALYSIS_RUN_PREP_MISMATCH");
 }
 
 #[test]
@@ -1539,6 +1597,7 @@ fn analysis_run_transient_with_options_controls_timeline() {
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
         prep_context: None,
+        prep_artifact_id: None,
         },
         OperationContext::new(None, None),
     )
@@ -1648,6 +1707,7 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
             mode_count: 2,
             residual_warn_threshold: 1.0e-2,
         prep_context: None,
+        prep_artifact_id: None,
         },
         OperationContext::new(None, None),
     )

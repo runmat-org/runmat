@@ -432,12 +432,21 @@ pub fn analysis_run_modal_with_options_op(
         ));
     }
 
+    let prep_context = resolve_run_prep_context(
+        model,
+        options.prep_artifact_id.as_deref(),
+        options.prep_context,
+        ANALYSIS_RUN_MODAL_OPERATION,
+        ANALYSIS_RUN_MODAL_OP_VERSION,
+        &context,
+    )?;
+
     let modal_run = run_modal_with_options(
         model,
         backend,
         ModalSolveOptions {
             mode_count: options.mode_count,
-            prep_context: to_fea_prep_context(options.prep_context),
+            prep_context: to_fea_prep_context(prep_context),
         },
     )
     .map_err(
@@ -734,6 +743,15 @@ pub fn analysis_run_transient_with_options_op(
     let transient_run = run_transient_with_options(
         model,
         backend,
+        {
+            let prep_context = resolve_run_prep_context(
+                model,
+                options.prep_artifact_id.as_deref(),
+                options.prep_context,
+                ANALYSIS_RUN_TRANSIENT_OPERATION,
+                ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+                &context,
+            )?;
         runmat_analysis_fea::solve::transient::TransientSolveOptions {
             time_step_s: options.time_step_s,
             min_time_step_s: options.min_time_step_s,
@@ -750,7 +768,8 @@ pub fn analysis_run_transient_with_options_op(
             adapt_retry_growth_cap: options.adapt_retry_growth_cap,
             adapt_nonconverged_shrink: options.adapt_nonconverged_shrink,
             dt_bucket_rel_tolerance: options.dt_bucket_rel_tolerance,
-            prep_context: to_fea_prep_context(options.prep_context),
+            prep_context: to_fea_prep_context(prep_context),
+        }
         },
     )
     .map_err(|err| {
@@ -1139,6 +1158,15 @@ pub fn analysis_run_nonlinear_with_options_op(
     let nonlinear_run = run_nonlinear_with_options(
         model,
         backend,
+        {
+            let prep_context = resolve_run_prep_context(
+                model,
+                options.prep_artifact_id.as_deref(),
+                options.prep_context,
+                ANALYSIS_RUN_NONLINEAR_OPERATION,
+                ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+                &context,
+            )?;
         runmat_analysis_fea::solve::nonlinear::NonlinearSolveOptions {
             increment_count: options.increment_count,
             max_newton_iters: options.max_newton_iters,
@@ -1149,7 +1177,8 @@ pub fn analysis_run_nonlinear_with_options_op(
             max_line_search_backtracks: options.max_line_search_backtracks,
             line_search_reduction: options.line_search_reduction,
             tangent_refresh_interval: options.tangent_refresh_interval,
-            prep_context: to_fea_prep_context(options.prep_context),
+            prep_context: to_fea_prep_context(prep_context),
+        }
         },
     )
     .map_err(|err| {
@@ -1405,10 +1434,20 @@ pub fn analysis_run_linear_static_with_options(
     let run = run_linear_static_with_options(
         model,
         backend,
+        {
+            let prep_context = resolve_run_prep_context(
+                model,
+                options.prep_artifact_id.as_deref(),
+                options.prep_context,
+                ANALYSIS_RUN_OPERATION,
+                ANALYSIS_RUN_OP_VERSION,
+                &context,
+            )?;
         LinearStaticSolveOptions {
             preconditioner_kind: requested_preconditioner,
             algebra_backend_kind: requested_solver_backend,
-            prep_context: to_fea_prep_context(options.prep_context),
+            prep_context: to_fea_prep_context(prep_context),
+        }
         },
     )
     .map_err(|err| {
@@ -2301,6 +2340,137 @@ fn to_fea_prep_context(context: Option<AnalysisRunPrepContext>) -> Option<runmat
         mean_aspect_ratio: prep.mean_aspect_ratio,
         inverted_element_count: prep.inverted_element_count,
     })
+}
+
+fn resolve_run_prep_context(
+    model: &AnalysisModel,
+    prep_artifact_id: Option<&str>,
+    legacy_prep_context: Option<AnalysisRunPrepContext>,
+    operation: &'static str,
+    op_version: &'static str,
+    context: &OperationContext,
+) -> Result<Option<AnalysisRunPrepContext>, OperationErrorEnvelope> {
+    if prep_artifact_id.is_none() {
+        if legacy_prep_context.is_some() {
+            return Err(operation_error(
+                operation,
+                op_version,
+                context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_RUN_PREP_UNTRUSTED_CONTEXT",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                "analysis run prep_context must be referenced by prep_artifact_id",
+                BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
+            ));
+        }
+        return Ok(None);
+    }
+
+    let prep_artifact_id = prep_artifact_id.expect("checked is_some");
+    let Some(artifact) = crate::geometry::load_prep_artifact(prep_artifact_id).map_err(|err| {
+        operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_PREP_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to load prep artifact: {err}"),
+            BTreeMap::from([("prep_artifact_id".to_string(), prep_artifact_id.to_string())]),
+        )
+    })? else {
+        return Err(operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_PREP_NOT_FOUND",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("prep artifact '{}' was not found", prep_artifact_id),
+            BTreeMap::from([("prep_artifact_id".to_string(), prep_artifact_id.to_string())]),
+        ));
+    };
+
+    if artifact.schema_version != "geometry_prep_artifact/v1" {
+        return Err(operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_PREP_SCHEMA_UNSUPPORTED",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!(
+                "prep artifact schema '{}' is not supported",
+                artifact.schema_version
+            ),
+            BTreeMap::from([("prep_artifact_id".to_string(), prep_artifact_id.to_string())]),
+        ));
+    }
+
+    if artifact.source_geometry_id != model.geometry_id
+        || artifact.source_geometry_revision != model.geometry_revision
+    {
+        return Err(operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_PREP_MISMATCH",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "prep artifact geometry lineage does not match analysis model",
+            BTreeMap::from([
+                ("prep_artifact_id".to_string(), prep_artifact_id.to_string()),
+                ("model_geometry_id".to_string(), model.geometry_id.clone()),
+                (
+                    "model_geometry_revision".to_string(),
+                    model.geometry_revision.to_string(),
+                ),
+                (
+                    "prep_geometry_id".to_string(),
+                    artifact.source_geometry_id.clone(),
+                ),
+                (
+                    "prep_geometry_revision".to_string(),
+                    artifact.source_geometry_revision.to_string(),
+                ),
+            ]),
+        ));
+    }
+
+    Ok(Some(AnalysisRunPrepContext {
+        prepared_mesh_count: artifact.prep.prepared_meshes.len(),
+        prepared_node_count: artifact
+            .prep
+            .prepared_meshes
+            .iter()
+            .map(|mesh| mesh.node_count as usize)
+            .sum(),
+        prepared_element_count: artifact
+            .prep
+            .prepared_meshes
+            .iter()
+            .map(|mesh| mesh.element_count as usize)
+            .sum(),
+        mapped_region_count: artifact.prep.region_mappings.len(),
+        min_scaled_jacobian: artifact.prep.quality.min_scaled_jacobian,
+        mean_aspect_ratio: artifact.prep.quality.mean_aspect_ratio,
+        inverted_element_count: artifact.prep.quality.inverted_element_count as usize,
+    }))
 }
 
 fn run_solve_ms(run: &AnalysisRunResult) -> Option<f64> {

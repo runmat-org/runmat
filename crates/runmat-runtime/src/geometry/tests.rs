@@ -245,10 +245,15 @@ fn prep_for_analysis_op_returns_versioned_deterministic_result() {
 
     assert_eq!(first.operation, "geometry.prep_for_analysis");
     assert_eq!(first.op_version, "geometry.prep_for_analysis/v1");
-    assert_eq!(first.data, second.data);
-    assert_eq!(first.data.schema_version, "geometry-prep-for-analysis/v1");
-    assert!(!first.data.prepared_meshes.is_empty());
-    assert!(!first.data.region_mappings.is_empty());
+    assert!(!first.data.prep_artifact_id.is_empty());
+    assert_ne!(first.data.prep_artifact_id, second.data.prep_artifact_id);
+    assert_eq!(first.data.prep, second.data.prep);
+    assert_eq!(
+        first.data.prep.schema_version,
+        "geometry-prep-for-analysis/v1"
+    );
+    assert!(!first.data.prep.prepared_meshes.is_empty());
+    assert!(!first.data.prep.region_mappings.is_empty());
 }
 
 #[test]

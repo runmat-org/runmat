@@ -33,10 +33,15 @@ fn geometry_prep_for_analysis_is_deterministic_for_fixture_inputs() {
         )
         .expect("second prep should succeed");
 
-        assert_eq!(first.data, second.data);
-        assert_eq!(first.data.schema_version, "geometry-prep-for-analysis/v1");
-        assert!(first.data.quality.min_scaled_jacobian >= 0.5);
-        assert_eq!(first.data.quality.inverted_element_count, 0);
+        assert_ne!(first.data.prep_artifact_id, second.data.prep_artifact_id);
+        assert_eq!(first.data.prep, second.data.prep);
+        assert!(!first.data.prep_artifact_id.is_empty());
+        assert_eq!(
+            first.data.prep.schema_version,
+            "geometry-prep-for-analysis/v1"
+        );
+        assert!(first.data.prep.quality.min_scaled_jacobian >= 0.5);
+        assert_eq!(first.data.prep.quality.inverted_element_count, 0);
     }
 }
 
@@ -55,8 +60,8 @@ fn geometry_prep_for_analysis_preserves_region_mapping_stability() {
     )
     .expect("prep should succeed");
 
-    assert!(!prep.data.region_mappings.is_empty());
-    for mapping in &prep.data.region_mappings {
+    assert!(!prep.data.prep.region_mappings.is_empty());
+    for mapping in &prep.data.prep.region_mappings {
         assert!(!mapping.region_id.is_empty());
         assert!(!mapping.source_mesh_ids.is_empty());
         assert!(!mapping.prepared_mesh_ids.is_empty());

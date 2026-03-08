@@ -141,7 +141,8 @@ fn geometry_operation_contracts_are_v1_and_versioned() {
     .expect("prep for analysis should succeed");
     assert_eq!(prep.operation, "geometry.prep_for_analysis");
     assert_eq!(prep.op_version, "geometry.prep_for_analysis/v1");
-    assert!(!prep.data.prepared_meshes.is_empty());
+    assert!(!prep.data.prep_artifact_id.is_empty());
+    assert!(!prep.data.prep.prepared_meshes.is_empty());
     assert_eq!(svg_capture.data.format, "svg");
 
     let invalid_capture_view = geometry_capture_view_op(
@@ -294,9 +295,9 @@ fn prep_to_create_model_to_validate_flow_is_contract_stable() {
             model_id: "contract_prep_model".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
             prep_context: Some(runmat_runtime::analysis::AnalysisCreateModelPrepContext {
-                source_geometry_id: prep.data.provenance.source_geometry_id.clone(),
-                source_geometry_revision: prep.data.provenance.source_geometry_revision,
-                region_mappings: prep.data.region_mappings.clone(),
+                source_geometry_id: prep.data.prep.provenance.source_geometry_id.clone(),
+                source_geometry_revision: prep.data.prep.provenance.source_geometry_revision,
+                region_mappings: prep.data.prep.region_mappings.clone(),
             }),
         },
         OperationContext::new(Some("trace-contract-prep-flow-3".to_string()), None),
@@ -513,6 +514,7 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
             mode_count: 2,
             residual_warn_threshold: 1.0e-2,
         prep_context: None,
+        prep_artifact_id: None,
         },
         OperationContext::new(Some("trace-contract-modal-opts-3".to_string()), None),
     )
@@ -539,6 +541,7 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
             mode_count: 0,
             residual_warn_threshold: 1.0e-3,
         prep_context: None,
+        prep_artifact_id: None,
         },
         OperationContext::new(Some("trace-contract-modal-opts-4".to_string()), None),
     )
@@ -845,6 +848,24 @@ fn analysis_run_nonlinear_policy_diverges_on_harder_fixture_profile() {
 }
 
 #[test]
+fn analysis_run_nonlinear_prep_reference_errors_are_typed() {
+    let model = fixture_model(FixtureId::NonlinearAssembly);
+    let missing = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            prep_artifact_id: Some("prep:missing".to_string()),
+            ..AnalysisNonlinearRunOptions::production_recommended()
+        },
+        OperationContext::new(Some("trace-contract-prep-ref-1".to_string()), None),
+    )
+    .expect_err("missing prep artifact should fail");
+    assert_eq!(missing.operation, "analysis.run_nonlinear");
+    assert_eq!(missing.op_version, "analysis.run_nonlinear/v1");
+    assert_eq!(missing.error_code, "ANALYSIS_RUN_PREP_NOT_FOUND");
+}
+
+#[test]
 fn analysis_results_compare_contract_is_v1_and_handles_missing_run_ids() {
     let model = fixture_model(FixtureId::NonlinearAssembly);
     let baseline = analysis_run_nonlinear_op(
@@ -947,6 +968,7 @@ fn analysis_run_transient_with_options_contract_controls_execution_window() {
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
         prep_context: None,
+        prep_artifact_id: None,
         },
         OperationContext::new(Some("trace-contract-transient-opts-1".to_string()), None),
     )
@@ -1416,19 +1438,20 @@ fn analysis_run_deterministic_contract_is_stable_across_replays() {
         preconditioner_mode: PreconditionerMode::Auto,
         quality_policy: QualityPolicy::Balanced,
     prep_context: None,
+    prep_artifact_id: None,
     };
 
     let first = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        options,
+        options.clone(),
         OperationContext::new(Some("trace-contract-6a".to_string()), None),
     )
     .expect("first deterministic run should succeed");
     let second = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        options,
+        options.clone(),
         OperationContext::new(Some("trace-contract-6b".to_string()), None),
     )
     .expect("second deterministic run should succeed");
@@ -1460,7 +1483,7 @@ fn analysis_run_backend_selection_is_recorded_in_provenance() {
     let cpu = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
-        options,
+        options.clone(),
         OperationContext::new(Some("trace-contract-7a".to_string()), None),
     )
     .expect("cpu run should succeed");
@@ -1468,7 +1491,7 @@ fn analysis_run_backend_selection_is_recorded_in_provenance() {
     let gpu = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Gpu,
-        options,
+        options.clone(),
         OperationContext::new(Some("trace-contract-7b".to_string()), None),
     )
     .expect("gpu run should succeed");
@@ -1683,6 +1706,7 @@ fn strict_policy_quality_reasons_propagate_to_results_contracts() {
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Strict,
         prep_context: None,
+        prep_artifact_id: None,
         },
         OperationContext::new(Some("trace-contract-11-run".to_string()), None),
     )
@@ -1774,6 +1798,7 @@ fn balanced_and_strict_diverge_for_same_field_promotion_fallback() {
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
         prep_context: None,
+        prep_artifact_id: None,
         },
         OperationContext::new(Some("trace-contract-12-balanced".to_string()), None),
     )
@@ -1788,6 +1813,7 @@ fn balanced_and_strict_diverge_for_same_field_promotion_fallback() {
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Strict,
         prep_context: None,
+        prep_artifact_id: None,
         },
         OperationContext::new(Some("trace-contract-12-strict".to_string()), None),
     )
@@ -1860,6 +1886,7 @@ fn balanced_and_strict_divergence_propagates_through_results_endpoints() {
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
         prep_context: None,
+        prep_artifact_id: None,
         },
         OperationContext::new(Some("trace-contract-13-balanced-run".to_string()), None),
     )
@@ -1873,6 +1900,7 @@ fn balanced_and_strict_divergence_propagates_through_results_endpoints() {
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Strict,
         prep_context: None,
+        prep_artifact_id: None,
         },
         OperationContext::new(Some("trace-contract-13-strict-run".to_string()), None),
     )
