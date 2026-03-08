@@ -233,6 +233,55 @@ jobs:
               console.log(body);
             }
 
+  nonlinear-conformance:
+    if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)
+    name: nonlinear-conformance
+    runs-on: ["self-hosted", "linux", "gpu"]
+    env:
+      RUST_BACKTRACE: 1
+      RUNMAT_ANALYSIS_ENFORCE_BASELINE_ON_PROTECTED: "true"
+      RUNMAT_ANALYSIS_PROTECTED_BRANCHES: "main,master,release"
+      RUNMAT_ANALYSIS_BASELINE_DIR: target/runmat-analysis-artifacts/rolling
+      RUNMAT_ANALYSIS_BASELINE_WINDOW: "12"
+      RUNMAT_ANALYSIS_MAX_SLOWDOWN_RATIO: "1.35"
+      RUNMAT_ANALYSIS_MAX_COST_SLOWDOWN_RATIO: "1.5"
+      RUNMAT_ANALYSIS_MIN_SPEEDUP_RETENTION: "0.8"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: 1.90.0
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install Linux system dependencies (BLAS/LAPACK, ZMQ, OpenSSL)
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            libopenblas-dev liblapack-dev libssl-dev \
+            libzmq3-dev pkg-config ca-certificates
+
+      - name: Run nonlinear benchmark conformance
+        run: cargo test -p runmat-runtime --test analysis
+
+      - name: Summarize nonlinear report
+        if: always()
+        run: |
+          python3 scripts/summarize_analysis_report.py | tee nonlinear-summary.md
+          cat nonlinear-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload nonlinear benchmark artifacts
+        if: always() && (failure() || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
+        uses: actions/upload-artifact@v4
+        with:
+          name: nonlinear-benchmark-${{ github.run_id }}
+          path: |
+            target/runmat-analysis-artifacts/analysis_benchmark_report.json
+            target/runmat-analysis-artifacts/rolling/*.json
+            nonlinear-summary.md
+          if-no-files-found: warn
+
   cross-build:
     # Build all release targets so failures are caught before tagging
     if: github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork == true)

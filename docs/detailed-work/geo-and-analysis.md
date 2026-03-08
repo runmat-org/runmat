@@ -955,6 +955,35 @@ Harness override environment variables:
 - `RUNMAT_NONLINEAR_LINE_SEARCH_REDUCTION`
 - `RUNMAT_NONLINEAR_TANGENT_REFRESH_INTERVAL`
 
+### Nonlinear CI Governance
+
+- CI job `nonlinear-conformance` runs `cargo test -p runmat-runtime --test analysis` on Linux GPU runners.
+- Baseline enforcement is branch-aware via:
+  - `RUNMAT_ANALYSIS_ENFORCE_BASELINE_ON_PROTECTED=true`
+  - `RUNMAT_ANALYSIS_PROTECTED_BRANCHES=main,master,release`
+- Artifacts are uploaded only when useful:
+  - test failure, or
+  - protected branch push (`main` / `release/*`).
+- CI emits a compact nonlinear summary from `analysis_benchmark_report.json` into the job summary using `scripts/summarize_analysis_report.py`.
+
+### Nonlinear Regression Triage
+
+Use this quick map from failing gate to likely fix direction:
+
+- `nonlinear_failed_increments` > 0:
+  - likely under-iterated solve or unstable step progression,
+  - first try increasing `RUNMAT_NONLINEAR_MAX_NEWTON_ITERS`, then enable/increase line-search backtracks.
+- `nonlinear_stress_line_search_backtracks` out of band:
+  - too low (often `0`): line search disabled or ineffective,
+  - too high: overly aggressive steps; reduce line-search reduction aggressiveness or refresh tangent more frequently.
+- `nonlinear_stress_tangent_rebuild_count` above ceiling:
+  - indicates repeated rebuild churn; check tangent refresh cadence and increment progression.
+- `nonlinear_*_converged_increments` below target:
+  - ensure increment count matches fixture intent and verify no env override reduced increments.
+- `gpu_speedup_ratio` retention regression:
+  - inspect `gpu_solver_solve_ms` and `gpu_solver_prepared_build_ms` drift,
+  - check provider availability/fallback events before adjusting thresholds.
+
 ## Numeric Tolerance Policy
 
 - CPU vs CPU deterministic replay: exact match for topology + metadata; numeric fields within `1e-12` relative tolerance.
@@ -1150,6 +1179,8 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-08: Added nonlinear CI governance automation with a dedicated `nonlinear-conformance` workflow job (Linux GPU) that runs `--test analysis`, enables branch-aware baseline enforcement defaults on protected branches, emits a concise nonlinear benchmark summary from artifacts, and uploads nonlinear artifacts only when useful (failure or protected branch pushes).
+- 2026-03-08: Added nonlinear observability event logging in runtime (`analysis.run_nonlinear`) with structured run-outcome fields (failed increments, iteration cap usage, backtracks, tangent rebuilds, max residual/increment norms, publishability/status) so local OTEL pipelines can surface nonlinear regressions outside test logs.
 - 2026-03-08: Calibrated nonlinear presets and conformance gates from sweep evidence by introducing `AnalysisNonlinearRunOptions::production_recommended()` (deterministic fp64 balanced, 24 increments baseline / stress fixture override 32, max_newton_iters=28, line_search=true, max_backtracks=8, tangent_refresh_interval=2), wiring harness defaults to that preset, and validating against benchmark artifacts where default provider runs held publishability with strong speedups (`nonlinear_assembly_gpu_provider` ~2.65x, `nonlinear_assembly_stress_gpu_provider` ~4.37x).
 - 2026-03-08: Added nonlinear tuning override knobs for harness sweeps (`RUNMAT_NONLINEAR_*`) and tightened must-not-regress nonlinear threshold gates (exact converged increment targets, failed increment ceilings, required line-search activity bounds, tangent rebuild upper bound), with sweep confirmation that disabling line search triggers intended gate failures (increment failures and elevated tangent rebuilds).
 - 2026-03-08: Expanded nonlinear policy contract/unit coverage by asserting explicit policy divergence under induced increment-cap pressure: exploratory remains publishable while balanced/strict degrade with `NonlinearIncrementFailure`, and added nonlinear preset ordering tests covering coarse/balanced/production/high-accuracy tradeoffs.

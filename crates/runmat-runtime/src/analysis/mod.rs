@@ -512,6 +512,39 @@ pub fn analysis_run_modal_with_options_op(
         },
     };
 
+    if let Some(nonlinear) = result.nonlinear_results.as_ref() {
+        let event = format!(
+            "analysis.run_nonlinear outcome run_id={} model_id={} backend={:?} run_status={:?} publishable={} failed_increments={} max_iteration_count={} line_search_backtracks={} tangent_rebuild_count={} max_residual_norm={} max_increment_norm={} quality_reason_count={}",
+            result.run_id,
+            model.model_id.0,
+            backend,
+            result.run_status,
+            result.publishable,
+            nonlinear.failed_increments,
+            nonlinear.iteration_counts.iter().copied().max().unwrap_or(0),
+            nonlinear.line_search_backtracks,
+            nonlinear.tangent_rebuild_count,
+            nonlinear
+                .residual_norms
+                .iter()
+                .copied()
+                .reduce(f64::max)
+                .unwrap_or(0.0),
+            nonlinear
+                .increment_norms
+                .iter()
+                .copied()
+                .reduce(f64::max)
+                .unwrap_or(0.0),
+            result.quality_reasons.len()
+        );
+        if matches!(result.run_status, RunStatus::Degraded | RunStatus::Rejected) {
+            tracing::warn!(target: "runmat_analysis", "{event}");
+        } else {
+            tracing::info!(target: "runmat_analysis", "{event}");
+        }
+    }
+
     storage::persist_run_result(&result).map_err(|err| {
         operation_error(
             ANALYSIS_RUN_MODAL_OPERATION,
