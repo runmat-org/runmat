@@ -123,6 +123,7 @@ fn analysis_create_model_returns_v1_envelope() {
         AnalysisCreateModelIntentSpec {
             model_id: "model_from_geo".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
+        prep_context: None,
         },
         OperationContext::new(Some("trace-create-1".to_string()), None),
     )
@@ -211,6 +212,7 @@ fn analysis_create_model_maps_invalid_intent_error() {
         AnalysisCreateModelIntentSpec {
             model_id: "   ".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
+        prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -230,6 +232,7 @@ fn analysis_create_model_supports_nonlinear_profile_template() {
         AnalysisCreateModelIntentSpec {
             model_id: "nonlinear_model".to_string(),
             profile: AnalysisCreateModelProfile::NonlinearStructural,
+        prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -241,6 +244,69 @@ fn analysis_create_model_supports_nonlinear_profile_template() {
 }
 
 #[test]
+fn analysis_create_model_accepts_prep_context_and_validates_model() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_step_like_geometry_asset();
+    let prep = crate::geometry::geometry_prep_for_analysis_op(
+        &geometry,
+        crate::geometry::GeometryPrepForAnalysisSpec::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("prep for analysis should succeed");
+
+    let created = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "prep_model".to_string(),
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            prep_context: Some(AnalysisCreateModelPrepContext {
+                source_geometry_id: prep.data.provenance.source_geometry_id.clone(),
+                source_geometry_revision: prep.data.provenance.source_geometry_revision,
+                region_mappings: prep.data.region_mappings.clone(),
+            }),
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("create model with prep context should succeed");
+
+    analysis_validate(
+        &created.data,
+        geometry.units,
+        &ReferenceFrame::Global,
+        OperationContext::new(None, None),
+    )
+    .expect("prep-aware created model should validate");
+    assert_eq!(created.data.boundary_conditions[0].region_id, "region_root");
+    assert_eq!(created.data.loads[0].region_id, "region_tip");
+    assert!(created
+        .data
+        .material_assignments
+        .iter()
+        .all(|assignment| assignment.confidence == runmat_analysis_core::EvidenceConfidence::Verified));
+}
+
+#[test]
+fn analysis_create_model_rejects_mismatched_prep_context() {
+    let _guard = analysis_test_guard();
+    let geometry = sample_step_like_geometry_asset();
+    let error = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "bad_prep_model".to_string(),
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            prep_context: Some(AnalysisCreateModelPrepContext {
+                source_geometry_id: "geo:other".to_string(),
+                source_geometry_revision: geometry.revision,
+                region_mappings: Vec::new(),
+            }),
+        },
+        OperationContext::new(None, None),
+    )
+    .expect_err("mismatched prep context should fail");
+    assert_eq!(error.error_code, "ANALYSIS_CREATE_MODEL_PREP_MISMATCH");
+}
+
+#[test]
 fn analysis_create_model_supports_transient_profile_template() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
@@ -249,6 +315,7 @@ fn analysis_create_model_supports_transient_profile_template() {
         AnalysisCreateModelIntentSpec {
             model_id: "transient_model".to_string(),
             profile: AnalysisCreateModelProfile::TransientStructural,
+        prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -268,6 +335,7 @@ fn analysis_create_model_supports_modal_profile_template() {
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
+        prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -287,6 +355,7 @@ fn analysis_create_model_infers_materials_and_assignments_from_geometry_evidence
         AnalysisCreateModelIntentSpec {
             model_id: "model_from_step_like".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
+        prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -1488,6 +1557,7 @@ fn analysis_run_modal_returns_native_modal_result() {
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_run".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
+        prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -1555,6 +1625,7 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_run_opts".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
+        prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -1593,6 +1664,7 @@ fn analysis_results_include_modal_payload_for_modal_runs() {
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_results".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
+        prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -1646,6 +1718,7 @@ fn analysis_results_query_can_exclude_modal_payload() {
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_results_filter".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
+        prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -1685,6 +1758,7 @@ fn analysis_results_query_rejects_unknown_modal_mode_index() {
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_results_index".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
+        prep_context: None,
         },
         OperationContext::new(None, None),
     )

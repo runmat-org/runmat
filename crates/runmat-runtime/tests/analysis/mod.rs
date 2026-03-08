@@ -199,6 +199,7 @@ fn synthesized_nonlinear_model() -> AnalysisModel {
         AnalysisCreateModelIntentSpec {
             model_id: "nonlinear_created_fixture_model".to_string(),
             profile: AnalysisCreateModelProfile::NonlinearStructural,
+        prep_context: None,
         },
         OperationContext::new(Some("trace-create-model-nonlinear".to_string()), None),
     )

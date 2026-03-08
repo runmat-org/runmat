@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisModel, AnalysisModelId, AnalysisStep,
@@ -23,8 +23,9 @@ mod promotion;
 pub mod storage;
 
 pub use contracts::{
-    AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisResultsCompareData,
-    AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisModalRunOptions,
+    AnalysisCreateModelIntentSpec, AnalysisCreateModelPrepContext, AnalysisCreateModelProfile,
+    AnalysisResultsCompareData, AnalysisResultsCompareQuery, AnalysisResultsData,
+    AnalysisModalRunOptions,
     AnalysisNonlinearRunOptions, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunKind, AnalysisRunOptions, AnalysisRunResult, AnalysisTrendKindSummary,
     AnalysisTrendsData, AnalysisTrendsQuery, AnalysisTransientRunOptions, AnalysisValidateResult,
@@ -107,15 +108,125 @@ pub fn analysis_create_model_op(
         ));
     }
 
-    let fixed_region_id = select_fixed_region_id(geometry)
+    let prep_mapped_region_ids = if let Some(prep) = intent.prep_context.as_ref() {
+        if prep.source_geometry_id != geometry.geometry_id
+            || prep.source_geometry_revision != geometry.revision
+        {
+            return Err(operation_error(
+                ANALYSIS_CREATE_MODEL_OPERATION,
+                ANALYSIS_CREATE_MODEL_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_CREATE_MODEL_PREP_MISMATCH",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                "analysis model prep context does not match geometry id/revision",
+                BTreeMap::from([
+                    ("geometry_id".to_string(), geometry.geometry_id.clone()),
+                    ("geometry_revision".to_string(), geometry.revision.to_string()),
+                    (
+                        "prep_geometry_id".to_string(),
+                        prep.source_geometry_id.clone(),
+                    ),
+                    (
+                        "prep_geometry_revision".to_string(),
+                        prep.source_geometry_revision.to_string(),
+                    ),
+                ]),
+            ));
+        }
+
+        let mesh_id_set = geometry
+            .meshes
+            .iter()
+            .map(|mesh| mesh.mesh_id.as_str())
+            .collect::<HashSet<_>>();
+        let region_id_set = geometry
+            .regions
+            .iter()
+            .map(|region| region.region_id.as_str())
+            .collect::<HashSet<_>>();
+        for mapping in &prep.region_mappings {
+            if !region_id_set.is_empty() && !region_id_set.contains(mapping.region_id.as_str()) {
+                return Err(operation_error(
+                    ANALYSIS_CREATE_MODEL_OPERATION,
+                    ANALYSIS_CREATE_MODEL_OP_VERSION,
+                    &context,
+                    OperationErrorSpec {
+                        error_code: "ANALYSIS_CREATE_MODEL_PREP_REGION_NOT_FOUND",
+                        error_type: OperationErrorType::Validation,
+                        retryable: false,
+                        severity: OperationErrorSeverity::Error,
+                    },
+                    format!(
+                        "prep context region '{}' is not present in geometry regions",
+                        mapping.region_id
+                    ),
+                    BTreeMap::from([("region_id".to_string(), mapping.region_id.clone())]),
+                ));
+            }
+            if mapping.source_mesh_ids.is_empty() || mapping.prepared_mesh_ids.is_empty() {
+                return Err(operation_error(
+                    ANALYSIS_CREATE_MODEL_OPERATION,
+                    ANALYSIS_CREATE_MODEL_OP_VERSION,
+                    &context,
+                    OperationErrorSpec {
+                        error_code: "ANALYSIS_CREATE_MODEL_PREP_INVALID_MAPPING",
+                        error_type: OperationErrorType::Input,
+                        retryable: false,
+                        severity: OperationErrorSeverity::Error,
+                    },
+                    "prep context mapping requires non-empty source/prepared mesh ids",
+                    BTreeMap::from([("region_id".to_string(), mapping.region_id.clone())]),
+                ));
+            }
+            for source_mesh_id in &mapping.source_mesh_ids {
+                if !mesh_id_set.contains(source_mesh_id.as_str()) {
+                    return Err(operation_error(
+                        ANALYSIS_CREATE_MODEL_OPERATION,
+                        ANALYSIS_CREATE_MODEL_OP_VERSION,
+                        &context,
+                        OperationErrorSpec {
+                            error_code: "ANALYSIS_CREATE_MODEL_PREP_MESH_NOT_FOUND",
+                            error_type: OperationErrorType::Validation,
+                            retryable: false,
+                            severity: OperationErrorSeverity::Error,
+                        },
+                        format!(
+                            "prep context source mesh '{}' is not present in geometry",
+                            source_mesh_id
+                        ),
+                        BTreeMap::from([("source_mesh_id".to_string(), source_mesh_id.clone())]),
+                    ));
+                }
+            }
+        }
+
+        Some(
+            prep.region_mappings
+                .iter()
+                .map(|mapping| mapping.region_id.clone())
+                .collect::<HashSet<_>>(),
+        )
+    } else {
+        None
+    };
+
+    let fixed_region_id = select_fixed_region_id(geometry, prep_mapped_region_ids.as_ref())
         .or_else(|| geometry.regions.first().map(|region| region.region_id.clone()))
         .unwrap_or_else(|| "region_default".to_string());
-    let load_region_id = select_load_region_id(geometry)
+    let load_region_id = select_load_region_id(geometry, prep_mapped_region_ids.as_ref())
         .or_else(|| geometry.regions.last().map(|region| region.region_id.clone()))
         .unwrap_or_else(|| fixed_region_id.clone());
 
     let inferred_materials = infer_material_models(geometry);
-    let inferred_assignments = infer_material_assignments(geometry, &inferred_materials);
+    let inferred_assignments = infer_material_assignments(
+        geometry,
+        &inferred_materials,
+        prep_mapped_region_ids.as_ref(),
+    );
 
     let (default_bc, default_load, default_step) = match intent.profile {
         AnalysisCreateModelProfile::LinearStaticStructural => (
@@ -2253,10 +2364,18 @@ fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
     materials
 }
 
-fn select_fixed_region_id(geometry: &GeometryAsset) -> Option<String> {
+fn select_fixed_region_id(
+    geometry: &GeometryAsset,
+    prep_regions: Option<&HashSet<String>>,
+) -> Option<String> {
     geometry
         .regions
         .iter()
+        .filter(|region| {
+            prep_regions
+                .map(|mapped| mapped.contains(&region.region_id))
+                .unwrap_or(true)
+        })
         .find(|region| {
             let key = format!(
                 "{} {}",
@@ -2275,10 +2394,18 @@ fn select_fixed_region_id(geometry: &GeometryAsset) -> Option<String> {
         .map(|region| region.region_id.clone())
 }
 
-fn select_load_region_id(geometry: &GeometryAsset) -> Option<String> {
+fn select_load_region_id(
+    geometry: &GeometryAsset,
+    prep_regions: Option<&HashSet<String>>,
+) -> Option<String> {
     geometry
         .regions
         .iter()
+        .filter(|region| {
+            prep_regions
+                .map(|mapped| mapped.contains(&region.region_id))
+                .unwrap_or(true)
+        })
         .find(|region| {
             let key = format!(
                 "{} {}",
@@ -2300,6 +2427,7 @@ fn select_load_region_id(geometry: &GeometryAsset) -> Option<String> {
 fn infer_material_assignments(
     geometry: &GeometryAsset,
     materials: &[MaterialModel],
+    prep_regions: Option<&HashSet<String>>,
 ) -> Vec<MaterialAssignment> {
     let default_material = materials
         .first()
@@ -2339,7 +2467,7 @@ fn infer_material_assignments(
             default_material.clone()
         };
 
-        let confidence = if geometry
+        let evidence_confidence = if geometry
             .source_geometry
             .material_evidence
             .iter()
@@ -2355,6 +2483,14 @@ fn infer_material_assignments(
             EvidenceConfidence::Probable
         } else {
             EvidenceConfidence::Inferred
+        };
+        let confidence = if prep_regions
+            .map(|mapped| mapped.contains(&region.region_id))
+            .unwrap_or(false)
+        {
+            EvidenceConfidence::Verified
+        } else {
+            evidence_confidence
         };
 
         assignments.push(MaterialAssignment {

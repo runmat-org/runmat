@@ -196,6 +196,7 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
         AnalysisCreateModelIntentSpec {
             model_id: "contract_generated_model".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
+        prep_context: None,
         },
         OperationContext::new(Some("trace-contract-create-2".to_string()), None),
     )
@@ -209,6 +210,7 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
         AnalysisCreateModelIntentSpec {
             model_id: "".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
+        prep_context: None,
         },
         OperationContext::new(Some("trace-contract-create-3".to_string()), None),
     )
@@ -222,6 +224,7 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
         AnalysisCreateModelIntentSpec {
             model_id: "contract_modal_model".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
+        prep_context: None,
         },
         OperationContext::new(Some("trace-contract-create-4-modal".to_string()), None),
     )
@@ -235,6 +238,7 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
         AnalysisCreateModelIntentSpec {
             model_id: "contract_transient_model".to_string(),
             profile: AnalysisCreateModelProfile::TransientStructural,
+        prep_context: None,
         },
         OperationContext::new(Some("trace-contract-create-4-transient".to_string()), None),
     )
@@ -251,6 +255,7 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
         AnalysisCreateModelIntentSpec {
             model_id: "contract_nonlinear_model".to_string(),
             profile: AnalysisCreateModelProfile::NonlinearStructural,
+        prep_context: None,
         },
         OperationContext::new(Some("trace-contract-create-4-nonlinear".to_string()), None),
     )
@@ -261,6 +266,53 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
         nonlinear.data.steps[0].kind,
         runmat_analysis_core::AnalysisStepKind::Nonlinear
     );
+}
+
+#[test]
+fn prep_to_create_model_to_validate_flow_is_contract_stable() {
+    let geometry = geometry_load_op(
+        "/assembly.step",
+        SIMPLE_STEP.as_bytes(),
+        OperationContext::new(Some("trace-contract-prep-flow-1".to_string()), None),
+    )
+    .expect("geometry load should succeed");
+    let prep = geometry_prep_for_analysis_op(
+        &geometry.data,
+        GeometryPrepForAnalysisSpec {
+            profile: GeometryPrepProfile::AnalysisReady,
+            target_element_budget: 120_000,
+        },
+        OperationContext::new(Some("trace-contract-prep-flow-2".to_string()), None),
+    )
+    .expect("prep should succeed");
+    assert_eq!(prep.operation, "geometry.prep_for_analysis");
+    assert_eq!(prep.op_version, "geometry.prep_for_analysis/v1");
+
+    let created = analysis_create_model_op(
+        &geometry.data,
+        AnalysisCreateModelIntentSpec {
+            model_id: "contract_prep_model".to_string(),
+            profile: AnalysisCreateModelProfile::LinearStaticStructural,
+            prep_context: Some(runmat_runtime::analysis::AnalysisCreateModelPrepContext {
+                source_geometry_id: prep.data.provenance.source_geometry_id.clone(),
+                source_geometry_revision: prep.data.provenance.source_geometry_revision,
+                region_mappings: prep.data.region_mappings.clone(),
+            }),
+        },
+        OperationContext::new(Some("trace-contract-prep-flow-3".to_string()), None),
+    )
+    .expect("create model should succeed");
+
+    let validated = analysis_validate(
+        &created.data,
+        created.data.units,
+        &runmat_analysis_core::ReferenceFrame::Global,
+        OperationContext::new(Some("trace-contract-prep-flow-4".to_string()), None),
+    )
+    .expect("validate should succeed");
+    assert_eq!(validated.operation, "analysis.validate");
+    assert_eq!(validated.op_version, "analysis.validate/v1");
+    assert!(validated.data.valid);
 }
 
 #[test]
@@ -277,6 +329,7 @@ fn analysis_create_model_infers_materials_from_step_metadata_contract() {
         AnalysisCreateModelIntentSpec {
             model_id: "contract_step_model".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
+        prep_context: None,
         },
         OperationContext::new(Some("trace-contract-create-step-2".to_string()), None),
     )
@@ -373,6 +426,7 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
         AnalysisCreateModelIntentSpec {
             model_id: "contract_modal_model".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
+        prep_context: None,
         },
         OperationContext::new(Some("trace-contract-modal-2".to_string()), None),
     )
@@ -443,6 +497,7 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
         AnalysisCreateModelIntentSpec {
             model_id: "contract_modal_model_opts".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
+        prep_context: None,
         },
         OperationContext::new(Some("trace-contract-modal-opts-2".to_string()), None),
     )
@@ -1129,6 +1184,7 @@ fn analysis_results_modal_query_controls_are_typed() {
         AnalysisCreateModelIntentSpec {
             model_id: "contract_modal_results_model".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
+        prep_context: None,
         },
         OperationContext::new(Some("trace-contract-modal-results-2".to_string()), None),
     )

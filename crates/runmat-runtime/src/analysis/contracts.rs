@@ -1,6 +1,7 @@
 use runmat_analysis_core::AnalysisField;
 use runmat_analysis_fea::diagnostics::FeaDiagnostic;
 use runmat_analysis_fea::{ComputeBackend, FeaRunResult};
+use runmat_meshing_core::RegionMeshMapping;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -12,6 +13,15 @@ pub struct AnalysisValidateResult {
 pub struct AnalysisCreateModelIntentSpec {
     pub model_id: String,
     pub profile: AnalysisCreateModelProfile,
+    #[serde(default)]
+    pub prep_context: Option<AnalysisCreateModelPrepContext>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisCreateModelPrepContext {
+    pub source_geometry_id: String,
+    pub source_geometry_revision: u32,
+    pub region_mappings: Vec<RegionMeshMapping>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

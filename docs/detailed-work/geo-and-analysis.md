@@ -1042,6 +1042,29 @@ Backward-compat fallback behavior:
   - optional summary fields default to `null`.
 - Prefer summary fields for stable dashboarding/gating; use full nonlinear payloads for deeper diagnostics and debug tooling.
 
+### Prep-Aware Model Synthesis Flow
+
+For geometry assets that have been meshing-prepared, prefer this flow:
+
+1. `geometry.load/v1`
+2. `geometry.prep_for_analysis/v1`
+3. `analysis.create_model/v1` with `prep_context`
+4. `analysis.validate/v1`
+
+`analysis.create_model` prep-context behavior:
+
+- verifies prep geometry id/revision matches the target geometry,
+- validates prep region/mesh mappings reference known geometry entities,
+- prioritizes prep-mapped regions for default boundary/load placement,
+- upgrades material-assignment confidence on prep-mapped regions.
+
+Typed prep-context error families:
+
+- `ANALYSIS_CREATE_MODEL_PREP_MISMATCH`
+- `ANALYSIS_CREATE_MODEL_PREP_REGION_NOT_FOUND`
+- `ANALYSIS_CREATE_MODEL_PREP_MESH_NOT_FOUND`
+- `ANALYSIS_CREATE_MODEL_PREP_INVALID_MAPPING`
+
 ### Artifact Retention and Migration Guarantees
 
 Runtime artifact persistence now supports compatibility-aware loading for both:
@@ -1269,6 +1292,8 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-08: Completed prep-aware analysis model integration by extending `analysis.create_model/v1` intent with optional `prep_context` (source geometry id/revision + region mappings), adding typed prep-consistency validation/error mapping, and prioritizing prep-mapped regions during default BC/load placement plus assignment-confidence promotion.
+- 2026-03-08: Added end-to-end contract coverage for `geometry.load -> geometry.prep_for_analysis -> analysis.create_model -> analysis.validate` and runtime unit tests for prep-context success/mismatch paths, ensuring deterministic prep-to-model flow behavior.
 - 2026-03-08: Started Phase-7 meshing foundation by adding `runmat-meshing-core` with deterministic analysis-prep contracts (`MeshingOptions`, prepared mesh descriptors, region mapping provenance, quality report) and a constrained deterministic meshing MVP (`prepare_geometry_for_analysis`) for existing mesh-derived geometry assets.
 - 2026-03-08: Added new runtime operation contract `geometry.prep_for_analysis/v1` (spec + typed error mapping) to bridge `GeometryAsset` into analysis-ready meshing-prep artifacts, with unit + operation-contract + dedicated conformance tests covering determinism and mapping stability across STL/STEP fixture inputs.
 - 2026-03-08: Added release-readiness governance for nonlinear analysis via `scripts/release_readiness_nonlinear.py` with typed verdict output (`analysis-release-readiness/v1`: `pass`/`warn`/`fail`), reason codes, machine-readable artifact emission, and protected-branch fail semantics driven by conformance/trend/artifact verification signals.
