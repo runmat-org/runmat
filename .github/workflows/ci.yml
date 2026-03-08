@@ -318,6 +318,11 @@ jobs:
         if: always()
         env:
           RUNMAT_RELEASE_READINESS_MAX_SLOWDOWN_RATIO: "1.25"
+          RUNMAT_RELEASE_READINESS_PREP_WARN_ARTIFACT_COUNT: "64"
+          RUNMAT_RELEASE_READINESS_PREP_FAIL_ARTIFACT_COUNT: "128"
+          RUNMAT_RELEASE_READINESS_PREP_WARN_P95_AGE_SECONDS: "604800"
+          RUNMAT_RELEASE_READINESS_PREP_FAIL_P95_AGE_SECONDS: "1209600"
+          RUNMAT_RELEASE_READINESS_PREP_MAX_REJECT_RATE: "0.25"
         run: |
           python3 scripts/release_readiness_nonlinear.py | tee nonlinear-release-readiness.md
           cat nonlinear-release-readiness.md >> "$GITHUB_STEP_SUMMARY"

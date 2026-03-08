@@ -1012,6 +1012,10 @@ Release readiness criteria (default):
 - Trend guard:
   - nonlinear fixture `gpu_run_ms` slowdown ratio must stay below `RUNMAT_RELEASE_READINESS_MAX_SLOWDOWN_RATIO` vs rolling median baseline.
   - missing trend history is tolerated on non-protected branches by default; set `RUNMAT_RELEASE_READINESS_REQUIRE_TRENDS=true` to force warning behavior.
+- Prep artifact health guard:
+  - prep artifact count must remain below configured warn/fail thresholds (`RUNMAT_RELEASE_READINESS_PREP_WARN_ARTIFACT_COUNT`, `RUNMAT_RELEASE_READINESS_PREP_FAIL_ARTIFACT_COUNT`),
+  - prep artifact p95 age must remain below configured warn/fail thresholds (`RUNMAT_RELEASE_READINESS_PREP_WARN_P95_AGE_SECONDS`, `RUNMAT_RELEASE_READINESS_PREP_FAIL_P95_AGE_SECONDS`),
+  - prep reject-rate guard (`PREP_REJECT_RATE_HIGH`) compares `(stale_reject + mismatch_reject)/created` against `RUNMAT_RELEASE_READINESS_PREP_MAX_REJECT_RATE` when counters are provided.
 - Protected branches:
   - `fail` reasons block release,
   - `warn` reasons are surfaced and should be triaged before tagging.
@@ -1349,6 +1353,8 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-08: Integrated prep artifact health into nonlinear release readiness by extending `release_readiness_nonlinear.py` with typed prep reason codes (`PREP_SLO_COUNT_EXCEEDED`, `PREP_SLO_AGE_EXCEEDED`, `PREP_REJECT_RATE_HIGH`, `PREP_HEALTH_MISSING`) and branch-aware severity behavior, so prep lifecycle SLO regressions now influence readiness verdicts alongside conformance/trend/artifact checks.
+- 2026-03-08: Added readiness unit coverage for prep-health pathways (count/age warn+fail and reject-rate signaling) and CI default prep-health thresholds for release readiness evaluation (`RUNMAT_RELEASE_READINESS_PREP_*`).
 - 2026-03-08: Added prep artifact health observability with `geometry.prep_artifact_health/v1`, exposing lifecycle counters and age distribution summaries, plus runtime lifecycle event emission for prep artifact create/load/prune and stale/mismatch rejection outcomes.
 - 2026-03-08: Added CI prep artifact SLO summary (`scripts/summarize_prep_artifacts.py`) and workflow integration with configurable warn/fail thresholds for artifact count and p95 artifact age, including summary publication in CI step output.
 - 2026-03-08: Added prep artifact lifecycle governance with retention pruning controls (`RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS`, `RUNMAT_GEOMETRY_PREP_MAX_ARTIFACTS_PER_GEOMETRY`, `RUNMAT_GEOMETRY_PREP_MAX_AGE_SECONDS`) applied on prep artifact persist/load across in-memory and optional filesystem-backed prep stores.
