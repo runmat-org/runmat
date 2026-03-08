@@ -13,6 +13,7 @@ pub enum FixtureId {
     ModalLarge,
     TransientLong,
     TransientShock,
+    NonlinearAssembly,
     MultiMaterialAssembly,
     MissingMaterials,
     MissingLoads,
@@ -26,6 +27,7 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
         FixtureId::ModalLarge => modal_large_fixture(),
         FixtureId::TransientLong => transient_long_fixture(),
         FixtureId::TransientShock => transient_shock_fixture(),
+        FixtureId::NonlinearAssembly => nonlinear_assembly_fixture(),
         FixtureId::MultiMaterialAssembly => multi_material_assembly(),
         FixtureId::MissingMaterials => missing_materials(),
         FixtureId::MissingLoads => missing_loads(),
@@ -158,6 +160,16 @@ fn transient_shock_fixture() -> AnalysisModel {
     model.steps = vec![AnalysisStep {
         step_id: "transient_shock_1".to_string(),
         kind: AnalysisStepKind::Transient,
+    }];
+    model
+}
+
+fn nonlinear_assembly_fixture() -> AnalysisModel {
+    let mut model = transient_shock_fixture();
+    model.model_id = AnalysisModelId("nonlinear_assembly_fixture".to_string());
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_assembly_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
     }];
     model
 }

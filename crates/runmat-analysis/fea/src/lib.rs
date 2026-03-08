@@ -22,6 +22,7 @@ use crate::{
         backend::{build_backend, kind::LinearAlgebraBackendKind},
         linear::solve_linear_system,
         modal::solve_modal_system,
+        nonlinear::{solve_nonlinear_system, NonlinearSolveOptions},
         preconditioner::SpdPreconditionerKind,
         transient::{solve_transient_system, TransientSolveOptions},
     },
@@ -78,6 +79,15 @@ pub struct FeaTransientRunResult {
     pub time_points_s: Vec<f64>,
     pub displacement_snapshots: Vec<AnalysisField>,
     pub residual_norms: Vec<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeaNonlinearRunResult {
+    pub run: FeaRunResult,
+    pub load_factors: Vec<f64>,
+    pub displacement_snapshots: Vec<AnalysisField>,
+    pub residual_norms: Vec<f64>,
+    pub iteration_counts: Vec<usize>,
 }
 
 impl Default for LinearStaticSolveOptions {
@@ -299,6 +309,78 @@ pub fn run_transient_with_options(
         time_points_s: transient.time_points_s,
         displacement_snapshots,
         residual_norms: transient.residual_norms,
+    })
+}
+
+pub fn run_nonlinear(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+) -> Result<FeaNonlinearRunResult, FeaRunError> {
+    run_nonlinear_with_options(model, backend, NonlinearSolveOptions::default())
+}
+
+pub fn run_nonlinear_with_options(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: NonlinearSolveOptions,
+) -> Result<FeaNonlinearRunResult, FeaRunError> {
+    validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
+
+    let summary = assemble_linear_system(model);
+    let nonlinear = solve_nonlinear_system(&summary, options, backend);
+    let mut diagnostics = nonlinear.diagnostics.clone();
+    diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
+
+    let displacement = nonlinear
+        .displacement_snapshots
+        .last()
+        .cloned()
+        .unwrap_or_else(|| vec![0.0; summary.dof_count.max(3)]);
+    let von_mises = displacement
+        .iter()
+        .map(|value| value.abs())
+        .fold(0.0_f64, f64::max)
+        * 1.0e11;
+
+    let run = FeaRunResult {
+        backend,
+        solver_backend: nonlinear.solver_backend,
+        solver_device_apply_k_ratio: if nonlinear.device_apply_k_attempt_count == 0 {
+            0.0
+        } else {
+            nonlinear.device_apply_k_count as f64 / nonlinear.device_apply_k_attempt_count as f64
+        },
+        solver_method: nonlinear.solver_method,
+        preconditioner: nonlinear.preconditioner,
+        solver_host_sync_count: nonlinear.solver_host_sync_count,
+        diagnostics,
+        displacement_field: AnalysisField::host_f64(
+            "displacement",
+            vec![displacement.len()],
+            displacement,
+        ),
+        von_mises_field: AnalysisField::host_f64("von_mises", vec![1], vec![von_mises]),
+    };
+
+    let displacement_snapshots = nonlinear
+        .displacement_snapshots
+        .into_iter()
+        .enumerate()
+        .map(|(index, snapshot)| {
+            AnalysisField::host_f64(
+                format!("nonlinear_displacement_inc{}", index),
+                vec![snapshot.len()],
+                snapshot,
+            )
+        })
+        .collect();
+
+    Ok(FeaNonlinearRunResult {
+        run,
+        load_factors: nonlinear.load_factors,
+        displacement_snapshots,
+        residual_norms: nonlinear.residual_norms,
+        iteration_counts: nonlinear.iteration_counts,
     })
 }
 
@@ -554,6 +636,26 @@ mod tests {
             .diagnostics
             .iter()
             .any(|diag| diag.code == "FEA_TRANSIENT_PHYSICS"));
+    }
+
+    #[test]
+    fn nonlinear_fixture_emits_incremental_payload_and_diagnostics() {
+        let mut model = fixture_model(FixtureId::TransientShock);
+        model.steps = vec![runmat_analysis_core::AnalysisStep {
+            step_id: "nonlinear_1".to_string(),
+            kind: runmat_analysis_core::AnalysisStepKind::Nonlinear,
+        }];
+        let result =
+            run_nonlinear(&model, ComputeBackend::Cpu).expect("nonlinear solve should succeed");
+
+        assert!(!result.load_factors.is_empty());
+        assert_eq!(result.load_factors.len(), result.residual_norms.len());
+        assert_eq!(result.residual_norms.len(), result.iteration_counts.len());
+        assert!(result
+            .run
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "FEA_NONLINEAR_CONVERGENCE"));
     }
 
     #[test]

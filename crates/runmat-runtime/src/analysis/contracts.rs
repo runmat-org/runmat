@@ -63,6 +63,8 @@ pub enum QualityReasonCode {
     TransientResidualExceeded,
     TransientStabilityExceeded,
     TransientStepFailure,
+    NonlinearResidualExceeded,
+    NonlinearIncrementFailure,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,6 +210,61 @@ pub struct AnalysisModalRunOptions {
     pub residual_warn_threshold: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisNonlinearRunOptions {
+    pub deterministic_mode: bool,
+    pub precision_mode: PrecisionMode,
+    pub quality_policy: QualityPolicy,
+    pub increment_count: usize,
+    pub max_newton_iters: usize,
+    pub tolerance: f64,
+    pub line_search: bool,
+}
+
+impl Default for AnalysisNonlinearRunOptions {
+    fn default() -> Self {
+        Self {
+            deterministic_mode: false,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            increment_count: 12,
+            max_newton_iters: 24,
+            tolerance: 1.0e-6,
+            line_search: true,
+        }
+    }
+}
+
+impl AnalysisNonlinearRunOptions {
+    pub fn coarse() -> Self {
+        Self {
+            deterministic_mode: false,
+            precision_mode: PrecisionMode::Fp32,
+            quality_policy: QualityPolicy::Exploratory,
+            increment_count: 8,
+            max_newton_iters: 16,
+            tolerance: 5.0e-6,
+            line_search: false,
+        }
+    }
+
+    pub fn balanced() -> Self {
+        Self::default()
+    }
+
+    pub fn high_accuracy() -> Self {
+        Self {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Strict,
+            increment_count: 24,
+            max_newton_iters: 40,
+            tolerance: 1.0e-7,
+            line_search: true,
+        }
+    }
+}
+
 impl Default for AnalysisModalRunOptions {
     fn default() -> Self {
         Self {
@@ -282,6 +339,7 @@ pub struct AnalysisRunResult {
     pub run: FeaRunResult,
     pub modal_results: Option<ModalResultsData>,
     pub transient_results: Option<TransientResultsData>,
+    pub nonlinear_results: Option<NonlinearResultsData>,
     pub model_validity: QualityGate,
     pub solver_convergence: QualityGate,
     pub result_quality: QualityGate,
@@ -307,6 +365,7 @@ pub struct AnalysisResultsQuery {
     pub mode_indices: Vec<usize>,
     pub include_transient_results: bool,
     pub transient_snapshot_indices: Vec<usize>,
+    pub include_nonlinear_results: bool,
 }
 
 impl Default for AnalysisResultsQuery {
@@ -318,6 +377,7 @@ impl Default for AnalysisResultsQuery {
             mode_indices: Vec::new(),
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
+            include_nonlinear_results: true,
         }
     }
 }
@@ -337,6 +397,9 @@ pub struct AnalysisResultsSummary {
     pub time_end_s: Option<f64>,
     pub max_transient_residual_norm: Option<f64>,
     pub final_step_converged: Option<bool>,
+    pub increment_count: usize,
+    pub max_nonlinear_residual_norm: Option<f64>,
+    pub final_increment_converged: Option<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -344,6 +407,7 @@ pub struct AnalysisResultsData {
     pub fields: Vec<AnalysisField>,
     pub modal_results: Option<ModalResultsData>,
     pub transient_results: Option<TransientResultsData>,
+    pub nonlinear_results: Option<NonlinearResultsData>,
     pub diagnostics: Option<Vec<FeaDiagnostic>>,
     pub run_status: RunStatus,
     pub publishable: bool,
@@ -371,11 +435,27 @@ pub struct TransientResultsData {
     pub integration_method: TransientIntegrationMethod,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct NonlinearResultsData {
+    pub nonlinear_payload_version: String,
+    pub load_factors: Vec<f64>,
+    pub displacement_snapshots: Vec<AnalysisField>,
+    pub residual_norms: Vec<f64>,
+    pub iteration_counts: Vec<usize>,
+    pub method: NonlinearMethod,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TransientIntegrationMethod {
     ImplicitEuler,
     PlaceholderLinearStatic,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NonlinearMethod {
+    IncrementalNewtonRaphson,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

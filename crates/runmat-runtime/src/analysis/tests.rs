@@ -480,6 +480,7 @@ fn analysis_results_returns_filtered_fields_and_metadata() {
             mode_indices: Vec::new(),
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
+            include_nonlinear_results: true,
         },
         OperationContext::new(Some("trace-results-2".to_string()), None),
     )
@@ -524,6 +525,7 @@ fn analysis_results_unknown_field_maps_typed_error() {
             mode_indices: Vec::new(),
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
+            include_nonlinear_results: true,
         },
         OperationContext::new(Some("trace-results-4".to_string()), None),
     )
@@ -812,6 +814,95 @@ fn analysis_run_transient_rejects_models_without_transient_step() {
 }
 
 #[test]
+fn analysis_run_nonlinear_rejects_models_without_nonlinear_step() {
+    let _guard = analysis_test_guard();
+    let model = sample_model();
+    let err = analysis_run_nonlinear_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("nonlinear run should reject models without nonlinear step");
+    assert_eq!(err.operation, "analysis.run_nonlinear");
+    assert_eq!(err.op_version, "analysis.run_nonlinear/v1");
+    assert_eq!(err.error_code, "ANALYSIS_RUN_NONLINEAR_INVALID_MODEL");
+}
+
+#[test]
+fn analysis_run_nonlinear_returns_native_nonlinear_result() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+    let envelope = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            increment_count: 16,
+            ..AnalysisNonlinearRunOptions::balanced()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("nonlinear run should succeed");
+
+    assert_eq!(envelope.operation, "analysis.run_nonlinear");
+    assert_eq!(envelope.op_version, "analysis.run_nonlinear/v1");
+    let nonlinear = envelope
+        .data
+        .nonlinear_results
+        .as_ref()
+        .expect("nonlinear payload should exist");
+    assert_eq!(nonlinear.method, NonlinearMethod::IncrementalNewtonRaphson);
+    assert_eq!(nonlinear.load_factors.len(), 16);
+    assert_eq!(nonlinear.load_factors.len(), nonlinear.residual_norms.len());
+    assert_eq!(nonlinear.residual_norms.len(), nonlinear.iteration_counts.len());
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_NONLINEAR_CONVERGENCE"));
+}
+
+#[test]
+fn analysis_results_query_can_exclude_nonlinear_payload() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+    let run = analysis_run_nonlinear_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("nonlinear run should succeed");
+
+    let results = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery {
+            include_fields: Vec::new(),
+            include_diagnostics: true,
+            include_modal_results: true,
+            mode_indices: Vec::new(),
+            include_transient_results: true,
+            transient_snapshot_indices: Vec::new(),
+            include_nonlinear_results: false,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("results should succeed");
+
+    assert!(results.data.nonlinear_results.is_none());
+    assert!(results.data.summary.increment_count > 0);
+    assert!(results.data.summary.max_nonlinear_residual_norm.is_some());
+    assert!(results.data.summary.final_increment_converged.is_some());
+}
+
+#[test]
 fn analysis_run_transient_returns_native_transient_result() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
@@ -1091,6 +1182,7 @@ fn analysis_results_query_can_exclude_modal_payload() {
             mode_indices: Vec::new(),
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
+            include_nonlinear_results: true,
         },
         OperationContext::new(None, None),
     )
@@ -1128,6 +1220,7 @@ fn analysis_results_query_rejects_unknown_modal_mode_index() {
             mode_indices: vec![10],
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
+            include_nonlinear_results: true,
         },
         OperationContext::new(None, None),
     )
@@ -1197,6 +1290,7 @@ fn analysis_results_query_can_exclude_transient_payload() {
             mode_indices: Vec::new(),
             include_transient_results: false,
             transient_snapshot_indices: Vec::new(),
+            include_nonlinear_results: true,
         },
         OperationContext::new(None, None),
     )
@@ -1234,6 +1328,7 @@ fn analysis_results_query_rejects_unknown_transient_snapshot_index() {
             mode_indices: Vec::new(),
             include_transient_results: true,
             transient_snapshot_indices: vec![999],
+            include_nonlinear_results: true,
         },
         OperationContext::new(None, None),
     )

@@ -6,8 +6,8 @@ use runmat_analysis_core::{
     EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment, MaterialModel, ReferenceFrame,
 };
 use runmat_analysis_fea::{
-    run_linear_static_with_options, run_modal_with_options, run_transient_with_options,
-    ComputeBackend, LinearStaticSolveOptions, ModalSolveOptions,
+    run_linear_static_with_options, run_modal_with_options, run_nonlinear_with_options,
+    run_transient_with_options, ComputeBackend, LinearStaticSolveOptions, ModalSolveOptions,
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
@@ -24,11 +24,12 @@ pub mod storage;
 
 pub use contracts::{
     AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisResultsData,
-    AnalysisModalRunOptions, AnalysisResultsQuery, AnalysisResultsSummary, AnalysisRunOptions,
-    AnalysisRunResult, AnalysisTransientRunOptions, AnalysisValidateResult,
-    ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, PrecisionMode,
-    PreconditionerMode, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
-    RunProvenance, RunStatus, TransientIntegrationMethod, TransientResultsData,
+    AnalysisModalRunOptions, AnalysisNonlinearRunOptions, AnalysisResultsQuery,
+    AnalysisResultsSummary, AnalysisRunOptions, AnalysisRunResult, AnalysisTransientRunOptions,
+    AnalysisValidateResult, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
+    NonlinearMethod, NonlinearResultsData, PrecisionMode, PreconditionerMode, QualityGate,
+    QualityPolicy, QualityReason, QualityReasonCode, RunProvenance, RunStatus,
+    TransientIntegrationMethod, TransientResultsData,
 };
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "analysis.create_model";
@@ -41,6 +42,8 @@ const ANALYSIS_RUN_MODAL_OPERATION: &str = "analysis.run_modal";
 const ANALYSIS_RUN_MODAL_OP_VERSION: &str = "analysis.run_modal/v1";
 const ANALYSIS_RUN_TRANSIENT_OPERATION: &str = "analysis.run_transient";
 const ANALYSIS_RUN_TRANSIENT_OP_VERSION: &str = "analysis.run_transient/v1";
+const ANALYSIS_RUN_NONLINEAR_OPERATION: &str = "analysis.run_nonlinear";
+const ANALYSIS_RUN_NONLINEAR_OP_VERSION: &str = "analysis.run_nonlinear/v1";
 const ANALYSIS_RESULTS_OPERATION: &str = "analysis.results";
 const ANALYSIS_RESULTS_OP_VERSION: &str = "analysis.results/v1";
 const TRANSIENT_RESIDUAL_WARN_THRESHOLD: f64 = 1.0e-4;
@@ -492,6 +495,7 @@ pub fn analysis_run_modal_with_options_op(
             frequency_basis,
         }),
         transient_results: None,
+        nonlinear_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -768,6 +772,7 @@ pub fn analysis_run_transient_with_options_op(
             residual_norms: transient_run.residual_norms,
             integration_method: TransientIntegrationMethod::ImplicitEuler,
         }),
+        nonlinear_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -807,6 +812,266 @@ pub fn analysis_run_transient_with_options_op(
     Ok(OperationEnvelope::new(
         ANALYSIS_RUN_TRANSIENT_OPERATION,
         ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+        &context,
+        result,
+    ))
+}
+
+pub fn analysis_run_nonlinear_op(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    analysis_run_nonlinear_with_options_op(
+        model,
+        backend,
+        AnalysisNonlinearRunOptions::default(),
+        context,
+    )
+}
+
+pub fn analysis_run_nonlinear_with_options_op(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: AnalysisNonlinearRunOptions,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let has_nonlinear_step = model
+        .steps
+        .iter()
+        .any(|step| step.kind == AnalysisStepKind::Nonlinear);
+    if !has_nonlinear_step {
+        return Err(operation_error(
+            ANALYSIS_RUN_NONLINEAR_OPERATION,
+            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_MODEL",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis model must include at least one nonlinear step for analysis.run_nonlinear",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("geometry_id".to_string(), model.geometry_id.clone()),
+            ]),
+        ));
+    }
+
+    if options.increment_count == 0 {
+        return Err(operation_error(
+            ANALYSIS_RUN_NONLINEAR_OPERATION,
+            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_nonlinear options require increment_count greater than zero",
+            BTreeMap::from([(
+                "increment_count".to_string(),
+                options.increment_count.to_string(),
+            )]),
+        ));
+    }
+
+    let nonlinear_run = run_nonlinear_with_options(
+        model,
+        backend,
+        runmat_analysis_fea::solve::nonlinear::NonlinearSolveOptions {
+            increment_count: options.increment_count,
+            max_newton_iters: options.max_newton_iters,
+            tolerance: options.tolerance,
+            line_search: options.line_search,
+        },
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_NONLINEAR_OPERATION,
+            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "SOLVER_MODEL_INVALID",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            err.to_string(),
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("geometry_id".to_string(), model.geometry_id.clone()),
+            ]),
+        )
+    })?;
+
+    let mut run = nonlinear_run.run;
+    let mut fallback_events = Vec::new();
+    promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
+    if backend == ComputeBackend::Gpu && run.solver_backend != "runtime_tensor" {
+        fallback_events.push(
+            "SOLVER_BACKEND_FALLBACK:requested=runtime_tensor:using=cpu_reference".to_string(),
+        );
+    }
+
+    let solver_convergence = if run.diagnostics.iter().any(|item| {
+        item.code == "FEA_NONLINEAR_CONVERGENCE"
+            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+    }) {
+        QualityGate::Pass
+    } else {
+        QualityGate::Warn
+    };
+    let max_nonlinear_residual = nonlinear_run
+        .residual_norms
+        .iter()
+        .copied()
+        .reduce(f64::max)
+        .unwrap_or(0.0);
+    let result_quality = if nonlinear_run.load_factors.is_empty()
+        || nonlinear_run.displacement_snapshots.is_empty()
+        || nonlinear_run.residual_norms.iter().any(|r| !r.is_finite())
+    {
+        QualityGate::Fail
+    } else if max_nonlinear_residual > options.tolerance * 10.0 {
+        QualityGate::Warn
+    } else {
+        QualityGate::Pass
+    };
+    let nonlinear_increment_warn = run.diagnostics.iter().any(|item| {
+        item.code == "FEA_NONLINEAR_CONVERGENCE"
+            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    });
+
+    let mut quality_reasons = Vec::new();
+    if solver_convergence == QualityGate::Warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::SolverNotConverged,
+            detail: "nonlinear solver convergence gate is warning".to_string(),
+        });
+    }
+    if result_quality == QualityGate::Warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::NonlinearResidualExceeded,
+            detail: format!(
+                "nonlinear residual exceeds threshold {}",
+                options.tolerance * 10.0
+            ),
+        });
+    }
+    if nonlinear_increment_warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::NonlinearIncrementFailure,
+            detail: "nonlinear increment convergence reported warnings".to_string(),
+        });
+    }
+    if fallback_events
+        .iter()
+        .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK"))
+    {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::SolverBackendFallback,
+            detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
+        });
+    }
+    if fallback_events.iter().any(|event| {
+        event.starts_with("BACKEND_NO_PROVIDER") || event.starts_with("BACKEND_UPLOAD_FAILED")
+    }) {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::FieldPromotionFallback,
+            detail: "field promotion fell back to host-backed values".to_string(),
+        });
+    }
+
+    let publishable = match options.quality_policy {
+        QualityPolicy::Strict => {
+            solver_convergence == QualityGate::Pass
+                && result_quality == QualityGate::Pass
+                && quality_reasons.is_empty()
+        }
+        QualityPolicy::Balanced => {
+            solver_convergence == QualityGate::Pass
+                && result_quality == QualityGate::Pass
+                && !quality_reasons.iter().any(|r| {
+                    matches!(
+                        r.code,
+                        QualityReasonCode::NonlinearResidualExceeded
+                            | QualityReasonCode::NonlinearIncrementFailure
+                    )
+                })
+        }
+        QualityPolicy::Exploratory => {
+            solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
+        }
+    };
+    let run_status = if publishable {
+        RunStatus::Publishable
+    } else if result_quality == QualityGate::Fail {
+        RunStatus::Rejected
+    } else {
+        RunStatus::Degraded
+    };
+
+    let solver_backend = run.solver_backend.clone();
+    let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
+    let solver_host_sync_count = run.solver_host_sync_count;
+    let solver_method = run.solver_method.clone();
+    let selected_preconditioner = run.preconditioner.clone();
+
+    let result = AnalysisRunResult {
+        run_id: storage::next_run_id(),
+        run,
+        modal_results: None,
+        transient_results: None,
+        nonlinear_results: Some(NonlinearResultsData {
+            nonlinear_payload_version: "nonlinear_results/v1".to_string(),
+            load_factors: nonlinear_run.load_factors,
+            displacement_snapshots: nonlinear_run.displacement_snapshots,
+            residual_norms: nonlinear_run.residual_norms,
+            iteration_counts: nonlinear_run.iteration_counts,
+            method: NonlinearMethod::IncrementalNewtonRaphson,
+        }),
+        model_validity: QualityGate::Pass,
+        solver_convergence,
+        result_quality,
+        run_status,
+        publishable,
+        quality_reasons,
+        provenance: RunProvenance {
+            backend,
+            solver_backend,
+            solver_device_apply_k_ratio,
+            solver_host_sync_count,
+            precision_mode: contracts::format_precision_mode(options.precision_mode),
+            deterministic_mode: options.deterministic_mode,
+            solver_method,
+            preconditioner: selected_preconditioner,
+            quality_policy: contracts::format_quality_policy(options.quality_policy),
+            fallback_events,
+        },
+    };
+
+    storage::persist_run_result(&result).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_NONLINEAR_OPERATION,
+            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist analysis run artifact: {err}"),
+            BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
+        )
+    })?;
+
+    Ok(OperationEnvelope::new(
+        ANALYSIS_RUN_NONLINEAR_OPERATION,
+        ANALYSIS_RUN_NONLINEAR_OP_VERSION,
         &context,
         result,
     ))
@@ -964,6 +1229,7 @@ pub fn analysis_run_linear_static_with_options(
         run,
         modal_results: None,
         transient_results: None,
+        nonlinear_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -1120,6 +1386,16 @@ pub fn analysis_results_op(
             (0, None, None, None, None)
         };
 
+    let (increment_count, max_nonlinear_residual_norm, final_increment_converged) =
+        if let Some(nonlinear) = run_result.nonlinear_results.as_ref() {
+            let count = nonlinear.load_factors.len();
+            let max_residual = nonlinear.residual_norms.iter().copied().reduce(f64::max);
+            let final_converged = max_residual.map(|value| value <= 1.0e-6);
+            (count, max_residual, final_converged)
+        } else {
+            (0, None, None)
+        };
+
     let summary = AnalysisResultsSummary {
         field_count: fields.len(),
         total_elements: fields.iter().map(|field| field.element_count()).sum(),
@@ -1134,6 +1410,9 @@ pub fn analysis_results_op(
         time_end_s,
         max_transient_residual_norm,
         final_step_converged,
+        increment_count,
+        max_nonlinear_residual_norm,
+        final_increment_converged,
     };
 
     let modal_results = if query.include_modal_results {
@@ -1338,10 +1617,17 @@ pub fn analysis_results_op(
         None
     };
 
+    let nonlinear_results = if query.include_nonlinear_results {
+        run_result.nonlinear_results.clone()
+    } else {
+        None
+    };
+
     let data = AnalysisResultsData {
         fields,
         modal_results,
         transient_results,
+        nonlinear_results,
         diagnostics: if query.include_diagnostics {
             Some(run_result.run.diagnostics.clone())
         } else {

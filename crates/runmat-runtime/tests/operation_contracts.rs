@@ -6,7 +6,7 @@ use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_op,
     analysis_run_linear_static_op, analysis_run_linear_static_with_options, analysis_run_modal_op,
-    analysis_run_modal_with_options_op, analysis_run_transient_op,
+    analysis_run_modal_with_options_op, analysis_run_nonlinear_op, analysis_run_transient_op,
     analysis_run_transient_with_options_op, analysis_validate, AnalysisCreateModelIntentSpec,
     AnalysisCreateModelProfile, AnalysisModalRunOptions, AnalysisResultsQuery, AnalysisRunOptions,
     AnalysisTransientRunOptions, ModalFrequencyBasis, ModalFrequencyUnits, PrecisionMode,
@@ -509,6 +509,37 @@ fn analysis_run_transient_contract_is_v1_and_typed() {
 }
 
 #[test]
+fn analysis_run_nonlinear_contract_is_v1_and_typed() {
+    let model = fixture_model(FixtureId::NonlinearAssembly);
+    let envelope = analysis_run_nonlinear_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-nonlinear-1".to_string()), None),
+    )
+    .expect("nonlinear run should succeed for nonlinear fixture");
+
+    assert_eq!(envelope.operation, "analysis.run_nonlinear");
+    assert_eq!(envelope.op_version, "analysis.run_nonlinear/v1");
+    assert!(envelope.data.nonlinear_results.is_some());
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_NONLINEAR_CONVERGENCE"));
+
+    let invalid = analysis_run_nonlinear_op(
+        &fixture_model(FixtureId::CantileverLinearStatic),
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-nonlinear-2".to_string()), None),
+    )
+    .expect_err("nonlinear run should reject models without nonlinear step");
+    assert_eq!(invalid.operation, "analysis.run_nonlinear");
+    assert_eq!(invalid.op_version, "analysis.run_nonlinear/v1");
+    assert_eq!(invalid.error_code, "ANALYSIS_RUN_NONLINEAR_INVALID_MODEL");
+}
+
+#[test]
 fn analysis_run_transient_with_options_contract_controls_execution_window() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.steps = vec![runmat_analysis_core::AnalysisStep {
@@ -720,6 +751,7 @@ fn analysis_results_contract_is_v1_and_filterable() {
             mode_indices: Vec::new(),
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
+            include_nonlinear_results: true,
         },
         OperationContext::new(Some("trace-contract-3b-results".to_string()), None),
     )
@@ -751,6 +783,7 @@ fn analysis_results_unknown_field_maps_typed_error_contract() {
             mode_indices: Vec::new(),
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
+            include_nonlinear_results: true,
         },
         OperationContext::new(Some("trace-contract-3c-results".to_string()), None),
     )
@@ -794,6 +827,7 @@ fn analysis_results_modal_query_controls_are_typed() {
             mode_indices: Vec::new(),
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
+            include_nonlinear_results: true,
         },
         OperationContext::new(Some("trace-contract-modal-results-4".to_string()), None),
     )
@@ -823,6 +857,7 @@ fn analysis_results_modal_query_controls_are_typed() {
             mode_indices: vec![99],
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
+            include_nonlinear_results: true,
         },
         OperationContext::new(Some("trace-contract-modal-results-5".to_string()), None),
     )
@@ -855,6 +890,7 @@ fn analysis_results_transient_query_controls_are_typed() {
             mode_indices: Vec::new(),
             include_transient_results: false,
             transient_snapshot_indices: Vec::new(),
+            include_nonlinear_results: true,
         },
         OperationContext::new(Some("trace-contract-transient-results-2".to_string()), None),
     )
@@ -875,6 +911,7 @@ fn analysis_results_transient_query_controls_are_typed() {
             mode_indices: Vec::new(),
             include_transient_results: true,
             transient_snapshot_indices: vec![999],
+            include_nonlinear_results: true,
         },
         OperationContext::new(Some("trace-contract-transient-results-3".to_string()), None),
     )

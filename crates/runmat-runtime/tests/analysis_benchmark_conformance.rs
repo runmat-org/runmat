@@ -15,9 +15,10 @@ use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_results_by_run_id_op, analysis_results_op, analysis_run_linear_static_with_options,
-    analysis_run_modal_with_options_op, analysis_run_transient_with_options_op, analysis_validate,
-    AnalysisModalRunOptions, AnalysisResultsQuery, AnalysisRunOptions, AnalysisTransientRunOptions,
-    PrecisionMode, PreconditionerMode, QualityPolicy,
+    analysis_run_modal_with_options_op, analysis_run_nonlinear_with_options_op,
+    analysis_run_transient_with_options_op, analysis_validate, AnalysisModalRunOptions,
+    AnalysisNonlinearRunOptions, AnalysisResultsQuery, AnalysisRunOptions,
+    AnalysisTransientRunOptions, PrecisionMode, PreconditionerMode, QualityPolicy,
 };
 use runmat_runtime::operations::OperationContext;
 use serde::{Deserialize, Serialize};
@@ -39,6 +40,7 @@ enum AnalysisRunKind {
     LinearStatic,
     Modal,
     Transient,
+    Nonlinear,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -173,6 +175,7 @@ const ROLLING_TARGET_FIXTURES: &[&str] =
         "modal_large_gpu_provider_stress16",
         "transient_long_gpu_provider",
         "transient_shock_gpu_provider",
+        "nonlinear_assembly_gpu_provider",
     ];
 
 fn manifest_specs() -> Vec<FixtureSpec> {
@@ -547,6 +550,54 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_cache_misses: Some(40.0),
         },
         FixtureSpec {
+            id: "nonlinear_assembly_cpu",
+            description: "nonlinear assembly fixture baseline CPU execution",
+            model: || fixture_model(FixtureId::NonlinearAssembly),
+            run_kind: AnalysisRunKind::Nonlinear,
+            expect_validate_error: None,
+            expect_run_error: None,
+            expected_publishable: Some(true),
+            parity_tolerance: None,
+            gpu_mode: None,
+            residency_expectation: None,
+            max_solver_host_sync_count: None,
+            min_solver_device_apply_k_ratio: None,
+            expected_solver_backend: None,
+            modal_mode_count: None,
+            transient_step_count: Some(24),
+            max_modal_orthogonality_offdiag: None,
+            min_modal_relative_frequency_separation: None,
+            max_transient_residual_norm: None,
+            max_transient_energy_growth_ratio: None,
+            min_gpu_speedup_ratio: None,
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
+        },
+        FixtureSpec {
+            id: "nonlinear_assembly_gpu_provider",
+            description: "nonlinear assembly fixture provider-backed acceleration",
+            model: || fixture_model(FixtureId::NonlinearAssembly),
+            run_kind: AnalysisRunKind::Nonlinear,
+            expect_validate_error: None,
+            expect_run_error: None,
+            expected_publishable: Some(true),
+            parity_tolerance: None,
+            gpu_mode: Some(GpuMode::WithProvider),
+            residency_expectation: Some(ResidencyExpectation::DeviceRef),
+            max_solver_host_sync_count: Some(96),
+            min_solver_device_apply_k_ratio: Some(1.0),
+            expected_solver_backend: Some("runtime_tensor"),
+            modal_mode_count: None,
+            transient_step_count: Some(24),
+            max_modal_orthogonality_offdiag: None,
+            min_modal_relative_frequency_separation: None,
+            max_transient_residual_norm: None,
+            max_transient_energy_growth_ratio: None,
+            min_gpu_speedup_ratio: Some(1.6),
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
+        },
+        FixtureSpec {
             id: "missing_materials",
             description: "invalid fixture must fail validation and run with typed errors",
             model: || fixture_model(FixtureId::MissingMaterials),
@@ -613,6 +664,7 @@ fn fixture_manifest(specs: &[FixtureSpec]) -> FixtureManifest {
                     AnalysisRunKind::LinearStatic => "linear_static".to_string(),
                     AnalysisRunKind::Modal => "modal".to_string(),
                     AnalysisRunKind::Transient => "transient".to_string(),
+                    AnalysisRunKind::Nonlinear => "nonlinear".to_string(),
                 },
                 expect_validate_error: spec.expect_validate_error.map(|s| s.to_string()),
                 expect_run_error: spec.expect_run_error.map(|s| s.to_string()),
@@ -695,6 +747,17 @@ fn run_fixture_cpu(
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
+        AnalysisRunKind::Nonlinear => analysis_run_nonlinear_with_options_op(
+            model,
+            ComputeBackend::Cpu,
+            AnalysisNonlinearRunOptions {
+                increment_count: spec
+                    .transient_step_count
+                    .unwrap_or(AnalysisNonlinearRunOptions::default().increment_count),
+                ..AnalysisNonlinearRunOptions::balanced()
+            },
+            OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
+        ),
     }
 }
 
@@ -737,6 +800,17 @@ fn run_fixture_gpu(
                     .unwrap_or(AnalysisTransientRunOptions::production_recommended().dt_bucket_rel_tolerance),
                 ..AnalysisTransientRunOptions::production_recommended()
                 }
+            },
+            OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
+        ),
+        AnalysisRunKind::Nonlinear => analysis_run_nonlinear_with_options_op(
+            model,
+            ComputeBackend::Gpu,
+            AnalysisNonlinearRunOptions {
+                increment_count: spec
+                    .transient_step_count
+                    .unwrap_or(AnalysisNonlinearRunOptions::default().increment_count),
+                ..AnalysisNonlinearRunOptions::balanced()
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
@@ -1131,6 +1205,16 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                         "FEA_TRANSIENT_PHYSICS",
                         "nonfinite_displacement_count",
                     );
+                    let nonlinear_converged_increments = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_NONLINEAR_CONVERGENCE",
+                        "converged_increments",
+                    );
+                    let nonlinear_total_increments = diagnostic_metric(
+                        &gpu_envelope.data,
+                        "FEA_NONLINEAR_CONVERGENCE",
+                        "increments",
+                    );
 
                     for event in &gpu_fallback_events {
                         if !validate_fallback_event_schema(event) {
@@ -1312,6 +1396,28 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                             Some(0.0),
                         );
                     }
+                    if spec.id == "nonlinear_assembly_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_converged_increments",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_converged_increments,
+                            Some(16.0),
+                            None,
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_total_increments",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_total_increments,
+                            Some(24.0),
+                            Some(24.0),
+                        );
+                    }
 
                     let gpu_results = analysis_results_op(
                         &gpu_envelope.data,
@@ -1322,6 +1428,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                             mode_indices: Vec::new(),
                             include_transient_results: false,
                             transient_snapshot_indices: Vec::new(),
+                            include_nonlinear_results: false,
                         },
                         OperationContext::new(Some(format!("trace-results-gpu-{}", spec.id)), None),
                     );
@@ -1382,6 +1489,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                                 mode_indices: Vec::new(),
                                 include_transient_results: false,
                                 transient_snapshot_indices: Vec::new(),
+                                include_nonlinear_results: false,
                             },
                             OperationContext::new(
                                 Some(format!("trace-results-gpu-by-id-{}", spec.id)),
@@ -1455,6 +1563,7 @@ fn run_fixture(spec: &FixtureSpec, filesystem_root: Option<&PathBuf>) -> Fixture
                                 mode_indices: Vec::new(),
                                 include_transient_results: false,
                                 transient_snapshot_indices: Vec::new(),
+                                include_nonlinear_results: false,
                             },
                             OperationContext::new(
                                 Some(format!("trace-results-cpu-{}", spec.id)),
