@@ -215,23 +215,21 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
         runmat_analysis_core::AnalysisStepKind::Transient
     );
 
-    for profile in [AnalysisCreateModelProfile::NonlinearStructural] {
-        let unsupported_profile = analysis_create_model_op(
-            &geometry.data,
-            AnalysisCreateModelIntentSpec {
-                model_id: "contract_unsupported_model".to_string(),
-                profile,
-            },
-            OperationContext::new(Some("trace-contract-create-4".to_string()), None),
-        )
-        .expect_err("profile should be unsupported");
-        assert_eq!(unsupported_profile.operation, "analysis.create_model");
-        assert_eq!(unsupported_profile.op_version, "analysis.create_model/v1");
-        assert_eq!(
-            unsupported_profile.error_code,
-            "ANALYSIS_CREATE_MODEL_PROFILE_UNSUPPORTED"
-        );
-    }
+    let nonlinear = analysis_create_model_op(
+        &geometry.data,
+        AnalysisCreateModelIntentSpec {
+            model_id: "contract_nonlinear_model".to_string(),
+            profile: AnalysisCreateModelProfile::NonlinearStructural,
+        },
+        OperationContext::new(Some("trace-contract-create-4-nonlinear".to_string()), None),
+    )
+    .expect("nonlinear profile should be supported");
+    assert_eq!(nonlinear.operation, "analysis.create_model");
+    assert_eq!(nonlinear.op_version, "analysis.create_model/v1");
+    assert_eq!(
+        nonlinear.data.steps[0].kind,
+        runmat_analysis_core::AnalysisStepKind::Nonlinear
+    );
 }
 
 #[test]

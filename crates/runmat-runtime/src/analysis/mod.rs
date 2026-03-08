@@ -108,29 +108,6 @@ pub fn analysis_create_model_op(
         .or_else(|| geometry.regions.last().map(|region| region.region_id.clone()))
         .unwrap_or_else(|| fixed_region_id.clone());
 
-    if matches!(
-        intent.profile,
-        AnalysisCreateModelProfile::NonlinearStructural
-    ) {
-        let profile = create_model_profile_name(intent.profile);
-        return Err(operation_error(
-            ANALYSIS_CREATE_MODEL_OPERATION,
-            ANALYSIS_CREATE_MODEL_OP_VERSION,
-            &context,
-            OperationErrorSpec {
-                error_code: "ANALYSIS_CREATE_MODEL_PROFILE_UNSUPPORTED",
-                error_type: OperationErrorType::Contract,
-                retryable: false,
-                severity: OperationErrorSeverity::Error,
-            },
-            format!("analysis.create_model profile '{profile}' is not implemented yet"),
-            BTreeMap::from([
-                ("geometry_id".to_string(), geometry.geometry_id.clone()),
-                ("profile".to_string(), profile.to_string()),
-            ]),
-        ));
-    }
-
     let inferred_materials = infer_material_models(geometry);
     let inferred_assignments = infer_material_assignments(geometry, &inferred_materials);
 
@@ -195,7 +172,26 @@ pub fn analysis_create_model_op(
                 kind: AnalysisStepKind::Transient,
             },
         ),
-        AnalysisCreateModelProfile::NonlinearStructural => unreachable!("guarded above"),
+        AnalysisCreateModelProfile::NonlinearStructural => (
+            BoundaryCondition {
+                bc_id: "bc_default_fixed".to_string(),
+                region_id: fixed_region_id,
+                kind: BoundaryConditionKind::Fixed,
+            },
+            LoadCase {
+                load_id: "load_default_nonlinear_force".to_string(),
+                region_id: load_region_id,
+                kind: LoadKind::Force {
+                    fx: 0.0,
+                    fy: -750.0,
+                    fz: 0.0,
+                },
+            },
+            AnalysisStep {
+                step_id: "step_default_nonlinear".to_string(),
+                kind: AnalysisStepKind::Nonlinear,
+            },
+        ),
     };
 
     let model = AnalysisModel {
@@ -1838,15 +1834,6 @@ fn infer_material_assignments(
     }
 
     assignments
-}
-
-fn create_model_profile_name(profile: AnalysisCreateModelProfile) -> &'static str {
-    match profile {
-        AnalysisCreateModelProfile::LinearStaticStructural => "linear_static_structural",
-        AnalysisCreateModelProfile::ModalStructural => "modal_structural",
-        AnalysisCreateModelProfile::TransientStructural => "transient_structural",
-        AnalysisCreateModelProfile::NonlinearStructural => "nonlinear_structural",
-    }
 }
 
 fn map_validate_error(

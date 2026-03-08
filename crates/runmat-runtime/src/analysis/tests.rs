@@ -194,24 +194,22 @@ fn analysis_create_model_maps_invalid_intent_error() {
 }
 
 #[test]
-fn analysis_create_model_maps_unsupported_profile_error() {
+fn analysis_create_model_supports_nonlinear_profile_template() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
-    for profile in [AnalysisCreateModelProfile::NonlinearStructural] {
-        let err = analysis_create_model_op(
-            &geometry,
-            AnalysisCreateModelIntentSpec {
-                model_id: "unsupported_model".to_string(),
-                profile,
-            },
-            OperationContext::new(None, None),
-        )
-        .expect_err("profile should be unsupported");
+    let envelope = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "nonlinear_model".to_string(),
+            profile: AnalysisCreateModelProfile::NonlinearStructural,
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("nonlinear profile should be supported");
 
-        assert_eq!(err.error_code, "ANALYSIS_CREATE_MODEL_PROFILE_UNSUPPORTED");
-        assert_eq!(err.operation, "analysis.create_model");
-        assert_eq!(err.op_version, "analysis.create_model/v1");
-    }
+    assert_eq!(envelope.data.model_id.0, "nonlinear_model");
+    assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Nonlinear);
+    assert_eq!(envelope.data.loads[0].load_id, "load_default_nonlinear_force");
 }
 
 #[test]

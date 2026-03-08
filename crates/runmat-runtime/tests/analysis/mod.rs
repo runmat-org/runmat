@@ -14,12 +14,15 @@ use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
-    analysis_results_by_run_id_op, analysis_results_op, analysis_run_linear_static_with_options,
+    analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_op,
+    analysis_run_linear_static_with_options,
     analysis_run_modal_with_options_op, analysis_run_nonlinear_with_options_op,
-    analysis_run_transient_with_options_op, analysis_validate, AnalysisModalRunOptions,
-    AnalysisNonlinearRunOptions, AnalysisResultsQuery, AnalysisRunOptions,
+    analysis_run_transient_with_options_op, analysis_validate, AnalysisCreateModelIntentSpec,
+    AnalysisCreateModelProfile, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
+    AnalysisResultsQuery, AnalysisRunOptions,
     AnalysisTransientRunOptions, PrecisionMode, PreconditionerMode, QualityPolicy,
 };
+use runmat_runtime::geometry::geometry_load_op;
 use runmat_runtime::operations::OperationContext;
 use serde::{Deserialize, Serialize};
 
@@ -177,6 +180,28 @@ const ROLLING_TARGET_FIXTURES: &[&str] =
         "transient_shock_gpu_provider",
         "nonlinear_assembly_gpu_provider",
     ];
+
+const SYNTHETIC_TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
+
+fn synthesized_nonlinear_model() -> AnalysisModel {
+    let geometry = geometry_load_op(
+        "/synthetic/nonlinear_fixture.stl",
+        SYNTHETIC_TRIANGLE_STL.as_bytes(),
+        OperationContext::new(Some("trace-create-model-nonlinear-geometry".to_string()), None),
+    )
+    .expect("load synthetic nonlinear geometry for create-model fixture");
+
+    let created = analysis_create_model_op(
+        &geometry.data,
+        AnalysisCreateModelIntentSpec {
+            model_id: "nonlinear_created_fixture_model".to_string(),
+            profile: AnalysisCreateModelProfile::NonlinearStructural,
+        },
+        OperationContext::new(Some("trace-create-model-nonlinear".to_string()), None),
+    )
+    .expect("synthesize nonlinear model via analysis.create_model");
+    created.data
+}
 
 mod baseline;
 mod harness;
