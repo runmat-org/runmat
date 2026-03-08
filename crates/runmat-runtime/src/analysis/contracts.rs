@@ -283,6 +283,23 @@ impl AnalysisNonlinearRunOptions {
             tangent_refresh_interval: 1,
         }
     }
+
+    pub fn production_recommended() -> Self {
+        Self {
+            deterministic_mode: true,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            increment_count: 24,
+            max_newton_iters: 28,
+            tolerance: 1.0e-6,
+            residual_convergence_factor: 4.0,
+            increment_norm_tolerance: 8.0e-8,
+            line_search: true,
+            max_line_search_backtracks: 8,
+            line_search_reduction: 0.5,
+            tangent_refresh_interval: 2,
+        }
+    }
 }
 
 impl Default for AnalysisModalRunOptions {

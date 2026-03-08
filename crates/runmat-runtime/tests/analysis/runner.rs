@@ -2,6 +2,71 @@ use super::harness::with_harness_provider;
 use super::manifest::default_options;
 use super::*;
 
+fn env_usize(name: &str) -> Option<usize> {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<usize>().ok())
+}
+
+fn env_f64(name: &str) -> Option<f64> {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| value.parse::<f64>().ok())
+}
+
+fn env_bool(name: &str) -> Option<bool> {
+    std::env::var(name)
+        .ok()
+        .and_then(|value| match value.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Some(true),
+            "0" | "false" | "no" | "off" => Some(false),
+            _ => None,
+        })
+}
+
+fn nonlinear_options_for_spec(spec: &FixtureSpec) -> AnalysisNonlinearRunOptions {
+    let mut options = AnalysisNonlinearRunOptions::production_recommended();
+    options.increment_count = spec.transient_step_count.unwrap_or(options.increment_count);
+
+    if let Some(value) = env_usize("RUNMAT_NONLINEAR_INCREMENT_COUNT") {
+        options.increment_count = value.max(1);
+    }
+    if let Some(value) = env_usize("RUNMAT_NONLINEAR_MAX_NEWTON_ITERS") {
+        options.max_newton_iters = value.max(1);
+    }
+    if let Some(value) = env_f64("RUNMAT_NONLINEAR_TOLERANCE") {
+        if value.is_finite() && value > 0.0 {
+            options.tolerance = value;
+        }
+    }
+    if let Some(value) = env_f64("RUNMAT_NONLINEAR_RESIDUAL_FACTOR") {
+        if value.is_finite() && value >= 1.0 {
+            options.residual_convergence_factor = value;
+        }
+    }
+    if let Some(value) = env_f64("RUNMAT_NONLINEAR_INCREMENT_NORM_TOL") {
+        if value.is_finite() && value > 0.0 {
+            options.increment_norm_tolerance = value;
+        }
+    }
+    if let Some(value) = env_bool("RUNMAT_NONLINEAR_LINE_SEARCH") {
+        options.line_search = value;
+    }
+    if let Some(value) = env_usize("RUNMAT_NONLINEAR_MAX_BACKTRACKS") {
+        options.max_line_search_backtracks = value;
+    }
+    if let Some(value) = env_f64("RUNMAT_NONLINEAR_LINE_SEARCH_REDUCTION") {
+        if value.is_finite() && value > 0.0 && value < 1.0 {
+            options.line_search_reduction = value;
+        }
+    }
+    if let Some(value) = env_usize("RUNMAT_NONLINEAR_TANGENT_REFRESH_INTERVAL") {
+        options.tangent_refresh_interval = value.max(1);
+    }
+
+    options
+}
+
 fn run_fixture_cpu(
     spec: &FixtureSpec,
     model: &AnalysisModel,
@@ -50,12 +115,7 @@ fn run_fixture_cpu(
         AnalysisRunKind::Nonlinear => analysis_run_nonlinear_with_options_op(
             model,
             ComputeBackend::Cpu,
-            AnalysisNonlinearRunOptions {
-                increment_count: spec
-                    .transient_step_count
-                    .unwrap_or(AnalysisNonlinearRunOptions::default().increment_count),
-                ..AnalysisNonlinearRunOptions::balanced()
-            },
+            nonlinear_options_for_spec(spec),
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
     }
@@ -110,12 +170,7 @@ fn run_fixture_gpu(
         AnalysisRunKind::Nonlinear => analysis_run_nonlinear_with_options_op(
             model,
             ComputeBackend::Gpu,
-            AnalysisNonlinearRunOptions {
-                increment_count: spec
-                    .transient_step_count
-                    .unwrap_or(AnalysisNonlinearRunOptions::default().increment_count),
-                ..AnalysisNonlinearRunOptions::balanced()
-            },
+            nonlinear_options_for_spec(spec),
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
     };
@@ -758,7 +813,17 @@ pub(super) fn run_fixture(
                             "nonlinear_converged_increments",
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_converged_increments,
-                            Some(16.0),
+                            Some(24.0),
+                            Some(24.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "nonlinear_line_search_backtracks",
+                            "FEA_NONLINEAR_CONVERGENCE",
+                            nonlinear_line_search_backtracks,
+                            Some(1.0),
                             None,
                         );
                         push_threshold_assertion(
@@ -779,7 +844,7 @@ pub(super) fn run_fixture(
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_failed_increments,
                             None,
-                            Some(8.0),
+                            Some(0.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -800,7 +865,7 @@ pub(super) fn run_fixture(
                             "nonlinear_stress_converged_increments",
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_converged_increments,
-                            Some(20.0),
+                            Some(30.0),
                             None,
                         );
                         push_threshold_assertion(
@@ -821,7 +886,7 @@ pub(super) fn run_fixture(
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_failed_increments,
                             None,
-                            Some(12.0),
+                            Some(2.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -850,8 +915,8 @@ pub(super) fn run_fixture(
                             "nonlinear_stress_line_search_backtracks",
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_line_search_backtracks,
-                            None,
-                            Some(320.0),
+                            Some(1.0),
+                            Some(64.0),
                         );
                         push_threshold_assertion(
                             spec.id,
@@ -861,7 +926,7 @@ pub(super) fn run_fixture(
                             "FEA_NONLINEAR_CONVERGENCE",
                             nonlinear_tangent_rebuild_count,
                             Some(4.0),
-                            None,
+                            Some(24.0),
                         );
                     }
 

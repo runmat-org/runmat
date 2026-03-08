@@ -892,11 +892,68 @@ Preset selection quick guide:
 
 Recommended starting matrix:
 
-| Scenario | Modal preset | Transient preset |
-| --- | --- | --- |
-| Interactive design iteration | `coarse` | `coarse` |
-| Standard analysis pipeline | `balanced` | `balanced` |
-| Release/sign-off quality gate | `high_accuracy` | `high_accuracy` |
+| Scenario | Modal preset | Transient preset | Nonlinear preset |
+| --- | --- | --- | --- |
+| Interactive design iteration | `coarse` | `coarse` | `coarse` |
+| Standard analysis pipeline | `balanced` | `production_recommended` | `production_recommended` |
+| Release/sign-off quality gate | `high_accuracy` | `high_accuracy` | `high_accuracy` |
+
+### Nonlinear Tuning Playbook
+
+Use this when re-baselining nonlinear thresholds or evaluating new solver behavior:
+
+1. Run baseline conformance with defaults:
+
+   ```bash
+   cargo test -p runmat-runtime --test analysis
+   ```
+
+2. Run targeted nonlinear sweeps by overriding harness knobs:
+
+   ```bash
+   RUNMAT_NONLINEAR_MAX_NEWTON_ITERS=24 \
+   RUNMAT_NONLINEAR_MAX_BACKTRACKS=6 \
+   RUNMAT_NONLINEAR_TANGENT_REFRESH_INTERVAL=2 \
+   cargo test -p runmat-runtime --test analysis
+   ```
+
+3. Validate guard sensitivity with a negative control (expected to fail conformance):
+
+   ```bash
+   RUNMAT_NONLINEAR_LINE_SEARCH=false \
+   RUNMAT_NONLINEAR_MAX_BACKTRACKS=0 \
+   cargo test -p runmat-runtime --test analysis
+   ```
+
+4. Inspect `target/runmat-analysis-artifacts/analysis_benchmark_report.json` focusing on:
+
+   - `nonlinear_assembly_gpu_provider`
+   - `nonlinear_assembly_stress_gpu_provider`
+   - `threshold_assertions[*]` values for:
+     - converged/total/failed increments,
+     - line-search backtracks,
+     - tangent rebuild count,
+     - residual + increment-norm ceilings,
+     - `gpu_run_ms` and `gpu_speedup_ratio`.
+
+5. Keep threshold updates only when all are true:
+
+   - both nonlinear provider fixtures remain `publishable=true`,
+   - no failed increments in production-recommended runs,
+   - stress fixture line-search and tangent activity remain within bounded bands,
+   - speedup floors remain healthy (currently ~2.6x baseline nonlinear, ~4.3x stress nonlinear on local reference runs).
+
+Harness override environment variables:
+
+- `RUNMAT_NONLINEAR_INCREMENT_COUNT`
+- `RUNMAT_NONLINEAR_MAX_NEWTON_ITERS`
+- `RUNMAT_NONLINEAR_TOLERANCE`
+- `RUNMAT_NONLINEAR_RESIDUAL_FACTOR`
+- `RUNMAT_NONLINEAR_INCREMENT_NORM_TOL`
+- `RUNMAT_NONLINEAR_LINE_SEARCH`
+- `RUNMAT_NONLINEAR_MAX_BACKTRACKS`
+- `RUNMAT_NONLINEAR_LINE_SEARCH_REDUCTION`
+- `RUNMAT_NONLINEAR_TANGENT_REFRESH_INTERVAL`
 
 ## Numeric Tolerance Policy
 
@@ -1093,6 +1150,9 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-08: Calibrated nonlinear presets and conformance gates from sweep evidence by introducing `AnalysisNonlinearRunOptions::production_recommended()` (deterministic fp64 balanced, 24 increments baseline / stress fixture override 32, max_newton_iters=28, line_search=true, max_backtracks=8, tangent_refresh_interval=2), wiring harness defaults to that preset, and validating against benchmark artifacts where default provider runs held publishability with strong speedups (`nonlinear_assembly_gpu_provider` ~2.65x, `nonlinear_assembly_stress_gpu_provider` ~4.37x).
+- 2026-03-08: Added nonlinear tuning override knobs for harness sweeps (`RUNMAT_NONLINEAR_*`) and tightened must-not-regress nonlinear threshold gates (exact converged increment targets, failed increment ceilings, required line-search activity bounds, tangent rebuild upper bound), with sweep confirmation that disabling line search triggers intended gate failures (increment failures and elevated tangent rebuilds).
+- 2026-03-08: Expanded nonlinear policy contract/unit coverage by asserting explicit policy divergence under induced increment-cap pressure: exploratory remains publishable while balanced/strict degrade with `NonlinearIncrementFailure`, and added nonlinear preset ordering tests covering coarse/balanced/production/high-accuracy tradeoffs.
 - 2026-03-07: Tightened nonlinear `QualityPolicy::Strict` publishability semantics so strict runs now explicitly reject when increment failures occur or Newton iteration caps are exhausted (iteration-cap hits now emit `NonlinearIncrementFailure` quality reasons with failed/cap-hit/max-iteration details), and added focused runtime unit coverage for the strict rejection path.
 - 2026-03-07: Upgraded nonlinear solver fidelity from scaffold to an incremental-Newton-v2 path with dual convergence gating (residual + increment norm), configurable tangent refresh cadence, configurable backtracking line-search controls, and richer nonlinear observability (`FEA_NONLINEAR_CONVERGENCE` + `FEA_NONLINEAR_COST` metrics for failed increments, max iteration usage, max increment norm, line-search backtracks, tangent rebuild count, and solver cost).
 - 2026-03-07: Extended runtime nonlinear contracts/results to carry the richer nonlinear telemetry (`increment_norms`, failed-increment and line-search/tangent counters, and nonlinear summary discoverability fields), tightened nonlinear option validation surfaces, and preserved operation version shape with additive fields only.

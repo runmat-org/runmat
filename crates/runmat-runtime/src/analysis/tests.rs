@@ -175,6 +175,32 @@ fn modal_run_option_presets_are_ordered_for_cost_vs_accuracy() {
 }
 
 #[test]
+fn nonlinear_run_option_presets_are_ordered_for_cost_vs_accuracy() {
+    let coarse = AnalysisNonlinearRunOptions::coarse();
+    let balanced = AnalysisNonlinearRunOptions::balanced();
+    let production = AnalysisNonlinearRunOptions::production_recommended();
+    let high_accuracy = AnalysisNonlinearRunOptions::high_accuracy();
+
+    assert!(coarse.increment_count < balanced.increment_count);
+    assert!(balanced.increment_count <= production.increment_count);
+    assert!(production.increment_count <= high_accuracy.increment_count);
+
+    assert!(coarse.max_newton_iters < balanced.max_newton_iters);
+    assert!(balanced.max_newton_iters <= production.max_newton_iters);
+    assert!(production.max_newton_iters <= high_accuracy.max_newton_iters);
+
+    assert!(coarse.tolerance > balanced.tolerance);
+    assert!(balanced.tolerance >= production.tolerance);
+    assert!(production.tolerance >= high_accuracy.tolerance);
+
+    assert_eq!(production.quality_policy, QualityPolicy::Balanced);
+    assert!(production.deterministic_mode);
+    assert_eq!(production.precision_mode, PrecisionMode::Fp64);
+    assert!(production.line_search);
+    assert!(production.max_line_search_backtracks >= balanced.max_line_search_backtracks);
+}
+
+#[test]
 fn analysis_create_model_maps_invalid_intent_error() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
@@ -895,6 +921,54 @@ fn analysis_run_nonlinear_strict_rejects_iteration_cap_exhaustion() {
         .quality_reasons
         .iter()
         .any(|reason| reason.code == QualityReasonCode::NonlinearIncrementFailure));
+}
+
+#[test]
+fn nonlinear_quality_policy_diverges_for_increment_failures() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+
+    let run_with_policy = |quality_policy| {
+        analysis_run_nonlinear_with_options_op(
+            &model,
+            ComputeBackend::Cpu,
+            AnalysisNonlinearRunOptions {
+                quality_policy,
+                max_newton_iters: 1,
+                line_search: false,
+                max_line_search_backtracks: 0,
+                ..AnalysisNonlinearRunOptions::balanced()
+            },
+            OperationContext::new(None, None),
+        )
+        .expect("nonlinear run should return envelope")
+    };
+
+    let exploratory = run_with_policy(QualityPolicy::Exploratory);
+    let balanced = run_with_policy(QualityPolicy::Balanced);
+    let strict = run_with_policy(QualityPolicy::Strict);
+
+    assert!(exploratory.data.publishable);
+    assert_eq!(exploratory.data.run_status, RunStatus::Publishable);
+    assert!(balanced
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::NonlinearIncrementFailure));
+    assert!(!balanced.data.publishable);
+    assert_eq!(balanced.data.run_status, RunStatus::Degraded);
+
+    assert!(strict
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::NonlinearIncrementFailure));
+    assert!(!strict.data.publishable);
+    assert_eq!(strict.data.run_status, RunStatus::Degraded);
 }
 
 #[test]

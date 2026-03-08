@@ -594,6 +594,43 @@ fn analysis_run_nonlinear_strict_iteration_cap_sets_degraded_status() {
 }
 
 #[test]
+fn analysis_run_nonlinear_policy_contract_divergence_is_explicit() {
+    let model = fixture_model(FixtureId::NonlinearAssembly);
+    let run_with_policy = |policy| {
+        analysis_run_nonlinear_with_options_op(
+            &model,
+            ComputeBackend::Cpu,
+            AnalysisNonlinearRunOptions {
+                quality_policy: policy,
+                max_newton_iters: 1,
+                line_search: false,
+                max_line_search_backtracks: 0,
+                ..AnalysisNonlinearRunOptions::balanced()
+            },
+            OperationContext::new(Some(format!("trace-contract-nonlinear-policy-{policy:?}")), None),
+        )
+        .expect("nonlinear run should produce typed envelope")
+    };
+
+    let exploratory = run_with_policy(QualityPolicy::Exploratory);
+    let balanced = run_with_policy(QualityPolicy::Balanced);
+    let strict = run_with_policy(QualityPolicy::Strict);
+
+    assert!(exploratory.data.publishable);
+    assert_eq!(exploratory.data.run_status, RunStatus::Publishable);
+
+    for degraded in [balanced, strict] {
+        assert!(!degraded.data.publishable);
+        assert_eq!(degraded.data.run_status, RunStatus::Degraded);
+        assert!(degraded
+            .data
+            .quality_reasons
+            .iter()
+            .any(|reason| reason.code == QualityReasonCode::NonlinearIncrementFailure));
+    }
+}
+
+#[test]
 fn analysis_run_transient_with_options_contract_controls_execution_window() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.steps = vec![runmat_analysis_core::AnalysisStep {
