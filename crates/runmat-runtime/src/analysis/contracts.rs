@@ -104,6 +104,12 @@ pub struct AnalysisTransientRunOptions {
     pub residual_target: f64,
     pub adaptive_time_step: bool,
     pub max_step_retries: usize,
+    pub adapt_min_scale: f64,
+    pub adapt_max_scale: f64,
+    pub adapt_growth_exponent: f64,
+    pub adapt_retry_growth_cap: f64,
+    pub adapt_nonconverged_shrink: f64,
+    pub dt_bucket_rel_tolerance: f64,
 }
 
 impl Default for AnalysisTransientRunOptions {
@@ -121,6 +127,12 @@ impl Default for AnalysisTransientRunOptions {
             residual_target: 1.0e-6,
             adaptive_time_step: true,
             max_step_retries: 4,
+            adapt_min_scale: 0.8,
+            adapt_max_scale: 1.25,
+            adapt_growth_exponent: 0.35,
+            adapt_retry_growth_cap: 1.05,
+            adapt_nonconverged_shrink: 0.75,
+            dt_bucket_rel_tolerance: 0.0,
         }
     }
 }
@@ -140,6 +152,12 @@ impl AnalysisTransientRunOptions {
             residual_target: 1.0e-4,
             adaptive_time_step: true,
             max_step_retries: 2,
+            adapt_min_scale: 0.75,
+            adapt_max_scale: 1.3,
+            adapt_growth_exponent: 0.3,
+            adapt_retry_growth_cap: 1.02,
+            adapt_nonconverged_shrink: 0.7,
+            dt_bucket_rel_tolerance: 0.02,
         }
     }
 
@@ -161,6 +179,12 @@ impl AnalysisTransientRunOptions {
             residual_target: 1.0e-7,
             adaptive_time_step: true,
             max_step_retries: 8,
+            adapt_min_scale: 0.85,
+            adapt_max_scale: 1.2,
+            adapt_growth_exponent: 0.45,
+            adapt_retry_growth_cap: 1.03,
+            adapt_nonconverged_shrink: 0.8,
+            dt_bucket_rel_tolerance: 0.005,
         }
     }
 }

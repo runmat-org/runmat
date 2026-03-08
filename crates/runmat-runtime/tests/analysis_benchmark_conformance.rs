@@ -371,6 +371,54 @@ fn manifest_specs() -> Vec<FixtureSpec> {
             max_transient_cache_misses: None,
         },
         FixtureSpec {
+            id: "modal_large_cpu_stress16",
+            description: "large modal fixture stress run at 16 modes",
+            model: || fixture_model(FixtureId::ModalLarge),
+            run_kind: AnalysisRunKind::Modal,
+            expect_validate_error: None,
+            expect_run_error: None,
+            expected_publishable: Some(false),
+            parity_tolerance: None,
+            gpu_mode: None,
+            residency_expectation: None,
+            max_solver_host_sync_count: None,
+            min_solver_device_apply_k_ratio: None,
+            expected_solver_backend: None,
+            modal_mode_count: Some(16),
+            transient_step_count: None,
+            max_modal_orthogonality_offdiag: Some(8.0e-3),
+            min_modal_relative_frequency_separation: Some(5.0e-6),
+            max_transient_residual_norm: None,
+            max_transient_energy_growth_ratio: None,
+            min_gpu_speedup_ratio: None,
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
+        },
+        FixtureSpec {
+            id: "modal_large_gpu_provider_stress16",
+            description: "large modal fixture GPU provider stress run at 16 modes",
+            model: || fixture_model(FixtureId::ModalLarge),
+            run_kind: AnalysisRunKind::Modal,
+            expect_validate_error: None,
+            expect_run_error: None,
+            expected_publishable: Some(false),
+            parity_tolerance: None,
+            gpu_mode: Some(GpuMode::WithProvider),
+            residency_expectation: Some(ResidencyExpectation::DeviceRef),
+            max_solver_host_sync_count: Some(144),
+            min_solver_device_apply_k_ratio: Some(1.0),
+            expected_solver_backend: Some("runtime_tensor"),
+            modal_mode_count: Some(16),
+            transient_step_count: None,
+            max_modal_orthogonality_offdiag: Some(8.0e-3),
+            min_modal_relative_frequency_separation: Some(5.0e-6),
+            max_transient_residual_norm: None,
+            max_transient_energy_growth_ratio: None,
+            min_gpu_speedup_ratio: Some(2.2),
+            min_transient_cache_hit_ratio: None,
+            max_transient_cache_misses: None,
+        },
+        FixtureSpec {
             id: "transient_long_cpu",
             description: "long transient fixture with thresholded stability diagnostics",
             model: || fixture_model(FixtureId::TransientLong),
@@ -579,11 +627,18 @@ fn run_fixture_cpu(
         AnalysisRunKind::Transient => analysis_run_transient_with_options_op(
             model,
             ComputeBackend::Cpu,
-            AnalysisTransientRunOptions {
+            {
+                let requested_bucket_rel_tol = std::env::var("RUNMAT_TRANSIENT_DT_BUCKET_REL_TOL")
+                    .ok()
+                    .and_then(|value| value.parse::<f64>().ok());
+                AnalysisTransientRunOptions {
                 step_count: spec
                     .transient_step_count
                     .unwrap_or(AnalysisTransientRunOptions::default().step_count),
+                dt_bucket_rel_tolerance: requested_bucket_rel_tol
+                    .unwrap_or(AnalysisTransientRunOptions::balanced().dt_bucket_rel_tolerance),
                 ..AnalysisTransientRunOptions::balanced()
+                }
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
@@ -617,11 +672,18 @@ fn run_fixture_gpu(
         AnalysisRunKind::Transient => analysis_run_transient_with_options_op(
             model,
             ComputeBackend::Gpu,
-            AnalysisTransientRunOptions {
+            {
+                let requested_bucket_rel_tol = std::env::var("RUNMAT_TRANSIENT_DT_BUCKET_REL_TOL")
+                    .ok()
+                    .and_then(|value| value.parse::<f64>().ok());
+                AnalysisTransientRunOptions {
                 step_count: spec
                     .transient_step_count
                     .unwrap_or(AnalysisTransientRunOptions::default().step_count),
+                dt_bucket_rel_tolerance: requested_bucket_rel_tol
+                    .unwrap_or(AnalysisTransientRunOptions::balanced().dt_bucket_rel_tolerance),
                 ..AnalysisTransientRunOptions::balanced()
+                }
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),

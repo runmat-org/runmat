@@ -13,10 +13,7 @@ mod diagnostics;
 mod linear_step;
 
 use diagnostics::push_transient_quality_diagnostics;
-use linear_step::{
-    build_step_rhs, solve_implicit_step_system, strain_energy, transient_dt_bucket_rel_tolerance,
-    LinearStepStats,
-};
+use linear_step::{build_step_rhs, solve_implicit_step_system, strain_energy, LinearStepStats};
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct TransientSolveOptions {
@@ -29,6 +26,12 @@ pub struct TransientSolveOptions {
     pub residual_target: f64,
     pub adaptive_time_step: bool,
     pub max_step_retries: usize,
+    pub adapt_min_scale: f64,
+    pub adapt_max_scale: f64,
+    pub adapt_growth_exponent: f64,
+    pub adapt_retry_growth_cap: f64,
+    pub adapt_nonconverged_shrink: f64,
+    pub dt_bucket_rel_tolerance: f64,
 }
 
 impl Default for TransientSolveOptions {
@@ -43,6 +46,12 @@ impl Default for TransientSolveOptions {
             residual_target: 1.0e-6,
             adaptive_time_step: true,
             max_step_retries: 4,
+            adapt_min_scale: 0.8,
+            adapt_max_scale: 1.25,
+            adapt_growth_exponent: 0.35,
+            adapt_retry_growth_cap: 1.05,
+            adapt_nonconverged_shrink: 0.75,
+            dt_bucket_rel_tolerance: 0.0,
         }
     }
 }
@@ -124,7 +133,7 @@ pub fn solve_transient_system(
     let mut adapt_scale_sum = 0.0_f64;
     let mut adapt_scale_min = f64::INFINITY;
     let mut adapt_scale_max = 0.0_f64;
-    let dt_bucket_rel_tolerance = transient_dt_bucket_rel_tolerance();
+    let dt_bucket_rel_tolerance = options.dt_bucket_rel_tolerance.max(0.0);
 
     for _step in 0..options.step_count {
         let mut step_dt = dt;
@@ -143,6 +152,7 @@ pub fn solve_transient_system(
                 &mut prepared_runtime_cache_hits,
                 &mut prepared_runtime_cache_misses,
                 &mut prepared_build_ms,
+                dt_bucket_rel_tolerance,
             );
             solve_ms += solve_start.elapsed().as_secs_f64() * 1_000.0;
             if !options.adaptive_time_step {
@@ -209,6 +219,7 @@ pub fn solve_transient_system(
                 max_dt,
                 converged,
                 retries,
+                options,
             );
             let scale = next_dt / step_dt.max(1.0e-12);
             adapt_scale_sum += scale;
@@ -294,18 +305,23 @@ fn recommend_next_time_step(
     max_dt: f64,
     converged: bool,
     retries: usize,
+    options: TransientSolveOptions,
 ) -> f64 {
     if !converged {
-        return (step_dt * 0.75).clamp(min_dt, max_dt);
+        return (step_dt * options.adapt_nonconverged_shrink.clamp(0.2, 1.0)).clamp(min_dt, max_dt);
     }
 
     let target = residual_target.max(1.0e-12);
     let ratio = (target / residual_norm.max(1.0e-12)).clamp(0.25, 4.0);
-    let mut factor = ratio.powf(0.35).clamp(0.8, 1.25);
+    let mut factor = ratio.powf(options.adapt_growth_exponent.clamp(0.1, 1.0));
+    factor = factor.clamp(
+        options.adapt_min_scale.clamp(0.2, 1.0),
+        options.adapt_max_scale.clamp(1.0, 2.0),
+    );
     if retries > 0 {
-        factor = factor.min(1.05);
+        factor = factor.min(options.adapt_retry_growth_cap.clamp(1.0, 1.5));
     } else if residual_norm <= target * 0.1 {
-        factor = factor.max(1.15);
+        factor = factor.max((1.0 + (options.adapt_max_scale - 1.0) * 0.6).clamp(1.0, 1.5));
     }
     (step_dt * factor).clamp(min_dt, max_dt)
 }

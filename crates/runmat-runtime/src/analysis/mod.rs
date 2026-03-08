@@ -591,6 +591,12 @@ pub fn analysis_run_transient_with_options_op(
             residual_target: options.residual_target,
             adaptive_time_step: options.adaptive_time_step,
             max_step_retries: options.max_step_retries,
+            adapt_min_scale: options.adapt_min_scale,
+            adapt_max_scale: options.adapt_max_scale,
+            adapt_growth_exponent: options.adapt_growth_exponent,
+            adapt_retry_growth_cap: options.adapt_retry_growth_cap,
+            adapt_nonconverged_shrink: options.adapt_nonconverged_shrink,
+            dt_bucket_rel_tolerance: options.dt_bucket_rel_tolerance,
         },
     )
     .map_err(|err| {

@@ -532,6 +532,12 @@ fn analysis_run_transient_with_options_contract_controls_execution_window() {
             residual_target: 1.0e-6,
             adaptive_time_step: false,
             max_step_retries: 0,
+            adapt_min_scale: 0.8,
+            adapt_max_scale: 1.25,
+            adapt_growth_exponent: 0.35,
+            adapt_retry_growth_cap: 1.05,
+            adapt_nonconverged_shrink: 0.75,
+            dt_bucket_rel_tolerance: 0.0,
         },
         OperationContext::new(Some("trace-contract-transient-opts-1".to_string()), None),
     )

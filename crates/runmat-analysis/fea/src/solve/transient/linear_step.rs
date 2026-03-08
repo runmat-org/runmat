@@ -43,10 +43,11 @@ pub(super) fn solve_implicit_step_system(
     prepared_runtime_cache_hits: &mut usize,
     prepared_runtime_cache_misses: &mut usize,
     prepared_build_ms: &mut f64,
+    dt_bucket_rel_tolerance: f64,
 ) -> (Vec<f64>, f64, bool, Option<LinearStepStats>) {
     const PREPARED_RUNTIME_CACHE_CAPACITY: usize = 12;
     if use_runtime_tensor {
-        let dt_key = dt_cache_key(dt, options.time_step_s);
+        let dt_key = dt_cache_key(dt, options.time_step_s, dt_bucket_rel_tolerance);
         if prepared_runtime_systems_by_dt.contains_key(&dt_key) {
             *prepared_runtime_cache_hits += 1;
             prepared_runtime_system_lru.retain(|value| *value != dt_key);
@@ -153,16 +154,7 @@ pub(super) fn solve_implicit_step_system(
     (x, rr_old.sqrt() / rhs_norm, converged, None)
 }
 
-pub(super) fn transient_dt_bucket_rel_tolerance() -> f64 {
-    std::env::var("RUNMAT_TRANSIENT_DT_BUCKET_REL_TOL")
-        .ok()
-        .and_then(|value| value.parse::<f64>().ok())
-        .unwrap_or(0.0)
-        .max(0.0)
-}
-
-fn dt_cache_key(dt: f64, nominal_dt: f64) -> u64 {
-    let rel_tol = transient_dt_bucket_rel_tolerance();
+fn dt_cache_key(dt: f64, nominal_dt: f64, rel_tol: f64) -> u64 {
     if rel_tol <= 0.0 {
         return dt.to_bits();
     }
