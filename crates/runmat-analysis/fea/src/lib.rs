@@ -60,6 +60,9 @@ pub struct FeaPrepContext {
     pub mapped_load_count: usize,
     pub mapped_bc_count: usize,
     pub layout_seed: u64,
+    pub topology_dof_multiplier: f64,
+    pub topology_bandwidth_proxy: u32,
+    pub mapped_region_participation_ratio: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -184,6 +187,9 @@ pub fn run_linear_static_with_options(
     }
     if let Some(prep_summary) = summary.prep_assembly.as_ref() {
         diagnostics.push(prep_assembly_diagnostic(prep_summary));
+        if let Some(prep) = options.prep_context {
+            diagnostics.push(prep_topology_diagnostic(prep, summary.dof_count));
+        }
     }
     diagnostics.extend(solve_result.diagnostics);
 
@@ -223,6 +229,9 @@ pub fn run_modal_with_options(
     }
     if let Some(prep_summary) = summary.prep_assembly.as_ref() {
         diagnostics.push(prep_assembly_diagnostic(prep_summary));
+        if let Some(prep) = options.prep_context {
+            diagnostics.push(prep_topology_diagnostic(prep, summary.dof_count));
+        }
     }
 
     let displacement = modal
@@ -304,6 +313,9 @@ pub fn run_transient_with_options(
     }
     if let Some(prep_summary) = summary.prep_assembly.as_ref() {
         diagnostics.push(prep_assembly_diagnostic(prep_summary));
+        if let Some(prep) = options.prep_context {
+            diagnostics.push(prep_topology_diagnostic(prep, summary.dof_count));
+        }
     }
 
     let displacement = transient
@@ -381,6 +393,9 @@ pub fn run_nonlinear_with_options(
     }
     if let Some(prep_summary) = summary.prep_assembly.as_ref() {
         diagnostics.push(prep_assembly_diagnostic(prep_summary));
+        if let Some(prep) = options.prep_context {
+            diagnostics.push(prep_topology_diagnostic(prep, summary.dof_count));
+        }
     }
 
     let displacement = nonlinear
@@ -491,14 +506,19 @@ fn prep_diagnostic(prep: FeaPrepContext) -> FeaDiagnostic {
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "prepared_mesh_count={} prepared_node_count={} prepared_element_count={} mapped_region_count={} min_scaled_jacobian={} mean_aspect_ratio={} inverted_element_count={}",
+            "prepared_mesh_count={} prepared_node_count={} prepared_element_count={} mapped_region_count={} mapped_load_count={} mapped_bc_count={} min_scaled_jacobian={} mean_aspect_ratio={} inverted_element_count={} topology_dof_multiplier={} topology_bandwidth_proxy={} mapped_region_participation_ratio={}",
             prep.prepared_mesh_count,
             prep.prepared_node_count,
             prep.prepared_element_count,
             prep.mapped_region_count,
+            prep.mapped_load_count,
+            prep.mapped_bc_count,
             prep.min_scaled_jacobian,
             prep.mean_aspect_ratio,
             prep.inverted_element_count,
+            prep.topology_dof_multiplier,
+            prep.topology_bandwidth_proxy,
+            prep.mapped_region_participation_ratio,
         ),
     }
 }
@@ -519,6 +539,20 @@ fn prep_assembly_diagnostic(summary: &assembly::PrepAssemblySummary) -> FeaDiagn
             summary.mapped_load_ratio,
             summary.constrained_prep_ratio,
             summary.layout_seed
+        ),
+    }
+}
+
+fn prep_topology_diagnostic(prep: FeaPrepContext, dof_count: usize) -> FeaDiagnostic {
+    FeaDiagnostic {
+        code: "FEA_PREP_TOPOLOGY".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "effective_dof_multiplier={} effective_dof_count={} coupling_bandwidth_proxy={} mapped_region_participation_ratio={}",
+            prep.topology_dof_multiplier,
+            dof_count,
+            prep.topology_bandwidth_proxy,
+            prep.mapped_region_participation_ratio,
         ),
     }
 }

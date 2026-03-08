@@ -24,12 +24,33 @@ impl Default for MeshingOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MeshConnectivityClass {
+    SparseBand,
+    SurfacePatch,
+    VolumeCore,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ElementFamilyHint {
+    Triangle,
+    Quad,
+    Tet,
+    Hex,
+    Mixed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreparedMeshDescriptor {
     pub prepared_mesh_id: String,
     pub source_mesh_id: String,
     pub kind: MeshKind,
     pub node_count: u64,
     pub element_count: u64,
+    pub connectivity_class: MeshConnectivityClass,
+    pub element_family_hint: ElementFamilyHint,
+    pub region_span_hint: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -94,12 +115,43 @@ pub fn prepare_geometry_for_analysis(
         let proposed = ((mesh.element_count as f64) * profile_scale).round() as u64;
         let element_count = proposed.max(1).min(per_mesh_budget.max(mesh.element_count));
         let node_count = (mesh.vertex_count.max(3)).max(element_count / 2 + 2);
+        let connectivity_class = match mesh.kind {
+            MeshKind::Surface => {
+                if element_count > 20_000 {
+                    MeshConnectivityClass::SparseBand
+                } else {
+                    MeshConnectivityClass::SurfacePatch
+                }
+            }
+            MeshKind::Volume => MeshConnectivityClass::VolumeCore,
+        };
+        let element_family_hint = match mesh.kind {
+            MeshKind::Surface => {
+                if element_count % 2 == 0 {
+                    ElementFamilyHint::Triangle
+                } else {
+                    ElementFamilyHint::Quad
+                }
+            }
+            MeshKind::Volume => {
+                if element_count % 2 == 0 {
+                    ElementFamilyHint::Tet
+                } else {
+                    ElementFamilyHint::Hex
+                }
+            }
+        };
+        let region_span_hint = ((geometry.regions.len().max(1) as u32).min(64).max(1))
+            .saturating_sub((prepared_meshes.len() as u32) % 2);
         prepared_meshes.push(PreparedMeshDescriptor {
             prepared_mesh_id: format!("prep_{}_{}", geometry.revision, mesh.mesh_id),
             source_mesh_id: mesh.mesh_id,
             kind: mesh.kind,
             node_count,
             element_count,
+            connectivity_class,
+            element_family_hint,
+            region_span_hint,
         });
     }
 
@@ -213,6 +265,11 @@ mod tests {
         let second = prepare_geometry_for_analysis(&geometry, MeshingOptions::default())
             .expect("second meshing prep should work");
         assert_eq!(first, second);
+        let descriptor = first
+            .prepared_meshes
+            .first()
+            .expect("prepared mesh descriptor should exist");
+        assert!(descriptor.region_span_hint >= 1);
     }
 
     #[test]

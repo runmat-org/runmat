@@ -57,6 +57,23 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         OperationContext::new(Some("trace-prep-solve-enhanced".to_string()), None),
     )
     .expect("prep-enhanced nonlinear run should succeed");
+    let prep_enhanced_replay = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            prep_artifact_id: Some(prep.data.prep_artifact_id.clone()),
+            ..AnalysisNonlinearRunOptions::production_recommended()
+        },
+        OperationContext::new(Some("trace-prep-solve-enhanced-replay".to_string()), None),
+    )
+    .expect("prep-enhanced replay nonlinear run should succeed");
+
+    assert!(baseline
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .all(|diag| diag.code != "FEA_PREP_TOPOLOGY"));
 
     assert!(prep_enhanced
         .data
@@ -70,6 +87,12 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_PREP_ASSEMBLY"));
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_TOPOLOGY"));
 
     let base_nonlinear = baseline
         .data
@@ -99,4 +122,20 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         base_max_iters != prep_max_iters
             || base_nonlinear.failed_increments != prep_nonlinear.failed_increments
     );
+
+    let prep_topology_diag = prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_TOPOLOGY")
+        .expect("prep topology diagnostic should be present");
+    let replay_topology_diag = prep_enhanced_replay
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_TOPOLOGY")
+        .expect("prep topology diagnostic should be present in replay");
+    assert_eq!(prep_topology_diag.message, replay_topology_diag.message);
 }

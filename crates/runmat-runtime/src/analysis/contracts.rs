@@ -36,6 +36,9 @@ pub struct AnalysisRunPrepContext {
     pub mapped_load_count: usize,
     pub mapped_bc_count: usize,
     pub layout_seed: u64,
+    pub topology_dof_multiplier: f64,
+    pub topology_bandwidth_proxy: u32,
+    pub mapped_region_participation_ratio: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

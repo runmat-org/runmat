@@ -1084,6 +1084,18 @@ Prep-aware assembly fidelity tier (updated):
   - `FEA_PREP_ASSEMBLY` (assembly participation/distribution metrics),
 - this represents deterministic prep-driven operator structure changes, while still not replacing the core operator with full remeshed element topology assembly.
 
+Topology-backed prep assembly mode:
+
+- prep mesh descriptors now carry topology hints (`connectivity_class`, `element_family_hint`, `region_span_hint`) used by assembly shaping,
+- prep-aware assembly derives:
+  - effective DOF scaling from prep topology multipliers,
+  - coupling sparsity band shaping from topology bandwidth proxies,
+  - region-coupled load/constraint distribution from mapping cardinalities,
+- prep-aware runs emit `FEA_PREP_TOPOLOGY` diagnostics with:
+  - `effective_dof_multiplier`,
+  - `coupling_bandwidth_proxy`,
+  - `mapped_region_participation_ratio`.
+
 Trusted prep-reference semantics:
 
 - `geometry.prep_for_analysis/v1` now persists prep artifacts and returns `prep_artifact_id`.
@@ -1353,6 +1365,9 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-08: Added topology descriptors to prep artifacts (`connectivity_class`, `element_family_hint`, `region_span_hint`) and wired topology-derived prep context signals (`topology_dof_multiplier`, `topology_bandwidth_proxy`, `mapped_region_participation_ratio`) into prep-aware solve context resolution.
+- 2026-03-08: Implemented prep-topology assembly mode in FEA with deterministic DOF scaling from prep topology multipliers, coupling sparsity shaping from bandwidth proxies, and region-coupled load/constraint placement from mapping cardinalities, plus new `FEA_PREP_TOPOLOGY` diagnostics for structural topology statistics.
+- 2026-03-08: Added conformance assertions for topology-backed prep runs (`FEA_PREP_TOPOLOGY` + deterministic replay checks) and published customer-facing manuals in `docs/geometry/prep-for-analysis.md` and `docs/analysis/prep-aware-solves.md` with explicit prep fidelity tiers.
 - 2026-03-08: Integrated prep artifact health into nonlinear release readiness by extending `release_readiness_nonlinear.py` with typed prep reason codes (`PREP_SLO_COUNT_EXCEEDED`, `PREP_SLO_AGE_EXCEEDED`, `PREP_REJECT_RATE_HIGH`, `PREP_HEALTH_MISSING`) and branch-aware severity behavior, so prep lifecycle SLO regressions now influence readiness verdicts alongside conformance/trend/artifact checks.
 - 2026-03-08: Added readiness unit coverage for prep-health pathways (count/age warn+fail and reject-rate signaling) and CI default prep-health thresholds for release readiness evaluation (`RUNMAT_RELEASE_READINESS_PREP_*`).
 - 2026-03-08: Added prep artifact health observability with `geometry.prep_artifact_health/v1`, exposing lifecycle counters and age distribution summaries, plus runtime lifecycle event emission for prep artifact create/load/prune and stale/mismatch rejection outcomes.

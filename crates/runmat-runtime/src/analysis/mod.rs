@@ -2342,6 +2342,9 @@ fn to_fea_prep_context(context: Option<AnalysisRunPrepContext>) -> Option<runmat
         mapped_load_count: prep.mapped_load_count,
         mapped_bc_count: prep.mapped_bc_count,
         layout_seed: prep.layout_seed,
+        topology_dof_multiplier: prep.topology_dof_multiplier,
+        topology_bandwidth_proxy: prep.topology_bandwidth_proxy,
+        mapped_region_participation_ratio: prep.mapped_region_participation_ratio,
     })
 }
 
@@ -2503,20 +2506,56 @@ fn resolve_run_prep_context(
         }
     }
 
+    let prepared_node_count = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .map(|mesh| mesh.node_count as usize)
+        .sum::<usize>();
+    let prepared_element_count = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .map(|mesh| mesh.element_count as usize)
+        .sum::<usize>();
+    let topology_dof_multiplier = if model.loads.is_empty() {
+        1.0
+    } else {
+        ((prepared_node_count as f64 / (model.loads.len() as f64 * 3.0)).clamp(1.0, 4.0) * 0.35
+            + 1.0)
+            .min(4.0)
+    };
+    let topology_bandwidth_proxy = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .map(|mesh| mesh.region_span_hint)
+        .sum::<u32>()
+        .max(1)
+        .min(128);
+    let mapped_region_participation_ratio = if artifact.prep.region_mappings.is_empty() {
+        0.0
+    } else {
+        (artifact
+            .prep
+            .region_mappings
+            .iter()
+            .filter(|mapping| {
+                model.loads.iter().any(|load| load.region_id == mapping.region_id)
+                    || model
+                        .boundary_conditions
+                        .iter()
+                        .any(|bc| bc.region_id == mapping.region_id)
+            })
+            .count() as f64
+            / artifact.prep.region_mappings.len() as f64)
+            .clamp(0.0, 1.0)
+    };
+
     Ok(Some(AnalysisRunPrepContext {
         prepared_mesh_count: artifact.prep.prepared_meshes.len(),
-        prepared_node_count: artifact
-            .prep
-            .prepared_meshes
-            .iter()
-            .map(|mesh| mesh.node_count as usize)
-            .sum(),
-        prepared_element_count: artifact
-            .prep
-            .prepared_meshes
-            .iter()
-            .map(|mesh| mesh.element_count as usize)
-            .sum(),
+        prepared_node_count,
+        prepared_element_count,
         mapped_region_count: artifact.prep.region_mappings.len(),
         min_scaled_jacobian: artifact.prep.quality.min_scaled_jacobian,
         mean_aspect_ratio: artifact.prep.quality.mean_aspect_ratio,
@@ -2553,6 +2592,9 @@ fn resolve_run_prep_context(
             }
             seed
         },
+        topology_dof_multiplier,
+        topology_bandwidth_proxy,
+        mapped_region_participation_ratio,
     }))
 }
 

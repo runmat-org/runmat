@@ -27,7 +27,15 @@ pub fn assemble_linear_system(
     model: &AnalysisModel,
     prep_context: Option<FeaPrepContext>,
 ) -> AssemblySummary {
-    let dof_count = (model.loads.len() * 3).max(3);
+    let base_dof_count = (model.loads.len() * 3).max(3);
+    let dof_count = if let Some(prep) = prep_context {
+        let prep_dof = ((prep.prepared_node_count as f64) * prep.topology_dof_multiplier)
+            .round()
+            .max(base_dof_count as f64) as usize;
+        prep_dof.clamp(base_dof_count, base_dof_count.saturating_mul(6).max(3))
+    } else {
+        base_dof_count
+    };
 
     let avg_youngs_modulus = if model.materials.is_empty() {
         1.0e9
@@ -153,9 +161,13 @@ pub fn assemble_linear_system(
         });
     }
 
+    let bandwidth_stride = prep_context
+        .map(|prep| prep.topology_bandwidth_proxy.max(1) as usize)
+        .unwrap_or(1);
     for i in 0..stiffness_upper.len() {
         let coupling = 0.05 * stiffness_diag[i].min(stiffness_diag[i + 1]);
-        stiffness_upper[i] = if constrained[i] || constrained[i + 1] {
+        let in_sparse_band = bandwidth_stride <= 1 || (i % bandwidth_stride != 0);
+        stiffness_upper[i] = if constrained[i] || constrained[i + 1] || !in_sparse_band {
             0.0
         } else {
             coupling
