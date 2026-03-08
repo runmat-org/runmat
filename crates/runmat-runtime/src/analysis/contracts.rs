@@ -24,6 +24,17 @@ pub struct AnalysisCreateModelPrepContext {
     pub region_mappings: Vec<RegionMeshMapping>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisRunPrepContext {
+    pub prepared_mesh_count: usize,
+    pub prepared_node_count: usize,
+    pub prepared_element_count: usize,
+    pub mapped_region_count: usize,
+    pub min_scaled_jacobian: f64,
+    pub mean_aspect_ratio: f64,
+    pub inverted_element_count: usize,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalysisCreateModelProfile {
@@ -83,12 +94,14 @@ pub struct QualityReason {
     pub detail: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 pub struct AnalysisRunOptions {
     pub deterministic_mode: bool,
     pub precision_mode: PrecisionMode,
     pub preconditioner_mode: PreconditionerMode,
     pub quality_policy: QualityPolicy,
+    #[serde(default)]
+    pub prep_context: Option<AnalysisRunPrepContext>,
 }
 
 impl Default for AnalysisRunOptions {
@@ -98,6 +111,7 @@ impl Default for AnalysisRunOptions {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
+            prep_context: None,
         }
     }
 }
@@ -122,6 +136,8 @@ pub struct AnalysisTransientRunOptions {
     pub adapt_retry_growth_cap: f64,
     pub adapt_nonconverged_shrink: f64,
     pub dt_bucket_rel_tolerance: f64,
+    #[serde(default)]
+    pub prep_context: Option<AnalysisRunPrepContext>,
 }
 
 impl Default for AnalysisTransientRunOptions {
@@ -145,6 +161,7 @@ impl Default for AnalysisTransientRunOptions {
             adapt_retry_growth_cap: 1.05,
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
+            prep_context: None,
         }
     }
 }
@@ -170,6 +187,7 @@ impl AnalysisTransientRunOptions {
             adapt_retry_growth_cap: 1.02,
             adapt_nonconverged_shrink: 0.7,
             dt_bucket_rel_tolerance: 0.02,
+            prep_context: None,
         }
     }
 
@@ -207,6 +225,7 @@ impl AnalysisTransientRunOptions {
             adapt_retry_growth_cap: 1.03,
             adapt_nonconverged_shrink: 0.8,
             dt_bucket_rel_tolerance: 0.005,
+            prep_context: None,
         }
     }
 }
@@ -218,6 +237,8 @@ pub struct AnalysisModalRunOptions {
     pub quality_policy: QualityPolicy,
     pub mode_count: usize,
     pub residual_warn_threshold: f64,
+    #[serde(default)]
+    pub prep_context: Option<AnalysisRunPrepContext>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -234,6 +255,8 @@ pub struct AnalysisNonlinearRunOptions {
     pub max_line_search_backtracks: usize,
     pub line_search_reduction: f64,
     pub tangent_refresh_interval: usize,
+    #[serde(default)]
+    pub prep_context: Option<AnalysisRunPrepContext>,
 }
 
 impl Default for AnalysisNonlinearRunOptions {
@@ -251,6 +274,7 @@ impl Default for AnalysisNonlinearRunOptions {
             max_line_search_backtracks: 6,
             line_search_reduction: 0.5,
             tangent_refresh_interval: 2,
+            prep_context: None,
         }
     }
 }
@@ -270,6 +294,7 @@ impl AnalysisNonlinearRunOptions {
             max_line_search_backtracks: 0,
             line_search_reduction: 0.6,
             tangent_refresh_interval: 4,
+            prep_context: None,
         }
     }
 
@@ -291,6 +316,7 @@ impl AnalysisNonlinearRunOptions {
             max_line_search_backtracks: 10,
             line_search_reduction: 0.5,
             tangent_refresh_interval: 1,
+            prep_context: None,
         }
     }
 
@@ -308,6 +334,7 @@ impl AnalysisNonlinearRunOptions {
             max_line_search_backtracks: 8,
             line_search_reduction: 0.5,
             tangent_refresh_interval: 2,
+            prep_context: None,
         }
     }
 }
@@ -320,6 +347,7 @@ impl Default for AnalysisModalRunOptions {
             quality_policy: QualityPolicy::Balanced,
             mode_count: 3,
             residual_warn_threshold: 1.0e-3,
+            prep_context: None,
         }
     }
 }
@@ -332,6 +360,7 @@ impl AnalysisModalRunOptions {
             quality_policy: QualityPolicy::Exploratory,
             mode_count: 2,
             residual_warn_threshold: 5.0e-3,
+            prep_context: None,
         }
     }
 
@@ -346,6 +375,7 @@ impl AnalysisModalRunOptions {
             quality_policy: QualityPolicy::Strict,
             mode_count: 8,
             residual_warn_threshold: 5.0e-4,
+            prep_context: None,
         }
     }
 }

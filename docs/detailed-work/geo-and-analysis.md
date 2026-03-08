@@ -1065,6 +1065,13 @@ Typed prep-context error families:
 - `ANALYSIS_CREATE_MODEL_PREP_MESH_NOT_FOUND`
 - `ANALYSIS_CREATE_MODEL_PREP_INVALID_MAPPING`
 
+Prep-aware solve semantics (current MVP):
+
+- `analysis.run_*` option payloads accept optional `prep_context` summary metrics.
+- Runtime maps prep context into FEA execution options for linear/modal/transient/nonlinear paths.
+- FEA emits `FEA_PREP_CONTEXT` diagnostics for prep-aware runs and applies deterministic assembly scaling based on prep mesh density/quality counters.
+- Current guarantee: prep-aware runs are deterministic and observable, but still use surrogate prep influence (not full remeshed element-topology solve yet).
+
 ### Artifact Retention and Migration Guarantees
 
 Runtime artifact persistence now supports compatibility-aware loading for both:
@@ -1292,6 +1299,8 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-08: Extended prep context from model synthesis into solve execution by adding optional run-level prep payloads across analysis run option contracts (`analysis.run_linear_static/modal/transient/nonlinear`), mapping prep summaries into FEA solve options, and emitting `FEA_PREP_CONTEXT` diagnostics for prep-aware runs.
+- 2026-03-08: Added deterministic prep-influenced assembly scaling in FEA (mesh density/quality driven stiffness/load shaping and prep-aware load-complexity augmentation), plus prep-vs-non-prep conformance coverage asserting bounded nonlinear quality deltas and explicit prep diagnostic presence.
 - 2026-03-08: Completed prep-aware analysis model integration by extending `analysis.create_model/v1` intent with optional `prep_context` (source geometry id/revision + region mappings), adding typed prep-consistency validation/error mapping, and prioritizing prep-mapped regions during default BC/load placement plus assignment-confidence promotion.
 - 2026-03-08: Added end-to-end contract coverage for `geometry.load -> geometry.prep_for_analysis -> analysis.create_model -> analysis.validate` and runtime unit tests for prep-context success/mismatch paths, ensuring deterministic prep-to-model flow behavior.
 - 2026-03-08: Started Phase-7 meshing foundation by adding `runmat-meshing-core` with deterministic analysis-prep contracts (`MeshingOptions`, prepared mesh descriptors, region mapping provenance, quality report) and a constrained deterministic meshing MVP (`prepare_geometry_for_analysis`) for existing mesh-derived geometry assets.

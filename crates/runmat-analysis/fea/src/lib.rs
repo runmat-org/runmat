@@ -48,20 +48,36 @@ pub struct FeaRunResult {
     pub von_mises_field: AnalysisField,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct FeaPrepContext {
+    pub prepared_mesh_count: usize,
+    pub prepared_node_count: usize,
+    pub prepared_element_count: usize,
+    pub mapped_region_count: usize,
+    pub min_scaled_jacobian: f64,
+    pub mean_aspect_ratio: f64,
+    pub inverted_element_count: usize,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct LinearStaticSolveOptions {
     pub preconditioner_kind: SpdPreconditionerKind,
     pub algebra_backend_kind: LinearAlgebraBackendKind,
+    pub prep_context: Option<FeaPrepContext>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ModalSolveOptions {
     pub mode_count: usize,
+    pub prep_context: Option<FeaPrepContext>,
 }
 
 impl Default for ModalSolveOptions {
     fn default() -> Self {
-        Self { mode_count: 3 }
+        Self {
+            mode_count: 3,
+            prep_context: None,
+        }
     }
 }
 
@@ -103,6 +119,7 @@ impl Default for LinearStaticSolveOptions {
         Self {
             preconditioner_kind: SpdPreconditionerKind::Jacobi,
             algebra_backend_kind: LinearAlgebraBackendKind::CpuReference,
+            prep_context: None,
         }
     }
 }
@@ -127,7 +144,7 @@ pub fn run_linear_static_with_options(
 ) -> Result<FeaRunResult, FeaRunError> {
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
 
-    let summary = assemble_linear_system(model);
+    let summary = assemble_linear_system(model, options.prep_context);
     let algebra_backend = build_backend(options.algebra_backend_kind);
     let solve_result = solve_linear_system(
         &summary,
@@ -159,6 +176,9 @@ pub fn run_linear_static_with_options(
         ),
     }];
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
+    if let Some(prep) = options.prep_context {
+        diagnostics.push(prep_diagnostic(prep));
+    }
     diagnostics.extend(solve_result.diagnostics);
 
     Ok(FeaRunResult {
@@ -188,10 +208,13 @@ pub fn run_modal_with_options(
 ) -> Result<FeaModalRunResult, FeaRunError> {
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
 
-    let summary = assemble_linear_system(model);
+    let summary = assemble_linear_system(model, options.prep_context);
     let modal = solve_modal_system(&summary, options.mode_count, backend);
     let mut diagnostics = modal.diagnostics.clone();
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
+    if let Some(prep) = options.prep_context {
+        diagnostics.push(prep_diagnostic(prep));
+    }
 
     let displacement = modal
         .mode_shapes
@@ -263,10 +286,13 @@ pub fn run_transient_with_options(
 ) -> Result<FeaTransientRunResult, FeaRunError> {
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
 
-    let summary = assemble_linear_system(model);
+    let summary = assemble_linear_system(model, options.prep_context);
     let transient = solve_transient_system(&summary, options, backend);
     let mut diagnostics = transient.diagnostics.clone();
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
+    if let Some(prep) = options.prep_context {
+        diagnostics.push(prep_diagnostic(prep));
+    }
 
     let displacement = transient
         .displacement_snapshots
@@ -334,10 +360,13 @@ pub fn run_nonlinear_with_options(
 ) -> Result<FeaNonlinearRunResult, FeaRunError> {
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
 
-    let summary = assemble_linear_system(model);
+    let summary = assemble_linear_system(model, options.prep_context);
     let nonlinear = solve_nonlinear_system(&summary, options, backend);
     let mut diagnostics = nonlinear.diagnostics.clone();
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
+    if let Some(prep) = options.prep_context {
+        diagnostics.push(prep_diagnostic(prep));
+    }
 
     let displacement = nonlinear
         .displacement_snapshots
@@ -436,6 +465,27 @@ fn material_assignment_diagnostics(assignments: &[MaterialAssignment]) -> Vec<Fe
         });
     }
     out
+}
+
+fn prep_diagnostic(prep: FeaPrepContext) -> FeaDiagnostic {
+    FeaDiagnostic {
+        code: "FEA_PREP_CONTEXT".to_string(),
+        severity: if prep.inverted_element_count == 0 {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "prepared_mesh_count={} prepared_node_count={} prepared_element_count={} mapped_region_count={} min_scaled_jacobian={} mean_aspect_ratio={} inverted_element_count={}",
+            prep.prepared_mesh_count,
+            prep.prepared_node_count,
+            prep.prepared_element_count,
+            prep.mapped_region_count,
+            prep.min_scaled_jacobian,
+            prep.mean_aspect_ratio,
+            prep.inverted_element_count,
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -585,7 +635,10 @@ mod tests {
         let result = run_modal_with_options(
             &model,
             ComputeBackend::Cpu,
-            ModalSolveOptions { mode_count: 8 },
+            ModalSolveOptions {
+                mode_count: 8,
+                prep_context: None,
+            },
         )
         .expect("modal large fixture should solve");
 

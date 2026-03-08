@@ -623,5 +623,6 @@ pub(super) fn default_options() -> AnalysisRunOptions {
         precision_mode: PrecisionMode::Fp64,
         preconditioner_mode: PreconditionerMode::Auto,
         quality_policy: QualityPolicy::Balanced,
+    prep_context: None,
     }
 }

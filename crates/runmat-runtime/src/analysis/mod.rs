@@ -28,7 +28,8 @@ pub use contracts::{
     AnalysisModalRunOptions,
     AnalysisNonlinearRunOptions, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunKind, AnalysisRunOptions, AnalysisRunResult, AnalysisTrendKindSummary,
-    AnalysisTrendsData, AnalysisTrendsQuery, AnalysisTransientRunOptions, AnalysisValidateResult,
+    AnalysisRunPrepContext, AnalysisTrendsData, AnalysisTrendsQuery,
+    AnalysisTransientRunOptions, AnalysisValidateResult,
     ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, NonlinearMethod,
     NonlinearResultsData, PrecisionMode, PreconditionerMode, QualityGate, QualityPolicy,
     QualityReason, QualityReasonCode, RunProvenance, RunStatus,
@@ -436,6 +437,7 @@ pub fn analysis_run_modal_with_options_op(
         backend,
         ModalSolveOptions {
             mode_count: options.mode_count,
+            prep_context: to_fea_prep_context(options.prep_context),
         },
     )
     .map_err(
@@ -748,6 +750,7 @@ pub fn analysis_run_transient_with_options_op(
             adapt_retry_growth_cap: options.adapt_retry_growth_cap,
             adapt_nonconverged_shrink: options.adapt_nonconverged_shrink,
             dt_bucket_rel_tolerance: options.dt_bucket_rel_tolerance,
+            prep_context: to_fea_prep_context(options.prep_context),
         },
     )
     .map_err(|err| {
@@ -1146,6 +1149,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             max_line_search_backtracks: options.max_line_search_backtracks,
             line_search_reduction: options.line_search_reduction,
             tangent_refresh_interval: options.tangent_refresh_interval,
+            prep_context: to_fea_prep_context(options.prep_context),
         },
     )
     .map_err(|err| {
@@ -1404,6 +1408,7 @@ pub fn analysis_run_linear_static_with_options(
         LinearStaticSolveOptions {
             preconditioner_kind: requested_preconditioner,
             algebra_backend_kind: requested_solver_backend,
+            prep_context: to_fea_prep_context(options.prep_context),
         },
     )
     .map_err(|err| {
@@ -2284,6 +2289,18 @@ fn run_kind(run: &AnalysisRunResult) -> AnalysisRunKind {
     } else {
         AnalysisRunKind::LinearStatic
     }
+}
+
+fn to_fea_prep_context(context: Option<AnalysisRunPrepContext>) -> Option<runmat_analysis_fea::FeaPrepContext> {
+    context.map(|prep| runmat_analysis_fea::FeaPrepContext {
+        prepared_mesh_count: prep.prepared_mesh_count,
+        prepared_node_count: prep.prepared_node_count,
+        prepared_element_count: prep.prepared_element_count,
+        mapped_region_count: prep.mapped_region_count,
+        min_scaled_jacobian: prep.min_scaled_jacobian,
+        mean_aspect_ratio: prep.mean_aspect_ratio,
+        inverted_element_count: prep.inverted_element_count,
+    })
 }
 
 fn run_solve_ms(run: &AnalysisRunResult) -> Option<f64> {

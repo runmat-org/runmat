@@ -418,6 +418,7 @@ fn analysis_run_linear_static_returns_typed_envelope() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
+        prep_context: None,
         },
         context,
     )
@@ -1033,6 +1034,7 @@ fn requested_preconditioner_fallback_is_recorded() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Amg,
             quality_policy: QualityPolicy::Balanced,
+        prep_context: None,
         },
         OperationContext::new(Some("trace-preconditioner-fallback".to_string()), None),
     )
@@ -1059,6 +1061,7 @@ fn ilu_preconditioner_request_is_honored_without_fallback() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Ilu,
             quality_policy: QualityPolicy::Balanced,
+        prep_context: None,
         },
         OperationContext::new(Some("trace-preconditioner-ilu".to_string()), None),
     )
@@ -1087,6 +1090,7 @@ fn quality_policy_exploratory_allows_publishable_warn_path() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Exploratory,
+        prep_context: None,
         },
         OperationContext::new(Some("trace-quality-policy-exploratory".to_string()), None),
     )
@@ -1143,6 +1147,7 @@ fn quality_policy_balanced_allows_publishable_with_quality_reasons() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
+        prep_context: None,
         },
         OperationContext::new(Some("trace-quality-policy-balanced".to_string()), None),
     )
@@ -1201,6 +1206,7 @@ fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Strict,
+        prep_context: None,
         },
         OperationContext::new(Some("trace-quality-policy-strict".to_string()), None),
     )
@@ -1532,6 +1538,7 @@ fn analysis_run_transient_with_options_controls_timeline() {
             adapt_retry_growth_cap: 1.05,
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
+        prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -1640,6 +1647,7 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
             quality_policy: QualityPolicy::Balanced,
             mode_count: 2,
             residual_warn_threshold: 1.0e-2,
+        prep_context: None,
         },
         OperationContext::new(None, None),
     )
