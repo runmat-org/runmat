@@ -965,6 +965,10 @@ Harness override environment variables:
   - test failure, or
   - protected branch push (`main` / `release/*`).
 - CI emits a compact nonlinear summary from `analysis_benchmark_report.json` into the job summary using `scripts/summarize_analysis_report.py`.
+- CI also evaluates rolling nonlinear trends with `scripts/analyze_nonlinear_trends.py`:
+  - window: `RUNMAT_ANALYSIS_TREND_WINDOW` (default `8`),
+  - slowdown threshold: `RUNMAT_ANALYSIS_TREND_MAX_SLOWDOWN_RATIO` (default `1.25`),
+  - warning on non-protected branches, fail-on-threshold for protected branches.
 
 ### Nonlinear Regression Triage
 
@@ -983,6 +987,16 @@ Use this quick map from failing gate to likely fix direction:
 - `gpu_speedup_ratio` retention regression:
   - inspect `gpu_solver_solve_ms` and `gpu_solver_prepared_build_ms` drift,
   - check provider availability/fallback events before adjusting thresholds.
+
+Trend interpretation guidance:
+
+- `analysis.results_compare` should be used for run-to-run reviews:
+  - negative `failed_increment_delta` / `max_iteration_delta` generally indicates improvement,
+  - positive `solve_ms_delta` indicates slowdown and should be weighed against quality gains.
+- `analysis.trends` should be used for release-readiness:
+  - watch `median_solve_ms` and `p95_solve_ms` divergence,
+  - keep nonlinear `publishable_rate` close to `1.0` in stable branches,
+  - investigate when `failed_increment_rate`, `mean_spike_count`, or `mean_stall_count` trend upward over multiple windows.
 
 ### Integrator Contract Guidance (Nonlinear)
 
@@ -1225,6 +1239,9 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-08: Added typed multi-run analytics operations: `analysis.results_compare/v1` for baseline-vs-candidate deltas (publishability/status, quality-reason count, nonlinear failed-increment/max-iteration/spike/stall deltas, solve-ms delta) and `analysis.trends/v1` for rolling run-kind summaries (median/p95 solve time, publishable rate, nonlinear failed-increment/spike/stall trend rates).
+- 2026-03-08: Extended artifact store capabilities with run listing support so trend aggregation works across in-memory and filesystem stores, and added mixed-schema/noisy-sample trend tests to ensure robust behavior with legacy+wrapped artifacts and stable percentile calculations.
+- 2026-03-08: Added CI nonlinear trend intelligence via `scripts/analyze_nonlinear_trends.py`, appending trend summaries to job output and enforcing branch-aware slowdown thresholds (`RUNMAT_ANALYSIS_TREND_MAX_SLOWDOWN_RATIO`) with protected-branch fail semantics.
 - 2026-03-08: Added artifact lifecycle hardening for analysis run persistence by introducing schema-wrapped filesystem artifacts (`analysis_run_artifact/v1`) with operation metadata, backward-compatible loading of legacy raw artifacts, and forward-compatible tolerance for unknown future fields at the storage boundary.
 - 2026-03-08: Added filesystem artifact retention controls (`RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS`, `RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS_PER_KIND`) with pruning-on-persist behavior and coverage for per-kind pruning semantics.
 - 2026-03-08: Added deterministic filesystem replay validation for `analysis.results_by_run_id` (stable summary/status/quality reasons across repeated loads) and wired the replay check into nonlinear CI governance alongside nonlinear report schema validation.

@@ -22,6 +22,7 @@ struct PersistedRunArtifact {
 pub trait AnalysisArtifactStore: Send + Sync {
     fn persist_run(&self, run: &AnalysisRunResult) -> Result<AnalysisArtifactRecord, String>;
     fn load_run(&self, run_id: &str) -> Result<Option<AnalysisRunResult>, String>;
+    fn list_runs(&self) -> Result<Vec<AnalysisRunResult>, String>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -72,6 +73,14 @@ impl AnalysisArtifactStore for InMemoryAnalysisArtifactStore {
             .read()
             .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
         Ok(guard.get(run_id).cloned())
+    }
+
+    fn list_runs(&self) -> Result<Vec<AnalysisRunResult>, String> {
+        let guard = self
+            .runs
+            .read()
+            .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+        Ok(guard.values().cloned().collect())
     }
 }
 
@@ -131,6 +140,33 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
                 .map_err(|err| format!("failed to parse run artifact: {err}"))?,
         };
         Ok(Some(run))
+    }
+
+    fn list_runs(&self) -> Result<Vec<AnalysisRunResult>, String> {
+        let runs_dir = self.root.join("runs");
+        if !runs_dir.exists() {
+            return Ok(Vec::new());
+        }
+        let mut runs = Vec::new();
+        for entry in
+            fs::read_dir(&runs_dir).map_err(|err| format!("failed to scan artifacts: {err}"))?
+        {
+            let entry = entry.map_err(|err| format!("failed to read artifact entry: {err}"))?;
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let bytes =
+                fs::read(&path).map_err(|err| format!("failed to read run artifact: {err}"))?;
+            let parsed = match serde_json::from_slice::<PersistedRunArtifact>(&bytes) {
+                Ok(persisted) => Some(persisted.run),
+                Err(_) => serde_json::from_slice::<AnalysisRunResult>(&bytes).ok(),
+            };
+            if let Some(run) = parsed {
+                runs.push(run);
+            }
+        }
+        Ok(runs)
     }
 }
 
@@ -239,6 +275,13 @@ pub fn load_run_result(run_id: &str) -> Result<Option<AnalysisRunResult>, String
         .read()
         .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
     guard.load_run(run_id)
+}
+
+pub fn list_run_results() -> Result<Vec<AnalysisRunResult>, String> {
+    let guard = global_store()
+        .read()
+        .map_err(|_| "analysis artifact store lock poisoned".to_string())?;
+    guard.list_runs()
 }
 
 pub fn configure_artifact_store(config: AnalysisArtifactStoreConfig) -> Result<(), String> {

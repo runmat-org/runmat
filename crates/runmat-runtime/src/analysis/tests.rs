@@ -616,6 +616,141 @@ fn analysis_results_by_run_id_missing_maps_typed_error() {
     storage::reset_artifact_store_for_tests();
 }
 
+#[test]
+fn analysis_results_compare_reports_typed_deltas() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+    let baseline = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            max_newton_iters: 1,
+            line_search: false,
+            ..AnalysisNonlinearRunOptions::balanced()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("baseline nonlinear run should succeed");
+    let candidate = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions::production_recommended(),
+        OperationContext::new(None, None),
+    )
+    .expect("candidate nonlinear run should succeed");
+
+    let compare = analysis_results_compare_op(
+        AnalysisResultsCompareQuery {
+            baseline_run_id: baseline.data.run_id.clone(),
+            candidate_run_id: candidate.data.run_id.clone(),
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("compare operation should succeed");
+
+    assert_eq!(compare.operation, "analysis.results_compare");
+    assert_eq!(compare.op_version, "analysis.results_compare/v1");
+    assert!(compare.data.failed_increment_delta.is_some());
+    assert!(compare.data.max_iteration_delta.is_some());
+    assert!(compare.data.solve_ms_delta.is_some());
+
+    storage::reset_artifact_store_for_tests();
+}
+
+#[test]
+fn analysis_trends_summarizes_recent_nonlinear_runs() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+    for _ in 0..4 {
+        let _ = analysis_run_nonlinear_op(&model, ComputeBackend::Cpu, OperationContext::new(None, None))
+            .expect("nonlinear run should persist for trends");
+    }
+
+    let trends = analysis_trends_op(
+        AnalysisTrendsQuery { window_size: 3 },
+        OperationContext::new(None, None),
+    )
+    .expect("trends should succeed");
+
+    assert_eq!(trends.operation, "analysis.trends");
+    assert_eq!(trends.op_version, "analysis.trends/v1");
+    let nonlinear = trends
+        .data
+        .summaries
+        .iter()
+        .find(|summary| summary.run_kind == AnalysisRunKind::Nonlinear)
+        .expect("nonlinear trend summary should exist");
+    assert_eq!(nonlinear.sample_count, 3);
+    assert!(nonlinear.median_solve_ms.is_some());
+    assert!(nonlinear.p95_solve_ms.is_some());
+    assert!(nonlinear.failed_increment_rate.is_some());
+
+    storage::reset_artifact_store_for_tests();
+}
+
+#[test]
+fn analysis_trends_handles_mixed_schema_and_noisy_samples() {
+    let _guard = analysis_test_guard();
+    storage::reset_artifact_store_for_tests();
+    let root = temp_artifact_root("trends-mixed-schema");
+    let _ = fs::remove_dir_all(&root);
+    storage::configure_artifact_store(storage::AnalysisArtifactStoreConfig::Filesystem {
+        root: root.clone(),
+    })
+    .expect("configure filesystem artifact store");
+
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+    let run = analysis_run_nonlinear_op(&model, ComputeBackend::Cpu, OperationContext::new(None, None))
+        .expect("seed nonlinear run should succeed");
+
+    let run_path = root.join("runs").join(format!("{}.json", run.data.run_id));
+    let raw = fs::read_to_string(&run_path).expect("read wrapped artifact");
+    let wrapped: serde_json::Value = serde_json::from_str(&raw).expect("parse wrapped artifact");
+    let mut legacy = wrapped
+        .get("run")
+        .cloned()
+        .expect("wrapped artifact should have run payload");
+    legacy["run_id"] = serde_json::json!(format!("{}_legacy", run.data.run_id));
+    fs::write(
+        root.join("runs").join(format!("{}_legacy.json", run.data.run_id)),
+        serde_json::to_vec_pretty(&legacy).expect("encode legacy artifact"),
+    )
+    .expect("write legacy artifact");
+
+    let trends = analysis_trends_op(
+        AnalysisTrendsQuery { window_size: 8 },
+        OperationContext::new(None, None),
+    )
+    .expect("trends should succeed on mixed schema artifacts");
+    let nonlinear = trends
+        .data
+        .summaries
+        .iter()
+        .find(|summary| summary.run_kind == AnalysisRunKind::Nonlinear)
+        .expect("nonlinear summary should be present");
+    assert!(nonlinear.sample_count >= 2);
+    assert!(nonlinear.p95_solve_ms.unwrap_or(0.0) >= nonlinear.median_solve_ms.unwrap_or(0.0));
+
+    storage::reset_artifact_store_for_tests();
+    let _ = fs::remove_dir_all(&root);
+}
+
 fn temp_artifact_root(test_name: &str) -> PathBuf {
     std::env::temp_dir().join(format!(
         "runmat-analysis-tests-{}-{}",

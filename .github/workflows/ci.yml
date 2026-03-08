@@ -276,6 +276,15 @@ jobs:
       - name: Validate nonlinear benchmark report keys
         run: python3 scripts/validate_analysis_report_nonlinear.py
 
+      - name: Analyze nonlinear rolling trends
+        if: always()
+        env:
+          RUNMAT_ANALYSIS_TREND_WINDOW: "8"
+          RUNMAT_ANALYSIS_TREND_MAX_SLOWDOWN_RATIO: "1.25"
+        run: |
+          python3 scripts/analyze_nonlinear_trends.py | tee nonlinear-trends.md
+          cat nonlinear-trends.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Summarize nonlinear report
         if: always()
         run: |

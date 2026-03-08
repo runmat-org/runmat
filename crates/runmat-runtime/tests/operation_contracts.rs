@@ -4,15 +4,16 @@ use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
-    analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_op,
+    analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_compare_op,
+    analysis_results_op, analysis_trends_op,
     analysis_run_linear_static_op, analysis_run_linear_static_with_options, analysis_run_modal_op,
     analysis_run_modal_with_options_op, analysis_run_nonlinear_op,
     analysis_run_nonlinear_with_options_op, analysis_run_transient_op,
     analysis_run_transient_with_options_op, analysis_validate, AnalysisCreateModelIntentSpec,
     AnalysisCreateModelProfile, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
-    AnalysisResultsQuery, AnalysisRunOptions, AnalysisTransientRunOptions, ModalFrequencyBasis,
-    ModalFrequencyUnits, PrecisionMode, PreconditionerMode, QualityPolicy, QualityReasonCode,
-    RunStatus,
+    AnalysisResultsCompareQuery, AnalysisResultsQuery, AnalysisRunKind, AnalysisRunOptions,
+    AnalysisTrendsQuery, AnalysisTransientRunOptions, ModalFrequencyBasis, ModalFrequencyUnits,
+    PrecisionMode, PreconditionerMode, QualityPolicy, QualityReasonCode, RunStatus,
 };
 use runmat_runtime::geometry::{
     geometry_capture_view_op, geometry_inspect_op, geometry_list_regions_op, geometry_load_op,
@@ -770,6 +771,78 @@ fn analysis_run_nonlinear_policy_diverges_on_harder_fixture_profile() {
     assert_eq!(balanced.data.run_status, RunStatus::Degraded);
     assert!(!strict.data.publishable);
     assert_eq!(strict.data.run_status, RunStatus::Degraded);
+}
+
+#[test]
+fn analysis_results_compare_contract_is_v1_and_handles_missing_run_ids() {
+    let model = fixture_model(FixtureId::NonlinearAssembly);
+    let baseline = analysis_run_nonlinear_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-compare-1".to_string()), None),
+    )
+    .expect("baseline nonlinear run should succeed");
+    let candidate = analysis_run_nonlinear_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-compare-2".to_string()), None),
+    )
+    .expect("candidate nonlinear run should succeed");
+
+    let compare = analysis_results_compare_op(
+        AnalysisResultsCompareQuery {
+            baseline_run_id: baseline.data.run_id.clone(),
+            candidate_run_id: candidate.data.run_id.clone(),
+        },
+        OperationContext::new(Some("trace-contract-compare-3".to_string()), None),
+    )
+    .expect("compare should succeed");
+    assert_eq!(compare.operation, "analysis.results_compare");
+    assert_eq!(compare.op_version, "analysis.results_compare/v1");
+    assert!(compare.data.solve_ms_delta.is_some());
+
+    let missing = analysis_results_compare_op(
+        AnalysisResultsCompareQuery {
+            baseline_run_id: "missing-run-id".to_string(),
+            candidate_run_id: candidate.data.run_id,
+        },
+        OperationContext::new(Some("trace-contract-compare-4".to_string()), None),
+    )
+    .expect_err("missing baseline run should fail");
+    assert_eq!(missing.operation, "analysis.results_compare");
+    assert_eq!(missing.op_version, "analysis.results_compare/v1");
+    assert_eq!(missing.error_code, "ANALYSIS_RESULTS_RUN_NOT_FOUND");
+}
+
+#[test]
+fn analysis_trends_contract_is_v1_and_typed() {
+    let model = fixture_model(FixtureId::NonlinearAssembly);
+    for idx in 0..3 {
+        let _ = analysis_run_nonlinear_op(
+            &model,
+            ComputeBackend::Cpu,
+            OperationContext::new(Some(format!("trace-contract-trends-{idx}")), None),
+        )
+        .expect("nonlinear run should succeed for trends");
+    }
+
+    let trends = analysis_trends_op(
+        AnalysisTrendsQuery { window_size: 2 },
+        OperationContext::new(Some("trace-contract-trends-op".to_string()), None),
+    )
+    .expect("trends operation should succeed");
+    assert_eq!(trends.operation, "analysis.trends");
+    assert_eq!(trends.op_version, "analysis.trends/v1");
+    assert_eq!(trends.data.window_size, 2);
+    let nonlinear = trends
+        .data
+        .summaries
+        .iter()
+        .find(|summary| summary.run_kind == AnalysisRunKind::Nonlinear)
+        .expect("nonlinear trend summary should be present");
+    assert_eq!(nonlinear.sample_count, 2);
+    assert!(nonlinear.median_solve_ms.is_some());
+    assert!(nonlinear.p95_solve_ms.is_some());
 }
 
 #[test]

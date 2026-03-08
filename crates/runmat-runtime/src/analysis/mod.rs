@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 
 use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisModel, AnalysisModelId, AnalysisStep,
@@ -23,12 +23,14 @@ mod promotion;
 pub mod storage;
 
 pub use contracts::{
-    AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisResultsData,
-    AnalysisModalRunOptions, AnalysisNonlinearRunOptions, AnalysisResultsQuery,
-    AnalysisResultsSummary, AnalysisRunOptions, AnalysisRunResult, AnalysisTransientRunOptions,
-    AnalysisValidateResult, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
-    NonlinearMethod, NonlinearResultsData, PrecisionMode, PreconditionerMode, QualityGate,
-    QualityPolicy, QualityReason, QualityReasonCode, RunProvenance, RunStatus,
+    AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisResultsCompareData,
+    AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisModalRunOptions,
+    AnalysisNonlinearRunOptions, AnalysisResultsQuery, AnalysisResultsSummary,
+    AnalysisRunKind, AnalysisRunOptions, AnalysisRunResult, AnalysisTrendKindSummary,
+    AnalysisTrendsData, AnalysisTrendsQuery, AnalysisTransientRunOptions, AnalysisValidateResult,
+    ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, NonlinearMethod,
+    NonlinearResultsData, PrecisionMode, PreconditionerMode, QualityGate, QualityPolicy,
+    QualityReason, QualityReasonCode, RunProvenance, RunStatus,
     TransientIntegrationMethod, TransientResultsData,
 };
 
@@ -46,6 +48,10 @@ const ANALYSIS_RUN_NONLINEAR_OPERATION: &str = "analysis.run_nonlinear";
 const ANALYSIS_RUN_NONLINEAR_OP_VERSION: &str = "analysis.run_nonlinear/v1";
 const ANALYSIS_RESULTS_OPERATION: &str = "analysis.results";
 const ANALYSIS_RESULTS_OP_VERSION: &str = "analysis.results/v1";
+const ANALYSIS_RESULTS_COMPARE_OPERATION: &str = "analysis.results_compare";
+const ANALYSIS_RESULTS_COMPARE_OP_VERSION: &str = "analysis.results_compare/v1";
+const ANALYSIS_TRENDS_OPERATION: &str = "analysis.trends";
+const ANALYSIS_TRENDS_OP_VERSION: &str = "analysis.trends/v1";
 const TRANSIENT_RESIDUAL_WARN_THRESHOLD: f64 = 1.0e-4;
 
 pub fn analysis_create_model_op(
@@ -1920,6 +1926,294 @@ pub fn analysis_results_by_run_id_op(
     };
 
     analysis_results_op(&run_result, query, context)
+}
+
+pub fn analysis_results_compare_op(
+    query: AnalysisResultsCompareQuery,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisResultsCompareData>, OperationErrorEnvelope> {
+    let baseline = storage::load_run_result(&query.baseline_run_id).map_err(|err| {
+        operation_error(
+            ANALYSIS_RESULTS_COMPARE_OPERATION,
+            ANALYSIS_RESULTS_COMPARE_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to load baseline analysis run artifact: {err}"),
+            BTreeMap::from([("run_id".to_string(), query.baseline_run_id.clone())]),
+        )
+    })?;
+    let Some(baseline) = baseline else {
+        return Err(operation_error(
+            ANALYSIS_RESULTS_COMPARE_OPERATION,
+            ANALYSIS_RESULTS_COMPARE_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RESULTS_RUN_NOT_FOUND",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("analysis baseline run_id '{}' was not found", query.baseline_run_id),
+            BTreeMap::from([("run_id".to_string(), query.baseline_run_id.clone())]),
+        ));
+    };
+
+    let candidate = storage::load_run_result(&query.candidate_run_id).map_err(|err| {
+        operation_error(
+            ANALYSIS_RESULTS_COMPARE_OPERATION,
+            ANALYSIS_RESULTS_COMPARE_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to load candidate analysis run artifact: {err}"),
+            BTreeMap::from([("run_id".to_string(), query.candidate_run_id.clone())]),
+        )
+    })?;
+    let Some(candidate) = candidate else {
+        return Err(operation_error(
+            ANALYSIS_RESULTS_COMPARE_OPERATION,
+            ANALYSIS_RESULTS_COMPARE_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RESULTS_RUN_NOT_FOUND",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("analysis candidate run_id '{}' was not found", query.candidate_run_id),
+            BTreeMap::from([("run_id".to_string(), query.candidate_run_id.clone())]),
+        ));
+    };
+
+    let baseline_solve_ms = run_solve_ms(&baseline);
+    let candidate_solve_ms = run_solve_ms(&candidate);
+    let failed_increment_delta = match (
+        baseline.nonlinear_results.as_ref(),
+        candidate.nonlinear_results.as_ref(),
+    ) {
+        (Some(a), Some(b)) => Some(b.failed_increments as i64 - a.failed_increments as i64),
+        _ => None,
+    };
+    let max_iteration_delta = match (
+        baseline.nonlinear_results.as_ref(),
+        candidate.nonlinear_results.as_ref(),
+    ) {
+        (Some(a), Some(b)) => Some(
+            b.iteration_counts.iter().copied().max().unwrap_or(0) as i64
+                - a.iteration_counts.iter().copied().max().unwrap_or(0) as i64,
+        ),
+        _ => None,
+    };
+    let nonlinear_spike_count_delta = match (
+        baseline.nonlinear_results.as_ref(),
+        candidate.nonlinear_results.as_ref(),
+    ) {
+        (Some(a), Some(b)) => Some(b.iteration_spike_count as i64 - a.iteration_spike_count as i64),
+        _ => None,
+    };
+    let nonlinear_stall_count_delta = match (
+        baseline.nonlinear_results.as_ref(),
+        candidate.nonlinear_results.as_ref(),
+    ) {
+        (Some(a), Some(b)) => Some(b.convergence_stall_count as i64 - a.convergence_stall_count as i64),
+        _ => None,
+    };
+
+    let data = AnalysisResultsCompareData {
+        baseline_run_id: baseline.run_id,
+        candidate_run_id: candidate.run_id,
+        publishable_changed: baseline.publishable != candidate.publishable,
+        run_status_changed: baseline.run_status != candidate.run_status,
+        quality_reason_count_delta: candidate.quality_reasons.len() as i64
+            - baseline.quality_reasons.len() as i64,
+        failed_increment_delta,
+        max_iteration_delta,
+        nonlinear_spike_count_delta,
+        nonlinear_stall_count_delta,
+        solve_ms_delta: match (baseline_solve_ms, candidate_solve_ms) {
+            (Some(a), Some(b)) => Some(b - a),
+            _ => None,
+        },
+    };
+
+    Ok(OperationEnvelope::new(
+        ANALYSIS_RESULTS_COMPARE_OPERATION,
+        ANALYSIS_RESULTS_COMPARE_OP_VERSION,
+        &context,
+        data,
+    ))
+}
+
+pub fn analysis_trends_op(
+    query: AnalysisTrendsQuery,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisTrendsData>, OperationErrorEnvelope> {
+    let runs = storage::list_run_results().map_err(|err| {
+        operation_error(
+            ANALYSIS_TRENDS_OPERATION,
+            ANALYSIS_TRENDS_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to list analysis run artifacts: {err}"),
+            BTreeMap::new(),
+        )
+    })?;
+
+    let mut grouped: HashMap<AnalysisRunKind, Vec<AnalysisRunResult>> = HashMap::new();
+    for run in runs {
+        grouped.entry(run_kind(&run)).or_default().push(run);
+    }
+
+    let window = query.window_size.max(1);
+    let mut summaries = Vec::new();
+    for kind in [
+        AnalysisRunKind::LinearStatic,
+        AnalysisRunKind::Modal,
+        AnalysisRunKind::Transient,
+        AnalysisRunKind::Nonlinear,
+    ] {
+        let Some(mut entries) = grouped.remove(&kind) else {
+            continue;
+        };
+        entries.sort_by(|a, b| b.run_id.cmp(&a.run_id));
+        if entries.len() > window {
+            entries.truncate(window);
+        }
+        let sample_count = entries.len();
+        if sample_count == 0 {
+            continue;
+        }
+
+        let mut solve_samples = entries
+            .iter()
+            .filter_map(run_solve_ms)
+            .filter(|value| value.is_finite())
+            .collect::<Vec<_>>();
+        solve_samples.sort_by(|a, b| a.total_cmp(b));
+        let median_solve_ms = percentile(&solve_samples, 0.5);
+        let p95_solve_ms = percentile(&solve_samples, 0.95);
+        let publishable_rate = entries.iter().filter(|run| run.publishable).count() as f64
+            / sample_count as f64;
+
+        let failed_increment_rate = if kind == AnalysisRunKind::Nonlinear {
+            let failed = entries
+                .iter()
+                .filter_map(|run| run.nonlinear_results.as_ref())
+                .filter(|nonlinear| nonlinear.failed_increments > 0)
+                .count();
+            Some(failed as f64 / sample_count as f64)
+        } else {
+            None
+        };
+        let mean_spike_count = if kind == AnalysisRunKind::Nonlinear {
+            let values = entries
+                .iter()
+                .filter_map(|run| run.nonlinear_results.as_ref())
+                .map(|nonlinear| nonlinear.iteration_spike_count as f64)
+                .collect::<Vec<_>>();
+            Some(mean(&values))
+        } else {
+            None
+        };
+        let mean_stall_count = if kind == AnalysisRunKind::Nonlinear {
+            let values = entries
+                .iter()
+                .filter_map(|run| run.nonlinear_results.as_ref())
+                .map(|nonlinear| nonlinear.convergence_stall_count as f64)
+                .collect::<Vec<_>>();
+            Some(mean(&values))
+        } else {
+            None
+        };
+
+        summaries.push(AnalysisTrendKindSummary {
+            run_kind: kind,
+            sample_count,
+            median_solve_ms,
+            p95_solve_ms,
+            publishable_rate,
+            failed_increment_rate,
+            mean_spike_count,
+            mean_stall_count,
+        });
+    }
+
+    Ok(OperationEnvelope::new(
+        ANALYSIS_TRENDS_OPERATION,
+        ANALYSIS_TRENDS_OP_VERSION,
+        &context,
+        AnalysisTrendsData {
+            window_size: window,
+            summaries,
+        },
+    ))
+}
+
+fn run_kind(run: &AnalysisRunResult) -> AnalysisRunKind {
+    if run.nonlinear_results.is_some() {
+        AnalysisRunKind::Nonlinear
+    } else if run.transient_results.is_some() {
+        AnalysisRunKind::Transient
+    } else if run.modal_results.is_some() {
+        AnalysisRunKind::Modal
+    } else {
+        AnalysisRunKind::LinearStatic
+    }
+}
+
+fn run_solve_ms(run: &AnalysisRunResult) -> Option<f64> {
+    for code in ["FEA_NONLINEAR_COST", "FEA_TRANSIENT_COST", "FEA_MODAL_COST"] {
+        if let Some(value) = diagnostic_metric(&run.run.diagnostics, code, "solve_ms") {
+            return Some(value);
+        }
+    }
+    None
+}
+
+fn diagnostic_metric(
+    diagnostics: &[runmat_analysis_fea::diagnostics::FeaDiagnostic],
+    code: &str,
+    key: &str,
+) -> Option<f64> {
+    diagnostics
+        .iter()
+        .find(|diag| diag.code == code)
+        .and_then(|diag| {
+            diag.message
+                .split_whitespace()
+                .find_map(|token| token.strip_prefix(&format!("{key}=")))
+        })
+        .and_then(|value| value.parse::<f64>().ok())
+}
+
+fn percentile(sorted_samples: &[f64], ratio: f64) -> Option<f64> {
+    if sorted_samples.is_empty() {
+        return None;
+    }
+    let index = ((sorted_samples.len() - 1) as f64 * ratio.clamp(0.0, 1.0)).round() as usize;
+    sorted_samples.get(index).copied()
+}
+
+fn mean(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        0.0
+    } else {
+        values.iter().sum::<f64>() / values.len() as f64
+    }
 }
 
 fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {

@@ -464,6 +464,64 @@ pub struct AnalysisResultsData {
     pub summary: AnalysisResultsSummary,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisResultsCompareQuery {
+    pub baseline_run_id: String,
+    pub candidate_run_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisResultsCompareData {
+    pub baseline_run_id: String,
+    pub candidate_run_id: String,
+    pub publishable_changed: bool,
+    pub run_status_changed: bool,
+    pub quality_reason_count_delta: i64,
+    pub failed_increment_delta: Option<i64>,
+    pub max_iteration_delta: Option<i64>,
+    pub nonlinear_spike_count_delta: Option<i64>,
+    pub nonlinear_stall_count_delta: Option<i64>,
+    pub solve_ms_delta: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AnalysisTrendsQuery {
+    pub window_size: usize,
+}
+
+impl Default for AnalysisTrendsQuery {
+    fn default() -> Self {
+        Self { window_size: 16 }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalysisRunKind {
+    LinearStatic,
+    Modal,
+    Transient,
+    Nonlinear,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisTrendKindSummary {
+    pub run_kind: AnalysisRunKind,
+    pub sample_count: usize,
+    pub median_solve_ms: Option<f64>,
+    pub p95_solve_ms: Option<f64>,
+    pub publishable_rate: f64,
+    pub failed_increment_rate: Option<f64>,
+    pub mean_spike_count: Option<f64>,
+    pub mean_stall_count: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisTrendsData {
+    pub window_size: usize,
+    pub summaries: Vec<AnalysisTrendKindSummary>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ModalResultsData {
     pub modal_payload_version: String,
