@@ -969,6 +969,10 @@ Harness override environment variables:
   - window: `RUNMAT_ANALYSIS_TREND_WINDOW` (default `8`),
   - slowdown threshold: `RUNMAT_ANALYSIS_TREND_MAX_SLOWDOWN_RATIO` (default `1.25`),
   - warning on non-protected branches, fail-on-threshold for protected branches.
+- CI evaluates final nonlinear release readiness via `scripts/release_readiness_nonlinear.py`, producing:
+  - machine-readable output: `target/runmat-analysis-artifacts/nonlinear_release_readiness.json`,
+  - human summary appended to step summary,
+  - verdict semantics: `pass` / `warn` / `fail`.
 
 ### Nonlinear Regression Triage
 
@@ -997,6 +1001,19 @@ Trend interpretation guidance:
   - watch `median_solve_ms` and `p95_solve_ms` divergence,
   - keep nonlinear `publishable_rate` close to `1.0` in stable branches,
   - investigate when `failed_increment_rate`, `mean_spike_count`, or `mean_stall_count` trend upward over multiple windows.
+
+Release readiness criteria (default):
+
+- Required pass checks:
+  - latest nonlinear conformance report passed,
+  - no missing nonlinear fixture records,
+  - no non-publishable nonlinear fixture records,
+  - artifact replay + compatibility verification checks marked passed.
+- Trend guard:
+  - nonlinear fixture `gpu_run_ms` slowdown ratio must stay below `RUNMAT_RELEASE_READINESS_MAX_SLOWDOWN_RATIO` vs rolling median baseline.
+- Protected branches:
+  - `fail` reasons block release,
+  - `warn` reasons are surfaced and should be triaged before tagging.
 
 ### Integrator Contract Guidance (Nonlinear)
 
@@ -1239,6 +1256,9 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-08: Added release-readiness governance for nonlinear analysis via `scripts/release_readiness_nonlinear.py` with typed verdict output (`analysis-release-readiness/v1`: `pass`/`warn`/`fail`), reason codes, machine-readable artifact emission, and protected-branch fail semantics driven by conformance/trend/artifact verification signals.
+- 2026-03-08: Added typed multi-run runtime analytics endpoints `analysis.results_compare/v1` and `analysis.trends/v1` for run-to-run deltas and rolling run-kind trend summaries, including nonlinear-specific deltas/rates (failed increments, max iterations, spike/stall counts) and solve-time statistics (median/p95).
+- 2026-03-08: Added CI coverage and tests for readiness/trend logic (Python unit tests + runtime unit/contract tests), and wired branch-aware release-readiness evaluation into the nonlinear conformance pipeline with summary output and artifact capture.
 - 2026-03-08: Added typed multi-run analytics operations: `analysis.results_compare/v1` for baseline-vs-candidate deltas (publishability/status, quality-reason count, nonlinear failed-increment/max-iteration/spike/stall deltas, solve-ms delta) and `analysis.trends/v1` for rolling run-kind summaries (median/p95 solve time, publishable rate, nonlinear failed-increment/spike/stall trend rates).
 - 2026-03-08: Extended artifact store capabilities with run listing support so trend aggregation works across in-memory and filesystem stores, and added mixed-schema/noisy-sample trend tests to ensure robust behavior with legacy+wrapped artifacts and stable percentile calculations.
 - 2026-03-08: Added CI nonlinear trend intelligence via `scripts/analyze_nonlinear_trends.py`, appending trend summaries to job output and enforcing branch-aware slowdown thresholds (`RUNMAT_ANALYSIS_TREND_MAX_SLOWDOWN_RATIO`) with protected-branch fail semantics.

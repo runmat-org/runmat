@@ -273,8 +273,19 @@ jobs:
           RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS_PER_KIND: "0"
         run: cargo test -p runmat-runtime analysis::tests::analysis_results_by_run_id_filesystem_replay_is_stable
 
+      - name: Mark artifact replay verification passed
+        if: success()
+        run: echo "RUNMAT_RELEASE_READINESS_ARTIFACT_REPLAY_OK=true" >> "$GITHUB_ENV"
+
       - name: Validate nonlinear benchmark report keys
         run: python3 scripts/validate_analysis_report_nonlinear.py
+
+      - name: Mark artifact compatibility verification passed
+        if: success()
+        run: echo "RUNMAT_RELEASE_READINESS_ARTIFACT_COMPAT_OK=true" >> "$GITHUB_ENV"
+
+      - name: Test release readiness script logic
+        run: python3 -m unittest scripts.tests.test_release_readiness_nonlinear
 
       - name: Analyze nonlinear rolling trends
         if: always()
@@ -291,6 +302,14 @@ jobs:
           python3 scripts/summarize_analysis_report.py | tee nonlinear-summary.md
           cat nonlinear-summary.md >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Evaluate nonlinear release readiness
+        if: always()
+        env:
+          RUNMAT_RELEASE_READINESS_MAX_SLOWDOWN_RATIO: "1.25"
+        run: |
+          python3 scripts/release_readiness_nonlinear.py | tee nonlinear-release-readiness.md
+          cat nonlinear-release-readiness.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Upload nonlinear benchmark artifacts
         if: always() && (failure() || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
         uses: actions/upload-artifact@v4
@@ -298,8 +317,10 @@ jobs:
           name: nonlinear-benchmark-${{ github.run_id }}
           path: |
             target/runmat-analysis-artifacts/analysis_benchmark_report.json
+            target/runmat-analysis-artifacts/nonlinear_release_readiness.json
             target/runmat-analysis-artifacts/rolling/*.json
             nonlinear-summary.md
+            nonlinear-release-readiness.md
           if-no-files-found: warn
 
   cross-build:
