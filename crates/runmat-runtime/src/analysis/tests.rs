@@ -867,6 +867,37 @@ fn analysis_run_nonlinear_returns_native_nonlinear_result() {
 }
 
 #[test]
+fn analysis_run_nonlinear_strict_rejects_iteration_cap_exhaustion() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+
+    let envelope = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            quality_policy: QualityPolicy::Strict,
+            max_newton_iters: 1,
+            line_search: false,
+            ..AnalysisNonlinearRunOptions::balanced()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("nonlinear run should produce envelope");
+
+    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
+    assert!(!envelope.data.publishable);
+    assert!(envelope
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::NonlinearIncrementFailure));
+}
+
+#[test]
 fn analysis_results_query_can_exclude_nonlinear_payload() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();

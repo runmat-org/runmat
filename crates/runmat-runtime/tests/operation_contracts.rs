@@ -6,11 +6,13 @@ use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_op,
     analysis_run_linear_static_op, analysis_run_linear_static_with_options, analysis_run_modal_op,
-    analysis_run_modal_with_options_op, analysis_run_nonlinear_op, analysis_run_transient_op,
+    analysis_run_modal_with_options_op, analysis_run_nonlinear_op,
+    analysis_run_nonlinear_with_options_op, analysis_run_transient_op,
     analysis_run_transient_with_options_op, analysis_validate, AnalysisCreateModelIntentSpec,
-    AnalysisCreateModelProfile, AnalysisModalRunOptions, AnalysisResultsQuery, AnalysisRunOptions,
-    AnalysisTransientRunOptions, ModalFrequencyBasis, ModalFrequencyUnits, PrecisionMode,
-    PreconditionerMode, QualityPolicy, QualityReasonCode, RunStatus,
+    AnalysisCreateModelProfile, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
+    AnalysisResultsQuery, AnalysisRunOptions, AnalysisTransientRunOptions, ModalFrequencyBasis,
+    ModalFrequencyUnits, PrecisionMode, PreconditionerMode, QualityPolicy, QualityReasonCode,
+    RunStatus,
 };
 use runmat_runtime::geometry::{
     geometry_capture_view_op, geometry_inspect_op, geometry_list_regions_op, geometry_load_op,
@@ -562,6 +564,33 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
     assert_eq!(invalid.operation, "analysis.run_nonlinear");
     assert_eq!(invalid.op_version, "analysis.run_nonlinear/v1");
     assert_eq!(invalid.error_code, "ANALYSIS_RUN_NONLINEAR_INVALID_MODEL");
+}
+
+#[test]
+fn analysis_run_nonlinear_strict_iteration_cap_sets_degraded_status() {
+    let model = fixture_model(FixtureId::NonlinearAssembly);
+    let envelope = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            quality_policy: QualityPolicy::Strict,
+            max_newton_iters: 1,
+            line_search: false,
+            ..AnalysisNonlinearRunOptions::balanced()
+        },
+        OperationContext::new(Some("trace-contract-nonlinear-strict-cap".to_string()), None),
+    )
+    .expect("nonlinear strict run should return envelope");
+
+    assert_eq!(envelope.operation, "analysis.run_nonlinear");
+    assert_eq!(envelope.op_version, "analysis.run_nonlinear/v1");
+    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
+    assert!(!envelope.data.publishable);
+    assert!(envelope
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::NonlinearIncrementFailure));
 }
 
 #[test]

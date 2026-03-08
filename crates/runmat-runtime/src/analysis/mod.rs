@@ -1062,6 +1062,19 @@ pub fn analysis_run_nonlinear_with_options_op(
         item.code == "FEA_NONLINEAR_CONVERGENCE"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
     });
+    let max_nonlinear_iteration_count = nonlinear_run
+        .iteration_counts
+        .iter()
+        .copied()
+        .max()
+        .unwrap_or(0);
+    let iteration_cap_hits = nonlinear_run
+        .iteration_counts
+        .iter()
+        .filter(|&&count| count >= options.max_newton_iters.max(1))
+        .count();
+    let strict_increment_failure = nonlinear_run.failed_increments > 0;
+    let strict_iteration_cap_exhausted = iteration_cap_hits > 0;
 
     let mut quality_reasons = Vec::new();
     if solver_convergence == QualityGate::Warn {
@@ -1080,12 +1093,14 @@ pub fn analysis_run_nonlinear_with_options_op(
             ),
         });
     }
-    if nonlinear_increment_warn || nonlinear_run.failed_increments > 0 {
+    if nonlinear_increment_warn || strict_increment_failure || strict_iteration_cap_exhausted {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::NonlinearIncrementFailure,
             detail: format!(
-                "nonlinear increment convergence reported warnings failed_increments={}",
-                nonlinear_run.failed_increments
+                "nonlinear increment convergence warnings failed_increments={} iteration_cap_hits={} max_iteration_count={}",
+                nonlinear_run.failed_increments,
+                iteration_cap_hits,
+                max_nonlinear_iteration_count
             ),
         });
     }
@@ -1111,6 +1126,8 @@ pub fn analysis_run_nonlinear_with_options_op(
         QualityPolicy::Strict => {
             solver_convergence == QualityGate::Pass
                 && result_quality == QualityGate::Pass
+                && !strict_increment_failure
+                && !strict_iteration_cap_exhausted
                 && quality_reasons.is_empty()
         }
         QualityPolicy::Balanced => {
