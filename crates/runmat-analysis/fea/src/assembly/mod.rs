@@ -15,6 +15,8 @@ pub struct AssemblySummary {
     pub prep_element_assembly: Option<PrepElementAssemblySummary>,
     pub prep_element_connectivity: Option<PrepElementConnectivitySummary>,
     pub prep_graph_assembly: Option<PrepGraphAssemblySummary>,
+    pub prep_calibration: Option<PrepCalibrationSummary>,
+    pub prep_acceptance: Option<PrepAcceptanceSummary>,
     pub operator: OperatorSystem,
 }
 
@@ -93,6 +95,31 @@ pub struct PrepGraphAssemblySummary {
     pub ordering_fingerprint: u64,
     pub recommend_ilu0: bool,
     pub graph_fingerprint: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrepCalibrationSummary {
+    pub profile: String,
+    pub triangle_weight: f64,
+    pub quad_weight: f64,
+    pub tet_weight: f64,
+    pub hex_weight: f64,
+    pub mixed_weight: f64,
+    pub stiffness_calibration_scale: f64,
+    pub mass_calibration_scale: f64,
+    pub damping_calibration_scale: f64,
+    pub calibration_fingerprint: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrepAcceptanceSummary {
+    pub profile: String,
+    pub accepted: bool,
+    pub bounded_displacement_scale: bool,
+    pub bounded_stress_scale: bool,
+    pub bounded_connectivity_fill: bool,
+    pub acceptance_score: f64,
+    pub acceptance_fingerprint: u64,
 }
 
 pub fn assemble_linear_system(
@@ -190,6 +217,8 @@ pub fn assemble_linear_system(
     let mut prep_element_assembly = None;
     let mut prep_element_connectivity = None;
     let mut prep_graph_assembly = None;
+    let mut prep_calibration = None;
+    let mut prep_acceptance = None;
     let mut topology_stiffness_scale = 1.0;
     let mut topology_mass_scale = 1.0;
     let mut topology_damping_scale = 1.0;
@@ -360,6 +389,24 @@ pub fn assemble_linear_system(
             prep_element_connectivity = Some(connectivity_summary);
             prep_graph_assembly = Some(graph_summary);
         }
+        if let Some(calibration) = apply_prep_calibration(
+            prep,
+            avg_youngs_modulus,
+            prep_graph_assembly.as_ref(),
+            &mut stiffness_diag,
+            &mut mass_diag,
+            &mut damping_diag,
+            &mut rhs,
+        ) {
+            let acceptance = evaluate_prep_acceptance(
+                prep,
+                &calibration,
+                prep_graph_assembly.as_ref(),
+                &stiffness_diag,
+            );
+            prep_calibration = Some(calibration);
+            prep_acceptance = Some(acceptance);
+        }
         let coupling_nonzero_ratio = if stiffness_upper.is_empty() {
             0.0
         } else {
@@ -431,6 +478,8 @@ pub fn assemble_linear_system(
         prep_element_assembly,
         prep_element_connectivity,
         prep_graph_assembly,
+        prep_calibration,
+        prep_acceptance,
         operator: OperatorSystem {
             dof_count,
             constrained,
@@ -754,6 +803,163 @@ fn apply_prep_element_connectivity_scatter(
     (connectivity_summary, graph_summary)
 }
 
+fn apply_prep_calibration(
+    prep: FeaPrepContext,
+    avg_youngs_modulus: f64,
+    graph_summary: Option<&PrepGraphAssemblySummary>,
+    stiffness_diag: &mut [f64],
+    mass_diag: &mut [f64],
+    damping_diag: &mut [f64],
+    rhs: &mut [f64],
+) -> Option<PrepCalibrationSummary> {
+    if stiffness_diag.is_empty() {
+        return None;
+    }
+    let profile = select_calibration_profile(prep, avg_youngs_modulus, graph_summary);
+    let (profile_gain, profile_name) = match profile {
+        CalibrationProfile::Fast => (0.92, "fast"),
+        CalibrationProfile::Balanced => (1.0, "balanced"),
+        CalibrationProfile::Conservative => (1.08, "conservative"),
+    };
+
+    let triangle_weight = (0.95 + 0.08 * prep.topology_triangle_family_ratio) * profile_gain;
+    let quad_weight = (1.0 + 0.06 * prep.topology_quad_family_ratio) * profile_gain;
+    let tet_weight = (1.04 + 0.10 * prep.topology_tet_family_ratio) * profile_gain;
+    let hex_weight = (1.08 + 0.12 * prep.topology_hex_family_ratio) * profile_gain;
+    let mixed_weight = (0.9 + 0.05 * prep.topology_mixed_family_ratio) * profile_gain;
+
+    let stiffness_calibration_scale = (triangle_weight * prep.topology_triangle_family_ratio
+        + quad_weight * prep.topology_quad_family_ratio
+        + tet_weight * prep.topology_tet_family_ratio
+        + hex_weight * prep.topology_hex_family_ratio
+        + mixed_weight * prep.topology_mixed_family_ratio.max(0.01))
+    .clamp(0.8, 1.3);
+    let mass_calibration_scale = (0.96
+        + 0.03 * prep.topology_surface_patch_ratio
+        + 0.04 * prep.topology_region_mesh_mean.clamp(1.0, 6.0) / 6.0)
+        .clamp(0.9, 1.2)
+        * profile_gain;
+    let damping_calibration_scale = (0.94
+        + 0.05 * prep.topology_mixed_family_ratio
+        + 0.03 * prep.mapped_region_participation_ratio)
+        .clamp(0.9, 1.2)
+        * profile_gain;
+
+    for value in stiffness_diag.iter_mut() {
+        *value *= stiffness_calibration_scale;
+    }
+    for value in mass_diag.iter_mut() {
+        *value *= mass_calibration_scale;
+    }
+    for value in damping_diag.iter_mut() {
+        *value *= damping_calibration_scale;
+    }
+    for value in rhs.iter_mut() {
+        *value *= (2.0 - stiffness_calibration_scale).clamp(0.8, 1.2);
+    }
+
+    Some(PrepCalibrationSummary {
+        profile: profile_name.to_string(),
+        triangle_weight,
+        quad_weight,
+        tet_weight,
+        hex_weight,
+        mixed_weight,
+        stiffness_calibration_scale,
+        mass_calibration_scale,
+        damping_calibration_scale,
+        calibration_fingerprint: calibration_fingerprint(
+            prep,
+            profile_name,
+            stiffness_calibration_scale,
+            mass_calibration_scale,
+            damping_calibration_scale,
+        ),
+    })
+}
+
+fn evaluate_prep_acceptance(
+    prep: FeaPrepContext,
+    calibration: &PrepCalibrationSummary,
+    graph_summary: Option<&PrepGraphAssemblySummary>,
+    stiffness_diag: &[f64],
+) -> PrepAcceptanceSummary {
+    let bounded_displacement_scale = (0.8..=1.3).contains(&calibration.stiffness_calibration_scale);
+    let bounded_stress_scale = (0.9..=1.25).contains(&calibration.damping_calibration_scale);
+    let bounded_connectivity_fill = graph_summary
+        .map(|graph| graph.fill_ratio <= 0.25 && graph.connected_component_count <= 64)
+        .unwrap_or(true);
+    let stiffness_max = stiffness_diag.iter().copied().fold(0.0_f64, f64::max);
+    let stiffness_min = stiffness_diag
+        .iter()
+        .copied()
+        .filter(|value| *value > 0.0)
+        .fold(f64::INFINITY, f64::min);
+    let spread = if stiffness_min.is_finite() && stiffness_min > 0.0 {
+        stiffness_max / stiffness_min
+    } else {
+        0.0
+    };
+    let spread_penalty = (spread / 100.0).clamp(0.0, 1.0);
+    let mut acceptance_score = 1.0 - spread_penalty;
+    if !bounded_displacement_scale {
+        acceptance_score -= 0.2;
+    }
+    if !bounded_stress_scale {
+        acceptance_score -= 0.2;
+    }
+    if !bounded_connectivity_fill {
+        acceptance_score -= 0.3;
+    }
+    acceptance_score = acceptance_score.clamp(0.0, 1.0);
+    let accepted = bounded_displacement_scale
+        && bounded_stress_scale
+        && bounded_connectivity_fill
+        && acceptance_score >= 0.4
+        && prep.min_scaled_jacobian >= 0.45;
+
+    PrepAcceptanceSummary {
+        profile: calibration.profile.clone(),
+        accepted,
+        bounded_displacement_scale,
+        bounded_stress_scale,
+        bounded_connectivity_fill,
+        acceptance_score,
+        acceptance_fingerprint: acceptance_fingerprint(
+            prep,
+            &calibration.profile,
+            accepted,
+            acceptance_score,
+            spread,
+        ),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CalibrationProfile {
+    Fast,
+    Balanced,
+    Conservative,
+}
+
+fn select_calibration_profile(
+    prep: FeaPrepContext,
+    avg_youngs_modulus: f64,
+    graph_summary: Option<&PrepGraphAssemblySummary>,
+) -> CalibrationProfile {
+    let stiffness_regime = avg_youngs_modulus;
+    let ordering_gain = graph_summary
+        .map(|graph| graph.ordering_reduction_ratio)
+        .unwrap_or(0.0);
+    if prep.min_scaled_jacobian < 0.65 || prep.topology_mixed_family_ratio > 0.25 {
+        CalibrationProfile::Conservative
+    } else if stiffness_regime < 5.0e10 || ordering_gain > 0.2 {
+        CalibrationProfile::Fast
+    } else {
+        CalibrationProfile::Balanced
+    }
+}
+
 fn build_prep_graph_edges(
     prep: FeaPrepContext,
     node_count: usize,
@@ -1056,5 +1262,53 @@ fn graph_fingerprint(
         hash ^= value;
         hash = hash.wrapping_mul(1099511628211_u64);
     }
+    hash
+}
+
+fn calibration_fingerprint(
+    prep: FeaPrepContext,
+    profile: &str,
+    stiffness_scale: f64,
+    mass_scale: f64,
+    damping_scale: f64,
+) -> u64 {
+    let mut hash = 1469598103934665603_u64;
+    for byte in profile.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(1099511628211_u64);
+    }
+    for value in [
+        prep.layout_seed,
+        prep.prepared_element_count as u64,
+        stiffness_scale.to_bits(),
+        mass_scale.to_bits(),
+        damping_scale.to_bits(),
+        prep.topology_triangle_family_ratio.to_bits(),
+        prep.topology_quad_family_ratio.to_bits(),
+        prep.topology_tet_family_ratio.to_bits(),
+        prep.topology_hex_family_ratio.to_bits(),
+    ] {
+        hash ^= value;
+        hash = hash.wrapping_mul(1099511628211_u64);
+    }
+    hash
+}
+
+fn acceptance_fingerprint(
+    prep: FeaPrepContext,
+    profile: &str,
+    accepted: bool,
+    score: f64,
+    spread: f64,
+) -> u64 {
+    let mut hash = calibration_fingerprint(
+        prep,
+        profile,
+        score,
+        spread,
+        if accepted { 1.0 } else { 0.0 },
+    );
+    hash ^= accepted as u64;
+    hash = hash.wrapping_mul(1099511628211_u64);
     hash
 }

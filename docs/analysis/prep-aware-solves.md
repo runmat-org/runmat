@@ -52,6 +52,10 @@ Typed prep-reference failure families:
   - deterministic graph ordering profile informs solver traversal and bandwidth reduction estimates,
   - graph-conditioned preconditioner tuning is applied in prep-aware solver paths,
   - graph-solver diagnostics report ordering and effective preconditioner outcomes.
+- **Tier 5**: calibration + acceptance harness.
+  - deterministic calibration profiles (`fast`, `balanced`, `conservative`) scale family-weighted operator contributions,
+  - acceptance checks enforce bounded displacement/stress/connectivity conditions,
+  - calibration and acceptance fingerprints are replay-stable for the same prep artifact.
 
 ## Diagnostics
 
@@ -66,5 +70,7 @@ Prep-aware runs can emit:
 - `FEA_PREP_ELEMENT_CONNECTIVITY`
 - `FEA_PREP_GRAPH_ASSEMBLY`
 - `FEA_PREP_GRAPH_SOLVER`
+- `FEA_PREP_CALIBRATION`
+- `FEA_PREP_ACCEPTANCE`
 
 These diagnostics are deterministic for the same model + prep artifact reference.

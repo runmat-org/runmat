@@ -224,6 +224,12 @@ pub fn run_linear_static_with_options(
             &solve_result.preconditioner,
         ));
     }
+    if let Some(calibration) = summary.prep_calibration.as_ref() {
+        diagnostics.push(prep_calibration_diagnostic(calibration));
+    }
+    if let Some(acceptance) = summary.prep_acceptance.as_ref() {
+        diagnostics.push(prep_acceptance_diagnostic(acceptance));
+    }
     diagnostics.extend(solve_result.diagnostics);
 
     Ok(FeaRunResult {
@@ -291,6 +297,12 @@ pub fn run_modal_with_options(
                 "none"
             },
         ));
+    }
+    if let Some(calibration) = summary.prep_calibration.as_ref() {
+        diagnostics.push(prep_calibration_diagnostic(calibration));
+    }
+    if let Some(acceptance) = summary.prep_acceptance.as_ref() {
+        diagnostics.push(prep_acceptance_diagnostic(acceptance));
     }
 
     let displacement = modal
@@ -402,6 +414,12 @@ pub fn run_transient_with_options(
             &transient.preconditioner,
         ));
     }
+    if let Some(calibration) = summary.prep_calibration.as_ref() {
+        diagnostics.push(prep_calibration_diagnostic(calibration));
+    }
+    if let Some(acceptance) = summary.prep_acceptance.as_ref() {
+        diagnostics.push(prep_acceptance_diagnostic(acceptance));
+    }
 
     let displacement = transient
         .displacement_snapshots
@@ -512,6 +530,12 @@ pub fn run_nonlinear_with_options(
             "auto",
             &nonlinear.preconditioner,
         ));
+    }
+    if let Some(calibration) = summary.prep_calibration.as_ref() {
+        diagnostics.push(prep_calibration_diagnostic(calibration));
+    }
+    if let Some(acceptance) = summary.prep_acceptance.as_ref() {
+        diagnostics.push(prep_acceptance_diagnostic(acceptance));
     }
 
     let displacement = nonlinear
@@ -813,6 +837,47 @@ fn prep_graph_solver_diagnostic(
             iteration_metric,
             residual_metric,
             summary.graph_fingerprint,
+        ),
+    }
+}
+
+fn prep_calibration_diagnostic(summary: &assembly::PrepCalibrationSummary) -> FeaDiagnostic {
+    FeaDiagnostic {
+        code: "FEA_PREP_CALIBRATION".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "profile={} triangle_weight={} quad_weight={} tet_weight={} hex_weight={} mixed_weight={} stiffness_calibration_scale={} mass_calibration_scale={} damping_calibration_scale={} calibration_fingerprint={}",
+            summary.profile,
+            summary.triangle_weight,
+            summary.quad_weight,
+            summary.tet_weight,
+            summary.hex_weight,
+            summary.mixed_weight,
+            summary.stiffness_calibration_scale,
+            summary.mass_calibration_scale,
+            summary.damping_calibration_scale,
+            summary.calibration_fingerprint,
+        ),
+    }
+}
+
+fn prep_acceptance_diagnostic(summary: &assembly::PrepAcceptanceSummary) -> FeaDiagnostic {
+    FeaDiagnostic {
+        code: "FEA_PREP_ACCEPTANCE".to_string(),
+        severity: if summary.accepted {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "profile={} accepted={} bounded_displacement_scale={} bounded_stress_scale={} bounded_connectivity_fill={} acceptance_score={} acceptance_fingerprint={}",
+            summary.profile,
+            summary.accepted,
+            summary.bounded_displacement_scale,
+            summary.bounded_stress_scale,
+            summary.bounded_connectivity_fill,
+            summary.acceptance_score,
+            summary.acceptance_fingerprint,
         ),
     }
 }

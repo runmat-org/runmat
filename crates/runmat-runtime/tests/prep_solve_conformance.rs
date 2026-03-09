@@ -110,6 +110,18 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         .diagnostics
         .iter()
         .all(|diag| diag.code != "FEA_PREP_GRAPH_SOLVER"));
+    assert!(baseline
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .all(|diag| diag.code != "FEA_PREP_CALIBRATION"));
+    assert!(baseline
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .all(|diag| diag.code != "FEA_PREP_ACCEPTANCE"));
 
     assert!(prep_enhanced
         .data
@@ -165,6 +177,18 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_PREP_GRAPH_SOLVER"));
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_CALIBRATION"));
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_ACCEPTANCE"));
 
     let base_nonlinear = baseline
         .data
@@ -327,6 +351,43 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         replay_graph_solver_diag.message
     );
 
+    let prep_calibration_diag = prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_CALIBRATION")
+        .expect("prep calibration diagnostic should be present");
+    let replay_calibration_diag = prep_enhanced_replay
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_CALIBRATION")
+        .expect("prep calibration diagnostic should be present in replay");
+    assert_eq!(
+        prep_calibration_diag.message,
+        replay_calibration_diag.message
+    );
+
+    let prep_acceptance_diag = prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_ACCEPTANCE")
+        .expect("prep acceptance diagnostic should be present");
+    let replay_acceptance_diag = prep_enhanced_replay
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_ACCEPTANCE")
+        .expect("prep acceptance diagnostic should be present in replay");
+    assert_eq!(prep_acceptance_diag.message, replay_acceptance_diag.message);
+    let acceptance_score = metric_f64(&prep_acceptance_diag.message, "acceptance_score");
+    assert!(acceptance_score > 0.0);
+
     let base_peak_displacement = baseline
         .data
         .run
@@ -382,4 +443,12 @@ fn metric_usize(message: &str, key: &str) -> usize {
         .find_map(|token| token.strip_prefix(&format!("{key}=")))
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0)
+}
+
+fn metric_f64(message: &str, key: &str) -> f64 {
+    message
+        .split_whitespace()
+        .find_map(|token| token.strip_prefix(&format!("{key}=")))
+        .and_then(|value| value.parse::<f64>().ok())
+        .unwrap_or(0.0)
 }

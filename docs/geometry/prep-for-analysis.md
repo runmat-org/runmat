@@ -30,6 +30,9 @@ connectivity traversal, with replay-stable graph fingerprints and graph-structur
 In Tier 4.5 runs, graph ordering and graph-conditioned preconditioner tuning are applied in
 prep-aware solve paths and surfaced via graph-solver diagnostics.
 
+In Tier 5 runs, deterministic calibration profiles and acceptance checks are applied to prep-aware
+assembly/solve behavior, with replay-stable calibration and acceptance fingerprints.
+
 ## Prep artifact lifecycle
 
 Prep artifacts are persisted and can be filesystem-backed using:
