@@ -525,6 +525,7 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
             residual_warn_threshold: 1.0e-2,
         prep_context: None,
         prep_artifact_id: None,
+        prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-modal-opts-3".to_string()), None),
     )
@@ -552,6 +553,7 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
             residual_warn_threshold: 1.0e-3,
         prep_context: None,
         prep_artifact_id: None,
+        prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-modal-opts-4".to_string()), None),
     )
@@ -1038,6 +1040,7 @@ fn analysis_run_transient_with_options_contract_controls_execution_window() {
             dt_bucket_rel_tolerance: 0.0,
         prep_context: None,
         prep_artifact_id: None,
+        prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-transient-opts-1".to_string()), None),
     )
@@ -1508,6 +1511,7 @@ fn analysis_run_deterministic_contract_is_stable_across_replays() {
         quality_policy: QualityPolicy::Balanced,
     prep_context: None,
     prep_artifact_id: None,
+    prep_calibration_profile: None,
     };
 
     let first = analysis_run_linear_static_with_options(
@@ -1776,6 +1780,7 @@ fn strict_policy_quality_reasons_propagate_to_results_contracts() {
             quality_policy: QualityPolicy::Strict,
         prep_context: None,
         prep_artifact_id: None,
+        prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-11-run".to_string()), None),
     )
@@ -1868,6 +1873,7 @@ fn balanced_and_strict_diverge_for_same_field_promotion_fallback() {
             quality_policy: QualityPolicy::Balanced,
         prep_context: None,
         prep_artifact_id: None,
+        prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-12-balanced".to_string()), None),
     )
@@ -1883,6 +1889,7 @@ fn balanced_and_strict_diverge_for_same_field_promotion_fallback() {
             quality_policy: QualityPolicy::Strict,
         prep_context: None,
         prep_artifact_id: None,
+        prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-12-strict".to_string()), None),
     )
@@ -1956,6 +1963,7 @@ fn balanced_and_strict_divergence_propagates_through_results_endpoints() {
             quality_policy: QualityPolicy::Balanced,
         prep_context: None,
         prep_artifact_id: None,
+        prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-13-balanced-run".to_string()), None),
     )
@@ -1970,6 +1978,7 @@ fn balanced_and_strict_divergence_propagates_through_results_endpoints() {
             quality_policy: QualityPolicy::Strict,
         prep_context: None,
         prep_artifact_id: None,
+        prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-13-strict-run".to_string()), None),
     )

@@ -216,6 +216,41 @@ def evaluate_release_readiness(
             )
         )
 
+    prep_acceptance_min_rate = float(
+        os.getenv("RUNMAT_RELEASE_READINESS_PREP_ACCEPTANCE_MIN_RATE", "0.9")
+    )
+    prep_acceptance_require = is_true(
+        os.getenv("RUNMAT_RELEASE_READINESS_PREP_ACCEPTANCE_REQUIRE", "false")
+    )
+    acceptance_flags = []
+    for rec in records.values():
+        accepted = rec.get("prep_acceptance_passed")
+        if isinstance(accepted, bool):
+            acceptance_flags.append(accepted)
+    acceptance_rate = None
+    if not acceptance_flags:
+        if protected or prep_acceptance_require:
+            reasons.append(
+                Reason(
+                    code="PREP_ACCEPTANCE_MISSING",
+                    severity="warn",
+                    detail="prep acceptance metrics missing from nonlinear fixture records",
+                )
+            )
+    else:
+        acceptance_rate = sum(1 for flag in acceptance_flags if flag) / len(acceptance_flags)
+        if acceptance_rate < prep_acceptance_min_rate:
+            reasons.append(
+                Reason(
+                    code="PREP_ACCEPTANCE_RATE_LOW",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"prep acceptance pass rate {acceptance_rate:.3f} below "
+                        f"minimum {prep_acceptance_min_rate:.3f}"
+                    ),
+                )
+            )
+
     prep_warn_count = env_u64("RUNMAT_RELEASE_READINESS_PREP_WARN_ARTIFACT_COUNT", 64)
     prep_fail_count = env_u64("RUNMAT_RELEASE_READINESS_PREP_FAIL_ARTIFACT_COUNT", 128)
     prep_warn_p95_age = float(
@@ -321,6 +356,7 @@ def evaluate_release_readiness(
         "reasons": [reason.__dict__ for reason in reasons],
         "latest_report_passed": latest_passed,
         "nonlinear_fixture_count": len(records),
+        "prep_acceptance_rate": acceptance_rate,
     }
 
 

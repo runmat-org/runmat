@@ -32,7 +32,7 @@ pub use contracts::{
     AnalysisRunPrepContext, AnalysisTrendsData, AnalysisTrendsQuery,
     AnalysisTransientRunOptions, AnalysisValidateResult,
     ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, NonlinearMethod,
-    NonlinearResultsData, PrecisionMode, PreconditionerMode, QualityGate, QualityPolicy,
+    NonlinearResultsData, PrecisionMode, PrepCalibrationProfile, PreconditionerMode, QualityGate, QualityPolicy,
     QualityReason, QualityReasonCode, RunProvenance, RunStatus,
     TransientIntegrationMethod, TransientResultsData,
 };
@@ -447,7 +447,7 @@ pub fn analysis_run_modal_with_options_op(
         backend,
         ModalSolveOptions {
             mode_count: options.mode_count,
-            prep_context: to_fea_prep_context(prep_context),
+            prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
         },
     )
     .map_err(
@@ -769,7 +769,7 @@ pub fn analysis_run_transient_with_options_op(
             adapt_retry_growth_cap: options.adapt_retry_growth_cap,
             adapt_nonconverged_shrink: options.adapt_nonconverged_shrink,
             dt_bucket_rel_tolerance: options.dt_bucket_rel_tolerance,
-            prep_context: to_fea_prep_context(prep_context),
+            prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
         }
         },
     )
@@ -1178,7 +1178,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             max_line_search_backtracks: options.max_line_search_backtracks,
             line_search_reduction: options.line_search_reduction,
             tangent_refresh_interval: options.tangent_refresh_interval,
-            prep_context: to_fea_prep_context(prep_context),
+            prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
         }
         },
     )
@@ -1447,7 +1447,7 @@ pub fn analysis_run_linear_static_with_options(
         LinearStaticSolveOptions {
             preconditioner_kind: requested_preconditioner,
             algebra_backend_kind: requested_solver_backend,
-            prep_context: to_fea_prep_context(prep_context),
+            prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
         }
         },
     )
@@ -1771,6 +1771,28 @@ pub fn analysis_results_op(
             )
         };
 
+    let prep_calibration_profile = diagnostic_metric_string(&run_result.run.diagnostics, "FEA_PREP_CALIBRATION", "profile");
+    let prep_calibration_fingerprint = diagnostic_metric_u64(
+        &run_result.run.diagnostics,
+        "FEA_PREP_CALIBRATION",
+        "calibration_fingerprint",
+    );
+    let prep_acceptance_score = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_PREP_ACCEPTANCE",
+        "acceptance_score",
+    );
+    let prep_acceptance_passed = diagnostic_metric_bool(
+        &run_result.run.diagnostics,
+        "FEA_PREP_ACCEPTANCE",
+        "accepted",
+    );
+    let prep_acceptance_fingerprint = diagnostic_metric_u64(
+        &run_result.run.diagnostics,
+        "FEA_PREP_ACCEPTANCE",
+        "acceptance_fingerprint",
+    );
+
     let summary = AnalysisResultsSummary {
         field_count: fields.len(),
         total_elements: fields.iter().map(|field| field.element_count()).sum(),
@@ -1797,6 +1819,11 @@ pub fn analysis_results_op(
         nonlinear_iteration_spike_count,
         nonlinear_convergence_stall_count,
         nonlinear_backtrack_burst_count,
+        prep_calibration_profile,
+        prep_calibration_fingerprint,
+        prep_acceptance_score,
+        prep_acceptance_passed,
+        prep_acceptance_fingerprint,
     };
 
     let modal_results = if query.include_modal_results {
@@ -2295,6 +2322,23 @@ pub fn analysis_trends_op(
         } else {
             None
         };
+        let prep_acceptance_rate = {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric_bool(&run.run.diagnostics, "FEA_PREP_ACCEPTANCE", "accepted")
+                })
+                .collect::<Vec<_>>();
+            if values.is_empty() {
+                None
+            } else {
+                Some(values.iter().filter(|value| **value).count() as f64 / values.len() as f64)
+            }
+        };
+        let prep_calibration_fast_rate = calibration_profile_rate(&entries, "fast");
+        let prep_calibration_balanced_rate = calibration_profile_rate(&entries, "balanced");
+        let prep_calibration_conservative_rate =
+            calibration_profile_rate(&entries, "conservative");
 
         summaries.push(AnalysisTrendKindSummary {
             run_kind: kind,
@@ -2305,6 +2349,10 @@ pub fn analysis_trends_op(
             failed_increment_rate,
             mean_spike_count,
             mean_stall_count,
+            prep_acceptance_rate,
+            prep_calibration_fast_rate,
+            prep_calibration_balanced_rate,
+            prep_calibration_conservative_rate,
         });
     }
 
@@ -2331,7 +2379,10 @@ fn run_kind(run: &AnalysisRunResult) -> AnalysisRunKind {
     }
 }
 
-fn to_fea_prep_context(context: Option<AnalysisRunPrepContext>) -> Option<runmat_analysis_fea::FeaPrepContext> {
+fn to_fea_prep_context(
+    context: Option<AnalysisRunPrepContext>,
+    calibration_profile: Option<PrepCalibrationProfile>,
+) -> Option<runmat_analysis_fea::FeaPrepContext> {
     context.map(|prep| runmat_analysis_fea::FeaPrepContext {
         prepared_mesh_count: prep.prepared_mesh_count,
         prepared_node_count: prep.prepared_node_count,
@@ -2357,7 +2408,23 @@ fn to_fea_prep_context(context: Option<AnalysisRunPrepContext>) -> Option<runmat
         topology_quad_family_ratio: prep.topology_quad_family_ratio,
         topology_tet_family_ratio: prep.topology_tet_family_ratio,
         topology_hex_family_ratio: prep.topology_hex_family_ratio,
+        calibration_profile_override: calibration_profile.and_then(map_calibration_profile),
     })
+}
+
+fn map_calibration_profile(
+    profile: PrepCalibrationProfile,
+) -> Option<runmat_analysis_fea::FeaPrepCalibrationProfile> {
+    match profile {
+        PrepCalibrationProfile::Auto => None,
+        PrepCalibrationProfile::Fast => Some(runmat_analysis_fea::FeaPrepCalibrationProfile::Fast),
+        PrepCalibrationProfile::Balanced => {
+            Some(runmat_analysis_fea::FeaPrepCalibrationProfile::Balanced)
+        }
+        PrepCalibrationProfile::Conservative => {
+            Some(runmat_analysis_fea::FeaPrepCalibrationProfile::Conservative)
+        }
+    }
 }
 
 fn resolve_run_prep_context(
@@ -2728,6 +2795,54 @@ fn diagnostic_metric(
         .and_then(|value| value.parse::<f64>().ok())
 }
 
+fn diagnostic_metric_u64(
+    diagnostics: &[runmat_analysis_fea::diagnostics::FeaDiagnostic],
+    code: &str,
+    key: &str,
+) -> Option<u64> {
+    diagnostics
+        .iter()
+        .find(|diag| diag.code == code)
+        .and_then(|diag| {
+            diag.message
+                .split_whitespace()
+                .find_map(|token| token.strip_prefix(&format!("{key}=")))
+        })
+        .and_then(|value| value.parse::<u64>().ok())
+}
+
+fn diagnostic_metric_bool(
+    diagnostics: &[runmat_analysis_fea::diagnostics::FeaDiagnostic],
+    code: &str,
+    key: &str,
+) -> Option<bool> {
+    diagnostics
+        .iter()
+        .find(|diag| diag.code == code)
+        .and_then(|diag| {
+            diag.message
+                .split_whitespace()
+                .find_map(|token| token.strip_prefix(&format!("{key}=")))
+        })
+        .and_then(|value| value.parse::<bool>().ok())
+}
+
+fn diagnostic_metric_string(
+    diagnostics: &[runmat_analysis_fea::diagnostics::FeaDiagnostic],
+    code: &str,
+    key: &str,
+) -> Option<String> {
+    diagnostics
+        .iter()
+        .find(|diag| diag.code == code)
+        .and_then(|diag| {
+            diag.message
+                .split_whitespace()
+                .find_map(|token| token.strip_prefix(&format!("{key}=")))
+        })
+        .map(|value| value.to_string())
+}
+
 fn percentile(sorted_samples: &[f64], ratio: f64) -> Option<f64> {
     if sorted_samples.is_empty() {
         return None;
@@ -2742,6 +2857,25 @@ fn mean(values: &[f64]) -> f64 {
     } else {
         values.iter().sum::<f64>() / values.len() as f64
     }
+}
+
+fn calibration_profile_rate(entries: &[AnalysisRunResult], profile: &str) -> Option<f64> {
+    let values = entries
+        .iter()
+        .filter_map(|run| {
+            diagnostic_metric_string(&run.run.diagnostics, "FEA_PREP_CALIBRATION", "profile")
+        })
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        return None;
+    }
+    Some(
+        values
+            .iter()
+            .filter(|value| value.as_str() == profile)
+            .count() as f64
+            / values.len() as f64,
+    )
 }
 
 fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {

@@ -40,6 +40,11 @@
     "nonlinear_tangent_rebuild_count": null,
     "nonlinear_iteration_spike_count": null,
     "nonlinear_convergence_stall_count": null,
-    "nonlinear_backtrack_burst_count": null
+    "nonlinear_backtrack_burst_count": null,
+    "prep_calibration_profile": null,
+    "prep_calibration_fingerprint": null,
+    "prep_acceptance_score": null,
+    "prep_acceptance_passed": null,
+    "prep_acceptance_fingerprint": null
   }
 }

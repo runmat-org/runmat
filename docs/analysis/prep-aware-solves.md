@@ -56,6 +56,10 @@ Typed prep-reference failure families:
   - deterministic calibration profiles (`fast`, `balanced`, `conservative`) scale family-weighted operator contributions,
   - acceptance checks enforce bounded displacement/stress/connectivity conditions,
   - calibration and acceptance fingerprints are replay-stable for the same prep artifact.
+- **Tier 5.5**: calibration governance + release gates.
+  - run options can select prep calibration profile override (`auto`, `fast`, `balanced`, `conservative`),
+  - results/trends surfaces expose structured calibration and acceptance summary fields,
+  - release-readiness can enforce prep acceptance-rate thresholds in protected branch policy.
 
 ## Diagnostics
 

@@ -2,7 +2,7 @@ use runmat_analysis_core::AnalysisModel;
 use serde::{Deserialize, Serialize};
 
 use crate::operator::OperatorSystem;
-use crate::FeaPrepContext;
+use crate::{FeaPrepCalibrationProfile, FeaPrepContext};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssemblySummary {
@@ -947,6 +947,13 @@ fn select_calibration_profile(
     avg_youngs_modulus: f64,
     graph_summary: Option<&PrepGraphAssemblySummary>,
 ) -> CalibrationProfile {
+    if let Some(profile) = prep.calibration_profile_override {
+        return match profile {
+            FeaPrepCalibrationProfile::Fast => CalibrationProfile::Fast,
+            FeaPrepCalibrationProfile::Balanced => CalibrationProfile::Balanced,
+            FeaPrepCalibrationProfile::Conservative => CalibrationProfile::Conservative,
+        };
+    }
     let stiffness_regime = avg_youngs_modulus;
     let ordering_gain = graph_summary
         .map(|graph| graph.ordering_reduction_ratio)

@@ -88,6 +88,15 @@ pub enum QualityPolicy {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+pub enum PrepCalibrationProfile {
+    Auto,
+    Fast,
+    Balanced,
+    Conservative,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum QualityReasonCode {
     MaterialAssignmentConflict,
     SolverNotConverged,
@@ -121,6 +130,8 @@ pub struct AnalysisRunOptions {
     pub prep_context: Option<AnalysisRunPrepContext>,
     #[serde(default)]
     pub prep_artifact_id: Option<String>,
+    #[serde(default)]
+    pub prep_calibration_profile: Option<PrepCalibrationProfile>,
 }
 
 impl Default for AnalysisRunOptions {
@@ -132,6 +143,7 @@ impl Default for AnalysisRunOptions {
             quality_policy: QualityPolicy::Balanced,
             prep_context: None,
             prep_artifact_id: None,
+            prep_calibration_profile: None,
         }
     }
 }
@@ -160,6 +172,8 @@ pub struct AnalysisTransientRunOptions {
     pub prep_context: Option<AnalysisRunPrepContext>,
     #[serde(default)]
     pub prep_artifact_id: Option<String>,
+    #[serde(default)]
+    pub prep_calibration_profile: Option<PrepCalibrationProfile>,
 }
 
 impl Default for AnalysisTransientRunOptions {
@@ -185,6 +199,7 @@ impl Default for AnalysisTransientRunOptions {
             dt_bucket_rel_tolerance: 0.0,
             prep_context: None,
             prep_artifact_id: None,
+            prep_calibration_profile: None,
         }
     }
 }
@@ -212,6 +227,7 @@ impl AnalysisTransientRunOptions {
             dt_bucket_rel_tolerance: 0.02,
             prep_context: None,
             prep_artifact_id: None,
+            prep_calibration_profile: None,
         }
     }
 
@@ -251,6 +267,7 @@ impl AnalysisTransientRunOptions {
             dt_bucket_rel_tolerance: 0.005,
             prep_context: None,
             prep_artifact_id: None,
+            prep_calibration_profile: None,
         }
     }
 }
@@ -266,6 +283,8 @@ pub struct AnalysisModalRunOptions {
     pub prep_context: Option<AnalysisRunPrepContext>,
     #[serde(default)]
     pub prep_artifact_id: Option<String>,
+    #[serde(default)]
+    pub prep_calibration_profile: Option<PrepCalibrationProfile>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -286,6 +305,8 @@ pub struct AnalysisNonlinearRunOptions {
     pub prep_context: Option<AnalysisRunPrepContext>,
     #[serde(default)]
     pub prep_artifact_id: Option<String>,
+    #[serde(default)]
+    pub prep_calibration_profile: Option<PrepCalibrationProfile>,
 }
 
 impl Default for AnalysisNonlinearRunOptions {
@@ -305,6 +326,7 @@ impl Default for AnalysisNonlinearRunOptions {
             tangent_refresh_interval: 2,
             prep_context: None,
             prep_artifact_id: None,
+            prep_calibration_profile: None,
         }
     }
 }
@@ -326,6 +348,7 @@ impl AnalysisNonlinearRunOptions {
             tangent_refresh_interval: 4,
             prep_context: None,
             prep_artifact_id: None,
+            prep_calibration_profile: None,
         }
     }
 
@@ -349,6 +372,7 @@ impl AnalysisNonlinearRunOptions {
             tangent_refresh_interval: 1,
             prep_context: None,
             prep_artifact_id: None,
+            prep_calibration_profile: None,
         }
     }
 
@@ -368,6 +392,7 @@ impl AnalysisNonlinearRunOptions {
             tangent_refresh_interval: 2,
             prep_context: None,
             prep_artifact_id: None,
+            prep_calibration_profile: None,
         }
     }
 }
@@ -382,6 +407,7 @@ impl Default for AnalysisModalRunOptions {
             residual_warn_threshold: 1.0e-3,
             prep_context: None,
             prep_artifact_id: None,
+            prep_calibration_profile: None,
         }
     }
 }
@@ -396,6 +422,7 @@ impl AnalysisModalRunOptions {
             residual_warn_threshold: 5.0e-3,
             prep_context: None,
             prep_artifact_id: None,
+            prep_calibration_profile: None,
         }
     }
 
@@ -412,6 +439,7 @@ impl AnalysisModalRunOptions {
             residual_warn_threshold: 5.0e-4,
             prep_context: None,
             prep_artifact_id: None,
+            prep_calibration_profile: None,
         }
     }
 }
@@ -524,6 +552,11 @@ pub struct AnalysisResultsSummary {
     pub nonlinear_iteration_spike_count: Option<usize>,
     pub nonlinear_convergence_stall_count: Option<usize>,
     pub nonlinear_backtrack_burst_count: Option<usize>,
+    pub prep_calibration_profile: Option<String>,
+    pub prep_calibration_fingerprint: Option<u64>,
+    pub prep_acceptance_score: Option<f64>,
+    pub prep_acceptance_passed: Option<bool>,
+    pub prep_acceptance_fingerprint: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -590,6 +623,10 @@ pub struct AnalysisTrendKindSummary {
     pub failed_increment_rate: Option<f64>,
     pub mean_spike_count: Option<f64>,
     pub mean_stall_count: Option<f64>,
+    pub prep_acceptance_rate: Option<f64>,
+    pub prep_calibration_fast_rate: Option<f64>,
+    pub prep_calibration_balanced_rate: Option<f64>,
+    pub prep_calibration_conservative_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

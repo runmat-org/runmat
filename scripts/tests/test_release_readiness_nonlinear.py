@@ -4,7 +4,7 @@ import os
 from scripts.release_readiness_nonlinear import evaluate_release_readiness
 
 
-def report(passed=True, publishable=True, gpu_ms=100.0):
+def report(passed=True, publishable=True, gpu_ms=100.0, prep_acceptance_passed=True):
     fixtures = [
         "nonlinear_assembly_gpu_provider",
         "nonlinear_assembly_stress_gpu_provider",
@@ -18,6 +18,7 @@ def report(passed=True, publishable=True, gpu_ms=100.0):
                 "fixture_id": fixture,
                 "publishable": publishable,
                 "gpu_run_ms": gpu_ms,
+                "prep_acceptance_passed": prep_acceptance_passed,
             }
             for fixture in fixtures
         ],
@@ -35,6 +36,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_PREP_CREATED_COUNT",
             "RUNMAT_PREP_STALE_REJECT_COUNT",
             "RUNMAT_PREP_MISMATCH_REJECT_COUNT",
+            "RUNMAT_RELEASE_READINESS_PREP_ACCEPTANCE_MIN_RATE",
+            "RUNMAT_RELEASE_READINESS_PREP_ACCEPTANCE_REQUIRE",
         ]:
             os.environ.pop(key, None)
 
@@ -108,6 +111,24 @@ class ReleaseReadinessTests(unittest.TestCase):
         )
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("PREP_REJECT_RATE_HIGH", codes)
+
+    def test_prep_acceptance_rate_low_reason_is_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0, prep_acceptance_passed=False)
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        os.environ["RUNMAT_RELEASE_READINESS_PREP_ACCEPTANCE_MIN_RATE"] = "0.8"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PREP_ACCEPTANCE_RATE_LOW", codes)
+
+    def test_prep_acceptance_missing_warns_when_required(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        for rec in latest["records"]:
+            rec.pop("prep_acceptance_passed", None)
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        os.environ["RUNMAT_RELEASE_READINESS_PREP_ACCEPTANCE_REQUIRE"] = "true"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PREP_ACCEPTANCE_MISSING", codes)
 
 
 if __name__ == "__main__":

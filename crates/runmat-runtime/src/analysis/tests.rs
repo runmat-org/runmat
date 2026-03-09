@@ -420,6 +420,7 @@ fn analysis_run_linear_static_returns_typed_envelope() {
             quality_policy: QualityPolicy::Balanced,
         prep_context: None,
         prep_artifact_id: None,
+        prep_calibration_profile: None,
         },
         context,
     )
@@ -1037,6 +1038,7 @@ fn requested_preconditioner_fallback_is_recorded() {
             quality_policy: QualityPolicy::Balanced,
         prep_context: None,
         prep_artifact_id: None,
+        prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-preconditioner-fallback".to_string()), None),
     )
@@ -1065,6 +1067,7 @@ fn ilu_preconditioner_request_is_honored_without_fallback() {
             quality_policy: QualityPolicy::Balanced,
         prep_context: None,
         prep_artifact_id: None,
+        prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-preconditioner-ilu".to_string()), None),
     )
@@ -1095,6 +1098,7 @@ fn quality_policy_exploratory_allows_publishable_warn_path() {
             quality_policy: QualityPolicy::Exploratory,
         prep_context: None,
         prep_artifact_id: None,
+        prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-quality-policy-exploratory".to_string()), None),
     )
@@ -1153,6 +1157,7 @@ fn quality_policy_balanced_allows_publishable_with_quality_reasons() {
             quality_policy: QualityPolicy::Balanced,
         prep_context: None,
         prep_artifact_id: None,
+        prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-quality-policy-balanced".to_string()), None),
     )
@@ -1213,6 +1218,7 @@ fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
             quality_policy: QualityPolicy::Strict,
         prep_context: None,
         prep_artifact_id: None,
+        prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-quality-policy-strict".to_string()), None),
     )
@@ -1656,6 +1662,7 @@ fn analysis_run_transient_with_options_controls_timeline() {
             dt_bucket_rel_tolerance: 0.0,
         prep_context: None,
         prep_artifact_id: None,
+        prep_calibration_profile: None,
         },
         OperationContext::new(None, None),
     )
@@ -1766,6 +1773,7 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
             residual_warn_threshold: 1.0e-2,
         prep_context: None,
         prep_artifact_id: None,
+        prep_calibration_profile: None,
         },
         OperationContext::new(None, None),
     )
