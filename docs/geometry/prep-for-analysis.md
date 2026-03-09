@@ -39,6 +39,9 @@ prep acceptance-rate governance can be enforced in release-readiness checks.
 In Tier 6 runs, calibration evidence artifacts define fixture/profile acceptance-score envelopes
 used for drift detection and release-readiness policy checks.
 
+In Tier 6.5 runs, evidence lifecycle validation and staleness controls are enforced, and
+deterministic profile-shift recommendations are produced from drift behavior.
+
 ## Prep artifact lifecycle
 
 Prep artifacts are persisted and can be filesystem-backed using:

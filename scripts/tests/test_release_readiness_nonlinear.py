@@ -49,6 +49,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_PREP_ACCEPTANCE_REQUIRE",
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT",
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_REQUIRE_EVIDENCE",
+            "RUNMAT_RELEASE_READINESS_PREP_RETRAIN_TRIGGER_DRIFT",
+            "RUNMAT_RELEASE_READINESS_PREP_MAX_RECOMMENDATION_RATIO",
         ]:
             os.environ.pop(key, None)
 
@@ -200,6 +202,89 @@ class ReleaseReadinessTests(unittest.TestCase):
         )
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("PREP_CALIBRATION_DRIFT_HIGH", codes)
+
+    def test_prep_calibration_evidence_stale_reason_is_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        evidence = {
+            "schema_version": "prep-calibration-evidence/v1",
+            "generated_at": "2025-01-01T00:00:00Z",
+            "max_age_days": 1,
+            "fixtures": {
+                "nonlinear_assembly_gpu_provider": {
+                    "default_profile": "balanced",
+                    "profiles": {
+                        "balanced": {
+                            "acceptance_score_min": 0.3,
+                            "acceptance_score_max": 1.0,
+                        }
+                    },
+                }
+            },
+        }
+        result = evaluate_release_readiness(
+            latest,
+            rolling,
+            protected=False,
+            calibration_evidence=evidence,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PREP_CALIBRATION_EVIDENCE_STALE", codes)
+
+    def test_prep_calibration_retrain_recommended_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            prep_acceptance_score=0.55,
+            prep_calibration_profile="balanced",
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                prep_acceptance_score=0.75,
+                prep_calibration_profile="balanced",
+            ),
+            latest,
+        ]
+        evidence = {
+            "schema_version": "prep-calibration-evidence/v1",
+            "generated_at": "2026-03-08T00:00:00Z",
+            "max_age_days": 365,
+            "fixtures": {
+                fixture: {
+                    "default_profile": "balanced",
+                    "profiles": {
+                        "balanced": {
+                            "acceptance_score_min": 0.8,
+                            "acceptance_score_max": 1.0,
+                        },
+                        "conservative": {
+                            "acceptance_score_min": 0.9,
+                            "acceptance_score_max": 1.0,
+                        },
+                    },
+                }
+                for fixture in [
+                    "nonlinear_assembly_gpu_provider",
+                    "nonlinear_assembly_stress_gpu_provider",
+                    "nonlinear_softening_proxy_gpu_provider",
+                    "nonlinear_load_path_mix_gpu_provider",
+                ]
+            },
+        }
+        os.environ["RUNMAT_RELEASE_READINESS_PREP_MAX_RECOMMENDATION_RATIO"] = "0.1"
+        os.environ["RUNMAT_RELEASE_READINESS_PREP_RETRAIN_TRIGGER_DRIFT"] = "0.05"
+        result = evaluate_release_readiness(
+            latest,
+            rolling,
+            protected=False,
+            calibration_evidence=evidence,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PREP_CALIBRATION_RETRAIN_RECOMMENDED", codes)
 
 
 if __name__ == "__main__":

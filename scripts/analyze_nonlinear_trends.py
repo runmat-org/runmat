@@ -5,7 +5,12 @@ import statistics
 import sys
 from pathlib import Path
 
-from scripts.evaluate_prep_calibration_drift import load_evidence, evaluate_report_drift
+from scripts.evaluate_prep_calibration_drift import (
+    evaluate_report_drift,
+    evaluate_rolling_drift,
+    load_evidence,
+    recommend_profile_shifts,
+)
 
 
 NONLINEAR_FIXTURES = {
@@ -134,8 +139,25 @@ def main():
         drift_rows = evaluate_report_drift(latest_report, evidence)
         if drift_rows:
             max_drift = max(row.get("drift_ratio", 0.0) for row in drift_rows)
+            drift_slopes = evaluate_rolling_drift(reports[-max(window, 1) :], evidence)
+            max_drift_slope = max(drift_slopes.values()) if drift_slopes else 0.0
+            recommendations = recommend_profile_shifts(
+                latest_report,
+                reports[-max(window, 1) :],
+                evidence,
+                drift_trigger=float(
+                    os.getenv("RUNMAT_RELEASE_READINESS_PREP_RETRAIN_TRIGGER_DRIFT", "0.1")
+                ),
+            )
+            recommendation_pressure = (
+                len(recommendations) / len(NONLINEAR_FIXTURES) if NONLINEAR_FIXTURES else 0.0
+            )
             print("\nCalibration drift summary:")
             print(f"- max drift ratio: {max_drift:.3f}")
+            print(f"- max drift slope: {max_drift_slope:.4f}")
+            print(
+                f"- recommendation pressure: {recommendation_pressure:.3f} ({len(recommendations)} fixtures)"
+            )
 
     warnings = []
     for fixture, values in samples.items():

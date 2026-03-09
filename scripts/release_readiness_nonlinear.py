@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List
 
-from scripts.evaluate_prep_calibration_drift import load_evidence, evaluate_report_drift
+from scripts.evaluate_prep_calibration_drift import (
+    load_evidence,
+    evaluate_report_drift,
+    recommend_profile_shifts,
+    validate_evidence,
+)
 
 
 NONLINEAR_FIXTURES = {
@@ -352,6 +357,7 @@ def evaluate_release_readiness(
         os.getenv("RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_REQUIRE_EVIDENCE", "false")
     )
     prep_calibration_max_observed_drift = None
+    prep_calibration_recommendation_count = 0
     if calibration_evidence is None:
         if protected or prep_calibration_require_evidence:
             reasons.append(
@@ -362,6 +368,26 @@ def evaluate_release_readiness(
                 )
             )
     else:
+        evidence_status = validate_evidence(calibration_evidence)
+        if not evidence_status.get("valid", False):
+            reasons.append(
+                Reason(
+                    code="PREP_CALIBRATION_EVIDENCE_INVALID",
+                    severity="fail" if protected else "warn",
+                    detail="prep calibration evidence artifact is invalid",
+                )
+            )
+        elif evidence_status.get("stale", False):
+            reasons.append(
+                Reason(
+                    code="PREP_CALIBRATION_EVIDENCE_STALE",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"prep calibration evidence age {evidence_status.get('age_days', 0.0):.1f}d "
+                        f"exceeds max {evidence_status.get('max_age_days', 0.0):.1f}d"
+                    ),
+                )
+            )
         drift_rows = evaluate_report_drift(latest, calibration_evidence)
         if drift_rows:
             prep_calibration_max_observed_drift = max(
@@ -384,6 +410,35 @@ def evaluate_release_readiness(
                     )
                 )
 
+        recommendation_trigger = float(
+            os.getenv("RUNMAT_RELEASE_READINESS_PREP_RETRAIN_TRIGGER_DRIFT", "0.1")
+        )
+        recommendations = recommend_profile_shifts(
+            latest,
+            rolling,
+            calibration_evidence,
+            drift_trigger=recommendation_trigger,
+        )
+        prep_calibration_recommendation_count = len(recommendations)
+        recommendation_ratio = (
+            prep_calibration_recommendation_count / len(records) if records else 0.0
+        )
+        max_recommendation_ratio = float(
+            os.getenv("RUNMAT_RELEASE_READINESS_PREP_MAX_RECOMMENDATION_RATIO", "0.5")
+        )
+        if recommendation_ratio > max_recommendation_ratio:
+            fixtures = [item["fixture_id"] for item in recommendations]
+            reasons.append(
+                Reason(
+                    code="PREP_CALIBRATION_RETRAIN_RECOMMENDED",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"recommended retrain ratio {recommendation_ratio:.3f} exceeds "
+                        f"threshold {max_recommendation_ratio:.3f}; fixtures: {', '.join(fixtures)}"
+                    ),
+                )
+            )
+
     if any(reason.severity == "fail" for reason in reasons):
         verdict = "fail"
     elif reasons:
@@ -400,6 +455,7 @@ def evaluate_release_readiness(
         "nonlinear_fixture_count": len(records),
         "prep_acceptance_rate": acceptance_rate,
         "prep_calibration_max_observed_drift": prep_calibration_max_observed_drift,
+        "prep_calibration_recommendation_count": prep_calibration_recommendation_count,
     }
 
 

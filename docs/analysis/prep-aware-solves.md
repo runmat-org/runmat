@@ -64,6 +64,10 @@ Typed prep-reference failure families:
   - fixture/profile acceptance-score envelopes are encoded in a versioned evidence artifact,
   - release-readiness evaluates per-fixture drift ratios against evidence thresholds,
   - trend summaries surface acceptance and drift posture for rolling governance.
+- **Tier 6.5**: evidence lifecycle + auto-retune recommendations.
+  - evidence payload validation checks schema/content and staleness windows,
+  - deterministic profile-shift recommendations are generated from latest drift + rolling drift slope,
+  - release-readiness can gate on stale evidence and recommendation pressure for protected branches.
 
 ## Diagnostics
 
