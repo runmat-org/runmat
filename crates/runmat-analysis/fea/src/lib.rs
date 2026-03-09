@@ -67,6 +67,9 @@ pub struct FeaPrepContext {
     pub topology_volume_core_ratio: f64,
     pub topology_mixed_family_ratio: f64,
     pub topology_region_span_mean: f64,
+    pub topology_region_block_count: usize,
+    pub topology_region_mesh_mean: f64,
+    pub topology_region_mesh_variance: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -198,6 +201,9 @@ pub fn run_linear_static_with_options(
     if let Some(operator_topology) = summary.prep_operator_topology.as_ref() {
         diagnostics.push(prep_operator_topology_diagnostic(operator_topology));
     }
+    if let Some(region_topology) = summary.prep_region_topology.as_ref() {
+        diagnostics.push(prep_region_topology_diagnostic(region_topology));
+    }
     diagnostics.extend(solve_result.diagnostics);
 
     Ok(FeaRunResult {
@@ -242,6 +248,9 @@ pub fn run_modal_with_options(
     }
     if let Some(operator_topology) = summary.prep_operator_topology.as_ref() {
         diagnostics.push(prep_operator_topology_diagnostic(operator_topology));
+    }
+    if let Some(region_topology) = summary.prep_region_topology.as_ref() {
+        diagnostics.push(prep_region_topology_diagnostic(region_topology));
     }
 
     let displacement = modal
@@ -330,6 +339,9 @@ pub fn run_transient_with_options(
     if let Some(operator_topology) = summary.prep_operator_topology.as_ref() {
         diagnostics.push(prep_operator_topology_diagnostic(operator_topology));
     }
+    if let Some(region_topology) = summary.prep_region_topology.as_ref() {
+        diagnostics.push(prep_region_topology_diagnostic(region_topology));
+    }
 
     let displacement = transient
         .displacement_snapshots
@@ -412,6 +424,9 @@ pub fn run_nonlinear_with_options(
     }
     if let Some(operator_topology) = summary.prep_operator_topology.as_ref() {
         diagnostics.push(prep_operator_topology_diagnostic(operator_topology));
+    }
+    if let Some(region_topology) = summary.prep_region_topology.as_ref() {
+        diagnostics.push(prep_region_topology_diagnostic(region_topology));
     }
 
     let displacement = nonlinear
@@ -522,7 +537,7 @@ fn prep_diagnostic(prep: FeaPrepContext) -> FeaDiagnostic {
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "prepared_mesh_count={} prepared_node_count={} prepared_element_count={} mapped_region_count={} mapped_load_count={} mapped_bc_count={} min_scaled_jacobian={} mean_aspect_ratio={} inverted_element_count={} topology_dof_multiplier={} topology_bandwidth_proxy={} mapped_region_participation_ratio={} topology_surface_patch_ratio={} topology_volume_core_ratio={} topology_mixed_family_ratio={} topology_region_span_mean={}",
+            "prepared_mesh_count={} prepared_node_count={} prepared_element_count={} mapped_region_count={} mapped_load_count={} mapped_bc_count={} min_scaled_jacobian={} mean_aspect_ratio={} inverted_element_count={} topology_dof_multiplier={} topology_bandwidth_proxy={} mapped_region_participation_ratio={} topology_surface_patch_ratio={} topology_volume_core_ratio={} topology_mixed_family_ratio={} topology_region_span_mean={} topology_region_block_count={} topology_region_mesh_mean={} topology_region_mesh_variance={}",
             prep.prepared_mesh_count,
             prep.prepared_node_count,
             prep.prepared_element_count,
@@ -539,6 +554,9 @@ fn prep_diagnostic(prep: FeaPrepContext) -> FeaDiagnostic {
             prep.topology_volume_core_ratio,
             prep.topology_mixed_family_ratio,
             prep.topology_region_span_mean,
+            prep.topology_region_block_count,
+            prep.topology_region_mesh_mean,
+            prep.topology_region_mesh_variance,
         ),
     }
 }
@@ -596,6 +614,23 @@ fn prep_operator_topology_diagnostic(
             summary.coupling_nonzero_ratio,
             summary.stiffness_spread_ratio,
             summary.topology_fingerprint,
+        ),
+    }
+}
+
+fn prep_region_topology_diagnostic(summary: &assembly::PrepRegionTopologySummary) -> FeaDiagnostic {
+    FeaDiagnostic {
+        code: "FEA_PREP_REGION_TOPOLOGY".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "region_block_count={} inter_block_edge_count={} coupling_nonzero_ratio={} block_size_min={} block_size_max={} block_size_mean={} region_topology_fingerprint={}",
+            summary.region_block_count,
+            summary.inter_block_edge_count,
+            summary.coupling_nonzero_ratio,
+            summary.block_size_min,
+            summary.block_size_max,
+            summary.block_size_mean,
+            summary.region_topology_fingerprint,
         ),
     }
 }

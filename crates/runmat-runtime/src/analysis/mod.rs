@@ -2350,6 +2350,9 @@ fn to_fea_prep_context(context: Option<AnalysisRunPrepContext>) -> Option<runmat
         topology_volume_core_ratio: prep.topology_volume_core_ratio,
         topology_mixed_family_ratio: prep.topology_mixed_family_ratio,
         topology_region_span_mean: prep.topology_region_span_mean,
+        topology_region_block_count: prep.topology_region_block_count,
+        topology_region_mesh_mean: prep.topology_region_mesh_mean,
+        topology_region_mesh_variance: prep.topology_region_mesh_variance,
     })
 }
 
@@ -2553,6 +2556,30 @@ fn resolve_run_prep_context(
         .map(|mesh| mesh.region_span_hint as f64)
         .sum::<f64>()
         / mesh_count;
+    let region_block_count = artifact.prep.region_mappings.len().max(1);
+    let region_mesh_counts = artifact
+        .prep
+        .region_mappings
+        .iter()
+        .map(|mapping| mapping.prepared_mesh_ids.len().max(1) as f64)
+        .collect::<Vec<_>>();
+    let topology_region_mesh_mean = if region_mesh_counts.is_empty() {
+        1.0
+    } else {
+        region_mesh_counts.iter().sum::<f64>() / region_mesh_counts.len() as f64
+    };
+    let topology_region_mesh_variance = if region_mesh_counts.len() <= 1 {
+        0.0
+    } else {
+        region_mesh_counts
+            .iter()
+            .map(|count| {
+                let delta = *count - topology_region_mesh_mean;
+                delta * delta
+            })
+            .sum::<f64>()
+            / region_mesh_counts.len() as f64
+    };
     let topology_dof_multiplier = if model.loads.is_empty() {
         1.0
     } else {
@@ -2634,6 +2661,9 @@ fn resolve_run_prep_context(
         topology_volume_core_ratio,
         topology_mixed_family_ratio,
         topology_region_span_mean,
+        topology_region_block_count: region_block_count,
+        topology_region_mesh_mean,
+        topology_region_mesh_variance,
     }))
 }
 

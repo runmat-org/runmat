@@ -14,6 +14,10 @@
 Analysis runtime derives a deterministic topology profile from prep descriptors (surface/volume connectivity mix,
 element-family mix, and mean region span) to shape assembly and operator coefficients.
 
+Analysis runtime also derives deterministic region-block topology summaries from `region_mappings`
+(block count and region mesh participation distribution) to drive region-local assembly partitioning
+before full remeshed element assembly is available.
+
 ## Prep artifact lifecycle
 
 Prep artifacts are persisted and can be filesystem-backed using:

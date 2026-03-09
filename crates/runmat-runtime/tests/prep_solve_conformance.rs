@@ -80,6 +80,12 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         .diagnostics
         .iter()
         .all(|diag| diag.code != "FEA_PREP_OPERATOR_TOPOLOGY"));
+    assert!(baseline
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .all(|diag| diag.code != "FEA_PREP_REGION_TOPOLOGY"));
 
     assert!(prep_enhanced
         .data
@@ -105,6 +111,12 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_PREP_OPERATOR_TOPOLOGY"));
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_REGION_TOPOLOGY"));
 
     let base_nonlinear = baseline
         .data
@@ -168,6 +180,25 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
     assert_eq!(
         prep_operator_topology_diag.message,
         replay_operator_topology_diag.message
+    );
+
+    let prep_region_topology_diag = prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_REGION_TOPOLOGY")
+        .expect("prep region topology diagnostic should be present");
+    let replay_region_topology_diag = prep_enhanced_replay
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_REGION_TOPOLOGY")
+        .expect("prep region topology diagnostic should be present in replay");
+    assert_eq!(
+        prep_region_topology_diag.message,
+        replay_region_topology_diag.message
     );
 
     let base_peak_displacement = baseline

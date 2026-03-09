@@ -11,6 +11,7 @@ pub struct AssemblySummary {
     pub load_count: usize,
     pub prep_assembly: Option<PrepAssemblySummary>,
     pub prep_operator_topology: Option<PrepOperatorTopologySummary>,
+    pub prep_region_topology: Option<PrepRegionTopologySummary>,
     pub operator: OperatorSystem,
 }
 
@@ -33,6 +34,17 @@ pub struct PrepOperatorTopologySummary {
     pub coupling_nonzero_ratio: f64,
     pub stiffness_spread_ratio: f64,
     pub topology_fingerprint: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrepRegionTopologySummary {
+    pub region_block_count: usize,
+    pub inter_block_edge_count: usize,
+    pub coupling_nonzero_ratio: f64,
+    pub block_size_min: usize,
+    pub block_size_max: usize,
+    pub block_size_mean: f64,
+    pub region_topology_fingerprint: u64,
 }
 
 pub fn assemble_linear_system(
@@ -126,12 +138,16 @@ pub fn assemble_linear_system(
     let mut prep_load_bonus = 0usize;
     let mut prep_assembly = None;
     let mut prep_operator_topology = None;
+    let mut prep_region_topology = None;
     let mut topology_stiffness_scale = 1.0;
     let mut topology_mass_scale = 1.0;
     let mut topology_damping_scale = 1.0;
     let mut topology_rhs_scale = 1.0;
     let mut topology_coupling_scale = 1.0;
     let mut topology_coupling_anisotropy = 1.0;
+    let mut region_block_sizes = Vec::new();
+    let mut region_boundary_positions = Vec::new();
+    let mut region_coupling_weight = 1.0;
     if let Some(prep) = prep_context {
         let mesh_scale = 1.0 + (prep.prepared_mesh_count.min(32) as f64) * 0.01;
         let density = if prep.prepared_node_count == 0 {
@@ -172,6 +188,42 @@ pub fn assemble_linear_system(
             .clamp(0.8, 1.3);
         topology_coupling_anisotropy =
             (1.0 - 0.18 * prep.topology_mixed_family_ratio).clamp(0.78, 1.0);
+        region_coupling_weight = (1.0
+            + 0.10 * prep.mapped_region_participation_ratio
+            + 0.05 * prep.topology_region_mesh_variance.clamp(0.0, 6.0) / 6.0
+            - 0.04 * prep.topology_mixed_family_ratio)
+            .clamp(0.85, 1.2);
+        let region_block_count = prep.topology_region_block_count.clamp(1, dof_count.max(1));
+        region_block_sizes = build_region_block_sizes(
+            dof_count,
+            region_block_count,
+            prep.layout_seed,
+            prep.topology_region_mesh_mean,
+            prep.topology_region_mesh_variance,
+            prep.mapped_region_participation_ratio,
+        );
+        let region_block_offsets = block_offsets(&region_block_sizes);
+        region_boundary_positions = region_block_offsets
+            .iter()
+            .skip(1)
+            .map(|offset| offset.saturating_sub(1))
+            .filter(|index| *index < dof_count.saturating_sub(1))
+            .collect::<Vec<_>>();
+
+        for (block_index, offset) in region_block_offsets.iter().enumerate() {
+            let block_size = region_block_sizes[block_index];
+            let block_end = offset.saturating_add(block_size).min(dof_count);
+            let block_bias = block_bias(prep.layout_seed, block_index)
+                * (0.04 + 0.02 * prep.topology_region_mesh_mean.clamp(1.0, 6.0) / 6.0);
+            let stiffness_block_scale = (1.0 + block_bias).clamp(0.9, 1.1);
+            let mass_block_scale = (1.0 + 0.6 * block_bias).clamp(0.92, 1.08);
+            let damping_block_scale = (1.0 + 0.8 * block_bias).clamp(0.9, 1.1);
+            for idx in *offset..block_end {
+                stiffness_diag[idx] *= stiffness_block_scale;
+                mass_diag[idx] *= mass_block_scale;
+                damping_diag[idx] *= damping_block_scale;
+            }
+        }
 
         for value in &mut stiffness_diag {
             *value *= stiffness_scale * topology_stiffness_scale;
@@ -212,12 +264,21 @@ pub fn assemble_linear_system(
         .map(|prep| prep.topology_bandwidth_proxy.max(1) as usize)
         .unwrap_or(1);
     for i in 0..stiffness_upper.len() {
+        let at_region_boundary = region_boundary_positions.binary_search(&i).is_ok();
         let local_coupling_scale = if i % 2 == 0 {
             topology_coupling_scale
         } else {
             topology_coupling_scale * topology_coupling_anisotropy
         };
-        let coupling = 0.05 * stiffness_diag[i].min(stiffness_diag[i + 1]) * local_coupling_scale;
+        let region_boundary_scale = if at_region_boundary {
+            region_coupling_weight * 0.75
+        } else {
+            region_coupling_weight
+        };
+        let coupling = 0.05
+            * stiffness_diag[i].min(stiffness_diag[i + 1])
+            * local_coupling_scale
+            * region_boundary_scale;
         let in_sparse_band = bandwidth_stride <= 1 || (i % bandwidth_stride != 0);
         stiffness_upper[i] = if constrained[i] || constrained[i + 1] || !in_sparse_band {
             0.0
@@ -264,6 +325,28 @@ pub fn assemble_linear_system(
                 stiffness_spread_ratio,
             ),
         });
+
+        if !region_block_sizes.is_empty() {
+            let block_size_min = region_block_sizes.iter().copied().min().unwrap_or(0);
+            let block_size_max = region_block_sizes.iter().copied().max().unwrap_or(0);
+            let block_size_mean =
+                region_block_sizes.iter().sum::<usize>() as f64 / region_block_sizes.len() as f64;
+            let inter_block_edge_count = region_boundary_positions.len();
+            prep_region_topology = Some(PrepRegionTopologySummary {
+                region_block_count: region_block_sizes.len(),
+                inter_block_edge_count,
+                coupling_nonzero_ratio,
+                block_size_min,
+                block_size_max,
+                block_size_mean,
+                region_topology_fingerprint: region_topology_fingerprint(
+                    prep,
+                    &region_block_sizes,
+                    inter_block_edge_count,
+                    coupling_nonzero_ratio,
+                ),
+            });
+        }
     }
 
     AssemblySummary {
@@ -272,6 +355,7 @@ pub fn assemble_linear_system(
         load_count: model.loads.len().saturating_add(prep_load_bonus),
         prep_assembly,
         prep_operator_topology,
+        prep_region_topology,
         operator: OperatorSystem {
             dof_count,
             constrained,
@@ -311,6 +395,82 @@ fn topology_fingerprint(
         prep.layout_seed,
     ] {
         hash ^= value;
+        hash = hash.wrapping_mul(1099511628211_u64);
+    }
+    hash
+}
+
+fn build_region_block_sizes(
+    dof_count: usize,
+    block_count: usize,
+    layout_seed: u64,
+    region_mesh_mean: f64,
+    region_mesh_variance: f64,
+    mapped_region_participation_ratio: f64,
+) -> Vec<usize> {
+    let mut sizes = vec![dof_count / block_count; block_count];
+    for size in &mut sizes {
+        if *size == 0 {
+            *size = 1;
+        }
+    }
+    let assigned = sizes.iter().sum::<usize>();
+    let mut remainder = dof_count.saturating_sub(assigned);
+    let seed_bias = ((layout_seed % 13) as usize).max(1);
+    let participation_bias =
+        (mapped_region_participation_ratio.clamp(0.0, 1.0) * 7.0).round() as usize;
+    let variance_bias = region_mesh_variance.clamp(0.0, 16.0).round() as usize;
+    let stride = (seed_bias + participation_bias + variance_bias).max(1);
+    let mut cursor = (region_mesh_mean.round() as usize + seed_bias) % block_count.max(1);
+    while remainder > 0 {
+        sizes[cursor % block_count] = sizes[cursor % block_count].saturating_add(1);
+        cursor = cursor.saturating_add(stride);
+        remainder -= 1;
+    }
+    sizes
+}
+
+fn block_offsets(sizes: &[usize]) -> Vec<usize> {
+    let mut offsets = Vec::with_capacity(sizes.len());
+    let mut current = 0usize;
+    for size in sizes {
+        offsets.push(current);
+        current = current.saturating_add(*size);
+    }
+    offsets
+}
+
+fn block_bias(layout_seed: u64, block_index: usize) -> f64 {
+    let mut hash = layout_seed ^ ((block_index as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    hash ^= hash >> 33;
+    hash = hash.wrapping_mul(0xff51afd7ed558ccd);
+    hash ^= hash >> 33;
+    let normalized = (hash % 1000) as f64 / 999.0;
+    normalized * 2.0 - 1.0
+}
+
+fn region_topology_fingerprint(
+    prep: FeaPrepContext,
+    block_sizes: &[usize],
+    inter_block_edge_count: usize,
+    coupling_nonzero_ratio: f64,
+) -> u64 {
+    let mut hash = 1469598103934665603_u64;
+    for value in [
+        prep.layout_seed,
+        prep.topology_region_block_count as u64,
+        prep.topology_region_mesh_mean.to_bits(),
+        prep.topology_region_mesh_variance.to_bits(),
+        prep.topology_region_span_mean.to_bits(),
+        prep.mapped_region_participation_ratio.to_bits(),
+        inter_block_edge_count as u64,
+        coupling_nonzero_ratio.to_bits(),
+    ] {
+        hash ^= value;
+        hash = hash.wrapping_mul(1099511628211_u64);
+    }
+    for size in block_sizes {
+        hash ^= *size as u64;
         hash = hash.wrapping_mul(1099511628211_u64);
     }
     hash

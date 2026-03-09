@@ -32,6 +32,10 @@ Typed prep-reference failure families:
   - stiffness/mass/damping/right-hand-side scaling from topology profile ratios,
   - deterministic coupling-strength anisotropy from topology family/participation signals,
   - deterministic operator-topology fingerprint for replay verification.
+- **Tier 3 bridge**: region-blocked prep assembly.
+  - deterministic region-local operator block sizing from prep region mappings,
+  - per-block coefficient shaping and inter-block coupling attenuation,
+  - deterministic region-topology fingerprint and block graph diagnostics.
 - **Tier 3 (future)**: full remeshed element operator assembly.
 
 ## Diagnostics
@@ -42,5 +46,6 @@ Prep-aware runs can emit:
 - `FEA_PREP_ASSEMBLY`
 - `FEA_PREP_TOPOLOGY`
 - `FEA_PREP_OPERATOR_TOPOLOGY`
+- `FEA_PREP_REGION_TOPOLOGY`
 
 These diagnostics are deterministic for the same model + prep artifact reference.
