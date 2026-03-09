@@ -13,6 +13,7 @@ pub struct AssemblySummary {
     pub prep_operator_topology: Option<PrepOperatorTopologySummary>,
     pub prep_region_topology: Option<PrepRegionTopologySummary>,
     pub prep_element_assembly: Option<PrepElementAssemblySummary>,
+    pub prep_element_connectivity: Option<PrepElementConnectivitySummary>,
     pub operator: OperatorSystem,
 }
 
@@ -58,6 +59,21 @@ pub struct PrepElementAssemblySummary {
     pub mixed_element_count: usize,
     pub scatter_nnz_count: usize,
     pub assembly_fingerprint: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrepElementConnectivitySummary {
+    pub assembled_element_count: usize,
+    pub stiffness_offdiag_nnz_count: usize,
+    pub mass_offdiag_proxy_nnz_count: usize,
+    pub damping_offdiag_proxy_nnz_count: usize,
+    pub triangle_contrib_share: f64,
+    pub quad_contrib_share: f64,
+    pub tet_contrib_share: f64,
+    pub hex_contrib_share: f64,
+    pub mixed_contrib_share: f64,
+    pub mean_connectivity_hop: f64,
+    pub connectivity_fingerprint: u64,
 }
 
 pub fn assemble_linear_system(
@@ -153,6 +169,7 @@ pub fn assemble_linear_system(
     let mut prep_operator_topology = None;
     let mut prep_region_topology = None;
     let mut prep_element_assembly = None;
+    let mut prep_element_connectivity = None;
     let mut topology_stiffness_scale = 1.0;
     let mut topology_mass_scale = 1.0;
     let mut topology_damping_scale = 1.0;
@@ -311,6 +328,16 @@ pub fn assemble_linear_system(
     }
 
     if let Some(prep) = prep_context {
+        if let Some(element_summary) = prep_element_assembly.as_ref() {
+            prep_element_connectivity = Some(apply_prep_element_connectivity_scatter(
+                prep,
+                &constrained,
+                &mut stiffness_upper,
+                &mut mass_diag,
+                &mut damping_diag,
+                element_summary,
+            ));
+        }
         let coupling_nonzero_ratio = if stiffness_upper.is_empty() {
             0.0
         } else {
@@ -380,6 +407,7 @@ pub fn assemble_linear_system(
         prep_operator_topology,
         prep_region_topology,
         prep_element_assembly,
+        prep_element_connectivity,
         operator: OperatorSystem {
             dof_count,
             constrained,
@@ -520,6 +548,144 @@ fn apply_prep_native_element_assembly(
     }
 }
 
+fn apply_prep_element_connectivity_scatter(
+    prep: FeaPrepContext,
+    constrained: &[bool],
+    stiffness_upper: &mut [f64],
+    mass_diag: &mut [f64],
+    damping_diag: &mut [f64],
+    element_summary: &PrepElementAssemblySummary,
+) -> PrepElementConnectivitySummary {
+    if stiffness_upper.is_empty() {
+        return PrepElementConnectivitySummary {
+            assembled_element_count: element_summary.assembled_element_count,
+            stiffness_offdiag_nnz_count: 0,
+            mass_offdiag_proxy_nnz_count: 0,
+            damping_offdiag_proxy_nnz_count: 0,
+            triangle_contrib_share: 0.0,
+            quad_contrib_share: 0.0,
+            tet_contrib_share: 0.0,
+            hex_contrib_share: 0.0,
+            mixed_contrib_share: 0.0,
+            mean_connectivity_hop: 0.0,
+            connectivity_fingerprint: element_connectivity_fingerprint(
+                prep,
+                element_summary,
+                0,
+                0,
+                0,
+                0.0,
+                [0.0; 5],
+            ),
+        };
+    }
+
+    let mut touched_stiffness = vec![false; stiffness_upper.len()];
+    let mut touched_mass = vec![false; mass_diag.len()];
+    let mut touched_damping = vec![false; damping_diag.len()];
+    let mut family_contrib = [0.0_f64; 5];
+    let mut hops = Vec::new();
+    let mut previous_edge = None;
+    let family_counts = [
+        element_summary.triangle_element_count,
+        element_summary.quad_element_count,
+        element_summary.tet_element_count,
+        element_summary.hex_element_count,
+        element_summary.mixed_element_count,
+    ];
+    let family_stiffness = [0.85_f64, 0.95_f64, 1.05_f64, 1.15_f64, 0.9_f64];
+    let family_mass = [0.10_f64, 0.11_f64, 0.12_f64, 0.14_f64, 0.105_f64];
+    let family_damping = [0.004_f64, 0.0045_f64, 0.005_f64, 0.0055_f64, 0.0042_f64];
+    let stride = (prep.topology_bandwidth_proxy.max(1) as usize)
+        .saturating_add(prep.topology_region_block_count.max(1));
+    let region_bias = 1.0 + 0.05 * prep.topology_region_mesh_mean.clamp(1.0, 8.0) / 8.0;
+
+    let mut element_cursor = 0usize;
+    for family_index in 0..family_counts.len() {
+        for _ in 0..family_counts[family_index] {
+            let edge_index = ((prep.layout_seed as usize)
+                .wrapping_add(family_index.saturating_mul(17))
+                .wrapping_add(element_cursor.saturating_mul(stride.max(1))))
+                % stiffness_upper.len().max(1);
+            let left = edge_index;
+            let right = (edge_index + 1).min(constrained.len().saturating_sub(1));
+            if constrained[left] || constrained[right] {
+                element_cursor = element_cursor.saturating_add(1);
+                continue;
+            }
+
+            let wave = 1.0 + ((element_cursor % 19) as f64) / 90.0;
+            let stiffness_add = 0.015
+                * family_stiffness[family_index]
+                * region_bias
+                * wave
+                * prep.topology_dof_multiplier.clamp(1.0, 4.0);
+            stiffness_upper[edge_index] +=
+                stiffness_add * (stiffness_upper[edge_index].abs() + 1.0);
+            family_contrib[family_index] += stiffness_add.abs();
+            touched_stiffness[edge_index] = true;
+
+            let mass_add = family_mass[family_index] * wave;
+            mass_diag[left] += mass_add;
+            mass_diag[right] += mass_add * 0.8;
+            touched_mass[left] = true;
+            touched_mass[right] = true;
+
+            let damping_add =
+                family_damping[family_index] * (1.0 + 0.5 * prep.topology_mixed_family_ratio);
+            damping_diag[left] += damping_add;
+            damping_diag[right] += damping_add * 0.85;
+            touched_damping[left] = true;
+            touched_damping[right] = true;
+
+            if let Some(prev) = previous_edge {
+                hops.push(edge_index.abs_diff(prev) as f64);
+            }
+            previous_edge = Some(edge_index);
+            element_cursor = element_cursor.saturating_add(1);
+        }
+    }
+
+    let stiffness_offdiag_nnz_count = touched_stiffness.iter().filter(|&&hit| hit).count();
+    let mass_offdiag_proxy_nnz_count = touched_mass.iter().filter(|&&hit| hit).count();
+    let damping_offdiag_proxy_nnz_count = touched_damping.iter().filter(|&&hit| hit).count();
+    let total_contrib = family_contrib.iter().sum::<f64>().max(1.0e-12);
+    let shares = [
+        family_contrib[0] / total_contrib,
+        family_contrib[1] / total_contrib,
+        family_contrib[2] / total_contrib,
+        family_contrib[3] / total_contrib,
+        family_contrib[4] / total_contrib,
+    ];
+    let mean_connectivity_hop = if hops.is_empty() {
+        0.0
+    } else {
+        hops.iter().sum::<f64>() / hops.len() as f64
+    };
+
+    PrepElementConnectivitySummary {
+        assembled_element_count: element_summary.assembled_element_count,
+        stiffness_offdiag_nnz_count,
+        mass_offdiag_proxy_nnz_count,
+        damping_offdiag_proxy_nnz_count,
+        triangle_contrib_share: shares[0],
+        quad_contrib_share: shares[1],
+        tet_contrib_share: shares[2],
+        hex_contrib_share: shares[3],
+        mixed_contrib_share: shares[4],
+        mean_connectivity_hop,
+        connectivity_fingerprint: element_connectivity_fingerprint(
+            prep,
+            element_summary,
+            stiffness_offdiag_nnz_count,
+            mass_offdiag_proxy_nnz_count,
+            damping_offdiag_proxy_nnz_count,
+            mean_connectivity_hop,
+            shares,
+        ),
+    }
+}
+
 fn build_region_block_sizes(
     dof_count: usize,
     block_count: usize,
@@ -622,6 +788,37 @@ fn element_assembly_fingerprint(
         prep.topology_tet_family_ratio.to_bits(),
         prep.topology_hex_family_ratio.to_bits(),
         prep.topology_mixed_family_ratio.to_bits(),
+    ] {
+        hash ^= value;
+        hash = hash.wrapping_mul(1099511628211_u64);
+    }
+    hash
+}
+
+fn element_connectivity_fingerprint(
+    prep: FeaPrepContext,
+    element_summary: &PrepElementAssemblySummary,
+    stiffness_offdiag_nnz_count: usize,
+    mass_offdiag_proxy_nnz_count: usize,
+    damping_offdiag_proxy_nnz_count: usize,
+    mean_connectivity_hop: f64,
+    shares: [f64; 5],
+) -> u64 {
+    let mut hash = 1469598103934665603_u64;
+    for value in [
+        prep.layout_seed,
+        element_summary.assembly_fingerprint,
+        element_summary.assembled_element_count as u64,
+        stiffness_offdiag_nnz_count as u64,
+        mass_offdiag_proxy_nnz_count as u64,
+        damping_offdiag_proxy_nnz_count as u64,
+        mean_connectivity_hop.to_bits(),
+        shares[0].to_bits(),
+        shares[1].to_bits(),
+        shares[2].to_bits(),
+        shares[3].to_bits(),
+        shares[4].to_bits(),
+        prep.topology_bandwidth_proxy as u64,
     ] {
         hash ^= value;
         hash = hash.wrapping_mul(1099511628211_u64);

@@ -211,6 +211,9 @@ pub fn run_linear_static_with_options(
     if let Some(element_assembly) = summary.prep_element_assembly.as_ref() {
         diagnostics.push(prep_element_assembly_diagnostic(element_assembly));
     }
+    if let Some(element_connectivity) = summary.prep_element_connectivity.as_ref() {
+        diagnostics.push(prep_element_connectivity_diagnostic(element_connectivity));
+    }
     diagnostics.extend(solve_result.diagnostics);
 
     Ok(FeaRunResult {
@@ -261,6 +264,9 @@ pub fn run_modal_with_options(
     }
     if let Some(element_assembly) = summary.prep_element_assembly.as_ref() {
         diagnostics.push(prep_element_assembly_diagnostic(element_assembly));
+    }
+    if let Some(element_connectivity) = summary.prep_element_connectivity.as_ref() {
+        diagnostics.push(prep_element_connectivity_diagnostic(element_connectivity));
     }
 
     let displacement = modal
@@ -355,6 +361,9 @@ pub fn run_transient_with_options(
     if let Some(element_assembly) = summary.prep_element_assembly.as_ref() {
         diagnostics.push(prep_element_assembly_diagnostic(element_assembly));
     }
+    if let Some(element_connectivity) = summary.prep_element_connectivity.as_ref() {
+        diagnostics.push(prep_element_connectivity_diagnostic(element_connectivity));
+    }
 
     let displacement = transient
         .displacement_snapshots
@@ -443,6 +452,9 @@ pub fn run_nonlinear_with_options(
     }
     if let Some(element_assembly) = summary.prep_element_assembly.as_ref() {
         diagnostics.push(prep_element_assembly_diagnostic(element_assembly));
+    }
+    if let Some(element_connectivity) = summary.prep_element_connectivity.as_ref() {
+        diagnostics.push(prep_element_connectivity_diagnostic(element_connectivity));
     }
 
     let displacement = nonlinear
@@ -671,6 +683,29 @@ fn prep_element_assembly_diagnostic(
             summary.mixed_element_count,
             summary.scatter_nnz_count,
             summary.assembly_fingerprint,
+        ),
+    }
+}
+
+fn prep_element_connectivity_diagnostic(
+    summary: &assembly::PrepElementConnectivitySummary,
+) -> FeaDiagnostic {
+    FeaDiagnostic {
+        code: "FEA_PREP_ELEMENT_CONNECTIVITY".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "assembled_element_count={} stiffness_offdiag_nnz_count={} mass_offdiag_proxy_nnz_count={} damping_offdiag_proxy_nnz_count={} triangle_contrib_share={} quad_contrib_share={} tet_contrib_share={} hex_contrib_share={} mixed_contrib_share={} mean_connectivity_hop={} connectivity_fingerprint={}",
+            summary.assembled_element_count,
+            summary.stiffness_offdiag_nnz_count,
+            summary.mass_offdiag_proxy_nnz_count,
+            summary.damping_offdiag_proxy_nnz_count,
+            summary.triangle_contrib_share,
+            summary.quad_contrib_share,
+            summary.tet_contrib_share,
+            summary.hex_contrib_share,
+            summary.mixed_contrib_share,
+            summary.mean_connectivity_hop,
+            summary.connectivity_fingerprint,
         ),
     }
 }

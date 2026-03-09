@@ -92,6 +92,12 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         .diagnostics
         .iter()
         .all(|diag| diag.code != "FEA_PREP_ELEMENT_ASSEMBLY"));
+    assert!(baseline
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .all(|diag| diag.code != "FEA_PREP_ELEMENT_CONNECTIVITY"));
 
     assert!(prep_enhanced
         .data
@@ -129,6 +135,12 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_PREP_ELEMENT_ASSEMBLY"));
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_ELEMENT_CONNECTIVITY"));
 
     let base_nonlinear = baseline
         .data
@@ -230,6 +242,25 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
     assert_eq!(
         prep_element_assembly_diag.message,
         replay_element_assembly_diag.message
+    );
+
+    let prep_element_connectivity_diag = prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_ELEMENT_CONNECTIVITY")
+        .expect("prep element connectivity diagnostic should be present");
+    let replay_element_connectivity_diag = prep_enhanced_replay
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_ELEMENT_CONNECTIVITY")
+        .expect("prep element connectivity diagnostic should be present in replay");
+    assert_eq!(
+        prep_element_connectivity_diag.message,
+        replay_element_connectivity_diag.message
     );
 
     let base_peak_displacement = baseline

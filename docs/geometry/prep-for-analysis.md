@@ -21,6 +21,9 @@ before full remeshed element assembly is available.
 In Tier 3 core runs, prep descriptors also drive deterministic element-family contribution synthesis
 for stiffness/mass/damping/right-hand-side accumulation, with replay-stable assembly fingerprints.
 
+In Tier 3.5 runs, prep descriptors additionally drive deterministic element connectivity scatter
+that shapes off-diagonal coupling structure and emits replay-stable connectivity fingerprints.
+
 ## Prep artifact lifecycle
 
 Prep artifacts are persisted and can be filesystem-backed using:

@@ -40,6 +40,10 @@ Typed prep-reference failure families:
   - prepared-element family mix contributes directly to operator coefficient accumulation,
   - deterministic element-scatter footprint and assembly fingerprint,
   - prep-aware path no longer relies solely on global surrogate diagonal synthesis.
+- **Tier 3.5**: prep-native connectivity scatter.
+  - deterministic element-family connectivity scatter contributes to off-diagonal coupling structure,
+  - mass/damping off-diagonal influence is captured via deterministic neighbor-scatter proxies,
+  - connectivity fingerprint and hop statistics are replay-stable for the same prep artifact.
 
 ## Diagnostics
 
@@ -51,5 +55,6 @@ Prep-aware runs can emit:
 - `FEA_PREP_OPERATOR_TOPOLOGY`
 - `FEA_PREP_REGION_TOPOLOGY`
 - `FEA_PREP_ELEMENT_ASSEMBLY`
+- `FEA_PREP_ELEMENT_CONNECTIVITY`
 
 These diagnostics are deterministic for the same model + prep artifact reference.
