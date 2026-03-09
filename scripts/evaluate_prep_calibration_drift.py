@@ -43,6 +43,10 @@ def validate_evidence(evidence: dict, now: datetime | None = None):
     if schema != "prep-calibration-evidence/v1":
         warnings.append("unexpected schema_version; expected prep-calibration-evidence/v1")
 
+    state = evidence.get("state")
+    if state is not None and state not in {"candidate", "approved"}:
+        errors.append("state must be either 'candidate' or 'approved'")
+
     fixtures = evidence.get("fixtures")
     if not isinstance(fixtures, dict) or not fixtures:
         errors.append("fixtures map is missing or empty")
@@ -83,6 +87,7 @@ def validate_evidence(evidence: dict, now: datetime | None = None):
     return {
         "valid": not errors,
         "stale": stale,
+        "state": state,
         "errors": errors,
         "warnings": warnings,
         "age_days": age_days,
@@ -213,3 +218,80 @@ def recommend_profile_shifts(
             }
         )
     return sorted(recommendations, key=lambda item: (item["fixture_id"], item["suggested_profile"]))
+
+
+def build_recommendation_artifact(
+    latest_report: dict,
+    rolling_reports: list[dict],
+    evidence: dict,
+    drift_trigger: float = 0.1,
+):
+    recommendations = recommend_profile_shifts(
+        latest_report,
+        rolling_reports,
+        evidence,
+        drift_trigger=drift_trigger,
+    )
+    max_drift_ratio = 0.0
+    drift_rows = evaluate_report_drift(latest_report, evidence)
+    if drift_rows:
+        max_drift_ratio = max(row.get("drift_ratio", 0.0) for row in drift_rows)
+    return {
+        "schema_version": "prep-calibration-recommendations/v1",
+        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "drift_trigger": float(drift_trigger),
+        "rolling_window_count": len(rolling_reports),
+        "max_drift_ratio": float(max_drift_ratio),
+        "recommendation_count": len(recommendations),
+        "recommendations": recommendations,
+    }
+
+
+def validate_recommendation_artifact(artifact: dict, now: datetime | None = None):
+    now = now or datetime.now(timezone.utc)
+    errors = []
+    warnings = []
+    if not isinstance(artifact, dict):
+        return {
+            "valid": False,
+            "stale": True,
+            "errors": ["recommendation artifact must be a JSON object"],
+            "warnings": [],
+            "age_days": None,
+        }
+    if artifact.get("schema_version") != "prep-calibration-recommendations/v1":
+        errors.append("schema_version must be prep-calibration-recommendations/v1")
+    generated_at = _parse_iso8601(artifact.get("generated_at"))
+    if generated_at is None:
+        errors.append("generated_at missing or invalid")
+        age_days = None
+    else:
+        age_days = max((now - generated_at).total_seconds(), 0.0) / 86400.0
+    recs = artifact.get("recommendations")
+    if not isinstance(recs, list):
+        errors.append("recommendations must be a list")
+        recs = []
+    for idx, rec in enumerate(recs):
+        if not isinstance(rec, dict):
+            errors.append(f"recommendation index {idx} must be object")
+            continue
+        for key in ["fixture_id", "current_profile", "suggested_profile"]:
+            if not isinstance(rec.get(key), str):
+                errors.append(f"recommendation index {idx} missing string field '{key}'")
+        if not isinstance(rec.get("suggested_profile_shift"), int):
+            errors.append(f"recommendation index {idx} missing int field 'suggested_profile_shift'")
+
+    stale_days = artifact.get("max_age_days", 7)
+    stale = False
+    if age_days is not None and isinstance(stale_days, (int, float)):
+        stale = age_days > float(stale_days)
+    else:
+        warnings.append("max_age_days invalid; stale evaluation disabled")
+
+    return {
+        "valid": not errors,
+        "stale": stale,
+        "errors": errors,
+        "warnings": warnings,
+        "age_days": age_days,
+    }

@@ -11,6 +11,7 @@ from scripts.evaluate_prep_calibration_drift import (
     evaluate_report_drift,
     recommend_profile_shifts,
     validate_evidence,
+    validate_recommendation_artifact,
 )
 
 
@@ -31,6 +32,40 @@ class Reason:
 
 def is_true(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def governance_profile_name() -> str:
+    ref_name = os.getenv("GITHUB_REF_NAME", "")
+    if ref_name in {"main", "master"} or ref_name.startswith("release/"):
+        return "release"
+    if ref_name in {"develop", "dev"}:
+        return "development"
+    return "feature"
+
+
+def profile_default(name: str, default: str) -> str:
+    profile = governance_profile_name()
+    profile_map = {
+        "release": {
+            "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.15",
+            "RUNMAT_RELEASE_READINESS_PREP_MAX_RECOMMENDATION_RATIO": "0.25",
+            "RUNMAT_RELEASE_READINESS_PREP_CANDIDATE_MAX_AGE_DAYS": "7",
+            "RUNMAT_RELEASE_READINESS_PREP_REQUIRE_RECOMMENDATION_ARTIFACT": "true",
+        },
+        "development": {
+            "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.2",
+            "RUNMAT_RELEASE_READINESS_PREP_MAX_RECOMMENDATION_RATIO": "0.5",
+            "RUNMAT_RELEASE_READINESS_PREP_CANDIDATE_MAX_AGE_DAYS": "14",
+            "RUNMAT_RELEASE_READINESS_PREP_REQUIRE_RECOMMENDATION_ARTIFACT": "false",
+        },
+        "feature": {
+            "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.25",
+            "RUNMAT_RELEASE_READINESS_PREP_MAX_RECOMMENDATION_RATIO": "0.75",
+            "RUNMAT_RELEASE_READINESS_PREP_CANDIDATE_MAX_AGE_DAYS": "21",
+            "RUNMAT_RELEASE_READINESS_PREP_REQUIRE_RECOMMENDATION_ARTIFACT": "false",
+        },
+    }
+    return profile_map.get(profile, {}).get(name, default)
 
 
 def is_protected_branch() -> bool:
@@ -127,6 +162,7 @@ def evaluate_release_readiness(
     protected: bool,
     prep_health: dict | None = None,
     calibration_evidence: dict | None = None,
+    recommendation_artifact: dict | None = None,
 ) -> dict:
     reasons: List[Reason] = []
     latest_passed = bool(latest.get("passed", False))
@@ -351,7 +387,10 @@ def evaluate_release_readiness(
             )
 
     prep_calibration_max_drift = float(
-        os.getenv("RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT", "0.2")
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT",
+            profile_default("RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT", "0.2"),
+        )
     )
     prep_calibration_require_evidence = is_true(
         os.getenv("RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_REQUIRE_EVIDENCE", "false")
@@ -388,6 +427,25 @@ def evaluate_release_readiness(
                     ),
                 )
             )
+        if evidence_status.get("state") == "candidate":
+            candidate_max_age_days = float(
+                os.getenv(
+                    "RUNMAT_RELEASE_READINESS_PREP_CANDIDATE_MAX_AGE_DAYS",
+                    profile_default("RUNMAT_RELEASE_READINESS_PREP_CANDIDATE_MAX_AGE_DAYS", "14"),
+                )
+            )
+            age_days = evidence_status.get("age_days")
+            if isinstance(age_days, (int, float)) and age_days > candidate_max_age_days:
+                reasons.append(
+                    Reason(
+                        code="PREP_CALIBRATION_CANDIDATE_STALE",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"candidate evidence age {age_days:.1f}d exceeds max "
+                            f"{candidate_max_age_days:.1f}d"
+                        ),
+                    )
+                )
         drift_rows = evaluate_report_drift(latest, calibration_evidence)
         if drift_rows:
             prep_calibration_max_observed_drift = max(
@@ -424,7 +482,10 @@ def evaluate_release_readiness(
             prep_calibration_recommendation_count / len(records) if records else 0.0
         )
         max_recommendation_ratio = float(
-            os.getenv("RUNMAT_RELEASE_READINESS_PREP_MAX_RECOMMENDATION_RATIO", "0.5")
+            os.getenv(
+                "RUNMAT_RELEASE_READINESS_PREP_MAX_RECOMMENDATION_RATIO",
+                profile_default("RUNMAT_RELEASE_READINESS_PREP_MAX_RECOMMENDATION_RATIO", "0.5"),
+            )
         )
         if recommendation_ratio > max_recommendation_ratio:
             fixtures = [item["fixture_id"] for item in recommendations]
@@ -436,6 +497,40 @@ def evaluate_release_readiness(
                         f"recommended retrain ratio {recommendation_ratio:.3f} exceeds "
                         f"threshold {max_recommendation_ratio:.3f}; fixtures: {', '.join(fixtures)}"
                     ),
+                )
+            )
+
+    recommendation_require = is_true(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PREP_REQUIRE_RECOMMENDATION_ARTIFACT",
+            profile_default("RUNMAT_RELEASE_READINESS_PREP_REQUIRE_RECOMMENDATION_ARTIFACT", "false"),
+        )
+    )
+    if recommendation_artifact is None:
+        if protected or recommendation_require:
+            reasons.append(
+                Reason(
+                    code="PREP_CALIBRATION_RECOMMENDATION_ARTIFACT_MISSING",
+                    severity="warn",
+                    detail="prep calibration recommendation artifact missing",
+                )
+            )
+    else:
+        recommendation_status = validate_recommendation_artifact(recommendation_artifact)
+        if not recommendation_status.get("valid", False):
+            reasons.append(
+                Reason(
+                    code="PREP_CALIBRATION_RECOMMENDATION_ARTIFACT_INVALID",
+                    severity="fail" if protected else "warn",
+                    detail="prep calibration recommendation artifact invalid",
+                )
+            )
+        elif recommendation_status.get("stale", False):
+            reasons.append(
+                Reason(
+                    code="PREP_CALIBRATION_RECOMMENDATION_ARTIFACT_STALE",
+                    severity="warn",
+                    detail="prep calibration recommendation artifact is stale",
                 )
             )
 
@@ -456,12 +551,14 @@ def evaluate_release_readiness(
         "prep_acceptance_rate": acceptance_rate,
         "prep_calibration_max_observed_drift": prep_calibration_max_observed_drift,
         "prep_calibration_recommendation_count": prep_calibration_recommendation_count,
+        "governance_profile": governance_profile_name(),
     }
 
 
 def markdown_summary(result: dict) -> str:
     lines = ["## Nonlinear Release Readiness", ""]
     lines.append(f"Verdict: **{result['verdict']}**")
+    lines.append(f"Governance profile: **{result.get('governance_profile', 'unknown')}**")
     lines.append(f"Protected branch enforcement: **{result['protected_branch']}**")
     lines.append("")
     if result["reasons"]:
@@ -494,6 +591,12 @@ def main() -> int:
             "scripts/prep_calibration_evidence.json",
         )
     )
+    recommendation_artifact_path = Path(
+        os.getenv(
+            "RUNMAT_PREP_CALIBRATION_RECOMMENDATIONS_INPUT",
+            "target/runmat-analysis-artifacts/prep_calibration_recommendations.json",
+        )
+    )
     output_path = Path(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_OUTPUT",
@@ -513,6 +616,7 @@ def main() -> int:
         is_protected_branch(),
         prep_health=prep_health,
         calibration_evidence=load_evidence(calibration_evidence_path),
+        recommendation_artifact=load_json(recommendation_artifact_path),
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(result, indent=2))

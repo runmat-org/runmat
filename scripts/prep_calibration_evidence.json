@@ -1,5 +1,6 @@
 {
   "schema_version": "prep-calibration-evidence/v1",
+  "state": "approved",
   "generated_at": "2026-03-08T00:00:00Z",
   "max_age_days": 30,
   "fixtures": {

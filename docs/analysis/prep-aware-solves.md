@@ -68,6 +68,14 @@ Typed prep-reference failure families:
   - evidence payload validation checks schema/content and staleness windows,
   - deterministic profile-shift recommendations are generated from latest drift + rolling drift slope,
   - release-readiness can gate on stale evidence and recommendation pressure for protected branches.
+- **Tier 7**: recommendation artifacts + evidence promotion workflow.
+  - recommendations are emitted in a versioned artifact contract (`prep-calibration-recommendations/v1`),
+  - candidate evidence can be promoted to approved evidence with deterministic promotion checks,
+  - release-readiness can require recommendation artifacts and gate on candidate-evidence aging.
+- **Tier 7.5**: policy hardening + CI/runbook enforcement.
+  - branch-specific governance profiles set default strictness for drift and recommendation thresholds,
+  - CI enforces no-silent-bypass checks for governance artifact presence,
+  - release workflows consume promoted approved evidence artifacts as governance preflight outputs.
 
 ## Diagnostics
 

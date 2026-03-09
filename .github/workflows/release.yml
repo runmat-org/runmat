@@ -15,9 +15,43 @@ env:
   VERSION: ${{ github.ref_name }}
 
 jobs:
+  governance-preflight:
+    name: Governance preflight
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+
+      - name: Validate prep calibration evidence
+        run: python3 scripts/validate_prep_calibration_evidence.py
+
+      - name: Generate prep calibration recommendations
+        run: python3 scripts/generate_prep_calibration_recommendations.py
+
+      - name: Promote approved prep calibration evidence
+        env:
+          RUNMAT_PREP_CALIBRATION_EVIDENCE_CANDIDATE: scripts/prep_calibration_evidence.json
+          RUNMAT_PREP_CALIBRATION_EVIDENCE_APPROVED: target/runmat-analysis-artifacts/prep_calibration_evidence_approved.json
+          RUNMAT_PREP_CALIBRATION_RECOMMENDATIONS_INPUT: target/runmat-analysis-artifacts/prep_calibration_recommendations.json
+          RUNMAT_PREP_CALIBRATION_PROMOTION_MAX_RECOMMENDATIONS: "128"
+        run: python3 scripts/promote_prep_calibration_evidence.py
+
+      - name: Upload governance artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: governance-artifacts-${{ github.ref_name }}
+          path: |
+            target/runmat-analysis-artifacts/prep_calibration_evidence_validation.json
+            target/runmat-analysis-artifacts/prep_calibration_recommendations.json
+            target/runmat-analysis-artifacts/prep_calibration_evidence_approved.json
+
   build-release:
     environment: Production
     name: Build ${{ matrix.platform.release_for }}
+    needs: [governance-preflight]
     env:
       RUNMAT_TELEMETRY_KEY: ${{ secrets.TELEMETRY_INGESTION_KEY }}
     strategy:
@@ -252,7 +286,7 @@ jobs:
 
   create-release:
     name: Create Release
-    needs: [build-release, publish-crates, publish-bindings]
+    needs: [governance-preflight, build-release, publish-crates, publish-bindings]
     environment: Production
     runs-on: ubuntu-latest
     steps:

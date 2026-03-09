@@ -42,6 +42,12 @@ used for drift detection and release-readiness policy checks.
 In Tier 6.5 runs, evidence lifecycle validation and staleness controls are enforced, and
 deterministic profile-shift recommendations are produced from drift behavior.
 
+In Tier 7 runs, recommendation artifacts are promoted to first-class governance outputs and
+evidence promotion from candidate to approved state is controlled by deterministic checks.
+
+In Tier 7.5 runs, governance profiles and workflow-level artifact requirements are enforced in CI
+and release preflight to prevent silent bypass of calibration governance.
+
 ## Prep artifact lifecycle
 
 Prep artifacts are persisted and can be filesystem-backed using:

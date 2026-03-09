@@ -51,6 +51,9 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_REQUIRE_EVIDENCE",
             "RUNMAT_RELEASE_READINESS_PREP_RETRAIN_TRIGGER_DRIFT",
             "RUNMAT_RELEASE_READINESS_PREP_MAX_RECOMMENDATION_RATIO",
+            "RUNMAT_RELEASE_READINESS_PREP_CANDIDATE_MAX_AGE_DAYS",
+            "RUNMAT_RELEASE_READINESS_PREP_REQUIRE_RECOMMENDATION_ARTIFACT",
+            "GITHUB_REF_NAME",
         ]:
             os.environ.pop(key, None)
 
@@ -285,6 +288,115 @@ class ReleaseReadinessTests(unittest.TestCase):
         )
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("PREP_CALIBRATION_RETRAIN_RECOMMENDED", codes)
+
+    def test_prep_calibration_candidate_stale_reason_is_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        evidence = {
+            "schema_version": "prep-calibration-evidence/v1",
+            "state": "candidate",
+            "generated_at": "2025-01-01T00:00:00Z",
+            "max_age_days": 999,
+            "fixtures": {
+                "nonlinear_assembly_gpu_provider": {
+                    "default_profile": "balanced",
+                    "profiles": {
+                        "balanced": {
+                            "acceptance_score_min": 0.3,
+                            "acceptance_score_max": 1.0,
+                        }
+                    },
+                }
+            },
+        }
+        os.environ["RUNMAT_RELEASE_READINESS_PREP_CANDIDATE_MAX_AGE_DAYS"] = "1"
+        result = evaluate_release_readiness(
+            latest,
+            rolling,
+            protected=False,
+            calibration_evidence=evidence,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PREP_CALIBRATION_CANDIDATE_STALE", codes)
+
+    def test_recommendation_artifact_missing_reason_is_emitted_when_required(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        os.environ["RUNMAT_RELEASE_READINESS_PREP_REQUIRE_RECOMMENDATION_ARTIFACT"] = "true"
+        result = evaluate_release_readiness(
+            latest,
+            rolling,
+            protected=False,
+            calibration_evidence={
+                "schema_version": "prep-calibration-evidence/v1",
+                "generated_at": "2026-03-08T00:00:00Z",
+                "max_age_days": 365,
+                "fixtures": {},
+            },
+            recommendation_artifact=None,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PREP_CALIBRATION_RECOMMENDATION_ARTIFACT_MISSING", codes)
+
+    def test_release_branch_profile_requires_recommendation_artifact_by_default(self):
+        os.environ["GITHUB_REF_NAME"] = "release/1.2.3"
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+            calibration_evidence={
+                "schema_version": "prep-calibration-evidence/v1",
+                "state": "approved",
+                "generated_at": "2026-03-08T00:00:00Z",
+                "max_age_days": 365,
+                "fixtures": {
+                    "nonlinear_assembly_gpu_provider": {
+                        "default_profile": "balanced",
+                        "profiles": {
+                            "balanced": {
+                                "acceptance_score_min": 0.3,
+                                "acceptance_score_max": 1.0,
+                            }
+                        },
+                    }
+                },
+            },
+            recommendation_artifact=None,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PREP_CALIBRATION_RECOMMENDATION_ARTIFACT_MISSING", codes)
+        self.assertEqual(result.get("governance_profile"), "release")
+
+    def test_feature_branch_profile_does_not_require_recommendation_artifact_by_default(self):
+        os.environ["GITHUB_REF_NAME"] = "feature/sandbox"
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+            calibration_evidence={
+                "schema_version": "prep-calibration-evidence/v1",
+                "state": "approved",
+                "generated_at": "2026-03-08T00:00:00Z",
+                "max_age_days": 365,
+                "fixtures": {
+                    "nonlinear_assembly_gpu_provider": {
+                        "default_profile": "balanced",
+                        "profiles": {
+                            "balanced": {
+                                "acceptance_score_min": 0.3,
+                                "acceptance_score_max": 1.0,
+                            }
+                        },
+                    }
+                },
+            },
+            recommendation_artifact=None,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertNotIn("PREP_CALIBRATION_RECOMMENDATION_ARTIFACT_MISSING", codes)
+        self.assertEqual(result.get("governance_profile"), "feature")
 
 
 if __name__ == "__main__":

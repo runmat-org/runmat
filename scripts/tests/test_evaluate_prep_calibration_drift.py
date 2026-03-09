@@ -2,10 +2,12 @@ import unittest
 from datetime import datetime, timezone
 
 from scripts.evaluate_prep_calibration_drift import (
+    build_recommendation_artifact,
     evaluate_record_drift,
     evaluate_report_drift,
     recommend_profile_shifts,
     validate_evidence,
+    validate_recommendation_artifact,
 )
 
 
@@ -141,6 +143,38 @@ class PrepCalibrationDriftTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertTrue(first)
         self.assertEqual(first[0]["suggested_profile"], "conservative")
+
+    def test_build_and_validate_recommendation_artifact(self):
+        evidence = {
+            "fixtures": {
+                "known": {
+                    "default_profile": "balanced",
+                    "profiles": {
+                        "balanced": {
+                            "acceptance_score_min": 0.8,
+                            "acceptance_score_max": 1.0,
+                        },
+                        "conservative": {
+                            "acceptance_score_min": 0.9,
+                            "acceptance_score_max": 1.0,
+                        },
+                    },
+                }
+            }
+        }
+        latest = {
+            "records": [
+                {
+                    "fixture_id": "known",
+                    "prep_calibration_profile": "balanced",
+                    "prep_acceptance_score": 0.6,
+                }
+            ]
+        }
+        artifact = build_recommendation_artifact(latest, [latest], evidence, drift_trigger=0.1)
+        status = validate_recommendation_artifact(artifact)
+        self.assertTrue(status["valid"])
+        self.assertIn("recommendations", artifact)
 
 
 if __name__ == "__main__":

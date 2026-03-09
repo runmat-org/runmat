@@ -286,7 +286,35 @@ jobs:
         run: echo "RUNMAT_RELEASE_READINESS_ARTIFACT_COMPAT_OK=true" >> "$GITHUB_ENV"
 
       - name: Test release readiness script logic
-        run: python3 -m unittest scripts.tests.test_release_readiness_nonlinear
+        run: |
+          python3 -m unittest \
+            scripts.tests.test_release_readiness_nonlinear \
+            scripts.tests.test_evaluate_prep_calibration_drift \
+            scripts.tests.test_promote_prep_calibration_evidence
+
+      - name: Validate prep calibration evidence
+        run: python3 scripts/validate_prep_calibration_evidence.py
+
+      - name: Generate prep calibration recommendations
+        env:
+          RUNMAT_RELEASE_READINESS_PREP_RETRAIN_TRIGGER_DRIFT: "0.1"
+        run: python3 scripts/generate_prep_calibration_recommendations.py
+
+      - name: Verify governance artifacts exist
+        run: |
+          test -f target/runmat-analysis-artifacts/prep_calibration_evidence_validation.json
+          test -f target/runmat-analysis-artifacts/prep_calibration_recommendations.json
+
+      - name: Validate prep calibration evidence promotion
+        env:
+          RUNMAT_PREP_CALIBRATION_EVIDENCE_CANDIDATE: scripts/prep_calibration_evidence.json
+          RUNMAT_PREP_CALIBRATION_EVIDENCE_APPROVED: target/runmat-analysis-artifacts/prep_calibration_evidence_approved.json
+          RUNMAT_PREP_CALIBRATION_RECOMMENDATIONS_INPUT: target/runmat-analysis-artifacts/prep_calibration_recommendations.json
+          RUNMAT_PREP_CALIBRATION_PROMOTION_MAX_RECOMMENDATIONS: "64"
+        run: python3 scripts/promote_prep_calibration_evidence.py
+
+      - name: Verify promotion artifact exists
+        run: test -f target/runmat-analysis-artifacts/prep_calibration_evidence_approved.json
 
       - name: Analyze nonlinear rolling trends
         if: always()
@@ -323,9 +351,38 @@ jobs:
           RUNMAT_RELEASE_READINESS_PREP_WARN_P95_AGE_SECONDS: "604800"
           RUNMAT_RELEASE_READINESS_PREP_FAIL_P95_AGE_SECONDS: "1209600"
           RUNMAT_RELEASE_READINESS_PREP_MAX_REJECT_RATE: "0.25"
+          RUNMAT_RELEASE_READINESS_PREP_REQUIRE_RECOMMENDATION_ARTIFACT: "true"
+          RUNMAT_RELEASE_READINESS_PREP_CANDIDATE_MAX_AGE_DAYS: "14"
+          RUNMAT_PREP_CALIBRATION_RECOMMENDATIONS_INPUT: target/runmat-analysis-artifacts/prep_calibration_recommendations.json
         run: |
           python3 scripts/release_readiness_nonlinear.py | tee nonlinear-release-readiness.md
           cat nonlinear-release-readiness.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summarize governance artifacts
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          rec_path = Path("target/runmat-analysis-artifacts/prep_calibration_recommendations.json")
+          ready_path = Path("target/runmat-analysis-artifacts/nonlinear_release_readiness.json")
+          lines = ["## Tier 7.5 Governance", ""]
+          if rec_path.exists():
+              rec = json.loads(rec_path.read_text())
+              lines.append(f"- Recommendation count: {rec.get('recommendation_count', 0)}")
+          else:
+              lines.append("- Recommendation artifact: missing")
+          if ready_path.exists():
+              ready = json.loads(ready_path.read_text())
+              lines.append(f"- Governance profile: {ready.get('governance_profile', 'unknown')}")
+              lines.append(f"- Readiness verdict: {ready.get('verdict', 'unknown')}")
+          else:
+              lines.append("- Readiness artifact: missing")
+          out = Path("tier75-governance-summary.md")
+          out.write_text("\n".join(lines) + "\n")
+          print(out.read_text())
+          PY
+          cat tier75-governance-summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload nonlinear benchmark artifacts
         if: always() && (failure() || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/'))
@@ -335,11 +392,16 @@ jobs:
           path: |
             target/runmat-analysis-artifacts/analysis_benchmark_report.json
             target/runmat-analysis-artifacts/nonlinear_release_readiness.json
+            target/runmat-analysis-artifacts/prep_calibration_evidence_validation.json
+            target/runmat-analysis-artifacts/prep_calibration_recommendations.json
+            target/runmat-analysis-artifacts/prep_calibration_evidence_approved.json
             target/runmat-analysis-artifacts/rolling/*.json
             target/runmat-prep-artifacts/prep/*.json
             nonlinear-summary.md
             nonlinear-release-readiness.md
+            nonlinear-trends.md
             prep-artifact-slo.md
+            tier75-governance-summary.md
           if-no-files-found: warn
 
   cross-build:
