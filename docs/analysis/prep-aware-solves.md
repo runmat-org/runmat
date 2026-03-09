@@ -48,6 +48,10 @@ Typed prep-reference failure families:
   - deterministic prep-derived sparse graph backbone drives connectivity traversal,
   - graph degree distribution and connected component structure are surfaced as diagnostics,
   - graph fingerprint provides replay-stable structural pattern verification.
+- **Tier 4.5**: graph-solver co-design.
+  - deterministic graph ordering profile informs solver traversal and bandwidth reduction estimates,
+  - graph-conditioned preconditioner tuning is applied in prep-aware solver paths,
+  - graph-solver diagnostics report ordering and effective preconditioner outcomes.
 
 ## Diagnostics
 
@@ -61,5 +65,6 @@ Prep-aware runs can emit:
 - `FEA_PREP_ELEMENT_ASSEMBLY`
 - `FEA_PREP_ELEMENT_CONNECTIVITY`
 - `FEA_PREP_GRAPH_ASSEMBLY`
+- `FEA_PREP_GRAPH_SOLVER`
 
 These diagnostics are deterministic for the same model + prep artifact reference.

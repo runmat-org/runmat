@@ -216,6 +216,13 @@ pub fn run_linear_static_with_options(
     }
     if let Some(graph_assembly) = summary.prep_graph_assembly.as_ref() {
         diagnostics.push(prep_graph_assembly_diagnostic(graph_assembly));
+        diagnostics.push(prep_graph_solver_diagnostic(
+            graph_assembly,
+            solve_result.iterations as f64,
+            solve_result.residual_norm,
+            options.preconditioner_kind.as_str(),
+            &solve_result.preconditioner,
+        ));
     }
     diagnostics.extend(solve_result.diagnostics);
 
@@ -273,6 +280,17 @@ pub fn run_modal_with_options(
     }
     if let Some(graph_assembly) = summary.prep_graph_assembly.as_ref() {
         diagnostics.push(prep_graph_assembly_diagnostic(graph_assembly));
+        diagnostics.push(prep_graph_solver_diagnostic(
+            graph_assembly,
+            mode_shapes_iteration_proxy(&modal.residual_norms),
+            modal.residual_norms.iter().copied().fold(0.0_f64, f64::max),
+            "auto",
+            if backend == ComputeBackend::Gpu {
+                "jacobi"
+            } else {
+                "none"
+            },
+        ));
     }
 
     let displacement = modal
@@ -372,6 +390,17 @@ pub fn run_transient_with_options(
     }
     if let Some(graph_assembly) = summary.prep_graph_assembly.as_ref() {
         diagnostics.push(prep_graph_assembly_diagnostic(graph_assembly));
+        diagnostics.push(prep_graph_solver_diagnostic(
+            graph_assembly,
+            transient.converged_steps as f64,
+            transient
+                .residual_norms
+                .iter()
+                .copied()
+                .fold(0.0_f64, f64::max),
+            "auto",
+            &transient.preconditioner,
+        ));
     }
 
     let displacement = transient
@@ -467,6 +496,22 @@ pub fn run_nonlinear_with_options(
     }
     if let Some(graph_assembly) = summary.prep_graph_assembly.as_ref() {
         diagnostics.push(prep_graph_assembly_diagnostic(graph_assembly));
+        diagnostics.push(prep_graph_solver_diagnostic(
+            graph_assembly,
+            nonlinear
+                .iteration_counts
+                .iter()
+                .copied()
+                .max()
+                .unwrap_or(0) as f64,
+            nonlinear
+                .residual_norms
+                .iter()
+                .copied()
+                .fold(0.0_f64, f64::max),
+            "auto",
+            &nonlinear.preconditioner,
+        ));
     }
 
     let displacement = nonlinear
@@ -727,7 +772,7 @@ fn prep_graph_assembly_diagnostic(summary: &assembly::PrepGraphAssemblySummary) 
         code: "FEA_PREP_GRAPH_ASSEMBLY".to_string(),
         severity: FeaDiagnosticSeverity::Info,
         message: format!(
-            "node_count={} edge_count={} degree_min={} degree_max={} degree_mean={} degree_p95={} fill_ratio={} connected_component_count={} graph_fingerprint={}",
+            "node_count={} edge_count={} degree_min={} degree_max={} degree_mean={} degree_p95={} fill_ratio={} connected_component_count={} ordering_bandwidth_before={} ordering_bandwidth_after={} ordering_reduction_ratio={} ordering_fingerprint={} recommend_ilu0={} graph_fingerprint={}",
             summary.node_count,
             summary.edge_count,
             summary.degree_min,
@@ -736,9 +781,44 @@ fn prep_graph_assembly_diagnostic(summary: &assembly::PrepGraphAssemblySummary) 
             summary.degree_p95,
             summary.fill_ratio,
             summary.connected_component_count,
+            summary.ordering_bandwidth_before,
+            summary.ordering_bandwidth_after,
+            summary.ordering_reduction_ratio,
+            summary.ordering_fingerprint,
+            summary.recommend_ilu0,
             summary.graph_fingerprint,
         ),
     }
+}
+
+fn prep_graph_solver_diagnostic(
+    summary: &assembly::PrepGraphAssemblySummary,
+    iteration_metric: f64,
+    residual_metric: f64,
+    requested_preconditioner: &str,
+    effective_preconditioner: &str,
+) -> FeaDiagnostic {
+    FeaDiagnostic {
+        code: "FEA_PREP_GRAPH_SOLVER".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "ordering_bandwidth_before={} ordering_bandwidth_after={} ordering_reduction_ratio={} ordering_fingerprint={} recommend_ilu0={} requested_preconditioner={} effective_preconditioner={} iteration_metric={} residual_metric={} graph_fingerprint={}",
+            summary.ordering_bandwidth_before,
+            summary.ordering_bandwidth_after,
+            summary.ordering_reduction_ratio,
+            summary.ordering_fingerprint,
+            summary.recommend_ilu0,
+            requested_preconditioner,
+            effective_preconditioner,
+            iteration_metric,
+            residual_metric,
+            summary.graph_fingerprint,
+        ),
+    }
+}
+
+fn mode_shapes_iteration_proxy(residual_norms: &[f64]) -> f64 {
+    residual_norms.len() as f64
 }
 
 #[cfg(test)]

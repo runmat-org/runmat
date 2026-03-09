@@ -63,9 +63,11 @@ pub fn solve_linear_system(
         };
     }
 
-    let max_iters = 64;
+    let tuned_preconditioner_kind = graph_tuned_preconditioner(summary, preconditioner_kind);
+    let max_iters = graph_tuned_max_iters(summary, 64);
     let tol = 1.0e-8;
-    let preconditioner = build_spd_preconditioner(summary, preconditioner_kind);
+    let preconditioner = build_spd_preconditioner(summary, tuned_preconditioner_kind);
+    let traversal_order = graph_solver_traversal_order(summary);
     let b = &summary.operator.rhs;
     let mut x = vec![0.0; summary.dof_count];
 
@@ -89,6 +91,17 @@ pub fn solve_linear_system(
             severity: FeaDiagnosticSeverity::Warning,
             message: "runtime-tensor backend unavailable for current provider; fell back to cpu_reference solver"
                 .to_string(),
+        });
+    }
+    if tuned_preconditioner_kind != preconditioner_kind {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_GRAPH_PRECONDITIONER_TUNING".to_string(),
+            severity: FeaDiagnosticSeverity::Info,
+            message: format!(
+                "requested_preconditioner={} tuned_preconditioner={}",
+                preconditioner_kind.as_str(),
+                tuned_preconditioner_kind.as_str()
+            ),
         });
     }
 
@@ -132,8 +145,8 @@ pub fn solve_linear_system(
             break;
         }
         let beta = rz_new / rz_old;
-        for i in 0..p.len() {
-            p[i] = z[i] + beta * p[i];
+        for i in &traversal_order {
+            p[*i] = z[*i] + beta * p[*i];
         }
         rz_old = rz_new;
     }
@@ -162,4 +175,42 @@ pub fn solve_linear_system(
         preconditioner: preconditioner.kind().as_str().to_string(),
         diagnostics,
     }
+}
+
+fn graph_tuned_preconditioner(
+    summary: &AssemblySummary,
+    requested: SpdPreconditionerKind,
+) -> SpdPreconditionerKind {
+    if let Some(graph) = summary.prep_graph_assembly.as_ref() {
+        if graph.recommend_ilu0 {
+            return SpdPreconditionerKind::Ilu0;
+        }
+    }
+    requested
+}
+
+fn graph_tuned_max_iters(summary: &AssemblySummary, base_max_iters: usize) -> usize {
+    if let Some(graph) = summary.prep_graph_assembly.as_ref() {
+        if graph.ordering_reduction_ratio > 0.15 {
+            return ((base_max_iters as f64) * 0.85).round() as usize;
+        }
+        if graph.connected_component_count > 8 {
+            return ((base_max_iters as f64) * 1.1).round() as usize;
+        }
+    }
+    base_max_iters
+}
+
+fn graph_solver_traversal_order(summary: &AssemblySummary) -> Vec<usize> {
+    let mut order = (0..summary.dof_count).collect::<Vec<_>>();
+    if let Some(graph) = summary.prep_graph_assembly.as_ref() {
+        let seed = graph.ordering_fingerprint;
+        order.sort_by_key(|idx| {
+            let mut hash = seed ^ ((*idx as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15));
+            hash ^= hash >> 33;
+            hash = hash.wrapping_mul(0xff51afd7ed558ccd);
+            hash
+        });
+    }
+    order
 }

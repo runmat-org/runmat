@@ -87,6 +87,11 @@ pub struct PrepGraphAssemblySummary {
     pub degree_p95: f64,
     pub fill_ratio: f64,
     pub connected_component_count: usize,
+    pub ordering_bandwidth_before: usize,
+    pub ordering_bandwidth_after: usize,
+    pub ordering_reduction_ratio: f64,
+    pub ordering_fingerprint: u64,
+    pub recommend_ilu0: bool,
     pub graph_fingerprint: u64,
 }
 
@@ -606,6 +611,11 @@ fn apply_prep_element_connectivity_scatter(
             degree_p95: 0.0,
             fill_ratio: 0.0,
             connected_component_count: constrained.len().max(1),
+            ordering_bandwidth_before: 0,
+            ordering_bandwidth_after: 0,
+            ordering_reduction_ratio: 0.0,
+            ordering_fingerprint: 0,
+            recommend_ilu0: false,
             graph_fingerprint: graph_fingerprint(prep, 0, constrained.len().max(1), 0.0, 0.0),
         };
         return (connectivity_summary, graph_summary);
@@ -691,6 +701,16 @@ fn apply_prep_element_connectivity_scatter(
 
     let graph_fingerprint_value =
         graph_fingerprint(prep, edges.len(), component_count, degree_mean, degree_p95);
+    let ordering_permutation = graph_ordering_permutation(node_count, &edges);
+    let ordering_bandwidth_before = graph_bandwidth(&edges, None);
+    let ordering_bandwidth_after = graph_bandwidth(&edges, Some(&ordering_permutation));
+    let ordering_reduction_ratio = if ordering_bandwidth_before == 0 {
+        0.0
+    } else {
+        1.0 - (ordering_bandwidth_after as f64 / ordering_bandwidth_before as f64)
+    };
+    let ordering_fingerprint = graph_ordering_fingerprint(prep, &ordering_permutation);
+    let recommend_ilu0 = degree_p95 >= 4.0 || fill_ratio >= 0.02 || component_count <= 3;
     let graph_summary = PrepGraphAssemblySummary {
         node_count,
         edge_count: edges.len(),
@@ -700,6 +720,11 @@ fn apply_prep_element_connectivity_scatter(
         degree_p95,
         fill_ratio,
         connected_component_count: component_count,
+        ordering_bandwidth_before,
+        ordering_bandwidth_after,
+        ordering_reduction_ratio,
+        ordering_fingerprint,
+        recommend_ilu0,
         graph_fingerprint: graph_fingerprint_value,
     };
 
@@ -826,6 +851,45 @@ fn graph_degree_stats(
         roots.insert(find(&mut parent, idx));
     }
     (degree_min, degree_max, degree_mean, degree_p95, roots.len())
+}
+
+fn graph_ordering_permutation(node_count: usize, edges: &[(usize, usize, usize)]) -> Vec<usize> {
+    if node_count == 0 {
+        return Vec::new();
+    }
+    let mut degree = vec![0usize; node_count];
+    for (a, b, _) in edges {
+        degree[*a] = degree[*a].saturating_add(1);
+        degree[*b] = degree[*b].saturating_add(1);
+    }
+    let mut order = (0..node_count).collect::<Vec<_>>();
+    order.sort_by(|a, b| degree[*a].cmp(&degree[*b]).then_with(|| a.cmp(b)));
+    let mut permutation = vec![0usize; node_count];
+    for (new_idx, old_idx) in order.iter().copied().enumerate() {
+        permutation[old_idx] = new_idx;
+    }
+    permutation
+}
+
+fn graph_bandwidth(edges: &[(usize, usize, usize)], permutation: Option<&[usize]>) -> usize {
+    let mut max_bw = 0usize;
+    for (a, b, _) in edges {
+        let lhs = permutation.map(|perm| perm[*a]).unwrap_or(*a);
+        let rhs = permutation.map(|perm| perm[*b]).unwrap_or(*b);
+        max_bw = max_bw.max(lhs.abs_diff(rhs));
+    }
+    max_bw
+}
+
+fn graph_ordering_fingerprint(prep: FeaPrepContext, permutation: &[usize]) -> u64 {
+    let mut hash = 1469598103934665603_u64;
+    hash ^= prep.layout_seed;
+    hash = hash.wrapping_mul(1099511628211_u64);
+    for value in permutation.iter().take(256) {
+        hash ^= *value as u64;
+        hash = hash.wrapping_mul(1099511628211_u64);
+    }
+    hash
 }
 
 fn build_region_block_sizes(

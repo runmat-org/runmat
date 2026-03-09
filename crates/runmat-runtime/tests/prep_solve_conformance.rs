@@ -104,6 +104,12 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         .diagnostics
         .iter()
         .all(|diag| diag.code != "FEA_PREP_GRAPH_ASSEMBLY"));
+    assert!(baseline
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .all(|diag| diag.code != "FEA_PREP_GRAPH_SOLVER"));
 
     assert!(prep_enhanced
         .data
@@ -153,6 +159,12 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_PREP_GRAPH_ASSEMBLY"));
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_GRAPH_SOLVER"));
 
     let base_nonlinear = baseline
         .data
@@ -295,6 +307,25 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
     let node_count = metric_usize(&prep_graph_diag.message, "node_count");
     assert!(edge_count > 0);
     assert!(edge_count <= node_count.saturating_mul(node_count.saturating_sub(1)) / 2);
+
+    let prep_graph_solver_diag = prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_GRAPH_SOLVER")
+        .expect("prep graph solver diagnostic should be present");
+    let replay_graph_solver_diag = prep_enhanced_replay
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_GRAPH_SOLVER")
+        .expect("prep graph solver diagnostic should be present in replay");
+    assert_eq!(
+        prep_graph_solver_diag.message,
+        replay_graph_solver_diag.message
+    );
 
     let base_peak_displacement = baseline
         .data

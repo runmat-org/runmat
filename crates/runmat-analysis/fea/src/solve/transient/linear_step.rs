@@ -46,6 +46,7 @@ pub(super) fn solve_implicit_step_system(
     dt_bucket_rel_tolerance: f64,
 ) -> (Vec<f64>, f64, bool, Option<LinearStepStats>) {
     const PREPARED_RUNTIME_CACHE_CAPACITY: usize = 12;
+    let tuned_preconditioner_kind = graph_tuned_preconditioner_kind(summary);
     if use_runtime_tensor {
         let dt_key = dt_cache_key(dt, options.time_step_s, dt_bucket_rel_tolerance);
         if prepared_runtime_systems_by_dt.contains_key(&dt_key) {
@@ -75,7 +76,7 @@ pub(super) fn solve_implicit_step_system(
                 summary,
                 prepared,
                 rhs,
-                SpdPreconditionerKind::Jacobi,
+                tuned_preconditioner_kind,
                 None,
             ) {
                 let rhs_norm = dot(rhs, rhs).sqrt().max(1.0);
@@ -90,7 +91,7 @@ pub(super) fn solve_implicit_step_system(
                         host_sync_count: result.host_sync_count,
                         device_apply_k_count: result.device_apply_k_count,
                         device_apply_k_attempt_count: result.device_apply_k_attempt_count,
-                        preconditioner: result.preconditioner,
+                        preconditioner: tuned_preconditioner_kind.as_str().to_string(),
                     }),
                 );
             }
@@ -99,7 +100,7 @@ pub(super) fn solve_implicit_step_system(
         let implicit_summary = build_implicit_summary(summary, rhs, dt);
         if let Some(result) = solve_linear_system_runtime_tensor_with_initial_guess(
             &implicit_summary,
-            SpdPreconditionerKind::Jacobi,
+            tuned_preconditioner_kind,
             None,
         ) {
             let rhs_norm = dot(rhs, rhs).sqrt().max(1.0);
@@ -114,7 +115,7 @@ pub(super) fn solve_implicit_step_system(
                     host_sync_count: result.host_sync_count,
                     device_apply_k_count: result.device_apply_k_count,
                     device_apply_k_attempt_count: result.device_apply_k_attempt_count,
-                    preconditioner: result.preconditioner,
+                    preconditioner: tuned_preconditioner_kind.as_str().to_string(),
                 }),
             );
         }
@@ -152,6 +153,15 @@ pub(super) fn solve_implicit_step_system(
     }
 
     (x, rr_old.sqrt() / rhs_norm, converged, None)
+}
+
+fn graph_tuned_preconditioner_kind(summary: &AssemblySummary) -> SpdPreconditionerKind {
+    if let Some(graph) = summary.prep_graph_assembly.as_ref() {
+        if graph.recommend_ilu0 {
+            return SpdPreconditionerKind::Ilu0;
+        }
+    }
+    SpdPreconditionerKind::Jacobi
 }
 
 fn dt_cache_key(dt: f64, nominal_dt: f64, rel_tol: f64) -> u64 {

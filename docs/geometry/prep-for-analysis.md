@@ -27,6 +27,9 @@ that shapes off-diagonal coupling structure and emits replay-stable connectivity
 In Tier 4 runs, prep descriptors drive deterministic sparse graph backbone construction for
 connectivity traversal, with replay-stable graph fingerprints and graph-structure diagnostics.
 
+In Tier 4.5 runs, graph ordering and graph-conditioned preconditioner tuning are applied in
+prep-aware solve paths and surfaced via graph-solver diagnostics.
+
 ## Prep artifact lifecycle
 
 Prep artifacts are persisted and can be filesystem-backed using:
