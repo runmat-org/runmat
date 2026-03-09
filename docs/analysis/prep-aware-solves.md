@@ -60,6 +60,10 @@ Typed prep-reference failure families:
   - run options can select prep calibration profile override (`auto`, `fast`, `balanced`, `conservative`),
   - results/trends surfaces expose structured calibration and acceptance summary fields,
   - release-readiness can enforce prep acceptance-rate thresholds in protected branch policy.
+- **Tier 6**: evidence-anchored calibration drift control.
+  - fixture/profile acceptance-score envelopes are encoded in a versioned evidence artifact,
+  - release-readiness evaluates per-fixture drift ratios against evidence thresholds,
+  - trend summaries surface acceptance and drift posture for rolling governance.
 
 ## Diagnostics
 

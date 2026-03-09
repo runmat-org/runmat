@@ -5,6 +5,8 @@ import statistics
 import sys
 from pathlib import Path
 
+from scripts.evaluate_prep_calibration_drift import load_evidence, evaluate_report_drift
+
 
 NONLINEAR_FIXTURES = {
     "nonlinear_assembly_gpu_provider",
@@ -55,6 +57,7 @@ def collect_metrics(reports, window):
                     if fixture == "nonlinear_softening_proxy_gpu_provider"
                     else threshold_value(record, "nonlinear_path_mix_total_increments"),
                     "publishable": bool(record.get("publishable", False)),
+                    "prep_acceptance_score": record.get("prep_acceptance_score"),
                 }
             )
     return fixture_samples
@@ -62,8 +65,8 @@ def collect_metrics(reports, window):
 
 def summarize(samples):
     lines = ["## Nonlinear Trend Summary", ""]
-    lines.append("| Fixture | Samples | Median GPU ms | Median speedup | Publishable rate |")
-    lines.append("| --- | ---: | ---: | ---: | ---: |")
+    lines.append("| Fixture | Samples | Median GPU ms | Median speedup | Publishable rate | Median acceptance score |")
+    lines.append("| --- | ---: | ---: | ---: | ---: | ---: |")
     for fixture, values in sorted(samples.items()):
         if not values:
             lines.append(f"| {fixture} | 0 | - | - | - |")
@@ -75,13 +78,19 @@ def summarize(samples):
             if isinstance(v["gpu_speedup_ratio"], (int, float))
         ]
         publishable_rate = sum(1 for v in values if v["publishable"]) / len(values)
+        acceptance_scores = [
+            v["prep_acceptance_score"]
+            for v in values
+            if isinstance(v.get("prep_acceptance_score"), (int, float))
+        ]
         lines.append(
-            "| {} | {} | {} | {} | {:.2f} |".format(
+            "| {} | {} | {} | {} | {:.2f} | {} |".format(
                 fixture,
                 len(values),
                 f"{statistics.median(gpu):.3f}" if gpu else "-",
                 f"{statistics.median(speedup):.3f}" if speedup else "-",
                 publishable_rate,
+                f"{statistics.median(acceptance_scores):.3f}" if acceptance_scores else "-",
             )
         )
     return "\n".join(lines)
@@ -112,6 +121,21 @@ def main():
     samples = collect_metrics(reports, max(window, 1))
     summary = summarize(samples)
     print(summary)
+
+    evidence_path = Path(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_EVIDENCE",
+            "scripts/prep_calibration_evidence.json",
+        )
+    )
+    evidence = load_evidence(evidence_path)
+    if evidence is not None:
+        latest_report = reports[-1]
+        drift_rows = evaluate_report_drift(latest_report, evidence)
+        if drift_rows:
+            max_drift = max(row.get("drift_ratio", 0.0) for row in drift_rows)
+            print("\nCalibration drift summary:")
+            print(f"- max drift ratio: {max_drift:.3f}")
 
     warnings = []
     for fixture, values in samples.items():

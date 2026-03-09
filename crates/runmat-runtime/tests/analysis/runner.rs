@@ -334,6 +334,11 @@ pub(super) fn run_fixture(
     let mut gpu_solver_prepared_build_ms = None;
     let mut gpu_solver_solve_ms = None;
     let mut gpu_solver_fallback_apply_count = None;
+    let mut prep_calibration_profile = None;
+    let mut prep_calibration_fingerprint = None;
+    let mut prep_acceptance_score = None;
+    let mut prep_acceptance_passed = None;
+    let mut prep_acceptance_fingerprint = None;
     let mut publishable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
@@ -370,6 +375,11 @@ pub(super) fn run_fixture(
                     gpu_solver_prepared_build_ms,
                     gpu_solver_solve_ms,
                     gpu_solver_fallback_apply_count,
+                    prep_calibration_profile,
+                    prep_calibration_fingerprint,
+                    prep_acceptance_score,
+                    prep_acceptance_passed,
+                    prep_acceptance_fingerprint,
                     publishable,
                     parity,
                     threshold_assertions,
@@ -1115,6 +1125,11 @@ pub(super) fn run_fixture(
                                 gpu_solver_prepared_build_ms,
                                 gpu_solver_solve_ms,
                                 gpu_solver_fallback_apply_count,
+                                prep_calibration_profile,
+                                prep_calibration_fingerprint,
+                                prep_acceptance_score,
+                                prep_acceptance_passed,
+                                prep_acceptance_fingerprint,
                                 publishable,
                                 parity,
                                 threshold_assertions,
@@ -1127,6 +1142,15 @@ pub(super) fn run_fixture(
                     {
                         failures.push("analysis.results contract version mismatch".to_string());
                     }
+
+                    prep_calibration_profile =
+                        gpu_results.data.summary.prep_calibration_profile.clone();
+                    prep_calibration_fingerprint =
+                        gpu_results.data.summary.prep_calibration_fingerprint;
+                    prep_acceptance_score = gpu_results.data.summary.prep_acceptance_score;
+                    prep_acceptance_passed = gpu_results.data.summary.prep_acceptance_passed;
+                    prep_acceptance_fingerprint =
+                        gpu_results.data.summary.prep_acceptance_fingerprint;
 
                     if let Some(root) = filesystem_root {
                         runmat_runtime::analysis::storage::configure_artifact_store(
@@ -1141,7 +1165,7 @@ pub(super) fn run_fixture(
                             AnalysisResultsQuery {
                                 include_fields: vec!["displacement".to_string()],
                                 include_diagnostics: false,
-                            diagnostic_codes: Vec::new(),
+                                diagnostic_codes: Vec::new(),
                                 include_modal_results: false,
                                 mode_indices: Vec::new(),
                                 include_transient_results: false,
@@ -1221,7 +1245,7 @@ pub(super) fn run_fixture(
                             AnalysisResultsQuery {
                                 include_fields: vec!["displacement".to_string()],
                                 include_diagnostics: false,
-                            diagnostic_codes: Vec::new(),
+                                diagnostic_codes: Vec::new(),
                                 include_modal_results: false,
                                 mode_indices: Vec::new(),
                                 include_transient_results: false,
@@ -1260,6 +1284,11 @@ pub(super) fn run_fixture(
                                     gpu_solver_prepared_build_ms,
                                     gpu_solver_solve_ms,
                                     gpu_solver_fallback_apply_count,
+                                    prep_calibration_profile,
+                                    prep_calibration_fingerprint,
+                                    prep_acceptance_score,
+                                    prep_acceptance_passed,
+                                    prep_acceptance_fingerprint,
                                     publishable,
                                     parity,
                                     threshold_assertions,
@@ -1345,6 +1374,11 @@ pub(super) fn run_fixture(
         gpu_solver_prepared_build_ms,
         gpu_solver_solve_ms,
         gpu_solver_fallback_apply_count,
+        prep_calibration_profile,
+        prep_calibration_fingerprint,
+        prep_acceptance_score,
+        prep_acceptance_passed,
+        prep_acceptance_fingerprint,
         publishable,
         parity,
         threshold_assertions,

@@ -42,9 +42,9 @@ def build_summary(report):
     )
     lines.append("")
     lines.append(
-        "| Fixture | Publishable | GPU ms | Speedup | Failed increments | Backtracks | Tangent rebuilds |"
+        "| Fixture | Publishable | GPU ms | Speedup | Failed increments | Backtracks | Tangent rebuilds | Calibration profile | Acceptance score |"
     )
-    lines.append("| --- | --- | ---: | ---: | ---: | ---: | ---: |")
+    lines.append("| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: |")
 
     for fixture_id in NONLINEAR_FIXTURES:
         record = records_by_id.get(fixture_id)
@@ -76,6 +76,8 @@ def build_summary(report):
                 format_num(failed),
                 format_num(backtracks),
                 format_num(tangent),
+                record.get("prep_calibration_profile", "-"),
+                format_num(record.get("prep_acceptance_score")),
             )
         )
 

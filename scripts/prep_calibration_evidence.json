@@ -1,0 +1,37 @@
+{
+  "schema_version": "prep-calibration-evidence/v1",
+  "fixtures": {
+    "nonlinear_assembly_gpu_provider": {
+      "default_profile": "balanced",
+      "profiles": {
+        "fast": { "acceptance_score_min": 0.45, "acceptance_score_max": 1.0 },
+        "balanced": { "acceptance_score_min": 0.55, "acceptance_score_max": 1.0 },
+        "conservative": { "acceptance_score_min": 0.65, "acceptance_score_max": 1.0 }
+      }
+    },
+    "nonlinear_assembly_stress_gpu_provider": {
+      "default_profile": "balanced",
+      "profiles": {
+        "fast": { "acceptance_score_min": 0.4, "acceptance_score_max": 1.0 },
+        "balanced": { "acceptance_score_min": 0.5, "acceptance_score_max": 1.0 },
+        "conservative": { "acceptance_score_min": 0.6, "acceptance_score_max": 1.0 }
+      }
+    },
+    "nonlinear_softening_proxy_gpu_provider": {
+      "default_profile": "conservative",
+      "profiles": {
+        "fast": { "acceptance_score_min": 0.35, "acceptance_score_max": 1.0 },
+        "balanced": { "acceptance_score_min": 0.45, "acceptance_score_max": 1.0 },
+        "conservative": { "acceptance_score_min": 0.55, "acceptance_score_max": 1.0 }
+      }
+    },
+    "nonlinear_load_path_mix_gpu_provider": {
+      "default_profile": "balanced",
+      "profiles": {
+        "fast": { "acceptance_score_min": 0.4, "acceptance_score_max": 1.0 },
+        "balanced": { "acceptance_score_min": 0.5, "acceptance_score_max": 1.0 },
+        "conservative": { "acceptance_score_min": 0.6, "acceptance_score_max": 1.0 }
+      }
+    }
+  }
+}

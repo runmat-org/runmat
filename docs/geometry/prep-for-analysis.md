@@ -36,6 +36,9 @@ assembly/solve behavior, with replay-stable calibration and acceptance fingerpri
 In Tier 5.5 runs, calibration profile overrides can be selected from analysis run options and
 prep acceptance-rate governance can be enforced in release-readiness checks.
 
+In Tier 6 runs, calibration evidence artifacts define fixture/profile acceptance-score envelopes
+used for drift detection and release-readiness policy checks.
+
 ## Prep artifact lifecycle
 
 Prep artifacts are persisted and can be filesystem-backed using:

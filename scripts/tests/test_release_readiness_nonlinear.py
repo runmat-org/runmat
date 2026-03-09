@@ -4,7 +4,14 @@ import os
 from scripts.release_readiness_nonlinear import evaluate_release_readiness
 
 
-def report(passed=True, publishable=True, gpu_ms=100.0, prep_acceptance_passed=True):
+def report(
+    passed=True,
+    publishable=True,
+    gpu_ms=100.0,
+    prep_acceptance_passed=True,
+    prep_acceptance_score=0.9,
+    prep_calibration_profile="balanced",
+):
     fixtures = [
         "nonlinear_assembly_gpu_provider",
         "nonlinear_assembly_stress_gpu_provider",
@@ -19,6 +26,8 @@ def report(passed=True, publishable=True, gpu_ms=100.0, prep_acceptance_passed=T
                 "publishable": publishable,
                 "gpu_run_ms": gpu_ms,
                 "prep_acceptance_passed": prep_acceptance_passed,
+                "prep_acceptance_score": prep_acceptance_score,
+                "prep_calibration_profile": prep_calibration_profile,
             }
             for fixture in fixtures
         ],
@@ -38,6 +47,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_PREP_MISMATCH_REJECT_COUNT",
             "RUNMAT_RELEASE_READINESS_PREP_ACCEPTANCE_MIN_RATE",
             "RUNMAT_RELEASE_READINESS_PREP_ACCEPTANCE_REQUIRE",
+            "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT",
+            "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_REQUIRE_EVIDENCE",
         ]:
             os.environ.pop(key, None)
 
@@ -129,6 +140,66 @@ class ReleaseReadinessTests(unittest.TestCase):
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("PREP_ACCEPTANCE_MISSING", codes)
+
+    def test_prep_calibration_drift_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            prep_acceptance_passed=True,
+            prep_acceptance_score=0.1,
+            prep_calibration_profile="balanced",
+        )
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        evidence = {
+            "fixtures": {
+                "nonlinear_assembly_gpu_provider": {
+                    "default_profile": "balanced",
+                    "profiles": {
+                        "balanced": {
+                            "acceptance_score_min": 0.8,
+                            "acceptance_score_max": 1.0,
+                        }
+                    },
+                },
+                "nonlinear_assembly_stress_gpu_provider": {
+                    "default_profile": "balanced",
+                    "profiles": {
+                        "balanced": {
+                            "acceptance_score_min": 0.8,
+                            "acceptance_score_max": 1.0,
+                        }
+                    },
+                },
+                "nonlinear_softening_proxy_gpu_provider": {
+                    "default_profile": "balanced",
+                    "profiles": {
+                        "balanced": {
+                            "acceptance_score_min": 0.8,
+                            "acceptance_score_max": 1.0,
+                        }
+                    },
+                },
+                "nonlinear_load_path_mix_gpu_provider": {
+                    "default_profile": "balanced",
+                    "profiles": {
+                        "balanced": {
+                            "acceptance_score_min": 0.8,
+                            "acceptance_score_max": 1.0,
+                        }
+                    },
+                },
+            }
+        }
+        os.environ["RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT"] = "0.2"
+        result = evaluate_release_readiness(
+            latest,
+            rolling,
+            protected=False,
+            calibration_evidence=evidence,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PREP_CALIBRATION_DRIFT_HIGH", codes)
 
 
 if __name__ == "__main__":

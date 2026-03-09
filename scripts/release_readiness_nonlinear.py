@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List
 
+from scripts.evaluate_prep_calibration_drift import load_evidence, evaluate_report_drift
+
 
 NONLINEAR_FIXTURES = {
     "nonlinear_assembly_gpu_provider",
@@ -119,6 +121,7 @@ def evaluate_release_readiness(
     rolling: List[dict],
     protected: bool,
     prep_health: dict | None = None,
+    calibration_evidence: dict | None = None,
 ) -> dict:
     reasons: List[Reason] = []
     latest_passed = bool(latest.get("passed", False))
@@ -342,6 +345,45 @@ def evaluate_release_readiness(
                 )
             )
 
+    prep_calibration_max_drift = float(
+        os.getenv("RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT", "0.2")
+    )
+    prep_calibration_require_evidence = is_true(
+        os.getenv("RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_REQUIRE_EVIDENCE", "false")
+    )
+    prep_calibration_max_observed_drift = None
+    if calibration_evidence is None:
+        if protected or prep_calibration_require_evidence:
+            reasons.append(
+                Reason(
+                    code="PREP_CALIBRATION_EVIDENCE_MISSING",
+                    severity="warn",
+                    detail="prep calibration evidence artifact missing for drift evaluation",
+                )
+            )
+    else:
+        drift_rows = evaluate_report_drift(latest, calibration_evidence)
+        if drift_rows:
+            prep_calibration_max_observed_drift = max(
+                row.get("drift_ratio", 0.0) for row in drift_rows
+            )
+            if prep_calibration_max_observed_drift > prep_calibration_max_drift:
+                offending = [
+                    row["fixture_id"]
+                    for row in drift_rows
+                    if row.get("drift_ratio", 0.0) > prep_calibration_max_drift
+                ]
+                reasons.append(
+                    Reason(
+                        code="PREP_CALIBRATION_DRIFT_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"max calibration drift {prep_calibration_max_observed_drift:.3f} exceeds "
+                            f"threshold {prep_calibration_max_drift:.3f}; fixtures: {', '.join(offending)}"
+                        ),
+                    )
+                )
+
     if any(reason.severity == "fail" for reason in reasons):
         verdict = "fail"
     elif reasons:
@@ -357,6 +399,7 @@ def evaluate_release_readiness(
         "latest_report_passed": latest_passed,
         "nonlinear_fixture_count": len(records),
         "prep_acceptance_rate": acceptance_rate,
+        "prep_calibration_max_observed_drift": prep_calibration_max_observed_drift,
     }
 
 
@@ -389,6 +432,12 @@ def main() -> int:
     prep_root = Path(
         os.getenv("RUNMAT_GEOMETRY_PREP_ARTIFACT_ROOT", "target/runmat-prep-artifacts")
     )
+    calibration_evidence_path = Path(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_EVIDENCE",
+            "scripts/prep_calibration_evidence.json",
+        )
+    )
     output_path = Path(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_OUTPUT",
@@ -407,6 +456,7 @@ def main() -> int:
         rolling_reports(rolling_dir),
         is_protected_branch(),
         prep_health=prep_health,
+        calibration_evidence=load_evidence(calibration_evidence_path),
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(result, indent=2))
