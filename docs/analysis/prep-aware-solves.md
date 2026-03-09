@@ -36,7 +36,10 @@ Typed prep-reference failure families:
   - deterministic region-local operator block sizing from prep region mappings,
   - per-block coefficient shaping and inter-block coupling attenuation,
   - deterministic region-topology fingerprint and block graph diagnostics.
-- **Tier 3 (future)**: full remeshed element operator assembly.
+- **Tier 3 core**: prep-native element operator assembly.
+  - prepared-element family mix contributes directly to operator coefficient accumulation,
+  - deterministic element-scatter footprint and assembly fingerprint,
+  - prep-aware path no longer relies solely on global surrogate diagonal synthesis.
 
 ## Diagnostics
 
@@ -47,5 +50,6 @@ Prep-aware runs can emit:
 - `FEA_PREP_TOPOLOGY`
 - `FEA_PREP_OPERATOR_TOPOLOGY`
 - `FEA_PREP_REGION_TOPOLOGY`
+- `FEA_PREP_ELEMENT_ASSEMBLY`
 
 These diagnostics are deterministic for the same model + prep artifact reference.

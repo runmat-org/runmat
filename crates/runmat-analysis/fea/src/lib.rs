@@ -70,6 +70,10 @@ pub struct FeaPrepContext {
     pub topology_region_block_count: usize,
     pub topology_region_mesh_mean: f64,
     pub topology_region_mesh_variance: f64,
+    pub topology_triangle_family_ratio: f64,
+    pub topology_quad_family_ratio: f64,
+    pub topology_tet_family_ratio: f64,
+    pub topology_hex_family_ratio: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -204,6 +208,9 @@ pub fn run_linear_static_with_options(
     if let Some(region_topology) = summary.prep_region_topology.as_ref() {
         diagnostics.push(prep_region_topology_diagnostic(region_topology));
     }
+    if let Some(element_assembly) = summary.prep_element_assembly.as_ref() {
+        diagnostics.push(prep_element_assembly_diagnostic(element_assembly));
+    }
     diagnostics.extend(solve_result.diagnostics);
 
     Ok(FeaRunResult {
@@ -251,6 +258,9 @@ pub fn run_modal_with_options(
     }
     if let Some(region_topology) = summary.prep_region_topology.as_ref() {
         diagnostics.push(prep_region_topology_diagnostic(region_topology));
+    }
+    if let Some(element_assembly) = summary.prep_element_assembly.as_ref() {
+        diagnostics.push(prep_element_assembly_diagnostic(element_assembly));
     }
 
     let displacement = modal
@@ -342,6 +352,9 @@ pub fn run_transient_with_options(
     if let Some(region_topology) = summary.prep_region_topology.as_ref() {
         diagnostics.push(prep_region_topology_diagnostic(region_topology));
     }
+    if let Some(element_assembly) = summary.prep_element_assembly.as_ref() {
+        diagnostics.push(prep_element_assembly_diagnostic(element_assembly));
+    }
 
     let displacement = transient
         .displacement_snapshots
@@ -427,6 +440,9 @@ pub fn run_nonlinear_with_options(
     }
     if let Some(region_topology) = summary.prep_region_topology.as_ref() {
         diagnostics.push(prep_region_topology_diagnostic(region_topology));
+    }
+    if let Some(element_assembly) = summary.prep_element_assembly.as_ref() {
+        diagnostics.push(prep_element_assembly_diagnostic(element_assembly));
     }
 
     let displacement = nonlinear
@@ -537,7 +553,7 @@ fn prep_diagnostic(prep: FeaPrepContext) -> FeaDiagnostic {
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "prepared_mesh_count={} prepared_node_count={} prepared_element_count={} mapped_region_count={} mapped_load_count={} mapped_bc_count={} min_scaled_jacobian={} mean_aspect_ratio={} inverted_element_count={} topology_dof_multiplier={} topology_bandwidth_proxy={} mapped_region_participation_ratio={} topology_surface_patch_ratio={} topology_volume_core_ratio={} topology_mixed_family_ratio={} topology_region_span_mean={} topology_region_block_count={} topology_region_mesh_mean={} topology_region_mesh_variance={}",
+            "prepared_mesh_count={} prepared_node_count={} prepared_element_count={} mapped_region_count={} mapped_load_count={} mapped_bc_count={} min_scaled_jacobian={} mean_aspect_ratio={} inverted_element_count={} topology_dof_multiplier={} topology_bandwidth_proxy={} mapped_region_participation_ratio={} topology_surface_patch_ratio={} topology_volume_core_ratio={} topology_mixed_family_ratio={} topology_region_span_mean={} topology_region_block_count={} topology_region_mesh_mean={} topology_region_mesh_variance={} topology_triangle_family_ratio={} topology_quad_family_ratio={} topology_tet_family_ratio={} topology_hex_family_ratio={}",
             prep.prepared_mesh_count,
             prep.prepared_node_count,
             prep.prepared_element_count,
@@ -557,6 +573,10 @@ fn prep_diagnostic(prep: FeaPrepContext) -> FeaDiagnostic {
             prep.topology_region_block_count,
             prep.topology_region_mesh_mean,
             prep.topology_region_mesh_variance,
+            prep.topology_triangle_family_ratio,
+            prep.topology_quad_family_ratio,
+            prep.topology_tet_family_ratio,
+            prep.topology_hex_family_ratio,
         ),
     }
 }
@@ -631,6 +651,26 @@ fn prep_region_topology_diagnostic(summary: &assembly::PrepRegionTopologySummary
             summary.block_size_max,
             summary.block_size_mean,
             summary.region_topology_fingerprint,
+        ),
+    }
+}
+
+fn prep_element_assembly_diagnostic(
+    summary: &assembly::PrepElementAssemblySummary,
+) -> FeaDiagnostic {
+    FeaDiagnostic {
+        code: "FEA_PREP_ELEMENT_ASSEMBLY".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "assembled_element_count={} triangle_element_count={} quad_element_count={} tet_element_count={} hex_element_count={} mixed_element_count={} scatter_nnz_count={} assembly_fingerprint={}",
+            summary.assembled_element_count,
+            summary.triangle_element_count,
+            summary.quad_element_count,
+            summary.tet_element_count,
+            summary.hex_element_count,
+            summary.mixed_element_count,
+            summary.scatter_nnz_count,
+            summary.assembly_fingerprint,
         ),
     }
 }

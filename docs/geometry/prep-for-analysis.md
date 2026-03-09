@@ -18,6 +18,9 @@ Analysis runtime also derives deterministic region-block topology summaries from
 (block count and region mesh participation distribution) to drive region-local assembly partitioning
 before full remeshed element assembly is available.
 
+In Tier 3 core runs, prep descriptors also drive deterministic element-family contribution synthesis
+for stiffness/mass/damping/right-hand-side accumulation, with replay-stable assembly fingerprints.
+
 ## Prep artifact lifecycle
 
 Prep artifacts are persisted and can be filesystem-backed using:

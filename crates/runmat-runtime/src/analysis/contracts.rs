@@ -46,6 +46,10 @@ pub struct AnalysisRunPrepContext {
     pub topology_region_block_count: usize,
     pub topology_region_mesh_mean: f64,
     pub topology_region_mesh_variance: f64,
+    pub topology_triangle_family_ratio: f64,
+    pub topology_quad_family_ratio: f64,
+    pub topology_tet_family_ratio: f64,
+    pub topology_hex_family_ratio: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

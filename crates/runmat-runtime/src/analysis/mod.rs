@@ -2353,6 +2353,10 @@ fn to_fea_prep_context(context: Option<AnalysisRunPrepContext>) -> Option<runmat
         topology_region_block_count: prep.topology_region_block_count,
         topology_region_mesh_mean: prep.topology_region_mesh_mean,
         topology_region_mesh_variance: prep.topology_region_mesh_variance,
+        topology_triangle_family_ratio: prep.topology_triangle_family_ratio,
+        topology_quad_family_ratio: prep.topology_quad_family_ratio,
+        topology_tet_family_ratio: prep.topology_tet_family_ratio,
+        topology_hex_family_ratio: prep.topology_hex_family_ratio,
     })
 }
 
@@ -2549,6 +2553,34 @@ fn resolve_run_prep_context(
         .filter(|mesh| mesh.element_family_hint == ElementFamilyHint::Mixed)
         .count() as f64
         / mesh_count;
+    let topology_triangle_family_ratio = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .filter(|mesh| mesh.element_family_hint == ElementFamilyHint::Triangle)
+        .count() as f64
+        / mesh_count;
+    let topology_quad_family_ratio = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .filter(|mesh| mesh.element_family_hint == ElementFamilyHint::Quad)
+        .count() as f64
+        / mesh_count;
+    let topology_tet_family_ratio = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .filter(|mesh| mesh.element_family_hint == ElementFamilyHint::Tet)
+        .count() as f64
+        / mesh_count;
+    let topology_hex_family_ratio = artifact
+        .prep
+        .prepared_meshes
+        .iter()
+        .filter(|mesh| mesh.element_family_hint == ElementFamilyHint::Hex)
+        .count() as f64
+        / mesh_count;
     let topology_region_span_mean = artifact
         .prep
         .prepared_meshes
@@ -2664,6 +2696,10 @@ fn resolve_run_prep_context(
         topology_region_block_count: region_block_count,
         topology_region_mesh_mean,
         topology_region_mesh_variance,
+        topology_triangle_family_ratio,
+        topology_quad_family_ratio,
+        topology_tet_family_ratio,
+        topology_hex_family_ratio,
     }))
 }
 

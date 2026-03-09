@@ -12,6 +12,7 @@ pub struct AssemblySummary {
     pub prep_assembly: Option<PrepAssemblySummary>,
     pub prep_operator_topology: Option<PrepOperatorTopologySummary>,
     pub prep_region_topology: Option<PrepRegionTopologySummary>,
+    pub prep_element_assembly: Option<PrepElementAssemblySummary>,
     pub operator: OperatorSystem,
 }
 
@@ -45,6 +46,18 @@ pub struct PrepRegionTopologySummary {
     pub block_size_max: usize,
     pub block_size_mean: f64,
     pub region_topology_fingerprint: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrepElementAssemblySummary {
+    pub assembled_element_count: usize,
+    pub triangle_element_count: usize,
+    pub quad_element_count: usize,
+    pub tet_element_count: usize,
+    pub hex_element_count: usize,
+    pub mixed_element_count: usize,
+    pub scatter_nnz_count: usize,
+    pub assembly_fingerprint: u64,
 }
 
 pub fn assemble_linear_system(
@@ -139,6 +152,7 @@ pub fn assemble_linear_system(
     let mut prep_assembly = None;
     let mut prep_operator_topology = None;
     let mut prep_region_topology = None;
+    let mut prep_element_assembly = None;
     let mut topology_stiffness_scale = 1.0;
     let mut topology_mass_scale = 1.0;
     let mut topology_damping_scale = 1.0;
@@ -238,6 +252,15 @@ pub fn assemble_linear_system(
         for value in &mut rhs {
             *value *= rhs_scale * topology_rhs_scale;
         }
+        prep_element_assembly = Some(apply_prep_native_element_assembly(
+            prep,
+            dof_count,
+            &constrained,
+            &mut stiffness_diag,
+            &mut mass_diag,
+            &mut damping_diag,
+            &mut rhs,
+        ));
         prep_load_bonus = prep
             .mapped_region_count
             .saturating_add(prep.inverted_element_count.min(8));
@@ -356,6 +379,7 @@ pub fn assemble_linear_system(
         prep_assembly,
         prep_operator_topology,
         prep_region_topology,
+        prep_element_assembly,
         operator: OperatorSystem {
             dof_count,
             constrained,
@@ -398,6 +422,102 @@ fn topology_fingerprint(
         hash = hash.wrapping_mul(1099511628211_u64);
     }
     hash
+}
+
+fn apply_prep_native_element_assembly(
+    prep: FeaPrepContext,
+    dof_count: usize,
+    constrained: &[bool],
+    stiffness_diag: &mut [f64],
+    mass_diag: &mut [f64],
+    damping_diag: &mut [f64],
+    rhs: &mut [f64],
+) -> PrepElementAssemblySummary {
+    let element_count = prep
+        .prepared_element_count
+        .max(prep.prepared_mesh_count)
+        .max(1);
+    let triangle_count = ((element_count as f64)
+        * prep.topology_triangle_family_ratio.clamp(0.0, 1.0))
+    .round() as usize;
+    let quad_count =
+        ((element_count as f64) * prep.topology_quad_family_ratio.clamp(0.0, 1.0)).round() as usize;
+    let tet_count =
+        ((element_count as f64) * prep.topology_tet_family_ratio.clamp(0.0, 1.0)).round() as usize;
+    let mut hex_count =
+        ((element_count as f64) * prep.topology_hex_family_ratio.clamp(0.0, 1.0)).round() as usize;
+    let assigned = triangle_count + quad_count + tet_count + hex_count;
+    if assigned > element_count {
+        let overflow = assigned - element_count;
+        hex_count = hex_count.saturating_sub(overflow);
+    }
+    let mixed_count =
+        element_count.saturating_sub(triangle_count + quad_count + tet_count + hex_count);
+
+    let mut touched_diag = vec![false; dof_count];
+    let mut touched_rhs = vec![false; dof_count];
+    let mut element_cursor = 0usize;
+    let stride = (prep.topology_bandwidth_proxy.max(1) as usize + 1)
+        .saturating_add(prep.topology_region_block_count.saturating_sub(1));
+    let span_scale = 1.0 + 0.08 * prep.topology_region_span_mean.clamp(1.0, 24.0) / 24.0;
+
+    let mut apply_family = |count: usize, stiffness_factor: f64, mass_factor: f64| {
+        for _ in 0..count {
+            let base = ((prep.layout_seed as usize)
+                .wrapping_add(element_cursor.saturating_mul(stride.max(1))))
+                % dof_count.max(1);
+            let wave = 1.0 + ((element_cursor % 17) as f64) / 80.0;
+            let assembly_scale = stiffness_factor * span_scale * wave;
+            let mass_scale = mass_factor * (1.0 + 0.04 * prep.topology_surface_patch_ratio);
+            let damping_scale = (0.9 + 0.2 * prep.mapped_region_participation_ratio)
+                * (1.0 + 0.05 * prep.topology_mixed_family_ratio);
+
+            stiffness_diag[base] += 7.5e4 * assembly_scale;
+            mass_diag[base] += 0.25 * mass_scale;
+            damping_diag[base] += 0.012 * damping_scale;
+            touched_diag[base] = true;
+
+            if !constrained[base] {
+                rhs[base] += 0.5 * assembly_scale;
+                touched_rhs[base] = true;
+            }
+            if base + 1 < dof_count {
+                stiffness_diag[base + 1] += 2.0e4 * assembly_scale;
+                mass_diag[base + 1] += 0.08 * mass_scale;
+                damping_diag[base + 1] += 0.004 * damping_scale;
+                touched_diag[base + 1] = true;
+            }
+            element_cursor = element_cursor.saturating_add(1);
+        }
+    };
+
+    apply_family(triangle_count, 0.92, 0.95);
+    apply_family(quad_count, 1.00, 1.00);
+    apply_family(tet_count, 1.07, 1.05);
+    apply_family(hex_count, 1.15, 1.12);
+    apply_family(mixed_count, 0.98, 1.02);
+
+    let scatter_nnz_count = touched_diag.iter().filter(|&&hit| hit).count()
+        + touched_rhs.iter().filter(|&&hit| hit).count();
+    PrepElementAssemblySummary {
+        assembled_element_count: element_count,
+        triangle_element_count: triangle_count,
+        quad_element_count: quad_count,
+        tet_element_count: tet_count,
+        hex_element_count: hex_count,
+        mixed_element_count: mixed_count,
+        scatter_nnz_count,
+        assembly_fingerprint: element_assembly_fingerprint(
+            prep,
+            element_count,
+            triangle_count,
+            quad_count,
+            tet_count,
+            hex_count,
+            mixed_count,
+            scatter_nnz_count,
+        ),
+    }
 }
 
 fn build_region_block_sizes(
@@ -471,6 +591,39 @@ fn region_topology_fingerprint(
     }
     for size in block_sizes {
         hash ^= *size as u64;
+        hash = hash.wrapping_mul(1099511628211_u64);
+    }
+    hash
+}
+
+fn element_assembly_fingerprint(
+    prep: FeaPrepContext,
+    element_count: usize,
+    triangle_count: usize,
+    quad_count: usize,
+    tet_count: usize,
+    hex_count: usize,
+    mixed_count: usize,
+    scatter_nnz_count: usize,
+) -> u64 {
+    let mut hash = 1469598103934665603_u64;
+    for value in [
+        prep.layout_seed,
+        prep.prepared_element_count as u64,
+        element_count as u64,
+        triangle_count as u64,
+        quad_count as u64,
+        tet_count as u64,
+        hex_count as u64,
+        mixed_count as u64,
+        scatter_nnz_count as u64,
+        prep.topology_triangle_family_ratio.to_bits(),
+        prep.topology_quad_family_ratio.to_bits(),
+        prep.topology_tet_family_ratio.to_bits(),
+        prep.topology_hex_family_ratio.to_bits(),
+        prep.topology_mixed_family_ratio.to_bits(),
+    ] {
+        hash ^= value;
         hash = hash.wrapping_mul(1099511628211_u64);
     }
     hash
