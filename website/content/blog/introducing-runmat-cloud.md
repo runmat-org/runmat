@@ -1,24 +1,24 @@
 ---
-title: "RunMat Cloud: From CLI to Browser to Persistent Projects"
-description: "RunMat launched last August as a CLI. In November we added GPU acceleration with Accelerate. Now the sandbox puts the full runtime in your browser, and RunMat Cloud makes it persistent: projects, run history, version snapshots, and collaboration."
+title: "More Math Per Hour: Introducing RunMat Cloud"
+description: "Every jump in computation per engineer has unlocked new categories of engineering. RunMat brings automatic GPU acceleration to a browser-based runtime, and RunMat Cloud makes it persistent: projects, run history, version snapshots, and collaboration."
 date: "2026-03-10"
 authors:
   - name: "Nabeel Allana"
     url: "https://x.com/nabeelallana"
-readTime: "7 min read"
+readTime: "8 min read"
 slug: "introducing-runmat-cloud"
 visibility: unlisted
 tags: ["RunMat Cloud", "sandbox", "scientific computing", "GPU computing", "WebAssembly", "WebGPU", "collaboration"]
 keywords: "RunMat Cloud, RunMat sandbox, MATLAB online alternative, browser GPU computing, WebAssembly scientific computing, WebGPU math, engineering collaboration tool, version control scientific computing, MATLAB cloud alternative"
-excerpt: "Last August we shipped a fast CLI runtime. In November we added GPU acceleration. Now you can run the same engine in your browser, save your work across sessions, and collaborate. No install required."
+excerpt: "Every jump in computation per engineer has unlocked new categories of engineering. RunMat brings automatic GPU acceleration to a browser-based runtime. RunMat Cloud makes it persistent. No install required."
 image: "https://web.runmatstatic.com/blog-images/introducing-runmat-cloud.png"
 imageAlt: "RunMat Cloud project environment with run history"
 ogType: "article"
-ogTitle: "RunMat Cloud: From CLI to Browser to Persistent Projects"
-ogDescription: "The RunMat sandbox runs GPU-accelerated math in your browser. RunMat Cloud makes it persistent: projects, run history, version snapshots, and team collaboration."
+ogTitle: "More Math Per Hour: Introducing RunMat Cloud"
+ogDescription: "Automatic GPU acceleration in a browser-based runtime. RunMat Cloud makes it persistent: projects, run history, version snapshots, and team collaboration."
 twitterCard: "summary_large_image"
-twitterTitle: "RunMat Cloud: From CLI to Browser to Persistent Projects"
-twitterDescription: "GPU-accelerated math in your browser. Persistent projects, automatic run history, and team collaboration. Free tier available."
+twitterTitle: "More Math Per Hour: Introducing RunMat Cloud"
+twitterDescription: "Automatic GPU acceleration in your browser. Persistent projects, run history, and team collaboration. Open source, free tier available."
 canonical: "https://runmat.com/blog/introducing-runmat-cloud"
 jsonLd:
   "@context": "https://schema.org"
@@ -40,9 +40,9 @@ jsonLd:
 
     - "@type": "BlogPosting"
       "@id": "https://runmat.com/blog/introducing-runmat-cloud#article"
-      headline: "RunMat Cloud: From CLI to Browser to Persistent Projects"
+      headline: "More Math Per Hour: Introducing RunMat Cloud"
       alternativeHeadline: "GPU-Accelerated Math in Your Browser, Now with Persistent Projects"
-      description: "RunMat launched as a CLI last August. Accelerate added GPU acceleration in November. Now the sandbox runs in your browser, and RunMat Cloud adds persistent projects, run history, and collaboration."
+      description: "Every jump in computation per engineer has unlocked new categories of engineering. RunMat brings automatic GPU acceleration to a browser-based runtime, and RunMat Cloud adds persistent projects, run history, and collaboration."
       image: "https://web.runmatstatic.com/blog-images/introducing-runmat-cloud.png"
       datePublished: "2026-03-10T00:00:00Z"
       dateModified: "2026-03-10T00:00:00Z"
@@ -76,37 +76,39 @@ jsonLd:
             text: "Yes. The browser sandbox uses WebGPU to access your local GPU for acceleration. Your code and data stay on your machine. RunMat Cloud stores project files and run metadata, not your GPU computations."
 ---
 
-When we [launched RunMat](/blog/introducing-runmat) last August, you downloaded a binary and ran `.m` files from your terminal. It was fast (150x-180x faster than Octave on the same workloads) but you had to install it. In November we shipped [Accelerate](/blog/runmat-accelerate-fastest-runtime-for-your-math), which added automatic GPU acceleration through a fusion engine that plans your math across CPU and GPU without any code changes. Still a CLI. Still a download.
+Engineering progress follows a recursive pattern. Better math leads to better computation, which produces better models, which enables better engineering, which builds better machines, which demand even more computation. The loop has been running for centuries. And at each major jump in what a single engineer can compute per hour, the result has been new categories of engineering that the previous era could not have attempted.
 
-The runtime was fast, but a CLI is not for everyone. Engineers who live in MATLAB or Python often do not want to open a terminal just to try something new. That limited who could actually experience RunMat.
+```mermaid
+graph LR
+    BetterMath[Better Math] --> BetterComputation[Better Computation]
+    BetterComputation --> BetterModels[Better Models]
+    BetterModels --> BetterEngineering[Better Engineering]
+    BetterEngineering --> BetterMachines[Better Machines]
+    BetterMachines --> EvenMoreComputation[Even More Computation]
+    EvenMoreComputation --> BetterMath
+```
 
-Between November and now, we also shipped a lot of runtime work that did not get its own announcement: 3D plotting with interactive camera controls, async execution so long-running computations do not block the UI, shape inference for better autocomplete and error detection as you type, linting in the editor so you see problems before you hit Run, and logging and tracing so we can diagnose issues quickly. These all shipped incrementally, and they all carry over into the sandbox and cloud.
+When [ENIAC](https://en.wikipedia.org/wiki/ENIAC) came online in 1945, it could do roughly 5,000 additions per second, about 10,000 times what a room of human computers could manage. Stanislaw Ulam later wrote that the thermonuclear weapon design it enabled was impossible to do by hand, at any speed. That same machine made [numerical weather prediction](https://en.wikipedia.org/wiki/Numerical_weather_prediction#History) and early finite element analysis feasible for the first time.
 
-Since then we have shipped two things that change how people actually get to RunMat. The sandbox puts the full runtime and its fusion engine in your browser: same GPU acceleration, nothing to install. And now RunMat Cloud makes that browser experience persistent: projects that persist across sessions, automatic run history, version snapshots, and team collaboration.
+In the late 1970s, Cleve Moler saw a version of the same barrier at the University of New Mexico. His students needed LINPACK and EISPACK for serious linear algebra, but both required FORTRAN. So he [wrote MATLAB](https://www.mathworks.com/company/newsletters/articles/the-origins-of-matlab.html) to let them work with matrices directly, without a systems language in the way. He removed a barrier between engineers and computation, and it worked. MATLAB became the standard for over 40 years.
+
+Several things have changed since MATLAB was designed. GPUs are now in every laptop, but MATLAB gates GPU access behind the Parallel Computing Toolbox and requires CUDA. Browsers can run compiled code at near-native speed through WebAssembly and access GPUs through WebGPU, neither of which existed when MATLAB was architected. Open source has become the norm: Python with NumPy and SciPy has already taken a large share of MATLAB's market, proving the demand for free, open tools. And AI models can now write, run, and iterate on mathematical code, which means engineering tools need to be built for models to use, not just humans. MATLAB remains proprietary and expensive.
+
+RunMat is built for these current constraints. The runtime [automatically routes math across CPU and GPU](/blog/runmat-accelerate-fastest-runtime-for-your-math) without code changes or paid add-ons. It compiles to WebAssembly and runs in a browser, so there is nothing to install. It is [open source](https://github.com/runmat-org/runmat) and MIT licensed. We [launched the CLI](/blog/introducing-runmat) last August at 150–180x faster than Octave on the same workloads. In November we shipped [Accelerate](/blog/runmat-accelerate-fastest-runtime-for-your-math) for automatic GPU acceleration. Now the sandbox puts that same engine in your browser, and RunMat Cloud makes it persistent.
 
 ## The sandbox: RunMat in your browser
 
-The RunMat sandbox at [runmat.com/sandbox](https://runmat.com/sandbox) runs the same runtime that powers the CLI, compiled to run in your browser. Open a tab, write MATLAB-style code, hit Run. If your browser supports WebGPU (Chrome, Edge, Safari 18+, Firefox 139+), the fusion engine routes work to your local GPU automatically. The [4K image pipeline](/blog/runmat-accelerate-fastest-runtime-for-your-math) from the Accelerate blog runs in the sandbox. This is not a stripped-down demo.
-
-You also get things the CLI does not have: a built-in editor with linting and autocomplete, and interactive 2D and 3D plotting.
-
-One caveat: browsers throttle GPU access. Your browser limits how much GPU time and memory a single tab can use, so the sandbox will not match the full throughput of the native CLI on large workloads. For most scripts and visualizations you will not notice. For large simulations where you need every bit of GPU performance, the CLI will be faster. The sandbox trades peak GPU performance for zero-install convenience. The upcoming desktop app will remove this tradeoff entirely: the same editor, linting, plotting, and cloud features as the sandbox, but running natively on your machine with full, unrestricted GPU access.
-
-All computation happens locally in your browser. When you sign into Cloud, your project files and run metadata are stored on our servers for persistence, but the computation still happens on your machine.
+The sandbox at [runmat.com/sandbox](https://runmat.com/sandbox) runs the full RunMat runtime in your browser, the same engine and [GPU acceleration](/blog/runmat-accelerate-fastest-runtime-for-your-math) as the CLI. If your browser supports WebGPU (Chrome, Edge, Safari 18+, Firefox 139+), the fusion engine routes work to your local GPU automatically. You get a built-in editor with linting and autocomplete, interactive 2D and 3D plotting, and all computation happens locally on your machine. Browsers do throttle GPU time, so peak throughput on large workloads will be lower than the native CLI. The upcoming desktop app removes this tradeoff: native GPU access with the same editor and cloud features.
 
 ## RunMat Cloud: your work persists
 
-RunMat Cloud is what you get when you sign in. Log in with Google, Apple, Microsoft, a passkey, or your email, and the sandbox becomes a persistent project. Your files save to cloud storage. Every run records automatically. Come back tomorrow, next week, or from a different machine, and everything is where you left it.
+Sign in with Google, Apple, Microsoft, a passkey, or your email, and the sandbox becomes a persistent project. Your files save to cloud storage. Every run records automatically — code, workspace variables, figures, exact camera angle on a 3D surface. Come back tomorrow or from a different machine and everything is where you left it. No checkpoint files to manage. We wrote about [how run state restoration works](/blog/restoring-historical-run-state-scientific-numerical-calculations), [how the storage deduplicates across runs](/blog/ad-hoc-checkpoints-to-large-data-persistence), and [how snapshots export as git-compatible history](/blog/version-control-for-engineers-who-dont-use-git) for those who want the technical details.
 
-Every time you hit Run, we capture the full state: your code, workspace variables, and figures. Open the history dropdown, pick a previous run, and the workspace reconstructs — exact values, exact plot state, exact camera angle on a 3D surface. You do not configure this. There are no checkpoint files to manage. We wrote about [how run state restoration works](/blog/restoring-historical-run-state-scientific-numerical-calculations) in detail.
+Invite teammates to your project. Everyone sees the same files, the same run history, the same storage usage. When someone saves a file, teammates see the update immediately.
 
-The storage is smart about duplicates. If 90% of your workspace is unchanged between runs, that 90% is stored once, so your storage usage reflects actual changes, not redundant copies. The [technical details are here](/blog/ad-hoc-checkpoints-to-large-data-persistence) for those who want them.
+## What else shipped
 
-Run history is automatic. Snapshots are deliberate — you take one before a milestone, a test campaign, or a major parameter sweep. One click freezes the full project state. Snapshots form a linear chain with an audit trail: who, what, when. The chain [exports as git-compatible history](/blog/version-control-for-engineers-who-dont-use-git) when compliance or reproducibility requires it.
-
-Invite teammates to your project. Everyone sees the same files, the same run history, the same storage usage. When someone saves a file, teammates see the update immediately. No more emailing scripts back and forth or wondering which version someone is running.
-
-The dashboard shows what is using space and where. You can delete individual runs to reclaim storage. Pro and Team plans include on-demand overage if you exceed your included storage. We will notify you as you approach your limits, and you can set a usage cap so you never spend more than you are comfortable with. Billing is transparent: you see exactly what you are using and what it costs.
+Between the Accelerate launch in November and now, we shipped 3D plotting with interactive camera controls, async execution so long-running computations do not block the UI, shape inference for better autocomplete and error detection, linting in the editor, and logging and tracing for diagnostics. All of it carries over into the sandbox and cloud.
 
 ## Plans and pricing
 
@@ -126,7 +128,7 @@ The full breakdown is on the [pricing page](/pricing).
 
 The sandbox is free, anonymous, and instant. The CLI is available for local execution and CI/CD. The fusion engine, the automatic CPU/GPU acceleration, and the interactive 2D/3D plotting are the same across all three surfaces: CLI, sandbox, and cloud.
 
-One runtime. Three ways to use it. All of them fast.
+One runtime, three ways to use it, all of them fast.
 
 ## Open source
 
@@ -134,7 +136,7 @@ The [full runtime is open source](https://github.com/runmat-org/runmat) and MIT 
 
 ## What is next
 
-The native desktop application mentioned above is in active development, alongside an integrated AI assistant for the cloud environment. We will write about each when they are ready to use.
+The native desktop application mentioned above is in active development, alongside an integrated AI assistant for the cloud environment. Each step continues the same work: more math per hour, for more engineers. We will write about each when they are ready to use.
 
 For now: open [runmat.com/sandbox](https://runmat.com/sandbox), sign in, and save your first project. It will be there when you come back.
 
