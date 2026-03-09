@@ -85,6 +85,8 @@ Engineering progress follows a recursive pattern. Better math leads to better co
 > → better machines
 > → even more computation
 
+![Glen Beck and Betty Snyder programming ENIAC at the Ballistic Research Laboratory, circa 1947. U.S. Army photo, public domain.](https://upload.wikimedia.org/wikipedia/commons/d/d3/Glen_Beck_and_Betty_Snyder_program_the_ENIAC_in_building_328_at_the_Ballistic_Research_Laboratory.jpg)
+
 When [ENIAC](https://en.wikipedia.org/wiki/ENIAC) came online in 1945, it could do roughly 5,000 additions per second, about 10,000 times what a room of human computers could manage. Stanislaw Ulam later wrote that the thermonuclear weapon design it enabled was impossible to do by hand, at any speed. That same machine made [numerical weather prediction](https://en.wikipedia.org/wiki/Numerical_weather_prediction#History) and early finite element analysis feasible for the first time.
 
 In the late 1970s, Cleve Moler saw a version of the same barrier at the University of New Mexico. His students needed LINPACK and EISPACK for serious linear algebra, but both required FORTRAN. So he [wrote MATLAB](https://www.mathworks.com/company/newsletters/articles/the-origins-of-matlab.html) to let them work with matrices directly, without a systems language in the way. He removed a barrier between engineers and computation, and it worked. MATLAB became the standard for over 40 years.
