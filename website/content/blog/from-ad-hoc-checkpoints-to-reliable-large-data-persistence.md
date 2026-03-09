@@ -6,7 +6,6 @@ image: "https://web.runmatstatic.com/blog-images/large-data-persistence.png"
 imageAlt: "Large data persistence architecture"
 authors:
   - name: "Julie Ruiz"
-    url: "https://www.linkedin.com/in/julie-ruiz-64b24328/"
 readTime: "14 min read"
 slug: "ad-hoc-checkpoints-to-large-data-persistence"
 tags: ["data engineering", "artifact storage", "checkpointing", "team workflows", "collaboration", "RunMat"]
@@ -49,7 +48,6 @@ jsonLd:
       author:
         "@type": "Person"
         name: "Julie Ruiz"
-        url: "https://www.linkedin.com/in/julie-ruiz-64b24328/"
       publisher:
         "@type": "Organization"
         name: "RunMat by Dystr"
