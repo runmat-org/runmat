@@ -44,6 +44,10 @@ Typed prep-reference failure families:
   - deterministic element-family connectivity scatter contributes to off-diagonal coupling structure,
   - mass/damping off-diagonal influence is captured via deterministic neighbor-scatter proxies,
   - connectivity fingerprint and hop statistics are replay-stable for the same prep artifact.
+- **Tier 4**: prep graph-backbone assembly.
+  - deterministic prep-derived sparse graph backbone drives connectivity traversal,
+  - graph degree distribution and connected component structure are surfaced as diagnostics,
+  - graph fingerprint provides replay-stable structural pattern verification.
 
 ## Diagnostics
 
@@ -56,5 +60,6 @@ Prep-aware runs can emit:
 - `FEA_PREP_REGION_TOPOLOGY`
 - `FEA_PREP_ELEMENT_ASSEMBLY`
 - `FEA_PREP_ELEMENT_CONNECTIVITY`
+- `FEA_PREP_GRAPH_ASSEMBLY`
 
 These diagnostics are deterministic for the same model + prep artifact reference.

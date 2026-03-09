@@ -24,6 +24,9 @@ for stiffness/mass/damping/right-hand-side accumulation, with replay-stable asse
 In Tier 3.5 runs, prep descriptors additionally drive deterministic element connectivity scatter
 that shapes off-diagonal coupling structure and emits replay-stable connectivity fingerprints.
 
+In Tier 4 runs, prep descriptors drive deterministic sparse graph backbone construction for
+connectivity traversal, with replay-stable graph fingerprints and graph-structure diagnostics.
+
 ## Prep artifact lifecycle
 
 Prep artifacts are persisted and can be filesystem-backed using:

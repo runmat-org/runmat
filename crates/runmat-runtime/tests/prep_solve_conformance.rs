@@ -98,6 +98,12 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         .diagnostics
         .iter()
         .all(|diag| diag.code != "FEA_PREP_ELEMENT_CONNECTIVITY"));
+    assert!(baseline
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .all(|diag| diag.code != "FEA_PREP_GRAPH_ASSEMBLY"));
 
     assert!(prep_enhanced
         .data
@@ -141,6 +147,12 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_PREP_ELEMENT_CONNECTIVITY"));
+    assert!(prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PREP_GRAPH_ASSEMBLY"));
 
     let base_nonlinear = baseline
         .data
@@ -263,6 +275,27 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         replay_element_connectivity_diag.message
     );
 
+    let prep_graph_diag = prep_enhanced
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_GRAPH_ASSEMBLY")
+        .expect("prep graph assembly diagnostic should be present");
+    let replay_graph_diag = prep_enhanced_replay
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .find(|diag| diag.code == "FEA_PREP_GRAPH_ASSEMBLY")
+        .expect("prep graph assembly diagnostic should be present in replay");
+    assert_eq!(prep_graph_diag.message, replay_graph_diag.message);
+
+    let edge_count = metric_usize(&prep_graph_diag.message, "edge_count");
+    let node_count = metric_usize(&prep_graph_diag.message, "node_count");
+    assert!(edge_count > 0);
+    assert!(edge_count <= node_count.saturating_mul(node_count.saturating_sub(1)) / 2);
+
     let base_peak_displacement = baseline
         .data
         .run
@@ -310,4 +343,12 @@ fn prep_artifact_reference_changes_nonlinear_solve_profile_with_bounded_quality(
         / base_peak_stress.max(prep_peak_stress).max(1.0e-9);
     assert!(stress_delta_ratio > 1.0e-4);
     assert!(stress_delta_ratio < 0.95);
+}
+
+fn metric_usize(message: &str, key: &str) -> usize {
+    message
+        .split_whitespace()
+        .find_map(|token| token.strip_prefix(&format!("{key}=")))
+        .and_then(|value| value.parse::<usize>().ok())
+        .unwrap_or(0)
 }

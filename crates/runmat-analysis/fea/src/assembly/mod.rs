@@ -14,6 +14,7 @@ pub struct AssemblySummary {
     pub prep_region_topology: Option<PrepRegionTopologySummary>,
     pub prep_element_assembly: Option<PrepElementAssemblySummary>,
     pub prep_element_connectivity: Option<PrepElementConnectivitySummary>,
+    pub prep_graph_assembly: Option<PrepGraphAssemblySummary>,
     pub operator: OperatorSystem,
 }
 
@@ -74,6 +75,19 @@ pub struct PrepElementConnectivitySummary {
     pub mixed_contrib_share: f64,
     pub mean_connectivity_hop: f64,
     pub connectivity_fingerprint: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PrepGraphAssemblySummary {
+    pub node_count: usize,
+    pub edge_count: usize,
+    pub degree_min: usize,
+    pub degree_max: usize,
+    pub degree_mean: f64,
+    pub degree_p95: f64,
+    pub fill_ratio: f64,
+    pub connected_component_count: usize,
+    pub graph_fingerprint: u64,
 }
 
 pub fn assemble_linear_system(
@@ -170,6 +184,7 @@ pub fn assemble_linear_system(
     let mut prep_region_topology = None;
     let mut prep_element_assembly = None;
     let mut prep_element_connectivity = None;
+    let mut prep_graph_assembly = None;
     let mut topology_stiffness_scale = 1.0;
     let mut topology_mass_scale = 1.0;
     let mut topology_damping_scale = 1.0;
@@ -329,14 +344,16 @@ pub fn assemble_linear_system(
 
     if let Some(prep) = prep_context {
         if let Some(element_summary) = prep_element_assembly.as_ref() {
-            prep_element_connectivity = Some(apply_prep_element_connectivity_scatter(
+            let (connectivity_summary, graph_summary) = apply_prep_element_connectivity_scatter(
                 prep,
                 &constrained,
                 &mut stiffness_upper,
                 &mut mass_diag,
                 &mut damping_diag,
                 element_summary,
-            ));
+            );
+            prep_element_connectivity = Some(connectivity_summary);
+            prep_graph_assembly = Some(graph_summary);
         }
         let coupling_nonzero_ratio = if stiffness_upper.is_empty() {
             0.0
@@ -408,6 +425,7 @@ pub fn assemble_linear_system(
         prep_region_topology,
         prep_element_assembly,
         prep_element_connectivity,
+        prep_graph_assembly,
         operator: OperatorSystem {
             dof_count,
             constrained,
@@ -555,9 +573,9 @@ fn apply_prep_element_connectivity_scatter(
     mass_diag: &mut [f64],
     damping_diag: &mut [f64],
     element_summary: &PrepElementAssemblySummary,
-) -> PrepElementConnectivitySummary {
+) -> (PrepElementConnectivitySummary, PrepGraphAssemblySummary) {
     if stiffness_upper.is_empty() {
-        return PrepElementConnectivitySummary {
+        let connectivity_summary = PrepElementConnectivitySummary {
             assembled_element_count: element_summary.assembled_element_count,
             stiffness_offdiag_nnz_count: 0,
             mass_offdiag_proxy_nnz_count: 0,
@@ -576,74 +594,82 @@ fn apply_prep_element_connectivity_scatter(
                 0,
                 0.0,
                 [0.0; 5],
+                0,
             ),
         };
+        let graph_summary = PrepGraphAssemblySummary {
+            node_count: constrained.len(),
+            edge_count: 0,
+            degree_min: 0,
+            degree_max: 0,
+            degree_mean: 0.0,
+            degree_p95: 0.0,
+            fill_ratio: 0.0,
+            connected_component_count: constrained.len().max(1),
+            graph_fingerprint: graph_fingerprint(prep, 0, constrained.len().max(1), 0.0, 0.0),
+        };
+        return (connectivity_summary, graph_summary);
     }
+
+    let node_count = constrained.len().max(1);
+    let edges = build_prep_graph_edges(prep, node_count, element_summary);
+    let (degree_min, degree_max, degree_mean, degree_p95, component_count) =
+        graph_degree_stats(node_count, &edges);
+    let max_edges = node_count.saturating_mul(node_count.saturating_sub(1)) / 2;
+    let fill_ratio = if max_edges == 0 {
+        0.0
+    } else {
+        edges.len() as f64 / max_edges as f64
+    };
 
     let mut touched_stiffness = vec![false; stiffness_upper.len()];
     let mut touched_mass = vec![false; mass_diag.len()];
     let mut touched_damping = vec![false; damping_diag.len()];
     let mut family_contrib = [0.0_f64; 5];
     let mut hops = Vec::new();
-    let mut previous_edge = None;
-    let family_counts = [
-        element_summary.triangle_element_count,
-        element_summary.quad_element_count,
-        element_summary.tet_element_count,
-        element_summary.hex_element_count,
-        element_summary.mixed_element_count,
-    ];
     let family_stiffness = [0.85_f64, 0.95_f64, 1.05_f64, 1.15_f64, 0.9_f64];
     let family_mass = [0.10_f64, 0.11_f64, 0.12_f64, 0.14_f64, 0.105_f64];
     let family_damping = [0.004_f64, 0.0045_f64, 0.005_f64, 0.0055_f64, 0.0042_f64];
-    let stride = (prep.topology_bandwidth_proxy.max(1) as usize)
-        .saturating_add(prep.topology_region_block_count.max(1));
     let region_bias = 1.0 + 0.05 * prep.topology_region_mesh_mean.clamp(1.0, 8.0) / 8.0;
 
-    let mut element_cursor = 0usize;
-    for family_index in 0..family_counts.len() {
-        for _ in 0..family_counts[family_index] {
-            let edge_index = ((prep.layout_seed as usize)
-                .wrapping_add(family_index.saturating_mul(17))
-                .wrapping_add(element_cursor.saturating_mul(stride.max(1))))
-                % stiffness_upper.len().max(1);
-            let left = edge_index;
-            let right = (edge_index + 1).min(constrained.len().saturating_sub(1));
-            if constrained[left] || constrained[right] {
-                element_cursor = element_cursor.saturating_add(1);
+    for (edge_cursor, (left, right, family_index)) in edges.iter().copied().enumerate() {
+        if constrained[left] || constrained[right] {
+            continue;
+        }
+        let hop = right.abs_diff(left).max(1);
+        hops.push(hop as f64);
+        let wave = 1.0 + ((edge_cursor % 23) as f64) / 100.0;
+        let stiffness_add = 0.012
+            * family_stiffness[family_index]
+            * region_bias
+            * wave
+            * prep.topology_dof_multiplier.clamp(1.0, 4.0)
+            / hop as f64;
+        let lo = left.min(right);
+        let hi = left.max(right);
+        for band in lo..hi {
+            if band >= stiffness_upper.len() {
                 continue;
             }
-
-            let wave = 1.0 + ((element_cursor % 19) as f64) / 90.0;
-            let stiffness_add = 0.015
-                * family_stiffness[family_index]
-                * region_bias
-                * wave
-                * prep.topology_dof_multiplier.clamp(1.0, 4.0);
-            stiffness_upper[edge_index] +=
-                stiffness_add * (stiffness_upper[edge_index].abs() + 1.0);
-            family_contrib[family_index] += stiffness_add.abs();
-            touched_stiffness[edge_index] = true;
-
-            let mass_add = family_mass[family_index] * wave;
-            mass_diag[left] += mass_add;
-            mass_diag[right] += mass_add * 0.8;
-            touched_mass[left] = true;
-            touched_mass[right] = true;
-
-            let damping_add =
-                family_damping[family_index] * (1.0 + 0.5 * prep.topology_mixed_family_ratio);
-            damping_diag[left] += damping_add;
-            damping_diag[right] += damping_add * 0.85;
-            touched_damping[left] = true;
-            touched_damping[right] = true;
-
-            if let Some(prev) = previous_edge {
-                hops.push(edge_index.abs_diff(prev) as f64);
-            }
-            previous_edge = Some(edge_index);
-            element_cursor = element_cursor.saturating_add(1);
+            let attenuation = 1.0 / (1.0 + (band - lo) as f64);
+            stiffness_upper[band] +=
+                stiffness_add * attenuation * (stiffness_upper[band].abs() + 1.0);
+            touched_stiffness[band] = true;
         }
+        family_contrib[family_index] += stiffness_add.abs();
+
+        let mass_add = family_mass[family_index] * wave;
+        mass_diag[left] += mass_add;
+        mass_diag[right] += mass_add * 0.8;
+        touched_mass[left] = true;
+        touched_mass[right] = true;
+
+        let damping_add =
+            family_damping[family_index] * (1.0 + 0.5 * prep.topology_mixed_family_ratio);
+        damping_diag[left] += damping_add;
+        damping_diag[right] += damping_add * 0.85;
+        touched_damping[left] = true;
+        touched_damping[right] = true;
     }
 
     let stiffness_offdiag_nnz_count = touched_stiffness.iter().filter(|&&hit| hit).count();
@@ -663,7 +689,21 @@ fn apply_prep_element_connectivity_scatter(
         hops.iter().sum::<f64>() / hops.len() as f64
     };
 
-    PrepElementConnectivitySummary {
+    let graph_fingerprint_value =
+        graph_fingerprint(prep, edges.len(), component_count, degree_mean, degree_p95);
+    let graph_summary = PrepGraphAssemblySummary {
+        node_count,
+        edge_count: edges.len(),
+        degree_min,
+        degree_max,
+        degree_mean,
+        degree_p95,
+        fill_ratio,
+        connected_component_count: component_count,
+        graph_fingerprint: graph_fingerprint_value,
+    };
+
+    let connectivity_summary = PrepElementConnectivitySummary {
         assembled_element_count: element_summary.assembled_element_count,
         stiffness_offdiag_nnz_count,
         mass_offdiag_proxy_nnz_count,
@@ -682,8 +722,110 @@ fn apply_prep_element_connectivity_scatter(
             damping_offdiag_proxy_nnz_count,
             mean_connectivity_hop,
             shares,
+            graph_fingerprint_value,
         ),
+    };
+
+    (connectivity_summary, graph_summary)
+}
+
+fn build_prep_graph_edges(
+    prep: FeaPrepContext,
+    node_count: usize,
+    element_summary: &PrepElementAssemblySummary,
+) -> Vec<(usize, usize, usize)> {
+    use std::collections::BTreeSet;
+
+    let family_counts = [
+        element_summary.triangle_element_count,
+        element_summary.quad_element_count,
+        element_summary.tet_element_count,
+        element_summary.hex_element_count,
+        element_summary.mixed_element_count,
+    ];
+    let family_valence = [2usize, 3, 4, 5, 3];
+    let stride = (prep.topology_bandwidth_proxy.max(1) as usize)
+        .saturating_add(prep.topology_region_block_count.max(1));
+    let max_hop = prep
+        .topology_region_span_mean
+        .round()
+        .clamp(1.0, node_count as f64) as usize;
+    let mut edges = BTreeSet::new();
+    let mut cursor = 0usize;
+    for family_index in 0..family_counts.len() {
+        for _ in 0..family_counts[family_index] {
+            let base = ((prep.layout_seed as usize)
+                .wrapping_add(family_index.saturating_mul(31))
+                .wrapping_add(cursor.saturating_mul(stride.max(1))))
+                % node_count.max(1);
+            for k in 0..family_valence[family_index] {
+                let hop = 1
+                    + ((prep.layout_seed as usize)
+                        .wrapping_add(k)
+                        .wrapping_add(cursor)
+                        .wrapping_add(family_index.saturating_mul(7))
+                        % max_hop.max(1));
+                let target = (base + hop) % node_count.max(1);
+                if base == target {
+                    continue;
+                }
+                let lo = base.min(target);
+                let hi = base.max(target);
+                edges.insert((lo, hi, family_index));
+            }
+            cursor = cursor.saturating_add(1);
+        }
     }
+    edges.into_iter().collect()
+}
+
+fn graph_degree_stats(
+    node_count: usize,
+    edges: &[(usize, usize, usize)],
+) -> (usize, usize, f64, f64, usize) {
+    if node_count == 0 {
+        return (0, 0, 0.0, 0.0, 0);
+    }
+    let mut degree = vec![0usize; node_count];
+    let mut parent = (0..node_count).collect::<Vec<_>>();
+
+    fn find(parent: &mut [usize], x: usize) -> usize {
+        if parent[x] != x {
+            let root = find(parent, parent[x]);
+            parent[x] = root;
+        }
+        parent[x]
+    }
+    fn union(parent: &mut [usize], a: usize, b: usize) {
+        let ra = find(parent, a);
+        let rb = find(parent, b);
+        if ra != rb {
+            parent[rb] = ra;
+        }
+    }
+
+    for (a, b, _) in edges {
+        degree[*a] = degree[*a].saturating_add(1);
+        degree[*b] = degree[*b].saturating_add(1);
+        union(&mut parent, *a, *b);
+    }
+    let degree_min = degree.iter().copied().min().unwrap_or(0);
+    let degree_max = degree.iter().copied().max().unwrap_or(0);
+    let degree_mean = degree.iter().sum::<usize>() as f64 / degree.len() as f64;
+    let mut sorted_degree = degree.iter().map(|d| *d as f64).collect::<Vec<_>>();
+    sorted_degree.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let degree_p95 = if sorted_degree.is_empty() {
+        0.0
+    } else {
+        let index = ((sorted_degree.len() - 1) as f64 * 0.95).round() as usize;
+        sorted_degree[index]
+    };
+
+    let mut roots = std::collections::BTreeSet::new();
+    for idx in 0..node_count {
+        roots.insert(find(&mut parent, idx));
+    }
+    (degree_min, degree_max, degree_mean, degree_p95, roots.len())
 }
 
 fn build_region_block_sizes(
@@ -803,6 +945,7 @@ fn element_connectivity_fingerprint(
     damping_offdiag_proxy_nnz_count: usize,
     mean_connectivity_hop: f64,
     shares: [f64; 5],
+    graph_fingerprint: u64,
 ) -> u64 {
     let mut hash = 1469598103934665603_u64;
     for value in [
@@ -819,6 +962,32 @@ fn element_connectivity_fingerprint(
         shares[3].to_bits(),
         shares[4].to_bits(),
         prep.topology_bandwidth_proxy as u64,
+        graph_fingerprint,
+    ] {
+        hash ^= value;
+        hash = hash.wrapping_mul(1099511628211_u64);
+    }
+    hash
+}
+
+fn graph_fingerprint(
+    prep: FeaPrepContext,
+    edge_count: usize,
+    connected_component_count: usize,
+    degree_mean: f64,
+    degree_p95: f64,
+) -> u64 {
+    let mut hash = 1469598103934665603_u64;
+    for value in [
+        prep.layout_seed,
+        prep.topology_bandwidth_proxy as u64,
+        prep.topology_region_block_count as u64,
+        edge_count as u64,
+        connected_component_count as u64,
+        degree_mean.to_bits(),
+        degree_p95.to_bits(),
+        prep.topology_region_span_mean.to_bits(),
+        prep.topology_mixed_family_ratio.to_bits(),
     ] {
         hash ^= value;
         hash = hash.wrapping_mul(1099511628211_u64);

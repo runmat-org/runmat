@@ -214,6 +214,9 @@ pub fn run_linear_static_with_options(
     if let Some(element_connectivity) = summary.prep_element_connectivity.as_ref() {
         diagnostics.push(prep_element_connectivity_diagnostic(element_connectivity));
     }
+    if let Some(graph_assembly) = summary.prep_graph_assembly.as_ref() {
+        diagnostics.push(prep_graph_assembly_diagnostic(graph_assembly));
+    }
     diagnostics.extend(solve_result.diagnostics);
 
     Ok(FeaRunResult {
@@ -267,6 +270,9 @@ pub fn run_modal_with_options(
     }
     if let Some(element_connectivity) = summary.prep_element_connectivity.as_ref() {
         diagnostics.push(prep_element_connectivity_diagnostic(element_connectivity));
+    }
+    if let Some(graph_assembly) = summary.prep_graph_assembly.as_ref() {
+        diagnostics.push(prep_graph_assembly_diagnostic(graph_assembly));
     }
 
     let displacement = modal
@@ -364,6 +370,9 @@ pub fn run_transient_with_options(
     if let Some(element_connectivity) = summary.prep_element_connectivity.as_ref() {
         diagnostics.push(prep_element_connectivity_diagnostic(element_connectivity));
     }
+    if let Some(graph_assembly) = summary.prep_graph_assembly.as_ref() {
+        diagnostics.push(prep_graph_assembly_diagnostic(graph_assembly));
+    }
 
     let displacement = transient
         .displacement_snapshots
@@ -455,6 +464,9 @@ pub fn run_nonlinear_with_options(
     }
     if let Some(element_connectivity) = summary.prep_element_connectivity.as_ref() {
         diagnostics.push(prep_element_connectivity_diagnostic(element_connectivity));
+    }
+    if let Some(graph_assembly) = summary.prep_graph_assembly.as_ref() {
+        diagnostics.push(prep_graph_assembly_diagnostic(graph_assembly));
     }
 
     let displacement = nonlinear
@@ -706,6 +718,25 @@ fn prep_element_connectivity_diagnostic(
             summary.mixed_contrib_share,
             summary.mean_connectivity_hop,
             summary.connectivity_fingerprint,
+        ),
+    }
+}
+
+fn prep_graph_assembly_diagnostic(summary: &assembly::PrepGraphAssemblySummary) -> FeaDiagnostic {
+    FeaDiagnostic {
+        code: "FEA_PREP_GRAPH_ASSEMBLY".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "node_count={} edge_count={} degree_min={} degree_max={} degree_mean={} degree_p95={} fill_ratio={} connected_component_count={} graph_fingerprint={}",
+            summary.node_count,
+            summary.edge_count,
+            summary.degree_min,
+            summary.degree_max,
+            summary.degree_mean,
+            summary.degree_p95,
+            summary.fill_ratio,
+            summary.connected_component_count,
+            summary.graph_fingerprint,
         ),
     }
 }
