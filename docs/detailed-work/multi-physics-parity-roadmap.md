@@ -300,9 +300,9 @@ This section defines where upcoming multiphysics logic should live so the system
 
 ## Near-Term Next 3 Chunks
 
-1. Phase 1 kickstart: thermo-mechanical coupled study contract + minimal coupled assembly path + first benchmark fixture.
-2. Coupled solver diagnostics and convergence policy profile for thermo-mechanical benchmarks.
-3. Benchmark/trend/readiness expansion for thermo-mechanical acceptance and drift envelopes.
+1. Phase 3 electro-thermal Layer 1: additive coupled-study contracts + runtime validation + deterministic assembly diagnostics (`FEA_ET_COUPLING`).
+2. Phase 3 electro-thermal Layer 2: solver-policy shaping and electro-thermal transient/nonlinear diagnostics with benchmark threshold assertions.
+3. Phase 3 electro-thermal Layer 3: results/trends/readiness governance parity (branch-profile thresholds, trend drift reasons, CI summary posture) aligned with thermo-mechanical depth.
 
 ## Success Milestones
 

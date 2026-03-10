@@ -3,7 +3,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::operator::OperatorSystem;
 use crate::thermo::temporal_profile_variation;
-use crate::{FeaPrepCalibrationProfile, FeaPrepContext, FeaThermoMechanicalContext};
+use crate::{
+    FeaElectroThermalContext, FeaPrepCalibrationProfile, FeaPrepContext, FeaThermoMechanicalContext,
+};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssemblySummary {
@@ -19,6 +21,7 @@ pub struct AssemblySummary {
     pub prep_calibration: Option<PrepCalibrationSummary>,
     pub prep_acceptance: Option<PrepAcceptanceSummary>,
     pub thermo_mechanical: Option<ThermoMechanicalAssemblySummary>,
+    pub electro_thermal: Option<ElectroThermalAssemblySummary>,
     pub operator: OperatorSystem,
 }
 
@@ -144,10 +147,25 @@ pub struct ThermoMechanicalAssemblySummary {
     pub coupling_fingerprint: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ElectroThermalAssemblySummary {
+    pub enabled: bool,
+    pub reference_temperature_k: f64,
+    pub applied_voltage_v: f64,
+    pub base_electrical_conductivity_s_per_m: f64,
+    pub resistive_heating_coefficient: f64,
+    pub joule_heating_scale: f64,
+    pub conductivity_spread_ratio: f64,
+    pub temporal_profile_variation: f64,
+    pub region_scale_count: usize,
+    pub coupling_fingerprint: u64,
+}
+
 pub fn assemble_linear_system(
     model: &AnalysisModel,
     prep_context: Option<FeaPrepContext>,
     thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
+    electro_thermal_context: Option<FeaElectroThermalContext>,
 ) -> AssemblySummary {
     let base_dof_count = (model.loads.len() * 3).max(3);
     let dof_count = if let Some(prep) = prep_context {
@@ -263,6 +281,7 @@ pub fn assemble_linear_system(
     let mut prep_calibration = None;
     let mut prep_acceptance = None;
     let mut thermo_mechanical = None;
+    let mut electro_thermal = None;
     let mut topology_stiffness_scale = 1.0;
     let mut topology_mass_scale = 1.0;
     let mut topology_damping_scale = 1.0;
@@ -612,6 +631,70 @@ pub fn assemble_linear_system(
         }
     }
 
+    if let Some(context) = electro_thermal_context {
+        if context.enabled {
+            let temporal_variation = if context.time_profile.len() < 2 {
+                0.0
+            } else {
+                let min_scale = context
+                    .time_profile
+                    .iter()
+                    .map(|point| point.current_scale)
+                    .fold(f64::INFINITY, f64::min);
+                let max_scale = context
+                    .time_profile
+                    .iter()
+                    .map(|point| point.current_scale)
+                    .fold(-f64::INFINITY, f64::max);
+                ((max_scale - min_scale).abs() / 2.0).clamp(0.0, 1.0)
+            };
+            let mut conductivity_scales = vec![1.0_f64; dof_count];
+            for (idx, scale) in context.region_conductivity_scales.iter().enumerate() {
+                let cursor = (idx * 5 + scale.region_id.len()) % dof_count.max(1);
+                conductivity_scales[cursor] = scale.conductivity_scale.clamp(0.2, 2.5);
+            }
+            let min_scale = conductivity_scales
+                .iter()
+                .copied()
+                .fold(f64::INFINITY, f64::min)
+                .max(1.0e-6);
+            let max_scale = conductivity_scales.iter().copied().fold(0.0_f64, f64::max);
+            let conductivity_spread_ratio = (max_scale / min_scale).clamp(1.0, 8.0);
+            let joule_heating_scale = (context.applied_voltage_v.powi(2)
+                * context.base_electrical_conductivity_s_per_m.max(1.0e-9)
+                * context.resistive_heating_coefficient.max(0.0)
+                / 1.0e6)
+                .clamp(0.0, 10.0);
+
+            for i in 0..dof_count {
+                let local = conductivity_scales[i];
+                damping_diag[i] *= (1.0 + 0.02 * local).clamp(1.0, 1.1);
+                if !constrained[i] {
+                    rhs[i] += joule_heating_scale * local * (1.0 + (i % 7) as f64 * 0.01);
+                }
+            }
+
+            electro_thermal = Some(ElectroThermalAssemblySummary {
+                enabled: true,
+                reference_temperature_k: context.reference_temperature_k,
+                applied_voltage_v: context.applied_voltage_v,
+                base_electrical_conductivity_s_per_m: context.base_electrical_conductivity_s_per_m,
+                resistive_heating_coefficient: context.resistive_heating_coefficient,
+                joule_heating_scale,
+                conductivity_spread_ratio,
+                temporal_profile_variation: temporal_variation,
+                region_scale_count: context.region_conductivity_scales.len(),
+                coupling_fingerprint: electro_thermal_fingerprint(
+                    &context,
+                    dof_count,
+                    joule_heating_scale,
+                    conductivity_spread_ratio,
+                    temporal_variation,
+                ),
+            });
+        }
+    }
+
     AssemblySummary {
         dof_count,
         constrained_dof_count,
@@ -625,6 +708,7 @@ pub fn assemble_linear_system(
         prep_calibration,
         prep_acceptance,
         thermo_mechanical,
+        electro_thermal,
         operator: OperatorSystem {
             dof_count,
             constrained,
@@ -635,6 +719,32 @@ pub fn assemble_linear_system(
             rhs,
         },
     }
+}
+
+fn electro_thermal_fingerprint(
+    context: &FeaElectroThermalContext,
+    dof_count: usize,
+    joule_heating_scale: f64,
+    conductivity_spread_ratio: f64,
+    temporal_profile_variation: f64,
+) -> u64 {
+    let mut hash = 1469598103934665603_u64;
+    for value in [
+        context.reference_temperature_k.to_bits(),
+        context.applied_voltage_v.to_bits(),
+        context.base_electrical_conductivity_s_per_m.to_bits(),
+        context.resistive_heating_coefficient.to_bits(),
+        joule_heating_scale.to_bits(),
+        conductivity_spread_ratio.to_bits(),
+        temporal_profile_variation.to_bits(),
+        dof_count as u64,
+        context.region_conductivity_scales.len() as u64,
+        context.time_profile.len() as u64,
+    ] {
+        hash ^= value;
+        hash = hash.wrapping_mul(1099511628211);
+    }
+    hash
 }
 
 fn topology_fingerprint(

@@ -6,7 +6,7 @@ use crate::{
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     solve::transient::{solve_transient_system, TransientSolveOptions},
     thermo::{sample_time_profile_scale, temporal_profile_variation},
-    ComputeBackend, FeaPrepContext, FeaThermoMechanicalContext,
+    ComputeBackend, FeaElectroThermalContext, FeaPrepContext, FeaThermoMechanicalContext,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -22,6 +22,7 @@ pub struct NonlinearSolveOptions {
     pub tangent_refresh_interval: usize,
     pub prep_context: Option<FeaPrepContext>,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
+    pub electro_thermal_context: Option<FeaElectroThermalContext>,
 }
 
 impl Default for NonlinearSolveOptions {
@@ -38,6 +39,7 @@ impl Default for NonlinearSolveOptions {
             tangent_refresh_interval: 2,
             prep_context: None,
             thermo_mechanical_context: None,
+            electro_thermal_context: None,
         }
     }
 }
@@ -124,6 +126,7 @@ pub fn solve_nonlinear_system(
             dt_bucket_rel_tolerance: 0.0,
             prep_context: options.prep_context,
             thermo_mechanical_context: options.thermo_mechanical_context.clone(),
+            electro_thermal_context: options.electro_thermal_context.clone(),
         },
         backend,
     );

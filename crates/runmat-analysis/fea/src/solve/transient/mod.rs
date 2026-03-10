@@ -7,7 +7,7 @@ use crate::{
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     solve::runtime_tensor_solver::RuntimeTensorPreparedLinearSystem,
     thermo::{sample_time_profile_scale, temporal_profile_variation},
-    ComputeBackend, FeaPrepContext, FeaThermoMechanicalContext,
+    ComputeBackend, FeaElectroThermalContext, FeaPrepContext, FeaThermoMechanicalContext,
 };
 
 mod diagnostics;
@@ -35,6 +35,7 @@ pub struct TransientSolveOptions {
     pub dt_bucket_rel_tolerance: f64,
     pub prep_context: Option<FeaPrepContext>,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
+    pub electro_thermal_context: Option<FeaElectroThermalContext>,
 }
 
 impl Default for TransientSolveOptions {
@@ -57,6 +58,7 @@ impl Default for TransientSolveOptions {
             dt_bucket_rel_tolerance: 0.0,
             prep_context: None,
             thermo_mechanical_context: None,
+            electro_thermal_context: None,
         }
     }
 }

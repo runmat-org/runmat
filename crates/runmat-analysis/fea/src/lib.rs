@@ -116,6 +116,29 @@ pub struct FeaThermoMechanicalContext {
     pub time_profile: Vec<FeaThermoTimeProfilePoint>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeaElectroRegionConductivityScale {
+    pub region_id: String,
+    pub conductivity_scale: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeaElectroTimeProfilePoint {
+    pub normalized_time: f64,
+    pub current_scale: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeaElectroThermalContext {
+    pub enabled: bool,
+    pub reference_temperature_k: f64,
+    pub applied_voltage_v: f64,
+    pub base_electrical_conductivity_s_per_m: f64,
+    pub resistive_heating_coefficient: f64,
+    pub region_conductivity_scales: Vec<FeaElectroRegionConductivityScale>,
+    pub time_profile: Vec<FeaElectroTimeProfilePoint>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FeaPrepCalibrationProfile {
@@ -130,6 +153,7 @@ pub struct LinearStaticSolveOptions {
     pub algebra_backend_kind: LinearAlgebraBackendKind,
     pub prep_context: Option<FeaPrepContext>,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
+    pub electro_thermal_context: Option<FeaElectroThermalContext>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -137,6 +161,7 @@ pub struct ModalSolveOptions {
     pub mode_count: usize,
     pub prep_context: Option<FeaPrepContext>,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
+    pub electro_thermal_context: Option<FeaElectroThermalContext>,
 }
 
 impl Default for ModalSolveOptions {
@@ -145,6 +170,7 @@ impl Default for ModalSolveOptions {
             mode_count: 3,
             prep_context: None,
             thermo_mechanical_context: None,
+            electro_thermal_context: None,
         }
     }
 }
@@ -189,6 +215,7 @@ impl Default for LinearStaticSolveOptions {
             algebra_backend_kind: LinearAlgebraBackendKind::CpuReference,
             prep_context: None,
             thermo_mechanical_context: None,
+            electro_thermal_context: None,
         }
     }
 }
@@ -217,6 +244,7 @@ pub fn run_linear_static_with_options(
         model,
         options.prep_context,
         options.thermo_mechanical_context,
+        options.electro_thermal_context,
     );
     let algebra_backend = build_backend(options.algebra_backend_kind);
     let solve_result = solve_linear_system(
@@ -289,6 +317,9 @@ pub fn run_linear_static_with_options(
     if let Some(thermo_mechanical) = summary.thermo_mechanical.as_ref() {
         diagnostics.push(thermo_mechanical_diagnostic(thermo_mechanical));
     }
+    if let Some(electro_thermal) = summary.electro_thermal.as_ref() {
+        diagnostics.push(electro_thermal_diagnostic(electro_thermal));
+    }
     diagnostics.extend(solve_result.diagnostics);
 
     Ok(FeaRunResult {
@@ -322,6 +353,7 @@ pub fn run_modal_with_options(
         model,
         options.prep_context,
         options.thermo_mechanical_context,
+        options.electro_thermal_context,
     );
     let modal = solve_modal_system(&summary, options.mode_count, backend);
     let mut diagnostics = modal.diagnostics.clone();
@@ -369,6 +401,9 @@ pub fn run_modal_with_options(
     }
     if let Some(thermo_mechanical) = summary.thermo_mechanical.as_ref() {
         diagnostics.push(thermo_mechanical_diagnostic(thermo_mechanical));
+    }
+    if let Some(electro_thermal) = summary.electro_thermal.as_ref() {
+        diagnostics.push(electro_thermal_diagnostic(electro_thermal));
     }
 
     let displacement = modal
@@ -442,8 +477,9 @@ pub fn run_transient_with_options(
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
     let prep_context = options.prep_context;
     let thermo_context = options.thermo_mechanical_context.clone();
+    let electro_context = options.electro_thermal_context.clone();
 
-    let summary = assemble_linear_system(model, prep_context, thermo_context);
+    let summary = assemble_linear_system(model, prep_context, thermo_context, electro_context);
     let transient = solve_transient_system(&summary, options.clone(), backend);
     let mut diagnostics = transient.diagnostics.clone();
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
@@ -490,6 +526,9 @@ pub fn run_transient_with_options(
     }
     if let Some(thermo_mechanical) = summary.thermo_mechanical.as_ref() {
         diagnostics.push(thermo_mechanical_diagnostic(thermo_mechanical));
+    }
+    if let Some(electro_thermal) = summary.electro_thermal.as_ref() {
+        diagnostics.push(electro_thermal_diagnostic(electro_thermal));
     }
 
     let displacement = transient
@@ -559,8 +598,9 @@ pub fn run_nonlinear_with_options(
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
     let prep_context = options.prep_context;
     let thermo_context = options.thermo_mechanical_context.clone();
+    let electro_context = options.electro_thermal_context.clone();
 
-    let summary = assemble_linear_system(model, prep_context, thermo_context);
+    let summary = assemble_linear_system(model, prep_context, thermo_context, electro_context);
     let nonlinear = solve_nonlinear_system(&summary, options.clone(), backend);
     let mut diagnostics = nonlinear.diagnostics.clone();
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
@@ -612,6 +652,9 @@ pub fn run_nonlinear_with_options(
     }
     if let Some(thermo_mechanical) = summary.thermo_mechanical.as_ref() {
         diagnostics.push(thermo_mechanical_diagnostic(thermo_mechanical));
+    }
+    if let Some(electro_thermal) = summary.electro_thermal.as_ref() {
+        diagnostics.push(electro_thermal_diagnostic(electro_thermal));
     }
 
     let displacement = nonlinear
@@ -993,6 +1036,26 @@ fn thermo_mechanical_diagnostic(
     }
 }
 
+fn electro_thermal_diagnostic(summary: &assembly::ElectroThermalAssemblySummary) -> FeaDiagnostic {
+    FeaDiagnostic {
+        code: "FEA_ET_COUPLING".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "enabled={} reference_temperature_k={} applied_voltage_v={} base_electrical_conductivity_s_per_m={} resistive_heating_coefficient={} joule_heating_scale={} conductivity_spread_ratio={} temporal_profile_variation={} region_scale_count={} coupling_fingerprint={}",
+            summary.enabled,
+            summary.reference_temperature_k,
+            summary.applied_voltage_v,
+            summary.base_electrical_conductivity_s_per_m,
+            summary.resistive_heating_coefficient,
+            summary.joule_heating_scale,
+            summary.conductivity_spread_ratio,
+            summary.temporal_profile_variation,
+            summary.region_scale_count,
+            summary.coupling_fingerprint,
+        ),
+    }
+}
+
 fn mode_shapes_iteration_proxy(residual_norms: &[f64]) -> f64 {
     residual_norms.len() as f64
 }
@@ -1148,6 +1211,7 @@ mod tests {
                 mode_count: 8,
                 prep_context: None,
                 thermo_mechanical_context: None,
+                electro_thermal_context: None,
             },
         )
         .expect("modal large fixture should solve");

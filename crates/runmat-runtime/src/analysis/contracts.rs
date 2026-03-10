@@ -141,6 +141,31 @@ pub struct ThermoMechanicalCouplingOptions {
     pub time_profile: Vec<ThermoTimeProfilePoint>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ElectroRegionConductivityScale {
+    pub region_id: String,
+    pub conductivity_scale: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ElectroTimeProfilePoint {
+    pub normalized_time: f64,
+    pub current_scale: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ElectroThermalCouplingOptions {
+    pub enabled: bool,
+    pub reference_temperature_k: f64,
+    pub applied_voltage_v: f64,
+    pub base_electrical_conductivity_s_per_m: f64,
+    pub resistive_heating_coefficient: f64,
+    #[serde(default)]
+    pub region_conductivity_scales: Vec<ElectroRegionConductivityScale>,
+    #[serde(default)]
+    pub time_profile: Vec<ElectroTimeProfilePoint>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QualityReasonCode {
@@ -187,6 +212,8 @@ pub struct AnalysisRunOptions {
     pub prep_calibration_profile: Option<PrepCalibrationProfile>,
     #[serde(default)]
     pub thermo_mechanical_coupling: Option<ThermoMechanicalCouplingOptions>,
+    #[serde(default)]
+    pub electro_thermal_coupling: Option<ElectroThermalCouplingOptions>,
 }
 
 impl Default for AnalysisRunOptions {
@@ -200,6 +227,7 @@ impl Default for AnalysisRunOptions {
             prep_artifact_id: None,
             prep_calibration_profile: None,
             thermo_mechanical_coupling: None,
+            electro_thermal_coupling: None,
         }
     }
 }
@@ -232,6 +260,8 @@ pub struct AnalysisTransientRunOptions {
     pub prep_calibration_profile: Option<PrepCalibrationProfile>,
     #[serde(default)]
     pub thermo_mechanical_coupling: Option<ThermoMechanicalCouplingOptions>,
+    #[serde(default)]
+    pub electro_thermal_coupling: Option<ElectroThermalCouplingOptions>,
 }
 
 impl Default for AnalysisTransientRunOptions {
@@ -259,6 +289,7 @@ impl Default for AnalysisTransientRunOptions {
             prep_artifact_id: None,
             prep_calibration_profile: None,
             thermo_mechanical_coupling: None,
+            electro_thermal_coupling: None,
         }
     }
 }
@@ -288,6 +319,7 @@ impl AnalysisTransientRunOptions {
             prep_artifact_id: None,
             prep_calibration_profile: None,
             thermo_mechanical_coupling: None,
+            electro_thermal_coupling: None,
         }
     }
 
@@ -329,6 +361,7 @@ impl AnalysisTransientRunOptions {
             prep_artifact_id: None,
             prep_calibration_profile: None,
             thermo_mechanical_coupling: None,
+            electro_thermal_coupling: None,
         }
     }
 }
@@ -348,6 +381,8 @@ pub struct AnalysisModalRunOptions {
     pub prep_calibration_profile: Option<PrepCalibrationProfile>,
     #[serde(default)]
     pub thermo_mechanical_coupling: Option<ThermoMechanicalCouplingOptions>,
+    #[serde(default)]
+    pub electro_thermal_coupling: Option<ElectroThermalCouplingOptions>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -372,6 +407,8 @@ pub struct AnalysisNonlinearRunOptions {
     pub prep_calibration_profile: Option<PrepCalibrationProfile>,
     #[serde(default)]
     pub thermo_mechanical_coupling: Option<ThermoMechanicalCouplingOptions>,
+    #[serde(default)]
+    pub electro_thermal_coupling: Option<ElectroThermalCouplingOptions>,
 }
 
 impl Default for AnalysisNonlinearRunOptions {
@@ -393,6 +430,7 @@ impl Default for AnalysisNonlinearRunOptions {
             prep_artifact_id: None,
             prep_calibration_profile: None,
             thermo_mechanical_coupling: None,
+            electro_thermal_coupling: None,
         }
     }
 }
@@ -416,6 +454,7 @@ impl AnalysisNonlinearRunOptions {
             prep_artifact_id: None,
             prep_calibration_profile: None,
             thermo_mechanical_coupling: None,
+            electro_thermal_coupling: None,
         }
     }
 
@@ -441,6 +480,7 @@ impl AnalysisNonlinearRunOptions {
             prep_artifact_id: None,
             prep_calibration_profile: None,
             thermo_mechanical_coupling: None,
+            electro_thermal_coupling: None,
         }
     }
 
@@ -462,6 +502,7 @@ impl AnalysisNonlinearRunOptions {
             prep_artifact_id: None,
             prep_calibration_profile: None,
             thermo_mechanical_coupling: None,
+            electro_thermal_coupling: None,
         }
     }
 }
@@ -478,6 +519,7 @@ impl Default for AnalysisModalRunOptions {
             prep_artifact_id: None,
             prep_calibration_profile: None,
             thermo_mechanical_coupling: None,
+            electro_thermal_coupling: None,
         }
     }
 }
@@ -494,6 +536,7 @@ impl AnalysisModalRunOptions {
             prep_artifact_id: None,
             prep_calibration_profile: None,
             thermo_mechanical_coupling: None,
+            electro_thermal_coupling: None,
         }
     }
 
@@ -512,6 +555,7 @@ impl AnalysisModalRunOptions {
             prep_artifact_id: None,
             prep_calibration_profile: None,
             thermo_mechanical_coupling: None,
+            electro_thermal_coupling: None,
         }
     }
 }

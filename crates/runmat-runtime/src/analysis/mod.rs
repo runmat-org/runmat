@@ -33,7 +33,8 @@ pub use contracts::{
     AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunKind, AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult,
     AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
-    AnalysisValidateResult, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
+    AnalysisValidateResult, ElectroRegionConductivityScale, ElectroThermalCouplingOptions,
+    ElectroTimeProfilePoint, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
     NonlinearMethod, NonlinearResultsData, PrecisionMode, PreconditionerMode,
     PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
     RunProvenance, RunStatus, ThermoFieldInterpolationMode, ThermoFieldSource,
@@ -496,6 +497,74 @@ pub fn analysis_run_modal_with_options_op(
             ));
         }
     }
+    if let Some(electro_options) = options.electro_thermal_coupling.as_ref() {
+        if let Err((detail, metadata)) = validate_electro_coupling_options(model, electro_options) {
+            return Err(operation_error(
+                ANALYSIS_RUN_OPERATION,
+                ANALYSIS_RUN_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_RUN_INVALID_OPTIONS",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                detail,
+                metadata,
+            ));
+        }
+    }
+    if let Some(electro_options) = options.electro_thermal_coupling.as_ref() {
+        if let Err((detail, metadata)) = validate_electro_coupling_options(model, electro_options) {
+            return Err(operation_error(
+                ANALYSIS_RUN_NONLINEAR_OPERATION,
+                ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                detail,
+                metadata,
+            ));
+        }
+    }
+    if let Some(electro_options) = options.electro_thermal_coupling.as_ref() {
+        if let Err((detail, metadata)) = validate_electro_coupling_options(model, electro_options) {
+            return Err(operation_error(
+                ANALYSIS_RUN_TRANSIENT_OPERATION,
+                ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_RUN_TRANSIENT_INVALID_OPTIONS",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                detail,
+                metadata,
+            ));
+        }
+    }
+    if let Some(electro_options) = options.electro_thermal_coupling.as_ref() {
+        if let Err((detail, metadata)) = validate_electro_coupling_options(model, electro_options) {
+            return Err(operation_error(
+                ANALYSIS_RUN_MODAL_OPERATION,
+                ANALYSIS_RUN_MODAL_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_RUN_MODAL_INVALID_OPTIONS",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                detail,
+                metadata,
+            ));
+        }
+    }
 
     let prep_context = resolve_run_prep_context(
         model,
@@ -513,6 +582,9 @@ pub fn analysis_run_modal_with_options_op(
             mode_count: options.mode_count,
             prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
+            electro_thermal_context: to_fea_electro_thermal_context(
+                options.electro_thermal_coupling,
+            ),
         },
     )
     .map_err(|err| {
@@ -853,6 +925,9 @@ pub fn analysis_run_transient_with_options_op(
             dt_bucket_rel_tolerance: options.dt_bucket_rel_tolerance,
             prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
+            electro_thermal_context: to_fea_electro_thermal_context(
+                options.electro_thermal_coupling,
+            ),
         }
     })
     .map_err(|err| {
@@ -1403,6 +1478,9 @@ pub fn analysis_run_nonlinear_with_options_op(
             tangent_refresh_interval: options.tangent_refresh_interval,
             prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
+            electro_thermal_context: to_fea_electro_thermal_context(
+                options.electro_thermal_coupling,
+            ),
         }
     })
     .map_err(|err| {
@@ -1812,6 +1890,9 @@ pub fn analysis_run_linear_static_with_options(
             algebra_backend_kind: requested_solver_backend,
             prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
+            electro_thermal_context: to_fea_electro_thermal_context(
+                options.electro_thermal_coupling,
+            ),
         }
     })
     .map_err(|err| {
@@ -2992,6 +3073,44 @@ fn to_fea_thermo_mechanical_context(
     })
 }
 
+fn to_fea_electro_thermal_context(
+    options: Option<ElectroThermalCouplingOptions>,
+) -> Option<runmat_analysis_fea::FeaElectroThermalContext> {
+    options.map(|et| runmat_analysis_fea::FeaElectroThermalContext {
+        enabled: et.enabled,
+        reference_temperature_k: et.reference_temperature_k,
+        applied_voltage_v: et.applied_voltage_v,
+        base_electrical_conductivity_s_per_m: et.base_electrical_conductivity_s_per_m,
+        resistive_heating_coefficient: et.resistive_heating_coefficient,
+        region_conductivity_scales: et
+            .region_conductivity_scales
+            .into_iter()
+            .map(
+                |ElectroRegionConductivityScale {
+                     region_id,
+                     conductivity_scale,
+                 }| runmat_analysis_fea::FeaElectroRegionConductivityScale {
+                    region_id,
+                    conductivity_scale,
+                },
+            )
+            .collect(),
+        time_profile: et
+            .time_profile
+            .into_iter()
+            .map(
+                |ElectroTimeProfilePoint {
+                     normalized_time,
+                     current_scale,
+                 }| runmat_analysis_fea::FeaElectroTimeProfilePoint {
+                    normalized_time,
+                    current_scale,
+                },
+            )
+            .collect(),
+    })
+}
+
 fn validate_thermo_coupling_options(
     model: &AnalysisModel,
     options: &ThermoMechanicalCouplingOptions,
@@ -3110,6 +3229,125 @@ fn validate_thermo_coupling_options(
         }
     }
 
+    Ok(())
+}
+
+fn validate_electro_coupling_options(
+    model: &AnalysisModel,
+    options: &ElectroThermalCouplingOptions,
+) -> Result<(), (String, BTreeMap<String, String>)> {
+    if !options.enabled {
+        return Ok(());
+    }
+    if !options.reference_temperature_k.is_finite() || options.reference_temperature_k <= 0.0 {
+        return Err((
+            "electro-thermal coupling requires finite positive reference_temperature_k".to_string(),
+            BTreeMap::from([(
+                "reference_temperature_k".to_string(),
+                options.reference_temperature_k.to_string(),
+            )]),
+        ));
+    }
+    if !options.applied_voltage_v.is_finite() {
+        return Err((
+            "electro-thermal coupling requires finite applied_voltage_v".to_string(),
+            BTreeMap::from([(
+                "applied_voltage_v".to_string(),
+                options.applied_voltage_v.to_string(),
+            )]),
+        ));
+    }
+    if !options.base_electrical_conductivity_s_per_m.is_finite()
+        || options.base_electrical_conductivity_s_per_m <= 0.0
+    {
+        return Err((
+            "electro-thermal coupling requires finite positive base_electrical_conductivity_s_per_m"
+                .to_string(),
+            BTreeMap::from([(
+                "base_electrical_conductivity_s_per_m".to_string(),
+                options.base_electrical_conductivity_s_per_m.to_string(),
+            )]),
+        ));
+    }
+    if !options.resistive_heating_coefficient.is_finite()
+        || options.resistive_heating_coefficient < 0.0
+    {
+        return Err((
+            "electro-thermal coupling requires finite non-negative resistive_heating_coefficient"
+                .to_string(),
+            BTreeMap::from([(
+                "resistive_heating_coefficient".to_string(),
+                options.resistive_heating_coefficient.to_string(),
+            )]),
+        ));
+    }
+    let mut last_t = -1.0_f64;
+    for (idx, point) in options.time_profile.iter().enumerate() {
+        if !point.normalized_time.is_finite()
+            || point.normalized_time < 0.0
+            || point.normalized_time > 1.0
+        {
+            return Err((
+                "electro time_profile normalized_time must be finite and within [0, 1]".to_string(),
+                BTreeMap::from([
+                    ("time_profile_index".to_string(), idx.to_string()),
+                    (
+                        "normalized_time".to_string(),
+                        point.normalized_time.to_string(),
+                    ),
+                ]),
+            ));
+        }
+        if !point.current_scale.is_finite() {
+            return Err((
+                "electro time_profile current_scale must be finite".to_string(),
+                BTreeMap::from([
+                    ("time_profile_index".to_string(), idx.to_string()),
+                    ("current_scale".to_string(), point.current_scale.to_string()),
+                ]),
+            ));
+        }
+        if point.normalized_time + 1.0e-12 < last_t {
+            return Err((
+                "electro time_profile normalized_time must be monotonic non-decreasing".to_string(),
+                BTreeMap::from([
+                    ("time_profile_index".to_string(), idx.to_string()),
+                    (
+                        "normalized_time".to_string(),
+                        point.normalized_time.to_string(),
+                    ),
+                ]),
+            ));
+        }
+        last_t = point.normalized_time;
+    }
+    let model_region_ids = model
+        .material_assignments
+        .iter()
+        .map(|assignment| assignment.region_id.as_str())
+        .collect::<HashSet<_>>();
+    for scale in &options.region_conductivity_scales {
+        if !scale.conductivity_scale.is_finite() || scale.conductivity_scale <= 0.0 {
+            return Err((
+                "electro region_conductivity_scales must use finite positive conductivity_scale"
+                    .to_string(),
+                BTreeMap::from([
+                    ("region_id".to_string(), scale.region_id.clone()),
+                    (
+                        "conductivity_scale".to_string(),
+                        scale.conductivity_scale.to_string(),
+                    ),
+                ]),
+            ));
+        }
+        if !model_region_ids.is_empty() && !model_region_ids.contains(scale.region_id.as_str()) {
+            return Err((
+                "electro region_conductivity_scales region_id must exist in model material assignments"
+                    .to_string(),
+                BTreeMap::from([("region_id".to_string(), scale.region_id.clone())]),
+            ));
+        }
+    }
     Ok(())
 }
 
