@@ -387,6 +387,8 @@ jobs:
               thermo_max_nonlinear = ready.get('thermo_max_nonlinear_severity')
               thermo_max_spread = ready.get('thermo_max_spread_ratio')
               thermo_max_heterogeneity = ready.get('thermo_max_heterogeneity_index')
+              thermo_spread_breach_rate = ready.get('thermo_spread_breach_rate')
+              thermo_heterogeneity_breach_rate = ready.get('thermo_heterogeneity_breach_rate')
               lines.append(
                   "- Thermo coupling enabled-rate: "
                   f"{thermo_enabled_rate if thermo_enabled_rate is not None else '-'}"
@@ -406,6 +408,14 @@ jobs:
               lines.append(
                   "- Thermo max heterogeneity index: "
                   f"{thermo_max_heterogeneity if thermo_max_heterogeneity is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo spread breach rate: "
+                  f"{thermo_spread_breach_rate if thermo_spread_breach_rate is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo heterogeneity breach rate: "
+                  f"{thermo_heterogeneity_breach_rate if thermo_heterogeneity_breach_rate is not None else '-'}"
               )
           else:
               lines.append("- Readiness artifact: missing")

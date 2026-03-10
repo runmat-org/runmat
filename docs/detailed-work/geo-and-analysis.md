@@ -1381,6 +1381,7 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-09: Extended CI Tier-7.5 governance summary thermo rollup with rolling breach-rate visibility by adding `thermo_spread_breach_rate` and `thermo_heterogeneity_breach_rate` lines from nonlinear readiness artifacts.
 - 2026-03-09: Added rolling thermo posture governance in release readiness by introducing profile-aware breach-rate thresholds (`RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_BREACH_RATE`, `RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_BREACH_RATE`), new typed reasons (`THERMO_SPREAD_BREACH_RATE_HIGH`, `THERMO_HETEROGENEITY_BREACH_RATE_HIGH`), and markdown/report output fields for the computed breach rates.
 - 2026-03-09: Extended runtime thermo decisioning by adding quality-policy reasons for constitutive spread/assignment heterogeneity breaches and adding thermo breach-rate aggregates to `analysis.trends` summaries (`thermo_spread_breach_rate`, `thermo_heterogeneity_breach_rate`).
 - 2026-03-09: Updated CI Tier-7.5 governance summary emission (`tier75-governance-summary.md`) to include thermo posture rollups from nonlinear readiness artifacts (enabled-rate, max transient/nonlinear severity, max spread ratio, max heterogeneity index) for quick reviewer triage.
