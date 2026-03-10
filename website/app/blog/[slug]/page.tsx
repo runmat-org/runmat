@@ -31,6 +31,9 @@ export type JsonLdObject = {
 };
 type JsonLd = JsonLdObject | { "@graph": JsonLdObject[] };
 
+type TwitterCardType = 'summary' | 'summary_large_image' | 'app' | 'player';
+const VALID_TWITTER_CARDS = new Set<TwitterCardType>(['summary', 'summary_large_image', 'app', 'player']);
+
 interface BlogPost {
   slug: string;
   frontmatter: {
@@ -51,7 +54,7 @@ interface BlogPost {
     ogType?: string;
     ogTitle?: string;
     ogDescription?: string;
-    twitterCard?: string;
+    twitterCard?: TwitterCardType;
     twitterTitle?: string;
     twitterDescription?: string;
     visibility?: string;
@@ -168,7 +171,13 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
   const ogType = raw.ogType === undefined ? undefined : assertString(raw.ogType, 'ogType', slug);
   const ogTitle = raw.ogTitle === undefined ? undefined : assertString(raw.ogTitle, 'ogTitle', slug);
   const ogDescription = raw.ogDescription === undefined ? undefined : assertString(raw.ogDescription, 'ogDescription', slug);
-  const twitterCard = raw.twitterCard === undefined ? undefined : assertString(raw.twitterCard, 'twitterCard', slug);
+  const twitterCardRaw = raw.twitterCard === undefined ? undefined : assertString(raw.twitterCard, 'twitterCard', slug);
+  if (twitterCardRaw !== undefined && !VALID_TWITTER_CARDS.has(twitterCardRaw as TwitterCardType)) {
+    throw new Error(
+      `Frontmatter field "twitterCard" must be one of ${[...VALID_TWITTER_CARDS].join(', ')} in slug "${slug}", got "${twitterCardRaw}".`
+    );
+  }
+  const twitterCard = twitterCardRaw as TwitterCardType | undefined;
   const twitterTitle = raw.twitterTitle === undefined ? undefined : assertString(raw.twitterTitle, 'twitterTitle', slug);
   const twitterDescription =
     raw.twitterDescription === undefined ? undefined : assertString(raw.twitterDescription, 'twitterDescription', slug);
@@ -316,7 +325,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
       images: imageUrl ? [imageUrl] : undefined,
     },
     twitter: {
-      card: (post.frontmatter.twitterCard as 'summary_large_image') || 'summary_large_image',
+      card: post.frontmatter.twitterCard ?? 'summary_large_image',
       title: post.frontmatter.twitterTitle || post.frontmatter.title,
       description: post.frontmatter.twitterDescription || post.frontmatter.description,
       images: imageUrl ? [imageUrl] : undefined,
