@@ -166,6 +166,10 @@ Write shape matters as much as byte count.
 
 ### Boundary 4: workspace/runtime memory
 
+The fastest way to fail persistence is forcing full materialization of everything in one context.
+
+This is why chunked externalization and reference-based manifests are not optimizations; they are reliability requirements.
+
 ### Process and transport hops
 
 When you move large payloads between runtime contexts (UI thread to worker, IPC, API), latency and memory amplification appear quickly. Sub-10 MB payloads are usually routine. Tens of MB create visible UI and IPC jitter. Above 100 MB, timeout and retry patterns become the norm rather than the exception.
