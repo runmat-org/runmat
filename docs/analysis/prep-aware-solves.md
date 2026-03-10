@@ -80,6 +80,8 @@ Typed prep-reference failure families:
   - run options can provide optional thermo-mechanical coupling controls,
   - assembly emits deterministic thermo-mechanical coupling diagnostics and fingerprints,
   - coupled transient/nonlinear solve paths apply thermo-aware convergence/adaptivity profile shaping,
+  - runtime quality policy surfaces thermo stress reasons when coupling severity enters warning posture,
+  - `analysis.results` and `analysis.trends` summaries surface thermo coupling posture fields for lightweight client gating,
   - benchmark harness includes a kickoff fixture with coupling metric thresholds.
 
 ## Diagnostics

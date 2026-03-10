@@ -119,8 +119,10 @@ pub enum QualityReasonCode {
     TransientResidualExceeded,
     TransientStabilityExceeded,
     TransientStepFailure,
+    ThermoMechanicalTransientStress,
     NonlinearResidualExceeded,
     NonlinearIncrementFailure,
+    ThermoMechanicalNonlinearStress,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -585,6 +587,10 @@ pub struct AnalysisResultsSummary {
     pub prep_acceptance_score: Option<f64>,
     pub prep_acceptance_passed: Option<bool>,
     pub prep_acceptance_fingerprint: Option<u64>,
+    pub thermo_coupling_enabled: Option<bool>,
+    pub thermo_coupling_fingerprint: Option<u64>,
+    pub thermo_transient_severity: Option<f64>,
+    pub thermo_nonlinear_severity: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -655,6 +661,9 @@ pub struct AnalysisTrendKindSummary {
     pub prep_calibration_fast_rate: Option<f64>,
     pub prep_calibration_balanced_rate: Option<f64>,
     pub prep_calibration_conservative_rate: Option<f64>,
+    pub thermo_coupling_enabled_rate: Option<f64>,
+    pub thermo_transient_warn_rate: Option<f64>,
+    pub thermo_nonlinear_warn_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

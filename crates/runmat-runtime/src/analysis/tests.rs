@@ -123,7 +123,7 @@ fn analysis_create_model_returns_v1_envelope() {
         AnalysisCreateModelIntentSpec {
             model_id: "model_from_geo".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(Some("trace-create-1".to_string()), None),
     )
@@ -212,7 +212,7 @@ fn analysis_create_model_maps_invalid_intent_error() {
         AnalysisCreateModelIntentSpec {
             model_id: "   ".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -232,7 +232,7 @@ fn analysis_create_model_supports_nonlinear_profile_template() {
         AnalysisCreateModelIntentSpec {
             model_id: "nonlinear_model".to_string(),
             profile: AnalysisCreateModelProfile::NonlinearStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -240,7 +240,10 @@ fn analysis_create_model_supports_nonlinear_profile_template() {
 
     assert_eq!(envelope.data.model_id.0, "nonlinear_model");
     assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Nonlinear);
-    assert_eq!(envelope.data.loads[0].load_id, "load_default_nonlinear_force");
+    assert_eq!(
+        envelope.data.loads[0].load_id,
+        "load_default_nonlinear_force"
+    );
 }
 
 #[test]
@@ -282,7 +285,8 @@ fn analysis_create_model_accepts_prep_context_and_validates_model() {
         .data
         .material_assignments
         .iter()
-        .all(|assignment| assignment.confidence == runmat_analysis_core::EvidenceConfidence::Verified));
+        .all(|assignment| assignment.confidence
+            == runmat_analysis_core::EvidenceConfidence::Verified));
 }
 
 #[test]
@@ -315,7 +319,7 @@ fn analysis_create_model_supports_transient_profile_template() {
         AnalysisCreateModelIntentSpec {
             model_id: "transient_model".to_string(),
             profile: AnalysisCreateModelProfile::TransientStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -323,7 +327,10 @@ fn analysis_create_model_supports_transient_profile_template() {
 
     assert_eq!(envelope.data.model_id.0, "transient_model");
     assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Transient);
-    assert_eq!(envelope.data.loads[0].load_id, "load_default_transient_force");
+    assert_eq!(
+        envelope.data.loads[0].load_id,
+        "load_default_transient_force"
+    );
 }
 
 #[test]
@@ -335,7 +342,7 @@ fn analysis_create_model_supports_modal_profile_template() {
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -355,7 +362,7 @@ fn analysis_create_model_infers_materials_and_assignments_from_geometry_evidence
         AnalysisCreateModelIntentSpec {
             model_id: "model_from_step_like".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -372,7 +379,10 @@ fn analysis_create_model_infers_materials_and_assignments_from_geometry_evidence
         .material_assignments
         .iter()
         .all(|assignment| assignment.assigned_material_id == "mat_aluminum"));
-    assert_eq!(envelope.data.boundary_conditions[0].region_id, "region_root");
+    assert_eq!(
+        envelope.data.boundary_conditions[0].region_id,
+        "region_root"
+    );
     assert_eq!(envelope.data.loads[0].region_id, "region_tip");
 }
 
@@ -380,7 +390,8 @@ fn analysis_create_model_infers_materials_and_assignments_from_geometry_evidence
 fn analysis_validate_returns_typed_envelope() {
     let _guard = analysis_test_guard();
     let model = sample_model();
-    let context = OperationContext::new(Some("trace-a1".to_string()), Some("request-a1".to_string()));
+    let context =
+        OperationContext::new(Some("trace-a1".to_string()), Some("request-a1".to_string()));
     let envelope = analysis_validate(&model, UnitSystem::Meter, &ReferenceFrame::Global, context)
         .expect("validation should pass");
 
@@ -396,9 +407,8 @@ fn analysis_validate_maps_typed_error_code() {
     let mut model = sample_model();
     model.materials.clear();
     let context = OperationContext::new(None, None);
-    let error =
-        analysis_validate(&model, UnitSystem::Meter, &ReferenceFrame::Global, context)
-            .expect_err("validation should fail");
+    let error = analysis_validate(&model, UnitSystem::Meter, &ReferenceFrame::Global, context)
+        .expect_err("validation should fail");
 
     assert_eq!(error.error_code, "ANALYSIS_VALIDATION_MISSING_MATERIALS");
     assert_eq!(error.operation, "analysis.validate");
@@ -409,7 +419,8 @@ fn analysis_validate_maps_typed_error_code() {
 fn analysis_run_linear_static_returns_typed_envelope() {
     let _guard = analysis_test_guard();
     let model = sample_model();
-    let context = OperationContext::new(Some("trace-a2".to_string()), Some("request-a2".to_string()));
+    let context =
+        OperationContext::new(Some("trace-a2".to_string()), Some("request-a2".to_string()));
     let envelope = analysis_run_linear_static_with_options(
         &model,
         ComputeBackend::Cpu,
@@ -418,10 +429,10 @@ fn analysis_run_linear_static_returns_typed_envelope() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
-        thermo_mechanical_coupling: None,
-        prep_context: None,
-        prep_artifact_id: None,
-        prep_calibration_profile: None,
+            thermo_mechanical_coupling: None,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
         },
         context,
     )
@@ -449,9 +460,12 @@ fn gpu_run_without_provider_records_fallback_event() {
     let _guard = analysis_test_guard();
     let _guard = runmat_accelerate_api::ThreadProviderGuard::set(None);
     let model = sample_model();
-    let envelope =
-        analysis_run_linear_static_op(&model, ComputeBackend::Gpu, OperationContext::new(None, None))
-            .expect("run should pass");
+    let envelope = analysis_run_linear_static_op(
+        &model,
+        ComputeBackend::Gpu,
+        OperationContext::new(None, None),
+    )
+    .expect("run should pass");
 
     if envelope.data.provenance.solver_backend == "cpu_reference" {
         assert!(envelope
@@ -522,9 +536,12 @@ fn gpu_run_with_provider_emits_device_refs() {
     let _guard = runmat_accelerate_api::ThreadProviderGuard::set(Some(&PROVIDER));
 
     let model = sample_model();
-    let envelope =
-        analysis_run_linear_static_op(&model, ComputeBackend::Gpu, OperationContext::new(None, None))
-            .expect("run should pass");
+    let envelope = analysis_run_linear_static_op(
+        &model,
+        ComputeBackend::Gpu,
+        OperationContext::new(None, None),
+    )
+    .expect("run should pass");
 
     assert!(!envelope
         .data
@@ -575,7 +592,7 @@ fn analysis_results_returns_filtered_fields_and_metadata() {
         AnalysisResultsQuery {
             include_fields: vec!["displacement".to_string()],
             include_diagnostics: false,
-                            diagnostic_codes: Vec::new(),
+            diagnostic_codes: Vec::new(),
             include_modal_results: true,
             mode_indices: Vec::new(),
             include_transient_results: true,
@@ -747,8 +764,12 @@ fn analysis_trends_summarizes_recent_nonlinear_runs() {
         kind: AnalysisStepKind::Nonlinear,
     }];
     for _ in 0..4 {
-        let _ = analysis_run_nonlinear_op(&model, ComputeBackend::Cpu, OperationContext::new(None, None))
-            .expect("nonlinear run should persist for trends");
+        let _ = analysis_run_nonlinear_op(
+            &model,
+            ComputeBackend::Cpu,
+            OperationContext::new(None, None),
+        )
+        .expect("nonlinear run should persist for trends");
     }
 
     let trends = analysis_trends_op(
@@ -769,8 +790,87 @@ fn analysis_trends_summarizes_recent_nonlinear_runs() {
     assert!(nonlinear.median_solve_ms.is_some());
     assert!(nonlinear.p95_solve_ms.is_some());
     assert!(nonlinear.failed_increment_rate.is_some());
+    assert!(nonlinear.thermo_coupling_enabled_rate.is_none());
+    assert!(nonlinear.thermo_transient_warn_rate.is_none());
+    assert!(nonlinear.thermo_nonlinear_warn_rate.is_none());
 
     storage::reset_artifact_store_for_tests();
+}
+
+#[test]
+fn analysis_results_summary_surfaces_thermo_transient_metrics() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "transient_1".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
+
+    let run = analysis_run_transient_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisTransientRunOptions {
+            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 65.0,
+                thermal_expansion_coefficient: 1.2e-5,
+            }),
+            ..AnalysisTransientRunOptions::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("transient run should succeed");
+
+    let results = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("results should succeed");
+
+    assert_eq!(results.data.summary.thermo_coupling_enabled, Some(true));
+    assert!(results.data.summary.thermo_coupling_fingerprint.is_some());
+    assert!(results.data.summary.thermo_transient_severity.is_some());
+    assert!(results.data.summary.thermo_nonlinear_severity.is_none());
+}
+
+#[test]
+fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+
+    let run = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 80.0,
+                thermal_expansion_coefficient: 1.2e-5,
+            }),
+            ..AnalysisNonlinearRunOptions::production_recommended()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("nonlinear run should succeed");
+
+    let results = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("results should succeed");
+
+    assert_eq!(results.data.summary.thermo_coupling_enabled, Some(true));
+    assert!(results.data.summary.thermo_coupling_fingerprint.is_some());
+    assert!(results.data.summary.thermo_nonlinear_severity.is_some());
+    assert!(results.data.summary.thermo_transient_severity.is_some());
 }
 
 #[test]
@@ -789,8 +889,12 @@ fn analysis_trends_handles_mixed_schema_and_noisy_samples() {
         step_id: "nonlinear_1".to_string(),
         kind: AnalysisStepKind::Nonlinear,
     }];
-    let run = analysis_run_nonlinear_op(&model, ComputeBackend::Cpu, OperationContext::new(None, None))
-        .expect("seed nonlinear run should succeed");
+    let run = analysis_run_nonlinear_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("seed nonlinear run should succeed");
 
     let run_path = root.join("runs").join(format!("{}.json", run.data.run_id));
     let raw = fs::read_to_string(&run_path).expect("read wrapped artifact");
@@ -801,7 +905,8 @@ fn analysis_trends_handles_mixed_schema_and_noisy_samples() {
         .expect("wrapped artifact should have run payload");
     legacy["run_id"] = serde_json::json!(format!("{}_legacy", run.data.run_id));
     fs::write(
-        root.join("runs").join(format!("{}_legacy.json", run.data.run_id)),
+        root.join("runs")
+            .join(format!("{}_legacy.json", run.data.run_id)),
         serde_json::to_vec_pretty(&legacy).expect("encode legacy artifact"),
     )
     .expect("write legacy artifact");
@@ -848,8 +953,12 @@ fn analysis_results_by_run_id_legacy_nonlinear_artifacts_remain_loadable() {
         step_id: "nonlinear_1".to_string(),
         kind: AnalysisStepKind::Nonlinear,
     }];
-    let run = analysis_run_nonlinear_op(&model, ComputeBackend::Cpu, OperationContext::new(None, None))
-        .expect("nonlinear run should succeed");
+    let run = analysis_run_nonlinear_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("nonlinear run should succeed");
     let run_id = run.data.run_id.clone();
     let run_path = root.join("runs").join(format!("{run_id}.json"));
 
@@ -905,8 +1014,12 @@ fn analysis_results_by_run_id_future_artifact_extra_fields_are_ignored() {
         step_id: "nonlinear_1".to_string(),
         kind: AnalysisStepKind::Nonlinear,
     }];
-    let run = analysis_run_nonlinear_op(&model, ComputeBackend::Cpu, OperationContext::new(None, None))
-        .expect("nonlinear run should succeed");
+    let run = analysis_run_nonlinear_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("nonlinear run should succeed");
     let run_id = run.data.run_id.clone();
     let run_path = root.join("runs").join(format!("{run_id}.json"));
 
@@ -961,9 +1074,12 @@ fn analysis_artifact_retention_prunes_old_runs_per_kind() {
     }];
     let mut run_ids = Vec::new();
     for _ in 0..5 {
-        let run =
-            analysis_run_nonlinear_op(&model, ComputeBackend::Cpu, OperationContext::new(None, None))
-                .expect("nonlinear run should succeed");
+        let run = analysis_run_nonlinear_op(
+            &model,
+            ComputeBackend::Cpu,
+            OperationContext::new(None, None),
+        )
+        .expect("nonlinear run should succeed");
         run_ids.push(run.data.run_id.clone());
     }
 
@@ -974,10 +1090,14 @@ fn analysis_artifact_retention_prunes_old_runs_per_kind() {
         .filter(|entry| entry.path().extension().and_then(|ext| ext.to_str()) == Some("json"))
         .count();
     assert!(kept_files <= 2);
-    assert!(storage::load_run_result(&run_ids[0]).expect("load pruned result").is_none());
-    assert!(storage::load_run_result(run_ids.last().expect("latest run id"))
-        .expect("load latest result")
-        .is_some());
+    assert!(storage::load_run_result(&run_ids[0])
+        .expect("load pruned result")
+        .is_none());
+    assert!(
+        storage::load_run_result(run_ids.last().expect("latest run id"))
+            .expect("load latest result")
+            .is_some()
+    );
 
     std::env::remove_var("RUNMAT_ANALYSIS_ARTIFACT_MAX_RUNS_PER_KIND");
     storage::reset_artifact_store_for_tests();
@@ -1000,8 +1120,12 @@ fn analysis_results_by_run_id_filesystem_replay_is_stable() {
         step_id: "nonlinear_1".to_string(),
         kind: AnalysisStepKind::Nonlinear,
     }];
-    let run = analysis_run_nonlinear_op(&model, ComputeBackend::Cpu, OperationContext::new(None, None))
-        .expect("nonlinear run should succeed");
+    let run = analysis_run_nonlinear_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect("nonlinear run should succeed");
 
     let first = analysis_results_by_run_id_op(
         &run.data.run_id,
@@ -1037,10 +1161,10 @@ fn requested_preconditioner_fallback_is_recorded() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Amg,
             quality_policy: QualityPolicy::Balanced,
-        thermo_mechanical_coupling: None,
-        prep_context: None,
-        prep_artifact_id: None,
-        prep_calibration_profile: None,
+            thermo_mechanical_coupling: None,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-preconditioner-fallback".to_string()), None),
     )
@@ -1067,10 +1191,10 @@ fn ilu_preconditioner_request_is_honored_without_fallback() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Ilu,
             quality_policy: QualityPolicy::Balanced,
-        thermo_mechanical_coupling: None,
-        prep_context: None,
-        prep_artifact_id: None,
-        prep_calibration_profile: None,
+            thermo_mechanical_coupling: None,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-preconditioner-ilu".to_string()), None),
     )
@@ -1099,10 +1223,10 @@ fn quality_policy_exploratory_allows_publishable_warn_path() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Exploratory,
-        thermo_mechanical_coupling: None,
-        prep_context: None,
-        prep_artifact_id: None,
-        prep_calibration_profile: None,
+            thermo_mechanical_coupling: None,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-quality-policy-exploratory".to_string()), None),
     )
@@ -1159,10 +1283,10 @@ fn quality_policy_balanced_allows_publishable_with_quality_reasons() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
-        thermo_mechanical_coupling: None,
-        prep_context: None,
-        prep_artifact_id: None,
-        prep_calibration_profile: None,
+            thermo_mechanical_coupling: None,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-quality-policy-balanced".to_string()), None),
     )
@@ -1221,10 +1345,10 @@ fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Strict,
-        thermo_mechanical_coupling: None,
-        prep_context: None,
-        prep_artifact_id: None,
-        prep_calibration_profile: None,
+            thermo_mechanical_coupling: None,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-quality-policy-strict".to_string()), None),
     )
@@ -1246,8 +1370,12 @@ fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
 fn analysis_run_modal_rejects_models_without_modal_step() {
     let _guard = analysis_test_guard();
     let model = sample_model();
-    let err = analysis_run_modal_op(&model, ComputeBackend::Cpu, OperationContext::new(None, None))
-        .expect_err("modal run should fail for missing modal step");
+    let err = analysis_run_modal_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("modal run should fail for missing modal step");
 
     assert_eq!(err.operation, "analysis.run_modal");
     assert_eq!(err.op_version, "analysis.run_modal/v1");
@@ -1314,8 +1442,14 @@ fn analysis_run_nonlinear_returns_native_nonlinear_result() {
     assert_eq!(nonlinear.method, NonlinearMethod::IncrementalNewtonRaphson);
     assert_eq!(nonlinear.load_factors.len(), 16);
     assert_eq!(nonlinear.load_factors.len(), nonlinear.residual_norms.len());
-    assert_eq!(nonlinear.residual_norms.len(), nonlinear.increment_norms.len());
-    assert_eq!(nonlinear.residual_norms.len(), nonlinear.iteration_counts.len());
+    assert_eq!(
+        nonlinear.residual_norms.len(),
+        nonlinear.increment_norms.len()
+    );
+    assert_eq!(
+        nonlinear.residual_norms.len(),
+        nonlinear.iteration_counts.len()
+    );
     assert!(nonlinear.tangent_rebuild_count > 0);
     assert!(nonlinear.iteration_spike_count <= nonlinear.load_factors.len());
     assert!(nonlinear.max_line_search_backtracks_per_increment > 0);
@@ -1517,6 +1651,41 @@ fn nonlinear_quality_policy_diverges_for_increment_failures() {
 }
 
 #[test]
+fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+
+    let run = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            quality_policy: QualityPolicy::Balanced,
+            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 90.0,
+                thermal_expansion_coefficient: 1.0e-3,
+            }),
+            ..AnalysisNonlinearRunOptions::production_recommended()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("nonlinear run should return envelope");
+
+    assert!(!run.data.publishable);
+    assert_eq!(run.data.run_status, RunStatus::Degraded);
+    assert!(run
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::ThermoMechanicalNonlinearStress));
+}
+
+#[test]
 fn analysis_results_query_can_exclude_nonlinear_payload() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
@@ -1554,16 +1723,36 @@ fn analysis_results_query_can_exclude_nonlinear_payload() {
     assert!(results.data.summary.max_nonlinear_increment_norm.is_some());
     assert!(results.data.summary.max_nonlinear_iteration_count.is_some());
     assert!(results.data.summary.final_increment_converged.is_some());
-    assert!(results.data.summary.nonlinear_line_search_backtracks.is_some());
+    assert!(results
+        .data
+        .summary
+        .nonlinear_line_search_backtracks
+        .is_some());
     assert!(results
         .data
         .summary
         .nonlinear_max_backtracks_per_increment
         .is_some());
-    assert!(results.data.summary.nonlinear_tangent_rebuild_count.is_some());
-    assert!(results.data.summary.nonlinear_iteration_spike_count.is_some());
-    assert!(results.data.summary.nonlinear_convergence_stall_count.is_some());
-    assert!(results.data.summary.nonlinear_backtrack_burst_count.is_some());
+    assert!(results
+        .data
+        .summary
+        .nonlinear_tangent_rebuild_count
+        .is_some());
+    assert!(results
+        .data
+        .summary
+        .nonlinear_iteration_spike_count
+        .is_some());
+    assert!(results
+        .data
+        .summary
+        .nonlinear_convergence_stall_count
+        .is_some());
+    assert!(results
+        .data
+        .summary
+        .nonlinear_backtrack_burst_count
+        .is_some());
 }
 
 #[test]
@@ -1627,7 +1816,10 @@ fn analysis_run_transient_returns_native_transient_result() {
         .transient_results
         .as_ref()
         .expect("transient payload should exist");
-    assert_eq!(transient.integration_method, TransientIntegrationMethod::ImplicitEuler);
+    assert_eq!(
+        transient.integration_method,
+        TransientIntegrationMethod::ImplicitEuler
+    );
     assert!(!transient.time_points_s.is_empty());
     assert_eq!(
         transient.time_points_s.len(),
@@ -1666,10 +1858,10 @@ fn analysis_run_transient_with_options_controls_timeline() {
             adapt_retry_growth_cap: 1.05,
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
-        thermo_mechanical_coupling: None,
-        prep_context: None,
-        prep_artifact_id: None,
-        prep_calibration_profile: None,
+            thermo_mechanical_coupling: None,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
         },
         OperationContext::new(None, None),
     )
@@ -1687,6 +1879,43 @@ fn analysis_run_transient_with_options_controls_timeline() {
 }
 
 #[test]
+fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "transient_1".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
+
+    let run = analysis_run_transient_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisTransientRunOptions {
+            quality_policy: QualityPolicy::Balanced,
+            adaptive_time_step: true,
+            step_count: 8,
+            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 90.0,
+                thermal_expansion_coefficient: 1.0e-3,
+            }),
+            ..AnalysisTransientRunOptions::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("transient run should return envelope");
+
+    assert!(!run.data.publishable);
+    assert_eq!(run.data.run_status, RunStatus::Degraded);
+    assert!(run
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::ThermoMechanicalTransientStress));
+}
+
+#[test]
 fn analysis_run_modal_returns_native_modal_result() {
     let _guard = analysis_test_guard();
     let geometry = sample_geometry_asset();
@@ -1695,7 +1924,7 @@ fn analysis_run_modal_returns_native_modal_result() {
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_run".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -1732,10 +1961,7 @@ fn analysis_run_modal_returns_native_modal_result() {
     assert!(modal.residual_norms.iter().all(|value| value.is_finite()));
     assert_eq!(modal.modal_payload_version, "modal_results/v1");
     assert_eq!(modal.mode_units, ModalFrequencyUnits::Hz);
-    assert_eq!(
-        modal.frequency_basis,
-        ModalFrequencyBasis::NativeEigenSolve
-    );
+    assert_eq!(modal.frequency_basis, ModalFrequencyBasis::NativeEigenSolve);
     assert!(!envelope
         .data
         .quality_reasons
@@ -1763,7 +1989,7 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_run_opts".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -1778,10 +2004,10 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
             quality_policy: QualityPolicy::Balanced,
             mode_count: 2,
             residual_warn_threshold: 1.0e-2,
-        thermo_mechanical_coupling: None,
-        prep_context: None,
-        prep_artifact_id: None,
-        prep_calibration_profile: None,
+            thermo_mechanical_coupling: None,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
         },
         OperationContext::new(None, None),
     )
@@ -1806,7 +2032,7 @@ fn analysis_results_include_modal_payload_for_modal_runs() {
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_results".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -1836,10 +2062,7 @@ fn analysis_results_include_modal_payload_for_modal_runs() {
     assert_eq!(modal.eigenvalues_hz.len(), modal.residual_norms.len());
     assert_eq!(modal.modal_payload_version, "modal_results/v1");
     assert_eq!(modal.mode_units, ModalFrequencyUnits::Hz);
-    assert_eq!(
-        modal.frequency_basis,
-        ModalFrequencyBasis::NativeEigenSolve
-    );
+    assert_eq!(modal.frequency_basis, ModalFrequencyBasis::NativeEigenSolve);
     assert!(results.data.summary.mode_count > 0);
     assert_eq!(
         results.data.summary.mode_count,
@@ -1860,7 +2083,7 @@ fn analysis_results_query_can_exclude_modal_payload() {
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_results_filter".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -1900,7 +2123,7 @@ fn analysis_results_query_rejects_unknown_modal_mode_index() {
         AnalysisCreateModelIntentSpec {
             model_id: "modal_model_results_index".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(None, None),
     )
@@ -1960,7 +2183,10 @@ fn analysis_results_include_transient_payload_for_transient_runs() {
         .transient_results
         .as_ref()
         .expect("transient payload should propagate");
-    assert_eq!(transient.integration_method, TransientIntegrationMethod::ImplicitEuler);
+    assert_eq!(
+        transient.integration_method,
+        TransientIntegrationMethod::ImplicitEuler
+    );
     assert!(!transient.time_points_s.is_empty());
     assert_eq!(
         transient.time_points_s.len(),
@@ -2038,7 +2264,10 @@ fn analysis_results_query_rejects_unknown_transient_snapshot_index() {
     )
     .expect_err("results should fail for unknown transient snapshot index");
 
-    assert_eq!(err.error_code, "ANALYSIS_RESULTS_TRANSIENT_SNAPSHOT_NOT_FOUND");
+    assert_eq!(
+        err.error_code,
+        "ANALYSIS_RESULTS_TRANSIENT_SNAPSHOT_NOT_FOUND"
+    );
     assert_eq!(err.operation, "analysis.results");
     assert_eq!(err.op_version, "analysis.results/v1");
 }

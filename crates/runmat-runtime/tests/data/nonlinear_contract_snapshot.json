@@ -45,6 +45,10 @@
     "prep_calibration_fingerprint": null,
     "prep_acceptance_score": null,
     "prep_acceptance_passed": null,
-    "prep_acceptance_fingerprint": null
+    "prep_acceptance_fingerprint": null,
+    "thermo_coupling_enabled": null,
+    "thermo_coupling_fingerprint": null,
+    "thermo_transient_severity": null,
+    "thermo_nonlinear_severity": null
   }
 }

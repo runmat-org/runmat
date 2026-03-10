@@ -885,6 +885,30 @@ pub(super) fn run_fixture(
                             Some(0.5),
                             Some(2.0),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_mech_transient_severity",
+                            "FEA_TM_TRANSIENT",
+                            diagnostic_metric(&gpu_envelope.data, "FEA_TM_TRANSIENT", "severity"),
+                            Some(0.0),
+                            Some(0.2),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_mech_transient_residual_relaxation",
+                            "FEA_TM_TRANSIENT",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_TRANSIENT",
+                                "residual_relaxation",
+                            ),
+                            Some(1.0),
+                            Some(1.2),
+                        );
                     }
                     if spec.id == "nonlinear_assembly_gpu_provider" {
                         push_threshold_assertion(

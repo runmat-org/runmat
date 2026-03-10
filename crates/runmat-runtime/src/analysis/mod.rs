@@ -5,12 +5,12 @@ use runmat_analysis_core::{
     AnalysisStepKind, AnalysisValidationError, BoundaryCondition, BoundaryConditionKind,
     EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment, MaterialModel, ReferenceFrame,
 };
+use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
+use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_analysis_fea::{
     run_linear_static_with_options, run_modal_with_options, run_nonlinear_with_options,
     run_transient_with_options, ComputeBackend, LinearStaticSolveOptions, ModalSolveOptions,
 };
-use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
-use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 use runmat_meshing_core::{ElementFamilyHint, MeshConnectivityClass};
 
@@ -25,16 +25,15 @@ pub mod storage;
 
 pub use contracts::{
     AnalysisCreateModelIntentSpec, AnalysisCreateModelPrepContext, AnalysisCreateModelProfile,
-    AnalysisResultsCompareData, AnalysisResultsCompareQuery, AnalysisResultsData,
-    AnalysisModalRunOptions,
-    AnalysisNonlinearRunOptions, AnalysisResultsQuery, AnalysisResultsSummary,
-    AnalysisRunKind, AnalysisRunOptions, AnalysisRunResult, AnalysisTrendKindSummary,
-    AnalysisRunPrepContext, AnalysisTrendsData, AnalysisTrendsQuery,
-    AnalysisTransientRunOptions, AnalysisValidateResult,
-    ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, NonlinearMethod,
-    NonlinearResultsData, PrecisionMode, PrepCalibrationProfile, PreconditionerMode, QualityGate, QualityPolicy,
-    QualityReason, QualityReasonCode, RunProvenance, RunStatus,
-    ThermoMechanicalCouplingOptions, TransientIntegrationMethod, TransientResultsData,
+    AnalysisModalRunOptions, AnalysisNonlinearRunOptions, AnalysisResultsCompareData,
+    AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
+    AnalysisRunKind, AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult,
+    AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
+    AnalysisValidateResult, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
+    NonlinearMethod, NonlinearResultsData, PrecisionMode, PreconditionerMode,
+    PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
+    RunProvenance, RunStatus, ThermoMechanicalCouplingOptions, TransientIntegrationMethod,
+    TransientResultsData,
 };
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "analysis.create_model";
@@ -127,7 +126,10 @@ pub fn analysis_create_model_op(
                 "analysis model prep context does not match geometry id/revision",
                 BTreeMap::from([
                     ("geometry_id".to_string(), geometry.geometry_id.clone()),
-                    ("geometry_revision".to_string(), geometry.revision.to_string()),
+                    (
+                        "geometry_revision".to_string(),
+                        geometry.revision.to_string(),
+                    ),
                     (
                         "prep_geometry_id".to_string(),
                         prep.source_geometry_id.clone(),
@@ -217,10 +219,20 @@ pub fn analysis_create_model_op(
     };
 
     let fixed_region_id = select_fixed_region_id(geometry, prep_mapped_region_ids.as_ref())
-        .or_else(|| geometry.regions.first().map(|region| region.region_id.clone()))
+        .or_else(|| {
+            geometry
+                .regions
+                .first()
+                .map(|region| region.region_id.clone())
+        })
         .unwrap_or_else(|| "region_default".to_string());
     let load_region_id = select_load_region_id(geometry, prep_mapped_region_ids.as_ref())
-        .or_else(|| geometry.regions.last().map(|region| region.region_id.clone()))
+        .or_else(|| {
+            geometry
+                .regions
+                .last()
+                .map(|region| region.region_id.clone())
+        })
         .unwrap_or_else(|| fixed_region_id.clone());
 
     let inferred_materials = infer_material_models(geometry);
@@ -473,26 +485,24 @@ pub fn analysis_run_modal_with_options_op(
             ),
         },
     )
-    .map_err(
-        |err| {
-            operation_error(
-                ANALYSIS_RUN_MODAL_OPERATION,
-                ANALYSIS_RUN_MODAL_OP_VERSION,
-                &context,
-                OperationErrorSpec {
-                    error_code: "SOLVER_MODEL_INVALID",
-                    error_type: OperationErrorType::Validation,
-                    retryable: false,
-                    severity: OperationErrorSeverity::Error,
-                },
-                err.to_string(),
-                BTreeMap::from([
-                    ("analysis_model_id".to_string(), model.model_id.0.clone()),
-                    ("geometry_id".to_string(), model.geometry_id.clone()),
-                ]),
-            )
-        },
-    )?;
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_MODAL_OPERATION,
+            ANALYSIS_RUN_MODAL_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "SOLVER_MODEL_INVALID",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            err.to_string(),
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("geometry_id".to_string(), model.geometry_id.clone()),
+            ]),
+        )
+    })?;
 
     let mut run = modal_run.run;
     let mut fallback_events = Vec::new();
@@ -586,8 +596,7 @@ pub fn analysis_run_modal_with_options_op(
     {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::ModalPlaceholder,
-            detail: "modal run path currently uses linear-static placeholder backend"
-                .to_string(),
+            detail: "modal run path currently uses linear-static placeholder backend".to_string(),
         });
         ModalFrequencyBasis::PlaceholderLinearStatic
     } else {
@@ -603,15 +612,13 @@ pub fn analysis_run_modal_with_options_op(
         QualityPolicy::Balanced => {
             solver_convergence == QualityGate::Pass
                 && result_quality == QualityGate::Pass
-                && !quality_reasons
-                    .iter()
-                    .any(|r| {
-                        matches!(
-                            r.code,
-                            QualityReasonCode::ModalOrthogonalityExceeded
-                                | QualityReasonCode::ModalSeparationLow
-                        )
-                    })
+                && !quality_reasons.iter().any(|r| {
+                    matches!(
+                        r.code,
+                        QualityReasonCode::ModalOrthogonalityExceeded
+                            | QualityReasonCode::ModalSeparationLow
+                    )
+                })
         }
         QualityPolicy::Exploratory => {
             solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
@@ -764,18 +771,15 @@ pub fn analysis_run_transient_with_options_op(
         ));
     }
 
-    let transient_run = run_transient_with_options(
-        model,
-        backend,
-        {
-            let prep_context = resolve_run_prep_context(
-                model,
-                options.prep_artifact_id.as_deref(),
-                options.prep_context,
-                ANALYSIS_RUN_TRANSIENT_OPERATION,
-                ANALYSIS_RUN_TRANSIENT_OP_VERSION,
-                &context,
-            )?;
+    let transient_run = run_transient_with_options(model, backend, {
+        let prep_context = resolve_run_prep_context(
+            model,
+            options.prep_artifact_id.as_deref(),
+            options.prep_context,
+            ANALYSIS_RUN_TRANSIENT_OPERATION,
+            ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+            &context,
+        )?;
         runmat_analysis_fea::solve::transient::TransientSolveOptions {
             time_step_s: options.time_step_s,
             min_time_step_s: options.min_time_step_s,
@@ -797,8 +801,7 @@ pub fn analysis_run_transient_with_options_op(
                 options.thermo_mechanical_coupling,
             ),
         }
-        },
-    )
+    })
     .map_err(|err| {
         operation_error(
             ANALYSIS_RUN_TRANSIENT_OPERATION,
@@ -864,6 +867,10 @@ pub fn analysis_run_transient_with_options_op(
         item.code == "FEA_TRANSIENT_STEP_FAILURE"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
     });
+    let thermo_transient_warn = run.diagnostics.iter().any(|item| {
+        item.code == "FEA_TM_TRANSIENT"
+            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    });
 
     let mut quality_reasons = Vec::new();
     if solver_convergence == QualityGate::Warn {
@@ -891,6 +898,13 @@ pub fn analysis_run_transient_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::TransientStepFailure,
             detail: "transient step retry budget was exhausted".to_string(),
+        });
+    }
+    if thermo_transient_warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ThermoMechanicalTransientStress,
+            detail: "thermo-mechanical transient coupling severity exceeded balanced threshold"
+                .to_string(),
         });
     }
     if fallback_events
@@ -936,6 +950,7 @@ pub fn analysis_run_transient_with_options_op(
                         r.code,
                         QualityReasonCode::TransientStabilityExceeded
                             | QualityReasonCode::TransientStepFailure
+                            | QualityReasonCode::ThermoMechanicalTransientStress
                     )
                 })
         }
@@ -1124,7 +1139,8 @@ pub fn analysis_run_nonlinear_with_options_op(
             )]),
         ));
     }
-    if options.residual_convergence_factor < 1.0 || !options.residual_convergence_factor.is_finite() {
+    if options.residual_convergence_factor < 1.0 || !options.residual_convergence_factor.is_finite()
+    {
         return Err(operation_error(
             ANALYSIS_RUN_NONLINEAR_OPERATION,
             ANALYSIS_RUN_NONLINEAR_OP_VERSION,
@@ -1182,18 +1198,15 @@ pub fn analysis_run_nonlinear_with_options_op(
         ));
     }
 
-    let nonlinear_run = run_nonlinear_with_options(
-        model,
-        backend,
-        {
-            let prep_context = resolve_run_prep_context(
-                model,
-                options.prep_artifact_id.as_deref(),
-                options.prep_context,
-                ANALYSIS_RUN_NONLINEAR_OPERATION,
-                ANALYSIS_RUN_NONLINEAR_OP_VERSION,
-                &context,
-            )?;
+    let nonlinear_run = run_nonlinear_with_options(model, backend, {
+        let prep_context = resolve_run_prep_context(
+            model,
+            options.prep_artifact_id.as_deref(),
+            options.prep_context,
+            ANALYSIS_RUN_NONLINEAR_OPERATION,
+            ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+            &context,
+        )?;
         runmat_analysis_fea::solve::nonlinear::NonlinearSolveOptions {
             increment_count: options.increment_count,
             max_newton_iters: options.max_newton_iters,
@@ -1209,8 +1222,7 @@ pub fn analysis_run_nonlinear_with_options_op(
                 options.thermo_mechanical_coupling,
             ),
         }
-        },
-    )
+    })
     .map_err(|err| {
         operation_error(
             ANALYSIS_RUN_NONLINEAR_OPERATION,
@@ -1289,6 +1301,10 @@ pub fn analysis_run_nonlinear_with_options_op(
         .count();
     let strict_increment_failure = nonlinear_run.failed_increments > 0;
     let strict_iteration_cap_exhausted = iteration_cap_hits > 0;
+    let thermo_nonlinear_warn = run.diagnostics.iter().any(|item| {
+        item.code == "FEA_TM_NONLINEAR"
+            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    });
 
     let mut quality_reasons = Vec::new();
     if solver_convergence == QualityGate::Warn {
@@ -1316,6 +1332,13 @@ pub fn analysis_run_nonlinear_with_options_op(
                 iteration_cap_hits,
                 max_nonlinear_iteration_count
             ),
+        });
+    }
+    if thermo_nonlinear_warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ThermoMechanicalNonlinearStress,
+            detail: "thermo-mechanical nonlinear coupling severity exceeded balanced threshold"
+                .to_string(),
         });
     }
     if fallback_events
@@ -1352,6 +1375,7 @@ pub fn analysis_run_nonlinear_with_options_op(
                         r.code,
                         QualityReasonCode::NonlinearResidualExceeded
                             | QualityReasonCode::NonlinearIncrementFailure
+                            | QualityReasonCode::ThermoMechanicalNonlinearStress
                     )
                 })
         }
@@ -1461,18 +1485,15 @@ pub fn analysis_run_linear_static_with_options(
             }
         }
     };
-    let run = run_linear_static_with_options(
-        model,
-        backend,
-        {
-            let prep_context = resolve_run_prep_context(
-                model,
-                options.prep_artifact_id.as_deref(),
-                options.prep_context,
-                ANALYSIS_RUN_OPERATION,
-                ANALYSIS_RUN_OP_VERSION,
-                &context,
-            )?;
+    let run = run_linear_static_with_options(model, backend, {
+        let prep_context = resolve_run_prep_context(
+            model,
+            options.prep_artifact_id.as_deref(),
+            options.prep_context,
+            ANALYSIS_RUN_OPERATION,
+            ANALYSIS_RUN_OP_VERSION,
+            &context,
+        )?;
         LinearStaticSolveOptions {
             preconditioner_kind: requested_preconditioner,
             algebra_backend_kind: requested_solver_backend,
@@ -1481,8 +1502,7 @@ pub fn analysis_run_linear_static_with_options(
                 options.thermo_mechanical_coupling,
             ),
         }
-        },
-    )
+    })
     .map_err(|err| {
         operation_error(
             ANALYSIS_RUN_OPERATION,
@@ -1509,9 +1529,8 @@ pub fn analysis_run_linear_static_with_options(
     match options.preconditioner_mode {
         PreconditionerMode::Auto | PreconditionerMode::Jacobi | PreconditionerMode::Ilu => {}
         PreconditionerMode::Amg => {
-            fallback_events.push(
-                "SOLVER_PRECONDITIONER_FALLBACK:requested=amg:using=jacobi".to_string(),
-            );
+            fallback_events
+                .push("SOLVER_PRECONDITIONER_FALLBACK:requested=amg:using=jacobi".to_string());
         }
     }
 
@@ -1530,10 +1549,10 @@ pub fn analysis_run_linear_static_with_options(
         QualityGate::Warn
     };
 
-    let has_material_assignment_conflict = run
-        .diagnostics
-        .iter()
-        .any(|diag| diag.code.starts_with("ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_"));
+    let has_material_assignment_conflict = run.diagnostics.iter().any(|diag| {
+        diag.code
+            .starts_with("ANALYSIS_MATERIAL_ASSIGNMENT_CONFLICT_")
+    });
     let result_quality = if run.displacement_field.is_empty() || run.von_mises_field.is_empty() {
         QualityGate::Fail
     } else if has_material_assignment_conflict {
@@ -1564,10 +1583,9 @@ pub fn analysis_run_linear_static_with_options(
             detail: "solver backend fell back from runtime_tensor to cpu_reference".to_string(),
         });
     }
-    if fallback_events
-        .iter()
-        .any(|event| event.starts_with("BACKEND_NO_PROVIDER") || event.starts_with("BACKEND_UPLOAD_FAILED"))
-    {
+    if fallback_events.iter().any(|event| {
+        event.starts_with("BACKEND_NO_PROVIDER") || event.starts_with("BACKEND_UPLOAD_FAILED")
+    }) {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::FieldPromotionFallback,
             detail: "field promotion fell back to host-backed values".to_string(),
@@ -1700,37 +1718,32 @@ pub fn analysis_results_op(
         max_frequency_hz,
         max_modal_residual_norm,
         first_mode_converged,
-    ) =
-        if let Some(modal) = run_result.modal_results.as_ref() {
-            let count = modal.eigenvalues_hz.len().min(modal.mode_shapes.len());
-            let max_modal_residual_norm = modal
-                .residual_norms
-                .iter()
-                .copied()
-                .reduce(f64::max);
-            let first_mode_converged = modal.residual_norms.first().copied().map(|v| v <= 1.0e-6);
-            let (min_frequency_hz, max_frequency_hz) = if count == 0 {
-                (None, None)
-            } else {
-                let mut min_value = f64::INFINITY;
-                let mut max_value = f64::NEG_INFINITY;
-                for value in modal.eigenvalues_hz.iter().copied().take(count) {
-                    min_value = min_value.min(value);
-                    max_value = max_value.max(value);
-                }
-                (Some(min_value), Some(max_value))
-            };
-            (
-                count,
-                (0..count).collect(),
-                min_frequency_hz,
-                max_frequency_hz,
-                max_modal_residual_norm,
-                first_mode_converged,
-            )
+    ) = if let Some(modal) = run_result.modal_results.as_ref() {
+        let count = modal.eigenvalues_hz.len().min(modal.mode_shapes.len());
+        let max_modal_residual_norm = modal.residual_norms.iter().copied().reduce(f64::max);
+        let first_mode_converged = modal.residual_norms.first().copied().map(|v| v <= 1.0e-6);
+        let (min_frequency_hz, max_frequency_hz) = if count == 0 {
+            (None, None)
         } else {
-            (0, Vec::new(), None, None, None, None)
+            let mut min_value = f64::INFINITY;
+            let mut max_value = f64::NEG_INFINITY;
+            for value in modal.eigenvalues_hz.iter().copied().take(count) {
+                min_value = min_value.min(value);
+                max_value = max_value.max(value);
+            }
+            (Some(min_value), Some(max_value))
         };
+        (
+            count,
+            (0..count).collect(),
+            min_frequency_hz,
+            max_frequency_hz,
+            max_modal_residual_norm,
+            first_mode_converged,
+        )
+    } else {
+        (0, Vec::new(), None, None, None, None)
+    };
 
     let (
         snapshot_count,
@@ -1738,29 +1751,27 @@ pub fn analysis_results_op(
         time_end_s,
         max_transient_residual_norm,
         final_step_converged,
-    ) =
-        if let Some(transient) = run_result.transient_results.as_ref() {
-            let count = transient.time_points_s.len().min(transient.displacement_snapshots.len());
-            let max_residual = transient
-                .residual_norms
-                .iter()
-                .copied()
-                .reduce(f64::max);
-            let final_step_converged = max_residual.map(|value| value <= 1.0e-6);
-            if count == 0 {
-                (0, None, None, max_residual, final_step_converged)
-            } else {
-                (
-                    count,
-                    transient.time_points_s.first().copied(),
-                    transient.time_points_s.get(count - 1).copied(),
-                    max_residual,
-                    final_step_converged,
-                )
-            }
+    ) = if let Some(transient) = run_result.transient_results.as_ref() {
+        let count = transient
+            .time_points_s
+            .len()
+            .min(transient.displacement_snapshots.len());
+        let max_residual = transient.residual_norms.iter().copied().reduce(f64::max);
+        let final_step_converged = max_residual.map(|value| value <= 1.0e-6);
+        if count == 0 {
+            (0, None, None, max_residual, final_step_converged)
         } else {
-            (0, None, None, None, None)
-        };
+            (
+                count,
+                transient.time_points_s.first().copied(),
+                transient.time_points_s.get(count - 1).copied(),
+                max_residual,
+                final_step_converged,
+            )
+        }
+    } else {
+        (0, None, None, None, None)
+    };
 
     let (
         increment_count,
@@ -1775,35 +1786,38 @@ pub fn analysis_results_op(
         nonlinear_iteration_spike_count,
         nonlinear_convergence_stall_count,
         nonlinear_backtrack_burst_count,
-    ) =
-        if let Some(nonlinear) = run_result.nonlinear_results.as_ref() {
-            let count = nonlinear.load_factors.len();
-            let max_residual = nonlinear.residual_norms.iter().copied().reduce(f64::max);
-            let max_increment_norm = nonlinear.increment_norms.iter().copied().reduce(f64::max);
-            let max_iteration_count = nonlinear.iteration_counts.iter().copied().max();
-            let final_converged = max_residual
-                .map(|value| value <= 1.0e-6 && nonlinear.failed_increments == 0);
-            (
-                count,
-                Some(nonlinear.failed_increments),
-                max_residual,
-                max_increment_norm,
-                max_iteration_count,
-                final_converged,
-                Some(nonlinear.line_search_backtracks),
-                Some(nonlinear.max_line_search_backtracks_per_increment),
-                Some(nonlinear.tangent_rebuild_count),
-                Some(nonlinear.iteration_spike_count),
-                Some(nonlinear.convergence_stall_count),
-                Some(nonlinear.backtrack_burst_count),
-            )
-        } else {
-            (
-                0, None, None, None, None, None, None, None, None, None, None, None,
-            )
-        };
+    ) = if let Some(nonlinear) = run_result.nonlinear_results.as_ref() {
+        let count = nonlinear.load_factors.len();
+        let max_residual = nonlinear.residual_norms.iter().copied().reduce(f64::max);
+        let max_increment_norm = nonlinear.increment_norms.iter().copied().reduce(f64::max);
+        let max_iteration_count = nonlinear.iteration_counts.iter().copied().max();
+        let final_converged =
+            max_residual.map(|value| value <= 1.0e-6 && nonlinear.failed_increments == 0);
+        (
+            count,
+            Some(nonlinear.failed_increments),
+            max_residual,
+            max_increment_norm,
+            max_iteration_count,
+            final_converged,
+            Some(nonlinear.line_search_backtracks),
+            Some(nonlinear.max_line_search_backtracks_per_increment),
+            Some(nonlinear.tangent_rebuild_count),
+            Some(nonlinear.iteration_spike_count),
+            Some(nonlinear.convergence_stall_count),
+            Some(nonlinear.backtrack_burst_count),
+        )
+    } else {
+        (
+            0, None, None, None, None, None, None, None, None, None, None, None,
+        )
+    };
 
-    let prep_calibration_profile = diagnostic_metric_string(&run_result.run.diagnostics, "FEA_PREP_CALIBRATION", "profile");
+    let prep_calibration_profile = diagnostic_metric_string(
+        &run_result.run.diagnostics,
+        "FEA_PREP_CALIBRATION",
+        "profile",
+    );
     let prep_calibration_fingerprint = diagnostic_metric_u64(
         &run_result.run.diagnostics,
         "FEA_PREP_CALIBRATION",
@@ -1824,6 +1838,17 @@ pub fn analysis_results_op(
         "FEA_PREP_ACCEPTANCE",
         "acceptance_fingerprint",
     );
+    let thermo_coupling_enabled =
+        diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_TM_COUPLING", "enabled");
+    let thermo_coupling_fingerprint = diagnostic_metric_u64(
+        &run_result.run.diagnostics,
+        "FEA_TM_COUPLING",
+        "coupling_fingerprint",
+    );
+    let thermo_transient_severity =
+        diagnostic_metric(&run_result.run.diagnostics, "FEA_TM_TRANSIENT", "severity");
+    let thermo_nonlinear_severity =
+        diagnostic_metric(&run_result.run.diagnostics, "FEA_TM_NONLINEAR", "severity");
 
     let summary = AnalysisResultsSummary {
         field_count: fields.len(),
@@ -1856,6 +1881,10 @@ pub fn analysis_results_op(
         prep_acceptance_score,
         prep_acceptance_passed,
         prep_acceptance_fingerprint,
+        thermo_coupling_enabled,
+        thermo_coupling_fingerprint,
+        thermo_transient_severity,
+        thermo_nonlinear_severity,
     };
 
     let modal_results = if query.include_modal_results {
@@ -1899,7 +1928,9 @@ pub fn analysis_results_op(
                                 retryable: false,
                                 severity: OperationErrorSeverity::Error,
                             },
-                            format!("requested modal mode index '{index}' is missing mode shape data"),
+                            format!(
+                                "requested modal mode index '{index}' is missing mode shape data"
+                            ),
                             BTreeMap::from([
                                 ("requested_mode_index".to_string(), index.to_string()),
                                 (
@@ -1909,29 +1940,30 @@ pub fn analysis_results_op(
                             ]),
                         )
                     })?;
-                    let residual_norm = modal.residual_norms.get(index).copied().ok_or_else(|| {
-                        operation_error(
-                            ANALYSIS_RESULTS_OPERATION,
-                            ANALYSIS_RESULTS_OP_VERSION,
-                            &context,
-                            OperationErrorSpec {
-                                error_code: "ANALYSIS_RESULTS_MODE_NOT_FOUND",
-                                error_type: OperationErrorType::Input,
-                                retryable: false,
-                                severity: OperationErrorSeverity::Error,
-                            },
-                            format!(
-                                "requested modal mode index '{index}' is missing residual data"
-                            ),
-                            BTreeMap::from([
-                                ("requested_mode_index".to_string(), index.to_string()),
-                                (
-                                    "available_residual_count".to_string(),
-                                    modal.residual_norms.len().to_string(),
+                    let residual_norm =
+                        modal.residual_norms.get(index).copied().ok_or_else(|| {
+                            operation_error(
+                                ANALYSIS_RESULTS_OPERATION,
+                                ANALYSIS_RESULTS_OP_VERSION,
+                                &context,
+                                OperationErrorSpec {
+                                    error_code: "ANALYSIS_RESULTS_MODE_NOT_FOUND",
+                                    error_type: OperationErrorType::Input,
+                                    retryable: false,
+                                    severity: OperationErrorSeverity::Error,
+                                },
+                                format!(
+                                    "requested modal mode index '{index}' is missing residual data"
                                 ),
-                            ]),
-                        )
-                    })?;
+                                BTreeMap::from([
+                                    ("requested_mode_index".to_string(), index.to_string()),
+                                    (
+                                        "available_residual_count".to_string(),
+                                        modal.residual_norms.len().to_string(),
+                                    ),
+                                ]),
+                            )
+                        })?;
                     eigenvalues_hz.push(eigenvalue);
                     mode_shapes.push(mode_shape);
                     residual_norms.push(residual_norm);
@@ -2173,7 +2205,10 @@ pub fn analysis_results_compare_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            format!("analysis baseline run_id '{}' was not found", query.baseline_run_id),
+            format!(
+                "analysis baseline run_id '{}' was not found",
+                query.baseline_run_id
+            ),
             BTreeMap::from([("run_id".to_string(), query.baseline_run_id.clone())]),
         ));
     };
@@ -2204,7 +2239,10 @@ pub fn analysis_results_compare_op(
                 retryable: false,
                 severity: OperationErrorSeverity::Error,
             },
-            format!("analysis candidate run_id '{}' was not found", query.candidate_run_id),
+            format!(
+                "analysis candidate run_id '{}' was not found",
+                query.candidate_run_id
+            ),
             BTreeMap::from([("run_id".to_string(), query.candidate_run_id.clone())]),
         ));
     };
@@ -2239,7 +2277,9 @@ pub fn analysis_results_compare_op(
         baseline.nonlinear_results.as_ref(),
         candidate.nonlinear_results.as_ref(),
     ) {
-        (Some(a), Some(b)) => Some(b.convergence_stall_count as i64 - a.convergence_stall_count as i64),
+        (Some(a), Some(b)) => {
+            Some(b.convergence_stall_count as i64 - a.convergence_stall_count as i64)
+        }
         _ => None,
     };
 
@@ -2321,8 +2361,8 @@ pub fn analysis_trends_op(
         solve_samples.sort_by(|a, b| a.total_cmp(b));
         let median_solve_ms = percentile(&solve_samples, 0.5);
         let p95_solve_ms = percentile(&solve_samples, 0.95);
-        let publishable_rate = entries.iter().filter(|run| run.publishable).count() as f64
-            / sample_count as f64;
+        let publishable_rate =
+            entries.iter().filter(|run| run.publishable).count() as f64 / sample_count as f64;
 
         let failed_increment_rate = if kind == AnalysisRunKind::Nonlinear {
             let failed = entries
@@ -2369,8 +2409,30 @@ pub fn analysis_trends_op(
         };
         let prep_calibration_fast_rate = calibration_profile_rate(&entries, "fast");
         let prep_calibration_balanced_rate = calibration_profile_rate(&entries, "balanced");
-        let prep_calibration_conservative_rate =
-            calibration_profile_rate(&entries, "conservative");
+        let prep_calibration_conservative_rate = calibration_profile_rate(&entries, "conservative");
+        let thermo_coupling_enabled_rate = {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric_bool(&run.run.diagnostics, "FEA_TM_COUPLING", "enabled")
+                })
+                .collect::<Vec<_>>();
+            if values.is_empty() {
+                None
+            } else {
+                Some(values.iter().filter(|value| **value).count() as f64 / values.len() as f64)
+            }
+        };
+        let thermo_transient_warn_rate = if kind == AnalysisRunKind::Transient {
+            diagnostic_warning_rate(&entries, "FEA_TM_TRANSIENT")
+        } else {
+            None
+        };
+        let thermo_nonlinear_warn_rate = if kind == AnalysisRunKind::Nonlinear {
+            diagnostic_warning_rate(&entries, "FEA_TM_NONLINEAR")
+        } else {
+            None
+        };
 
         summaries.push(AnalysisTrendKindSummary {
             run_kind: kind,
@@ -2385,6 +2447,9 @@ pub fn analysis_trends_op(
             prep_calibration_fast_rate,
             prep_calibration_balanced_rate,
             prep_calibration_conservative_rate,
+            thermo_coupling_enabled_rate,
+            thermo_transient_warn_rate,
+            thermo_nonlinear_warn_rate,
         });
     }
 
@@ -2512,7 +2577,8 @@ fn resolve_run_prep_context(
             format!("failed to load prep artifact: {err}"),
             BTreeMap::from([("prep_artifact_id".to_string(), prep_artifact_id.to_string())]),
         )
-    })? else {
+    })?
+    else {
         return Err(operation_error(
             operation,
             op_version,
@@ -2583,25 +2649,32 @@ fn resolve_run_prep_context(
 
     let require_latest_revision = std::env::var("RUNMAT_GEOMETRY_PREP_REQUIRE_LATEST_REVISION")
         .ok()
-        .map(|value| matches!(value.to_ascii_lowercase().as_str(), "1" | "true" | "yes" | "on"))
+        .map(|value| {
+            matches!(
+                value.to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
         .unwrap_or(true);
     if require_latest_revision {
-        if let Some(latest_revision) =
-            crate::geometry::latest_prep_revision_for_geometry(&model.geometry_id).map_err(|err| {
-                operation_error(
-                    operation,
-                    op_version,
-                    context,
-                    OperationErrorSpec {
-                        error_code: "ANALYSIS_RUN_PREP_STORE_FAILED",
-                        error_type: OperationErrorType::Internal,
-                        retryable: true,
-                        severity: OperationErrorSeverity::Error,
-                    },
-                    format!("failed to evaluate prep artifact freshness: {err}"),
-                    BTreeMap::from([("prep_artifact_id".to_string(), prep_artifact_id.to_string())]),
-                )
-            })? {
+        if let Some(latest_revision) = crate::geometry::latest_prep_revision_for_geometry(
+            &model.geometry_id,
+        )
+        .map_err(|err| {
+            operation_error(
+                operation,
+                op_version,
+                context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_RUN_PREP_STORE_FAILED",
+                    error_type: OperationErrorType::Internal,
+                    retryable: true,
+                    severity: OperationErrorSeverity::Error,
+                },
+                format!("failed to evaluate prep artifact freshness: {err}"),
+                BTreeMap::from([("prep_artifact_id".to_string(), prep_artifact_id.to_string())]),
+            )
+        })? {
             if artifact.source_geometry_revision < latest_revision {
                 crate::geometry::record_prep_stale_reject();
                 return Err(operation_error(
@@ -2621,7 +2694,10 @@ fn resolve_run_prep_context(
                             "prep_geometry_revision".to_string(),
                             artifact.source_geometry_revision.to_string(),
                         ),
-                        ("latest_geometry_revision".to_string(), latest_revision.to_string()),
+                        (
+                            "latest_geometry_revision".to_string(),
+                            latest_revision.to_string(),
+                        ),
                     ]),
                 ));
             }
@@ -2745,7 +2821,10 @@ fn resolve_run_prep_context(
             .region_mappings
             .iter()
             .filter(|mapping| {
-                model.loads.iter().any(|load| load.region_id == mapping.region_id)
+                model
+                    .loads
+                    .iter()
+                    .any(|load| load.region_id == mapping.region_id)
                     || model
                         .boundary_conditions
                         .iter()
@@ -2921,6 +3000,27 @@ fn calibration_profile_rate(entries: &[AnalysisRunResult], profile: &str) -> Opt
     )
 }
 
+fn diagnostic_warning_rate(entries: &[AnalysisRunResult], code: &str) -> Option<f64> {
+    let values = entries
+        .iter()
+        .filter_map(|run| {
+            run.run
+                .diagnostics
+                .iter()
+                .find(|diag| diag.code == code)
+                .map(|diag| {
+                    diag.severity
+                        == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+                })
+        })
+        .collect::<Vec<_>>();
+    if values.is_empty() {
+        None
+    } else {
+        Some(values.iter().filter(|value| **value).count() as f64 / values.len() as f64)
+    }
+}
+
 fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
     let mut materials = Vec::new();
     for evidence in &geometry.source_geometry.material_evidence {
@@ -2935,7 +3035,10 @@ fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
             ("mat_inferred", "Inferred Material", 100e9, 0.32)
         };
 
-        if materials.iter().any(|m: &MaterialModel| m.material_id == material_id) {
+        if materials
+            .iter()
+            .any(|m: &MaterialModel| m.material_id == material_id)
+        {
             continue;
         }
         materials.push(MaterialModel {

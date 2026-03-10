@@ -1,19 +1,19 @@
 use runmat_analysis_core::{AnalysisFieldValues, ReferenceFrame};
-use runmat_geometry_core::EntityKind;
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::ComputeBackend;
+use runmat_geometry_core::EntityKind;
 use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_compare_op,
-    analysis_results_op, analysis_trends_op,
-    analysis_run_linear_static_op, analysis_run_linear_static_with_options, analysis_run_modal_op,
-    analysis_run_modal_with_options_op, analysis_run_nonlinear_op,
+    analysis_results_op, analysis_run_linear_static_op, analysis_run_linear_static_with_options,
+    analysis_run_modal_op, analysis_run_modal_with_options_op, analysis_run_nonlinear_op,
     analysis_run_nonlinear_with_options_op, analysis_run_transient_op,
-    analysis_run_transient_with_options_op, analysis_validate, AnalysisCreateModelIntentSpec,
-    AnalysisCreateModelProfile, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
-    AnalysisResultsCompareQuery, AnalysisResultsQuery, AnalysisRunKind, AnalysisRunOptions,
-    AnalysisTrendsQuery, AnalysisTransientRunOptions, ModalFrequencyBasis, ModalFrequencyUnits,
-    PrecisionMode, PreconditionerMode, QualityPolicy, QualityReasonCode, RunStatus,
+    analysis_run_transient_with_options_op, analysis_trends_op, analysis_validate,
+    AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisModalRunOptions,
+    AnalysisNonlinearRunOptions, AnalysisResultsCompareQuery, AnalysisResultsQuery,
+    AnalysisRunKind, AnalysisRunOptions, AnalysisTransientRunOptions, AnalysisTrendsQuery,
+    ModalFrequencyBasis, ModalFrequencyUnits, PrecisionMode, PreconditionerMode, QualityPolicy,
+    QualityReasonCode, RunStatus,
 };
 use runmat_runtime::geometry::{
     geometry_capture_view_op, geometry_inspect_op, geometry_list_regions_op, geometry_load_op,
@@ -152,7 +152,10 @@ fn geometry_operation_contracts_are_v1_and_versioned() {
     .expect("prep artifact health should succeed");
     assert_eq!(prep_health.operation, "geometry.prep_artifact_health");
     assert_eq!(prep_health.op_version, "geometry.prep_artifact_health/v1");
-    assert_eq!(prep_health.data.schema_version, "geometry-prep-artifact-health/v1");
+    assert_eq!(
+        prep_health.data.schema_version,
+        "geometry-prep-artifact-health/v1"
+    );
     assert_eq!(svg_capture.data.format, "svg");
 
     let invalid_capture_view = geometry_capture_view_op(
@@ -167,7 +170,10 @@ fn geometry_operation_contracts_are_v1_and_versioned() {
     .expect_err("invalid capture dimensions should fail");
     assert_eq!(invalid_capture_view.operation, "geometry.capture_view");
     assert_eq!(invalid_capture_view.op_version, "geometry.capture_view/v1");
-    assert_eq!(invalid_capture_view.error_code, "GEOMETRY_CAPTURE_INVALID_SPEC");
+    assert_eq!(
+        invalid_capture_view.error_code,
+        "GEOMETRY_CAPTURE_INVALID_SPEC"
+    );
 }
 
 #[test]
@@ -207,7 +213,7 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
         AnalysisCreateModelIntentSpec {
             model_id: "contract_generated_model".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(Some("trace-contract-create-2".to_string()), None),
     )
@@ -221,7 +227,7 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
         AnalysisCreateModelIntentSpec {
             model_id: "".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(Some("trace-contract-create-3".to_string()), None),
     )
@@ -235,21 +241,24 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
         AnalysisCreateModelIntentSpec {
             model_id: "contract_modal_model".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(Some("trace-contract-create-4-modal".to_string()), None),
     )
     .expect("modal profile should be supported");
     assert_eq!(modal.operation, "analysis.create_model");
     assert_eq!(modal.op_version, "analysis.create_model/v1");
-    assert_eq!(modal.data.steps[0].kind, runmat_analysis_core::AnalysisStepKind::Modal);
+    assert_eq!(
+        modal.data.steps[0].kind,
+        runmat_analysis_core::AnalysisStepKind::Modal
+    );
 
     let transient = analysis_create_model_op(
         &geometry.data,
         AnalysisCreateModelIntentSpec {
             model_id: "contract_transient_model".to_string(),
             profile: AnalysisCreateModelProfile::TransientStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(Some("trace-contract-create-4-transient".to_string()), None),
     )
@@ -266,7 +275,7 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
         AnalysisCreateModelIntentSpec {
             model_id: "contract_nonlinear_model".to_string(),
             profile: AnalysisCreateModelProfile::NonlinearStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(Some("trace-contract-create-4-nonlinear".to_string()), None),
     )
@@ -340,7 +349,7 @@ fn analysis_create_model_infers_materials_from_step_metadata_contract() {
         AnalysisCreateModelIntentSpec {
             model_id: "contract_step_model".to_string(),
             profile: AnalysisCreateModelProfile::LinearStaticStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(Some("trace-contract-create-step-2".to_string()), None),
     )
@@ -437,7 +446,7 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
         AnalysisCreateModelIntentSpec {
             model_id: "contract_modal_model".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(Some("trace-contract-modal-2".to_string()), None),
     )
@@ -461,10 +470,16 @@ fn analysis_run_modal_contract_is_v1_and_typed() {
         .as_ref()
         .expect("modal results payload should exist");
     assert!(!modal_results.eigenvalues_hz.is_empty());
-    assert_eq!(modal_results.eigenvalues_hz.len(), modal_results.mode_shapes.len());
+    assert_eq!(
+        modal_results.eigenvalues_hz.len(),
+        modal_results.mode_shapes.len()
+    );
     assert_eq!(modal_results.mode_shapes[0].field_id, "mode_shape_1");
     assert_eq!(modal_results.modal_payload_version, "modal_results/v1");
-    assert_eq!(modal_results.eigenvalues_hz.len(), modal_results.residual_norms.len());
+    assert_eq!(
+        modal_results.eigenvalues_hz.len(),
+        modal_results.residual_norms.len()
+    );
     assert_eq!(modal_results.mode_units, ModalFrequencyUnits::Hz);
     assert_eq!(
         modal_results.frequency_basis,
@@ -508,7 +523,7 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
         AnalysisCreateModelIntentSpec {
             model_id: "contract_modal_model_opts".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(Some("trace-contract-modal-opts-2".to_string()), None),
     )
@@ -524,9 +539,9 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
             mode_count: 2,
             residual_warn_threshold: 1.0e-2,
             thermo_mechanical_coupling: None,
-        prep_context: None,
-        prep_artifact_id: None,
-        prep_calibration_profile: None,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-modal-opts-3".to_string()), None),
     )
@@ -553,9 +568,9 @@ fn analysis_run_modal_with_options_contract_controls_mode_budget() {
             mode_count: 0,
             residual_warn_threshold: 1.0e-3,
             thermo_mechanical_coupling: None,
-        prep_context: None,
-        prep_artifact_id: None,
-        prep_calibration_profile: None,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-modal-opts-4".to_string()), None),
     )
@@ -594,7 +609,10 @@ fn analysis_run_transient_contract_is_v1_and_typed() {
         .transient_results
         .as_ref()
         .expect("transient payload should exist");
-    assert_eq!(transient.integration_method, runmat_runtime::analysis::TransientIntegrationMethod::ImplicitEuler);
+    assert_eq!(
+        transient.integration_method,
+        runmat_runtime::analysis::TransientIntegrationMethod::ImplicitEuler
+    );
     assert_eq!(
         transient.time_points_s.len(),
         transient.displacement_snapshots.len()
@@ -630,8 +648,14 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
         .as_ref()
         .expect("nonlinear payload should be present");
     assert_eq!(nonlinear.load_factors.len(), nonlinear.residual_norms.len());
-    assert_eq!(nonlinear.residual_norms.len(), nonlinear.increment_norms.len());
-    assert_eq!(nonlinear.increment_norms.len(), nonlinear.iteration_counts.len());
+    assert_eq!(
+        nonlinear.residual_norms.len(),
+        nonlinear.increment_norms.len()
+    );
+    assert_eq!(
+        nonlinear.increment_norms.len(),
+        nonlinear.iteration_counts.len()
+    );
     assert!(nonlinear.max_line_search_backtracks_per_increment > 0);
     assert!(nonlinear.iteration_spike_count <= nonlinear.load_factors.len());
     assert!(nonlinear.backtrack_burst_count > 0);
@@ -658,16 +682,36 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
     assert!(results.data.summary.failed_increment_count.is_some());
     assert!(results.data.summary.max_nonlinear_increment_norm.is_some());
     assert!(results.data.summary.max_nonlinear_iteration_count.is_some());
-    assert!(results.data.summary.nonlinear_line_search_backtracks.is_some());
+    assert!(results
+        .data
+        .summary
+        .nonlinear_line_search_backtracks
+        .is_some());
     assert!(results
         .data
         .summary
         .nonlinear_max_backtracks_per_increment
         .is_some());
-    assert!(results.data.summary.nonlinear_tangent_rebuild_count.is_some());
-    assert!(results.data.summary.nonlinear_iteration_spike_count.is_some());
-    assert!(results.data.summary.nonlinear_convergence_stall_count.is_some());
-    assert!(results.data.summary.nonlinear_backtrack_burst_count.is_some());
+    assert!(results
+        .data
+        .summary
+        .nonlinear_tangent_rebuild_count
+        .is_some());
+    assert!(results
+        .data
+        .summary
+        .nonlinear_iteration_spike_count
+        .is_some());
+    assert!(results
+        .data
+        .summary
+        .nonlinear_convergence_stall_count
+        .is_some());
+    assert!(results
+        .data
+        .summary
+        .nonlinear_backtrack_burst_count
+        .is_some());
 
     let invalid = analysis_run_nonlinear_op(
         &fixture_model(FixtureId::CantileverLinearStatic),
@@ -686,7 +730,10 @@ fn analysis_results_can_filter_nonlinear_diagnostics_by_code() {
     let envelope = analysis_run_nonlinear_op(
         &model,
         ComputeBackend::Cpu,
-        OperationContext::new(Some("trace-contract-nonlinear-diagnostics-1".to_string()), None),
+        OperationContext::new(
+            Some("trace-contract-nonlinear-diagnostics-1".to_string()),
+            None,
+        ),
     )
     .expect("nonlinear run should succeed");
 
@@ -705,7 +752,10 @@ fn analysis_results_can_filter_nonlinear_diagnostics_by_code() {
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
         },
-        OperationContext::new(Some("trace-contract-nonlinear-diagnostics-2".to_string()), None),
+        OperationContext::new(
+            Some("trace-contract-nonlinear-diagnostics-2".to_string()),
+            None,
+        ),
     )
     .expect("results query should succeed");
 
@@ -726,13 +776,19 @@ fn nonlinear_contract_snapshot_matches_expected_shape() {
     let envelope = analysis_run_nonlinear_op(
         &model,
         ComputeBackend::Cpu,
-        OperationContext::new(Some("trace-contract-nonlinear-snapshot-1".to_string()), None),
+        OperationContext::new(
+            Some("trace-contract-nonlinear-snapshot-1".to_string()),
+            None,
+        ),
     )
     .expect("nonlinear run should succeed");
     let results = analysis_results_op(
         &envelope.data,
         AnalysisResultsQuery::default(),
-        OperationContext::new(Some("trace-contract-nonlinear-snapshot-2".to_string()), None),
+        OperationContext::new(
+            Some("trace-contract-nonlinear-snapshot-2".to_string()),
+            None,
+        ),
     )
     .expect("results should succeed");
 
@@ -777,7 +833,10 @@ fn analysis_run_nonlinear_strict_iteration_cap_sets_degraded_status() {
             line_search: false,
             ..AnalysisNonlinearRunOptions::balanced()
         },
-        OperationContext::new(Some("trace-contract-nonlinear-strict-cap".to_string()), None),
+        OperationContext::new(
+            Some("trace-contract-nonlinear-strict-cap".to_string()),
+            None,
+        ),
     )
     .expect("nonlinear strict run should return envelope");
 
@@ -806,7 +865,10 @@ fn analysis_run_nonlinear_policy_contract_divergence_is_explicit() {
                 max_line_search_backtracks: 0,
                 ..AnalysisNonlinearRunOptions::balanced()
             },
-            OperationContext::new(Some(format!("trace-contract-nonlinear-policy-{policy:?}")), None),
+            OperationContext::new(
+                Some(format!("trace-contract-nonlinear-policy-{policy:?}")),
+                None,
+            ),
         )
         .expect("nonlinear run should produce typed envelope")
     };
@@ -1008,6 +1070,9 @@ fn analysis_trends_contract_is_v1_and_typed() {
     assert_eq!(nonlinear.sample_count, 2);
     assert!(nonlinear.median_solve_ms.is_some());
     assert!(nonlinear.p95_solve_ms.is_some());
+    assert!(nonlinear.thermo_coupling_enabled_rate.is_none());
+    assert!(nonlinear.thermo_transient_warn_rate.is_none());
+    assert!(nonlinear.thermo_nonlinear_warn_rate.is_none());
 }
 
 #[test]
@@ -1041,9 +1106,9 @@ fn analysis_run_transient_with_options_contract_controls_execution_window() {
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
             thermo_mechanical_coupling: None,
-        prep_context: None,
-        prep_artifact_id: None,
-        prep_calibration_profile: None,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-transient-opts-1".to_string()), None),
     )
@@ -1222,7 +1287,7 @@ fn analysis_results_contract_is_v1_and_filterable() {
         AnalysisResultsQuery {
             include_fields: vec!["von_mises".to_string()],
             include_diagnostics: false,
-                            diagnostic_codes: Vec::new(),
+            diagnostic_codes: Vec::new(),
             include_modal_results: true,
             mode_indices: Vec::new(),
             include_transient_results: true,
@@ -1284,7 +1349,7 @@ fn analysis_results_modal_query_controls_are_typed() {
         AnalysisCreateModelIntentSpec {
             model_id: "contract_modal_results_model".to_string(),
             profile: AnalysisCreateModelProfile::ModalStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(Some("trace-contract-modal-results-2".to_string()), None),
     )
@@ -1437,6 +1502,10 @@ fn analysis_results_by_run_id_contract_roundtrip() {
     assert_eq!(results.data.summary.time_end_s, None);
     assert_eq!(results.data.summary.max_transient_residual_norm, None);
     assert_eq!(results.data.summary.final_step_converged, None);
+    assert_eq!(results.data.summary.thermo_coupling_enabled, None);
+    assert_eq!(results.data.summary.thermo_coupling_fingerprint, None);
+    assert_eq!(results.data.summary.thermo_transient_severity, None);
+    assert_eq!(results.data.summary.thermo_nonlinear_severity, None);
 }
 
 #[test]
@@ -1512,10 +1581,10 @@ fn analysis_run_deterministic_contract_is_stable_across_replays() {
         precision_mode: PrecisionMode::Fp64,
         preconditioner_mode: PreconditionerMode::Auto,
         quality_policy: QualityPolicy::Balanced,
-    thermo_mechanical_coupling: None,
-    prep_context: None,
-    prep_artifact_id: None,
-    prep_calibration_profile: None,
+        thermo_mechanical_coupling: None,
+        prep_context: None,
+        prep_artifact_id: None,
+        prep_calibration_profile: None,
     };
 
     let first = analysis_run_linear_static_with_options(
@@ -1782,10 +1851,10 @@ fn strict_policy_quality_reasons_propagate_to_results_contracts() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Strict,
-        thermo_mechanical_coupling: None,
-        prep_context: None,
-        prep_artifact_id: None,
-        prep_calibration_profile: None,
+            thermo_mechanical_coupling: None,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-11-run".to_string()), None),
     )
@@ -1876,10 +1945,10 @@ fn balanced_and_strict_diverge_for_same_field_promotion_fallback() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
-        thermo_mechanical_coupling: None,
-        prep_context: None,
-        prep_artifact_id: None,
-        prep_calibration_profile: None,
+            thermo_mechanical_coupling: None,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-12-balanced".to_string()), None),
     )
@@ -1893,16 +1962,19 @@ fn balanced_and_strict_diverge_for_same_field_promotion_fallback() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Strict,
-        thermo_mechanical_coupling: None,
-        prep_context: None,
-        prep_artifact_id: None,
-        prep_calibration_profile: None,
+            thermo_mechanical_coupling: None,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-12-strict".to_string()), None),
     )
     .expect("strict run should succeed");
 
-    assert_eq!(balanced.data.solver_convergence, strict.data.solver_convergence);
+    assert_eq!(
+        balanced.data.solver_convergence,
+        strict.data.solver_convergence
+    );
     assert_eq!(balanced.data.result_quality, strict.data.result_quality);
     assert_eq!(balanced.data.provenance.quality_policy, "balanced");
     assert_eq!(strict.data.provenance.quality_policy, "strict");
@@ -1968,10 +2040,10 @@ fn balanced_and_strict_divergence_propagates_through_results_endpoints() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
-        thermo_mechanical_coupling: None,
-        prep_context: None,
-        prep_artifact_id: None,
-        prep_calibration_profile: None,
+            thermo_mechanical_coupling: None,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-13-balanced-run".to_string()), None),
     )
@@ -1984,10 +2056,10 @@ fn balanced_and_strict_divergence_propagates_through_results_endpoints() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Strict,
-        thermo_mechanical_coupling: None,
-        prep_context: None,
-        prep_artifact_id: None,
-        prep_calibration_profile: None,
+            thermo_mechanical_coupling: None,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
         },
         OperationContext::new(Some("trace-contract-13-strict-run".to_string()), None),
     )
