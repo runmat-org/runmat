@@ -24,14 +24,14 @@ export const docsTree: DocsNode[] = [
     children: [
       { title: "Getting Started", externalHref: "/docs/getting-started" },
       {
-        title: "Desktop & Browser Guide",
+        title: "Browser Guide",
         slug: ["desktop-browser-guide"],
         file: "docs/DESKTOP_BROWSER_GUIDE.md",
         seo: {
-          description: "Get started with RunMat Desktop, a browser-based IDE for writing and running MATLAB-style code with GPU acceleration.",
-          keywords: ["RunMat Desktop", "browser IDE", "sandbox", "WebAssembly", "GPU acceleration", "MATLAB online"],
-          ogTitle: "Desktop & Browser Guide",
-          ogDescription: "Learn how to use RunMat Desktop—a browser-based development environment for MATLAB-style code with automatic GPU acceleration.",
+          description: "Use the RunMat sandbox, a browser-based IDE for writing and running MATLAB-style code with GPU acceleration, cloud storage, and file versioning.",
+          keywords: ["RunMat sandbox", "RunMat browser", "browser IDE", "sandbox", "WebAssembly", "GPU acceleration", "MATLAB online", "cloud storage", "file versioning"],
+          ogTitle: "Browser Guide",
+          ogDescription: "Use the RunMat sandbox—a browser-based development environment for MATLAB-style code with automatic GPU acceleration and cloud storage.",
         },
       },
       {
@@ -114,6 +114,17 @@ export const docsTree: DocsNode[] = [
         },
       },
       {
+        title: "Large Dataset Persistence",
+        slug: ["large-dataset-persistence"],
+        file: "docs/LARGE_DATASET_PERSISTENCE.md",
+        seo: {
+          description: "How RunMat stores and operates on large numerical datasets using chunked, content-addressed objects with the data.* API.",
+          keywords: ["large datasets", "chunked storage", "content-addressed", "data API", "multi-terabyte arrays", "scientific data", "RunMat data"],
+          ogTitle: "Large Dataset Persistence",
+          ogDescription: "Read and write subregions of multi-terabyte arrays without loading the full file. Same API on local and cloud projects.",
+        },
+      },
+      {
         title: "Filesystem",
         slug: ["filesystem"],
         file: "docs/FILESYSTEM.md",
@@ -160,6 +171,7 @@ export const docsTree: DocsNode[] = [
     title: "Meta",
     children: [
       { title: "License", slug: ["license"], file: "LICENSE.md", seo: { description: "RunMat software license." } },
+      { title: "Terms and Conditions", slug: ["terms"], file: "docs/TERMS.md", seo: { description: "Dystr Terms and Conditions governing the use of the RunMat platform and related services.", keywords: ["terms and conditions", "terms of service", "legal", "RunMat", "Dystr"] } },
       { title: "Telemetry", slug: ["telemetry"], file: "docs/TELEMETRY.md", seo: { description: "RunMat telemetry: what information is collected and how it is used." } },
       { title: "Contributing", slug: ["contributing"], file: "docs/CONTRIBUTING.md", seo: { description: "How to contribute to RunMat: branch workflow, PR scope, and coding style." } },
     ],

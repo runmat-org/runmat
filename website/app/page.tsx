@@ -28,7 +28,7 @@ const jsonLd = {
       "description": "RunMat is a high-performance, open-source runtime for math that lets you run MATLAB-syntax code in the browser, on the desktop, or from the CLI, while getting GPU-speed execution.",
       "sameAs": [
         "https://github.com/runmat-org/runmat",
-        "https://x.com/runmat_org",
+        "https://x.com/runmat_com",
         "https://dystr.com"
       ],
       "knowsAbout": [
@@ -179,7 +179,7 @@ export default function HomePage() {
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">
-              Interactive 3D plotting, built in
+              See your math in 3D
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-lg">
               GPU-accelerated 2D and 3D plotting, built into the same environment as your code. Your plots are part of the same computation chain as your math. No copying data between systems, no separate plotting library.
@@ -302,10 +302,10 @@ export default function HomePage() {
           <div className="mx-auto max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
             <Link
               href="/sandbox"
-              className="rounded-2xl border border-border overflow-hidden min-h-[380px] md:row-span-3 flex items-center justify-center bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="rounded-2xl border border-border overflow-hidden min-h-[380px] md:row-span-3 bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               <video
-                className="w-full h-auto min-h-[380px] object-cover"
+                className="w-full h-full min-h-[380px] object-cover object-left-top"
                 autoPlay
                 muted
                 loop

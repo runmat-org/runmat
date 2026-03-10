@@ -1,33 +1,39 @@
-# 🚀 RunMat: Blazing Fast Runtime for Math
+<p align="center">
+  <strong><h1 align="center">RunMat</h1></strong>
+</p>
 
-### RunMat automatically **fuses operations and intelligently routes between CPU and GPU**. 
+<p align="center">
+  <strong>Open-source runtime for math. MATLAB syntax. CPU + GPU. No license fees.</strong>
+</p>
 
-Capture math in MATLAB syntax. Run on CPU or GPU. Works across Windows, macOS, Linux, and WebAssembly, across NVIDIA, AMD, Apple Silicon, and Intel GPUs. No kernel code, no rewrites. No device flags. No vendor lock-in.
+<p align="center">
+  RunMat automatically fuses operations and intelligently routes between CPU and GPU.<br/>
+  Works across Windows, macOS, Linux, and WebAssembly, across NVIDIA, AMD, Apple Silicon, and Intel GPUs.<br/>
+  No kernel code. No rewrites. No device flags. No vendor lock-in.
+</p>
 
-[![Build Status](https://img.shields.io/github/actions/workflow/status/runmat-org/runmat/ci.yml?branch=main)](https://github.com/runmat-org/runmat/actions)
-[![License](https://img.shields.io/badge/license-MIT%20with%20Attribution-blue.svg)](LICENSE.md)
-[![Crates.io](https://img.shields.io/crates/v/runmat.svg)](https://crates.io/crates/runmat)
-[![Downloads](https://img.shields.io/crates/d/runmat.svg)](https://crates.io/crates/runmat)
+<p align="center">
+  <a href="https://github.com/runmat-org/runmat/actions"><img src="https://img.shields.io/github/actions/workflow/status/runmat-org/runmat/ci.yml?branch=main" alt="Build Status"></a>
+  <a href="LICENSE.md"><img src="https://img.shields.io/badge/license-MIT%20with%20Attribution-blue.svg" alt="License"></a>
+  <a href="https://crates.io/crates/runmat"><img src="https://img.shields.io/crates/v/runmat.svg" alt="Crates.io"></a>
+  <a href="https://crates.io/crates/runmat"><img src="https://img.shields.io/crates/d/runmat.svg" alt="Downloads"></a>
+</p>
 
-**[🌐 Website](https://runmat.com) • [📖 Documentation](https://runmat.com/docs)**
+<p align="center">
+  <a href="https://runmat.com/sandbox"><strong>Try it now — no install needed</strong></a> · <a href="https://runmat.com/docs">Docs</a> · <a href="https://runmat.com/blog">Blog</a> · <a href="https://runmat.com">Website</a>
+</p>
 
----
-
-### **Status: Pre-release (v0.3)**
-
-RunMat is an early build. The core runtime and GPU engine already pass thousands of tests, and the plotting backend is in its first public release. Expect a few rough edges. Feedback and bug reports are always appreciated.
+<p align="center"><em>Status: Pre-release (v0.3) — core runtime and GPU engine pass thousands of tests. Expect a few rough edges.</em></p>
 
 ---
 
 ## What is RunMat?
 
-With RunMat you write your math in clean, readable MATLAB-style syntax. RunMat automatically fuses your operations into optimized kernels and runs them on the best place — CPU or GPU. On GPU, it can often match or beat hand-written CUDA on many dense numerical workloads
+With RunMat you write your math in clean, readable MATLAB-style syntax. RunMat automatically fuses your operations into optimized kernels and runs them on the best available hardware — CPU or GPU. On GPU, it can often match or beat hand-written CUDA on many dense numerical workloads.
 
 It runs on whatever GPU you have — NVIDIA, AMD, Apple Silicon, Intel — through native APIs (Metal / DirectX 12 / Vulkan). No device management. No vendor lock-in. No rewrites.
 
-This means a you can write math like:
-
-```matlab:runnable
+```matlab
 x  = 0:0.01:4*pi;
 y0 = sin(x) .* exp(-x / 10);
 y1 = y0 .* cos(x / 4) + 0.25 .* (y0 .^ 2);
@@ -36,7 +42,7 @@ y2 = tanh(y1) + 0.1 .* y1;
 plot(x, y2);
 ```
 
-and it will run like this (points in the graph is the number of elements in the `x` vector above):
+Points in the graph below correspond to the number of elements in the `x` vector above:
 
 ![Elementwise math speedup](https://web.runmatstatic.com/elementwise-math_speedup-b.svg)
 
@@ -45,6 +51,56 @@ Core ideas:
 - **MATLAB input language compatibility, not a new language**  
 - **Fast on CPU and GPU**, with one runtime  
 - **No device flags** — Fusion automatically chooses CPU vs GPU based on data size and transfer cost heuristics
+
+---
+
+## Ways to Use RunMat
+
+The open-source runtime in this repo powers every RunMat surface:
+
+<div align="center">
+<table>
+<tr>
+<td align="center" width="20%">
+<h3>🌐 Browser</h3>
+No install needed<br/><br/>
+Runs via WebAssembly + WebGPU.<br/>
+Your code never leaves your machine.<br/><br/>
+<a href="https://runmat.com/sandbox"><strong>Try now →</strong></a>
+</td>
+<td align="center" width="20%">
+<h3>⌨️ CLI</h3>
+Open source (this repo)<br/><br/>
+Run <code>.m</code> files, benchmark,<br/>
+integrate into CI/CD.<br/><br/>
+<code>cargo install runmat</code>
+</td>
+<td align="center" width="20%">
+<h3>📦 NPM</h3>
+Embed anywhere<br/><br/>
+Full runtime — execution, GPU,<br/>
+plotting — in any web app.<br/><br/>
+<a href="https://www.npmjs.com/package/runmat"><code>npm install runmat</code></a>
+</td>
+<td align="center" width="20%">
+<h3>🖥️ Desktop</h3>
+Coming soon<br/><br/>
+Native IDE with local files<br/>
+and full GPU acceleration.<br/><br/>
+&nbsp;
+</td>
+<td align="center" width="20%">
+<h3>☁️ Cloud</h3>
+Hobby tier available<br/><br/>
+Versioning, collaboration,<br/>
+team management.<br/><br/>
+<a href="https://runmat.com/pricing"><strong>Pricing →</strong></a>
+</td>
+</tr>
+</table>
+</div>
+
+---
 
 ## ✨ Features at a glance
 
@@ -70,41 +126,45 @@ Core ideas:
 - **Cross-platform GPU backend**
 
   - Uses wgpu / WebGPU  
-  - Supports **Metal (macOS), DirectX 12 (Windows), Vulkan (Linux)**  
+  - Supports **Metal (macOS), DirectX 12 (Windows), Vulkan (Linux), WebGPU (browser)**  
   - Falls back to CPU when workloads are too small for GPU to win  
 
-- **Plotting and tooling (pre-release)**
+- **Async-capable runtime**
 
-  - Simple 2D line and scatter plots work today  
-  - Plots that use filled shapes or meshes (box plots, violin plots, surfaces, many 3D views) are **not wired up yet**  
-  - 3D plots and better camera controls are **on the roadmap**  
-  - VS Code / Cursor extensions are also **on the roadmap**  
+  - Evaluation is built on Rust futures — non-blocking by design, not bolted on  
+  - GPU readback, interactive input, and long-running scripts never block the host  
+  - Language-level `async`/`await` with cooperative tasks is on the roadmap  
+  - MATLAB has no equivalent — RunMat scripts can run interactively in a browser without freezing the page  
 
+- **WebAssembly target + NPM package**
 
-- **Open source**
+  - The full runtime compiles to WASM and ships as part of this repo (`runmat-wasm`)  
+  - Available as [`runmat` on NPM](https://www.npmjs.com/package/runmat) — embed execution, GPU acceleration, and plotting into any web app  
+  - GPU acceleration works in the browser via WebGPU  
+  - Powers the [browser sandbox](https://runmat.com/sandbox) — your code runs locally, never on a server  
 
-  - MIT License with attribution  
-  - Small binary, CLI-first design 
+- **Plotting**
+
+  - Interactive 2D and 3D plots  
+  - Line, scatter, and surface plots supported today  
+  - Some advanced plot types (box plots, violin plots) are still in progress  
+
+- **Open-source runtime**
+
+  - The full runtime, GPU engine, JIT, GC, and plotting — everything in this repo — is MIT licensed  
+  - Small binary, CLI-first design  
 
 --- 
 
-## 📊 Performance highlights
- 
-Hardware: **Apple M2 Max**, **Metal**. Each point is the median of 3 runs for each benchmark.
+## 📊 Performance
 
-### 4K Image Pipeline Perf Sweep (B = batch size)
-| B | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
-|---|---:|---:|---:|---:|---:|
-| 4  | 142.97 | 801.29 | 500.34 | 3.50× | 5.60× |
-| 8  | 212.77 | 808.92 | 939.27 | 4.41× | 3.80× |
-| 16 | 241.56 | 907.73 | 1783.47 | 7.38× | 3.76× |
-| 32 | 389.25 | 1141.92 | 3605.95 | 9.26× | 2.93× |
-| 64 | 683.54 | 1203.20 | 6958.28 | 10.18× | 1.76× |
+Up to **131x faster than NumPy** and **7x faster than PyTorch** on Monte Carlo simulations. Hardware: Apple M2 Max, Metal. Median of 3 runs.
 
+![Monte Carlo speedup](https://web.runmatstatic.com/monte-carlo-analysis_speedup-b.svg)
 
-![4K image pipeline speedup](https://web.runmatstatic.com/4k-image-processing_speedup-b.svg)
+<details>
+<summary><strong>Monte Carlo raw data</strong></summary>
 
-### Monte Carlo Perf Sweep 
 | Paths (simulations) | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
 |--------------------:|-----------:|-------------:|-----------:|---------------:|-----------------:|
 | 250k   | 108.58 |   824.42 |  4,065.87 | 37.44× | 7.59× |
@@ -113,11 +173,28 @@ Hardware: **Apple M2 Max**, **Metal**. Each point is the median of 3 runs for ea
 | 2M     | 297.65 | 1,108.80 | 32,304.64 |108.53× | 3.73× |
 | 5M     | 607.36 | 1,697.59 | 79,894.98 |131.55× | 2.80× |
 
+</details>
 
+<details>
+<summary><strong>4K Image Pipeline</strong> — up to 10x faster than NumPy</summary>
 
-![Monte Carlo speedup](https://web.runmatstatic.com/monte-carlo-analysis_speedup-b.svg)
+![4K image pipeline speedup](https://web.runmatstatic.com/4k-image-processing_speedup-b.svg)
 
-### Elementwise Math Perf Sweep (points)
+| B | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
+|---|---:|---:|---:|---:|---:|
+| 4  | 142.97 | 801.29 | 500.34 | 3.50× | 5.60× |
+| 8  | 212.77 | 808.92 | 939.27 | 4.41× | 3.80× |
+| 16 | 241.56 | 907.73 | 1783.47 | 7.38× | 3.76× |
+| 32 | 389.25 | 1141.92 | 3605.95 | 9.26× | 2.93× |
+| 64 | 683.54 | 1203.20 | 6958.28 | 10.18× | 1.76× |
+
+</details>
+
+<details>
+<summary><strong>Elementwise Math</strong> — up to 144x faster than PyTorch at 1B elements</summary>
+
+![Elementwise math speedup](https://web.runmatstatic.com/elementwise-math_speedup-b.svg)
+
 | points | RunMat (ms) | PyTorch (ms) | NumPy (ms) | NumPy ÷ RunMat | PyTorch ÷ RunMat |
 |---|---:|---:|---:|---:|---:|
 | 1M   | 145.15 | 856.41  |   72.39 | 0.50× | 5.90× |
@@ -129,16 +206,14 @@ Hardware: **Apple M2 Max**, **Metal**. Each point is the median of 3 runs for ea
 | 500M | 137.58 | 17,882.11 | 5,026.94 | 36.54× | 129.97× |
 | 1B | 144.40 | 20,841.42 | 11,931.93 | 82.63× | 144.34× |
 
-![Elementwise math speedup](https://web.runmatstatic.com/elementwise-math_speedup-b.svg)
+</details>
 
 On smaller arrays Fusion keeps work on CPU so you still get low overhead and a fast JIT. 
 
-*Benchmarks run on Apple M2 Max with BLAS/LAPACK optimization and GPU acceleration. See [benchmarks/](benchmarks/) for reproducible test scripts, detailed results, and comparisons against NumPy, PyTorch, and Julia.*
+*See [benchmarks/](benchmarks/) for reproducible test scripts, detailed results, and comparisons against NumPy, PyTorch, and Julia.*
 
 
 ---
-
-
 
 ## 🎯 Quick Start
 
@@ -181,16 +256,25 @@ runmat script.m
 
 # Or pipe a script into RunMat
 echo "a = 10; b = 20; c = a + b" | runmat
+```
 
+### CLI Features
+
+```bash
 # Check GPU acceleration status
 runmat accel-info
 
 # Benchmark a script
 runmat benchmark script.m --iterations 5 --jit
 
+# Create a snapshot for faster startup
+runmat snapshot create -o stdlib.snapshot
+
 # View system information
 runmat info
 ```
+
+See [CLI Documentation](https://runmat.com/docs/cli) for the complete command reference.
 
 ### Jupyter Integration
 
@@ -202,52 +286,11 @@ runmat --install-kernel
 jupyter lab
 ```
 
-### GPU-Accelerated Example
-
-```matlab
-% RunMat automatically uses GPU when beneficial
-x = rand(10000, 1, 'single');
-y = sin(x) .* x + 0.5;  % Automatically fused and GPU-accelerated
-mean(y)  % Result computed on GPU
-```
-
-## 🌟 See It In Action
-
-### MATLAB Compatibility
-```matlab
-% Your existing MATLAB code just works
-A = [1 2 3; 4 5 6; 7 8 9];
-B = A' * A;
-eigenvals = eig(B);
-plot(eigenvals);
-```
-
-### GPU-Accelerated Fusion
-```matlab
-% RunMat automatically fuses this chain into a single GPU kernel
-% No kernel code, no rewrites—just MATLAB syntax
-x = rand(1024, 1, 'single');
-y = sin(x) .* x + 0.5;        % Fused: sin, multiply, add
-m = mean(y, 'all');            % Reduction stays on GPU
-fprintf('m=%.6f\n', double(m)); % Single download at sink
-```
-
-### Plotting
-```matlab
-% Simple 2D line plot (works in the pre-release)
-x = linspace(0, 2*pi, 1000);
-y = sin(x);
-
-plot(x, y);
-grid on;
-title("Sine wave");
-```
-
 ---
 
 ## 🧱 Architecture: CPU+GPU performance
 
-RunMat uses a tiered CPU runtime plus a fusion engine that automatically picks CPU or GPU for each chunk of math.
+RunMat uses a tiered CPU runtime plus a fusion engine that automatically picks CPU or GPU for each chunk of math. All of the components below are open source and live in this repository.
 
 ### Key components
 
@@ -258,9 +301,10 @@ RunMat uses a tiered CPU runtime plus a fusion engine that automatically picks C
 | 🧠 runmat-gc         | High-performance memory management       | Generational GC with pointer compression                            |
 | 🚀 runmat-accelerate | GPU acceleration subsystem               | Fusion engine + auto-offload planner + `wgpu` backend               |
 | 🔥 Fusion engine       | Collapses op chains, chooses CPU vs GPU  | Builds op graph, fuses ops, estimates cost, keeps tensors on device |
-| 🎨 runmat-plot       | Plotting layer (pre-release)                          | 2D line/scatter plots work today; 3D, filled shapes, and full GPU plotting are on the roadmap |
+| 🎨 runmat-plot       | Plotting layer                           | Interactive 2D/3D plots; some advanced plot types still in progress |
+| 🌐 runmat-wasm       | WebAssembly build of the runtime         | Runs in any browser; powers the sandbox at runmat.com               |
 | 📸 runmat-snapshot   | Fast startup snapshots                   | Binary blob serialization / restore                                 |
-| 🧰 runmat-runtime    | Core runtime + 200+ builtin functions    | BLAS/LAPACK integration and other CPU/GPU-accelerated operations    |
+| 🧰 runmat-runtime    | Core runtime + 300+ builtin functions    | BLAS/LAPACK integration and other CPU/GPU-accelerated operations    |
 
 
 ### Why this matters
@@ -269,7 +313,7 @@ RunMat uses a tiered CPU runtime plus a fusion engine that automatically picks C
 - **Fusion engine** removes most manual device management and kernel tuning.  
 - **GPU backend** runs on NVIDIA, AMD, Apple Silicon, and Intel through Metal / DirectX 12 / Vulkan, with no vendor lock-in.
 
-
+---
 
 ## 🚀 GPU Acceleration: Fusion & Auto-Offload
 
@@ -301,159 +345,38 @@ The runtime minimizes host↔device transfers by:
 ### Example: Automatic GPU Fusion
 
 ```matlab
-% This code automatically fuses into a single GPU kernel
 x = rand(1024, 1, 'single');
-y = sin(x) .* x + 0.5;  % Fused: sin, multiply, add
-m = mean(y, 'all');      % Reduction stays on GPU
-fprintf('m=%.6f\n', double(m));  % Single download at sink
+y = sin(x) .* x + 0.5;        % Fused: sin, multiply, add
+m = mean(y, 'all');            % Reduction stays on GPU
+fprintf('m=%.6f\n', double(m)); % Single download at sink
 ```
 
 RunMat detects the elementwise chain (`sin`, `.*`, `+`), fuses them into one GPU dispatch, keeps `y` resident on GPU, and only downloads `m` when needed for output.
 
 For more details, see [Introduction to RunMat GPU](https://runmat.com/docs/accelerate/fusion-intro).
 
-## 🎨 Modern Developer Experience
-
-### Rich REPL with Intelligent Features
-```bash
-runmat> .info
-🦀 RunMat v0.1.0 - High-Performance MATLAB Runtime
-⚡ JIT: Cranelift (optimization: speed)
-🧠 GC: Generational (heap: 45MB, collections: 12)
-🚀 GPU: wgpu provider (Metal/DX12/Vulkan)
-🎨 Plotting: GPU-accelerated (wgpu)
-📊 Functions loaded: 200+ builtins + 0 user-defined
-
-runmat> .stats
-Execution Statistics:
-  Total: 2, JIT: 0, Interpreter: 2
-  Average time: 0.12ms
-
-runmat> accel-info
-GPU Acceleration Provider: wgpu
-Device: Apple M2 Max
-Backend: Metal
-Fusion pipeline cache: 45 hits, 2 misses
-```
-
-### First-Class Jupyter Support
-- Rich output formatting with LaTeX math rendering
-- Interactive widgets for parameter exploration  
-- Full debugging support with breakpoints
-
-### Extensible Architecture
-```rust
-// Adding a new builtin function is trivial
-#[runtime_builtin("myfunction")]
-fn my_custom_function(x: f64, y: f64) -> f64 {
-    x.powf(y) + x.sin()
-}
-```
-
-### Advanced CLI Features
-
-RunMat includes a comprehensive CLI with powerful features:
-
-```bash
-# Check GPU acceleration status
-runmat accel-info
-
-# Benchmark a script
-runmat benchmark my_script.m --iterations 5 --jit
-
-# Create a snapshot for faster startup
-runmat snapshot create -o stdlib.snapshot
-
-# GC statistics and control
-runmat gc stats
-runmat gc major
-
-# System information
-runmat info
-```
-
-See [CLI Documentation](https://runmat.com/docs/cli) for the complete command reference.
-
-## 📦 Package System
-
-RunMat's package system enables both systems programmers and MATLAB users to extend the runtime. The core stays lean while packages provide domain-specific functionality.
-
-### Native Packages (Rust)
-
-High-performance built-ins implemented in Rust:
-
-```rust
-#[runtime_builtin(
-    name = "norm2",
-    category = "math/linalg",
-    summary = "Euclidean norm of a vector.",
-    examples = "n = norm2([3,4])  % 5"
-)]
-fn norm2_builtin(a: Value) -> Result<Value, String> {
-    let t: Tensor = (&a).try_into()?;
-    let s = t.data.iter().map(|x| x * x).sum::<f64>().sqrt();
-    Ok(Value::Num(s))
-}
-```
-
-Native packages get type-safe conversions, deterministic error IDs, and zero-cost documentation generation.
-
-### Source Packages (MATLAB)
-
-MATLAB source packages compile to RunMat bytecode:
-
-```matlab
-% +mypackage/norm2.m
-function n = norm2(v)
-    n = sqrt(sum(v .^ 2));
-end
-```
-
-Both package types appear identically to users—functions show up in the namespace, reference docs, and tooling (help, search, doc indexing).
-
-### Package Management
-
-The RunMat package manager is still in active design—no CLI commands ship in the current toolchain yet. The [Package Manager Documentation](https://runmat.com/docs/package-manager) captures the proposed workflow (dependency manifests, registry + git sources, publishing flow) and will be updated once the implementation begins.
+---
 
 ## 💡 Design Philosophy
 
-RunMat follows a **minimal core, fast runtime, open extension model** philosophy:
+RunMat follows a **fast-by-default runtime, open extension model** philosophy:
 
-### Core Principles
-
-- **Full language support**: The core implements the complete MATLAB grammar and semantics, not a subset
-- **Extensive built-ins**: The standard library aims for complete base MATLAB built-in coverage (200+ functions)
+- **High-fidelity language coverage**: Core MATLAB syntax, operators, control flow, OOP, and indexing — not a subset, not a new language
+- **Extensive built-ins**: 300+ functions covering core MATLAB built-ins, with more added continuously
 - **Tiered execution**: Ignition interpreter for fast startup, Turbine JIT for hot code
 - **GPU-first math**: Fusion engine automatically turns MATLAB code into fast GPU workloads
-- **Small, portable runtime**: Single static binary, fast startup, modern CLI, Jupyter kernel support
-- **Toolboxes as packages**: Signal processing, statistics, image processing, and other domains live as packages
+- **Single portable binary**: One static binary includes the runtime, GPU engine, and plotting — fast startup, modern CLI, Jupyter kernel support
+- **Toolboxes as packages**: Signal processing, statistics, image processing, and other domains live as packages — the package manager is [in active design](https://runmat.com/docs/package-manager)
 
-### What RunMat Is
-
-- A modern, high-performance runtime for MATLAB code
-- A minimal core with a thriving package ecosystem
-- GPU-accelerated by default with intelligent CPU/GPU routing
-- Open source and free forever
-
-### What RunMat Is Not
-
-- A reimplementation of MATLAB-in-full (toolboxes are packages)
-- A compatibility layer (we implement semantics, not folklore)
-- An IDE (use any editor: Cursor, VSCode, IntelliJ, etc.)
-
-RunMat keeps the core small and uncompromisingly high-quality; everything else is a package. This enables:
-- Fast iteration without destabilizing the runtime
-- Domain experts shipping features without forking
-- A smaller trusted compute base, easier auditing
-- Community-driven package ecosystem
+The runtime intentionally ships GPU acceleration, fusion, JIT, and plotting as first-class subsystems rather than optional plugins — this is what makes RunMat fast by default. Domain-specific toolboxes (signal processing, statistics, image processing, etc.) live as packages. Use any editor you like, or the built-in [browser IDE](https://runmat.com/sandbox) and upcoming desktop app.
 
 See [Design Philosophy](https://runmat.com/docs/design-philosophy) for the complete design rationale.
+
+---
 
 ## 🌍 Who Uses RunMat?
 
 RunMat is built for array-heavy math in many domains.
-
-Examples: 
 
 <div align="center">
 <table>
@@ -479,6 +402,53 @@ MATLAB background, need faster runs on laptops or clusters
 </div>
 
 If you write math in MATLAB and hit performance walls on CPU, RunMat is built for you.
+
+---
+
+## 📚 Quick links
+
+- **Getting started**
+  - [Installation](https://runmat.com/docs/getting-started)
+  - [Browser sandbox](https://runmat.com/sandbox)
+  - [CLI reference](docs/CLI.md)
+  - [Configuration](docs/CONFIG.md)
+
+- **Language & runtime**
+  - [Language reference](docs/LANGUAGE.md)
+  - [Language coverage](docs/LANGUAGE_COVERAGE.md)
+  - [Built-in function library](docs/LIBRARY.md)
+  - [Design philosophy](docs/DESIGN_PHILOSOPHY.md)
+
+- **GPU acceleration**
+  - [Introduction to RunMat GPU](docs/INTRODUCTION_TO_RUNMAT_GPU.md)
+  - [GPU behavior notes](docs/GPU_BEHAVIOR_NOTES.md)
+  - [Fusion & auto-offload](https://runmat.com/docs/accelerate/fusion-intro)
+
+- **Plotting**
+  - [Plotting guide](docs/PLOTTING.md)
+
+- **Runtime architecture**
+  - [Architecture overview](docs/ARCHITECTURE.md)
+  - [Async design](docs/ARCH_ASYNC.md)
+  - [Filesystem](docs/FILESYSTEM.md)
+  - [Roadmap](docs/ROADMAP.md)
+
+- **Embedding & integration**
+  - [NPM package (`runmat`)](bindings/ts/README.md)
+  - [Browser sandbox guide](docs/DESKTOP_BROWSER_GUIDE.md)
+
+- **Contributing**
+  - [Contributing guide](docs/CONTRIBUTING.md)
+  - [Developer setup](docs/DEVELOPING.md)
+
+- **Blog**
+  - [Introducing RunMat](https://runmat.com/blog/introducing-runmat)
+  - [Why Rust](https://runmat.com/blog/why-rust)
+  - [MATLAB Alternatives 2026](https://runmat.com/blog/matlab-alternatives)
+  - [How to Use GPUs in MATLAB](https://runmat.com/blog/how-to-use-gpu-in-matlab)
+  - [In Defense of MATLAB Whiteboard-Style Code](https://runmat.com/blog/in-defense-of-matlab-whiteboard-style-code)
+
+---
 
 ## 🤝 Join the mission
 
@@ -526,17 +496,22 @@ RunMat is more than just software—it's a movement toward **open, fast, and acc
 ### 💬 Connect With Us
 
 - **GitHub Discussions**: [Share ideas and get help](https://github.com/runmat-org/runmat/discussions)  
-- **Twitter**: [@dystreng](https://x.com/dystreng) for updates and announcements
+- **X (Twitter)**: [@runmat_com](https://x.com/runmat_com) for updates and announcements  
+- **LinkedIn**: [RunMat](https://www.linkedin.com/company/runmat)
+
+---
 
 ## 📜 License
 
-RunMat is licensed under the **MIT License with Attribution Requirements**. This means:
+The RunMat runtime is open source and licensed under the **MIT License with Attribution Requirements**. This means:
 
 ✅ **Free for everyone** - individuals, academics, most companies  
-✅ **Open source forever** - no vendor lock-in or license fees  
+✅ **Open source forever** - the runtime will always be free and open  
 ✅ **Commercial use allowed** - embed in your products freely  
 ⚠️ **Attribution required** - credit "RunMat by Dystr" in public distributions  
 ⚠️ **Special provisions** - large scientific software companies must keep modifications open source  
+
+RunMat Cloud and the desktop app are separate products built on top of this open-source runtime. See [runmat.com/pricing](https://runmat.com/pricing) for details.
 
 See [LICENSE.md](LICENSE.md) for complete terms or visit [runmat.com/license](https://runmat.com/license) for FAQs.
 
@@ -546,7 +521,7 @@ See [LICENSE.md](LICENSE.md) for complete terms or visit [runmat.com/license](ht
 
 ⭐ **Star us on GitHub** if RunMat is useful to you.
 
-[**🚀 Get Started**](https://runmat.com/docs/getting-started) • [**🐦 Follow @dystr**](https://x.com/dystrEng)
+[**🚀 Get Started**](https://runmat.com/docs/getting-started) • [**📖 Docs**](https://runmat.com/docs) • [**📝 Blog**](https://runmat.com/blog) • [**💰 Pricing**](https://runmat.com/pricing) • [**𝕏 @runmat_com**](https://x.com/runmat_com) • [**LinkedIn**](https://www.linkedin.com/company/runmat)
 
 ---
 

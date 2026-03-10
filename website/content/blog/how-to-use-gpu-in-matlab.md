@@ -60,8 +60,17 @@ jsonLd:
       about:
         - "@type": "SoftwareApplication"
           name: "MATLAB"
+          applicationCategory: "ScientificApplication"
+          operatingSystem: "Windows, Linux, macOS"
         - "@type": "SoftwareApplication"
           "@id": "https://runmat.com/#software"
+          name: "RunMat"
+          applicationCategory: "ScientificApplication"
+          operatingSystem: "Browser, Windows, Linux, macOS"
+          offers:
+            "@type": "Offer"
+            price: "0"
+            priceCurrency: "USD"
       speakable:
         "@type": "SpeakableSpecification"
         cssSelector: ["h1"]

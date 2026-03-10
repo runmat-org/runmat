@@ -31,7 +31,7 @@ export function ContentCard({
       <Card className="group overflow-hidden transition-all hover:shadow-lg cursor-pointer h-full flex flex-col">
         <CardContent className="p-5 flex flex-col h-full gap-0">
           {image ? (
-            <div className="relative w-full h-40 rounded-lg mb-3 overflow-hidden flex-shrink-0 bg-muted/10 border border-border/50">
+            <div className="relative w-full h-40 rounded-lg mb-3 overflow-hidden flex-shrink-0">
               <Image
                 src={image}
                 alt={imageAlt ?? title}
@@ -69,6 +69,7 @@ export function ContentCard({
                 year: "numeric",
                 month: "short",
                 day: "numeric",
+                timeZone: "UTC",
               })}
             </p>
           )}

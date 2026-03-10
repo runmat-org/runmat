@@ -49,15 +49,13 @@ jsonLd:
         "@type": "Person"
         name: "Nabeel Allana"
         url: "https://x.com/nabeelallana"
-        sameAs: ["https://dystr.com/about"]
+        sameAs: ["https://runmat.com/about"]
       publisher:
         "@type": "Organization"
-        name: "Dystr Inc."
+        name: "RunMat by Dystr"
         logo:
           "@type": "ImageObject"
           url: "/runmat-logo.svg"
-          width: 600
-          height: 60
       about:
         - "@type": "SoftwareApplication"
           name: "RunMat"
