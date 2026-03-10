@@ -91,7 +91,7 @@ Most persistence incidents happen at boundaries, not in math kernels.
 
 ### Boundary 1: process/transport hops
 
-When you move large payloads between runtime contexts (UI thread <-> worker, IPC, API), latency and memory amplification appear quickly.
+When you move large payloads between runtime contexts (UI thread &lt;-&gt; worker, IPC, API), latency and memory amplification appear quickly.
 
 Rules of thumb teams run into:
 
