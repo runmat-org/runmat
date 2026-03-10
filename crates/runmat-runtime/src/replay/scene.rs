@@ -100,7 +100,7 @@ pub fn decode_figure_scene_payload_with_limits(
     let payload: FigureScenePayload = serde_json::from_value(payload_json).map_err(|err| {
         replay_error_with_source(
             ReplayErrorKind::DecodeFailed,
-            "failed to decode hydrated figure replay payload",
+            format!("failed to decode hydrated figure replay payload: {err}"),
             err,
         )
     })?;

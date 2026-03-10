@@ -135,12 +135,36 @@ Ad-hoc checkpoints solve one run for one engineer. They do not solve repeated co
 
 Most persistence incidents happen at boundaries, not in math kernels.
 
-```mermaid
-flowchart LR
-    runtime["Runtime"] -->|"sub-10 MB: routine"| ipc["IPC / Transport"]
-    ipc -->|"100 MB+: timeouts"| network["Network"]
-    network -->|"1 Gbps = 125 MB/s"| storage["Storage"]
-```
+### Boundary 1: process/transport hops
+
+When you move large payloads between runtime contexts (UI thread &lt;-&gt; worker, IPC, API), latency and memory amplification appear quickly.
+
+Rules of thumb teams run into:
+
+- Sub-10 MB payloads are usually routine.
+- Tens of MB payloads begin to create visible UI/IPC jitter.
+- 100 MB+ single messages are where timeout/retry patterns become common.
+
+Even if raw bandwidth exists, tail latency and buffering behavior dominate reliability.
+
+### Boundary 2: network
+
+You can compute much faster than you can move data over typical team links.
+
+- 1 Gbps network ~= 125 MB/s theoretical
+- 10 Gbps network ~= 1.25 GB/s theoretical
+
+A 2 GB artifact can be "trivial" in memory terms and still be expensive to move repeatedly across teammates or CI runners.
+
+### Boundary 3: storage device and write shape
+
+Write shape matters as much as byte count.
+
+- NVMe can sustain high throughput for large sequential writes,
+- but repeated small writes and metadata churn increase overhead,
+- and monolithic blobs are harder to retry and recover from than chunked object writes.
+
+### Boundary 4: workspace/runtime memory
 
 ### Process and transport hops
 
