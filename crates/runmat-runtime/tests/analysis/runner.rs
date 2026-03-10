@@ -64,6 +64,14 @@ fn nonlinear_options_for_spec(spec: &FixtureSpec) -> AnalysisNonlinearRunOptions
     if let Some(value) = env_usize("RUNMAT_NONLINEAR_TANGENT_REFRESH_INTERVAL") {
         options.tangent_refresh_interval = value.max(1);
     }
+    if spec.id == "nonlinear_load_path_mix_gpu_provider" {
+        options.thermo_mechanical_coupling = Some(ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 75.0,
+            thermal_expansion_coefficient: 1.2e-5,
+        });
+    }
 
     options
 }
@@ -1164,6 +1172,16 @@ pub(super) fn run_fixture(
                             nonlinear_iteration_spike_count,
                             Some(0.0),
                             Some(10.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_nonlinear_severity",
+                            "FEA_TM_NONLINEAR",
+                            diagnostic_metric(&gpu_envelope.data, "FEA_TM_NONLINEAR", "severity"),
+                            Some(0.0),
+                            Some(0.2),
                         );
                     }
 

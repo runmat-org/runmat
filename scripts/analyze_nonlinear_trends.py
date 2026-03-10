@@ -63,6 +63,9 @@ def collect_metrics(reports, window):
                     else threshold_value(record, "nonlinear_path_mix_total_increments"),
                     "publishable": bool(record.get("publishable", False)),
                     "prep_acceptance_score": record.get("prep_acceptance_score"),
+                    "thermo_coupling_enabled": record.get("thermo_coupling_enabled"),
+                    "thermo_transient_severity": record.get("thermo_transient_severity"),
+                    "thermo_nonlinear_severity": record.get("thermo_nonlinear_severity"),
                 }
             )
     return fixture_samples
@@ -70,11 +73,13 @@ def collect_metrics(reports, window):
 
 def summarize(samples):
     lines = ["## Nonlinear Trend Summary", ""]
-    lines.append("| Fixture | Samples | Median GPU ms | Median speedup | Publishable rate | Median acceptance score |")
-    lines.append("| --- | ---: | ---: | ---: | ---: | ---: |")
+    lines.append(
+        "| Fixture | Samples | Median GPU ms | Median speedup | Publishable rate | Median acceptance score | Thermo enabled rate | Median thermo transient sev | Median thermo nonlinear sev |"
+    )
+    lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
     for fixture, values in sorted(samples.items()):
         if not values:
-            lines.append(f"| {fixture} | 0 | - | - | - |")
+            lines.append(f"| {fixture} | 0 | - | - | - | - | - | - | - |")
             continue
         gpu = [v["gpu_run_ms"] for v in values if isinstance(v["gpu_run_ms"], (int, float))]
         speedup = [
@@ -88,14 +93,44 @@ def summarize(samples):
             for v in values
             if isinstance(v.get("prep_acceptance_score"), (int, float))
         ]
+        thermo_enabled_values = [
+            v["thermo_coupling_enabled"]
+            for v in values
+            if isinstance(v.get("thermo_coupling_enabled"), bool)
+        ]
+        thermo_transient_values = [
+            v["thermo_transient_severity"]
+            for v in values
+            if isinstance(v.get("thermo_transient_severity"), (int, float))
+        ]
+        thermo_nonlinear_values = [
+            v["thermo_nonlinear_severity"]
+            for v in values
+            if isinstance(v.get("thermo_nonlinear_severity"), (int, float))
+        ]
         lines.append(
-            "| {} | {} | {} | {} | {:.2f} | {} |".format(
+            "| {} | {} | {} | {} | {:.2f} | {} | {} | {} | {} |".format(
                 fixture,
                 len(values),
                 f"{statistics.median(gpu):.3f}" if gpu else "-",
                 f"{statistics.median(speedup):.3f}" if speedup else "-",
                 publishable_rate,
                 f"{statistics.median(acceptance_scores):.3f}" if acceptance_scores else "-",
+                (
+                    f"{sum(1 for v in thermo_enabled_values if v) / len(thermo_enabled_values):.3f}"
+                    if thermo_enabled_values
+                    else "-"
+                ),
+                (
+                    f"{statistics.median(thermo_transient_values):.3f}"
+                    if thermo_transient_values
+                    else "-"
+                ),
+                (
+                    f"{statistics.median(thermo_nonlinear_values):.3f}"
+                    if thermo_nonlinear_values
+                    else "-"
+                ),
             )
         )
     return "\n".join(lines)

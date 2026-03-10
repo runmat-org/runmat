@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -24,8 +25,26 @@ REQUIRED_FIXTURES = {
         "nonlinear_path_mix_total_increments",
         "nonlinear_path_mix_max_backtracks_per_increment",
         "nonlinear_path_mix_backtrack_bursts",
+        "thermo_nonlinear_severity",
+    },
+    "thermo_mech_kickoff_gpu_provider": {
+        "thermo_mech_thermal_strain_scale",
+        "thermo_mech_thermal_load_scale",
+        "thermo_mech_transient_severity",
+        "thermo_mech_transient_residual_relaxation",
     },
 }
+
+THERMO_REQUIRED_FIELDS = {
+    "thermo_coupling_enabled",
+    "thermo_coupling_fingerprint",
+    "thermo_transient_severity",
+    "thermo_nonlinear_severity",
+}
+
+
+def is_true(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
 def main() -> int:
@@ -39,6 +58,9 @@ def main() -> int:
         return 1
 
     report = json.loads(path.read_text())
+    require_thermo_summary = is_true(
+        os.getenv("RUNMAT_VALIDATE_REQUIRE_THERMO_SUMMARY", "false")
+    )
     records = {
         record.get("fixture_id"): record
         for record in report.get("records", [])
@@ -60,6 +82,31 @@ def main() -> int:
         if missing:
             errors.append(
                 f"fixture {fixture_id} missing threshold assertions: {', '.join(missing)}"
+            )
+
+        if fixture_id in {
+            "thermo_mech_kickoff_gpu_provider",
+            "nonlinear_load_path_mix_gpu_provider",
+        }:
+            missing_fields = sorted(
+                field for field in THERMO_REQUIRED_FIELDS if field not in record
+            )
+            if missing_fields:
+                errors.append(
+                    f"fixture {fixture_id} missing thermo summary fields: {', '.join(missing_fields)}"
+                )
+
+    if require_thermo_summary:
+        thermo_records = [
+            record
+            for record in records.values()
+            if isinstance(record.get("thermo_coupling_enabled"), bool)
+            or isinstance(record.get("thermo_transient_severity"), (int, float))
+            or isinstance(record.get("thermo_nonlinear_severity"), (int, float))
+        ]
+        if not thermo_records:
+            errors.append(
+                "thermo summary fields missing across all records while RUNMAT_VALIDATE_REQUIRE_THERMO_SUMMARY=true"
             )
 
     if errors:

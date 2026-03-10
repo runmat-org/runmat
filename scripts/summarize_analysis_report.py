@@ -7,7 +7,11 @@ from pathlib import Path
 NONLINEAR_FIXTURES = (
     "nonlinear_assembly_gpu_provider",
     "nonlinear_assembly_stress_gpu_provider",
+    "nonlinear_softening_proxy_gpu_provider",
+    "nonlinear_load_path_mix_gpu_provider",
 )
+
+THERMO_FIXTURE = "thermo_mech_kickoff_gpu_provider"
 
 
 def threshold_map(record):
@@ -42,9 +46,11 @@ def build_summary(report):
     )
     lines.append("")
     lines.append(
-        "| Fixture | Publishable | GPU ms | Speedup | Failed increments | Backtracks | Tangent rebuilds | Calibration profile | Acceptance score |"
+        "| Fixture | Publishable | GPU ms | Speedup | Failed increments | Backtracks | Tangent rebuilds | Calibration profile | Acceptance score | Thermo enabled | Thermo transient sev | Thermo nonlinear sev |"
     )
-    lines.append("| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: |")
+    lines.append(
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- | ---: | ---: |"
+    )
 
     for fixture_id in NONLINEAR_FIXTURES:
         record = records_by_id.get(fixture_id)
@@ -68,7 +74,7 @@ def build_summary(report):
             tangent = tmap.get("nonlinear_tangent_rebuild_count", {}).get("observed")
 
         lines.append(
-            "| {} | {} | {} | {} | {} | {} | {} |".format(
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
                 fixture_id,
                 record.get("publishable", "-"),
                 format_num(record.get("gpu_run_ms")),
@@ -78,6 +84,23 @@ def build_summary(report):
                 format_num(tangent),
                 record.get("prep_calibration_profile", "-"),
                 format_num(record.get("prep_acceptance_score")),
+                record.get("thermo_coupling_enabled", "-"),
+                format_num(record.get("thermo_transient_severity")),
+                format_num(record.get("thermo_nonlinear_severity")),
+            )
+        )
+
+    lines.append("")
+    lines.append("### Thermo Kickoff")
+    thermo_record = records_by_id.get(THERMO_FIXTURE)
+    if thermo_record is None:
+        lines.append(f"- `{THERMO_FIXTURE}`: missing")
+    else:
+        lines.append(
+            "- enabled={} transient_severity={} nonlinear_severity={}".format(
+                thermo_record.get("thermo_coupling_enabled", "-"),
+                format_num(thermo_record.get("thermo_transient_severity")),
+                format_num(thermo_record.get("thermo_nonlinear_severity")),
             )
         )
 

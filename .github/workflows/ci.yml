@@ -281,6 +281,12 @@ jobs:
       - name: Validate nonlinear benchmark report keys
         run: python3 scripts/validate_analysis_report_nonlinear.py
 
+      - name: Enforce thermo summary presence on thermo-gated branches
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')
+        env:
+          RUNMAT_VALIDATE_REQUIRE_THERMO_SUMMARY: "true"
+        run: python3 scripts/validate_analysis_report_nonlinear.py
+
       - name: Mark artifact compatibility verification passed
         if: success()
         run: echo "RUNMAT_RELEASE_READINESS_ARTIFACT_COMPAT_OK=true" >> "$GITHUB_ENV"

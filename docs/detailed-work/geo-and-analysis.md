@@ -965,14 +965,18 @@ Harness override environment variables:
   - test failure, or
   - protected branch push (`main` / `release/*`).
 - CI emits a compact nonlinear summary from `analysis_benchmark_report.json` into the job summary using `scripts/summarize_analysis_report.py`.
+  - summary output now includes thermo posture columns (`thermo_coupling_enabled`, transient/nonlinear severities) and a dedicated thermo kickoff line.
 - CI also evaluates rolling nonlinear trends with `scripts/analyze_nonlinear_trends.py`:
   - window: `RUNMAT_ANALYSIS_TREND_WINDOW` (default `8`),
   - slowdown threshold: `RUNMAT_ANALYSIS_TREND_MAX_SLOWDOWN_RATIO` (default `1.25`),
-  - warning on non-protected branches, fail-on-threshold for protected branches.
+  - warning on non-protected branches, fail-on-threshold for protected branches,
+  - trend summary includes thermo enabled-rate and thermo severity medians when available.
 - CI evaluates final nonlinear release readiness via `scripts/release_readiness_nonlinear.py`, producing:
   - machine-readable output: `target/runmat-analysis-artifacts/nonlinear_release_readiness.json`,
   - human summary appended to step summary (including thermo posture metrics when available),
   - verdict semantics: `pass` / `warn` / `fail`.
+- CI schema validation for nonlinear artifacts (`scripts/validate_analysis_report_nonlinear.py`) now also verifies thermo fixture threshold assertions and thermo summary-field presence on thermo-enabled records.
+- On thermo-gated branches (`main`, `release/*`), CI runs an additional strict validator pass with `RUNMAT_VALIDATE_REQUIRE_THERMO_SUMMARY=true` to fail fast if thermo summary fields disappear from the benchmark report.
 
 ### Nonlinear Regression Triage
 
@@ -1375,6 +1379,8 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-09: Added branch-scoped CI thermo safety check by introducing strict validator mode (`RUNMAT_VALIDATE_REQUIRE_THERMO_SUMMARY=true`) in `validate_analysis_report_nonlinear.py` and wiring a dedicated `main`/`release/*` CI step to fail fast when thermo summary fields disappear from conformance artifacts.
+- 2026-03-09: Closed the thermo governance artifact loop by extending nonlinear conformance records with thermo posture summary fields, adding thermo schema checks to `validate_analysis_report_nonlinear.py`, surfacing thermo posture in conformance/trend summaries, and adding nonlinear thermo severity threshold gating (`thermo_nonlinear_severity`) in the path-mix fixture harness.
 - 2026-03-09: Extended nonlinear release-readiness governance to consume thermo summary/trend metrics directly from conformance report records by adding thermo posture fields to harness report records (`thermo_coupling_enabled`/fingerprint/severity metrics) and adding branch-profile thermo thresholds/reason codes in `scripts/release_readiness_nonlinear.py` (`THERMO_*`) with unit-test coverage.
 - 2026-03-09: Added thermo-coupling posture summary surfaces by extending `analysis.results` summary fields (`thermo_coupling_enabled`/fingerprint and thermo transient/nonlinear severity metrics) and `analysis.trends` kind summaries (thermo coupling enabled-rate and thermo warning-rate metrics), with contract snapshot and typed trend/result coverage updates.
 - 2026-03-09: Extended Phase-1 thermo-mechanical runtime governance by mapping thermo-solver warning diagnostics into explicit quality-policy reasons (`ThermoMechanicalTransientStress`, `ThermoMechanicalNonlinearStress`) and adding benchmark threshold gates for `FEA_TM_TRANSIENT` severity/relaxation metrics on the kickoff fixture.
