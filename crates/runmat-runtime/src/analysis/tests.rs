@@ -839,6 +839,8 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 65.0,
                 thermal_expansion_coefficient: 1.2e-5,
+                region_temperature_deltas: Vec::new(),
+                time_profile: Vec::new(),
             }),
             ..AnalysisTransientRunOptions::default()
         },
@@ -897,6 +899,8 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 80.0,
                 thermal_expansion_coefficient: 1.2e-5,
+                region_temperature_deltas: Vec::new(),
+                time_profile: Vec::new(),
             }),
             ..AnalysisNonlinearRunOptions::production_recommended()
         },
@@ -1733,6 +1737,8 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 90.0,
                 thermal_expansion_coefficient: 1.0e-3,
+                region_temperature_deltas: Vec::new(),
+                time_profile: Vec::new(),
             }),
             ..AnalysisNonlinearRunOptions::production_recommended()
         },
@@ -1768,6 +1774,8 @@ fn nonlinear_balanced_degrades_when_thermo_heterogeneity_is_high() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 90.0,
                 thermal_expansion_coefficient: 1.2e-5,
+                region_temperature_deltas: Vec::new(),
+                time_profile: Vec::new(),
             }),
             ..AnalysisNonlinearRunOptions::production_recommended()
         },
@@ -1997,6 +2005,8 @@ fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 90.0,
                 thermal_expansion_coefficient: 1.0e-3,
+                region_temperature_deltas: Vec::new(),
+                time_profile: Vec::new(),
             }),
             ..AnalysisTransientRunOptions::default()
         },
@@ -2034,6 +2044,8 @@ fn transient_balanced_degrades_when_thermo_heterogeneity_is_high() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 90.0,
                 thermal_expansion_coefficient: 1.2e-5,
+                region_temperature_deltas: Vec::new(),
+                time_profile: Vec::new(),
             }),
             ..AnalysisTransientRunOptions::default()
         },

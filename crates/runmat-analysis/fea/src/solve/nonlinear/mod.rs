@@ -8,7 +8,7 @@ use crate::{
     ComputeBackend, FeaPrepContext, FeaThermoMechanicalContext,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NonlinearSolveOptions {
     pub increment_count: usize,
     pub max_newton_iters: usize,
@@ -122,7 +122,7 @@ pub fn solve_nonlinear_system(
             adapt_nonconverged_shrink: 1.0,
             dt_bucket_rel_tolerance: 0.0,
             prep_context: options.prep_context,
-            thermo_mechanical_context: options.thermo_mechanical_context,
+            thermo_mechanical_context: options.thermo_mechanical_context.clone(),
         },
         backend,
     );
@@ -130,14 +130,10 @@ pub fn solve_nonlinear_system(
     let load_factors = (1..=options.increment_count)
         .map(|idx| idx as f64 / options.increment_count as f64)
         .collect::<Vec<_>>();
-    let thermo_severity = thermo_mechanical_severity(options.thermo_mechanical_context);
-    let thermo_residual_relaxation = 1.0 + 2.0 * thermo_severity;
-    let thermo_increment_relaxation = 1.0 + 1.4 * thermo_severity;
-    let convergence_residual_target = options.tolerance
-        * options.residual_convergence_factor.max(1.0)
-        * thermo_residual_relaxation;
-    let convergence_increment_target =
-        options.increment_norm_tolerance * thermo_increment_relaxation;
+    let thermo_severity_base =
+        thermo_mechanical_severity(options.thermo_mechanical_context.clone());
+    let thermo_temporal_variation =
+        thermo_temporal_profile_variation(options.thermo_mechanical_context.clone());
     let line_search_reduction = options.line_search_reduction.clamp(0.05, 0.95);
     let tangent_refresh_interval = options.tangent_refresh_interval.max(1);
 
@@ -158,8 +154,28 @@ pub fn solve_nonlinear_system(
     let complexity_scale = ((summary.load_count as f64 / 512.0).max(1.0))
         * ((summary.dof_count as f64 / 384.0).max(1.0));
     let burst_backtrack_threshold = (options.max_line_search_backtracks / 2).max(2);
+    let mut thermo_severity_peak = 0.0_f64;
+    let mut thermo_time_scale_sum = 0.0_f64;
+    let mut thermo_residual_target_peak = options.tolerance;
+    let mut thermo_increment_target_peak = options.increment_norm_tolerance;
 
     for index in 0..options.increment_count {
+        let load_factor = load_factors.get(index).copied().unwrap_or(1.0);
+        let thermo_time_scale =
+            thermo_time_scale(options.thermo_mechanical_context.clone(), load_factor);
+        let thermo_severity = (thermo_severity_base * thermo_time_scale).clamp(0.0, 1.0);
+        let thermo_residual_relaxation = 1.0 + 2.0 * thermo_severity;
+        let thermo_increment_relaxation = 1.0 + 1.4 * thermo_severity;
+        let convergence_residual_target = options.tolerance
+            * options.residual_convergence_factor.max(1.0)
+            * thermo_residual_relaxation;
+        let convergence_increment_target =
+            options.increment_norm_tolerance * thermo_increment_relaxation;
+        thermo_severity_peak = thermo_severity_peak.max(thermo_severity);
+        thermo_time_scale_sum += thermo_time_scale;
+        thermo_residual_target_peak = thermo_residual_target_peak.max(convergence_residual_target);
+        thermo_increment_target_peak =
+            thermo_increment_target_peak.max(convergence_increment_target);
         let candidate = transient
             .displacement_snapshots
             .get(index)
@@ -304,7 +320,7 @@ pub fn solve_nonlinear_system(
             max_iteration_count,
             mean_iteration_count,
             options.tolerance,
-            convergence_residual_target,
+            thermo_residual_target_peak,
             max_residual_norm,
             max_increment_norm,
             line_search_backtracks,
@@ -323,21 +339,25 @@ pub fn solve_nonlinear_system(
             transient_prepared_build_ms, solve_ms, transient_fallback_apply_count
         ),
     });
-    if thermo_severity > 0.0 {
+    if thermo_severity_peak > 0.0 {
         diagnostics.push(FeaDiagnostic {
             code: "FEA_TM_NONLINEAR".to_string(),
-            severity: if thermo_severity <= 0.6 {
+            severity: if thermo_severity_peak <= 0.6 && thermo_temporal_variation <= 0.5 {
                 FeaDiagnosticSeverity::Info
             } else {
                 FeaDiagnosticSeverity::Warning
             },
             message: format!(
-                "severity={} residual_relaxation={} increment_relaxation={} convergence_residual_target={} convergence_increment_target={}",
-                thermo_severity,
-                thermo_residual_relaxation,
-                thermo_increment_relaxation,
-                convergence_residual_target,
-                convergence_increment_target,
+                "severity_peak={} time_scale_mean={} temporal_variation={} convergence_residual_target_peak={} convergence_increment_target_peak={}",
+                thermo_severity_peak,
+                if options.increment_count == 0 {
+                    1.0
+                } else {
+                    thermo_time_scale_sum / options.increment_count as f64
+                },
+                thermo_temporal_variation,
+                thermo_residual_target_peak,
+                thermo_increment_target_peak,
             ),
         });
     }
@@ -400,4 +420,51 @@ fn thermo_mechanical_severity(context: Option<FeaThermoMechanicalContext>) -> f6
         * context.applied_temperature_delta_k.abs())
     .clamp(0.0, 0.05);
     (thermal_strain / 0.05).clamp(0.0, 1.0)
+}
+
+fn thermo_time_scale(context: Option<FeaThermoMechanicalContext>, normalized_time: f64) -> f64 {
+    let Some(context) = context else {
+        return 1.0;
+    };
+    if context.time_profile.is_empty() {
+        return 1.0;
+    }
+    let t = normalized_time.clamp(0.0, 1.0);
+    let mut points = context.time_profile;
+    points.sort_by(|a, b| a.normalized_time.total_cmp(&b.normalized_time));
+    if t <= points[0].normalized_time {
+        return points[0].scale.clamp(0.2, 2.0);
+    }
+    for pair in points.windows(2) {
+        let a = &pair[0];
+        let b = &pair[1];
+        if t >= a.normalized_time && t <= b.normalized_time {
+            let span = (b.normalized_time - a.normalized_time).abs().max(1.0e-9);
+            let alpha = (t - a.normalized_time) / span;
+            return (a.scale + (b.scale - a.scale) * alpha).clamp(0.2, 2.0);
+        }
+    }
+    points
+        .last()
+        .map(|p| p.scale.clamp(0.2, 2.0))
+        .unwrap_or(1.0)
+}
+
+fn thermo_temporal_profile_variation(context: Option<FeaThermoMechanicalContext>) -> f64 {
+    let Some(context) = context else {
+        return 0.0;
+    };
+    if context.time_profile.len() < 2 {
+        return 0.0;
+    }
+    let mut min_scale = f64::INFINITY;
+    let mut max_scale = -f64::INFINITY;
+    for point in &context.time_profile {
+        min_scale = min_scale.min(point.scale);
+        max_scale = max_scale.max(point.scale);
+    }
+    if !min_scale.is_finite() || !max_scale.is_finite() {
+        return 0.0;
+    }
+    ((max_scale - min_scale).abs() / 2.0).clamp(0.0, 1.0)
 }

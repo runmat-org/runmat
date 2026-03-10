@@ -36,7 +36,7 @@ REQUIRED_FIXTURES = {
         "thermo_mech_material_spread_ratio",
         "thermo_mech_assignment_heterogeneity_index",
         "thermo_mech_transient_severity",
-        "thermo_mech_transient_residual_relaxation",
+        "thermo_mech_transient_time_scale_mean",
     },
     "thermo_gradient_benign_gpu_provider": {
         "thermo_gradient_benign_spread_ratio",
@@ -45,6 +45,15 @@ REQUIRED_FIXTURES = {
     "thermo_gradient_pathological_gpu_provider": {
         "thermo_gradient_pathological_spread_ratio",
         "thermo_gradient_pathological_heterogeneity",
+        "thermo_gradient_pathological_temporal_variation",
+    },
+    "thermo_ramp_smooth_gpu_provider": {
+        "thermo_ramp_smooth_temporal_variation",
+        "thermo_ramp_smooth_spatial_gradient_index",
+    },
+    "thermo_shock_oscillatory_gpu_provider": {
+        "thermo_shock_oscillatory_temporal_variation",
+        "thermo_shock_oscillatory_spatial_gradient_index",
     },
 }
 
@@ -105,6 +114,8 @@ def main() -> int:
             "thermo_mech_kickoff_gpu_provider",
             "thermo_gradient_benign_gpu_provider",
             "thermo_gradient_pathological_gpu_provider",
+            "thermo_ramp_smooth_gpu_provider",
+            "thermo_shock_oscillatory_gpu_provider",
             "nonlinear_load_path_mix_gpu_provider",
         }:
             missing_fields = sorted(

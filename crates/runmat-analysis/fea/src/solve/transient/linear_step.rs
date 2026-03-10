@@ -36,7 +36,7 @@ pub(super) fn solve_implicit_step_system(
     summary: &AssemblySummary,
     rhs: &[f64],
     dt: f64,
-    options: TransientSolveOptions,
+    options: &TransientSolveOptions,
     use_runtime_tensor: bool,
     prepared_runtime_systems_by_dt: &mut HashMap<u64, RuntimeTensorPreparedLinearSystem>,
     prepared_runtime_system_lru: &mut VecDeque<u64>,

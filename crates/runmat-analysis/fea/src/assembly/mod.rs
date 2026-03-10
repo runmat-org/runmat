@@ -136,6 +136,9 @@ pub struct ThermoMechanicalAssemblySummary {
     pub effective_modulus_scale: f64,
     pub constitutive_material_spread_ratio: f64,
     pub assignment_heterogeneity_index: f64,
+    pub spatial_gradient_index: f64,
+    pub temporal_profile_variation: f64,
+    pub region_delta_count: usize,
     pub coupling_fingerprint: u64,
 }
 
@@ -547,6 +550,9 @@ pub fn assemble_linear_system(
                 context.applied_temperature_delta_k,
                 &mut dof_adjustments,
             );
+            let spatial_gradient_index =
+                apply_thermo_spatial_field(&context, dof_count, &mut dof_adjustments);
+            let temporal_profile_variation = thermo_temporal_profile_variation(&context);
             let mut local_modulus_scales = vec![effective_modulus_scale; dof_count];
             for i in 0..dof_count {
                 let thermal_bias = 1.0 + thermal_strain_scale * (1.0 + (i % 3) as f64 * 0.1);
@@ -585,14 +591,19 @@ pub fn assemble_linear_system(
                 effective_modulus_scale,
                 constitutive_material_spread_ratio,
                 assignment_heterogeneity_index,
+                spatial_gradient_index,
+                temporal_profile_variation,
+                region_delta_count: context.region_temperature_deltas.len(),
                 coupling_fingerprint: thermo_mechanical_fingerprint(
-                    context,
+                    &context,
                     dof_count,
                     constitutive_temperature_factor,
                     constitutive_poisson_coupling,
                     effective_modulus_scale,
                     constitutive_material_spread_ratio,
                     assignment_heterogeneity_index,
+                    spatial_gradient_index,
+                    temporal_profile_variation,
                 ),
             });
         }
@@ -1452,13 +1463,15 @@ fn acceptance_fingerprint(
 }
 
 fn thermo_mechanical_fingerprint(
-    context: FeaThermoMechanicalContext,
+    context: &FeaThermoMechanicalContext,
     dof_count: usize,
     constitutive_temperature_factor: f64,
     constitutive_poisson_coupling: f64,
     effective_modulus_scale: f64,
     constitutive_material_spread_ratio: f64,
     assignment_heterogeneity_index: f64,
+    spatial_gradient_index: f64,
+    temporal_profile_variation: f64,
 ) -> u64 {
     let mut hash = 1469598103934665603_u64;
     for value in [
@@ -1471,11 +1484,68 @@ fn thermo_mechanical_fingerprint(
         effective_modulus_scale.to_bits(),
         constitutive_material_spread_ratio.to_bits(),
         assignment_heterogeneity_index.to_bits(),
+        spatial_gradient_index.to_bits(),
+        temporal_profile_variation.to_bits(),
     ] {
         hash ^= value;
         hash = hash.wrapping_mul(1099511628211_u64);
     }
     hash
+}
+
+fn apply_thermo_spatial_field(
+    context: &FeaThermoMechanicalContext,
+    dof_count: usize,
+    dof_adjustments: &mut [f64],
+) -> f64 {
+    if dof_count == 0 || context.region_temperature_deltas.is_empty() {
+        return 0.0;
+    }
+    let mut min_delta = f64::INFINITY;
+    let mut max_delta = -f64::INFINITY;
+    for (idx, region_delta) in context.region_temperature_deltas.iter().enumerate() {
+        min_delta = min_delta.min(region_delta.temperature_delta_k);
+        max_delta = max_delta.max(region_delta.temperature_delta_k);
+        let normalized = ((region_delta.temperature_delta_k - context.applied_temperature_delta_k)
+            / 240.0)
+            .clamp(-0.45, 0.45);
+        let start =
+            ((region_hash(&region_delta.region_id) as usize).wrapping_add(idx * 5)) % dof_count;
+        let stride = context
+            .region_temperature_deltas
+            .len()
+            .saturating_add(3)
+            .max(2);
+        let mut cursor = start;
+        for hop in 0..dof_count {
+            if hop > 0 && cursor == start {
+                break;
+            }
+            let wave = 1.0 + ((hop + idx) % 7) as f64 * 0.02;
+            dof_adjustments[cursor] += normalized * wave;
+            cursor = (cursor + stride) % dof_count;
+        }
+    }
+    if !min_delta.is_finite() || !max_delta.is_finite() {
+        return 0.0;
+    }
+    ((max_delta - min_delta).abs() / 240.0).clamp(0.0, 1.0)
+}
+
+fn thermo_temporal_profile_variation(context: &FeaThermoMechanicalContext) -> f64 {
+    if context.time_profile.len() < 2 {
+        return 0.0;
+    }
+    let mut min_scale = f64::INFINITY;
+    let mut max_scale = -f64::INFINITY;
+    for point in &context.time_profile {
+        min_scale = min_scale.min(point.scale);
+        max_scale = max_scale.max(point.scale);
+    }
+    if !min_scale.is_finite() || !max_scale.is_finite() {
+        return 0.0;
+    }
+    (max_scale - min_scale).abs().clamp(0.0, 2.0) / 2.0
 }
 
 fn apply_thermo_material_heterogeneity(

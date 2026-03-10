@@ -77,12 +77,26 @@ pub struct FeaPrepContext {
     pub calibration_profile_override: Option<FeaPrepCalibrationProfile>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeaThermoRegionTemperatureDelta {
+    pub region_id: String,
+    pub temperature_delta_k: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeaThermoTimeProfilePoint {
+    pub normalized_time: f64,
+    pub scale: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaThermoMechanicalContext {
     pub enabled: bool,
     pub reference_temperature_k: f64,
     pub applied_temperature_delta_k: f64,
     pub thermal_expansion_coefficient: f64,
+    pub region_temperature_deltas: Vec<FeaThermoRegionTemperatureDelta>,
+    pub time_profile: Vec<FeaThermoTimeProfilePoint>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -93,7 +107,7 @@ pub enum FeaPrepCalibrationProfile {
     Conservative,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LinearStaticSolveOptions {
     pub preconditioner_kind: SpdPreconditionerKind,
     pub algebra_backend_kind: LinearAlgebraBackendKind,
@@ -101,7 +115,7 @@ pub struct LinearStaticSolveOptions {
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ModalSolveOptions {
     pub mode_count: usize,
     pub prep_context: Option<FeaPrepContext>,
@@ -409,21 +423,19 @@ pub fn run_transient_with_options(
     options: TransientSolveOptions,
 ) -> Result<FeaTransientRunResult, FeaRunError> {
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
+    let prep_context = options.prep_context;
+    let thermo_context = options.thermo_mechanical_context.clone();
 
-    let summary = assemble_linear_system(
-        model,
-        options.prep_context,
-        options.thermo_mechanical_context,
-    );
-    let transient = solve_transient_system(&summary, options, backend);
+    let summary = assemble_linear_system(model, prep_context, thermo_context);
+    let transient = solve_transient_system(&summary, options.clone(), backend);
     let mut diagnostics = transient.diagnostics.clone();
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
-    if let Some(prep) = options.prep_context {
+    if let Some(prep) = prep_context {
         diagnostics.push(prep_diagnostic(prep));
     }
     if let Some(prep_summary) = summary.prep_assembly.as_ref() {
         diagnostics.push(prep_assembly_diagnostic(prep_summary));
-        if let Some(prep) = options.prep_context {
+        if let Some(prep) = prep_context {
             diagnostics.push(prep_topology_diagnostic(prep, summary.dof_count));
         }
     }
@@ -528,21 +540,19 @@ pub fn run_nonlinear_with_options(
     options: NonlinearSolveOptions,
 ) -> Result<FeaNonlinearRunResult, FeaRunError> {
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
+    let prep_context = options.prep_context;
+    let thermo_context = options.thermo_mechanical_context.clone();
 
-    let summary = assemble_linear_system(
-        model,
-        options.prep_context,
-        options.thermo_mechanical_context,
-    );
-    let nonlinear = solve_nonlinear_system(&summary, options, backend);
+    let summary = assemble_linear_system(model, prep_context, thermo_context);
+    let nonlinear = solve_nonlinear_system(&summary, options.clone(), backend);
     let mut diagnostics = nonlinear.diagnostics.clone();
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
-    if let Some(prep) = options.prep_context {
+    if let Some(prep) = prep_context {
         diagnostics.push(prep_diagnostic(prep));
     }
     if let Some(prep_summary) = summary.prep_assembly.as_ref() {
         diagnostics.push(prep_assembly_diagnostic(prep_summary));
-        if let Some(prep) = options.prep_context {
+        if let Some(prep) = prep_context {
             diagnostics.push(prep_topology_diagnostic(prep, summary.dof_count));
         }
     }
@@ -945,7 +955,7 @@ fn thermo_mechanical_diagnostic(
         code: "FEA_TM_COUPLING".to_string(),
         severity: FeaDiagnosticSeverity::Info,
         message: format!(
-            "enabled={} reference_temperature_k={} applied_temperature_delta_k={} thermal_expansion_coefficient={} thermal_strain_scale={} thermal_load_scale={} constitutive_temperature_factor={} constitutive_poisson_coupling={} effective_modulus_scale={} constitutive_material_spread_ratio={} assignment_heterogeneity_index={} coupling_fingerprint={}",
+            "enabled={} reference_temperature_k={} applied_temperature_delta_k={} thermal_expansion_coefficient={} thermal_strain_scale={} thermal_load_scale={} constitutive_temperature_factor={} constitutive_poisson_coupling={} effective_modulus_scale={} constitutive_material_spread_ratio={} assignment_heterogeneity_index={} spatial_gradient_index={} temporal_profile_variation={} region_delta_count={} coupling_fingerprint={}",
             summary.enabled,
             summary.reference_temperature_k,
             summary.applied_temperature_delta_k,
@@ -957,6 +967,9 @@ fn thermo_mechanical_diagnostic(
             summary.effective_modulus_scale,
             summary.constitutive_material_spread_ratio,
             summary.assignment_heterogeneity_index,
+            summary.spatial_gradient_index,
+            summary.temporal_profile_variation,
+            summary.region_delta_count,
             summary.coupling_fingerprint,
         ),
     }
@@ -1200,6 +1213,8 @@ mod tests {
                     reference_temperature_k: 293.15,
                     applied_temperature_delta_k: 65.0,
                     thermal_expansion_coefficient: 1.2e-5,
+                    region_temperature_deltas: Vec::new(),
+                    time_profile: Vec::new(),
                 }),
                 ..TransientSolveOptions::default()
             },
@@ -1228,8 +1243,8 @@ mod tests {
             .iter()
             .find(|diag| diag.code == "FEA_TM_TRANSIENT")
             .expect("thermo transient profile diagnostic should be present");
-        assert!(profile.message.contains("effective_residual_target="));
-        assert!(profile.message.contains("growth_limit="));
+        assert!(profile.message.contains("effective_residual_target_peak="));
+        assert!(profile.message.contains("growth_limit_min="));
     }
 
     #[test]
@@ -1279,6 +1294,8 @@ mod tests {
                     reference_temperature_k: 293.15,
                     applied_temperature_delta_k: 90.0,
                     thermal_expansion_coefficient: 1.4e-5,
+                    region_temperature_deltas: Vec::new(),
+                    time_profile: Vec::new(),
                 }),
                 ..NonlinearSolveOptions::default()
             },
@@ -1291,8 +1308,12 @@ mod tests {
             .iter()
             .find(|diag| diag.code == "FEA_TM_NONLINEAR")
             .expect("thermo nonlinear profile diagnostic should be present");
-        assert!(profile.message.contains("convergence_residual_target="));
-        assert!(profile.message.contains("convergence_increment_target="));
+        assert!(profile
+            .message
+            .contains("convergence_residual_target_peak="));
+        assert!(profile
+            .message
+            .contains("convergence_increment_target_peak="));
     }
 
     #[test]

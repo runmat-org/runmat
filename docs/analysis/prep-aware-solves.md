@@ -91,6 +91,12 @@ Typed prep-reference failure families:
   - report validation/summarization scripts enforce and display thermo posture fields for CI triage,
   - CI runs strict thermo summary presence validation on thermo-gated branches,
   - benchmark harness includes a kickoff fixture with coupling metric thresholds.
+- **Phase 2B thermo field realism**: spatial + temporal thermo shaping and policy sensitivity.
+  - thermo coupling contracts support per-region temperature deltas and normalized time-profile points,
+  - assembly diagnostics now surface `spatial_gradient_index`, `temporal_profile_variation`, and `region_delta_count`,
+  - transient/nonlinear diagnostics now report peak/mean thermo severity and temporal variation,
+  - runtime quality policy adds `ThermoMechanicalGradientInstability` when spatial/temporal gradients cross policy thresholds,
+  - conformance harness adds smooth-ramp and oscillatory-shock thermo fixtures with threshold assertions.
 
 ## Diagnostics
 
@@ -122,6 +128,14 @@ Runtime quality-policy thermo heterogeneity thresholds:
 | `strict` | 1.15 | 0.12 |
 | `balanced` | 1.25 | 0.20 |
 | `exploratory` | 1.40 | 0.35 |
+
+Runtime quality-policy thermo gradient-instability thresholds:
+
+| Runtime policy | max spatial gradient index | max temporal variation |
+| --- | ---: | ---: |
+| `strict` | 0.22 | 0.25 |
+| `balanced` | 0.30 | 0.35 |
+| `exploratory` | 0.45 | 0.55 |
 
 Release-readiness branch profile defaults:
 

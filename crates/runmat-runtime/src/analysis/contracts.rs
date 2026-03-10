@@ -96,12 +96,28 @@ pub enum PrepCalibrationProfile {
     Conservative,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ThermoRegionTemperatureDelta {
+    pub region_id: String,
+    pub temperature_delta_k: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ThermoTimeProfilePoint {
+    pub normalized_time: f64,
+    pub scale: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ThermoMechanicalCouplingOptions {
     pub enabled: bool,
     pub reference_temperature_k: f64,
     pub applied_temperature_delta_k: f64,
     pub thermal_expansion_coefficient: f64,
+    #[serde(default)]
+    pub region_temperature_deltas: Vec<ThermoRegionTemperatureDelta>,
+    #[serde(default)]
+    pub time_profile: Vec<ThermoTimeProfilePoint>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -122,6 +138,7 @@ pub enum QualityReasonCode {
     ThermoMechanicalTransientStress,
     ThermoMechanicalConstitutiveSpreadHigh,
     ThermoMechanicalAssignmentHeterogeneityHigh,
+    ThermoMechanicalGradientInstability,
     NonlinearResidualExceeded,
     NonlinearIncrementFailure,
     ThermoMechanicalNonlinearStress,

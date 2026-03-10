@@ -33,6 +33,7 @@ pub use contracts::{
     NonlinearMethod, NonlinearResultsData, PrecisionMode, PreconditionerMode,
     PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
     RunProvenance, RunStatus, ThermoMechanicalCouplingOptions, TransientIntegrationMethod,
+    ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
     TransientResultsData,
 };
 
@@ -873,6 +874,18 @@ pub fn analysis_run_transient_with_options_op(
         item.code == "FEA_TM_TRANSIENT"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
     });
+    let thermo_spatial_gradient_index =
+        diagnostic_metric(&run.diagnostics, "FEA_TM_COUPLING", "spatial_gradient_index");
+    let thermo_temporal_variation =
+        diagnostic_metric(&run.diagnostics, "FEA_TM_TRANSIENT", "temporal_variation");
+    let (thermo_gradient_spatial_threshold, thermo_gradient_temporal_threshold) =
+        thermo_gradient_thresholds_for_policy(options.quality_policy);
+    let thermo_gradient_instability = thermo_spatial_gradient_index
+        .map(|value| value > thermo_gradient_spatial_threshold)
+        .unwrap_or(false)
+        || thermo_temporal_variation
+            .map(|value| value > thermo_gradient_temporal_threshold)
+            .unwrap_or(false);
     let thermo_spread_ratio = diagnostic_metric(
         &run.diagnostics,
         "FEA_TM_COUPLING",
@@ -947,6 +960,18 @@ pub fn analysis_run_transient_with_options_op(
             ),
         });
     }
+    if thermo_gradient_instability {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ThermoMechanicalGradientInstability,
+            detail: format!(
+                "thermo gradient instability spatial_gradient_index={} temporal_variation={} thresholds=({}, {})",
+                thermo_spatial_gradient_index.unwrap_or(0.0),
+                thermo_temporal_variation.unwrap_or(0.0),
+                thermo_gradient_spatial_threshold,
+                thermo_gradient_temporal_threshold,
+            ),
+        });
+    }
     if fallback_events
         .iter()
         .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK"))
@@ -993,6 +1018,7 @@ pub fn analysis_run_transient_with_options_op(
                             | QualityReasonCode::ThermoMechanicalTransientStress
                             | QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
                             | QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
+                            | QualityReasonCode::ThermoMechanicalGradientInstability
                     )
                 })
         }
@@ -1347,6 +1373,18 @@ pub fn analysis_run_nonlinear_with_options_op(
         item.code == "FEA_TM_NONLINEAR"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
     });
+    let thermo_spatial_gradient_index =
+        diagnostic_metric(&run.diagnostics, "FEA_TM_COUPLING", "spatial_gradient_index");
+    let thermo_temporal_variation =
+        diagnostic_metric(&run.diagnostics, "FEA_TM_NONLINEAR", "temporal_variation");
+    let (thermo_gradient_spatial_threshold, thermo_gradient_temporal_threshold) =
+        thermo_gradient_thresholds_for_policy(options.quality_policy);
+    let thermo_gradient_instability = thermo_spatial_gradient_index
+        .map(|value| value > thermo_gradient_spatial_threshold)
+        .unwrap_or(false)
+        || thermo_temporal_variation
+            .map(|value| value > thermo_gradient_temporal_threshold)
+            .unwrap_or(false);
     let thermo_spread_ratio = diagnostic_metric(
         &run.diagnostics,
         "FEA_TM_COUPLING",
@@ -1421,6 +1459,18 @@ pub fn analysis_run_nonlinear_with_options_op(
             ),
         });
     }
+    if thermo_gradient_instability {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ThermoMechanicalGradientInstability,
+            detail: format!(
+                "thermo gradient instability spatial_gradient_index={} temporal_variation={} thresholds=({}, {})",
+                thermo_spatial_gradient_index.unwrap_or(0.0),
+                thermo_temporal_variation.unwrap_or(0.0),
+                thermo_gradient_spatial_threshold,
+                thermo_gradient_temporal_threshold,
+            ),
+        });
+    }
     if fallback_events
         .iter()
         .any(|event| event.starts_with("SOLVER_BACKEND_FALLBACK"))
@@ -1458,6 +1508,7 @@ pub fn analysis_run_nonlinear_with_options_op(
                             | QualityReasonCode::ThermoMechanicalNonlinearStress
                             | QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
                             | QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
+                            | QualityReasonCode::ThermoMechanicalGradientInstability
                     )
                 })
         }
@@ -1947,10 +1998,18 @@ pub fn analysis_results_op(
         "FEA_TM_COUPLING",
         "assignment_heterogeneity_index",
     );
-    let thermo_transient_severity =
-        diagnostic_metric(&run_result.run.diagnostics, "FEA_TM_TRANSIENT", "severity");
-    let thermo_nonlinear_severity =
-        diagnostic_metric(&run_result.run.diagnostics, "FEA_TM_NONLINEAR", "severity");
+    let thermo_transient_severity = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_TRANSIENT",
+        "severity_peak",
+    )
+    .or_else(|| diagnostic_metric(&run_result.run.diagnostics, "FEA_TM_TRANSIENT", "severity"));
+    let thermo_nonlinear_severity = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_NONLINEAR",
+        "severity_peak",
+    )
+    .or_else(|| diagnostic_metric(&run_result.run.diagnostics, "FEA_TM_NONLINEAR", "severity"));
 
     let summary = AnalysisResultsSummary {
         field_count: fields.len(),
@@ -2686,6 +2745,32 @@ fn to_fea_thermo_mechanical_context(
         reference_temperature_k: tm.reference_temperature_k,
         applied_temperature_delta_k: tm.applied_temperature_delta_k,
         thermal_expansion_coefficient: tm.thermal_expansion_coefficient,
+        region_temperature_deltas: tm
+            .region_temperature_deltas
+            .into_iter()
+            .map(
+                |ThermoRegionTemperatureDelta {
+                     region_id,
+                     temperature_delta_k,
+                 }| runmat_analysis_fea::FeaThermoRegionTemperatureDelta {
+                    region_id,
+                    temperature_delta_k,
+                },
+            )
+            .collect(),
+        time_profile: tm
+            .time_profile
+            .into_iter()
+            .map(
+                |ThermoTimeProfilePoint {
+                     normalized_time,
+                     scale,
+                 }| runmat_analysis_fea::FeaThermoTimeProfilePoint {
+                    normalized_time,
+                    scale,
+                },
+            )
+            .collect(),
     })
 }
 
@@ -3183,6 +3268,14 @@ fn thermo_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64) {
             THERMO_HETEROGENEITY_THRESHOLD_BALANCED,
         ),
         QualityPolicy::Exploratory => (1.4, 0.35),
+    }
+}
+
+fn thermo_gradient_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64) {
+    match policy {
+        QualityPolicy::Strict => (0.22, 0.25),
+        QualityPolicy::Balanced => (0.30, 0.35),
+        QualityPolicy::Exploratory => (0.45, 0.55),
     }
 }
 

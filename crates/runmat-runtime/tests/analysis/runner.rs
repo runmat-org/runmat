@@ -1,7 +1,9 @@
 use super::harness::with_harness_provider;
 use super::manifest::default_options;
 use super::*;
-use runmat_runtime::analysis::ThermoMechanicalCouplingOptions;
+use runmat_runtime::analysis::{
+    ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
+};
 
 fn env_usize(name: &str) -> Option<usize> {
     std::env::var(name)
@@ -70,6 +72,8 @@ fn nonlinear_options_for_spec(spec: &FixtureSpec) -> AnalysisNonlinearRunOptions
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 75.0,
             thermal_expansion_coefficient: 1.2e-5,
+            region_temperature_deltas: Vec::new(),
+            time_profile: Vec::new(),
         });
     }
 
@@ -83,18 +87,150 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 65.0,
             thermal_expansion_coefficient: 1.2e-5,
+            region_temperature_deltas: vec![
+                ThermoRegionTemperatureDelta {
+                    region_id: "tip_steel".to_string(),
+                    temperature_delta_k: 75.0,
+                },
+                ThermoRegionTemperatureDelta {
+                    region_id: "mid_aluminum".to_string(),
+                    temperature_delta_k: 55.0,
+                },
+            ],
+            time_profile: vec![
+                ThermoTimeProfilePoint {
+                    normalized_time: 0.0,
+                    scale: 0.6,
+                },
+                ThermoTimeProfilePoint {
+                    normalized_time: 1.0,
+                    scale: 1.0,
+                },
+            ],
         }),
         "thermo_gradient_benign_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
             enabled: true,
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 55.0,
             thermal_expansion_coefficient: 1.0e-5,
+            region_temperature_deltas: vec![
+                ThermoRegionTemperatureDelta {
+                    region_id: "tip_steel".to_string(),
+                    temperature_delta_k: 60.0,
+                },
+                ThermoRegionTemperatureDelta {
+                    region_id: "mid_aluminum".to_string(),
+                    temperature_delta_k: 50.0,
+                },
+            ],
+            time_profile: vec![
+                ThermoTimeProfilePoint {
+                    normalized_time: 0.0,
+                    scale: 0.7,
+                },
+                ThermoTimeProfilePoint {
+                    normalized_time: 1.0,
+                    scale: 1.0,
+                },
+            ],
         }),
         "thermo_gradient_pathological_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
             enabled: true,
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 220.0,
             thermal_expansion_coefficient: 2.5e-5,
+            region_temperature_deltas: vec![
+                ThermoRegionTemperatureDelta {
+                    region_id: "tip_steel".to_string(),
+                    temperature_delta_k: 260.0,
+                },
+                ThermoRegionTemperatureDelta {
+                    region_id: "polymer_segment".to_string(),
+                    temperature_delta_k: 120.0,
+                },
+            ],
+            time_profile: vec![
+                ThermoTimeProfilePoint {
+                    normalized_time: 0.0,
+                    scale: 0.2,
+                },
+                ThermoTimeProfilePoint {
+                    normalized_time: 0.4,
+                    scale: 1.3,
+                },
+                ThermoTimeProfilePoint {
+                    normalized_time: 1.0,
+                    scale: 0.9,
+                },
+            ],
+        }),
+        "thermo_ramp_smooth_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 70.0,
+            thermal_expansion_coefficient: 1.1e-5,
+            region_temperature_deltas: vec![
+                ThermoRegionTemperatureDelta {
+                    region_id: "tip_steel".to_string(),
+                    temperature_delta_k: 72.0,
+                },
+                ThermoRegionTemperatureDelta {
+                    region_id: "mid_aluminum".to_string(),
+                    temperature_delta_k: 68.0,
+                },
+            ],
+            time_profile: vec![
+                ThermoTimeProfilePoint {
+                    normalized_time: 0.0,
+                    scale: 0.3,
+                },
+                ThermoTimeProfilePoint {
+                    normalized_time: 0.5,
+                    scale: 0.7,
+                },
+                ThermoTimeProfilePoint {
+                    normalized_time: 1.0,
+                    scale: 1.0,
+                },
+            ],
+        }),
+        "thermo_shock_oscillatory_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 140.0,
+            thermal_expansion_coefficient: 2.0e-5,
+            region_temperature_deltas: vec![
+                ThermoRegionTemperatureDelta {
+                    region_id: "tip_steel".to_string(),
+                    temperature_delta_k: 210.0,
+                },
+                ThermoRegionTemperatureDelta {
+                    region_id: "polymer_segment".to_string(),
+                    temperature_delta_k: 90.0,
+                },
+            ],
+            time_profile: vec![
+                ThermoTimeProfilePoint {
+                    normalized_time: 0.0,
+                    scale: 0.4,
+                },
+                ThermoTimeProfilePoint {
+                    normalized_time: 0.25,
+                    scale: 1.4,
+                },
+                ThermoTimeProfilePoint {
+                    normalized_time: 0.5,
+                    scale: 0.5,
+                },
+                ThermoTimeProfilePoint {
+                    normalized_time: 0.75,
+                    scale: 1.3,
+                },
+                ThermoTimeProfilePoint {
+                    normalized_time: 1.0,
+                    scale: 0.6,
+                },
+            ],
         }),
         _ => None,
     }
@@ -963,7 +1099,11 @@ pub(super) fn run_fixture(
                             &mut failures,
                             "thermo_mech_transient_severity",
                             "FEA_TM_TRANSIENT",
-                            diagnostic_metric(&gpu_envelope.data, "FEA_TM_TRANSIENT", "severity"),
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_TRANSIENT",
+                                "severity_peak",
+                            ),
                             Some(0.0),
                             Some(0.2),
                         );
@@ -971,15 +1111,15 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
-                            "thermo_mech_transient_residual_relaxation",
+                            "thermo_mech_transient_time_scale_mean",
                             "FEA_TM_TRANSIENT",
                             diagnostic_metric(
                                 &gpu_envelope.data,
                                 "FEA_TM_TRANSIENT",
-                                "residual_relaxation",
+                                "time_scale_mean",
                             ),
-                            Some(1.0),
-                            Some(1.2),
+                            Some(0.6),
+                            Some(1.1),
                         );
                     } else if spec.id == "thermo_gradient_benign_gpu_provider" {
                         push_threshold_assertion(
@@ -1010,6 +1150,20 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.22),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_gradient_benign_temporal_variation",
+                            "FEA_TM_TRANSIENT",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_TRANSIENT",
+                                "temporal_variation",
+                            ),
+                            Some(0.0),
+                            Some(0.35),
+                        );
                     } else if spec.id == "thermo_gradient_pathological_gpu_provider" {
                         push_threshold_assertion(
                             spec.id,
@@ -1037,6 +1191,78 @@ pub(super) fn run_fixture(
                                 "assignment_heterogeneity_index",
                             ),
                             Some(0.2),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_gradient_pathological_temporal_variation",
+                            "FEA_TM_TRANSIENT",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_TRANSIENT",
+                                "temporal_variation",
+                            ),
+                            Some(0.2),
+                            Some(1.0),
+                        );
+                    } else if spec.id == "thermo_ramp_smooth_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_ramp_smooth_temporal_variation",
+                            "FEA_TM_TRANSIENT",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_TRANSIENT",
+                                "temporal_variation",
+                            ),
+                            Some(0.2),
+                            Some(0.45),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_ramp_smooth_spatial_gradient_index",
+                            "FEA_TM_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_COUPLING",
+                                "spatial_gradient_index",
+                            ),
+                            Some(0.0),
+                            Some(0.25),
+                        );
+                    } else if spec.id == "thermo_shock_oscillatory_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_shock_oscillatory_temporal_variation",
+                            "FEA_TM_TRANSIENT",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_TRANSIENT",
+                                "temporal_variation",
+                            ),
+                            Some(0.35),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_shock_oscillatory_spatial_gradient_index",
+                            "FEA_TM_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_COUPLING",
+                                "spatial_gradient_index",
+                            ),
+                            Some(0.25),
                             Some(1.0),
                         );
                     }
@@ -1321,7 +1547,11 @@ pub(super) fn run_fixture(
                             &mut failures,
                             "thermo_nonlinear_severity",
                             "FEA_TM_NONLINEAR",
-                            diagnostic_metric(&gpu_envelope.data, "FEA_TM_NONLINEAR", "severity"),
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_NONLINEAR",
+                                "severity_peak",
+                            ),
                             Some(0.0),
                             Some(0.2),
                         );

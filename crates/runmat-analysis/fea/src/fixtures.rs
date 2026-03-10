@@ -20,6 +20,8 @@ pub enum FixtureId {
     ThermoMechanicalKickoff,
     ThermoGradientBenign,
     ThermoGradientPathological,
+    ThermoRampSmooth,
+    ThermoShockOscillatory,
     MultiMaterialAssembly,
     MissingMaterials,
     MissingLoads,
@@ -40,6 +42,8 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
         FixtureId::ThermoMechanicalKickoff => thermo_mechanical_kickoff_fixture(),
         FixtureId::ThermoGradientBenign => thermo_gradient_benign_fixture(),
         FixtureId::ThermoGradientPathological => thermo_gradient_pathological_fixture(),
+        FixtureId::ThermoRampSmooth => thermo_ramp_smooth_fixture(),
+        FixtureId::ThermoShockOscillatory => thermo_shock_oscillatory_fixture(),
         FixtureId::MultiMaterialAssembly => multi_material_assembly(),
         FixtureId::MissingMaterials => missing_materials(),
         FixtureId::MissingLoads => missing_loads(),
@@ -434,6 +438,47 @@ fn thermo_gradient_pathological_fixture() -> AnalysisModel {
         step_id: "thermo_grad_pathological_transient_1".to_string(),
         kind: AnalysisStepKind::Transient,
     }];
+    model
+}
+
+fn thermo_ramp_smooth_fixture() -> AnalysisModel {
+    let mut model = thermo_gradient_benign_fixture();
+    model.model_id = AnalysisModelId("thermo_ramp_smooth_fixture".to_string());
+    model.loads = (0..280)
+        .map(|i| {
+            let scale = 0.6 + (i as f64) * 0.0025;
+            LoadCase {
+                load_id: format!("thermo_ramp_smooth_load_{i}"),
+                region_id: format!("thermo_ramp_smooth_region_{}", i % 30),
+                kind: LoadKind::Force {
+                    fx: 24.0 * scale,
+                    fy: -760.0 * scale,
+                    fz: 10.0 * scale,
+                },
+            }
+        })
+        .collect();
+    model
+}
+
+fn thermo_shock_oscillatory_fixture() -> AnalysisModel {
+    let mut model = thermo_gradient_pathological_fixture();
+    model.model_id = AnalysisModelId("thermo_shock_oscillatory_fixture".to_string());
+    model.loads = (0..360)
+        .map(|i| {
+            let sign = if i % 2 == 0 { 1.0 } else { -1.0 };
+            let scale = 1.0 + (i as f64) * 0.004;
+            LoadCase {
+                load_id: format!("thermo_shock_osc_load_{i}"),
+                region_id: format!("thermo_shock_osc_region_{}", i % 36),
+                kind: LoadKind::Force {
+                    fx: sign * 48.0 * scale,
+                    fy: sign * -1320.0 * scale,
+                    fz: sign * 28.0 * scale,
+                },
+            }
+        })
+        .collect();
     model
 }
 

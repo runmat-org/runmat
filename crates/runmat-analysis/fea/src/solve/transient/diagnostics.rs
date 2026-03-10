@@ -4,7 +4,7 @@ use super::TransientSolveOptions;
 
 pub(super) fn push_transient_quality_diagnostics(
     diagnostics: &mut Vec<FeaDiagnostic>,
-    options: TransientSolveOptions,
+    options: &TransientSolveOptions,
     dt_final: f64,
     converged_steps: usize,
     retry_budget_hits: usize,
@@ -27,11 +27,13 @@ pub(super) fn push_transient_quality_diagnostics(
     dt_bucket_rel_tolerance: f64,
     max_step_l2_jump_ratio: f64,
     nonfinite_displacement_count: usize,
-    thermo_severity: f64,
-    thermo_residual_relaxation: f64,
-    effective_residual_target: f64,
-    thermo_growth_limit: f64,
-    thermo_nonconverged_shrink: f64,
+    thermo_severity_mean: f64,
+    thermo_time_scale_mean: f64,
+    thermo_severity_peak: f64,
+    thermo_temporal_variation: f64,
+    effective_residual_target_peak: f64,
+    thermo_growth_limit_min: f64,
+    thermo_nonconverged_shrink_min: f64,
 ) {
     let converged_all = converged_steps == options.step_count;
     diagnostics.push(FeaDiagnostic {
@@ -131,21 +133,23 @@ pub(super) fn push_transient_quality_diagnostics(
         ),
     });
 
-    if thermo_severity > 0.0 {
+    if thermo_severity_peak > 0.0 {
         diagnostics.push(FeaDiagnostic {
             code: "FEA_TM_TRANSIENT".to_string(),
-            severity: if thermo_severity <= 0.6 {
+            severity: if thermo_severity_peak <= 0.6 && thermo_temporal_variation <= 0.5 {
                 FeaDiagnosticSeverity::Info
             } else {
                 FeaDiagnosticSeverity::Warning
             },
             message: format!(
-                "severity={} residual_relaxation={} effective_residual_target={} growth_limit={} nonconverged_shrink={}",
-                thermo_severity,
-                thermo_residual_relaxation,
-                effective_residual_target,
-                thermo_growth_limit,
-                thermo_nonconverged_shrink,
+                "severity_mean={} time_scale_mean={} severity_peak={} temporal_variation={} effective_residual_target_peak={} growth_limit_min={} nonconverged_shrink_min={}",
+                thermo_severity_mean,
+                thermo_time_scale_mean,
+                thermo_severity_peak,
+                thermo_temporal_variation,
+                effective_residual_target_peak,
+                thermo_growth_limit_min,
+                thermo_nonconverged_shrink_min,
             ),
         });
     }
