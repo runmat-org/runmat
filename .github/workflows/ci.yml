@@ -288,6 +288,51 @@ jobs:
           RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY: "true"
         run: python3 scripts/validate_analysis_report_nonlinear.py
 
+      - name: Verify thermo field artifact trust chain
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import json
+          import subprocess
+          from pathlib import Path
+
+          artifacts = sorted(Path("target/runmat-analysis-artifacts/thermo-fields").glob("*.json"))
+          report = {
+              "schema_version": "thermo-field-trust-report/v1",
+              "artifact_count": len(artifacts),
+              "artifacts": [],
+              "passed": True,
+          }
+          lines = ["## Thermo Field Trust Report", "", f"Artifacts: `{len(artifacts)}`"]
+          for artifact in artifacts:
+              proc = subprocess.run(
+                  ["python3", "scripts/validate_thermo_field_artifact.py", str(artifact)],
+                  capture_output=True,
+                  text=True,
+              )
+              ok = proc.returncode == 0
+              report["artifacts"].append(
+                  {
+                      "path": str(artifact),
+                      "valid": ok,
+                      "stdout": proc.stdout.strip(),
+                      "stderr": proc.stderr.strip(),
+                  }
+              )
+              lines.append(f"- `{artifact}`: {'ok' if ok else 'invalid'}")
+              if not ok:
+                  report["passed"] = False
+          out_json = Path("target/runmat-analysis-artifacts/thermo_field_trust_report.json")
+          out_md = Path("thermo-field-trust-report.md")
+          out_json.parent.mkdir(parents=True, exist_ok=True)
+          out_json.write_text(json.dumps(report, indent=2) + "\n")
+          out_md.write_text("\n".join(lines) + "\n")
+          print(out_md.read_text())
+          if artifacts and not report["passed"]:
+              raise SystemExit(1)
+          PY
+          cat thermo-field-trust-report.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Mark artifact compatibility verification passed
         if: success()
         run: echo "RUNMAT_RELEASE_READINESS_ARTIFACT_COMPAT_OK=true" >> "$GITHUB_ENV"
@@ -501,8 +546,10 @@ jobs:
             nonlinear-summary.md
             nonlinear-release-readiness.md
             nonlinear-trends.md
+            thermo-field-trust-report.md
             prep-artifact-slo.md
             tier75-governance-summary.md
+            target/runmat-analysis-artifacts/thermo_field_trust_report.json
           if-no-files-found: warn
 
   cross-build:

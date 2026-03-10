@@ -108,6 +108,13 @@ Thermo field artifact lifecycle scripts:
 - `scripts/validate_thermo_field_artifact.py` enforces artifact schema + monotonic time-profile constraints.
 - `scripts/promote_thermo_field_artifact.py` promotes validated candidates to approved artifacts with age checks.
 
+Thermo field artifact trust-chain policy:
+
+- artifacts carry `payload_hash` and `signature` (`sigv1:sha256:...`) over canonical payload contents,
+- approved artifacts require `approved_by`; runtime can enforce allowlisted approvers via `RUNMAT_THERMO_FIELD_ALLOWED_APPROVERS`,
+- runtime verifies digest/signature during artifact-backed solve dispatch,
+- release readiness can require artifact-backed thermo fixtures and gate on approval/staleness/provenance validity.
+
 ## Diagnostics
 
 Prep-aware runs can emit:

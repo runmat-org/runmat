@@ -4,6 +4,117 @@ use super::*;
 use runmat_runtime::analysis::{
     ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
 };
+use sha2::{Digest, Sha256};
+
+fn thermo_field_payload_hash_for_value(payload: &serde_json::Value) -> String {
+    let schema = payload
+        .get("schema_version")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    let geometry_id = payload
+        .get("source_geometry_id")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    let geometry_revision = payload
+        .get("source_geometry_revision")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let source = payload
+        .get("field_source")
+        .and_then(|value| value.as_object())
+        .cloned()
+        .unwrap_or_default();
+    let source_id = source
+        .get("source_id")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    let source_revision = source
+        .get("revision")
+        .and_then(|value| value.as_u64())
+        .unwrap_or(0);
+    let interpolation = source
+        .get("interpolation_mode")
+        .and_then(|value| value.as_str())
+        .unwrap_or_default();
+    let expected_regions = source
+        .get("expected_region_ids")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .filter_map(|value| value.as_str())
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_default();
+    let region_terms = payload
+        .get("region_temperature_deltas")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .map(|entry| {
+                    let region_id = entry
+                        .get("region_id")
+                        .and_then(|value| value.as_str())
+                        .unwrap_or_default();
+                    let delta = entry
+                        .get("temperature_delta_k")
+                        .and_then(|value| value.as_f64())
+                        .unwrap_or(0.0);
+                    format!("{}:{:016x}", region_id, delta.to_bits())
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_default();
+    let time_terms = payload
+        .get("time_profile")
+        .and_then(|value| value.as_array())
+        .map(|values| {
+            values
+                .iter()
+                .map(|entry| {
+                    let t = entry
+                        .get("normalized_time")
+                        .and_then(|value| value.as_f64())
+                        .unwrap_or(0.0)
+                        .to_bits();
+                    let s = entry
+                        .get("scale")
+                        .and_then(|value| value.as_f64())
+                        .unwrap_or(0.0)
+                        .to_bits();
+                    format!("{:016x}:{:016x}", t, s)
+                })
+                .collect::<Vec<_>>()
+                .join(",")
+        })
+        .unwrap_or_default();
+    let canonical = format!(
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        schema,
+        geometry_id,
+        geometry_revision,
+        source_id,
+        source_revision,
+        interpolation,
+        expected_regions,
+        region_terms,
+        time_terms,
+    );
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.as_bytes());
+    format!("sha256:{:x}", hasher.finalize())
+}
+
+fn thermo_field_signature(payload_hash: &str, approved_by: &str) -> String {
+    let signing_key = std::env::var("RUNMAT_THERMO_FIELD_SIGNING_KEY")
+        .unwrap_or_else(|_| "runmat-dev-thermo-signing-key".to_string());
+    let mut hasher = Sha256::new();
+    hasher.update(format!("{payload_hash}:{approved_by}:{signing_key}").as_bytes());
+    format!("sigv1:sha256:{:x}", hasher.finalize())
+}
 
 fn env_usize(name: &str) -> Option<usize> {
     std::env::var(name)
@@ -278,13 +389,14 @@ fn ensure_thermo_field_artifacts_for_fixture(spec_id: &str, model: &AnalysisMode
                           interpolation_mode: &str,
                           region_temperature_deltas: serde_json::Value,
                           time_profile: serde_json::Value| {
-        let payload = serde_json::json!({
+        let mut payload = serde_json::json!({
             "schema_version": "analysis_thermo_field_artifact/v1",
             "source_geometry_id": model.geometry_id,
             "source_geometry_revision": model.geometry_revision,
             "artifact_status": "approved",
             "created_at": "2026-03-10T00:00:00Z",
             "approved_at": "2026-03-10T00:05:00Z",
+            "approved_by": "release-bot",
             "field_source": {
                 "source_id": source_id,
                 "revision": 1,
@@ -294,6 +406,10 @@ fn ensure_thermo_field_artifacts_for_fixture(spec_id: &str, model: &AnalysisMode
             "region_temperature_deltas": region_temperature_deltas,
             "time_profile": time_profile,
         });
+        let payload_hash = thermo_field_payload_hash_for_value(&payload);
+        payload["payload_hash"] = serde_json::Value::String(payload_hash.clone());
+        payload["signature"] =
+            serde_json::Value::String(thermo_field_signature(&payload_hash, "release-bot"));
         let _ = fs::write(
             root.join(format!("{artifact_id}.json")),
             serde_json::to_vec_pretty(&payload).unwrap_or_default(),
@@ -625,9 +741,11 @@ pub(super) fn run_fixture(
         thermo_coupling_for_fixture(spec.id).and_then(|options| options.field_artifact_id);
     let mut thermo_field_artifact_approved = None;
     let mut thermo_field_artifact_age_days = None;
+    let mut thermo_field_artifact_provenance_valid = None;
     if thermo_field_artifact_id.is_some() {
         thermo_field_artifact_approved = Some(true);
         thermo_field_artifact_age_days = Some(0.0);
+        thermo_field_artifact_provenance_valid = Some(true);
     }
     let mut thermo_transient_severity = None;
     let mut thermo_nonlinear_severity = None;
@@ -684,6 +802,7 @@ pub(super) fn run_fixture(
                     thermo_field_artifact_id,
                     thermo_field_artifact_approved,
                     thermo_field_artifact_age_days,
+                    thermo_field_artifact_provenance_valid,
                     thermo_transient_severity,
                     thermo_nonlinear_severity,
                     publishable,
@@ -1794,6 +1913,7 @@ pub(super) fn run_fixture(
                                 thermo_field_artifact_id,
                                 thermo_field_artifact_approved,
                                 thermo_field_artifact_age_days,
+                                thermo_field_artifact_provenance_valid,
                                 thermo_transient_severity,
                                 thermo_nonlinear_severity,
                                 publishable,
@@ -1991,6 +2111,7 @@ pub(super) fn run_fixture(
                                     thermo_field_artifact_id,
                                     thermo_field_artifact_approved,
                                     thermo_field_artifact_age_days,
+                                    thermo_field_artifact_provenance_valid,
                                     thermo_transient_severity,
                                     thermo_nonlinear_severity,
                                     publishable,
@@ -2095,6 +2216,7 @@ pub(super) fn run_fixture(
         thermo_field_artifact_id,
         thermo_field_artifact_approved,
         thermo_field_artifact_age_days,
+        thermo_field_artifact_provenance_valid,
         thermo_transient_severity,
         thermo_nonlinear_severity,
         publishable,

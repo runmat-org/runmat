@@ -163,6 +163,7 @@ struct FixtureRunRecord {
     thermo_field_artifact_id: Option<String>,
     thermo_field_artifact_approved: Option<bool>,
     thermo_field_artifact_age_days: Option<f64>,
+    thermo_field_artifact_provenance_valid: Option<bool>,
     thermo_transient_severity: Option<f64>,
     thermo_nonlinear_severity: Option<f64>,
     publishable: Option<bool>,

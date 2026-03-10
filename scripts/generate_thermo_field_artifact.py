@@ -1,8 +1,17 @@
 #!/usr/bin/env python3
 import argparse
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
+
+try:
+    from scripts.validate_thermo_field_artifact import (
+        compute_payload_hash,
+        compute_signature,
+    )
+except ModuleNotFoundError:
+    from validate_thermo_field_artifact import compute_payload_hash, compute_signature
 
 
 def parse_key_value_pairs(values, key_name, value_name, key_numeric=False):
@@ -28,6 +37,7 @@ def main() -> int:
     parser.add_argument("--region-delta", action="append", default=[])
     parser.add_argument("--time-point", action="append", default=[])
     parser.add_argument("--status", choices=["candidate", "approved"], default="candidate")
+    parser.add_argument("--approved-by", default="")
     args = parser.parse_args()
 
     region_pairs = parse_key_value_pairs(args.region_delta, "region", "delta_k")
@@ -42,6 +52,7 @@ def main() -> int:
         "artifact_status": args.status,
         "created_at": now,
         "approved_at": now if args.status == "approved" else None,
+        "approved_by": args.approved_by if args.status == "approved" else None,
         "field_source": {
             "source_id": args.source_id,
             "revision": args.revision,
@@ -56,6 +67,16 @@ def main() -> int:
             {"normalized_time": float(t), "scale": float(scale)} for t, scale in time_pairs
         ],
     }
+    artifact["payload_hash"] = compute_payload_hash(artifact)
+    signing_key = os.getenv("RUNMAT_THERMO_FIELD_SIGNING_KEY", "runmat-dev-thermo-signing-key")
+    if args.status == "approved" and args.approved_by:
+        artifact["signature"] = compute_signature(
+            artifact["payload_hash"],
+            args.approved_by,
+            signing_key,
+        )
+    else:
+        artifact["signature"] = None
 
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)

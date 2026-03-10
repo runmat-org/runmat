@@ -220,6 +220,7 @@ def evaluate_release_readiness(
     prep_health: dict | None = None,
     calibration_evidence: dict | None = None,
     recommendation_artifact: dict | None = None,
+    thermo_promotion_report: dict | None = None,
 ) -> dict:
     reasons: List[Reason] = []
     latest_passed = bool(latest.get("passed", False))
@@ -824,6 +825,25 @@ def evaluate_release_readiness(
                     )
                 )
 
+            invalid_provenance = sorted(
+                rec.get("fixture_id", "<unknown>")
+                for rec in thermo_records
+                if rec.get("thermo_coupling_enabled") is True
+                and isinstance(rec.get("thermo_field_artifact_id"), str)
+                and rec.get("thermo_field_artifact_provenance_valid") is not True
+            )
+            if invalid_provenance:
+                reasons.append(
+                    Reason(
+                        code="THERMO_FIELD_ARTIFACT_PROVENANCE_INVALID",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "thermo field artifact provenance is invalid for fixtures: "
+                            + ", ".join(invalid_provenance)
+                        ),
+                    )
+                )
+
         transient_values = []
         for rec in thermo_records:
             raw_value = rec.get("thermo_transient_severity")
@@ -1171,6 +1191,20 @@ def evaluate_release_readiness(
                     )
                 )
 
+    if isinstance(thermo_promotion_report, dict) and thermo_promotion_report.get("blocked"):
+        blocked_reasons = thermo_promotion_report.get("reasons")
+        if isinstance(blocked_reasons, list) and blocked_reasons:
+            detail = "; ".join(str(reason) for reason in blocked_reasons)
+        else:
+            detail = "thermo field promotion report indicates blocked status"
+        reasons.append(
+            Reason(
+                code="THERMO_FIELD_PROMOTION_BLOCKED",
+                severity="fail" if protected else "warn",
+                detail=detail,
+            )
+        )
+
     if any(reason.severity == "fail" for reason in reasons):
         verdict = "fail"
     elif reasons:
@@ -1336,6 +1370,12 @@ def main() -> int:
             "target/runmat-analysis-artifacts/prep_calibration_recommendations.json",
         )
     )
+    thermo_promotion_report_path = Path(
+        os.getenv(
+            "RUNMAT_THERMO_FIELD_PROMOTION_REPORT",
+            "target/runmat-analysis-artifacts/thermo_field_promotion_report.json",
+        )
+    )
     output_path = Path(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_OUTPUT",
@@ -1356,6 +1396,7 @@ def main() -> int:
         prep_health=prep_health,
         calibration_evidence=load_evidence(calibration_evidence_path),
         recommendation_artifact=load_json(recommendation_artifact_path),
+        thermo_promotion_report=load_json(thermo_promotion_report_path),
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(result, indent=2))

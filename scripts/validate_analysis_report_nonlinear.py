@@ -149,6 +149,17 @@ def main() -> int:
                 errors.append(
                     f"fixture {fixture_id} missing thermo summary fields: {', '.join(missing_fields)}"
                 )
+            if "field_artifact" in fixture_id:
+                for required_field in (
+                    "thermo_field_artifact_id",
+                    "thermo_field_artifact_approved",
+                    "thermo_field_artifact_age_days",
+                    "thermo_field_artifact_provenance_valid",
+                ):
+                    if required_field not in record:
+                        errors.append(
+                            f"fixture {fixture_id} missing thermo artifact field: {required_field}"
+                        )
 
     if require_thermo_summary:
         thermo_records = [

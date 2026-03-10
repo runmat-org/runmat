@@ -16,6 +16,7 @@ use runmat_analysis_fea::{
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 use runmat_meshing_core::{ElementFamilyHint, MeshConnectivityClass};
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
 
 use crate::operations::{
     operation_error, OperationContext, OperationEnvelope, OperationErrorEnvelope,
@@ -3118,11 +3119,80 @@ struct ThermoFieldArtifact {
     source_geometry_id: String,
     source_geometry_revision: u32,
     #[serde(default)]
+    artifact_status: Option<String>,
+    #[serde(default)]
+    approved_by: Option<String>,
+    #[serde(default)]
+    payload_hash: Option<String>,
+    #[serde(default)]
+    signature: Option<String>,
+    #[serde(default)]
     field_source: Option<ThermoFieldSource>,
     #[serde(default)]
     region_temperature_deltas: Vec<ThermoRegionTemperatureDelta>,
     #[serde(default)]
     time_profile: Vec<ThermoTimeProfilePoint>,
+}
+
+fn thermo_field_payload_hash(artifact: &ThermoFieldArtifact) -> String {
+    let source = artifact.field_source.as_ref();
+    let source_id = source.map(|s| s.source_id.as_str()).unwrap_or("");
+    let source_revision = source.map(|s| s.revision).unwrap_or(0);
+    let interpolation = source
+        .and_then(|s| s.interpolation_mode)
+        .map(|mode| match mode {
+            ThermoFieldInterpolationMode::Linear => "linear",
+            ThermoFieldInterpolationMode::Step => "step",
+        })
+        .unwrap_or("");
+    let expected_regions = source
+        .map(|s| s.expected_region_ids.join(","))
+        .unwrap_or_default();
+    let region_terms = artifact
+        .region_temperature_deltas
+        .iter()
+        .map(|delta| {
+            format!(
+                "{}:{:016x}",
+                delta.region_id,
+                delta.temperature_delta_k.to_bits()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let time_terms = artifact
+        .time_profile
+        .iter()
+        .map(|point| {
+            format!(
+                "{:016x}:{:016x}",
+                point.normalized_time.to_bits(),
+                point.scale.to_bits()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    let canonical = format!(
+        "{}|{}|{}|{}|{}|{}|{}|{}|{}",
+        artifact.schema_version,
+        artifact.source_geometry_id,
+        artifact.source_geometry_revision,
+        source_id,
+        source_revision,
+        interpolation,
+        expected_regions,
+        region_terms,
+        time_terms
+    );
+    let mut hasher = Sha256::new();
+    hasher.update(canonical.as_bytes());
+    format!("sha256:{:x}", hasher.finalize())
+}
+
+fn thermo_field_signature(payload_hash: &str, approved_by: &str, signing_key: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(format!("{payload_hash}:{approved_by}:{signing_key}").as_bytes());
+    format!("sigv1:sha256:{:x}", hasher.finalize())
 }
 
 fn resolve_thermo_coupling_options(
@@ -3271,6 +3341,115 @@ fn resolve_thermo_coupling_options(
                 ),
             ]),
         ));
+    }
+
+    let expected_hash = thermo_field_payload_hash(&artifact);
+    if artifact.payload_hash.as_deref() != Some(expected_hash.as_str()) {
+        return Err(operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_THERMO_FIELD_DIGEST_MISMATCH",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "thermo field artifact payload hash does not match payload contents",
+            BTreeMap::from([
+                (
+                    "thermo_field_artifact_id".to_string(),
+                    field_artifact_id.to_string(),
+                ),
+                ("expected_payload_hash".to_string(), expected_hash),
+                (
+                    "artifact_payload_hash".to_string(),
+                    artifact.payload_hash.clone().unwrap_or_default(),
+                ),
+            ]),
+        ));
+    }
+
+    if matches!(artifact.artifact_status.as_deref(), Some("approved")) {
+        let Some(approved_by) = artifact.approved_by.as_deref() else {
+            return Err(operation_error(
+                operation,
+                op_version,
+                context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_RUN_THERMO_FIELD_APPROVER_MISSING",
+                    error_type: OperationErrorType::Validation,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                "approved thermo field artifact is missing approved_by",
+                BTreeMap::from([(
+                    "thermo_field_artifact_id".to_string(),
+                    field_artifact_id.to_string(),
+                )]),
+            ));
+        };
+
+        let allowed = std::env::var("RUNMAT_THERMO_FIELD_ALLOWED_APPROVERS")
+            .ok()
+            .map(|value| {
+                value
+                    .split(',')
+                    .map(|entry| entry.trim().to_string())
+                    .filter(|entry| !entry.is_empty())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+        if !allowed.is_empty() && !allowed.iter().any(|entry| entry == approved_by) {
+            return Err(operation_error(
+                operation,
+                op_version,
+                context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_RUN_THERMO_FIELD_APPROVER_UNAUTHORIZED",
+                    error_type: OperationErrorType::Validation,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                "thermo field artifact approver is not authorized",
+                BTreeMap::from([
+                    (
+                        "thermo_field_artifact_id".to_string(),
+                        field_artifact_id.to_string(),
+                    ),
+                    ("approved_by".to_string(), approved_by.to_string()),
+                ]),
+            ));
+        }
+
+        let signing_key = std::env::var("RUNMAT_THERMO_FIELD_SIGNING_KEY")
+            .unwrap_or_else(|_| "runmat-dev-thermo-signing-key".to_string());
+        let expected_signature = thermo_field_signature(&expected_hash, approved_by, &signing_key);
+        if artifact.signature.as_deref() != Some(expected_signature.as_str()) {
+            return Err(operation_error(
+                operation,
+                op_version,
+                context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_RUN_THERMO_FIELD_SIGNATURE_INVALID",
+                    error_type: OperationErrorType::Validation,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                "thermo field artifact signature validation failed",
+                BTreeMap::from([
+                    (
+                        "thermo_field_artifact_id".to_string(),
+                        field_artifact_id.to_string(),
+                    ),
+                    ("expected_signature".to_string(), expected_signature),
+                    (
+                        "artifact_signature".to_string(),
+                        artifact.signature.clone().unwrap_or_default(),
+                    ),
+                ]),
+            ));
+        }
     }
 
     options.field_source = artifact.field_source;

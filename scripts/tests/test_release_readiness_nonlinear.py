@@ -24,6 +24,7 @@ def report(
     thermo_field_artifact_id=None,
     thermo_field_artifact_approved=None,
     thermo_field_artifact_age_days=None,
+    thermo_field_artifact_provenance_valid=None,
 ):
     fixtures = [
         "nonlinear_assembly_gpu_provider",
@@ -76,6 +77,11 @@ def report(
     if thermo_field_artifact_age_days is not None:
         for rec in records:
             rec["thermo_field_artifact_age_days"] = thermo_field_artifact_age_days
+    if thermo_field_artifact_provenance_valid is not None:
+        for rec in records:
+            rec["thermo_field_artifact_provenance_valid"] = (
+                thermo_field_artifact_provenance_valid
+            )
 
     return {
         "passed": passed,
@@ -118,6 +124,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED",
             "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS",
+            "RUNMAT_THERMO_FIELD_PROMOTION_REPORT",
             "GITHUB_REF_NAME",
         ]:
             os.environ.pop(key, None)
@@ -823,6 +830,39 @@ class ReleaseReadinessTests(unittest.TestCase):
         )
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMO_FIELD_ARTIFACT_STALE", codes)
+
+    def test_thermo_artifact_provenance_invalid_reason_is_emitted(self):
+        os.environ["RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED"] = "true"
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermo_coupling_enabled=True,
+            thermo_field_artifact_id="artifact-1",
+            thermo_field_artifact_approved=True,
+            thermo_field_artifact_provenance_valid=False,
+        )
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_FIELD_ARTIFACT_PROVENANCE_INVALID", codes)
+
+    def test_thermo_field_promotion_blocked_reason_is_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+            thermo_promotion_report={
+                "blocked": True,
+                "reasons": ["THERMO_FIELD_PROMOTION_TREND_DRIFT_BLOCKED:1.4>1.2"],
+            },
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_FIELD_PROMOTION_BLOCKED", codes)
 
     def test_markdown_summary_prints_thermo_posture_section(self):
         latest = report(

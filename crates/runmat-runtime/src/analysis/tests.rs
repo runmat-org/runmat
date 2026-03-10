@@ -2090,27 +2090,38 @@ fn analysis_run_transient_can_resolve_thermo_field_artifact() {
     let root = PathBuf::from("target/runmat-analysis-artifacts/thermo-fields");
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).expect("create thermo field artifact root");
+    let mut field_artifact = serde_json::json!({
+        "schema_version": "analysis_thermo_field_artifact/v1",
+        "source_geometry_id": model.geometry_id,
+        "source_geometry_revision": model.geometry_revision,
+        "artifact_status": "approved",
+        "approved_by": "release-bot",
+        "field_source": {
+            "source_id": "artifact/transient-field",
+            "revision": 1,
+            "interpolation_mode": "linear",
+            "expected_region_ids": [],
+        },
+        "region_temperature_deltas": [
+            {"region_id": "tip", "temperature_delta_k": 72.0}
+        ],
+        "time_profile": [
+            {"normalized_time": 0.0, "scale": 0.5},
+            {"normalized_time": 1.0, "scale": 1.0}
+        ]
+    });
+    let artifact_hash = thermo_field_payload_hash(
+        &serde_json::from_value(field_artifact.clone()).expect("decode artifact struct"),
+    );
+    field_artifact["payload_hash"] = serde_json::Value::String(artifact_hash.clone());
+    field_artifact["signature"] = serde_json::Value::String(thermo_field_signature(
+        &artifact_hash,
+        "release-bot",
+        "runmat-dev-thermo-signing-key",
+    ));
     fs::write(
         root.join("field_ok.json"),
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "analysis_thermo_field_artifact/v1",
-            "source_geometry_id": model.geometry_id,
-            "source_geometry_revision": model.geometry_revision,
-                "field_source": {
-                    "source_id": "artifact/transient-field",
-                    "revision": 1,
-                    "interpolation_mode": "linear",
-                    "expected_region_ids": [],
-                },
-            "region_temperature_deltas": [
-                {"region_id": "tip", "temperature_delta_k": 72.0}
-            ],
-            "time_profile": [
-                {"normalized_time": 0.0, "scale": 0.5},
-                {"normalized_time": 1.0, "scale": 1.0}
-            ]
-        }))
-        .expect("encode thermo field artifact"),
+        serde_json::to_vec_pretty(&field_artifact).expect("encode thermo field artifact"),
     )
     .expect("write thermo field artifact");
     let run = analysis_run_transient_with_options_op(
@@ -2195,27 +2206,39 @@ fn analysis_run_transient_artifact_backed_thermo_matches_inline_profile() {
     let root = PathBuf::from("target/runmat-analysis-artifacts/thermo-fields");
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).expect("create thermo field artifact root");
+    let mut inline_equivalent_artifact = serde_json::json!({
+        "schema_version": "analysis_thermo_field_artifact/v1",
+        "source_geometry_id": model.geometry_id,
+        "source_geometry_revision": model.geometry_revision,
+        "artifact_status": "approved",
+        "approved_by": "release-bot",
+        "field_source": {
+            "source_id": "artifact/inline-equivalent",
+            "revision": 1,
+            "interpolation_mode": "linear",
+            "expected_region_ids": []
+        },
+        "region_temperature_deltas": [
+            {"region_id": "tip", "temperature_delta_k": 90.0}
+        ],
+        "time_profile": [
+            {"normalized_time": 0.0, "scale": 0.4},
+            {"normalized_time": 1.0, "scale": 1.0}
+        ]
+    });
+    let inline_hash = thermo_field_payload_hash(
+        &serde_json::from_value(inline_equivalent_artifact.clone())
+            .expect("decode inline artifact struct"),
+    );
+    inline_equivalent_artifact["payload_hash"] = serde_json::Value::String(inline_hash.clone());
+    inline_equivalent_artifact["signature"] = serde_json::Value::String(thermo_field_signature(
+        &inline_hash,
+        "release-bot",
+        "runmat-dev-thermo-signing-key",
+    ));
     fs::write(
         root.join("inline_equivalent.json"),
-        serde_json::to_vec_pretty(&serde_json::json!({
-            "schema_version": "analysis_thermo_field_artifact/v1",
-            "source_geometry_id": model.geometry_id,
-            "source_geometry_revision": model.geometry_revision,
-            "field_source": {
-                "source_id": "artifact/inline-equivalent",
-                "revision": 1,
-                "interpolation_mode": "linear",
-                "expected_region_ids": []
-            },
-            "region_temperature_deltas": [
-                {"region_id": "tip", "temperature_delta_k": 90.0}
-            ],
-            "time_profile": [
-                {"normalized_time": 0.0, "scale": 0.4},
-                {"normalized_time": 1.0, "scale": 1.0}
-            ]
-        }))
-        .expect("encode artifact"),
+        serde_json::to_vec_pretty(&inline_equivalent_artifact).expect("encode artifact"),
     )
     .expect("write artifact");
 
