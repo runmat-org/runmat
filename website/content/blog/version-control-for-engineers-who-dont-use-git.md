@@ -72,6 +72,11 @@ jsonLd:
           name: "Git"
           sameAs: "https://en.wikipedia.org/wiki/Git"
           applicationCategory: "DeveloperApplication"
+          operatingSystem: "Windows, Linux, macOS"
+          offers:
+            "@type": "Offer"
+            price: "0"
+            priceCurrency: "USD"
 
       speakable:
         "@type": "SpeakableSpecification"

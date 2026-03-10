@@ -1,8 +1,8 @@
 ---
-title: "MATLAB Alternatives 2026: RunMat, Octave, Julia, and Python Compared for Engineers"
-description: "A deep comparison of free MATLAB alternatives. We look at RunMat, GNU Octave, Julia, and Python through the lens of engineering performance, compatibility, and usability."
+title: "MATLAB Alternatives 2026: RunMat, Octave, Julia, Python"
+description: "Side-by-side benchmarks of RunMat, Octave, Julia, and Python. Speed, GPU acceleration, MATLAB compatibility, and a decision guide for engineers."
 date: "2025-09-19"
-dateModified: "2026-03-03"
+dateModified: "2026-03-10"
 readTime: "22 min read"
 authors:
   - name: "Fin Watterson"
@@ -17,11 +17,11 @@ excerpt: "We compare four leading MATLAB alternatives (RunMat, Octave, Julia, an
 image: "https://web.runmatstatic.com/free-matlab-alternatives-2026.png"
 imageAlt: "RunMat vs Octave, Julia, Python benchmark chart"
 ogType: "article"
-ogTitle: "Free MATLAB Alternatives for Engineers: RunMat vs Octave, Julia, and Python"
-ogDescription: "RunMat, Octave, Julia, and Python compared: performance, compatibility, and usability for engineers."
+ogTitle: "MATLAB Alternatives 2026: RunMat vs Octave, Julia, Python"
+ogDescription: "Benchmarks, GPU tests, and compatibility scores. RunMat, Octave, Julia, and Python compared for engineering workflows."
 twitterCard: "summary_large_image"
-twitterTitle: "Best Free MATLAB Alternatives in 2026"
-twitterDescription: "RunMat, Octave, Julia, and Python compared for engineers. Which is fastest, most compatible, and free?"
+twitterTitle: "MATLAB Alternatives 2026: RunMat, Octave, Julia, Python Compared"
+twitterDescription: "RunMat, Octave, Julia, and Python compared for engineers. Which is fastest and most compatible?"
 canonical: "https://runmat.com/blog/free-matlab-alternatives"
 jsonLd:
   "@context": "https://schema.org"
@@ -38,17 +38,19 @@ jsonLd:
           item: "https://runmat.com/blog"
         - "@type": "ListItem"
           position: 3
-          name: "Free MATLAB Alternatives 2026"
+          name: "MATLAB Alternatives 2026"
           item: "https://runmat.com/blog/free-matlab-alternatives"
 
     - "@type": "TechArticle"
       "@id": "https://runmat.com/blog/free-matlab-alternatives#article"
-      headline: "Free MATLAB Alternatives 2026: RunMat vs Octave, Julia, and Python"
-      description: "A deep comparison of free MATLAB alternatives (RunMat, GNU Octave, Julia, Python) focusing on engineering performance and compatibility."
+      headline: "MATLAB Alternatives 2026: RunMat, Octave, Julia, Python"
+      description: "A deep comparison of MATLAB alternatives (RunMat, GNU Octave, Julia, Python) focusing on engineering performance and compatibility."
       image: "https://web.runmatstatic.com/free-matlab-alternatives-2026.png"
-      datePublished: "2025-09-19"
-      dateModified: "2026-03-03"
+      datePublished: "2025-09-19T00:00:00Z"
+      dateModified: "2026-03-10T00:00:00Z"
       proficiencyLevel: "Professional"
+      hasPart:
+        "@id": "https://runmat.com/blog/free-matlab-alternatives#faq"
       author:
         - "@type": "Person"
           name: "Fin Watterson"
@@ -70,16 +72,30 @@ jsonLd:
         - "@type": "SoftwareApplication"
           name: "GNU Octave"
           applicationCategory: "ScientificApplication"
+          operatingSystem: "Windows, Linux, macOS"
+          offers:
+            "@type": "Offer"
+            price: "0"
+            priceCurrency: "USD"
         - "@type": "SoftwareApplication"
           name: "Julia"
           applicationCategory: "ComputerLanguage"
+          operatingSystem: "Windows, Linux, macOS"
+          offers:
+            "@type": "Offer"
+            price: "0"
+            priceCurrency: "USD"
         - "@type": "SoftwareApplication"
           name: "MATLAB"
           applicationCategory: "ScientificApplication"
+          operatingSystem: "Windows, Linux, macOS"
         - "@type": "ComputerLanguage"
           name: "Python"
 
     - "@type": "FAQPage"
+      "@id": "https://runmat.com/blog/free-matlab-alternatives#faq"
+      mainEntityOfPage:
+        "@id": "https://runmat.com/blog/free-matlab-alternatives"
       mainEntity:
         - "@type": "Question"
           name: "What is the best free alternative to MATLAB for existing code?"

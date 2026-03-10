@@ -307,8 +307,8 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     description: post.frontmatter.description,
     alternates: post.frontmatter.canonical ? { canonical: post.frontmatter.canonical } : undefined,
     openGraph: {
-      title: post.frontmatter.title,
-      description: post.frontmatter.description,
+      title: post.frontmatter.ogTitle || post.frontmatter.title,
+      description: post.frontmatter.ogDescription || post.frontmatter.description,
       type: 'article',
       publishedTime: post.frontmatter.date,
       modifiedTime: post.frontmatter.dateModified || post.frontmatter.date,
@@ -316,9 +316,9 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
       images: imageUrl ? [imageUrl] : undefined,
     },
     twitter: {
-      card: 'summary_large_image',
-      title: post.frontmatter.title,
-      description: post.frontmatter.description,
+      card: (post.frontmatter.twitterCard as 'summary_large_image') || 'summary_large_image',
+      title: post.frontmatter.twitterTitle || post.frontmatter.title,
+      description: post.frontmatter.twitterDescription || post.frontmatter.description,
       images: imageUrl ? [imageUrl] : undefined,
     },
   };

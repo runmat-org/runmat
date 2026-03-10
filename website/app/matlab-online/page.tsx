@@ -167,8 +167,8 @@ const jsonLd = {
       description:
         "Run MATLAB-syntax code online with RunMat. GPU acceleration on any vendor, interactive 3D plotting, automatic file versioning, and cross-platform support. No license required.",
       inLanguage: "en",
-      datePublished: "2026-02-03",
-      dateModified: "2026-03-05",
+      datePublished: "2026-02-03T00:00:00Z",
+      dateModified: "2026-03-05T00:00:00Z",
       isPartOf: { "@id": "https://runmat.com/#website" },
       breadcrumb: { "@id": "https://runmat.com/matlab-online#breadcrumb" },
       author: { "@id": "https://runmat.com/#organization" },
@@ -188,7 +188,7 @@ const jsonLd = {
         "Short demo of RunMat running MATLAB-syntax code in the browser with GPU acceleration.",
       thumbnailUrl: heroPosterSrc,
       contentUrl: heroVideoSrc,
-      uploadDate: "2026-02-03",
+      uploadDate: "2026-02-03T00:00:00Z",
       duration: "PT15S",
     },
     {
@@ -592,7 +592,7 @@ export default function MatlabOnlinePage() {
               </span>
               <h3 className="text-lg font-semibold text-gray-100">Cloud project sharing</h3>
               <p className="text-sm text-gray-300 mt-1">Share projects with colleagues instantly. No shared drives, no emailing files back and forth.</p>
-              <Link href="/blog/ad-hoc-checkpoints-to-large-data-persistence" className="text-xs text-muted-foreground hover:text-foreground underline mt-2 inline-block">Learn more</Link>
+              <Link href="/blog/from-ad-hoc-checkpoints-to-reliable-large-data-persistence" className="text-xs text-muted-foreground hover:text-foreground underline mt-2 inline-block">Learn more</Link>
             </div>
           </div>
         </section>
