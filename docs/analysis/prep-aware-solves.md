@@ -76,6 +76,10 @@ Typed prep-reference failure families:
   - branch-specific governance profiles set default strictness for drift and recommendation thresholds,
   - CI enforces no-silent-bypass checks for governance artifact presence,
   - release workflows consume promoted approved evidence artifacts as governance preflight outputs.
+- **Phase 1 thermo-mechanical kickoff**: additive coupling contract + assembly slice.
+  - run options can provide optional thermo-mechanical coupling controls,
+  - assembly emits deterministic thermo-mechanical coupling diagnostics and fingerprints,
+  - benchmark harness includes a kickoff fixture with coupling metric thresholds.
 
 ## Diagnostics
 
@@ -92,5 +96,6 @@ Prep-aware runs can emit:
 - `FEA_PREP_GRAPH_SOLVER`
 - `FEA_PREP_CALIBRATION`
 - `FEA_PREP_ACCEPTANCE`
+- `FEA_TM_COUPLING`
 
 These diagnostics are deterministic for the same model + prep artifact reference.

@@ -1,6 +1,7 @@
 use super::harness::with_harness_provider;
 use super::manifest::default_options;
 use super::*;
+use runmat_runtime::analysis::ThermoMechanicalCouplingOptions;
 
 fn env_usize(name: &str) -> Option<usize> {
     std::env::var(name)
@@ -107,6 +108,16 @@ fn run_fixture_cpu(
                         AnalysisTransientRunOptions::production_recommended()
                             .dt_bucket_rel_tolerance,
                     ),
+                    thermo_mechanical_coupling: if spec.id == "thermo_mech_kickoff_gpu_provider" {
+                        Some(ThermoMechanicalCouplingOptions {
+                            enabled: true,
+                            reference_temperature_k: 293.15,
+                            applied_temperature_delta_k: 65.0,
+                            thermal_expansion_coefficient: 1.2e-5,
+                        })
+                    } else {
+                        None
+                    },
                     ..AnalysisTransientRunOptions::production_recommended()
                 }
             },
@@ -162,6 +173,16 @@ fn run_fixture_gpu(
                         AnalysisTransientRunOptions::production_recommended()
                             .dt_bucket_rel_tolerance,
                     ),
+                    thermo_mechanical_coupling: if spec.id == "thermo_mech_kickoff_gpu_provider" {
+                        Some(ThermoMechanicalCouplingOptions {
+                            enabled: true,
+                            reference_temperature_k: 293.15,
+                            applied_temperature_delta_k: 65.0,
+                            thermal_expansion_coefficient: 1.2e-5,
+                        })
+                    } else {
+                        None
+                    },
                     ..AnalysisTransientRunOptions::production_recommended()
                 }
             },
@@ -833,6 +854,36 @@ pub(super) fn run_fixture(
                             transient_physics_nonfinite,
                             None,
                             Some(0.0),
+                        );
+                    }
+                    if spec.id == "thermo_mech_kickoff_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_mech_thermal_strain_scale",
+                            "FEA_TM_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_COUPLING",
+                                "thermal_strain_scale",
+                            ),
+                            Some(5.0e-4),
+                            Some(5.0e-2),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_mech_thermal_load_scale",
+                            "FEA_TM_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_COUPLING",
+                                "thermal_load_scale",
+                            ),
+                            Some(0.5),
+                            Some(2.0),
                         );
                     }
                     if spec.id == "nonlinear_assembly_gpu_provider" {

@@ -2,7 +2,7 @@ use runmat_analysis_core::AnalysisModel;
 use serde::{Deserialize, Serialize};
 
 use crate::operator::OperatorSystem;
-use crate::{FeaPrepCalibrationProfile, FeaPrepContext};
+use crate::{FeaPrepCalibrationProfile, FeaPrepContext, FeaThermoMechanicalContext};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct AssemblySummary {
@@ -17,6 +17,7 @@ pub struct AssemblySummary {
     pub prep_graph_assembly: Option<PrepGraphAssemblySummary>,
     pub prep_calibration: Option<PrepCalibrationSummary>,
     pub prep_acceptance: Option<PrepAcceptanceSummary>,
+    pub thermo_mechanical: Option<ThermoMechanicalAssemblySummary>,
     pub operator: OperatorSystem,
 }
 
@@ -122,9 +123,21 @@ pub struct PrepAcceptanceSummary {
     pub acceptance_fingerprint: u64,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ThermoMechanicalAssemblySummary {
+    pub enabled: bool,
+    pub reference_temperature_k: f64,
+    pub applied_temperature_delta_k: f64,
+    pub thermal_expansion_coefficient: f64,
+    pub thermal_strain_scale: f64,
+    pub thermal_load_scale: f64,
+    pub coupling_fingerprint: u64,
+}
+
 pub fn assemble_linear_system(
     model: &AnalysisModel,
     prep_context: Option<FeaPrepContext>,
+    thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
 ) -> AssemblySummary {
     let base_dof_count = (model.loads.len() * 3).max(3);
     let dof_count = if let Some(prep) = prep_context {
@@ -219,6 +232,7 @@ pub fn assemble_linear_system(
     let mut prep_graph_assembly = None;
     let mut prep_calibration = None;
     let mut prep_acceptance = None;
+    let mut thermo_mechanical = None;
     let mut topology_stiffness_scale = 1.0;
     let mut topology_mass_scale = 1.0;
     let mut topology_damping_scale = 1.0;
@@ -468,6 +482,31 @@ pub fn assemble_linear_system(
         }
     }
 
+    if let Some(context) = thermo_mechanical_context {
+        if context.enabled {
+            let thermal_strain_scale = (context.thermal_expansion_coefficient
+                * context.applied_temperature_delta_k.abs())
+            .clamp(0.0, 0.05);
+            let thermal_load_scale = (context.applied_temperature_delta_k / 50.0).clamp(-2.0, 2.0);
+            for i in 0..dof_count {
+                let thermal_bias = 1.0 + thermal_strain_scale * (1.0 + (i % 3) as f64 * 0.1);
+                stiffness_diag[i] *= thermal_bias;
+                if !constrained[i] {
+                    rhs[i] += thermal_load_scale * (1.0 + (i % 5) as f64 * 0.05);
+                }
+            }
+            thermo_mechanical = Some(ThermoMechanicalAssemblySummary {
+                enabled: true,
+                reference_temperature_k: context.reference_temperature_k,
+                applied_temperature_delta_k: context.applied_temperature_delta_k,
+                thermal_expansion_coefficient: context.thermal_expansion_coefficient,
+                thermal_strain_scale,
+                thermal_load_scale,
+                coupling_fingerprint: thermo_mechanical_fingerprint(context, dof_count),
+            });
+        }
+    }
+
     AssemblySummary {
         dof_count,
         constrained_dof_count,
@@ -480,6 +519,7 @@ pub fn assemble_linear_system(
         prep_graph_assembly,
         prep_calibration,
         prep_acceptance,
+        thermo_mechanical,
         operator: OperatorSystem {
             dof_count,
             constrained,
@@ -1317,5 +1357,19 @@ fn acceptance_fingerprint(
     );
     hash ^= accepted as u64;
     hash = hash.wrapping_mul(1099511628211_u64);
+    hash
+}
+
+fn thermo_mechanical_fingerprint(context: FeaThermoMechanicalContext, dof_count: usize) -> u64 {
+    let mut hash = 1469598103934665603_u64;
+    for value in [
+        dof_count as u64,
+        context.reference_temperature_k.to_bits(),
+        context.applied_temperature_delta_k.to_bits(),
+        context.thermal_expansion_coefficient.to_bits(),
+    ] {
+        hash ^= value;
+        hash = hash.wrapping_mul(1099511628211_u64);
+    }
     hash
 }

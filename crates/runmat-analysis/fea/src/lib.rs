@@ -77,6 +77,14 @@ pub struct FeaPrepContext {
     pub calibration_profile_override: Option<FeaPrepCalibrationProfile>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct FeaThermoMechanicalContext {
+    pub enabled: bool,
+    pub reference_temperature_k: f64,
+    pub applied_temperature_delta_k: f64,
+    pub thermal_expansion_coefficient: f64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FeaPrepCalibrationProfile {
@@ -90,12 +98,14 @@ pub struct LinearStaticSolveOptions {
     pub preconditioner_kind: SpdPreconditionerKind,
     pub algebra_backend_kind: LinearAlgebraBackendKind,
     pub prep_context: Option<FeaPrepContext>,
+    pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct ModalSolveOptions {
     pub mode_count: usize,
     pub prep_context: Option<FeaPrepContext>,
+    pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
 }
 
 impl Default for ModalSolveOptions {
@@ -103,6 +113,7 @@ impl Default for ModalSolveOptions {
         Self {
             mode_count: 3,
             prep_context: None,
+            thermo_mechanical_context: None,
         }
     }
 }
@@ -146,6 +157,7 @@ impl Default for LinearStaticSolveOptions {
             preconditioner_kind: SpdPreconditionerKind::Jacobi,
             algebra_backend_kind: LinearAlgebraBackendKind::CpuReference,
             prep_context: None,
+            thermo_mechanical_context: None,
         }
     }
 }
@@ -170,7 +182,11 @@ pub fn run_linear_static_with_options(
 ) -> Result<FeaRunResult, FeaRunError> {
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
 
-    let summary = assemble_linear_system(model, options.prep_context);
+    let summary = assemble_linear_system(
+        model,
+        options.prep_context,
+        options.thermo_mechanical_context,
+    );
     let algebra_backend = build_backend(options.algebra_backend_kind);
     let solve_result = solve_linear_system(
         &summary,
@@ -239,6 +255,9 @@ pub fn run_linear_static_with_options(
     if let Some(acceptance) = summary.prep_acceptance.as_ref() {
         diagnostics.push(prep_acceptance_diagnostic(acceptance));
     }
+    if let Some(thermo_mechanical) = summary.thermo_mechanical.as_ref() {
+        diagnostics.push(thermo_mechanical_diagnostic(thermo_mechanical));
+    }
     diagnostics.extend(solve_result.diagnostics);
 
     Ok(FeaRunResult {
@@ -268,7 +287,11 @@ pub fn run_modal_with_options(
 ) -> Result<FeaModalRunResult, FeaRunError> {
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
 
-    let summary = assemble_linear_system(model, options.prep_context);
+    let summary = assemble_linear_system(
+        model,
+        options.prep_context,
+        options.thermo_mechanical_context,
+    );
     let modal = solve_modal_system(&summary, options.mode_count, backend);
     let mut diagnostics = modal.diagnostics.clone();
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
@@ -312,6 +335,9 @@ pub fn run_modal_with_options(
     }
     if let Some(acceptance) = summary.prep_acceptance.as_ref() {
         diagnostics.push(prep_acceptance_diagnostic(acceptance));
+    }
+    if let Some(thermo_mechanical) = summary.thermo_mechanical.as_ref() {
+        diagnostics.push(thermo_mechanical_diagnostic(thermo_mechanical));
     }
 
     let displacement = modal
@@ -384,7 +410,11 @@ pub fn run_transient_with_options(
 ) -> Result<FeaTransientRunResult, FeaRunError> {
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
 
-    let summary = assemble_linear_system(model, options.prep_context);
+    let summary = assemble_linear_system(
+        model,
+        options.prep_context,
+        options.thermo_mechanical_context,
+    );
     let transient = solve_transient_system(&summary, options, backend);
     let mut diagnostics = transient.diagnostics.clone();
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
@@ -428,6 +458,9 @@ pub fn run_transient_with_options(
     }
     if let Some(acceptance) = summary.prep_acceptance.as_ref() {
         diagnostics.push(prep_acceptance_diagnostic(acceptance));
+    }
+    if let Some(thermo_mechanical) = summary.thermo_mechanical.as_ref() {
+        diagnostics.push(thermo_mechanical_diagnostic(thermo_mechanical));
     }
 
     let displacement = transient
@@ -496,7 +529,11 @@ pub fn run_nonlinear_with_options(
 ) -> Result<FeaNonlinearRunResult, FeaRunError> {
     validate_model(model).map_err(|err| FeaRunError::InvalidModel(err.to_string()))?;
 
-    let summary = assemble_linear_system(model, options.prep_context);
+    let summary = assemble_linear_system(
+        model,
+        options.prep_context,
+        options.thermo_mechanical_context,
+    );
     let nonlinear = solve_nonlinear_system(&summary, options, backend);
     let mut diagnostics = nonlinear.diagnostics.clone();
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));
@@ -545,6 +582,9 @@ pub fn run_nonlinear_with_options(
     }
     if let Some(acceptance) = summary.prep_acceptance.as_ref() {
         diagnostics.push(prep_acceptance_diagnostic(acceptance));
+    }
+    if let Some(thermo_mechanical) = summary.thermo_mechanical.as_ref() {
+        diagnostics.push(thermo_mechanical_diagnostic(thermo_mechanical));
     }
 
     let displacement = nonlinear
@@ -898,6 +938,25 @@ fn prep_acceptance_diagnostic(summary: &assembly::PrepAcceptanceSummary) -> FeaD
     }
 }
 
+fn thermo_mechanical_diagnostic(
+    summary: &assembly::ThermoMechanicalAssemblySummary,
+) -> FeaDiagnostic {
+    FeaDiagnostic {
+        code: "FEA_TM_COUPLING".to_string(),
+        severity: FeaDiagnosticSeverity::Info,
+        message: format!(
+            "enabled={} reference_temperature_k={} applied_temperature_delta_k={} thermal_expansion_coefficient={} thermal_strain_scale={} thermal_load_scale={} coupling_fingerprint={}",
+            summary.enabled,
+            summary.reference_temperature_k,
+            summary.applied_temperature_delta_k,
+            summary.thermal_expansion_coefficient,
+            summary.thermal_strain_scale,
+            summary.thermal_load_scale,
+            summary.coupling_fingerprint,
+        ),
+    }
+}
+
 fn mode_shapes_iteration_proxy(residual_norms: &[f64]) -> f64 {
     residual_norms.len() as f64
 }
@@ -1052,6 +1111,7 @@ mod tests {
             ModalSolveOptions {
                 mode_count: 8,
                 prep_context: None,
+                thermo_mechanical_context: None,
             },
         )
         .expect("modal large fixture should solve");

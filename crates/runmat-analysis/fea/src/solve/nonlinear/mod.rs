@@ -5,7 +5,7 @@ use crate::{
     assembly::AssemblySummary,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     solve::transient::{solve_transient_system, TransientSolveOptions},
-    ComputeBackend, FeaPrepContext,
+    ComputeBackend, FeaPrepContext, FeaThermoMechanicalContext,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -20,6 +20,7 @@ pub struct NonlinearSolveOptions {
     pub line_search_reduction: f64,
     pub tangent_refresh_interval: usize,
     pub prep_context: Option<FeaPrepContext>,
+    pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
 }
 
 impl Default for NonlinearSolveOptions {
@@ -35,6 +36,7 @@ impl Default for NonlinearSolveOptions {
             line_search_reduction: 0.5,
             tangent_refresh_interval: 2,
             prep_context: None,
+            thermo_mechanical_context: None,
         }
     }
 }
@@ -120,6 +122,7 @@ pub fn solve_nonlinear_system(
             adapt_nonconverged_shrink: 1.0,
             dt_bucket_rel_tolerance: 0.0,
             prep_context: options.prep_context,
+            thermo_mechanical_context: options.thermo_mechanical_context,
         },
         backend,
     );

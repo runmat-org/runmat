@@ -6,7 +6,7 @@ use crate::{
     assembly::AssemblySummary,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     solve::runtime_tensor_solver::RuntimeTensorPreparedLinearSystem,
-    ComputeBackend, FeaPrepContext,
+    ComputeBackend, FeaPrepContext, FeaThermoMechanicalContext,
 };
 
 mod diagnostics;
@@ -33,6 +33,7 @@ pub struct TransientSolveOptions {
     pub adapt_nonconverged_shrink: f64,
     pub dt_bucket_rel_tolerance: f64,
     pub prep_context: Option<FeaPrepContext>,
+    pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
 }
 
 impl Default for TransientSolveOptions {
@@ -54,6 +55,7 @@ impl Default for TransientSolveOptions {
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
             prep_context: None,
+            thermo_mechanical_context: None,
         }
     }
 }

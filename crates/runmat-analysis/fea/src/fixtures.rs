@@ -17,6 +17,7 @@ pub enum FixtureId {
     NonlinearAssemblyStress,
     NonlinearSofteningProxy,
     NonlinearLoadPathMix,
+    ThermoMechanicalKickoff,
     MultiMaterialAssembly,
     MissingMaterials,
     MissingLoads,
@@ -34,6 +35,7 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
         FixtureId::NonlinearAssemblyStress => nonlinear_assembly_stress_fixture(),
         FixtureId::NonlinearSofteningProxy => nonlinear_softening_proxy_fixture(),
         FixtureId::NonlinearLoadPathMix => nonlinear_load_path_mix_fixture(),
+        FixtureId::ThermoMechanicalKickoff => thermo_mechanical_kickoff_fixture(),
         FixtureId::MultiMaterialAssembly => multi_material_assembly(),
         FixtureId::MissingMaterials => missing_materials(),
         FixtureId::MissingLoads => missing_loads(),
@@ -309,6 +311,30 @@ fn nonlinear_load_path_mix_fixture() -> AnalysisModel {
     model.steps = vec![AnalysisStep {
         step_id: "nonlinear_mix_1".to_string(),
         kind: AnalysisStepKind::Nonlinear,
+    }];
+    model
+}
+
+fn thermo_mechanical_kickoff_fixture() -> AnalysisModel {
+    let mut model = multi_material_assembly();
+    model.model_id = AnalysisModelId("thermo_mechanical_kickoff_fixture".to_string());
+    model.loads = (0..240)
+        .map(|i| {
+            let scale = 1.0 + (i as f64) * 0.004;
+            LoadCase {
+                load_id: format!("thermo_mech_force_{i}"),
+                region_id: format!("thermo_mech_region_{}", i % 24),
+                kind: LoadKind::Force {
+                    fx: 35.0 * scale,
+                    fy: -900.0 * scale,
+                    fz: 12.0 * scale,
+                },
+            }
+        })
+        .collect();
+    model.steps = vec![AnalysisStep {
+        step_id: "thermo_mech_transient_1".to_string(),
+        kind: AnalysisStepKind::Transient,
     }];
     model
 }

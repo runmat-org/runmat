@@ -34,7 +34,7 @@ pub use contracts::{
     ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, NonlinearMethod,
     NonlinearResultsData, PrecisionMode, PrepCalibrationProfile, PreconditionerMode, QualityGate, QualityPolicy,
     QualityReason, QualityReasonCode, RunProvenance, RunStatus,
-    TransientIntegrationMethod, TransientResultsData,
+    ThermoMechanicalCouplingOptions, TransientIntegrationMethod, TransientResultsData,
 };
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "analysis.create_model";
@@ -251,6 +251,26 @@ pub fn analysis_create_model_op(
                 kind: AnalysisStepKind::Static,
             },
         ),
+        AnalysisCreateModelProfile::ThermoMechanicalCoupled => (
+            BoundaryCondition {
+                bc_id: "bc_default_fixed".to_string(),
+                region_id: fixed_region_id,
+                kind: BoundaryConditionKind::Fixed,
+            },
+            LoadCase {
+                load_id: "load_default_thermal_mech_force".to_string(),
+                region_id: load_region_id,
+                kind: LoadKind::Force {
+                    fx: 0.0,
+                    fy: -650.0,
+                    fz: 0.0,
+                },
+            },
+            AnalysisStep {
+                step_id: "step_default_thermo_mech".to_string(),
+                kind: AnalysisStepKind::Transient,
+            },
+        ),
         AnalysisCreateModelProfile::ModalStructural => (
             BoundaryCondition {
                 bc_id: "bc_default_fixed".to_string(),
@@ -448,6 +468,9 @@ pub fn analysis_run_modal_with_options_op(
         ModalSolveOptions {
             mode_count: options.mode_count,
             prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
+            thermo_mechanical_context: to_fea_thermo_mechanical_context(
+                options.thermo_mechanical_coupling,
+            ),
         },
     )
     .map_err(
@@ -770,6 +793,9 @@ pub fn analysis_run_transient_with_options_op(
             adapt_nonconverged_shrink: options.adapt_nonconverged_shrink,
             dt_bucket_rel_tolerance: options.dt_bucket_rel_tolerance,
             prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
+            thermo_mechanical_context: to_fea_thermo_mechanical_context(
+                options.thermo_mechanical_coupling,
+            ),
         }
         },
     )
@@ -1179,6 +1205,9 @@ pub fn analysis_run_nonlinear_with_options_op(
             line_search_reduction: options.line_search_reduction,
             tangent_refresh_interval: options.tangent_refresh_interval,
             prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
+            thermo_mechanical_context: to_fea_thermo_mechanical_context(
+                options.thermo_mechanical_coupling,
+            ),
         }
         },
     )
@@ -1448,6 +1477,9 @@ pub fn analysis_run_linear_static_with_options(
             preconditioner_kind: requested_preconditioner,
             algebra_backend_kind: requested_solver_backend,
             prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
+            thermo_mechanical_context: to_fea_thermo_mechanical_context(
+                options.thermo_mechanical_coupling,
+            ),
         }
         },
     )
@@ -2425,6 +2457,17 @@ fn map_calibration_profile(
             Some(runmat_analysis_fea::FeaPrepCalibrationProfile::Conservative)
         }
     }
+}
+
+fn to_fea_thermo_mechanical_context(
+    options: Option<ThermoMechanicalCouplingOptions>,
+) -> Option<runmat_analysis_fea::FeaThermoMechanicalContext> {
+    options.map(|tm| runmat_analysis_fea::FeaThermoMechanicalContext {
+        enabled: tm.enabled,
+        reference_temperature_k: tm.reference_temperature_k,
+        applied_temperature_delta_k: tm.applied_temperature_delta_k,
+        thermal_expansion_coefficient: tm.thermal_expansion_coefficient,
+    })
 }
 
 fn resolve_run_prep_context(
