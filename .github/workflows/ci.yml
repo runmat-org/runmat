@@ -382,6 +382,31 @@ jobs:
               ready = json.loads(ready_path.read_text())
               lines.append(f"- Governance profile: {ready.get('governance_profile', 'unknown')}")
               lines.append(f"- Readiness verdict: {ready.get('verdict', 'unknown')}")
+              thermo_enabled_rate = ready.get('thermo_coupling_enabled_rate')
+              thermo_max_transient = ready.get('thermo_max_transient_severity')
+              thermo_max_nonlinear = ready.get('thermo_max_nonlinear_severity')
+              thermo_max_spread = ready.get('thermo_max_spread_ratio')
+              thermo_max_heterogeneity = ready.get('thermo_max_heterogeneity_index')
+              lines.append(
+                  "- Thermo coupling enabled-rate: "
+                  f"{thermo_enabled_rate if thermo_enabled_rate is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo max transient severity: "
+                  f"{thermo_max_transient if thermo_max_transient is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo max nonlinear severity: "
+                  f"{thermo_max_nonlinear if thermo_max_nonlinear is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo max spread ratio: "
+                  f"{thermo_max_spread if thermo_max_spread is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo max heterogeneity index: "
+                  f"{thermo_max_heterogeneity if thermo_max_heterogeneity is not None else '-'}"
+              )
           else:
               lines.append("- Readiness artifact: missing")
           out = Path("tier75-governance-summary.md")

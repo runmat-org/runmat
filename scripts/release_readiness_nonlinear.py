@@ -56,6 +56,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_NONLINEAR_SEVERITY": "0.25",
             "RUNMAT_RELEASE_READINESS_THERMO_MIN_ENABLED_RATE": "0.5",
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_METRICS": "true",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_INDEX": "0.2",
         },
         "development": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.2",
@@ -66,6 +68,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_NONLINEAR_SEVERITY": "0.3",
             "RUNMAT_RELEASE_READINESS_THERMO_MIN_ENABLED_RATE": "0.0",
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_METRICS": "false",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_RATIO": "1.3",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_INDEX": "0.3",
         },
         "feature": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.25",
@@ -76,6 +80,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_NONLINEAR_SEVERITY": "0.4",
             "RUNMAT_RELEASE_READINESS_THERMO_MIN_ENABLED_RATE": "0.0",
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_METRICS": "false",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_RATIO": "1.5",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_INDEX": "0.5",
         },
     }
     return profile_map.get(profile, {}).get(name, default)
@@ -579,16 +585,34 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_METRICS", "false"),
         )
     )
+    thermo_max_spread_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_RATIO", "1.3"),
+        )
+    )
+    thermo_max_heterogeneity_index_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_INDEX",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_INDEX", "0.3"
+            ),
+        )
+    )
     thermo_records = [
         rec
         for rec in report_records(latest)
         if isinstance(rec.get("thermo_coupling_enabled"), bool)
         or isinstance(rec.get("thermo_transient_severity"), (int, float))
         or isinstance(rec.get("thermo_nonlinear_severity"), (int, float))
+        or isinstance(rec.get("thermo_constitutive_material_spread_ratio"), (int, float))
+        or isinstance(rec.get("thermo_assignment_heterogeneity_index"), (int, float))
     ]
     thermo_coupling_enabled_rate = None
     thermo_max_transient_severity = None
     thermo_max_nonlinear_severity = None
+    thermo_max_spread_ratio = None
+    thermo_max_heterogeneity_index = None
     if not thermo_records:
         if protected or thermo_require_metrics:
             reasons.append(
@@ -670,6 +694,51 @@ def evaluate_release_readiness(
                     )
                 )
 
+        spread_values = []
+        for rec in thermo_records:
+            raw_value = rec.get("thermo_constitutive_material_spread_ratio")
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                if math.isfinite(value):
+                    spread_values.append(value)
+        if spread_values:
+            thermo_max_spread_ratio = max(spread_values)
+            if thermo_max_spread_ratio > thermo_max_spread_ratio_threshold:
+                reasons.append(
+                    Reason(
+                        code="THERMO_MATERIAL_SPREAD_RATIO_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"max thermo material spread ratio {thermo_max_spread_ratio:.3f} exceeds "
+                            f"threshold {thermo_max_spread_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
+
+        heterogeneity_values = []
+        for rec in thermo_records:
+            raw_value = rec.get("thermo_assignment_heterogeneity_index")
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                if math.isfinite(value):
+                    heterogeneity_values.append(value)
+        if heterogeneity_values:
+            thermo_max_heterogeneity_index = max(heterogeneity_values)
+            if (
+                thermo_max_heterogeneity_index
+                > thermo_max_heterogeneity_index_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="THERMO_ASSIGNMENT_HETEROGENEITY_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"max thermo assignment heterogeneity index {thermo_max_heterogeneity_index:.3f} exceeds "
+                            f"threshold {thermo_max_heterogeneity_index_threshold:.3f}"
+                        ),
+                    )
+                )
+
     if any(reason.severity == "fail" for reason in reasons):
         verdict = "fail"
     elif reasons:
@@ -690,6 +759,8 @@ def evaluate_release_readiness(
         "thermo_coupling_enabled_rate": thermo_coupling_enabled_rate,
         "thermo_max_transient_severity": thermo_max_transient_severity,
         "thermo_max_nonlinear_severity": thermo_max_nonlinear_severity,
+        "thermo_max_spread_ratio": thermo_max_spread_ratio,
+        "thermo_max_heterogeneity_index": thermo_max_heterogeneity_index,
         "governance_profile": governance_profile_name(),
     }
 
@@ -712,6 +783,14 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Max thermo nonlinear severity: "
         f"`{result.get('thermo_max_nonlinear_severity') if result.get('thermo_max_nonlinear_severity') is not None else '-'}`"
+    )
+    lines.append(
+        "- Max thermo material spread ratio: "
+        f"`{result.get('thermo_max_spread_ratio') if result.get('thermo_max_spread_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Max thermo assignment heterogeneity index: "
+        f"`{result.get('thermo_max_heterogeneity_index') if result.get('thermo_max_heterogeneity_index') is not None else '-'}`"
     )
     lines.append("")
     if result["reasons"]:

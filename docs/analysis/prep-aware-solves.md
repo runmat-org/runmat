@@ -85,6 +85,7 @@ Typed prep-reference failure families:
   - runtime quality policy surfaces thermo stress reasons when coupling severity enters warning posture,
   - `analysis.results` and `analysis.trends` summaries surface thermo coupling posture fields for lightweight client gating,
   - release-readiness scripts can gate directly on thermo summary fields via branch-profile thresholds,
+  - release-readiness thermo thresholds now include constitutive heterogeneity bounds (spread ratio + assignment heterogeneity index),
   - report validation/summarization scripts enforce and display thermo posture fields for CI triage,
   - CI runs strict thermo summary presence validation on thermo-gated branches,
   - benchmark harness includes a kickoff fixture with coupling metric thresholds.

@@ -1022,6 +1022,7 @@ Release readiness criteria (default):
   - prep reject-rate guard (`PREP_REJECT_RATE_HIGH`) compares `(stale_reject + mismatch_reject)/created` against `RUNMAT_RELEASE_READINESS_PREP_MAX_REJECT_RATE` when counters are provided.
 - Thermo-coupling posture guard:
   - when thermo metrics are present, release readiness evaluates max transient/nonlinear thermo severity against branch-aware thresholds (`RUNMAT_RELEASE_READINESS_THERMO_MAX_TRANSIENT_SEVERITY`, `RUNMAT_RELEASE_READINESS_THERMO_MAX_NONLINEAR_SEVERITY`),
+  - constitutive heterogeneity is also bounded via branch-aware thresholds (`RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_RATIO`, `RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_INDEX`),
   - coupling enabled-rate can be enforced via `RUNMAT_RELEASE_READINESS_THERMO_MIN_ENABLED_RATE`,
   - metrics presence can be required via `RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_METRICS`.
 - Protected branches:
@@ -1379,6 +1380,8 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-09: Updated CI Tier-7.5 governance summary emission (`tier75-governance-summary.md`) to include thermo posture rollups from nonlinear readiness artifacts (enabled-rate, max transient/nonlinear severity, max spread ratio, max heterogeneity index) for quick reviewer triage.
+- 2026-03-09: Added branch/profile thermo heterogeneity release gating by extending `release_readiness_nonlinear.py` with spread/heterogeneity thresholds and typed reasons (`THERMO_MATERIAL_SPREAD_RATIO_HIGH`, `THERMO_ASSIGNMENT_HETEROGENEITY_HIGH`), plus markdown posture output and unit coverage.
 - 2026-03-09: Advanced Phase-1 thermo constitutive heterogeneity by introducing assignment-aware local modulus perturbations (confidence/expected-vs-assigned material mismatch weighted) that produce new thermo spread diagnostics (`constitutive_material_spread_ratio`, `assignment_heterogeneity_index`) and propagate those metrics through `analysis.results`, benchmark records, validators, and trend/summary reporting.
 - 2026-03-09: Implemented the next Phase-1 thermo constitutive slice by adding temperature/Poisson-coupled effective modulus scaling in FEA assembly (`FEA_TM_COUPLING` now emits constitutive factors), applying that scale to both stiffness diagonal and coupling bands, and plumbing constitutive thermo fields through `analysis.results`, conformance records, validators, and summary/trend scripts.
 - 2026-03-09: Added branch-scoped CI thermo safety check by introducing strict validator mode (`RUNMAT_VALIDATE_REQUIRE_THERMO_SUMMARY=true`) in `validate_analysis_report_nonlinear.py` and wiring a dedicated `main`/`release/*` CI step to fail fast when thermo summary fields disappear from conformance artifacts.
