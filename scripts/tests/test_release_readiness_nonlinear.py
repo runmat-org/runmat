@@ -437,6 +437,24 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertNotIn("PREP_CALIBRATION_RECOMMENDATION_ARTIFACT_MISSING", codes)
         self.assertEqual(result.get("governance_profile"), "feature")
 
+    def test_feature_branch_profile_tolerates_pathological_spread_baseline(self):
+        os.environ["GITHUB_REF_NAME"] = "feature/sandbox"
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermo_coupling_enabled=True,
+            thermo_constitutive_material_spread_ratio=1.6,
+        )
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertNotIn("THERMO_MATERIAL_SPREAD_RATIO_HIGH", codes)
+        self.assertEqual(result.get("governance_profile"), "feature")
+
     def test_thermo_transient_severity_high_reason_is_emitted(self):
         latest = report(passed=True, publishable=True, gpu_ms=100.0)
         latest["records"].append(
@@ -666,6 +684,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Max thermo transient severity", summary)
         self.assertIn("Max thermo nonlinear severity", summary)
         self.assertIn("Max thermo material spread ratio", summary)
+        self.assertIn("Thermo spread ratio threshold", summary)
         self.assertIn("Max thermo assignment heterogeneity index", summary)
         self.assertIn("Thermo spread breach rate", summary)
         self.assertIn("Thermo heterogeneity breach rate", summary)

@@ -386,6 +386,7 @@ jobs:
               thermo_max_transient = ready.get('thermo_max_transient_severity')
               thermo_max_nonlinear = ready.get('thermo_max_nonlinear_severity')
               thermo_max_spread = ready.get('thermo_max_spread_ratio')
+              thermo_spread_threshold = ready.get('thermo_max_spread_ratio_threshold')
               thermo_max_heterogeneity = ready.get('thermo_max_heterogeneity_index')
               thermo_spread_breach_rate = ready.get('thermo_spread_breach_rate')
               thermo_heterogeneity_breach_rate = ready.get('thermo_heterogeneity_breach_rate')
@@ -405,6 +406,14 @@ jobs:
                   "- Thermo max spread ratio: "
                   f"{thermo_max_spread if thermo_max_spread is not None else '-'}"
               )
+              lines.append(
+                  "- Thermo spread ratio threshold: "
+                  f"{thermo_spread_threshold if thermo_spread_threshold is not None else '-'}"
+              )
+              if ready.get('governance_profile') == 'feature':
+                  lines.append(
+                      "- Feature-profile posture: allows thermo spread up to 1.6 to absorb pathological fixture variance"
+                  )
               lines.append(
                   "- Thermo max heterogeneity index: "
                   f"{thermo_max_heterogeneity if thermo_max_heterogeneity is not None else '-'}"

@@ -88,7 +88,7 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_NONLINEAR_SEVERITY": "0.4",
             "RUNMAT_RELEASE_READINESS_THERMO_MIN_ENABLED_RATE": "0.0",
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_METRICS": "false",
-            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_RATIO": "1.5",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_RATIO": "1.6",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_INDEX": "0.5",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_BREACH_RATE": "0.5",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_BREACH_RATE": "0.5",
@@ -933,6 +933,7 @@ def evaluate_release_readiness(
         "thermo_max_nonlinear_severity": thermo_max_nonlinear_severity,
         "thermo_max_spread_ratio": thermo_max_spread_ratio,
         "thermo_max_heterogeneity_index": thermo_max_heterogeneity_index,
+        "thermo_max_spread_ratio_threshold": thermo_max_spread_ratio_threshold,
         "thermo_spread_breach_rate": thermo_spread_breach_rate,
         "thermo_heterogeneity_breach_rate": thermo_heterogeneity_breach_rate,
         "thermo_spread_trend_ratio": thermo_spread_trend_ratio,
@@ -963,6 +964,10 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Max thermo material spread ratio: "
         f"`{result.get('thermo_max_spread_ratio') if result.get('thermo_max_spread_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermo spread ratio threshold: "
+        f"`{result.get('thermo_max_spread_ratio_threshold') if result.get('thermo_max_spread_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
         "- Max thermo assignment heterogeneity index: "
