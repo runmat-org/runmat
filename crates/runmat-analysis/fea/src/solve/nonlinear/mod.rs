@@ -130,8 +130,14 @@ pub fn solve_nonlinear_system(
     let load_factors = (1..=options.increment_count)
         .map(|idx| idx as f64 / options.increment_count as f64)
         .collect::<Vec<_>>();
-    let convergence_residual_target =
-        options.tolerance * options.residual_convergence_factor.max(1.0);
+    let thermo_severity = thermo_mechanical_severity(options.thermo_mechanical_context);
+    let thermo_residual_relaxation = 1.0 + 2.0 * thermo_severity;
+    let thermo_increment_relaxation = 1.0 + 1.4 * thermo_severity;
+    let convergence_residual_target = options.tolerance
+        * options.residual_convergence_factor.max(1.0)
+        * thermo_residual_relaxation;
+    let convergence_increment_target =
+        options.increment_norm_tolerance * thermo_increment_relaxation;
     let line_search_reduction = options.line_search_reduction.clamp(0.05, 0.95);
     let tangent_refresh_interval = options.tangent_refresh_interval.max(1);
 
@@ -179,7 +185,7 @@ pub fn solve_nonlinear_system(
             }
 
             let residual_ok = residual <= convergence_residual_target;
-            let increment_ok = increment_norm <= options.increment_norm_tolerance;
+            let increment_ok = increment_norm <= convergence_increment_target;
             if residual_ok && increment_ok {
                 converged = true;
                 break;
@@ -191,6 +197,7 @@ pub fn solve_nonlinear_system(
             if refresh_tangent {
                 damping *= 0.85;
             }
+            damping *= (1.0 - 0.08 * thermo_severity).clamp(0.65, 1.0);
 
             if options.line_search && options.max_line_search_backtracks > 0 {
                 let mut accepted = false;
@@ -316,6 +323,24 @@ pub fn solve_nonlinear_system(
             transient_prepared_build_ms, solve_ms, transient_fallback_apply_count
         ),
     });
+    if thermo_severity > 0.0 {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_TM_NONLINEAR".to_string(),
+            severity: if thermo_severity <= 0.6 {
+                FeaDiagnosticSeverity::Info
+            } else {
+                FeaDiagnosticSeverity::Warning
+            },
+            message: format!(
+                "severity={} residual_relaxation={} increment_relaxation={} convergence_residual_target={} convergence_increment_target={}",
+                thermo_severity,
+                thermo_residual_relaxation,
+                thermo_increment_relaxation,
+                convergence_residual_target,
+                convergence_increment_target,
+            ),
+        });
+    }
     diagnostics.extend(transient.diagnostics);
 
     NonlinearSolveResult {
@@ -362,4 +387,17 @@ fn transient_cost_metric(diagnostics: &[FeaDiagnostic], key: &str) -> Option<f64
                 .find_map(|token| token.strip_prefix(&format!("{key}=")))
         })
         .and_then(|value| value.parse::<f64>().ok())
+}
+
+fn thermo_mechanical_severity(context: Option<FeaThermoMechanicalContext>) -> f64 {
+    let Some(context) = context else {
+        return 0.0;
+    };
+    if !context.enabled {
+        return 0.0;
+    }
+    let thermal_strain = (context.thermal_expansion_coefficient
+        * context.applied_temperature_delta_k.abs())
+    .clamp(0.0, 0.05);
+    (thermal_strain / 0.05).clamp(0.0, 1.0)
 }

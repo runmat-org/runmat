@@ -79,6 +79,7 @@ Typed prep-reference failure families:
 - **Phase 1 thermo-mechanical kickoff**: additive coupling contract + assembly slice.
   - run options can provide optional thermo-mechanical coupling controls,
   - assembly emits deterministic thermo-mechanical coupling diagnostics and fingerprints,
+  - coupled transient/nonlinear solve paths apply thermo-aware convergence/adaptivity profile shaping,
   - benchmark harness includes a kickoff fixture with coupling metric thresholds.
 
 ## Diagnostics
@@ -97,5 +98,7 @@ Prep-aware runs can emit:
 - `FEA_PREP_CALIBRATION`
 - `FEA_PREP_ACCEPTANCE`
 - `FEA_TM_COUPLING`
+- `FEA_TM_TRANSIENT`
+- `FEA_TM_NONLINEAR`
 
 These diagnostics are deterministic for the same model + prep artifact reference.

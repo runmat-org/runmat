@@ -27,6 +27,11 @@ pub(super) fn push_transient_quality_diagnostics(
     dt_bucket_rel_tolerance: f64,
     max_step_l2_jump_ratio: f64,
     nonfinite_displacement_count: usize,
+    thermo_severity: f64,
+    thermo_residual_relaxation: f64,
+    effective_residual_target: f64,
+    thermo_growth_limit: f64,
+    thermo_nonconverged_shrink: f64,
 ) {
     let converged_all = converged_steps == options.step_count;
     diagnostics.push(FeaDiagnostic {
@@ -125,6 +130,25 @@ pub(super) fn push_transient_quality_diagnostics(
             max_step_l2_jump_ratio, nonfinite_displacement_count
         ),
     });
+
+    if thermo_severity > 0.0 {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_TM_TRANSIENT".to_string(),
+            severity: if thermo_severity <= 0.6 {
+                FeaDiagnosticSeverity::Info
+            } else {
+                FeaDiagnosticSeverity::Warning
+            },
+            message: format!(
+                "severity={} residual_relaxation={} effective_residual_target={} growth_limit={} nonconverged_shrink={}",
+                thermo_severity,
+                thermo_residual_relaxation,
+                effective_residual_target,
+                thermo_growth_limit,
+                thermo_nonconverged_shrink,
+            ),
+        });
+    }
 
     if !energies.is_empty() {
         let baseline_energy = energies

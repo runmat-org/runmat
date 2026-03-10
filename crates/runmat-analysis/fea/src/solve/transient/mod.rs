@@ -106,6 +106,11 @@ pub fn solve_transient_system(
     }
 
     let use_runtime_tensor = backend == ComputeBackend::Gpu;
+    let thermo_severity = thermo_mechanical_severity(options.thermo_mechanical_context);
+    let thermo_residual_relaxation = 1.0 + 1.5 * thermo_severity;
+    let effective_residual_target = options.residual_target * thermo_residual_relaxation;
+    let thermo_growth_limit = (1.0 - 0.12 * thermo_severity).clamp(0.75, 1.0);
+    let thermo_nonconverged_shrink = (1.0 - 0.20 * thermo_severity).clamp(0.65, 1.0);
     let min_dt = options.min_time_step_s.max(1.0e-9);
     let max_dt = options.max_time_step_s.max(min_dt);
     let mut dt = options.time_step_s.clamp(min_dt, max_dt);
@@ -163,7 +168,7 @@ pub fn solve_transient_system(
                 break solved;
             }
             let (candidate_x, candidate_residual, candidate_converged, candidate_stats) = solved;
-            if candidate_converged && candidate_residual <= options.residual_target * 4.0 {
+            if candidate_converged && candidate_residual <= effective_residual_target * 4.0 {
                 break (
                     candidate_x,
                     candidate_residual,
@@ -218,12 +223,14 @@ pub fn solve_transient_system(
             let next_dt = recommend_next_time_step(
                 step_dt,
                 residual_norm,
-                options.residual_target,
+                effective_residual_target,
                 min_dt,
                 max_dt,
                 converged,
                 retries,
                 options,
+                thermo_growth_limit,
+                thermo_nonconverged_shrink,
             );
             let scale = next_dt / step_dt.max(1.0e-12);
             adapt_scale_sum += scale;
@@ -304,6 +311,11 @@ pub fn solve_transient_system(
         dt_bucket_rel_tolerance,
         max_step_l2_jump_ratio,
         nonfinite_displacement_count,
+        thermo_severity,
+        thermo_residual_relaxation,
+        effective_residual_target,
+        thermo_growth_limit,
+        thermo_nonconverged_shrink,
     );
 
     TransientSolveResult {
@@ -332,9 +344,14 @@ fn recommend_next_time_step(
     converged: bool,
     retries: usize,
     options: TransientSolveOptions,
+    thermo_growth_limit: f64,
+    thermo_nonconverged_shrink: f64,
 ) -> f64 {
     if !converged {
-        return (step_dt * options.adapt_nonconverged_shrink.clamp(0.2, 1.0)).clamp(min_dt, max_dt);
+        return (step_dt
+            * options.adapt_nonconverged_shrink.clamp(0.2, 1.0)
+            * thermo_nonconverged_shrink)
+            .clamp(min_dt, max_dt);
     }
 
     let target = residual_target.max(1.0e-12);
@@ -349,5 +366,19 @@ fn recommend_next_time_step(
     } else if residual_norm <= target * 0.1 {
         factor = factor.max((1.0 + (options.adapt_max_scale - 1.0) * 0.6).clamp(1.0, 1.5));
     }
+    factor = factor.min(thermo_growth_limit.max(0.5));
     (step_dt * factor).clamp(min_dt, max_dt)
+}
+
+fn thermo_mechanical_severity(context: Option<FeaThermoMechanicalContext>) -> f64 {
+    let Some(context) = context else {
+        return 0.0;
+    };
+    if !context.enabled {
+        return 0.0;
+    }
+    let thermal_strain = (context.thermal_expansion_coefficient
+        * context.applied_temperature_delta_k.abs())
+    .clamp(0.0, 0.05);
+    (thermal_strain / 0.05).clamp(0.0, 1.0)
 }

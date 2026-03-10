@@ -1183,6 +1183,40 @@ mod tests {
     }
 
     #[test]
+    fn thermo_mechanical_transient_emits_coupled_solve_profile_diagnostic() {
+        let model = fixture_model(FixtureId::ThermoMechanicalKickoff);
+        let result = run_transient_with_options(
+            &model,
+            ComputeBackend::Cpu,
+            TransientSolveOptions {
+                step_count: 24,
+                thermo_mechanical_context: Some(FeaThermoMechanicalContext {
+                    enabled: true,
+                    reference_temperature_k: 293.15,
+                    applied_temperature_delta_k: 65.0,
+                    thermal_expansion_coefficient: 1.2e-5,
+                }),
+                ..TransientSolveOptions::default()
+            },
+        )
+        .expect("thermo-mechanical transient solve should succeed");
+
+        assert!(result
+            .run
+            .diagnostics
+            .iter()
+            .any(|diag| diag.code == "FEA_TM_COUPLING"));
+        let profile = result
+            .run
+            .diagnostics
+            .iter()
+            .find(|diag| diag.code == "FEA_TM_TRANSIENT")
+            .expect("thermo transient profile diagnostic should be present");
+        assert!(profile.message.contains("effective_residual_target="));
+        assert!(profile.message.contains("growth_limit="));
+    }
+
+    #[test]
     fn nonlinear_fixture_emits_incremental_payload_and_diagnostics() {
         let mut model = fixture_model(FixtureId::TransientShock);
         model.steps = vec![runmat_analysis_core::AnalysisStep {
@@ -1215,6 +1249,34 @@ mod tests {
         assert!(convergence.message.contains("iteration_spike_count="));
         assert!(convergence.message.contains("convergence_stall_count="));
         assert!(convergence.message.contains("backtrack_burst_count="));
+    }
+
+    #[test]
+    fn thermo_mechanical_nonlinear_emits_coupled_convergence_profile_diagnostic() {
+        let model = fixture_model(FixtureId::NonlinearLoadPathMix);
+        let result = run_nonlinear_with_options(
+            &model,
+            ComputeBackend::Cpu,
+            NonlinearSolveOptions {
+                thermo_mechanical_context: Some(FeaThermoMechanicalContext {
+                    enabled: true,
+                    reference_temperature_k: 293.15,
+                    applied_temperature_delta_k: 90.0,
+                    thermal_expansion_coefficient: 1.4e-5,
+                }),
+                ..NonlinearSolveOptions::default()
+            },
+        )
+        .expect("thermo-mechanical nonlinear solve should succeed");
+
+        let profile = result
+            .run
+            .diagnostics
+            .iter()
+            .find(|diag| diag.code == "FEA_TM_NONLINEAR")
+            .expect("thermo nonlinear profile diagnostic should be present");
+        assert!(profile.message.contains("convergence_residual_target="));
+        assert!(profile.message.contains("convergence_increment_target="));
     }
 
     #[test]
