@@ -155,4 +155,12 @@ Release-readiness branch profile defaults:
 | `development` | 0.30 | 0.30 | 1.30 | 0.30 | 0.25 | 0.25 | 1.20 | 1.20 |
 | `feature` | 0.40 | 0.40 | 1.60 | 0.50 | 0.50 | 0.50 | 1.35 | 1.35 |
 
+Release-readiness field-quality branch profile defaults:
+
+| Governance profile | min field coverage ratio | max field extrapolation ratio | max coverage-drop trend ratio | max extrapolation trend ratio |
+| --- | ---: | ---: | ---: | ---: |
+| `release` | 0.55 | 0.02 | 1.10 | 1.10 |
+| `development` | 0.45 | 0.08 | 1.20 | 1.20 |
+| `feature` | 0.30 | 0.18 | 1.35 | 1.35 |
+
 For exploratory feature branches, the `1.60` spread-ratio ceiling intentionally treats pathological thermo fixtures as expected stress signals rather than immediate readiness blockers.

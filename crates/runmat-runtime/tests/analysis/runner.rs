@@ -72,6 +72,7 @@ fn nonlinear_options_for_spec(spec: &FixtureSpec) -> AnalysisNonlinearRunOptions
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 75.0,
             thermal_expansion_coefficient: 1.2e-5,
+            field_artifact_id: None,
             field_source: None,
             region_temperature_deltas: Vec::new(),
             time_profile: Vec::new(),
@@ -88,6 +89,7 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 65.0,
             thermal_expansion_coefficient: 1.2e-5,
+            field_artifact_id: None,
             field_source: None,
             region_temperature_deltas: vec![
                 ThermoRegionTemperatureDelta {
@@ -115,6 +117,7 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 55.0,
             thermal_expansion_coefficient: 1.0e-5,
+            field_artifact_id: None,
             field_source: None,
             region_temperature_deltas: vec![
                 ThermoRegionTemperatureDelta {
@@ -142,6 +145,7 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 220.0,
             thermal_expansion_coefficient: 2.5e-5,
+            field_artifact_id: None,
             field_source: None,
             region_temperature_deltas: vec![
                 ThermoRegionTemperatureDelta {
@@ -173,6 +177,7 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 70.0,
             thermal_expansion_coefficient: 1.1e-5,
+            field_artifact_id: None,
             field_source: None,
             region_temperature_deltas: vec![
                 ThermoRegionTemperatureDelta {
@@ -204,6 +209,7 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 140.0,
             thermal_expansion_coefficient: 2.0e-5,
+            field_artifact_id: None,
             field_source: None,
             region_temperature_deltas: vec![
                 ThermoRegionTemperatureDelta {

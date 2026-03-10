@@ -64,6 +64,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_THERMO_MIN_FIELD_COVERAGE_RATIO": "0.55",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO": "0.02",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_COVERAGE_DROP_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO": "1.1",
         },
         "development": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.2",
@@ -82,6 +84,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_THERMO_MIN_FIELD_COVERAGE_RATIO": "0.45",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO": "0.08",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_COVERAGE_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO": "1.2",
         },
         "feature": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.25",
@@ -100,6 +104,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_THERMO_MIN_FIELD_COVERAGE_RATIO": "0.3",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO": "0.18",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_COVERAGE_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO": "1.35",
         },
     }
     return profile_map.get(profile, {}).get(name, default)
@@ -647,6 +653,24 @@ def evaluate_release_readiness(
             ),
         )
     )
+    thermo_max_field_coverage_drop_trend_ratio = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_COVERAGE_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_COVERAGE_DROP_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
+    thermo_max_field_extrapolation_trend_ratio = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO",
+                "1.2",
+            ),
+        )
+    )
     thermo_max_spread_trend_ratio = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_TREND_RATIO",
@@ -677,6 +701,8 @@ def evaluate_release_readiness(
     thermo_max_heterogeneity_index = None
     thermo_min_field_coverage_ratio = None
     thermo_max_field_extrapolation_ratio = None
+    thermo_field_coverage_drop_trend_ratio = None
+    thermo_field_extrapolation_trend_ratio = None
     thermo_spread_breach_rate = None
     thermo_heterogeneity_breach_rate = None
     thermo_spread_trend_ratio = None
@@ -984,6 +1010,89 @@ def evaluate_release_readiness(
                         )
                     )
 
+        latest_by_fixture = {}
+        for rec in report_records(latest):
+            fixture_id = rec.get("fixture_id")
+            if isinstance(fixture_id, str):
+                latest_by_fixture[fixture_id] = rec
+        rolling_by_fixture = {}
+        for report in rolling:
+            for rec in report_records(report):
+                fixture_id = rec.get("fixture_id")
+                if isinstance(fixture_id, str):
+                    rolling_by_fixture.setdefault(fixture_id, []).append(rec)
+
+        coverage_drop_ratios = []
+        extrapolation_trend_ratios = []
+        for fixture_id, latest_rec in latest_by_fixture.items():
+            baseline_records = rolling_by_fixture.get(fixture_id, [])
+            if not baseline_records:
+                continue
+            latest_coverage = latest_rec.get("thermo_spatial_coverage_ratio")
+            baseline_coverage_values = [
+                float(rec.get("thermo_spatial_coverage_ratio"))
+                for rec in baseline_records
+                if isinstance(rec.get("thermo_spatial_coverage_ratio"), (int, float))
+            ]
+            if (
+                isinstance(latest_coverage, (int, float))
+                and baseline_coverage_values
+                and float(latest_coverage) > 0
+            ):
+                coverage_drop_ratios.append(
+                    statistics.median(baseline_coverage_values) / float(latest_coverage)
+                )
+
+            latest_extrapolation = latest_rec.get("thermo_field_extrapolation_ratio")
+            baseline_extrapolation_values = [
+                float(rec.get("thermo_field_extrapolation_ratio"))
+                for rec in baseline_records
+                if isinstance(rec.get("thermo_field_extrapolation_ratio"), (int, float))
+            ]
+            if (
+                isinstance(latest_extrapolation, (int, float))
+                and baseline_extrapolation_values
+                and statistics.median(baseline_extrapolation_values) > 0
+            ):
+                extrapolation_trend_ratios.append(
+                    float(latest_extrapolation)
+                    / statistics.median(baseline_extrapolation_values)
+                )
+
+        if coverage_drop_ratios:
+            thermo_field_coverage_drop_trend_ratio = max(coverage_drop_ratios)
+            if (
+                thermo_field_coverage_drop_trend_ratio
+                > thermo_max_field_coverage_drop_trend_ratio
+            ):
+                reasons.append(
+                    Reason(
+                        code="THERMO_FIELD_COVERAGE_TREND_WORSENING",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"thermo field coverage drop trend ratio {thermo_field_coverage_drop_trend_ratio:.3f} exceeds "
+                            f"threshold {thermo_max_field_coverage_drop_trend_ratio:.3f}"
+                        ),
+                    )
+                )
+
+        if extrapolation_trend_ratios:
+            thermo_field_extrapolation_trend_ratio = max(extrapolation_trend_ratios)
+            if (
+                thermo_field_extrapolation_trend_ratio
+                > thermo_max_field_extrapolation_trend_ratio
+            ):
+                reasons.append(
+                    Reason(
+                        code="THERMO_FIELD_EXTRAPOLATION_TREND_WORSENING",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"thermo field extrapolation trend ratio {thermo_field_extrapolation_trend_ratio:.3f} exceeds "
+                            f"threshold {thermo_max_field_extrapolation_trend_ratio:.3f}"
+                        ),
+                    )
+                )
+
     if any(reason.severity == "fail" for reason in reasons):
         verdict = "fail"
     elif reasons:
@@ -1008,9 +1117,13 @@ def evaluate_release_readiness(
         "thermo_max_heterogeneity_index": thermo_max_heterogeneity_index,
         "thermo_min_field_coverage_ratio": thermo_min_field_coverage_ratio,
         "thermo_max_field_extrapolation_ratio": thermo_max_field_extrapolation_ratio,
+        "thermo_field_coverage_drop_trend_ratio": thermo_field_coverage_drop_trend_ratio,
+        "thermo_field_extrapolation_trend_ratio": thermo_field_extrapolation_trend_ratio,
         "thermo_max_spread_ratio_threshold": thermo_max_spread_ratio_threshold,
         "thermo_min_field_coverage_ratio_threshold": thermo_min_field_coverage_ratio_threshold,
         "thermo_max_field_extrapolation_ratio_threshold": thermo_max_field_extrapolation_ratio_threshold,
+        "thermo_max_field_coverage_drop_trend_ratio": thermo_max_field_coverage_drop_trend_ratio,
+        "thermo_max_field_extrapolation_trend_ratio": thermo_max_field_extrapolation_trend_ratio,
         "thermo_spread_breach_rate": thermo_spread_breach_rate,
         "thermo_heterogeneity_breach_rate": thermo_heterogeneity_breach_rate,
         "thermo_spread_trend_ratio": thermo_spread_trend_ratio,
@@ -1065,6 +1178,22 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Thermo field extrapolation threshold: "
         f"`{result.get('thermo_max_field_extrapolation_ratio_threshold') if result.get('thermo_max_field_extrapolation_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermo field coverage drop trend ratio: "
+        f"`{result.get('thermo_field_coverage_drop_trend_ratio') if result.get('thermo_field_coverage_drop_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermo field coverage drop trend threshold: "
+        f"`{result.get('thermo_max_field_coverage_drop_trend_ratio') if result.get('thermo_max_field_coverage_drop_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermo field extrapolation trend ratio: "
+        f"`{result.get('thermo_field_extrapolation_trend_ratio') if result.get('thermo_field_extrapolation_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermo field extrapolation trend threshold: "
+        f"`{result.get('thermo_max_field_extrapolation_trend_ratio') if result.get('thermo_max_field_extrapolation_trend_ratio') is not None else '-'}`"
     )
     lines.append(
         "- Thermo spread breach rate: "

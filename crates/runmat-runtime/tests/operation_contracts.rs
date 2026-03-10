@@ -13,7 +13,7 @@ use runmat_runtime::analysis::{
     AnalysisNonlinearRunOptions, AnalysisResultsCompareQuery, AnalysisResultsQuery,
     AnalysisRunKind, AnalysisRunOptions, AnalysisTransientRunOptions, AnalysisTrendsQuery,
     ModalFrequencyBasis, ModalFrequencyUnits, PrecisionMode, PreconditionerMode, QualityPolicy,
-    QualityReasonCode, RunStatus,
+    QualityReasonCode, RunStatus, ThermoMechanicalCouplingOptions,
 };
 use runmat_runtime::geometry::{
     geometry_capture_view_op, geometry_inspect_op, geometry_list_regions_op, geometry_load_op,
@@ -627,6 +627,38 @@ fn analysis_run_transient_contract_is_v1_and_typed() {
     assert_eq!(invalid.operation, "analysis.run_transient");
     assert_eq!(invalid.op_version, "analysis.run_transient/v1");
     assert_eq!(invalid.error_code, "ANALYSIS_RUN_TRANSIENT_INVALID_MODEL");
+}
+
+#[test]
+fn analysis_run_transient_thermo_field_reference_errors_are_typed() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.steps = vec![runmat_analysis_core::AnalysisStep {
+        step_id: "transient_1".to_string(),
+        kind: runmat_analysis_core::AnalysisStepKind::Transient,
+    }];
+
+    let invalid = analysis_run_transient_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisTransientRunOptions {
+            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 70.0,
+                thermal_expansion_coefficient: 1.1e-5,
+                field_artifact_id: Some("missing_thermo_field".to_string()),
+                field_source: None,
+                region_temperature_deltas: Vec::new(),
+                time_profile: Vec::new(),
+            }),
+            ..AnalysisTransientRunOptions::default()
+        },
+        OperationContext::new(Some("trace-contract-transient-thermo-field-1".to_string()), None),
+    )
+    .expect_err("missing thermo field artifact should fail");
+    assert_eq!(invalid.operation, "analysis.run_transient");
+    assert_eq!(invalid.op_version, "analysis.run_transient/v1");
+    assert_eq!(invalid.error_code, "ANALYSIS_RUN_THERMO_FIELD_NOT_FOUND");
 }
 
 #[test]

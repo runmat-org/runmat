@@ -102,6 +102,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_MIN_FIELD_COVERAGE_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_COVERAGE_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO",
             "GITHUB_REF_NAME",
         ]:
             os.environ.pop(key, None)
@@ -706,6 +708,54 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMO_FIELD_EXTRAPOLATION_HIGH", codes)
 
+    def test_thermo_field_coverage_trend_worsening_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermo_coupling_enabled=True,
+            thermo_spatial_coverage_ratio=0.3,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                thermo_coupling_enabled=True,
+                thermo_spatial_coverage_ratio=0.6,
+            )
+        ]
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_COVERAGE_DROP_TREND_RATIO"
+        ] = "1.5"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_FIELD_COVERAGE_TREND_WORSENING", codes)
+
+    def test_thermo_field_extrapolation_trend_worsening_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermo_coupling_enabled=True,
+            thermo_field_extrapolation_ratio=0.18,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                thermo_coupling_enabled=True,
+                thermo_field_extrapolation_ratio=0.09,
+            )
+        ]
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO"
+        ] = "1.5"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_FIELD_EXTRAPOLATION_TREND_WORSENING", codes)
+
     def test_markdown_summary_prints_thermo_posture_section(self):
         latest = report(
             passed=True,
@@ -736,6 +786,10 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Thermo field coverage threshold", summary)
         self.assertIn("Max thermo field extrapolation ratio", summary)
         self.assertIn("Thermo field extrapolation threshold", summary)
+        self.assertIn("Thermo field coverage drop trend ratio", summary)
+        self.assertIn("Thermo field coverage drop trend threshold", summary)
+        self.assertIn("Thermo field extrapolation trend ratio", summary)
+        self.assertIn("Thermo field extrapolation trend threshold", summary)
         self.assertIn("Thermo spread breach rate", summary)
         self.assertIn("Thermo heterogeneity breach rate", summary)
         self.assertIn("Thermo spread trend ratio", summary)

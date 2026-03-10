@@ -839,6 +839,7 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 65.0,
                 thermal_expansion_coefficient: 1.2e-5,
+                field_artifact_id: None,
                 field_source: None,
                 region_temperature_deltas: Vec::new(),
                 time_profile: Vec::new(),
@@ -900,6 +901,7 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 80.0,
                 thermal_expansion_coefficient: 1.2e-5,
+                field_artifact_id: None,
                 field_source: None,
                 region_temperature_deltas: Vec::new(),
                 time_profile: Vec::new(),
@@ -1739,6 +1741,7 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 90.0,
                 thermal_expansion_coefficient: 1.0e-3,
+                field_artifact_id: None,
                 field_source: None,
                 region_temperature_deltas: Vec::new(),
                 time_profile: Vec::new(),
@@ -1777,6 +1780,7 @@ fn nonlinear_balanced_degrades_when_thermo_heterogeneity_is_high() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 90.0,
                 thermal_expansion_coefficient: 1.2e-5,
+                field_artifact_id: None,
                 field_source: None,
                 region_temperature_deltas: Vec::new(),
                 time_profile: Vec::new(),
@@ -2006,6 +2010,7 @@ fn analysis_run_transient_rejects_non_monotonic_thermo_time_profile() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 70.0,
                 thermal_expansion_coefficient: 1.1e-5,
+                field_artifact_id: None,
                 field_source: Some(ThermoFieldSource {
                     source_id: "field/transient-a".to_string(),
                     revision: 1,
@@ -2054,6 +2059,7 @@ fn analysis_run_nonlinear_rejects_unknown_thermo_expected_region_ids() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 80.0,
                 thermal_expansion_coefficient: 1.2e-5,
+                field_artifact_id: None,
                 field_source: Some(ThermoFieldSource {
                     source_id: "field/nonlinear-a".to_string(),
                     revision: 2,
@@ -2070,6 +2076,111 @@ fn analysis_run_nonlinear_rejects_unknown_thermo_expected_region_ids() {
     .expect_err("unknown thermo expected region should be rejected");
 
     assert_eq!(err.error_code, "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS");
+}
+
+#[test]
+fn analysis_run_transient_can_resolve_thermo_field_artifact() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "transient_1".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
+
+    let root = PathBuf::from("target/runmat-analysis-artifacts/thermo-fields");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create thermo field artifact root");
+    fs::write(
+        root.join("field_ok.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "analysis_thermo_field_artifact/v1",
+            "source_geometry_id": model.geometry_id,
+            "source_geometry_revision": model.geometry_revision,
+                "field_source": {
+                    "source_id": "artifact/transient-field",
+                    "revision": 1,
+                    "interpolation_mode": "linear",
+                    "expected_region_ids": [],
+                },
+            "region_temperature_deltas": [
+                {"region_id": "tip", "temperature_delta_k": 72.0}
+            ],
+            "time_profile": [
+                {"normalized_time": 0.0, "scale": 0.5},
+                {"normalized_time": 1.0, "scale": 1.0}
+            ]
+        }))
+        .expect("encode thermo field artifact"),
+    )
+    .expect("write thermo field artifact");
+    let run = analysis_run_transient_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisTransientRunOptions {
+            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 70.0,
+                thermal_expansion_coefficient: 1.1e-5,
+                field_artifact_id: Some("field_ok".to_string()),
+                field_source: None,
+                region_temperature_deltas: Vec::new(),
+                time_profile: Vec::new(),
+            }),
+            ..AnalysisTransientRunOptions::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("transient run should resolve thermo field artifact");
+
+    let results = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("results should succeed");
+
+    let _ = fs::remove_dir_all(&root);
+
+    assert!(results.data.summary.thermo_spatial_coverage_ratio.is_some());
+    assert_eq!(results.data.summary.thermo_region_delta_count, Some(1.0));
+}
+
+#[test]
+fn analysis_run_transient_rejects_missing_thermo_field_artifact() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "transient_1".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
+
+    let root = PathBuf::from("target/runmat-analysis-artifacts/thermo-fields");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create empty thermo field artifact root");
+
+    let err = analysis_run_transient_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisTransientRunOptions {
+            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 70.0,
+                thermal_expansion_coefficient: 1.1e-5,
+                field_artifact_id: Some("missing".to_string()),
+                field_source: None,
+                region_temperature_deltas: Vec::new(),
+                time_profile: Vec::new(),
+            }),
+            ..AnalysisTransientRunOptions::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect_err("missing thermo field artifact should be rejected");
+    let _ = fs::remove_dir_all(&root);
+
+    assert_eq!(err.error_code, "ANALYSIS_RUN_THERMO_FIELD_NOT_FOUND");
 }
 
 #[test]
@@ -2093,6 +2204,7 @@ fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 90.0,
                 thermal_expansion_coefficient: 1.0e-3,
+                field_artifact_id: None,
                 field_source: None,
                 region_temperature_deltas: Vec::new(),
                 time_profile: Vec::new(),
@@ -2133,6 +2245,7 @@ fn transient_balanced_degrades_when_thermo_heterogeneity_is_high() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 90.0,
                 thermal_expansion_coefficient: 1.2e-5,
+                field_artifact_id: None,
                 field_source: None,
                 region_temperature_deltas: Vec::new(),
                 time_profile: Vec::new(),

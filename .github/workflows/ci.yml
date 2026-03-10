@@ -285,6 +285,7 @@ jobs:
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')
         env:
           RUNMAT_VALIDATE_REQUIRE_THERMO_SUMMARY: "true"
+          RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY: "true"
         run: python3 scripts/validate_analysis_report_nonlinear.py
 
       - name: Mark artifact compatibility verification passed
@@ -392,6 +393,10 @@ jobs:
               thermo_field_coverage_threshold = ready.get('thermo_min_field_coverage_ratio_threshold')
               thermo_max_field_extrapolation = ready.get('thermo_max_field_extrapolation_ratio')
               thermo_field_extrapolation_threshold = ready.get('thermo_max_field_extrapolation_ratio_threshold')
+              thermo_field_coverage_drop_trend_ratio = ready.get('thermo_field_coverage_drop_trend_ratio')
+              thermo_field_coverage_drop_trend_threshold = ready.get('thermo_max_field_coverage_drop_trend_ratio')
+              thermo_field_extrapolation_trend_ratio = ready.get('thermo_field_extrapolation_trend_ratio')
+              thermo_field_extrapolation_trend_threshold = ready.get('thermo_max_field_extrapolation_trend_ratio')
               thermo_spread_breach_rate = ready.get('thermo_spread_breach_rate')
               thermo_heterogeneity_breach_rate = ready.get('thermo_heterogeneity_breach_rate')
               lines.append(
@@ -437,6 +442,22 @@ jobs:
               lines.append(
                   "- Thermo field extrapolation threshold: "
                   f"{thermo_field_extrapolation_threshold if thermo_field_extrapolation_threshold is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo field coverage drop trend ratio: "
+                  f"{thermo_field_coverage_drop_trend_ratio if thermo_field_coverage_drop_trend_ratio is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo field coverage drop trend threshold: "
+                  f"{thermo_field_coverage_drop_trend_threshold if thermo_field_coverage_drop_trend_threshold is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo field extrapolation trend ratio: "
+                  f"{thermo_field_extrapolation_trend_ratio if thermo_field_extrapolation_trend_ratio is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo field extrapolation trend threshold: "
+                  f"{thermo_field_extrapolation_trend_threshold if thermo_field_extrapolation_trend_threshold is not None else '-'}"
               )
               lines.append(
                   "- Thermo spread breach rate: "

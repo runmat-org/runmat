@@ -132,6 +132,8 @@ pub struct ThermoMechanicalCouplingOptions {
     pub applied_temperature_delta_k: f64,
     pub thermal_expansion_coefficient: f64,
     #[serde(default)]
+    pub field_artifact_id: Option<String>,
+    #[serde(default)]
     pub field_source: Option<ThermoFieldSource>,
     #[serde(default)]
     pub region_temperature_deltas: Vec<ThermoRegionTemperatureDelta>,

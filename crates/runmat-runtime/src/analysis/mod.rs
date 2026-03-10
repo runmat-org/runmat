@@ -1,4 +1,6 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::fs;
+use std::path::PathBuf;
 
 use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisModel, AnalysisModelId, AnalysisStep,
@@ -13,6 +15,7 @@ use runmat_analysis_fea::{
 };
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 use runmat_meshing_core::{ElementFamilyHint, MeshConnectivityClass};
+use serde::Deserialize;
 
 use crate::operations::{
     operation_error, OperationContext, OperationEnvelope, OperationErrorEnvelope,
@@ -468,7 +471,14 @@ pub fn analysis_run_modal_with_options_op(
         ));
     }
 
-    if let Some(thermo_options) = options.thermo_mechanical_coupling.as_ref() {
+    let thermo_options = resolve_thermo_coupling_options(
+        model,
+        options.thermo_mechanical_coupling.clone(),
+        ANALYSIS_RUN_MODAL_OPERATION,
+        ANALYSIS_RUN_MODAL_OP_VERSION,
+        &context,
+    )?;
+    if let Some(thermo_options) = thermo_options.as_ref() {
         if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
             return Err(operation_error(
                 ANALYSIS_RUN_MODAL_OPERATION,
@@ -501,9 +511,7 @@ pub fn analysis_run_modal_with_options_op(
         ModalSolveOptions {
             mode_count: options.mode_count,
             prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
-            thermo_mechanical_context: to_fea_thermo_mechanical_context(
-                options.thermo_mechanical_coupling,
-            ),
+            thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
         },
     )
     .map_err(|err| {
@@ -792,7 +800,14 @@ pub fn analysis_run_transient_with_options_op(
         ));
     }
 
-    if let Some(thermo_options) = options.thermo_mechanical_coupling.as_ref() {
+    let thermo_options = resolve_thermo_coupling_options(
+        model,
+        options.thermo_mechanical_coupling.clone(),
+        ANALYSIS_RUN_TRANSIENT_OPERATION,
+        ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+        &context,
+    )?;
+    if let Some(thermo_options) = thermo_options.as_ref() {
         if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
             return Err(operation_error(
                 ANALYSIS_RUN_TRANSIENT_OPERATION,
@@ -836,9 +851,7 @@ pub fn analysis_run_transient_with_options_op(
             adapt_nonconverged_shrink: options.adapt_nonconverged_shrink,
             dt_bucket_rel_tolerance: options.dt_bucket_rel_tolerance,
             prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
-            thermo_mechanical_context: to_fea_thermo_mechanical_context(
-                options.thermo_mechanical_coupling,
-            ),
+            thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
         }
     })
     .map_err(|err| {
@@ -1343,7 +1356,14 @@ pub fn analysis_run_nonlinear_with_options_op(
         ));
     }
 
-    if let Some(thermo_options) = options.thermo_mechanical_coupling.as_ref() {
+    let thermo_options = resolve_thermo_coupling_options(
+        model,
+        options.thermo_mechanical_coupling.clone(),
+        ANALYSIS_RUN_NONLINEAR_OPERATION,
+        ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+        &context,
+    )?;
+    if let Some(thermo_options) = thermo_options.as_ref() {
         if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
             return Err(operation_error(
                 ANALYSIS_RUN_NONLINEAR_OPERATION,
@@ -1381,9 +1401,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             line_search_reduction: options.line_search_reduction,
             tangent_refresh_interval: options.tangent_refresh_interval,
             prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
-            thermo_mechanical_context: to_fea_thermo_mechanical_context(
-                options.thermo_mechanical_coupling,
-            ),
+            thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
         }
     })
     .map_err(|err| {
@@ -1738,7 +1756,14 @@ pub fn analysis_run_linear_static_with_options(
     options: AnalysisRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
-    if let Some(thermo_options) = options.thermo_mechanical_coupling.as_ref() {
+    let thermo_options = resolve_thermo_coupling_options(
+        model,
+        options.thermo_mechanical_coupling.clone(),
+        ANALYSIS_RUN_OPERATION,
+        ANALYSIS_RUN_OP_VERSION,
+        &context,
+    )?;
+    if let Some(thermo_options) = thermo_options.as_ref() {
         if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
             return Err(operation_error(
                 ANALYSIS_RUN_OPERATION,
@@ -1785,9 +1810,7 @@ pub fn analysis_run_linear_static_with_options(
             preconditioner_kind: requested_preconditioner,
             algebra_backend_kind: requested_solver_backend,
             prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
-            thermo_mechanical_context: to_fea_thermo_mechanical_context(
-                options.thermo_mechanical_coupling,
-            ),
+            thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
         }
     })
     .map_err(|err| {
@@ -3087,6 +3110,174 @@ fn validate_thermo_coupling_options(
     }
 
     Ok(())
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ThermoFieldArtifact {
+    schema_version: String,
+    source_geometry_id: String,
+    source_geometry_revision: u32,
+    #[serde(default)]
+    field_source: Option<ThermoFieldSource>,
+    #[serde(default)]
+    region_temperature_deltas: Vec<ThermoRegionTemperatureDelta>,
+    #[serde(default)]
+    time_profile: Vec<ThermoTimeProfilePoint>,
+}
+
+fn resolve_thermo_coupling_options(
+    model: &AnalysisModel,
+    options: Option<ThermoMechanicalCouplingOptions>,
+    operation: &'static str,
+    op_version: &'static str,
+    context: &OperationContext,
+) -> Result<Option<ThermoMechanicalCouplingOptions>, OperationErrorEnvelope> {
+    let Some(mut options) = options else {
+        return Ok(None);
+    };
+    let Some(field_artifact_id) = options.field_artifact_id.as_deref() else {
+        return Ok(Some(options));
+    };
+
+    let root = PathBuf::from(
+        std::env::var("RUNMAT_THERMO_FIELD_ARTIFACT_ROOT")
+            .unwrap_or_else(|_| "target/runmat-analysis-artifacts/thermo-fields".to_string()),
+    );
+    let path = root.join(format!("{field_artifact_id}.json"));
+    if !path.exists() {
+        return Err(operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_THERMO_FIELD_NOT_FOUND",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!(
+                "thermo field artifact '{}' was not found",
+                field_artifact_id
+            ),
+            BTreeMap::from([
+                (
+                    "thermo_field_artifact_id".to_string(),
+                    field_artifact_id.to_string(),
+                ),
+                (
+                    "thermo_field_artifact_path".to_string(),
+                    path.display().to_string(),
+                ),
+            ]),
+        ));
+    }
+
+    let raw = fs::read_to_string(&path).map_err(|err| {
+        operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_THERMO_FIELD_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to read thermo field artifact: {err}"),
+            BTreeMap::from([(
+                "thermo_field_artifact_path".to_string(),
+                path.display().to_string(),
+            )]),
+        )
+    })?;
+    let artifact: ThermoFieldArtifact = serde_json::from_str(&raw).map_err(|err| {
+        operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_THERMO_FIELD_INVALID",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("invalid thermo field artifact payload: {err}"),
+            BTreeMap::from([(
+                "thermo_field_artifact_path".to_string(),
+                path.display().to_string(),
+            )]),
+        )
+    })?;
+
+    if artifact.schema_version != "analysis_thermo_field_artifact/v1" {
+        return Err(operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_THERMO_FIELD_SCHEMA_UNSUPPORTED",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!(
+                "thermo field artifact schema '{}' is not supported",
+                artifact.schema_version
+            ),
+            BTreeMap::from([
+                (
+                    "thermo_field_artifact_id".to_string(),
+                    field_artifact_id.to_string(),
+                ),
+                (
+                    "thermo_field_artifact_schema".to_string(),
+                    artifact.schema_version.clone(),
+                ),
+            ]),
+        ));
+    }
+
+    if artifact.source_geometry_id != model.geometry_id
+        || artifact.source_geometry_revision != model.geometry_revision
+    {
+        return Err(operation_error(
+            operation,
+            op_version,
+            context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_THERMO_FIELD_MISMATCH",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "thermo field artifact geometry lineage does not match analysis model",
+            BTreeMap::from([
+                (
+                    "thermo_field_artifact_id".to_string(),
+                    field_artifact_id.to_string(),
+                ),
+                ("model_geometry_id".to_string(), model.geometry_id.clone()),
+                (
+                    "model_geometry_revision".to_string(),
+                    model.geometry_revision.to_string(),
+                ),
+                (
+                    "artifact_geometry_id".to_string(),
+                    artifact.source_geometry_id.clone(),
+                ),
+                (
+                    "artifact_geometry_revision".to_string(),
+                    artifact.source_geometry_revision.to_string(),
+                ),
+            ]),
+        ));
+    }
+
+    options.field_source = artifact.field_source;
+    options.region_temperature_deltas = artifact.region_temperature_deltas;
+    options.time_profile = artifact.time_profile;
+
+    Ok(Some(options))
 }
 
 fn resolve_run_prep_context(

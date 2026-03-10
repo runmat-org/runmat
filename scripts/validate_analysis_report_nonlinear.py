@@ -50,10 +50,14 @@ REQUIRED_FIXTURES = {
     "thermo_ramp_smooth_gpu_provider": {
         "thermo_ramp_smooth_temporal_variation",
         "thermo_ramp_smooth_spatial_gradient_index",
+        "thermo_ramp_smooth_spatial_coverage_ratio",
+        "thermo_ramp_smooth_field_extrapolation_ratio",
     },
     "thermo_shock_oscillatory_gpu_provider": {
         "thermo_shock_oscillatory_temporal_variation",
         "thermo_shock_oscillatory_spatial_gradient_index",
+        "thermo_shock_oscillatory_spatial_coverage_ratio",
+        "thermo_shock_oscillatory_field_extrapolation_ratio",
     },
 }
 
@@ -64,6 +68,9 @@ THERMO_REQUIRED_FIELDS = {
     "thermo_effective_modulus_scale",
     "thermo_constitutive_material_spread_ratio",
     "thermo_assignment_heterogeneity_index",
+    "thermo_region_delta_count",
+    "thermo_spatial_coverage_ratio",
+    "thermo_field_extrapolation_ratio",
     "thermo_transient_severity",
     "thermo_nonlinear_severity",
 }
@@ -86,6 +93,9 @@ def main() -> int:
     report = json.loads(path.read_text())
     require_thermo_summary = is_true(
         os.getenv("RUNMAT_VALIDATE_REQUIRE_THERMO_SUMMARY", "false")
+    )
+    require_thermo_field_summary = is_true(
+        os.getenv("RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY", "false")
     )
     records = {
         record.get("fixture_id"): record
@@ -138,6 +148,33 @@ def main() -> int:
             errors.append(
                 "thermo summary fields missing across all records while RUNMAT_VALIDATE_REQUIRE_THERMO_SUMMARY=true"
             )
+
+    if require_thermo_field_summary:
+        thermo_field_records = [
+            record
+            for record in records.values()
+            if isinstance(record.get("thermo_region_delta_count"), (int, float))
+            and float(record.get("thermo_region_delta_count", 0.0)) > 0.0
+        ]
+        if not thermo_field_records:
+            errors.append(
+                "thermo field summary records missing while RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY=true"
+            )
+        else:
+            if not any(
+                isinstance(record.get("thermo_spatial_coverage_ratio"), (int, float))
+                for record in thermo_field_records
+            ):
+                errors.append(
+                    "thermo_spatial_coverage_ratio missing across thermo field records while RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY=true"
+                )
+            if not any(
+                isinstance(record.get("thermo_field_extrapolation_ratio"), (int, float))
+                for record in thermo_field_records
+            ):
+                errors.append(
+                    "thermo_field_extrapolation_ratio missing across thermo field records while RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY=true"
+                )
 
     if errors:
         for error in errors:
