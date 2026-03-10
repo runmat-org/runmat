@@ -40,6 +40,67 @@ Planned allocation:
 - Programmatic UX over UI parity: optimize agent-authored code/config workflows instead of replicating GUI interaction models.
 - Governed promotion: calibration/evidence updates must pass explicit promotion gates.
 
+## Implementation Organization Plan
+
+This section defines where upcoming multiphysics logic should live so the system stays clear and maintainable.
+
+### Layer responsibilities
+
+- `crates/runmat-analysis/core`
+  - Own neutral analysis model/study schema definitions.
+  - Introduce coupled-study namespaces explicitly (for example, thermo-mechanical study configuration).
+
+- `crates/runmat-analysis/fea/src/physics/`
+  - Own physics-family implementation logic.
+  - Planned module grouping:
+    - `thermal/` for heat-transfer operator contributions,
+    - `structural/` for mechanical operator contributions,
+    - `coupling/thermo_mech/` for coupling block contributions.
+  - Each module should expose deterministic contribution builders and diagnostic fragments.
+
+- `crates/runmat-analysis/fea/src/assembly/`
+  - Orchestrate and compose contributions from physics modules into assembled operators.
+  - Avoid embedding deep PDE-specific math directly in orchestration code.
+
+- `crates/runmat-analysis/fea/src/solve/`
+  - Own solver strategy and coupled solve policy choices.
+  - Keep solver logic decoupled from per-physics assembly implementations.
+
+- `crates/runmat-runtime/src/analysis/`
+  - Own operation contract validation, prep artifact lineage enforcement, run orchestration, summaries, and trend shaping.
+  - Do not place physics equations or element formulation math in runtime.
+
+- `scripts/`
+  - Own governance lifecycle/reporting logic (evidence validate/generate/promote, release readiness, trend summaries).
+  - Consume structured outputs; do not duplicate solver/assembly logic.
+
+### Dependency and contract rules
+
+- Keep one-way dependency direction: runtime -> analysis crates, never reverse.
+- Evolve contracts additively with optional fields/defaults to protect compatibility.
+- Use explicit diagnostic naming conventions:
+  - `FEA_PREP_*` for prep/governance cross-cutting diagnostics,
+  - family/coupling-specific prefixes (for example `FEA_TM_*`) for coupled-physics diagnostics.
+
+### Test organization rules
+
+- `runmat-analysis-fea` tests:
+  - physics contribution unit tests,
+  - deterministic assembly integration tests,
+  - coupled block correctness and stability checks.
+- `runmat-runtime` tests:
+  - operation contract compatibility,
+  - deterministic replay/conformance for coupled runs,
+  - summary/trend field coverage.
+- `scripts/tests`:
+  - release/trend governance policy behavior,
+  - evidence/recommendation lifecycle checks.
+
+### Documentation co-update rules
+
+- Customer-facing capability behavior: `docs/analysis/prep-aware-solves.md`, `docs/geometry/prep-for-analysis.md`.
+- Engineering implementation and sequencing details: `docs/detailed-work/geo-and-analysis.md` and this roadmap.
+
 ## Target Architecture End-State
 
 ### Authoring layer

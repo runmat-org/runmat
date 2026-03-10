@@ -1363,8 +1363,15 @@ For maintainers onboarding mid-project, verify:
 5. Upload benchmark/conformance artifacts from CI for regression triage.
 6. Support optional baseline drift enforcement from prior benchmark artifacts.
 
+## Parity Roadmap
+
+- Detailed post-kickoff strategy and phase plan is maintained at:
+  - `docs/detailed-work/multi-physics-parity-roadmap.md`
+- This file remains the running engineering log and implementation timeline.
+
 ## Progress Log (OSS)
 
+- 2026-03-08: Documented implementation organization plan for upcoming multiphysics work (layer/module boundaries across `analysis/core`, `analysis/fea` physics/assembly/solve, runtime orchestration, and governance scripts), including dependency, contract, test, and documentation co-update rules before starting Phase-1 thermo-mechanical slice implementation.
 - 2026-03-08: Completed Tier-7.5 policy hardening by adding branch-specific governance profiles in nonlinear release-readiness defaults (`release`/`development`/`feature`), enforcing no-silent-bypass CI checks for recommendation/promotion artifacts, publishing Tier-7.5 governance summaries into CI step output, and wiring release workflow governance preflight to validate/generate/promote approved calibration evidence artifacts for tag builds.
 - 2026-03-08: Wired Tier-7 lifecycle governance into CI nonlinear-conformance workflow by adding evidence/recommendation/promotion validation steps (`validate_prep_calibration_evidence.py`, `generate_prep_calibration_recommendations.py`, `promote_prep_calibration_evidence.py`), enabling recommendation-artifact requirement in release-readiness evaluation, and publishing recommendation/evidence lifecycle artifacts for triage.
 - 2026-03-08: Completed Tier-7 recommendation artifact and evidence-promotion workflow by introducing versioned recommendation artifact generation (`prep-calibration-recommendations/v1`), adding evidence-promotion tooling (`scripts/promote_prep_calibration_evidence.py`) with deterministic validation gates, extending readiness policy with recommendation-artifact and candidate-aging governance (`PREP_CALIBRATION_RECOMMENDATION_ARTIFACT_*`, `PREP_CALIBRATION_CANDIDATE_STALE`), and adding evidence/recommendation lifecycle validation coverage.
