@@ -999,6 +999,10 @@ pub fn analysis_run_transient_with_options_op(
         item.code == "FEA_TM_TRANSIENT"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
     });
+    let electro_transient_warn = run.diagnostics.iter().any(|item| {
+        item.code == "FEA_ET_TRANSIENT"
+            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    });
     let thermo_spatial_gradient_index = diagnostic_metric(
         &run.diagnostics,
         "FEA_TM_COUPLING",
@@ -1083,6 +1087,13 @@ pub fn analysis_run_transient_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::ThermoMechanicalTransientStress,
             detail: "thermo-mechanical transient coupling severity exceeded balanced threshold"
+                .to_string(),
+        });
+    }
+    if electro_transient_warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectroThermalTransientStress,
+            detail: "electro-thermal transient coupling severity exceeded balanced threshold"
                 .to_string(),
         });
     }
@@ -1565,6 +1576,10 @@ pub fn analysis_run_nonlinear_with_options_op(
         item.code == "FEA_TM_NONLINEAR"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
     });
+    let electro_nonlinear_warn = run.diagnostics.iter().any(|item| {
+        item.code == "FEA_ET_NONLINEAR"
+            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    });
     let thermo_spatial_gradient_index = diagnostic_metric(
         &run.diagnostics,
         "FEA_TM_COUPLING",
@@ -1649,6 +1664,13 @@ pub fn analysis_run_nonlinear_with_options_op(
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::ThermoMechanicalNonlinearStress,
             detail: "thermo-mechanical nonlinear coupling severity exceeded balanced threshold"
+                .to_string(),
+        });
+    }
+    if electro_nonlinear_warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectroThermalNonlinearStress,
+            detail: "electro-thermal nonlinear coupling severity exceeded balanced threshold"
                 .to_string(),
         });
     }

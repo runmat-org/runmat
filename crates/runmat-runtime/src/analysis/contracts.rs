@@ -187,6 +187,8 @@ pub enum QualityReasonCode {
     ThermoMechanicalGradientInstability,
     ThermoMechanicalFieldCoverageLow,
     ThermoMechanicalFieldExtrapolationHigh,
+    ElectroThermalTransientStress,
+    ElectroThermalNonlinearStress,
     NonlinearResidualExceeded,
     NonlinearIncrementFailure,
     ThermoMechanicalNonlinearStress,

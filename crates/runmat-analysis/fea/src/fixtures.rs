@@ -22,6 +22,8 @@ pub enum FixtureId {
     ThermoGradientPathological,
     ThermoRampSmooth,
     ThermoShockOscillatory,
+    ElectroThermalJouleBenign,
+    ElectroThermalJoulePathological,
     MultiMaterialAssembly,
     MissingMaterials,
     MissingLoads,
@@ -44,6 +46,8 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
         FixtureId::ThermoGradientPathological => thermo_gradient_pathological_fixture(),
         FixtureId::ThermoRampSmooth => thermo_ramp_smooth_fixture(),
         FixtureId::ThermoShockOscillatory => thermo_shock_oscillatory_fixture(),
+        FixtureId::ElectroThermalJouleBenign => electro_thermal_joule_benign_fixture(),
+        FixtureId::ElectroThermalJoulePathological => electro_thermal_joule_pathological_fixture(),
         FixtureId::MultiMaterialAssembly => multi_material_assembly(),
         FixtureId::MissingMaterials => missing_materials(),
         FixtureId::MissingLoads => missing_loads(),
@@ -479,6 +483,18 @@ fn thermo_shock_oscillatory_fixture() -> AnalysisModel {
             }
         })
         .collect();
+    model
+}
+
+fn electro_thermal_joule_benign_fixture() -> AnalysisModel {
+    let mut model = transient_long_fixture();
+    model.model_id = AnalysisModelId("electro_thermal_joule_benign_fixture".to_string());
+    model
+}
+
+fn electro_thermal_joule_pathological_fixture() -> AnalysisModel {
+    let mut model = transient_shock_fixture();
+    model.model_id = AnalysisModelId("electro_thermal_joule_pathological_fixture".to_string());
     model
 }
 

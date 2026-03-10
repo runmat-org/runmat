@@ -2,6 +2,7 @@ use super::harness::with_harness_provider;
 use super::manifest::default_options;
 use super::*;
 use runmat_runtime::analysis::{
+    ElectroRegionConductivityScale, ElectroThermalCouplingOptions, ElectroTimeProfilePoint,
     ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
 };
 use sha2::{Digest, Sha256};
@@ -189,6 +190,7 @@ fn nonlinear_options_for_spec(spec: &FixtureSpec) -> AnalysisNonlinearRunOptions
             time_profile: Vec::new(),
         });
     }
+    options.electro_thermal_coupling = electro_coupling_for_fixture(spec.id);
 
     options
 }
@@ -381,6 +383,105 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
     }
 }
 
+fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingOptions> {
+    match spec_id {
+        "electro_thermal_joule_benign_gpu_provider" => Some(ElectroThermalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_voltage_v: 36.0,
+            base_electrical_conductivity_s_per_m: 3.8e7,
+            resistive_heating_coefficient: 3.5e-4,
+            region_conductivity_scales: vec![
+                ElectroRegionConductivityScale {
+                    region_id: "tip_steel".to_string(),
+                    conductivity_scale: 1.05,
+                },
+                ElectroRegionConductivityScale {
+                    region_id: "mid_aluminum".to_string(),
+                    conductivity_scale: 0.98,
+                },
+            ],
+            time_profile: vec![
+                ElectroTimeProfilePoint {
+                    normalized_time: 0.0,
+                    current_scale: 0.7,
+                },
+                ElectroTimeProfilePoint {
+                    normalized_time: 1.0,
+                    current_scale: 1.0,
+                },
+            ],
+        }),
+        "electro_thermal_joule_pathological_gpu_provider" => Some(ElectroThermalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_voltage_v: 180.0,
+            base_electrical_conductivity_s_per_m: 2.0e7,
+            resistive_heating_coefficient: 9.5e-4,
+            region_conductivity_scales: vec![
+                ElectroRegionConductivityScale {
+                    region_id: "shock_region_0".to_string(),
+                    conductivity_scale: 1.8,
+                },
+                ElectroRegionConductivityScale {
+                    region_id: "shock_region_1".to_string(),
+                    conductivity_scale: 0.55,
+                },
+            ],
+            time_profile: vec![
+                ElectroTimeProfilePoint {
+                    normalized_time: 0.0,
+                    current_scale: 0.45,
+                },
+                ElectroTimeProfilePoint {
+                    normalized_time: 0.3,
+                    current_scale: 1.45,
+                },
+                ElectroTimeProfilePoint {
+                    normalized_time: 0.6,
+                    current_scale: 0.6,
+                },
+                ElectroTimeProfilePoint {
+                    normalized_time: 1.0,
+                    current_scale: 1.25,
+                },
+            ],
+        }),
+        "nonlinear_load_path_mix_gpu_provider" => Some(ElectroThermalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_voltage_v: 82.0,
+            base_electrical_conductivity_s_per_m: 2.6e7,
+            resistive_heating_coefficient: 6.0e-4,
+            region_conductivity_scales: vec![
+                ElectroRegionConductivityScale {
+                    region_id: "softening_proxy_region_0".to_string(),
+                    conductivity_scale: 1.2,
+                },
+                ElectroRegionConductivityScale {
+                    region_id: "softening_proxy_region_1".to_string(),
+                    conductivity_scale: 0.85,
+                },
+            ],
+            time_profile: vec![
+                ElectroTimeProfilePoint {
+                    normalized_time: 0.0,
+                    current_scale: 0.55,
+                },
+                ElectroTimeProfilePoint {
+                    normalized_time: 0.5,
+                    current_scale: 1.2,
+                },
+                ElectroTimeProfilePoint {
+                    normalized_time: 1.0,
+                    current_scale: 0.9,
+                },
+            ],
+        }),
+        _ => None,
+    }
+}
+
 fn ensure_thermo_field_artifacts_for_fixture(spec_id: &str, model: &AnalysisModel) {
     let root = PathBuf::from("target/runmat-analysis-artifacts/thermo-fields");
     let _ = fs::create_dir_all(&root);
@@ -494,6 +595,7 @@ fn run_fixture_cpu(
                             .dt_bucket_rel_tolerance,
                     ),
                     thermo_mechanical_coupling: thermo_coupling_for_fixture(spec.id),
+                    electro_thermal_coupling: electro_coupling_for_fixture(spec.id),
                     ..AnalysisTransientRunOptions::production_recommended()
                 }
             },
@@ -550,6 +652,7 @@ fn run_fixture_gpu(
                             .dt_bucket_rel_tolerance,
                     ),
                     thermo_mechanical_coupling: thermo_coupling_for_fixture(spec.id),
+                    electro_thermal_coupling: electro_coupling_for_fixture(spec.id),
                     ..AnalysisTransientRunOptions::production_recommended()
                 }
             },
@@ -1563,6 +1666,120 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.2),
                         );
+                    } else if spec.id == "electro_thermal_joule_benign_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_benign_joule_heating_scale",
+                            "FEA_ET_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_COUPLING",
+                                "joule_heating_scale",
+                            ),
+                            Some(9.5),
+                            Some(10.5),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_benign_conductivity_spread_ratio",
+                            "FEA_ET_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_COUPLING",
+                                "conductivity_spread_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.2),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_benign_transient_severity_peak",
+                            "FEA_ET_TRANSIENT",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_TRANSIENT",
+                                "severity_peak",
+                            ),
+                            Some(0.95),
+                            Some(1.05),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_benign_temporal_variation",
+                            "FEA_ET_TRANSIENT",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_TRANSIENT",
+                                "temporal_variation",
+                            ),
+                            Some(0.0),
+                            Some(0.4),
+                        );
+                    } else if spec.id == "electro_thermal_joule_pathological_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_joule_heating_scale",
+                            "FEA_ET_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_COUPLING",
+                                "joule_heating_scale",
+                            ),
+                            Some(9.5),
+                            Some(10.5),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_conductivity_spread_ratio",
+                            "FEA_ET_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_COUPLING",
+                                "conductivity_spread_ratio",
+                            ),
+                            Some(1.5),
+                            Some(4.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_transient_severity_peak",
+                            "FEA_ET_TRANSIENT",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_TRANSIENT",
+                                "severity_peak",
+                            ),
+                            Some(0.5),
+                            Some(3.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_temporal_variation",
+                            "FEA_ET_TRANSIENT",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_TRANSIENT",
+                                "temporal_variation",
+                            ),
+                            Some(0.2),
+                            Some(1.5),
+                        );
                     }
                     if spec.id == "nonlinear_assembly_gpu_provider" {
                         push_threshold_assertion(
@@ -1852,6 +2069,62 @@ pub(super) fn run_fixture(
                             ),
                             Some(0.0),
                             Some(0.2),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_nonlinear_joule_heating_scale",
+                            "FEA_ET_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_COUPLING",
+                                "joule_heating_scale",
+                            ),
+                            Some(9.5),
+                            Some(10.5),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_nonlinear_conductivity_spread_ratio",
+                            "FEA_ET_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_COUPLING",
+                                "conductivity_spread_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.8),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_nonlinear_severity_peak",
+                            "FEA_ET_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_NONLINEAR",
+                                "severity_peak",
+                            ),
+                            Some(0.95),
+                            Some(1.05),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_nonlinear_temporal_variation",
+                            "FEA_ET_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_NONLINEAR",
+                                "temporal_variation",
+                            ),
+                            Some(0.0),
+                            Some(0.8),
                         );
                     }
 

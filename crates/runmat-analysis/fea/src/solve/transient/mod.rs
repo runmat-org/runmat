@@ -116,10 +116,16 @@ pub fn solve_transient_system(
         .as_ref()
         .map(temporal_profile_variation)
         .unwrap_or(0.0);
+    let electro_severity_base = electro_thermal_severity(options.electro_thermal_context.clone());
+    let electro_temporal_variation =
+        electro_temporal_profile_variation(options.electro_thermal_context.clone());
     let mut thermo_severity_sum = 0.0_f64;
     let mut thermo_time_scale_sum = 0.0_f64;
     let mut thermo_time_extrapolated = 0usize;
     let mut thermo_time_clamped = 0usize;
+    let mut electro_severity_sum = 0.0_f64;
+    let mut electro_time_scale_sum = 0.0_f64;
+    let mut electro_severity_peak = 0.0_f64;
     let mut thermo_severity_peak = 0.0_f64;
     let mut effective_residual_target_peak = options.residual_target;
     let mut thermo_growth_limit_min = 1.0_f64;
@@ -176,10 +182,16 @@ pub fn solve_transient_system(
                 thermo_time_clamped = thermo_time_clamped.saturating_add(1);
             }
         }
+        let electro_time_scale =
+            electro_time_scale(options.electro_thermal_context.clone(), step_progress);
         let thermo_severity = (thermo_severity_base * thermo_time_scale).clamp(0.0, 1.0);
+        let electro_severity = (electro_severity_base * electro_time_scale).clamp(0.0, 1.0);
         thermo_severity_sum += thermo_severity;
         thermo_time_scale_sum += thermo_time_scale;
         thermo_severity_peak = thermo_severity_peak.max(thermo_severity);
+        electro_severity_sum += electro_severity;
+        electro_time_scale_sum += electro_time_scale;
+        electro_severity_peak = electro_severity_peak.max(electro_severity);
         let thermo_residual_relaxation = 1.0 + 1.5 * thermo_severity;
         let effective_residual_target = options.residual_target * thermo_residual_relaxation;
         let thermo_growth_limit = (1.0 - 0.12 * thermo_severity).clamp(0.75, 1.0);
@@ -373,6 +385,31 @@ pub fn solve_transient_system(
         thermo_growth_limit_min,
         thermo_nonconverged_shrink_min,
     );
+    if electro_severity_peak > 0.0 {
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_ET_TRANSIENT".to_string(),
+            severity: if electro_severity_peak <= 0.6 && electro_temporal_variation <= 0.5 {
+                FeaDiagnosticSeverity::Info
+            } else {
+                FeaDiagnosticSeverity::Warning
+            },
+            message: format!(
+                "severity_mean={} time_scale_mean={} severity_peak={} temporal_variation={}",
+                if options.step_count == 0 {
+                    0.0
+                } else {
+                    electro_severity_sum / options.step_count as f64
+                },
+                if options.step_count == 0 {
+                    1.0
+                } else {
+                    electro_time_scale_sum / options.step_count as f64
+                },
+                electro_severity_peak,
+                electro_temporal_variation,
+            ),
+        });
+    }
 
     TransientSolveResult {
         converged_steps,
@@ -437,4 +474,66 @@ fn thermo_mechanical_severity(context: Option<FeaThermoMechanicalContext>) -> f6
         * context.applied_temperature_delta_k.abs())
     .clamp(0.0, 0.05);
     (thermal_strain / 0.05).clamp(0.0, 1.0)
+}
+
+fn electro_thermal_severity(context: Option<FeaElectroThermalContext>) -> f64 {
+    let Some(context) = context else {
+        return 0.0;
+    };
+    if !context.enabled {
+        return 0.0;
+    }
+    let joule_proxy = (context.applied_voltage_v.powi(2)
+        * context.base_electrical_conductivity_s_per_m.max(1.0e-9)
+        * context.resistive_heating_coefficient.max(0.0)
+        / 1.0e7)
+        .clamp(0.0, 1.0);
+    joule_proxy
+}
+
+fn electro_time_scale(context: Option<FeaElectroThermalContext>, normalized_time: f64) -> f64 {
+    let Some(context) = context else {
+        return 1.0;
+    };
+    if context.time_profile.is_empty() {
+        return 1.0;
+    }
+    let t = normalized_time.clamp(0.0, 1.0);
+    let mut points = context.time_profile;
+    points.sort_by(|a, b| a.normalized_time.total_cmp(&b.normalized_time));
+    if t <= points[0].normalized_time {
+        return points[0].current_scale.clamp(0.2, 2.0);
+    }
+    for pair in points.windows(2) {
+        let a = &pair[0];
+        let b = &pair[1];
+        if t >= a.normalized_time && t <= b.normalized_time {
+            let span = (b.normalized_time - a.normalized_time).abs().max(1.0e-9);
+            let alpha = (t - a.normalized_time) / span;
+            return (a.current_scale + (b.current_scale - a.current_scale) * alpha).clamp(0.2, 2.0);
+        }
+    }
+    points
+        .last()
+        .map(|p| p.current_scale.clamp(0.2, 2.0))
+        .unwrap_or(1.0)
+}
+
+fn electro_temporal_profile_variation(context: Option<FeaElectroThermalContext>) -> f64 {
+    let Some(context) = context else {
+        return 0.0;
+    };
+    if context.time_profile.len() < 2 {
+        return 0.0;
+    }
+    let mut min_scale = f64::INFINITY;
+    let mut max_scale = -f64::INFINITY;
+    for point in &context.time_profile {
+        min_scale = min_scale.min(point.current_scale);
+        max_scale = max_scale.max(point.current_scale);
+    }
+    if !min_scale.is_finite() || !max_scale.is_finite() {
+        return 0.0;
+    }
+    ((max_scale - min_scale).abs() / 2.0).clamp(0.0, 1.0)
 }

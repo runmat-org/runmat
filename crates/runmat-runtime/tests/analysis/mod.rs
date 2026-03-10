@@ -203,6 +203,8 @@ const ROLLING_TARGET_FIXTURES: &[&str] = &[
     "thermo_ramp_smooth_field_artifact_gpu_provider",
     "thermo_shock_oscillatory_gpu_provider",
     "thermo_shock_oscillatory_field_artifact_gpu_provider",
+    "electro_thermal_joule_benign_gpu_provider",
+    "electro_thermal_joule_pathological_gpu_provider",
     "nonlinear_assembly_gpu_provider",
     "nonlinear_assembly_stress_gpu_provider",
     "nonlinear_softening_proxy_gpu_provider",
