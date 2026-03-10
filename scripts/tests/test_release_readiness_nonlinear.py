@@ -21,6 +21,9 @@ def report(
     thermo_assignment_heterogeneity_index=None,
     thermo_spatial_coverage_ratio=None,
     thermo_field_extrapolation_ratio=None,
+    thermo_field_artifact_id=None,
+    thermo_field_artifact_approved=None,
+    thermo_field_artifact_age_days=None,
 ):
     fixtures = [
         "nonlinear_assembly_gpu_provider",
@@ -64,6 +67,15 @@ def report(
     if thermo_field_extrapolation_ratio is not None:
         for rec in records:
             rec["thermo_field_extrapolation_ratio"] = thermo_field_extrapolation_ratio
+    if thermo_field_artifact_id is not None:
+        for rec in records:
+            rec["thermo_field_artifact_id"] = thermo_field_artifact_id
+    if thermo_field_artifact_approved is not None:
+        for rec in records:
+            rec["thermo_field_artifact_approved"] = thermo_field_artifact_approved
+    if thermo_field_artifact_age_days is not None:
+        for rec in records:
+            rec["thermo_field_artifact_age_days"] = thermo_field_artifact_age_days
 
     return {
         "passed": passed,
@@ -104,6 +116,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_COVERAGE_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED",
+            "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS",
             "GITHUB_REF_NAME",
         ]:
             os.environ.pop(key, None)
@@ -756,6 +770,60 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMO_FIELD_EXTRAPOLATION_TREND_WORSENING", codes)
 
+    def test_thermo_artifact_backed_required_reason_is_emitted(self):
+        os.environ["RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED"] = "true"
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermo_coupling_enabled=True,
+        )
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_FIELD_ARTIFACT_REQUIRED", codes)
+
+    def test_thermo_artifact_unapproved_reason_is_emitted(self):
+        os.environ["RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED"] = "true"
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermo_coupling_enabled=True,
+            thermo_field_artifact_id="artifact-1",
+            thermo_field_artifact_approved=False,
+        )
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_FIELD_ARTIFACT_UNAPPROVED", codes)
+
+    def test_thermo_artifact_stale_reason_is_emitted(self):
+        os.environ["RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED"] = "true"
+        os.environ["RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS"] = "7"
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermo_coupling_enabled=True,
+            thermo_field_artifact_id="artifact-1",
+            thermo_field_artifact_approved=True,
+            thermo_field_artifact_age_days=10.0,
+        )
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_FIELD_ARTIFACT_STALE", codes)
+
     def test_markdown_summary_prints_thermo_posture_section(self):
         latest = report(
             passed=True,
@@ -790,6 +858,8 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Thermo field coverage drop trend threshold", summary)
         self.assertIn("Thermo field extrapolation trend ratio", summary)
         self.assertIn("Thermo field extrapolation trend threshold", summary)
+        self.assertIn("Thermo artifact-backed required", summary)
+        self.assertIn("Thermo field artifact max age days", summary)
         self.assertIn("Thermo spread breach rate", summary)
         self.assertIn("Thermo heterogeneity breach rate", summary)
         self.assertIn("Thermo spread trend ratio", summary)

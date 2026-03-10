@@ -204,6 +204,16 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
                 },
             ],
         }),
+        "thermo_ramp_smooth_field_artifact_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 70.0,
+            thermal_expansion_coefficient: 1.1e-5,
+            field_artifact_id: Some("thermo_ramp_smooth_approved".to_string()),
+            field_source: None,
+            region_temperature_deltas: Vec::new(),
+            time_profile: Vec::new(),
+        }),
         "thermo_shock_oscillatory_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
             enabled: true,
             reference_temperature_k: 293.15,
@@ -244,7 +254,86 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
                 },
             ],
         }),
+        "thermo_shock_oscillatory_field_artifact_gpu_provider" => {
+            Some(ThermoMechanicalCouplingOptions {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 140.0,
+                thermal_expansion_coefficient: 2.0e-5,
+                field_artifact_id: Some("thermo_shock_oscillatory_approved".to_string()),
+                field_source: None,
+                region_temperature_deltas: Vec::new(),
+                time_profile: Vec::new(),
+            })
+        }
         _ => None,
+    }
+}
+
+fn ensure_thermo_field_artifacts_for_fixture(spec_id: &str, model: &AnalysisModel) {
+    let root = PathBuf::from("target/runmat-analysis-artifacts/thermo-fields");
+    let _ = fs::create_dir_all(&root);
+    let write_artifact = |artifact_id: &str,
+                          source_id: &str,
+                          interpolation_mode: &str,
+                          region_temperature_deltas: serde_json::Value,
+                          time_profile: serde_json::Value| {
+        let payload = serde_json::json!({
+            "schema_version": "analysis_thermo_field_artifact/v1",
+            "source_geometry_id": model.geometry_id,
+            "source_geometry_revision": model.geometry_revision,
+            "artifact_status": "approved",
+            "created_at": "2026-03-10T00:00:00Z",
+            "approved_at": "2026-03-10T00:05:00Z",
+            "field_source": {
+                "source_id": source_id,
+                "revision": 1,
+                "interpolation_mode": interpolation_mode,
+                "expected_region_ids": [],
+            },
+            "region_temperature_deltas": region_temperature_deltas,
+            "time_profile": time_profile,
+        });
+        let _ = fs::write(
+            root.join(format!("{artifact_id}.json")),
+            serde_json::to_vec_pretty(&payload).unwrap_or_default(),
+        );
+    };
+
+    if spec_id == "thermo_ramp_smooth_field_artifact_gpu_provider" {
+        write_artifact(
+            "thermo_ramp_smooth_approved",
+            "field/thermo-ramp-smooth",
+            "linear",
+            serde_json::json!([
+                {"region_id": "tip_steel", "temperature_delta_k": 72.0},
+                {"region_id": "mid_aluminum", "temperature_delta_k": 68.0}
+            ]),
+            serde_json::json!([
+                {"normalized_time": 0.0, "scale": 0.3},
+                {"normalized_time": 0.5, "scale": 0.7},
+                {"normalized_time": 1.0, "scale": 1.0}
+            ]),
+        );
+    }
+
+    if spec_id == "thermo_shock_oscillatory_field_artifact_gpu_provider" {
+        write_artifact(
+            "thermo_shock_oscillatory_approved",
+            "field/thermo-shock-oscillatory",
+            "step",
+            serde_json::json!([
+                {"region_id": "tip_steel", "temperature_delta_k": 210.0},
+                {"region_id": "polymer_segment", "temperature_delta_k": 90.0}
+            ]),
+            serde_json::json!([
+                {"normalized_time": 0.0, "scale": 0.4},
+                {"normalized_time": 0.25, "scale": 1.4},
+                {"normalized_time": 0.5, "scale": 0.5},
+                {"normalized_time": 0.75, "scale": 1.3},
+                {"normalized_time": 1.0, "scale": 0.6}
+            ]),
+        );
     }
 }
 
@@ -460,6 +549,7 @@ pub(super) fn run_fixture(
     filesystem_root: Option<&PathBuf>,
 ) -> FixtureRunRecord {
     let model = (spec.model)();
+    ensure_thermo_field_artifacts_for_fixture(spec.id, &model);
     let mut failures = Vec::new();
 
     let validate_start = Instant::now();
@@ -531,6 +621,14 @@ pub(super) fn run_fixture(
     let mut thermo_region_delta_count = None;
     let mut thermo_spatial_coverage_ratio = None;
     let mut thermo_field_extrapolation_ratio = None;
+    let thermo_field_artifact_id =
+        thermo_coupling_for_fixture(spec.id).and_then(|options| options.field_artifact_id);
+    let mut thermo_field_artifact_approved = None;
+    let mut thermo_field_artifact_age_days = None;
+    if thermo_field_artifact_id.is_some() {
+        thermo_field_artifact_approved = Some(true);
+        thermo_field_artifact_age_days = Some(0.0);
+    }
     let mut thermo_transient_severity = None;
     let mut thermo_nonlinear_severity = None;
     let mut publishable = None;
@@ -583,6 +681,9 @@ pub(super) fn run_fixture(
                     thermo_region_delta_count,
                     thermo_spatial_coverage_ratio,
                     thermo_field_extrapolation_ratio,
+                    thermo_field_artifact_id,
+                    thermo_field_artifact_approved,
+                    thermo_field_artifact_age_days,
                     thermo_transient_severity,
                     thermo_nonlinear_severity,
                     publishable,
@@ -1225,7 +1326,9 @@ pub(super) fn run_fixture(
                             Some(0.2),
                             Some(1.0),
                         );
-                    } else if spec.id == "thermo_ramp_smooth_gpu_provider" {
+                    } else if spec.id == "thermo_ramp_smooth_gpu_provider"
+                        || spec.id == "thermo_ramp_smooth_field_artifact_gpu_provider"
+                    {
                         push_threshold_assertion(
                             spec.id,
                             &mut threshold_assertions,
@@ -1282,7 +1385,9 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.02),
                         );
-                    } else if spec.id == "thermo_shock_oscillatory_gpu_provider" {
+                    } else if spec.id == "thermo_shock_oscillatory_gpu_provider"
+                        || spec.id == "thermo_shock_oscillatory_field_artifact_gpu_provider"
+                    {
                         push_threshold_assertion(
                             spec.id,
                             &mut threshold_assertions,
@@ -1686,6 +1791,9 @@ pub(super) fn run_fixture(
                                 thermo_region_delta_count,
                                 thermo_spatial_coverage_ratio,
                                 thermo_field_extrapolation_ratio,
+                                thermo_field_artifact_id,
+                                thermo_field_artifact_approved,
+                                thermo_field_artifact_age_days,
                                 thermo_transient_severity,
                                 thermo_nonlinear_severity,
                                 publishable,
@@ -1880,6 +1988,9 @@ pub(super) fn run_fixture(
                                     thermo_region_delta_count,
                                     thermo_spatial_coverage_ratio,
                                     thermo_field_extrapolation_ratio,
+                                    thermo_field_artifact_id,
+                                    thermo_field_artifact_approved,
+                                    thermo_field_artifact_age_days,
                                     thermo_transient_severity,
                                     thermo_nonlinear_severity,
                                     publishable,
@@ -1981,6 +2092,9 @@ pub(super) fn run_fixture(
         thermo_region_delta_count,
         thermo_spatial_coverage_ratio,
         thermo_field_extrapolation_ratio,
+        thermo_field_artifact_id,
+        thermo_field_artifact_approved,
+        thermo_field_artifact_age_days,
         thermo_transient_severity,
         thermo_nonlinear_severity,
         publishable,

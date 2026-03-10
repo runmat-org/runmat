@@ -2184,6 +2184,123 @@ fn analysis_run_transient_rejects_missing_thermo_field_artifact() {
 }
 
 #[test]
+fn analysis_run_transient_artifact_backed_thermo_matches_inline_profile() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model_with_material_assignment_mismatch();
+    model.steps = vec![AnalysisStep {
+        step_id: "transient_1".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
+
+    let root = PathBuf::from("target/runmat-analysis-artifacts/thermo-fields");
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("create thermo field artifact root");
+    fs::write(
+        root.join("inline_equivalent.json"),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "schema_version": "analysis_thermo_field_artifact/v1",
+            "source_geometry_id": model.geometry_id,
+            "source_geometry_revision": model.geometry_revision,
+            "field_source": {
+                "source_id": "artifact/inline-equivalent",
+                "revision": 1,
+                "interpolation_mode": "linear",
+                "expected_region_ids": []
+            },
+            "region_temperature_deltas": [
+                {"region_id": "tip", "temperature_delta_k": 90.0}
+            ],
+            "time_profile": [
+                {"normalized_time": 0.0, "scale": 0.4},
+                {"normalized_time": 1.0, "scale": 1.0}
+            ]
+        }))
+        .expect("encode artifact"),
+    )
+    .expect("write artifact");
+
+    let inline = analysis_run_transient_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisTransientRunOptions {
+            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 90.0,
+                thermal_expansion_coefficient: 1.2e-5,
+                field_artifact_id: None,
+                field_source: None,
+                region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
+                    region_id: "tip".to_string(),
+                    temperature_delta_k: 90.0,
+                }],
+                time_profile: vec![
+                    ThermoTimeProfilePoint {
+                        normalized_time: 0.0,
+                        scale: 0.4,
+                    },
+                    ThermoTimeProfilePoint {
+                        normalized_time: 1.0,
+                        scale: 1.0,
+                    },
+                ],
+            }),
+            ..AnalysisTransientRunOptions::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("inline thermo run should succeed");
+
+    let artifact_backed = analysis_run_transient_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisTransientRunOptions {
+            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 90.0,
+                thermal_expansion_coefficient: 1.2e-5,
+                field_artifact_id: Some("inline_equivalent".to_string()),
+                field_source: None,
+                region_temperature_deltas: Vec::new(),
+                time_profile: Vec::new(),
+            }),
+            ..AnalysisTransientRunOptions::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("artifact-backed thermo run should succeed");
+    let _ = fs::remove_dir_all(&root);
+
+    let inline_transient = inline
+        .data
+        .transient_results
+        .as_ref()
+        .expect("inline transient payload");
+    let artifact_transient = artifact_backed
+        .data
+        .transient_results
+        .as_ref()
+        .expect("artifact transient payload");
+    let inline_final = inline_transient
+        .displacement_snapshots
+        .last()
+        .and_then(|field| field.as_host_f64())
+        .expect("inline host displacement");
+    let artifact_final = artifact_transient
+        .displacement_snapshots
+        .last()
+        .and_then(|field| field.as_host_f64())
+        .expect("artifact host displacement");
+    assert_eq!(inline_final.len(), artifact_final.len());
+    let mut max_abs = 0.0_f64;
+    for (lhs, rhs) in inline_final.iter().zip(artifact_final.iter()) {
+        max_abs = max_abs.max((lhs - rhs).abs());
+    }
+    assert!(max_abs <= 1.0e-12);
+}
+
+#[test]
 fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();

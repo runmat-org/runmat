@@ -653,7 +653,10 @@ fn analysis_run_transient_thermo_field_reference_errors_are_typed() {
             }),
             ..AnalysisTransientRunOptions::default()
         },
-        OperationContext::new(Some("trace-contract-transient-thermo-field-1".to_string()), None),
+        OperationContext::new(
+            Some("trace-contract-transient-thermo-field-1".to_string()),
+            None,
+        ),
     )
     .expect_err("missing thermo field artifact should fail");
     assert_eq!(invalid.operation, "analysis.run_transient");

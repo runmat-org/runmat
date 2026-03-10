@@ -66,6 +66,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO": "0.02",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_COVERAGE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED": "true",
+            "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS": "14",
         },
         "development": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.2",
@@ -86,6 +88,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO": "0.08",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_COVERAGE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED": "true",
+            "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS": "21",
         },
         "feature": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.25",
@@ -106,6 +110,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO": "0.18",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_COVERAGE_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED": "false",
+            "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS": "30",
         },
     }
     return profile_map.get(profile, {}).get(name, default)
@@ -671,6 +677,18 @@ def evaluate_release_readiness(
             ),
         )
     )
+    thermo_require_artifact_backed = is_true(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED",
+            profile_default("RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED", "false"),
+        )
+    )
+    thermo_field_artifact_max_age_days = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS",
+            profile_default("RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS", "30"),
+        )
+    )
     thermo_max_spread_trend_ratio = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_TREND_RATIO",
@@ -745,6 +763,66 @@ def evaluate_release_readiness(
                     detail="thermo coupling enabled-rate metric missing from report records",
                 )
             )
+
+        if thermo_require_artifact_backed:
+            missing_artifact_ids = sorted(
+                rec.get("fixture_id", "<unknown>")
+                for rec in thermo_records
+                if rec.get("thermo_coupling_enabled") is True
+                and not isinstance(rec.get("thermo_field_artifact_id"), str)
+            )
+            if missing_artifact_ids:
+                reasons.append(
+                    Reason(
+                        code="THERMO_FIELD_ARTIFACT_REQUIRED",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "thermo-enabled fixtures missing artifact-backed field references: "
+                            + ", ".join(missing_artifact_ids)
+                        ),
+                    )
+                )
+
+            unapproved_artifacts = sorted(
+                rec.get("fixture_id", "<unknown>")
+                for rec in thermo_records
+                if rec.get("thermo_coupling_enabled") is True
+                and isinstance(rec.get("thermo_field_artifact_id"), str)
+                and rec.get("thermo_field_artifact_approved") is not True
+            )
+            if unapproved_artifacts:
+                reasons.append(
+                    Reason(
+                        code="THERMO_FIELD_ARTIFACT_UNAPPROVED",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "thermo field artifacts are not approved for fixtures: "
+                            + ", ".join(unapproved_artifacts)
+                        ),
+                    )
+                )
+
+            stale_artifacts = []
+            for rec in thermo_records:
+                if rec.get("thermo_coupling_enabled") is not True:
+                    continue
+                age_days = rec.get("thermo_field_artifact_age_days")
+                if isinstance(age_days, (int, float)) and float(age_days) > thermo_field_artifact_max_age_days:
+                    stale_artifacts.append(
+                        f"{rec.get('fixture_id', '<unknown>')}({float(age_days):.1f}d)"
+                    )
+            if stale_artifacts:
+                reasons.append(
+                    Reason(
+                        code="THERMO_FIELD_ARTIFACT_STALE",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "thermo field artifacts exceed max age days "
+                            f"{thermo_field_artifact_max_age_days:.1f}: "
+                            + ", ".join(sorted(stale_artifacts))
+                        ),
+                    )
+                )
 
         transient_values = []
         for rec in thermo_records:
@@ -1124,6 +1202,8 @@ def evaluate_release_readiness(
         "thermo_max_field_extrapolation_ratio_threshold": thermo_max_field_extrapolation_ratio_threshold,
         "thermo_max_field_coverage_drop_trend_ratio": thermo_max_field_coverage_drop_trend_ratio,
         "thermo_max_field_extrapolation_trend_ratio": thermo_max_field_extrapolation_trend_ratio,
+        "thermo_require_artifact_backed": thermo_require_artifact_backed,
+        "thermo_field_artifact_max_age_days": thermo_field_artifact_max_age_days,
         "thermo_spread_breach_rate": thermo_spread_breach_rate,
         "thermo_heterogeneity_breach_rate": thermo_heterogeneity_breach_rate,
         "thermo_spread_trend_ratio": thermo_spread_trend_ratio,
@@ -1194,6 +1274,14 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Thermo field extrapolation trend threshold: "
         f"`{result.get('thermo_max_field_extrapolation_trend_ratio') if result.get('thermo_max_field_extrapolation_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermo artifact-backed required: "
+        f"`{result.get('thermo_require_artifact_backed') if result.get('thermo_require_artifact_backed') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermo field artifact max age days: "
+        f"`{result.get('thermo_field_artifact_max_age_days') if result.get('thermo_field_artifact_max_age_days') is not None else '-'}`"
     )
     lines.append(
         "- Thermo spread breach rate: "

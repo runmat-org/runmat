@@ -98,7 +98,15 @@ Typed prep-reference failure families:
   - transient/nonlinear diagnostics now report peak/mean thermo severity, temporal variation, and temporal field extrapolation/clamp ratios,
   - runtime quality policy adds `ThermoMechanicalGradientInstability` when spatial/temporal gradients cross policy thresholds,
   - runtime quality policy also flags low spatial field coverage and high temporal extrapolation,
+  - runtime can resolve artifact-backed thermo fields via `field_artifact_id` using `RUNMAT_THERMO_FIELD_ARTIFACT_ROOT`,
+  - branch-aware readiness can require approved artifact-backed thermo fields on development/release profiles,
   - conformance harness adds smooth-ramp and oscillatory-shock thermo fixtures with threshold assertions.
+
+Thermo field artifact lifecycle scripts:
+
+- `scripts/generate_thermo_field_artifact.py` creates candidate/approved thermo field artifacts.
+- `scripts/validate_thermo_field_artifact.py` enforces artifact schema + monotonic time-profile constraints.
+- `scripts/promote_thermo_field_artifact.py` promotes validated candidates to approved artifacts with age checks.
 
 ## Diagnostics
 
