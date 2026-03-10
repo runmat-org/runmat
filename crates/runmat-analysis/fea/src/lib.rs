@@ -945,7 +945,7 @@ fn thermo_mechanical_diagnostic(
         code: "FEA_TM_COUPLING".to_string(),
         severity: FeaDiagnosticSeverity::Info,
         message: format!(
-            "enabled={} reference_temperature_k={} applied_temperature_delta_k={} thermal_expansion_coefficient={} thermal_strain_scale={} thermal_load_scale={} constitutive_temperature_factor={} constitutive_poisson_coupling={} effective_modulus_scale={} coupling_fingerprint={}",
+            "enabled={} reference_temperature_k={} applied_temperature_delta_k={} thermal_expansion_coefficient={} thermal_strain_scale={} thermal_load_scale={} constitutive_temperature_factor={} constitutive_poisson_coupling={} effective_modulus_scale={} constitutive_material_spread_ratio={} assignment_heterogeneity_index={} coupling_fingerprint={}",
             summary.enabled,
             summary.reference_temperature_k,
             summary.applied_temperature_delta_k,
@@ -955,6 +955,8 @@ fn thermo_mechanical_diagnostic(
             summary.constitutive_temperature_factor,
             summary.constitutive_poisson_coupling,
             summary.effective_modulus_scale,
+            summary.constitutive_material_spread_ratio,
+            summary.assignment_heterogeneity_index,
             summary.coupling_fingerprint,
         ),
     }
@@ -1216,6 +1218,10 @@ mod tests {
             .find(|diag| diag.code == "FEA_TM_COUPLING")
             .expect("thermo coupling diagnostic should be present");
         assert!(coupling.message.contains("effective_modulus_scale="));
+        assert!(coupling
+            .message
+            .contains("constitutive_material_spread_ratio="));
+        assert!(coupling.message.contains("assignment_heterogeneity_index="));
         let profile = result
             .run
             .diagnostics

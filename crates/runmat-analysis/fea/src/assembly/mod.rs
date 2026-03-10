@@ -134,6 +134,8 @@ pub struct ThermoMechanicalAssemblySummary {
     pub constitutive_temperature_factor: f64,
     pub constitutive_poisson_coupling: f64,
     pub effective_modulus_scale: f64,
+    pub constitutive_material_spread_ratio: f64,
+    pub assignment_heterogeneity_index: f64,
     pub coupling_fingerprint: u64,
 }
 
@@ -511,16 +513,39 @@ pub fn assemble_linear_system(
             let thermal_stiffening_scale = (1.0 + 0.35 * thermal_strain_scale).clamp(1.0, 1.06);
             let effective_modulus_scale =
                 (modulus_temperature_scale * thermal_stiffening_scale).clamp(0.75, 1.2);
+            let mut dof_adjustments = vec![0.0_f64; dof_count];
+            let assignment_heterogeneity_index = apply_thermo_material_heterogeneity(
+                model,
+                dof_count,
+                constitutive_temperature_factor,
+                &mut dof_adjustments,
+            );
+            let mut local_modulus_scales = vec![effective_modulus_scale; dof_count];
             for i in 0..dof_count {
                 let thermal_bias = 1.0 + thermal_strain_scale * (1.0 + (i % 3) as f64 * 0.1);
-                stiffness_diag[i] *= thermal_bias * effective_modulus_scale;
+                let local_scale =
+                    (effective_modulus_scale * (1.0 + dof_adjustments[i])).clamp(0.75, 1.2);
+                local_modulus_scales[i] = local_scale;
+                stiffness_diag[i] *= thermal_bias * local_scale;
                 if !constrained[i] {
                     rhs[i] += thermal_load_scale * (1.0 + (i % 5) as f64 * 0.05);
                 }
             }
-            for value in &mut stiffness_upper {
-                *value *= effective_modulus_scale;
+            for i in 0..stiffness_upper.len() {
+                let edge_scale = 0.5 * (local_modulus_scales[i] + local_modulus_scales[i + 1]);
+                stiffness_upper[i] *= edge_scale;
             }
+            let min_modulus_scale = local_modulus_scales
+                .iter()
+                .copied()
+                .fold(f64::INFINITY, f64::min);
+            let max_modulus_scale = local_modulus_scales.iter().copied().fold(0.0_f64, f64::max);
+            let constitutive_material_spread_ratio =
+                if min_modulus_scale.is_finite() && min_modulus_scale > 0.0 {
+                    max_modulus_scale / min_modulus_scale
+                } else {
+                    1.0
+                };
             thermo_mechanical = Some(ThermoMechanicalAssemblySummary {
                 enabled: true,
                 reference_temperature_k: context.reference_temperature_k,
@@ -531,12 +556,16 @@ pub fn assemble_linear_system(
                 constitutive_temperature_factor,
                 constitutive_poisson_coupling,
                 effective_modulus_scale,
+                constitutive_material_spread_ratio,
+                assignment_heterogeneity_index,
                 coupling_fingerprint: thermo_mechanical_fingerprint(
                     context,
                     dof_count,
                     constitutive_temperature_factor,
                     constitutive_poisson_coupling,
                     effective_modulus_scale,
+                    constitutive_material_spread_ratio,
+                    assignment_heterogeneity_index,
                 ),
             });
         }
@@ -1401,6 +1430,8 @@ fn thermo_mechanical_fingerprint(
     constitutive_temperature_factor: f64,
     constitutive_poisson_coupling: f64,
     effective_modulus_scale: f64,
+    constitutive_material_spread_ratio: f64,
+    assignment_heterogeneity_index: f64,
 ) -> u64 {
     let mut hash = 1469598103934665603_u64;
     for value in [
@@ -1411,8 +1442,86 @@ fn thermo_mechanical_fingerprint(
         constitutive_temperature_factor.to_bits(),
         constitutive_poisson_coupling.to_bits(),
         effective_modulus_scale.to_bits(),
+        constitutive_material_spread_ratio.to_bits(),
+        assignment_heterogeneity_index.to_bits(),
     ] {
         hash ^= value;
+        hash = hash.wrapping_mul(1099511628211_u64);
+    }
+    hash
+}
+
+fn apply_thermo_material_heterogeneity(
+    model: &AnalysisModel,
+    dof_count: usize,
+    constitutive_temperature_factor: f64,
+    dof_adjustments: &mut [f64],
+) -> f64 {
+    if dof_count == 0 || model.material_assignments.is_empty() {
+        return 0.0;
+    }
+    let base_amplitude = (constitutive_temperature_factor.abs() * 0.8).clamp(0.0, 0.15);
+    if base_amplitude <= 0.0 {
+        return 0.0;
+    }
+    let mut weighted_activity = 0.0_f64;
+    let mut weight_sum = 0.0_f64;
+    for (idx, assignment) in model.material_assignments.iter().enumerate() {
+        let confidence_weight = match assignment.confidence {
+            runmat_analysis_core::EvidenceConfidence::Verified => 1.0,
+            runmat_analysis_core::EvidenceConfidence::Probable => 0.65,
+            runmat_analysis_core::EvidenceConfidence::Inferred => 0.4,
+        };
+        let expected_modulus = model
+            .materials
+            .iter()
+            .find(|material| material.material_id == assignment.expected_material_id)
+            .map(|material| material.youngs_modulus_pa)
+            .unwrap_or(1.0e9)
+            .max(1.0);
+        let assigned_modulus = model
+            .materials
+            .iter()
+            .find(|material| material.material_id == assignment.assigned_material_id)
+            .map(|material| material.youngs_modulus_pa)
+            .unwrap_or(expected_modulus)
+            .max(1.0);
+        let modulus_delta_ratio =
+            ((assigned_modulus - expected_modulus) / expected_modulus).clamp(-0.6, 0.6);
+        let region_phase = ((region_hash(&assignment.region_id) % 11) as f64) / 10.0;
+        let activity = modulus_delta_ratio.abs();
+        let signed_bias = base_amplitude
+            * confidence_weight
+            * (0.5 * modulus_delta_ratio + 0.5 * modulus_delta_ratio.signum() * region_phase);
+        let stride = model.material_assignments.len().saturating_add(1).max(2);
+        let start = ((region_hash(&assignment.region_id) as usize).wrapping_add(idx * 3))
+            % dof_count.max(1);
+        let mut cursor = start;
+        for hop in 0..dof_count {
+            if hop > 0 && cursor == start {
+                break;
+            }
+            let wave = 1.0 + ((hop + idx) % 5) as f64 * 0.03;
+            dof_adjustments[cursor] += signed_bias * wave;
+            cursor = (cursor + stride) % dof_count.max(1);
+        }
+        weighted_activity += activity * confidence_weight;
+        weight_sum += confidence_weight;
+    }
+    for value in dof_adjustments.iter_mut() {
+        *value = value.clamp(-0.18, 0.18);
+    }
+    if weight_sum > 0.0 {
+        (weighted_activity / weight_sum).clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
+fn region_hash(region_id: &str) -> u64 {
+    let mut hash = 1469598103934665603_u64;
+    for byte in region_id.as_bytes() {
+        hash ^= *byte as u64;
         hash = hash.wrapping_mul(1099511628211_u64);
     }
     hash

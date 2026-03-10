@@ -46,10 +46,10 @@ def build_summary(report):
     )
     lines.append("")
     lines.append(
-        "| Fixture | Publishable | GPU ms | Speedup | Failed increments | Backtracks | Tangent rebuilds | Calibration profile | Acceptance score | Thermo enabled | Thermo modulus scale | Thermo transient sev | Thermo nonlinear sev |"
+        "| Fixture | Publishable | GPU ms | Speedup | Failed increments | Backtracks | Tangent rebuilds | Calibration profile | Acceptance score | Thermo enabled | Thermo modulus scale | Thermo spread ratio | Thermo heterogeneity | Thermo transient sev | Thermo nonlinear sev |"
     )
     lines.append(
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- | ---: | ---: | ---: |"
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: |"
     )
 
     for fixture_id in NONLINEAR_FIXTURES:
@@ -74,7 +74,7 @@ def build_summary(report):
             tangent = tmap.get("nonlinear_tangent_rebuild_count", {}).get("observed")
 
         lines.append(
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
                 fixture_id,
                 record.get("publishable", "-"),
                 format_num(record.get("gpu_run_ms")),
@@ -86,6 +86,8 @@ def build_summary(report):
                 format_num(record.get("prep_acceptance_score")),
                 record.get("thermo_coupling_enabled", "-"),
                 format_num(record.get("thermo_effective_modulus_scale")),
+                format_num(record.get("thermo_constitutive_material_spread_ratio")),
+                format_num(record.get("thermo_assignment_heterogeneity_index")),
                 format_num(record.get("thermo_transient_severity")),
                 format_num(record.get("thermo_nonlinear_severity")),
             )
@@ -98,9 +100,11 @@ def build_summary(report):
         lines.append(f"- `{THERMO_FIXTURE}`: missing")
     else:
         lines.append(
-            "- enabled={} modulus_scale={} transient_severity={} nonlinear_severity={}".format(
+            "- enabled={} modulus_scale={} spread_ratio={} heterogeneity_index={} transient_severity={} nonlinear_severity={}".format(
                 thermo_record.get("thermo_coupling_enabled", "-"),
                 format_num(thermo_record.get("thermo_effective_modulus_scale")),
+                format_num(thermo_record.get("thermo_constitutive_material_spread_ratio")),
+                format_num(thermo_record.get("thermo_assignment_heterogeneity_index")),
                 format_num(thermo_record.get("thermo_transient_severity")),
                 format_num(thermo_record.get("thermo_nonlinear_severity")),
             )

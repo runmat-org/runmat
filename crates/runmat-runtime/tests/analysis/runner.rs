@@ -372,6 +372,8 @@ pub(super) fn run_fixture(
     let mut thermo_coupling_fingerprint = None;
     let mut thermo_constitutive_temperature_factor = None;
     let mut thermo_effective_modulus_scale = None;
+    let mut thermo_constitutive_material_spread_ratio = None;
+    let mut thermo_assignment_heterogeneity_index = None;
     let mut thermo_transient_severity = None;
     let mut thermo_nonlinear_severity = None;
     let mut publishable = None;
@@ -419,6 +421,8 @@ pub(super) fn run_fixture(
                     thermo_coupling_fingerprint,
                     thermo_constitutive_temperature_factor,
                     thermo_effective_modulus_scale,
+                    thermo_constitutive_material_spread_ratio,
+                    thermo_assignment_heterogeneity_index,
                     thermo_transient_severity,
                     thermo_nonlinear_severity,
                     publishable,
@@ -923,6 +927,34 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
+                            "thermo_mech_material_spread_ratio",
+                            "FEA_TM_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_COUPLING",
+                                "constitutive_material_spread_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.3),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_mech_assignment_heterogeneity_index",
+                            "FEA_TM_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_COUPLING",
+                                "assignment_heterogeneity_index",
+                            ),
+                            Some(0.0),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
                             "thermo_mech_transient_severity",
                             "FEA_TM_TRANSIENT",
                             diagnostic_metric(&gpu_envelope.data, "FEA_TM_TRANSIENT", "severity"),
@@ -1209,6 +1241,20 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
+                            "nonlinear_path_mix_material_spread_ratio",
+                            "FEA_TM_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_COUPLING",
+                                "constitutive_material_spread_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.4),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
                             "thermo_nonlinear_severity",
                             "FEA_TM_NONLINEAR",
                             diagnostic_metric(&gpu_envelope.data, "FEA_TM_NONLINEAR", "severity"),
@@ -1267,6 +1313,8 @@ pub(super) fn run_fixture(
                                 thermo_coupling_fingerprint,
                                 thermo_constitutive_temperature_factor,
                                 thermo_effective_modulus_scale,
+                                thermo_constitutive_material_spread_ratio,
+                                thermo_assignment_heterogeneity_index,
                                 thermo_transient_severity,
                                 thermo_nonlinear_severity,
                                 publishable,
@@ -1299,6 +1347,14 @@ pub(super) fn run_fixture(
                         .thermo_constitutive_temperature_factor;
                     thermo_effective_modulus_scale =
                         gpu_results.data.summary.thermo_effective_modulus_scale;
+                    thermo_constitutive_material_spread_ratio = gpu_results
+                        .data
+                        .summary
+                        .thermo_constitutive_material_spread_ratio;
+                    thermo_assignment_heterogeneity_index = gpu_results
+                        .data
+                        .summary
+                        .thermo_assignment_heterogeneity_index;
                     thermo_transient_severity = gpu_results.data.summary.thermo_transient_severity;
                     thermo_nonlinear_severity = gpu_results.data.summary.thermo_nonlinear_severity;
 
@@ -1443,6 +1499,8 @@ pub(super) fn run_fixture(
                                     thermo_coupling_fingerprint,
                                     thermo_constitutive_temperature_factor,
                                     thermo_effective_modulus_scale,
+                                    thermo_constitutive_material_spread_ratio,
+                                    thermo_assignment_heterogeneity_index,
                                     thermo_transient_severity,
                                     thermo_nonlinear_severity,
                                     publishable,
@@ -1539,6 +1597,8 @@ pub(super) fn run_fixture(
         thermo_coupling_fingerprint,
         thermo_constitutive_temperature_factor,
         thermo_effective_modulus_scale,
+        thermo_constitutive_material_spread_ratio,
+        thermo_assignment_heterogeneity_index,
         thermo_transient_severity,
         thermo_nonlinear_severity,
         publishable,

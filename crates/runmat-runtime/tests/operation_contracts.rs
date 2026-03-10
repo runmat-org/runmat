@@ -1509,6 +1509,17 @@ fn analysis_results_by_run_id_contract_roundtrip() {
         None
     );
     assert_eq!(results.data.summary.thermo_effective_modulus_scale, None);
+    assert_eq!(
+        results
+            .data
+            .summary
+            .thermo_constitutive_material_spread_ratio,
+        None
+    );
+    assert_eq!(
+        results.data.summary.thermo_assignment_heterogeneity_index,
+        None
+    );
     assert_eq!(results.data.summary.thermo_transient_severity, None);
     assert_eq!(results.data.summary.thermo_nonlinear_severity, None);
 }

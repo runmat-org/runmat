@@ -591,6 +591,8 @@ pub struct AnalysisResultsSummary {
     pub thermo_coupling_fingerprint: Option<u64>,
     pub thermo_constitutive_temperature_factor: Option<f64>,
     pub thermo_effective_modulus_scale: Option<f64>,
+    pub thermo_constitutive_material_spread_ratio: Option<f64>,
+    pub thermo_assignment_heterogeneity_index: Option<f64>,
     pub thermo_transient_severity: Option<f64>,
     pub thermo_nonlinear_severity: Option<f64>,
 }

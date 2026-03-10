@@ -1855,6 +1855,16 @@ pub fn analysis_results_op(
         "FEA_TM_COUPLING",
         "effective_modulus_scale",
     );
+    let thermo_constitutive_material_spread_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_COUPLING",
+        "constitutive_material_spread_ratio",
+    );
+    let thermo_assignment_heterogeneity_index = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_COUPLING",
+        "assignment_heterogeneity_index",
+    );
     let thermo_transient_severity =
         diagnostic_metric(&run_result.run.diagnostics, "FEA_TM_TRANSIENT", "severity");
     let thermo_nonlinear_severity =
@@ -1895,6 +1905,8 @@ pub fn analysis_results_op(
         thermo_coupling_fingerprint,
         thermo_constitutive_temperature_factor,
         thermo_effective_modulus_scale,
+        thermo_constitutive_material_spread_ratio,
+        thermo_assignment_heterogeneity_index,
         thermo_transient_severity,
         thermo_nonlinear_severity,
     };

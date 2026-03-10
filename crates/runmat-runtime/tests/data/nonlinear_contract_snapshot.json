@@ -50,6 +50,8 @@
     "thermo_coupling_fingerprint": null,
     "thermo_constitutive_temperature_factor": null,
     "thermo_effective_modulus_scale": null,
+    "thermo_constitutive_material_spread_ratio": null,
+    "thermo_assignment_heterogeneity_index": null,
     "thermo_transient_severity": null,
     "thermo_nonlinear_severity": null
   }

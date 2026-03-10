@@ -67,6 +67,12 @@ def collect_metrics(reports, window):
                     "thermo_effective_modulus_scale": record.get(
                         "thermo_effective_modulus_scale"
                     ),
+                    "thermo_constitutive_material_spread_ratio": record.get(
+                        "thermo_constitutive_material_spread_ratio"
+                    ),
+                    "thermo_assignment_heterogeneity_index": record.get(
+                        "thermo_assignment_heterogeneity_index"
+                    ),
                     "thermo_transient_severity": record.get("thermo_transient_severity"),
                     "thermo_nonlinear_severity": record.get("thermo_nonlinear_severity"),
                 }
@@ -77,12 +83,14 @@ def collect_metrics(reports, window):
 def summarize(samples):
     lines = ["## Nonlinear Trend Summary", ""]
     lines.append(
-        "| Fixture | Samples | Median GPU ms | Median speedup | Publishable rate | Median acceptance score | Thermo enabled rate | Median thermo modulus scale | Median thermo transient sev | Median thermo nonlinear sev |"
+        "| Fixture | Samples | Median GPU ms | Median speedup | Publishable rate | Median acceptance score | Thermo enabled rate | Median thermo modulus scale | Median thermo spread ratio | Median thermo heterogeneity | Median thermo transient sev | Median thermo nonlinear sev |"
     )
-    lines.append("| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |")
+    lines.append(
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+    )
     for fixture, values in sorted(samples.items()):
         if not values:
-            lines.append(f"| {fixture} | 0 | - | - | - | - | - | - | - | - |")
+            lines.append(f"| {fixture} | 0 | - | - | - | - | - | - | - | - | - | - |")
             continue
         gpu = [v["gpu_run_ms"] for v in values if isinstance(v["gpu_run_ms"], (int, float))]
         speedup = [
@@ -116,8 +124,18 @@ def summarize(samples):
             for v in values
             if isinstance(v.get("thermo_nonlinear_severity"), (int, float))
         ]
+        thermo_spread_values = [
+            v["thermo_constitutive_material_spread_ratio"]
+            for v in values
+            if isinstance(v.get("thermo_constitutive_material_spread_ratio"), (int, float))
+        ]
+        thermo_heterogeneity_values = [
+            v["thermo_assignment_heterogeneity_index"]
+            for v in values
+            if isinstance(v.get("thermo_assignment_heterogeneity_index"), (int, float))
+        ]
         lines.append(
-            "| {} | {} | {} | {} | {:.2f} | {} | {} | {} | {} | {} |".format(
+            "| {} | {} | {} | {} | {:.2f} | {} | {} | {} | {} | {} | {} | {} |".format(
                 fixture,
                 len(values),
                 f"{statistics.median(gpu):.3f}" if gpu else "-",
@@ -132,6 +150,16 @@ def summarize(samples):
                 (
                     f"{statistics.median(thermo_modulus_values):.3f}"
                     if thermo_modulus_values
+                    else "-"
+                ),
+                (
+                    f"{statistics.median(thermo_spread_values):.3f}"
+                    if thermo_spread_values
+                    else "-"
+                ),
+                (
+                    f"{statistics.median(thermo_heterogeneity_values):.3f}"
+                    if thermo_heterogeneity_values
                     else "-"
                 ),
                 (

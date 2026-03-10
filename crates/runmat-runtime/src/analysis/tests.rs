@@ -841,6 +841,16 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
         .summary
         .thermo_effective_modulus_scale
         .is_some());
+    assert!(results
+        .data
+        .summary
+        .thermo_constitutive_material_spread_ratio
+        .is_some());
+    assert!(results
+        .data
+        .summary
+        .thermo_assignment_heterogeneity_index
+        .is_some());
     assert!(results.data.summary.thermo_transient_severity.is_some());
     assert!(results.data.summary.thermo_nonlinear_severity.is_none());
 }
@@ -888,6 +898,16 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
         .data
         .summary
         .thermo_effective_modulus_scale
+        .is_some());
+    assert!(results
+        .data
+        .summary
+        .thermo_constitutive_material_spread_ratio
+        .is_some());
+    assert!(results
+        .data
+        .summary
+        .thermo_assignment_heterogeneity_index
         .is_some());
     assert!(results.data.summary.thermo_nonlinear_severity.is_some());
     assert!(results.data.summary.thermo_transient_severity.is_some());
