@@ -110,14 +110,14 @@ jsonLd:
 ## TL;DR
 
 - Re-execution answers "what happens now." Historical state restoration answers "what happened then." Treating them as interchangeable wastes compute and delays root-cause analysis.
-- Teams without state restoration typically cycle through 3-4 speculative reruns per incident, burning hours of compute that direct inspection would eliminate.
+- In our experience, teams without state restoration cycle through several speculative reruns per incident, burning hours of compute that direct inspection would eliminate.
 - The practical flow: inspect the historical run first, form a hypothesis from actual variables and figures, then rerun once to validate the fix.
 - The pain compounds with run cost and team size. Simulation groups, quant desks, and applied R&D teams feel this most acutely, where a single rerun can cost hours of wall-clock time and hundreds of dollars in cloud compute.
 - Persistence stores artifacts durably; state restoration rebuilds context from them. Both are necessary, and they are [separate layers](/blog/ad-hoc-checkpoints-to-large-data-persistence). For how the persistence layer works under the hood, see [Large Dataset Persistence](/docs/large-dataset-persistence).
 
 ![Restoring Historical Run State for Scientific and Numerical Calculations](https://web.runmatstatic.com/blog-images/restoring-historical-run-state.png)
 
-Scientific and numerical teams lose more time to speculative reruns than to the bugs themselves. When something goes wrong in a past run, the default move is to re-execute, but re-execution only tells you what happens under current conditions. The question that actually needs answering, what did the system produce at that specific point in time, requires inspecting historical state directly.
+Scientific and numerical teams often lose more time to speculative reruns than to the bugs themselves. When something goes wrong in a past run, the default move is to re-execute, but re-execution only tells you what happens under current conditions. The question that actually needs answering, what did the system produce at that specific point in time, requires inspecting historical state directly.
 
 Something looked wrong yesterday. A plot showed unexpected asymmetry in zone 3. A tensor had NaN entries past row 8,000. A metric spiked 3x above its normal range.
 
@@ -164,7 +164,7 @@ flowchart TB
 
 ## What teams do without historical state restoration
 
-People fill the gap however they can: screenshots of plots, copied terminal logs, ad-hoc checkpoint files written to shared drives, and reruns on a colleague's machine. Each of these helps in the moment. None of them compose into a reliable team process when runs cost hours of compute and collaboration happens asynchronously across time zones.
+People fill the gap however they can: screenshots of plots, copied terminal logs, ad-hoc checkpoint files written to shared drives, and reruns on a colleague's machine. Each of these helps in the moment. These rarely compose into a reliable team process when runs cost hours of compute and collaboration happens asynchronously across time zones.
 
 The symptoms follow a pattern teams recognize immediately: repeated reruns just to regain context, long "is this the same issue?" threads that span days, and postmortems built on partial evidence because nobody can reproduce the exact state that triggered the investigation.
 

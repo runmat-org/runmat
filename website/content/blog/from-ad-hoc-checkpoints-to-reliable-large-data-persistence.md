@@ -179,7 +179,7 @@ For the full API surface and schema details, see the [Large Dataset Persistence]
 
 ## How this changes team collaboration
 
-Without reliable persistence, teams fill the gap with workarounds: screenshots posted in chat, copied terminal logs, shared folders with files named `final_v2_real.mat`, and reruns triggered just to let someone else review the output. Each workaround helps in the moment. None of them compose into a reliable process when runs cost hours and [collaboration](/docs/collaboration) happens asynchronously across time zones.
+Without reliable persistence, teams fill the gap with workarounds: screenshots posted in chat, copied terminal logs, shared folders with files named `final_v2_real.mat`, and reruns triggered just to let someone else review the output. Each workaround helps in the moment. They rarely compose into a reliable process when runs cost hours and [collaboration](/docs/collaboration) happens asynchronously across time zones.
 
 The handoff friction is most visible during reviews and incident response. Someone says "can you send me the result from that run?" and the response is a screenshot, or a local file export, or a full rerun. The reviewer is never quite sure they're looking at the same state the original author saw.
 

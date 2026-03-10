@@ -2,6 +2,7 @@
 title: "Mission-Critical Math: The Full Platform Inside Your Airgap"
 description: "RunMat brings modern scientific computing to airgapped environments. A single binary with GPU acceleration, real-time collaboration, AI-assisted analysis, and ITAR-aligned compliance -- all running offline."
 date: "2026-02-19"
+dateModified: "2026-03-10"
 authors:
   - name: "Fin Watterson"
     url: "https://www.linkedin.com/in/finbarrwatterson/"
@@ -47,7 +48,7 @@ jsonLd:
       description: "RunMat brings modern scientific computing to airgapped environments. A single binary with GPU acceleration, real-time collaboration, AI-assisted analysis, and ITAR-aligned compliance -- all running offline."
       image: "https://runmat.com/airgap-blog-hero.jpg"
       datePublished: "2026-02-19T00:00:00Z"
-      dateModified: "2026-02-19T00:00:00Z"
+      dateModified: "2026-03-10T00:00:00Z"
       author:
         - "@type": "Person"
           name: "Fin Watterson"
@@ -100,7 +101,7 @@ The airgap is a security requirement, not a reason to freeze your toolchain. Run
 
 ![RunMat platform architecture inside an airgapped environment](https://web.runmatstatic.com/blog-images/runmat-airgap-blog.png)
 
-National security relies on that isolation; isolating critical systems from the public internet is a necessary defense. But for engineers working inside secure facilities, the airgap has come with a heavy tax: their tools stopped evolving. While the rest of the software world moved to the cloud (real-time collaboration, AI assistance, instant updates), scientific computing in the secure zone got stuck. License servers, complex dependency trees, and manual updates have made modern workflows nearly impossible to implement offline.
+National security relies on that isolation; isolating critical systems from the public internet is a necessary defense. But for engineers working inside secure facilities, the airgap has come with a heavy tax: their tools stopped evolving. While the rest of the software world moved to the cloud (real-time collaboration, AI assistance, instant updates), scientific computing in the secure zone fell behind. License servers, complex dependency trees, and manual updates have made modern workflows nearly impossible to implement offline.
 
 ## TL;DR
 
@@ -194,9 +195,9 @@ Every filesystem write and membership change emits a structured audit record wit
 
 ## What this unlocks
 
-Engineers inside secure facilities have been stuck with legacy tools. The real opportunity is giving them capabilities they have never had before, even compared to teams on the open internet.
+Engineers inside secure facilities often rely on older toolchains. The real opportunity is giving them capabilities they have rarely had access to, even compared to teams on the open internet.
 
-File changes and project events stream to teammates via Server-Sent Events — when an analyst saves a script, her teammate sees the update immediately, and shared drives and email attachments and "which version is current?" drop out of the workflow. RunMat Enterprise's LLM integration takes that further: point it at a local model server (Ollama, vLLM, or a facility-approved endpoint) and engineers get AI-assisted code completion and analysis without any data leaving the building. The feedback loop that used to mean sending code to a separate team and waiting days for review can happen inside the editor. No legacy scientific computing tool offers that in a disconnected environment.
+File changes and project events stream to teammates via Server-Sent Events — when an analyst saves a script, her teammate sees the update immediately, and shared drives and email attachments and "which version is current?" drop out of the workflow. RunMat Enterprise's LLM integration takes that further: point it at a local model server (Ollama, vLLM, or a facility-approved endpoint) and engineers get AI-assisted code completion and analysis without any data leaving the building. The feedback loop that used to mean sending code to a separate team and waiting days for review can happen inside the editor. Few legacy scientific computing tools offer that in a disconnected environment.
 
 On the versioning side, every file write creates a version record and snapshots capture full project state at a point in time. Snapshots export as a git fast-import stream for external review. When someone asks "which version of this script was running during the anomaly investigation last Tuesday?" you have a definitive answer. Compute stays local too: RunMat Accelerate works with whatever GPU is already in the machine, so performance that used to require a dedicated cluster or an IT ticket is now available at the analyst's desk. Upgrades follow the same single path as the initial install: carry in two binaries and a license payload on approved media, replace the old files, and the runtime, server, collaboration layer, and AI integration all update together.
 
