@@ -288,6 +288,20 @@ jobs:
           RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY: "true"
         run: python3 scripts/validate_analysis_report_nonlinear.py
 
+      - name: Enforce non-default thermo signing key on release branches
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')
+        env:
+          RUNMAT_THERMO_FIELD_SIGNING_KEY: ${{ secrets.RUNMAT_THERMO_FIELD_SIGNING_KEY }}
+        run: |
+          if [ -z "${RUNMAT_THERMO_FIELD_SIGNING_KEY}" ]; then
+            echo "RUNMAT_THERMO_FIELD_SIGNING_KEY secret is required on release branches"
+            exit 1
+          fi
+          if [ "${RUNMAT_THERMO_FIELD_SIGNING_KEY}" = "runmat-dev-thermo-signing-key" ]; then
+            echo "default dev signing key is not allowed on release branches"
+            exit 1
+          fi
+
       - name: Verify thermo field artifact trust chain
         if: always()
         run: |
@@ -406,6 +420,7 @@ jobs:
           RUNMAT_RELEASE_READINESS_PREP_REQUIRE_RECOMMENDATION_ARTIFACT: "true"
           RUNMAT_RELEASE_READINESS_PREP_CANDIDATE_MAX_AGE_DAYS: "14"
           RUNMAT_PREP_CALIBRATION_RECOMMENDATIONS_INPUT: target/runmat-analysis-artifacts/prep_calibration_recommendations.json
+          RUNMAT_THERMO_FIELD_SIGNING_KEY: ${{ secrets.RUNMAT_THERMO_FIELD_SIGNING_KEY }}
         run: |
           python3 scripts/release_readiness_nonlinear.py | tee nonlinear-release-readiness.md
           cat nonlinear-release-readiness.md >> "$GITHUB_STEP_SUMMARY"

@@ -115,6 +115,11 @@ Thermo field artifact trust-chain policy:
 - runtime verifies digest/signature during artifact-backed solve dispatch,
 - release readiness can require artifact-backed thermo fixtures and gate on approval/staleness/provenance validity.
 
+Release rollout minimum gate:
+
+- release branches must provide non-default `RUNMAT_THERMO_FIELD_SIGNING_KEY`,
+- release readiness emits `THERMO_FIELD_SIGNING_KEY_UNSAFE` when signing-key policy is not met.
+
 ## Diagnostics
 
 Prep-aware runs can emit:

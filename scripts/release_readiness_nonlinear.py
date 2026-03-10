@@ -1205,6 +1205,19 @@ def evaluate_release_readiness(
             )
         )
 
+    signing_key = os.getenv("RUNMAT_THERMO_FIELD_SIGNING_KEY", "")
+    if governance_profile_name() == "release":
+        if not signing_key or signing_key == "runmat-dev-thermo-signing-key":
+            reasons.append(
+                Reason(
+                    code="THERMO_FIELD_SIGNING_KEY_UNSAFE",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "release governance requires non-default thermo field signing key"
+                    ),
+                )
+            )
+
     if any(reason.severity == "fail" for reason in reasons):
         verdict = "fail"
     elif reasons:
@@ -1238,6 +1251,9 @@ def evaluate_release_readiness(
         "thermo_max_field_extrapolation_trend_ratio": thermo_max_field_extrapolation_trend_ratio,
         "thermo_require_artifact_backed": thermo_require_artifact_backed,
         "thermo_field_artifact_max_age_days": thermo_field_artifact_max_age_days,
+        "thermo_signing_key_safe": bool(
+            signing_key and signing_key != "runmat-dev-thermo-signing-key"
+        ),
         "thermo_spread_breach_rate": thermo_spread_breach_rate,
         "thermo_heterogeneity_breach_rate": thermo_heterogeneity_breach_rate,
         "thermo_spread_trend_ratio": thermo_spread_trend_ratio,
@@ -1316,6 +1332,10 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Thermo field artifact max age days: "
         f"`{result.get('thermo_field_artifact_max_age_days') if result.get('thermo_field_artifact_max_age_days') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermo signing key safe: "
+        f"`{result.get('thermo_signing_key_safe') if result.get('thermo_signing_key_safe') is not None else '-'}`"
     )
     lines.append(
         "- Thermo spread breach rate: "

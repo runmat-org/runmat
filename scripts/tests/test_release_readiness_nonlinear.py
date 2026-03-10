@@ -125,6 +125,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED",
             "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS",
             "RUNMAT_THERMO_FIELD_PROMOTION_REPORT",
+            "RUNMAT_THERMO_FIELD_SIGNING_KEY",
             "GITHUB_REF_NAME",
         ]:
             os.environ.pop(key, None)
@@ -864,6 +865,17 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMO_FIELD_PROMOTION_BLOCKED", codes)
 
+    def test_release_profile_requires_non_default_thermo_signing_key(self):
+        os.environ["GITHUB_REF_NAME"] = "main"
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_FIELD_SIGNING_KEY_UNSAFE", codes)
+
     def test_markdown_summary_prints_thermo_posture_section(self):
         latest = report(
             passed=True,
@@ -900,6 +912,7 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Thermo field extrapolation trend threshold", summary)
         self.assertIn("Thermo artifact-backed required", summary)
         self.assertIn("Thermo field artifact max age days", summary)
+        self.assertIn("Thermo signing key safe", summary)
         self.assertIn("Thermo spread breach rate", summary)
         self.assertIn("Thermo heterogeneity breach rate", summary)
         self.assertIn("Thermo spread trend ratio", summary)
