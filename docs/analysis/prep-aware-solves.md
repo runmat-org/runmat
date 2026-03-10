@@ -82,6 +82,7 @@ Typed prep-reference failure families:
   - coupled transient/nonlinear solve paths apply thermo-aware convergence/adaptivity profile shaping,
   - runtime quality policy surfaces thermo stress reasons when coupling severity enters warning posture,
   - `analysis.results` and `analysis.trends` summaries surface thermo coupling posture fields for lightweight client gating,
+  - release-readiness scripts can gate directly on thermo summary fields via branch-profile thresholds,
   - benchmark harness includes a kickoff fixture with coupling metric thresholds.
 
 ## Diagnostics

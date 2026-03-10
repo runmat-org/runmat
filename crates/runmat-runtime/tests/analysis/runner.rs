@@ -360,6 +360,10 @@ pub(super) fn run_fixture(
     let mut prep_acceptance_score = None;
     let mut prep_acceptance_passed = None;
     let mut prep_acceptance_fingerprint = None;
+    let mut thermo_coupling_enabled = None;
+    let mut thermo_coupling_fingerprint = None;
+    let mut thermo_transient_severity = None;
+    let mut thermo_nonlinear_severity = None;
     let mut publishable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
@@ -401,6 +405,10 @@ pub(super) fn run_fixture(
                     prep_acceptance_score,
                     prep_acceptance_passed,
                     prep_acceptance_fingerprint,
+                    thermo_coupling_enabled,
+                    thermo_coupling_fingerprint,
+                    thermo_transient_severity,
+                    thermo_nonlinear_severity,
                     publishable,
                     parity,
                     threshold_assertions,
@@ -1205,6 +1213,10 @@ pub(super) fn run_fixture(
                                 prep_acceptance_score,
                                 prep_acceptance_passed,
                                 prep_acceptance_fingerprint,
+                                thermo_coupling_enabled,
+                                thermo_coupling_fingerprint,
+                                thermo_transient_severity,
+                                thermo_nonlinear_severity,
                                 publishable,
                                 parity,
                                 threshold_assertions,
@@ -1226,6 +1238,11 @@ pub(super) fn run_fixture(
                     prep_acceptance_passed = gpu_results.data.summary.prep_acceptance_passed;
                     prep_acceptance_fingerprint =
                         gpu_results.data.summary.prep_acceptance_fingerprint;
+                    thermo_coupling_enabled = gpu_results.data.summary.thermo_coupling_enabled;
+                    thermo_coupling_fingerprint =
+                        gpu_results.data.summary.thermo_coupling_fingerprint;
+                    thermo_transient_severity = gpu_results.data.summary.thermo_transient_severity;
+                    thermo_nonlinear_severity = gpu_results.data.summary.thermo_nonlinear_severity;
 
                     if let Some(root) = filesystem_root {
                         runmat_runtime::analysis::storage::configure_artifact_store(
@@ -1364,6 +1381,10 @@ pub(super) fn run_fixture(
                                     prep_acceptance_score,
                                     prep_acceptance_passed,
                                     prep_acceptance_fingerprint,
+                                    thermo_coupling_enabled,
+                                    thermo_coupling_fingerprint,
+                                    thermo_transient_severity,
+                                    thermo_nonlinear_severity,
                                     publishable,
                                     parity,
                                     threshold_assertions,
@@ -1454,6 +1475,10 @@ pub(super) fn run_fixture(
         prep_acceptance_score,
         prep_acceptance_passed,
         prep_acceptance_fingerprint,
+        thermo_coupling_enabled,
+        thermo_coupling_fingerprint,
+        thermo_transient_severity,
+        thermo_nonlinear_severity,
         publishable,
         parity,
         threshold_assertions,

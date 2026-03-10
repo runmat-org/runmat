@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import math
 import os
 import statistics
 from dataclasses import dataclass
@@ -51,18 +52,30 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_PREP_MAX_RECOMMENDATION_RATIO": "0.25",
             "RUNMAT_RELEASE_READINESS_PREP_CANDIDATE_MAX_AGE_DAYS": "7",
             "RUNMAT_RELEASE_READINESS_PREP_REQUIRE_RECOMMENDATION_ARTIFACT": "true",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_TRANSIENT_SEVERITY": "0.25",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_NONLINEAR_SEVERITY": "0.25",
+            "RUNMAT_RELEASE_READINESS_THERMO_MIN_ENABLED_RATE": "0.5",
+            "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_METRICS": "true",
         },
         "development": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.2",
             "RUNMAT_RELEASE_READINESS_PREP_MAX_RECOMMENDATION_RATIO": "0.5",
             "RUNMAT_RELEASE_READINESS_PREP_CANDIDATE_MAX_AGE_DAYS": "14",
             "RUNMAT_RELEASE_READINESS_PREP_REQUIRE_RECOMMENDATION_ARTIFACT": "false",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_TRANSIENT_SEVERITY": "0.3",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_NONLINEAR_SEVERITY": "0.3",
+            "RUNMAT_RELEASE_READINESS_THERMO_MIN_ENABLED_RATE": "0.0",
+            "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_METRICS": "false",
         },
         "feature": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.25",
             "RUNMAT_RELEASE_READINESS_PREP_MAX_RECOMMENDATION_RATIO": "0.75",
             "RUNMAT_RELEASE_READINESS_PREP_CANDIDATE_MAX_AGE_DAYS": "21",
             "RUNMAT_RELEASE_READINESS_PREP_REQUIRE_RECOMMENDATION_ARTIFACT": "false",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_TRANSIENT_SEVERITY": "0.4",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_NONLINEAR_SEVERITY": "0.4",
+            "RUNMAT_RELEASE_READINESS_THERMO_MIN_ENABLED_RATE": "0.0",
+            "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_METRICS": "false",
         },
     }
     return profile_map.get(profile, {}).get(name, default)
@@ -153,6 +166,14 @@ def nonlinear_records(report: dict) -> Dict[str, dict]:
         fixture_id = rec.get("fixture_id")
         if isinstance(fixture_id, str) and fixture_id in NONLINEAR_FIXTURES:
             records[fixture_id] = rec
+    return records
+
+
+def report_records(report: dict) -> List[dict]:
+    records = []
+    for rec in report.get("records", []):
+        if isinstance(rec, dict):
+            records.append(rec)
     return records
 
 
@@ -534,6 +555,121 @@ def evaluate_release_readiness(
                 )
             )
 
+    thermo_max_transient_severity_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_TRANSIENT_SEVERITY",
+            profile_default("RUNMAT_RELEASE_READINESS_THERMO_MAX_TRANSIENT_SEVERITY", "0.3"),
+        )
+    )
+    thermo_max_nonlinear_severity_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_NONLINEAR_SEVERITY",
+            profile_default("RUNMAT_RELEASE_READINESS_THERMO_MAX_NONLINEAR_SEVERITY", "0.3"),
+        )
+    )
+    thermo_min_enabled_rate = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MIN_ENABLED_RATE",
+            profile_default("RUNMAT_RELEASE_READINESS_THERMO_MIN_ENABLED_RATE", "0.0"),
+        )
+    )
+    thermo_require_metrics = is_true(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_METRICS",
+            profile_default("RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_METRICS", "false"),
+        )
+    )
+    thermo_records = [
+        rec
+        for rec in report_records(latest)
+        if isinstance(rec.get("thermo_coupling_enabled"), bool)
+        or isinstance(rec.get("thermo_transient_severity"), (int, float))
+        or isinstance(rec.get("thermo_nonlinear_severity"), (int, float))
+    ]
+    thermo_coupling_enabled_rate = None
+    thermo_max_transient_severity = None
+    thermo_max_nonlinear_severity = None
+    if not thermo_records:
+        if protected or thermo_require_metrics:
+            reasons.append(
+                Reason(
+                    code="THERMO_COUPLING_METRICS_MISSING",
+                    severity="warn",
+                    detail="thermo coupling posture metrics missing from report records",
+                )
+            )
+    else:
+        enabled_values = [
+            rec.get("thermo_coupling_enabled")
+            for rec in thermo_records
+            if isinstance(rec.get("thermo_coupling_enabled"), bool)
+        ]
+        if enabled_values:
+            thermo_coupling_enabled_rate = (
+                sum(1 for value in enabled_values if value) / len(enabled_values)
+            )
+            if thermo_coupling_enabled_rate < thermo_min_enabled_rate:
+                reasons.append(
+                    Reason(
+                        code="THERMO_COUPLING_ENABLED_RATE_LOW",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"thermo coupling enabled rate {thermo_coupling_enabled_rate:.3f} below "
+                            f"minimum {thermo_min_enabled_rate:.3f}"
+                        ),
+                    )
+                )
+        elif protected or thermo_require_metrics:
+            reasons.append(
+                Reason(
+                    code="THERMO_COUPLING_ENABLED_RATE_MISSING",
+                    severity="warn",
+                    detail="thermo coupling enabled-rate metric missing from report records",
+                )
+            )
+
+        transient_values = []
+        for rec in thermo_records:
+            raw_value = rec.get("thermo_transient_severity")
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                if math.isfinite(value):
+                    transient_values.append(value)
+        if transient_values:
+            thermo_max_transient_severity = max(transient_values)
+            if thermo_max_transient_severity > thermo_max_transient_severity_threshold:
+                reasons.append(
+                    Reason(
+                        code="THERMO_TRANSIENT_SEVERITY_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"max thermo transient severity {thermo_max_transient_severity:.3f} exceeds "
+                            f"threshold {thermo_max_transient_severity_threshold:.3f}"
+                        ),
+                    )
+                )
+
+        nonlinear_values = []
+        for rec in thermo_records:
+            raw_value = rec.get("thermo_nonlinear_severity")
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                if math.isfinite(value):
+                    nonlinear_values.append(value)
+        if nonlinear_values:
+            thermo_max_nonlinear_severity = max(nonlinear_values)
+            if thermo_max_nonlinear_severity > thermo_max_nonlinear_severity_threshold:
+                reasons.append(
+                    Reason(
+                        code="THERMO_NONLINEAR_SEVERITY_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"max thermo nonlinear severity {thermo_max_nonlinear_severity:.3f} exceeds "
+                            f"threshold {thermo_max_nonlinear_severity_threshold:.3f}"
+                        ),
+                    )
+                )
+
     if any(reason.severity == "fail" for reason in reasons):
         verdict = "fail"
     elif reasons:
@@ -551,6 +687,9 @@ def evaluate_release_readiness(
         "prep_acceptance_rate": acceptance_rate,
         "prep_calibration_max_observed_drift": prep_calibration_max_observed_drift,
         "prep_calibration_recommendation_count": prep_calibration_recommendation_count,
+        "thermo_coupling_enabled_rate": thermo_coupling_enabled_rate,
+        "thermo_max_transient_severity": thermo_max_transient_severity,
+        "thermo_max_nonlinear_severity": thermo_max_nonlinear_severity,
         "governance_profile": governance_profile_name(),
     }
 
@@ -560,6 +699,20 @@ def markdown_summary(result: dict) -> str:
     lines.append(f"Verdict: **{result['verdict']}**")
     lines.append(f"Governance profile: **{result.get('governance_profile', 'unknown')}**")
     lines.append(f"Protected branch enforcement: **{result['protected_branch']}**")
+    lines.append("")
+    lines.append("### Thermo Posture")
+    lines.append(
+        "- Thermo coupling enabled-rate: "
+        f"`{result.get('thermo_coupling_enabled_rate') if result.get('thermo_coupling_enabled_rate') is not None else '-'}`"
+    )
+    lines.append(
+        "- Max thermo transient severity: "
+        f"`{result.get('thermo_max_transient_severity') if result.get('thermo_max_transient_severity') is not None else '-'}`"
+    )
+    lines.append(
+        "- Max thermo nonlinear severity: "
+        f"`{result.get('thermo_max_nonlinear_severity') if result.get('thermo_max_nonlinear_severity') is not None else '-'}`"
+    )
     lines.append("")
     if result["reasons"]:
         lines.append("### Reasons")

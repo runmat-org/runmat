@@ -1,7 +1,10 @@
 import unittest
 import os
 
-from scripts.release_readiness_nonlinear import evaluate_release_readiness
+from scripts.release_readiness_nonlinear import (
+    evaluate_release_readiness,
+    markdown_summary,
+)
 
 
 def report(
@@ -11,6 +14,9 @@ def report(
     prep_acceptance_passed=True,
     prep_acceptance_score=0.9,
     prep_calibration_profile="balanced",
+    thermo_coupling_enabled=None,
+    thermo_transient_severity=None,
+    thermo_nonlinear_severity=None,
 ):
     fixtures = [
         "nonlinear_assembly_gpu_provider",
@@ -18,19 +24,30 @@ def report(
         "nonlinear_softening_proxy_gpu_provider",
         "nonlinear_load_path_mix_gpu_provider",
     ]
+    records = [
+        {
+            "fixture_id": fixture,
+            "publishable": publishable,
+            "gpu_run_ms": gpu_ms,
+            "prep_acceptance_passed": prep_acceptance_passed,
+            "prep_acceptance_score": prep_acceptance_score,
+            "prep_calibration_profile": prep_calibration_profile,
+        }
+        for fixture in fixtures
+    ]
+    if thermo_coupling_enabled is not None:
+        for rec in records:
+            rec["thermo_coupling_enabled"] = thermo_coupling_enabled
+    if thermo_transient_severity is not None:
+        for rec in records:
+            rec["thermo_transient_severity"] = thermo_transient_severity
+    if thermo_nonlinear_severity is not None:
+        for rec in records:
+            rec["thermo_nonlinear_severity"] = thermo_nonlinear_severity
+
     return {
         "passed": passed,
-        "records": [
-            {
-                "fixture_id": fixture,
-                "publishable": publishable,
-                "gpu_run_ms": gpu_ms,
-                "prep_acceptance_passed": prep_acceptance_passed,
-                "prep_acceptance_score": prep_acceptance_score,
-                "prep_calibration_profile": prep_calibration_profile,
-            }
-            for fixture in fixtures
-        ],
+        "records": records,
     }
 
 
@@ -53,6 +70,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_PREP_MAX_RECOMMENDATION_RATIO",
             "RUNMAT_RELEASE_READINESS_PREP_CANDIDATE_MAX_AGE_DAYS",
             "RUNMAT_RELEASE_READINESS_PREP_REQUIRE_RECOMMENDATION_ARTIFACT",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_TRANSIENT_SEVERITY",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_NONLINEAR_SEVERITY",
+            "RUNMAT_RELEASE_READINESS_THERMO_MIN_ENABLED_RATE",
+            "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_METRICS",
             "GITHUB_REF_NAME",
         ]:
             os.environ.pop(key, None)
@@ -397,6 +418,91 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertNotIn("PREP_CALIBRATION_RECOMMENDATION_ARTIFACT_MISSING", codes)
         self.assertEqual(result.get("governance_profile"), "feature")
+
+    def test_thermo_transient_severity_high_reason_is_emitted(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        latest["records"].append(
+            {
+                "fixture_id": "thermo_mech_kickoff_gpu_provider",
+                "publishable": True,
+                "gpu_run_ms": 90.0,
+                "thermo_coupling_enabled": True,
+                "thermo_transient_severity": 0.45,
+            }
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_THERMO_MAX_TRANSIENT_SEVERITY"] = "0.2"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_TRANSIENT_SEVERITY_HIGH", codes)
+
+    def test_thermo_nonlinear_severity_high_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermo_coupling_enabled=True,
+            thermo_nonlinear_severity=0.55,
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_THERMO_MAX_NONLINEAR_SEVERITY"] = "0.2"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_NONLINEAR_SEVERITY_HIGH", codes)
+
+    def test_thermo_coupling_enabled_rate_low_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermo_coupling_enabled=False,
+            thermo_nonlinear_severity=0.05,
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_THERMO_MIN_ENABLED_RATE"] = "0.5"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_COUPLING_ENABLED_RATE_LOW", codes)
+
+    def test_thermo_metrics_missing_warn_when_required(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        os.environ["RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_METRICS"] = "true"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_COUPLING_METRICS_MISSING", codes)
+
+    def test_markdown_summary_prints_thermo_posture_section(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermo_coupling_enabled=True,
+            thermo_transient_severity=0.1,
+            thermo_nonlinear_severity=0.2,
+        )
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        summary = markdown_summary(result)
+        self.assertIn("### Thermo Posture", summary)
+        self.assertIn("Thermo coupling enabled-rate", summary)
+        self.assertIn("Max thermo transient severity", summary)
+        self.assertIn("Max thermo nonlinear severity", summary)
 
 
 if __name__ == "__main__":

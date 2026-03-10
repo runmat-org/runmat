@@ -1,13 +1,13 @@
-use std::fs;
 use std::collections::HashMap;
+use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
 use runmat_accelerate_api::{
-    AccelDownloadFuture, AccelProvider, AccelProviderFuture, ApiDeviceInfo, GpuTensorHandle, HostTensorOwned,
-    HostTensorView, ThreadProviderGuard,
+    AccelDownloadFuture, AccelProvider, AccelProviderFuture, ApiDeviceInfo, GpuTensorHandle,
+    HostTensorOwned, HostTensorView, ThreadProviderGuard,
 };
 use runmat_analysis_core::{AnalysisFieldValues, AnalysisModel, ReferenceFrame};
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
@@ -15,11 +15,10 @@ use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_op,
-    analysis_run_linear_static_with_options,
-    analysis_run_modal_with_options_op, analysis_run_nonlinear_with_options_op,
-    analysis_run_transient_with_options_op, analysis_validate, AnalysisCreateModelIntentSpec,
-    AnalysisCreateModelProfile, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
-    AnalysisResultsQuery, AnalysisRunOptions,
+    analysis_run_linear_static_with_options, analysis_run_modal_with_options_op,
+    analysis_run_nonlinear_with_options_op, analysis_run_transient_with_options_op,
+    analysis_validate, AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile,
+    AnalysisModalRunOptions, AnalysisNonlinearRunOptions, AnalysisResultsQuery, AnalysisRunOptions,
     AnalysisTransientRunOptions, PrecisionMode, PreconditionerMode, QualityPolicy,
 };
 use runmat_runtime::geometry::geometry_load_op;
@@ -152,6 +151,10 @@ struct FixtureRunRecord {
     prep_acceptance_score: Option<f64>,
     prep_acceptance_passed: Option<bool>,
     prep_acceptance_fingerprint: Option<u64>,
+    thermo_coupling_enabled: Option<bool>,
+    thermo_coupling_fingerprint: Option<u64>,
+    thermo_transient_severity: Option<f64>,
+    thermo_nonlinear_severity: Option<f64>,
     publishable: Option<bool>,
     parity: Option<ParitySummary>,
     threshold_assertions: Vec<ThresholdAssertionRecord>,
@@ -177,18 +180,17 @@ struct BaselineConfig {
     min_speedup_retention: f64,
 }
 
-const ROLLING_TARGET_FIXTURES: &[&str] =
-    &[
-        "modal_large_gpu_provider",
-        "modal_large_gpu_provider_stress16",
-        "transient_long_gpu_provider",
-        "transient_shock_gpu_provider",
-        "thermo_mech_kickoff_gpu_provider",
-        "nonlinear_assembly_gpu_provider",
-        "nonlinear_assembly_stress_gpu_provider",
-        "nonlinear_softening_proxy_gpu_provider",
-        "nonlinear_load_path_mix_gpu_provider",
-    ];
+const ROLLING_TARGET_FIXTURES: &[&str] = &[
+    "modal_large_gpu_provider",
+    "modal_large_gpu_provider_stress16",
+    "transient_long_gpu_provider",
+    "transient_shock_gpu_provider",
+    "thermo_mech_kickoff_gpu_provider",
+    "nonlinear_assembly_gpu_provider",
+    "nonlinear_assembly_stress_gpu_provider",
+    "nonlinear_softening_proxy_gpu_provider",
+    "nonlinear_load_path_mix_gpu_provider",
+];
 
 const SYNTHETIC_TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
 
@@ -196,7 +198,10 @@ fn synthesized_nonlinear_model() -> AnalysisModel {
     let geometry = geometry_load_op(
         "/synthetic/nonlinear_fixture.stl",
         SYNTHETIC_TRIANGLE_STL.as_bytes(),
-        OperationContext::new(Some("trace-create-model-nonlinear-geometry".to_string()), None),
+        OperationContext::new(
+            Some("trace-create-model-nonlinear-geometry".to_string()),
+            None,
+        ),
     )
     .expect("load synthetic nonlinear geometry for create-model fixture");
 
@@ -205,7 +210,7 @@ fn synthesized_nonlinear_model() -> AnalysisModel {
         AnalysisCreateModelIntentSpec {
             model_id: "nonlinear_created_fixture_model".to_string(),
             profile: AnalysisCreateModelProfile::NonlinearStructural,
-        prep_context: None,
+            prep_context: None,
         },
         OperationContext::new(Some("trace-create-model-nonlinear".to_string()), None),
     )
@@ -250,7 +255,11 @@ fn analysis_benchmark_conformance_manifest_gates() {
     let mut failures = Vec::new();
     for record in &records {
         if !record.failures.is_empty() {
-            failures.push(format!("{} => {}", record.fixture_id, record.failures.join("; ")));
+            failures.push(format!(
+                "{} => {}",
+                record.fixture_id,
+                record.failures.join("; ")
+            ));
         }
     }
 

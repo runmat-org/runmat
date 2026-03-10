@@ -31,7 +31,13 @@ fn store_insert(shape: Vec<usize>, data: Vec<f64>) -> anyhow::Result<GpuTensorHa
     let mut guard = harness_store()
         .lock()
         .map_err(|_| anyhow::anyhow!("harness store lock poisoned"))?;
-    guard.insert(buffer_id, HostTensorOwned { data, shape: shape.clone() });
+    guard.insert(
+        buffer_id,
+        HostTensorOwned {
+            data,
+            shape: shape.clone(),
+        },
+    );
     Ok(GpuTensorHandle {
         shape,
         device_id: 21,
@@ -123,7 +129,10 @@ impl AccelProvider for HarnessProvider {
         store_insert(ah.shape, data)
     }
 
-    fn reduce_sum<'a>(&'a self, a: &'a GpuTensorHandle) -> AccelProviderFuture<'a, GpuTensorHandle> {
+    fn reduce_sum<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let ah = store_get(a)?;
             let sum = ah.data.iter().sum::<f64>();

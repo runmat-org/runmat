@@ -971,7 +971,7 @@ Harness override environment variables:
   - warning on non-protected branches, fail-on-threshold for protected branches.
 - CI evaluates final nonlinear release readiness via `scripts/release_readiness_nonlinear.py`, producing:
   - machine-readable output: `target/runmat-analysis-artifacts/nonlinear_release_readiness.json`,
-  - human summary appended to step summary,
+  - human summary appended to step summary (including thermo posture metrics when available),
   - verdict semantics: `pass` / `warn` / `fail`.
 
 ### Nonlinear Regression Triage
@@ -1016,6 +1016,10 @@ Release readiness criteria (default):
   - prep artifact count must remain below configured warn/fail thresholds (`RUNMAT_RELEASE_READINESS_PREP_WARN_ARTIFACT_COUNT`, `RUNMAT_RELEASE_READINESS_PREP_FAIL_ARTIFACT_COUNT`),
   - prep artifact p95 age must remain below configured warn/fail thresholds (`RUNMAT_RELEASE_READINESS_PREP_WARN_P95_AGE_SECONDS`, `RUNMAT_RELEASE_READINESS_PREP_FAIL_P95_AGE_SECONDS`),
   - prep reject-rate guard (`PREP_REJECT_RATE_HIGH`) compares `(stale_reject + mismatch_reject)/created` against `RUNMAT_RELEASE_READINESS_PREP_MAX_REJECT_RATE` when counters are provided.
+- Thermo-coupling posture guard:
+  - when thermo metrics are present, release readiness evaluates max transient/nonlinear thermo severity against branch-aware thresholds (`RUNMAT_RELEASE_READINESS_THERMO_MAX_TRANSIENT_SEVERITY`, `RUNMAT_RELEASE_READINESS_THERMO_MAX_NONLINEAR_SEVERITY`),
+  - coupling enabled-rate can be enforced via `RUNMAT_RELEASE_READINESS_THERMO_MIN_ENABLED_RATE`,
+  - metrics presence can be required via `RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_METRICS`.
 - Protected branches:
   - `fail` reasons block release,
   - `warn` reasons are surfaced and should be triaged before tagging.
@@ -1371,6 +1375,7 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-09: Extended nonlinear release-readiness governance to consume thermo summary/trend metrics directly from conformance report records by adding thermo posture fields to harness report records (`thermo_coupling_enabled`/fingerprint/severity metrics) and adding branch-profile thermo thresholds/reason codes in `scripts/release_readiness_nonlinear.py` (`THERMO_*`) with unit-test coverage.
 - 2026-03-09: Added thermo-coupling posture summary surfaces by extending `analysis.results` summary fields (`thermo_coupling_enabled`/fingerprint and thermo transient/nonlinear severity metrics) and `analysis.trends` kind summaries (thermo coupling enabled-rate and thermo warning-rate metrics), with contract snapshot and typed trend/result coverage updates.
 - 2026-03-09: Extended Phase-1 thermo-mechanical runtime governance by mapping thermo-solver warning diagnostics into explicit quality-policy reasons (`ThermoMechanicalTransientStress`, `ThermoMechanicalNonlinearStress`) and adding benchmark threshold gates for `FEA_TM_TRANSIENT` severity/relaxation metrics on the kickoff fixture.
 - 2026-03-09: Delivered next Phase-1 thermo-mechanical slice by introducing thermo-aware solve-policy shaping in transient/nonlinear FEA paths (temperature-coupling severity drives adaptive timestep growth/shrink bounds and nonlinear convergence target relaxation), plus new structured diagnostics (`FEA_TM_TRANSIENT`, `FEA_TM_NONLINEAR`) and focused fixture-level unit coverage.
