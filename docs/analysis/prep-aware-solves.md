@@ -112,3 +112,21 @@ Prep-aware runs can emit:
 - `FEA_TM_NONLINEAR`
 
 These diagnostics are deterministic for the same model + prep artifact reference.
+
+## Thermo Policy Matrix
+
+Runtime quality-policy thermo heterogeneity thresholds:
+
+| Runtime policy | max spread ratio | max heterogeneity index |
+| --- | ---: | ---: |
+| `strict` | 1.15 | 0.12 |
+| `balanced` | 1.25 | 0.20 |
+| `exploratory` | 1.40 | 0.35 |
+
+Release-readiness branch profile defaults:
+
+| Governance profile | max transient sev | max nonlinear sev | max spread ratio | max heterogeneity index | max spread breach-rate | max heterogeneity breach-rate | max spread trend ratio | max heterogeneity trend ratio |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| `release` | 0.25 | 0.25 | 1.20 | 0.20 | 0.10 | 0.10 | 1.10 | 1.10 |
+| `development` | 0.30 | 0.30 | 1.30 | 0.30 | 0.25 | 0.25 | 1.20 | 1.20 |
+| `feature` | 0.40 | 0.40 | 1.50 | 0.50 | 0.50 | 0.50 | 1.35 | 1.35 |

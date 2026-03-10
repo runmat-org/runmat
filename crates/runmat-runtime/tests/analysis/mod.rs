@@ -190,6 +190,8 @@ const ROLLING_TARGET_FIXTURES: &[&str] = &[
     "transient_long_gpu_provider",
     "transient_shock_gpu_provider",
     "thermo_mech_kickoff_gpu_provider",
+    "thermo_gradient_benign_gpu_provider",
+    "thermo_gradient_pathological_gpu_provider",
     "nonlinear_assembly_gpu_provider",
     "nonlinear_assembly_stress_gpu_provider",
     "nonlinear_softening_proxy_gpu_provider",

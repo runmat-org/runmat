@@ -73,6 +73,20 @@ def validate_evidence(evidence: dict, now: datetime | None = None):
                     errors.append(
                         f"fixture '{fixture_id}' profile '{profile_name}' requires numeric acceptance_score_min/max"
                     )
+                thermo_spread_max = envelope.get("thermo_spread_ratio_max")
+                if thermo_spread_max is not None and not isinstance(
+                    thermo_spread_max, (int, float)
+                ):
+                    errors.append(
+                        f"fixture '{fixture_id}' profile '{profile_name}' thermo_spread_ratio_max must be numeric"
+                    )
+                thermo_heterogeneity_max = envelope.get("thermo_heterogeneity_index_max")
+                if thermo_heterogeneity_max is not None and not isinstance(
+                    thermo_heterogeneity_max, (int, float)
+                ):
+                    errors.append(
+                        f"fixture '{fixture_id}' profile '{profile_name}' thermo_heterogeneity_index_max must be numeric"
+                    )
 
     generated_at = _parse_iso8601(evidence.get("generated_at"))
     max_age_days = evidence.get("max_age_days")
@@ -125,17 +139,48 @@ def evaluate_record_drift(record: dict, fixture_spec: dict):
         min_score, max_score = max_score, min_score
 
     if min_score <= score <= max_score:
-        drift_ratio = 0.0
+        acceptance_drift_ratio = 0.0
     elif score < min_score:
-        drift_ratio = (min_score - score) / max(min_score, 1.0e-9)
+        acceptance_drift_ratio = (min_score - score) / max(min_score, 1.0e-9)
     else:
-        drift_ratio = (score - max_score) / max(max_score, 1.0e-9)
+        acceptance_drift_ratio = (score - max_score) / max(max_score, 1.0e-9)
+
+    thermo_spread_drift_ratio = 0.0
+    thermo_spread_ratio = record.get("thermo_constitutive_material_spread_ratio")
+    thermo_spread_max = expectation.get("thermo_spread_ratio_max")
+    if isinstance(thermo_spread_ratio, (int, float)) and isinstance(
+        thermo_spread_max, (int, float)
+    ):
+        if float(thermo_spread_ratio) > float(thermo_spread_max):
+            thermo_spread_drift_ratio = (
+                float(thermo_spread_ratio) - float(thermo_spread_max)
+            ) / max(float(thermo_spread_max), 1.0e-9)
+
+    thermo_heterogeneity_drift_ratio = 0.0
+    thermo_heterogeneity = record.get("thermo_assignment_heterogeneity_index")
+    thermo_heterogeneity_max = expectation.get("thermo_heterogeneity_index_max")
+    if isinstance(thermo_heterogeneity, (int, float)) and isinstance(
+        thermo_heterogeneity_max, (int, float)
+    ):
+        if float(thermo_heterogeneity) > float(thermo_heterogeneity_max):
+            thermo_heterogeneity_drift_ratio = (
+                float(thermo_heterogeneity) - float(thermo_heterogeneity_max)
+            ) / max(float(thermo_heterogeneity_max), 1.0e-9)
+
+    drift_ratio = max(
+        acceptance_drift_ratio,
+        thermo_spread_drift_ratio,
+        thermo_heterogeneity_drift_ratio,
+    )
 
     return {
         "profile": profile,
         "acceptance_score": float(score),
         "expected_min": float(min_score),
         "expected_max": float(max_score),
+        "acceptance_drift_ratio": float(max(acceptance_drift_ratio, 0.0)),
+        "thermo_spread_drift_ratio": float(max(thermo_spread_drift_ratio, 0.0)),
+        "thermo_heterogeneity_drift_ratio": float(max(thermo_heterogeneity_drift_ratio, 0.0)),
         "drift_ratio": float(max(drift_ratio, 0.0)),
     }
 

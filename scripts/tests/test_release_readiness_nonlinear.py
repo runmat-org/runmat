@@ -90,6 +90,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_INDEX",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_BREACH_RATE",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_TREND_RATIO",
             "GITHUB_REF_NAME",
         ]:
             os.environ.pop(key, None)
@@ -596,6 +598,52 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMO_HETEROGENEITY_BREACH_RATE_HIGH", codes)
 
+    def test_thermo_spread_trend_worsening_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermo_coupling_enabled=True,
+            thermo_constitutive_material_spread_ratio=1.35,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                thermo_coupling_enabled=True,
+                thermo_constitutive_material_spread_ratio=1.05,
+            )
+        ]
+        os.environ["RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_TREND_RATIO"] = "1.15"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_SPREAD_TREND_WORSENING", codes)
+
+    def test_thermo_heterogeneity_trend_worsening_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermo_coupling_enabled=True,
+            thermo_assignment_heterogeneity_index=0.34,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                thermo_coupling_enabled=True,
+                thermo_assignment_heterogeneity_index=0.18,
+            )
+        ]
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_TREND_RATIO"
+        ] = "1.3"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_HETEROGENEITY_TREND_WORSENING", codes)
+
     def test_markdown_summary_prints_thermo_posture_section(self):
         latest = report(
             passed=True,
@@ -621,6 +669,8 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Max thermo assignment heterogeneity index", summary)
         self.assertIn("Thermo spread breach rate", summary)
         self.assertIn("Thermo heterogeneity breach rate", summary)
+        self.assertIn("Thermo spread trend ratio", summary)
+        self.assertIn("Thermo heterogeneity trend ratio", summary)
 
 
 if __name__ == "__main__":

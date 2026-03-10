@@ -183,6 +183,12 @@ def main():
     )
     window = int(os.getenv("RUNMAT_ANALYSIS_TREND_WINDOW", "8"))
     slowdown_limit = float(os.getenv("RUNMAT_ANALYSIS_TREND_MAX_SLOWDOWN_RATIO", "1.25"))
+    thermo_spread_trend_limit = float(
+        os.getenv("RUNMAT_ANALYSIS_THERMO_MAX_SPREAD_TREND_RATIO", "1.2")
+    )
+    thermo_heterogeneity_trend_limit = float(
+        os.getenv("RUNMAT_ANALYSIS_THERMO_MAX_HETEROGENEITY_TREND_RATIO", "1.2")
+    )
     protected_only = (
         os.getenv("RUNMAT_ANALYSIS_ENFORCE_BASELINE_ON_PROTECTED", "false").lower() == "true"
     )
@@ -248,6 +254,40 @@ def main():
             warnings.append(
                 f"{fixture}: latest gpu_run_ms slowdown ratio {latest / baseline:.3f} exceeds {slowdown_limit:.3f}"
             )
+
+        spread = [
+            v["thermo_constitutive_material_spread_ratio"]
+            for v in values
+            if isinstance(v.get("thermo_constitutive_material_spread_ratio"), (int, float))
+        ]
+        if len(spread) >= 2:
+            baseline_spread = statistics.median(spread[:-1]) if len(spread) > 1 else spread[0]
+            latest_spread = spread[-1]
+            if baseline_spread > 0:
+                spread_ratio = latest_spread / baseline_spread
+                if spread_ratio > thermo_spread_trend_limit:
+                    warnings.append(
+                        f"THERMO_SPREAD_TREND_WORSENING:{fixture}: ratio {spread_ratio:.3f} exceeds {thermo_spread_trend_limit:.3f}"
+                    )
+
+        heterogeneity = [
+            v["thermo_assignment_heterogeneity_index"]
+            for v in values
+            if isinstance(v.get("thermo_assignment_heterogeneity_index"), (int, float))
+        ]
+        if len(heterogeneity) >= 2:
+            baseline_heterogeneity = (
+                statistics.median(heterogeneity[:-1])
+                if len(heterogeneity) > 1
+                else heterogeneity[0]
+            )
+            latest_heterogeneity = heterogeneity[-1]
+            if baseline_heterogeneity > 0:
+                heterogeneity_ratio = latest_heterogeneity / baseline_heterogeneity
+                if heterogeneity_ratio > thermo_heterogeneity_trend_limit:
+                    warnings.append(
+                        f"THERMO_HETEROGENEITY_TREND_WORSENING:{fixture}: ratio {heterogeneity_ratio:.3f} exceeds {thermo_heterogeneity_trend_limit:.3f}"
+                    )
 
     if warnings:
         print("\nTrend warnings:")

@@ -3211,6 +3211,8 @@ fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
             name: name.to_string(),
             youngs_modulus_pa,
             poisson_ratio,
+            reference_temperature_k: 293.15,
+            modulus_temp_coeff_per_k: -2.5e-4,
         });
     }
 
@@ -3220,6 +3222,8 @@ fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
             name: "Steel (Default)".to_string(),
             youngs_modulus_pa: 200e9,
             poisson_ratio: 0.3,
+            reference_temperature_k: 293.15,
+            modulus_temp_coeff_per_k: -2.5e-4,
         });
     }
 

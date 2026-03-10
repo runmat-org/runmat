@@ -18,6 +18,8 @@ pub enum FixtureId {
     NonlinearSofteningProxy,
     NonlinearLoadPathMix,
     ThermoMechanicalKickoff,
+    ThermoGradientBenign,
+    ThermoGradientPathological,
     MultiMaterialAssembly,
     MissingMaterials,
     MissingLoads,
@@ -36,6 +38,8 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
         FixtureId::NonlinearSofteningProxy => nonlinear_softening_proxy_fixture(),
         FixtureId::NonlinearLoadPathMix => nonlinear_load_path_mix_fixture(),
         FixtureId::ThermoMechanicalKickoff => thermo_mechanical_kickoff_fixture(),
+        FixtureId::ThermoGradientBenign => thermo_gradient_benign_fixture(),
+        FixtureId::ThermoGradientPathological => thermo_gradient_pathological_fixture(),
         FixtureId::MultiMaterialAssembly => multi_material_assembly(),
         FixtureId::MissingMaterials => missing_materials(),
         FixtureId::MissingLoads => missing_loads(),
@@ -54,6 +58,8 @@ fn cantilever_linear_static() -> AnalysisModel {
             name: "Steel".to_string(),
             youngs_modulus_pa: 200e9,
             poisson_ratio: 0.3,
+            reference_temperature_k: 293.15,
+            modulus_temp_coeff_per_k: -2.5e-4,
         }],
         material_assignments: vec![MaterialAssignment {
             region_id: "tip".to_string(),
@@ -221,12 +227,16 @@ fn nonlinear_softening_proxy_fixture() -> AnalysisModel {
             name: "Soft Polymer".to_string(),
             youngs_modulus_pa: 1.4e9,
             poisson_ratio: 0.39,
+            reference_temperature_k: 293.15,
+            modulus_temp_coeff_per_k: -1.2e-3,
         },
         MaterialModel {
             material_id: "mat_aluminum".to_string(),
             name: "Aluminum".to_string(),
             youngs_modulus_pa: 69e9,
             poisson_ratio: 0.33,
+            reference_temperature_k: 293.15,
+            modulus_temp_coeff_per_k: -3.6e-4,
         },
     ];
     model.material_assignments = vec![
@@ -339,6 +349,94 @@ fn thermo_mechanical_kickoff_fixture() -> AnalysisModel {
     model
 }
 
+fn thermo_gradient_benign_fixture() -> AnalysisModel {
+    let mut model = multi_material_assembly();
+    model.model_id = AnalysisModelId("thermo_gradient_benign_fixture".to_string());
+    model.material_assignments = vec![
+        MaterialAssignment {
+            region_id: "tip_steel".to_string(),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+        MaterialAssignment {
+            region_id: "mid_aluminum".to_string(),
+            expected_material_id: "mat_aluminum".to_string(),
+            assigned_material_id: "mat_aluminum".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+        MaterialAssignment {
+            region_id: "polymer_segment".to_string(),
+            expected_material_id: "mat_polymer".to_string(),
+            assigned_material_id: "mat_polymer".to_string(),
+            confidence: EvidenceConfidence::Probable,
+        },
+    ];
+    model.loads = (0..260)
+        .map(|i| {
+            let scale = 1.0 + (i as f64) * 0.003;
+            LoadCase {
+                load_id: format!("thermo_grad_benign_load_{i}"),
+                region_id: format!("thermo_grad_benign_region_{}", i % 28),
+                kind: LoadKind::Force {
+                    fx: 30.0 * scale,
+                    fy: -850.0 * scale,
+                    fz: 14.0 * scale,
+                },
+            }
+        })
+        .collect();
+    model.steps = vec![AnalysisStep {
+        step_id: "thermo_grad_benign_transient_1".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
+    model
+}
+
+fn thermo_gradient_pathological_fixture() -> AnalysisModel {
+    let mut model = multi_material_assembly();
+    model.model_id = AnalysisModelId("thermo_gradient_pathological_fixture".to_string());
+    model.material_assignments = vec![
+        MaterialAssignment {
+            region_id: "tip_steel".to_string(),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_polymer".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+        MaterialAssignment {
+            region_id: "mid_aluminum".to_string(),
+            expected_material_id: "mat_aluminum".to_string(),
+            assigned_material_id: "mat_polymer".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+        MaterialAssignment {
+            region_id: "polymer_segment".to_string(),
+            expected_material_id: "mat_polymer".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Inferred,
+        },
+    ];
+    model.loads = (0..320)
+        .map(|i| {
+            let scale = 1.0 + (i as f64) * 0.0038;
+            LoadCase {
+                load_id: format!("thermo_grad_pathological_load_{i}"),
+                region_id: format!("thermo_grad_pathological_region_{}", i % 32),
+                kind: LoadKind::Force {
+                    fx: 52.0 * scale,
+                    fy: -1150.0 * scale,
+                    fz: 26.0 * scale,
+                },
+            }
+        })
+        .collect();
+    model.steps = vec![AnalysisStep {
+        step_id: "thermo_grad_pathological_transient_1".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
+    model
+}
+
 fn multi_material_assembly() -> AnalysisModel {
     let mut model = cantilever_linear_static();
     model.model_id = AnalysisModelId("multi_material_assembly".to_string());
@@ -348,18 +446,24 @@ fn multi_material_assembly() -> AnalysisModel {
             name: "Steel".to_string(),
             youngs_modulus_pa: 200e9,
             poisson_ratio: 0.3,
+            reference_temperature_k: 293.15,
+            modulus_temp_coeff_per_k: -2.5e-4,
         },
         MaterialModel {
             material_id: "mat_aluminum".to_string(),
             name: "Aluminum".to_string(),
             youngs_modulus_pa: 69e9,
             poisson_ratio: 0.33,
+            reference_temperature_k: 293.15,
+            modulus_temp_coeff_per_k: -3.6e-4,
         },
         MaterialModel {
             material_id: "mat_polymer".to_string(),
             name: "Polymer".to_string(),
             youngs_modulus_pa: 3.2e9,
             poisson_ratio: 0.37,
+            reference_temperature_k: 293.15,
+            modulus_temp_coeff_per_k: -8.0e-4,
         },
     ];
 

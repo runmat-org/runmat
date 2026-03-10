@@ -76,6 +76,30 @@ fn nonlinear_options_for_spec(spec: &FixtureSpec) -> AnalysisNonlinearRunOptions
     options
 }
 
+fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCouplingOptions> {
+    match spec_id {
+        "thermo_mech_kickoff_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 65.0,
+            thermal_expansion_coefficient: 1.2e-5,
+        }),
+        "thermo_gradient_benign_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 55.0,
+            thermal_expansion_coefficient: 1.0e-5,
+        }),
+        "thermo_gradient_pathological_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 220.0,
+            thermal_expansion_coefficient: 2.5e-5,
+        }),
+        _ => None,
+    }
+}
+
 fn run_fixture_cpu(
     spec: &FixtureSpec,
     model: &AnalysisModel,
@@ -116,16 +140,7 @@ fn run_fixture_cpu(
                         AnalysisTransientRunOptions::production_recommended()
                             .dt_bucket_rel_tolerance,
                     ),
-                    thermo_mechanical_coupling: if spec.id == "thermo_mech_kickoff_gpu_provider" {
-                        Some(ThermoMechanicalCouplingOptions {
-                            enabled: true,
-                            reference_temperature_k: 293.15,
-                            applied_temperature_delta_k: 65.0,
-                            thermal_expansion_coefficient: 1.2e-5,
-                        })
-                    } else {
-                        None
-                    },
+                    thermo_mechanical_coupling: thermo_coupling_for_fixture(spec.id),
                     ..AnalysisTransientRunOptions::production_recommended()
                 }
             },
@@ -181,16 +196,7 @@ fn run_fixture_gpu(
                         AnalysisTransientRunOptions::production_recommended()
                             .dt_bucket_rel_tolerance,
                     ),
-                    thermo_mechanical_coupling: if spec.id == "thermo_mech_kickoff_gpu_provider" {
-                        Some(ThermoMechanicalCouplingOptions {
-                            enabled: true,
-                            reference_temperature_k: 293.15,
-                            applied_temperature_delta_k: 65.0,
-                            thermal_expansion_coefficient: 1.2e-5,
-                        })
-                    } else {
-                        None
-                    },
+                    thermo_mechanical_coupling: thermo_coupling_for_fixture(spec.id),
                     ..AnalysisTransientRunOptions::production_recommended()
                 }
             },
@@ -974,6 +980,64 @@ pub(super) fn run_fixture(
                             ),
                             Some(1.0),
                             Some(1.2),
+                        );
+                    } else if spec.id == "thermo_gradient_benign_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_gradient_benign_spread_ratio",
+                            "FEA_TM_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_COUPLING",
+                                "constitutive_material_spread_ratio",
+                            ),
+                            Some(1.0),
+                            Some(1.18),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_gradient_benign_heterogeneity",
+                            "FEA_TM_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_COUPLING",
+                                "assignment_heterogeneity_index",
+                            ),
+                            Some(0.0),
+                            Some(0.22),
+                        );
+                    } else if spec.id == "thermo_gradient_pathological_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_gradient_pathological_spread_ratio",
+                            "FEA_TM_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_COUPLING",
+                                "constitutive_material_spread_ratio",
+                            ),
+                            Some(1.04),
+                            Some(1.6),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_gradient_pathological_heterogeneity",
+                            "FEA_TM_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_COUPLING",
+                                "assignment_heterogeneity_index",
+                            ),
+                            Some(0.2),
+                            Some(1.0),
                         );
                     }
                     if spec.id == "nonlinear_assembly_gpu_provider" {

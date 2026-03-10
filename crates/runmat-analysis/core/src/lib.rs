@@ -38,6 +38,8 @@ mod tests {
                 name: "Steel".to_string(),
                 youngs_modulus_pa: 200e9,
                 poisson_ratio: 0.3,
+                reference_temperature_k: 293.15,
+                modulus_temp_coeff_per_k: -2.5e-4,
             }],
             material_assignments: Vec::new(),
             boundary_conditions: vec![BoundaryCondition {

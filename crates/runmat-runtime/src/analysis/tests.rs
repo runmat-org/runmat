@@ -39,6 +39,8 @@ fn sample_model() -> AnalysisModel {
             name: "Steel".to_string(),
             youngs_modulus_pa: 200e9,
             poisson_ratio: 0.3,
+            reference_temperature_k: 293.15,
+            modulus_temp_coeff_per_k: -2.5e-4,
         }],
         material_assignments: Vec::new(),
         boundary_conditions: vec![BoundaryCondition {
@@ -69,6 +71,8 @@ fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
         name: "Polymer".to_string(),
         youngs_modulus_pa: 3.2e9,
         poisson_ratio: 0.37,
+        reference_temperature_k: 293.15,
+        modulus_temp_coeff_per_k: -7.0e-4,
     });
     model.material_assignments = vec![MaterialAssignment {
         region_id: "tip".to_string(),

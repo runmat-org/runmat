@@ -174,6 +174,16 @@ pub fn assemble_linear_system(
             .sum::<f64>()
             / model.materials.len() as f64
     };
+    let avg_reference_temperature_k = if model.materials.is_empty() {
+        293.15
+    } else {
+        model
+            .materials
+            .iter()
+            .map(|material| material.reference_temperature_k)
+            .sum::<f64>()
+            / model.materials.len() as f64
+    };
     let stiffness_base = (avg_youngs_modulus / 2.0e3).max(1.0e5);
 
     let mut stiffness_diag = vec![0.0; dof_count];
@@ -503,13 +513,28 @@ pub fn assemble_linear_system(
                 * context.applied_temperature_delta_k.abs())
             .clamp(0.0, 0.05);
             let thermal_load_scale = (context.applied_temperature_delta_k / 50.0).clamp(-2.0, 2.0);
-            let constitutive_temperature_factor =
-                (context.applied_temperature_delta_k / 600.0).clamp(-0.25, 0.25);
+            let constitutive_temperature_factor = if model.materials.is_empty() {
+                (-(2.5e-4) * context.applied_temperature_delta_k).clamp(-0.25, 0.25)
+            } else {
+                let response = model
+                    .materials
+                    .iter()
+                    .map(|material| {
+                        let adjusted_delta = context.applied_temperature_delta_k
+                            + (context.reference_temperature_k - material.reference_temperature_k)
+                            + (avg_reference_temperature_k - material.reference_temperature_k)
+                                * 0.1;
+                        material.modulus_temp_coeff_per_k * adjusted_delta
+                    })
+                    .sum::<f64>()
+                    / model.materials.len() as f64;
+                response.clamp(-0.25, 0.25)
+            };
             let constitutive_poisson_coupling =
                 (0.6 + avg_poisson_ratio.clamp(0.0, 0.49)).clamp(0.6, 1.2);
             let modulus_temperature_scale = (1.0
-                - constitutive_temperature_factor * constitutive_poisson_coupling)
-                .clamp(0.75, 1.15);
+                + constitutive_temperature_factor * constitutive_poisson_coupling)
+                .clamp(0.72, 1.15);
             let thermal_stiffening_scale = (1.0 + 0.35 * thermal_strain_scale).clamp(1.0, 1.06);
             let effective_modulus_scale =
                 (modulus_temperature_scale * thermal_stiffening_scale).clamp(0.75, 1.2);
@@ -518,6 +543,8 @@ pub fn assemble_linear_system(
                 model,
                 dof_count,
                 constitutive_temperature_factor,
+                context.reference_temperature_k,
+                context.applied_temperature_delta_k,
                 &mut dof_adjustments,
             );
             let mut local_modulus_scales = vec![effective_modulus_scale; dof_count];
@@ -1455,6 +1482,8 @@ fn apply_thermo_material_heterogeneity(
     model: &AnalysisModel,
     dof_count: usize,
     constitutive_temperature_factor: f64,
+    reference_temperature_k: f64,
+    applied_temperature_delta_k: f64,
     dof_adjustments: &mut [f64],
 ) -> f64 {
     if dof_count == 0 || model.material_assignments.is_empty() {
@@ -1488,11 +1517,37 @@ fn apply_thermo_material_heterogeneity(
             .max(1.0);
         let modulus_delta_ratio =
             ((assigned_modulus - expected_modulus) / expected_modulus).clamp(-0.6, 0.6);
+        let expected_temp_response = model
+            .materials
+            .iter()
+            .find(|material| material.material_id == assignment.expected_material_id)
+            .map(|material| {
+                material.modulus_temp_coeff_per_k
+                    * (applied_temperature_delta_k
+                        + (reference_temperature_k - material.reference_temperature_k))
+            })
+            .unwrap_or(constitutive_temperature_factor)
+            .clamp(-0.4, 0.2);
+        let assigned_temp_response = model
+            .materials
+            .iter()
+            .find(|material| material.material_id == assignment.assigned_material_id)
+            .map(|material| {
+                material.modulus_temp_coeff_per_k
+                    * (applied_temperature_delta_k
+                        + (reference_temperature_k - material.reference_temperature_k))
+            })
+            .unwrap_or(expected_temp_response)
+            .clamp(-0.4, 0.2);
+        let response_delta = (assigned_temp_response - expected_temp_response).clamp(-0.35, 0.35);
         let region_phase = ((region_hash(&assignment.region_id) % 11) as f64) / 10.0;
-        let activity = modulus_delta_ratio.abs();
+        let activity =
+            (0.7 * modulus_delta_ratio.abs() + 0.3 * response_delta.abs()).clamp(0.0, 1.0);
         let signed_bias = base_amplitude
             * confidence_weight
-            * (0.5 * modulus_delta_ratio + 0.5 * modulus_delta_ratio.signum() * region_phase);
+            * (0.45 * modulus_delta_ratio
+                + 0.35 * response_delta
+                + 0.2 * modulus_delta_ratio.signum() * region_phase);
         let stride = model.material_assignments.len().saturating_add(1).max(2);
         let start = ((region_hash(&assignment.region_id) as usize).wrapping_add(idx * 3))
             % dof_count.max(1);

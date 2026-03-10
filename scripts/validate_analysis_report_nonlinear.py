@@ -38,6 +38,14 @@ REQUIRED_FIXTURES = {
         "thermo_mech_transient_severity",
         "thermo_mech_transient_residual_relaxation",
     },
+    "thermo_gradient_benign_gpu_provider": {
+        "thermo_gradient_benign_spread_ratio",
+        "thermo_gradient_benign_heterogeneity",
+    },
+    "thermo_gradient_pathological_gpu_provider": {
+        "thermo_gradient_pathological_spread_ratio",
+        "thermo_gradient_pathological_heterogeneity",
+    },
 }
 
 THERMO_REQUIRED_FIELDS = {
@@ -95,6 +103,8 @@ def main() -> int:
 
         if fixture_id in {
             "thermo_mech_kickoff_gpu_provider",
+            "thermo_gradient_benign_gpu_provider",
+            "thermo_gradient_pathological_gpu_provider",
             "nonlinear_load_path_mix_gpu_provider",
         }:
             missing_fields = sorted(

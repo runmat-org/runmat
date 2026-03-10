@@ -1381,6 +1381,7 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-09: Scoped-and-delivered Phase-2A kickoff block (items 1-5): added temperature-dependent material-law coefficients to `MaterialModel` and assembly constitutive scaling, introduced benign/pathological thermo-gradient fixtures with conformance thresholds, extended prep calibration evidence/drift logic to include thermo spread/heterogeneity envelopes, added thermo trend-worsening reasoning in release readiness, and published an explicit runtime/profile thermo threshold matrix in docs.
 - 2026-03-09: Extended CI Tier-7.5 governance summary thermo rollup with rolling breach-rate visibility by adding `thermo_spread_breach_rate` and `thermo_heterogeneity_breach_rate` lines from nonlinear readiness artifacts.
 - 2026-03-09: Added rolling thermo posture governance in release readiness by introducing profile-aware breach-rate thresholds (`RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_BREACH_RATE`, `RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_BREACH_RATE`), new typed reasons (`THERMO_SPREAD_BREACH_RATE_HIGH`, `THERMO_HETEROGENEITY_BREACH_RATE_HIGH`), and markdown/report output fields for the computed breach rates.
 - 2026-03-09: Extended runtime thermo decisioning by adding quality-policy reasons for constitutive spread/assignment heterogeneity breaches and adding thermo breach-rate aggregates to `analysis.trends` summaries (`thermo_spread_breach_rate`, `thermo_heterogeneity_breach_rate`).
