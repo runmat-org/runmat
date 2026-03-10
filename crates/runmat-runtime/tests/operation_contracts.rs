@@ -1073,6 +1073,8 @@ fn analysis_trends_contract_is_v1_and_typed() {
     assert!(nonlinear.thermo_coupling_enabled_rate.is_none());
     assert!(nonlinear.thermo_transient_warn_rate.is_none());
     assert!(nonlinear.thermo_nonlinear_warn_rate.is_none());
+    assert!(nonlinear.thermo_spread_breach_rate.is_none());
+    assert!(nonlinear.thermo_heterogeneity_breach_rate.is_none());
 }
 
 #[test]

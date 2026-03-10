@@ -55,6 +55,8 @@ const ANALYSIS_RESULTS_COMPARE_OP_VERSION: &str = "analysis.results_compare/v1";
 const ANALYSIS_TRENDS_OPERATION: &str = "analysis.trends";
 const ANALYSIS_TRENDS_OP_VERSION: &str = "analysis.trends/v1";
 const TRANSIENT_RESIDUAL_WARN_THRESHOLD: f64 = 1.0e-4;
+const THERMO_SPREAD_THRESHOLD_BALANCED: f64 = 1.25;
+const THERMO_HETEROGENEITY_THRESHOLD_BALANCED: f64 = 0.2;
 
 pub fn analysis_create_model_op(
     geometry: &GeometryAsset,
@@ -871,6 +873,24 @@ pub fn analysis_run_transient_with_options_op(
         item.code == "FEA_TM_TRANSIENT"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
     });
+    let thermo_spread_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_TM_COUPLING",
+        "constitutive_material_spread_ratio",
+    );
+    let thermo_heterogeneity_index = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_TM_COUPLING",
+        "assignment_heterogeneity_index",
+    );
+    let (thermo_spread_threshold, thermo_heterogeneity_threshold) =
+        thermo_thresholds_for_policy(options.quality_policy);
+    let thermo_spread_breach = thermo_spread_ratio
+        .map(|value| value > thermo_spread_threshold)
+        .unwrap_or(false);
+    let thermo_heterogeneity_breach = thermo_heterogeneity_index
+        .map(|value| value > thermo_heterogeneity_threshold)
+        .unwrap_or(false);
 
     let mut quality_reasons = Vec::new();
     if solver_convergence == QualityGate::Warn {
@@ -905,6 +925,26 @@ pub fn analysis_run_transient_with_options_op(
             code: QualityReasonCode::ThermoMechanicalTransientStress,
             detail: "thermo-mechanical transient coupling severity exceeded balanced threshold"
                 .to_string(),
+        });
+    }
+    if thermo_spread_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh,
+            detail: format!(
+                "thermo constitutive material spread ratio {} exceeds threshold {}",
+                thermo_spread_ratio.unwrap_or(0.0),
+                thermo_spread_threshold
+            ),
+        });
+    }
+    if thermo_heterogeneity_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh,
+            detail: format!(
+                "thermo assignment heterogeneity index {} exceeds threshold {}",
+                thermo_heterogeneity_index.unwrap_or(0.0),
+                thermo_heterogeneity_threshold
+            ),
         });
     }
     if fallback_events
@@ -951,6 +991,8 @@ pub fn analysis_run_transient_with_options_op(
                         QualityReasonCode::TransientStabilityExceeded
                             | QualityReasonCode::TransientStepFailure
                             | QualityReasonCode::ThermoMechanicalTransientStress
+                            | QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
+                            | QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
                     )
                 })
         }
@@ -1305,6 +1347,24 @@ pub fn analysis_run_nonlinear_with_options_op(
         item.code == "FEA_TM_NONLINEAR"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
     });
+    let thermo_spread_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_TM_COUPLING",
+        "constitutive_material_spread_ratio",
+    );
+    let thermo_heterogeneity_index = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_TM_COUPLING",
+        "assignment_heterogeneity_index",
+    );
+    let (thermo_spread_threshold, thermo_heterogeneity_threshold) =
+        thermo_thresholds_for_policy(options.quality_policy);
+    let thermo_spread_breach = thermo_spread_ratio
+        .map(|value| value > thermo_spread_threshold)
+        .unwrap_or(false);
+    let thermo_heterogeneity_breach = thermo_heterogeneity_index
+        .map(|value| value > thermo_heterogeneity_threshold)
+        .unwrap_or(false);
 
     let mut quality_reasons = Vec::new();
     if solver_convergence == QualityGate::Warn {
@@ -1339,6 +1399,26 @@ pub fn analysis_run_nonlinear_with_options_op(
             code: QualityReasonCode::ThermoMechanicalNonlinearStress,
             detail: "thermo-mechanical nonlinear coupling severity exceeded balanced threshold"
                 .to_string(),
+        });
+    }
+    if thermo_spread_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh,
+            detail: format!(
+                "thermo constitutive material spread ratio {} exceeds threshold {}",
+                thermo_spread_ratio.unwrap_or(0.0),
+                thermo_spread_threshold
+            ),
+        });
+    }
+    if thermo_heterogeneity_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh,
+            detail: format!(
+                "thermo assignment heterogeneity index {} exceeds threshold {}",
+                thermo_heterogeneity_index.unwrap_or(0.0),
+                thermo_heterogeneity_threshold
+            ),
         });
     }
     if fallback_events
@@ -1376,6 +1456,8 @@ pub fn analysis_run_nonlinear_with_options_op(
                         QualityReasonCode::NonlinearResidualExceeded
                             | QualityReasonCode::NonlinearIncrementFailure
                             | QualityReasonCode::ThermoMechanicalNonlinearStress
+                            | QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
+                            | QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
                     )
                 })
         }
@@ -2457,6 +2539,52 @@ pub fn analysis_trends_op(
         } else {
             None
         };
+        let thermo_spread_breach_rate = {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_TM_COUPLING",
+                        "constitutive_material_spread_ratio",
+                    )
+                })
+                .collect::<Vec<_>>();
+            if values.is_empty() {
+                None
+            } else {
+                Some(
+                    values
+                        .iter()
+                        .filter(|value| **value > THERMO_SPREAD_THRESHOLD_BALANCED)
+                        .count() as f64
+                        / values.len() as f64,
+                )
+            }
+        };
+        let thermo_heterogeneity_breach_rate = {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_TM_COUPLING",
+                        "assignment_heterogeneity_index",
+                    )
+                })
+                .collect::<Vec<_>>();
+            if values.is_empty() {
+                None
+            } else {
+                Some(
+                    values
+                        .iter()
+                        .filter(|value| **value > THERMO_HETEROGENEITY_THRESHOLD_BALANCED)
+                        .count() as f64
+                        / values.len() as f64,
+                )
+            }
+        };
 
         summaries.push(AnalysisTrendKindSummary {
             run_kind: kind,
@@ -2474,6 +2602,8 @@ pub fn analysis_trends_op(
             thermo_coupling_enabled_rate,
             thermo_transient_warn_rate,
             thermo_nonlinear_warn_rate,
+            thermo_spread_breach_rate,
+            thermo_heterogeneity_breach_rate,
         });
     }
 
@@ -3042,6 +3172,17 @@ fn diagnostic_warning_rate(entries: &[AnalysisRunResult], code: &str) -> Option<
         None
     } else {
         Some(values.iter().filter(|value| **value).count() as f64 / values.len() as f64)
+    }
+}
+
+fn thermo_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64) {
+    match policy {
+        QualityPolicy::Strict => (1.15, 0.12),
+        QualityPolicy::Balanced => (
+            THERMO_SPREAD_THRESHOLD_BALANCED,
+            THERMO_HETEROGENEITY_THRESHOLD_BALANCED,
+        ),
+        QualityPolicy::Exploratory => (1.4, 0.35),
     }
 }
 

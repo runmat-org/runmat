@@ -1380,6 +1380,7 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-09: Extended runtime thermo decisioning by adding quality-policy reasons for constitutive spread/assignment heterogeneity breaches and adding thermo breach-rate aggregates to `analysis.trends` summaries (`thermo_spread_breach_rate`, `thermo_heterogeneity_breach_rate`).
 - 2026-03-09: Updated CI Tier-7.5 governance summary emission (`tier75-governance-summary.md`) to include thermo posture rollups from nonlinear readiness artifacts (enabled-rate, max transient/nonlinear severity, max spread ratio, max heterogeneity index) for quick reviewer triage.
 - 2026-03-09: Added branch/profile thermo heterogeneity release gating by extending `release_readiness_nonlinear.py` with spread/heterogeneity thresholds and typed reasons (`THERMO_MATERIAL_SPREAD_RATIO_HIGH`, `THERMO_ASSIGNMENT_HETEROGENEITY_HIGH`), plus markdown posture output and unit coverage.
 - 2026-03-09: Advanced Phase-1 thermo constitutive heterogeneity by introducing assignment-aware local modulus perturbations (confidence/expected-vs-assigned material mismatch weighted) that produce new thermo spread diagnostics (`constitutive_material_spread_ratio`, `assignment_heterogeneity_index`) and propagate those metrics through `analysis.results`, benchmark records, validators, and trend/summary reporting.

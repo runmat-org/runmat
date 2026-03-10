@@ -9,7 +9,8 @@ use runmat_accelerate_api::{
 };
 use runmat_analysis_core::{
     AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind,
-    BoundaryCondition, BoundaryConditionKind, LoadCase, LoadKind, MaterialModel, ReferenceFrame,
+    BoundaryCondition, BoundaryConditionKind, EvidenceConfidence, LoadCase, LoadKind,
+    MaterialAssignment, MaterialModel, ReferenceFrame,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{
@@ -59,6 +60,23 @@ fn sample_model() -> AnalysisModel {
             kind: AnalysisStepKind::Static,
         }],
     }
+}
+
+fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
+    let mut model = sample_model();
+    model.materials.push(MaterialModel {
+        material_id: "mat_polymer".to_string(),
+        name: "Polymer".to_string(),
+        youngs_modulus_pa: 3.2e9,
+        poisson_ratio: 0.37,
+    });
+    model.material_assignments = vec![MaterialAssignment {
+        region_id: "tip".to_string(),
+        expected_material_id: "mat_steel".to_string(),
+        assigned_material_id: "mat_polymer".to_string(),
+        confidence: EvidenceConfidence::Verified,
+    }];
+    model
 }
 
 fn sample_geometry_asset() -> GeometryAsset {
@@ -793,6 +811,8 @@ fn analysis_trends_summarizes_recent_nonlinear_runs() {
     assert!(nonlinear.thermo_coupling_enabled_rate.is_none());
     assert!(nonlinear.thermo_transient_warn_rate.is_none());
     assert!(nonlinear.thermo_nonlinear_warn_rate.is_none());
+    assert!(nonlinear.thermo_spread_breach_rate.is_none());
+    assert!(nonlinear.thermo_heterogeneity_breach_rate.is_none());
 
     storage::reset_artifact_store_for_tests();
 }
@@ -1726,6 +1746,40 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
 }
 
 #[test]
+fn nonlinear_balanced_degrades_when_thermo_heterogeneity_is_high() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model_with_material_assignment_mismatch();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+
+    let run = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            quality_policy: QualityPolicy::Balanced,
+            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 90.0,
+                thermal_expansion_coefficient: 1.2e-5,
+            }),
+            ..AnalysisNonlinearRunOptions::production_recommended()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("nonlinear run should return envelope");
+
+    assert!(!run.data.publishable);
+    assert_eq!(run.data.run_status, RunStatus::Degraded);
+    assert!(run.data.quality_reasons.iter().any(|reason| {
+        reason.code == QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
+            || reason.code == QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
+    }));
+}
+
+#[test]
 fn analysis_results_query_can_exclude_nonlinear_payload() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
@@ -1953,6 +2007,42 @@ fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         .quality_reasons
         .iter()
         .any(|reason| reason.code == QualityReasonCode::ThermoMechanicalTransientStress));
+}
+
+#[test]
+fn transient_balanced_degrades_when_thermo_heterogeneity_is_high() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model_with_material_assignment_mismatch();
+    model.steps = vec![AnalysisStep {
+        step_id: "transient_1".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
+
+    let run = analysis_run_transient_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisTransientRunOptions {
+            quality_policy: QualityPolicy::Balanced,
+            adaptive_time_step: true,
+            step_count: 8,
+            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 90.0,
+                thermal_expansion_coefficient: 1.2e-5,
+            }),
+            ..AnalysisTransientRunOptions::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("transient run should return envelope");
+
+    assert!(!run.data.publishable);
+    assert_eq!(run.data.run_status, RunStatus::Degraded);
+    assert!(run.data.quality_reasons.iter().any(|reason| {
+        reason.code == QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
+            || reason.code == QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
+    }));
 }
 
 #[test]

@@ -83,6 +83,7 @@ Typed prep-reference failure families:
   - thermo coupling includes heterogeneity spread metrics (`constitutive_material_spread_ratio`, `assignment_heterogeneity_index`) for per-material posture tracking,
   - coupled transient/nonlinear solve paths apply thermo-aware convergence/adaptivity profile shaping,
   - runtime quality policy surfaces thermo stress reasons when coupling severity enters warning posture,
+  - runtime quality policy also degrades runs when thermo constitutive spread/heterogeneity exceed policy thresholds,
   - `analysis.results` and `analysis.trends` summaries surface thermo coupling posture fields for lightweight client gating,
   - release-readiness scripts can gate directly on thermo summary fields via branch-profile thresholds,
   - release-readiness thermo thresholds now include constitutive heterogeneity bounds (spread ratio + assignment heterogeneity index),

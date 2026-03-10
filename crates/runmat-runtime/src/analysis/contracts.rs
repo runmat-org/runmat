@@ -120,6 +120,8 @@ pub enum QualityReasonCode {
     TransientStabilityExceeded,
     TransientStepFailure,
     ThermoMechanicalTransientStress,
+    ThermoMechanicalConstitutiveSpreadHigh,
+    ThermoMechanicalAssignmentHeterogeneityHigh,
     NonlinearResidualExceeded,
     NonlinearIncrementFailure,
     ThermoMechanicalNonlinearStress,
@@ -668,6 +670,8 @@ pub struct AnalysisTrendKindSummary {
     pub thermo_coupling_enabled_rate: Option<f64>,
     pub thermo_transient_warn_rate: Option<f64>,
     pub thermo_nonlinear_warn_rate: Option<f64>,
+    pub thermo_spread_breach_rate: Option<f64>,
+    pub thermo_heterogeneity_breach_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
