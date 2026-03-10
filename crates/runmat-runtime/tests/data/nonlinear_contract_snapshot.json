@@ -48,6 +48,8 @@
     "prep_acceptance_fingerprint": null,
     "thermo_coupling_enabled": null,
     "thermo_coupling_fingerprint": null,
+    "thermo_constitutive_temperature_factor": null,
+    "thermo_effective_modulus_scale": null,
     "thermo_transient_severity": null,
     "thermo_nonlinear_severity": null
   }

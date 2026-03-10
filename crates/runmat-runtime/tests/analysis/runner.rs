@@ -370,6 +370,8 @@ pub(super) fn run_fixture(
     let mut prep_acceptance_fingerprint = None;
     let mut thermo_coupling_enabled = None;
     let mut thermo_coupling_fingerprint = None;
+    let mut thermo_constitutive_temperature_factor = None;
+    let mut thermo_effective_modulus_scale = None;
     let mut thermo_transient_severity = None;
     let mut thermo_nonlinear_severity = None;
     let mut publishable = None;
@@ -415,6 +417,8 @@ pub(super) fn run_fixture(
                     prep_acceptance_fingerprint,
                     thermo_coupling_enabled,
                     thermo_coupling_fingerprint,
+                    thermo_constitutive_temperature_factor,
+                    thermo_effective_modulus_scale,
                     thermo_transient_severity,
                     thermo_nonlinear_severity,
                     publishable,
@@ -905,6 +909,20 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
+                            "thermo_mech_effective_modulus_scale",
+                            "FEA_TM_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_COUPLING",
+                                "effective_modulus_scale",
+                            ),
+                            Some(0.85),
+                            Some(1.2),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
                             "thermo_mech_transient_severity",
                             "FEA_TM_TRANSIENT",
                             diagnostic_metric(&gpu_envelope.data, "FEA_TM_TRANSIENT", "severity"),
@@ -1177,6 +1195,20 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
+                            "nonlinear_path_mix_effective_modulus_scale",
+                            "FEA_TM_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_COUPLING",
+                                "effective_modulus_scale",
+                            ),
+                            Some(0.85),
+                            Some(1.2),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
                             "thermo_nonlinear_severity",
                             "FEA_TM_NONLINEAR",
                             diagnostic_metric(&gpu_envelope.data, "FEA_TM_NONLINEAR", "severity"),
@@ -1233,6 +1265,8 @@ pub(super) fn run_fixture(
                                 prep_acceptance_fingerprint,
                                 thermo_coupling_enabled,
                                 thermo_coupling_fingerprint,
+                                thermo_constitutive_temperature_factor,
+                                thermo_effective_modulus_scale,
                                 thermo_transient_severity,
                                 thermo_nonlinear_severity,
                                 publishable,
@@ -1259,6 +1293,12 @@ pub(super) fn run_fixture(
                     thermo_coupling_enabled = gpu_results.data.summary.thermo_coupling_enabled;
                     thermo_coupling_fingerprint =
                         gpu_results.data.summary.thermo_coupling_fingerprint;
+                    thermo_constitutive_temperature_factor = gpu_results
+                        .data
+                        .summary
+                        .thermo_constitutive_temperature_factor;
+                    thermo_effective_modulus_scale =
+                        gpu_results.data.summary.thermo_effective_modulus_scale;
                     thermo_transient_severity = gpu_results.data.summary.thermo_transient_severity;
                     thermo_nonlinear_severity = gpu_results.data.summary.thermo_nonlinear_severity;
 
@@ -1401,6 +1441,8 @@ pub(super) fn run_fixture(
                                     prep_acceptance_fingerprint,
                                     thermo_coupling_enabled,
                                     thermo_coupling_fingerprint,
+                                    thermo_constitutive_temperature_factor,
+                                    thermo_effective_modulus_scale,
                                     thermo_transient_severity,
                                     thermo_nonlinear_severity,
                                     publishable,
@@ -1495,6 +1537,8 @@ pub(super) fn run_fixture(
         prep_acceptance_fingerprint,
         thermo_coupling_enabled,
         thermo_coupling_fingerprint,
+        thermo_constitutive_temperature_factor,
+        thermo_effective_modulus_scale,
         thermo_transient_severity,
         thermo_nonlinear_severity,
         publishable,

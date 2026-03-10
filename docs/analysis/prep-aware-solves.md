@@ -79,6 +79,7 @@ Typed prep-reference failure families:
 - **Phase 1 thermo-mechanical kickoff**: additive coupling contract + assembly slice.
   - run options can provide optional thermo-mechanical coupling controls,
   - assembly emits deterministic thermo-mechanical coupling diagnostics and fingerprints,
+  - thermo coupling now includes constitutive temperature response (`effective_modulus_scale`) in assembly diagnostics,
   - coupled transient/nonlinear solve paths apply thermo-aware convergence/adaptivity profile shaping,
   - runtime quality policy surfaces thermo stress reasons when coupling severity enters warning posture,
   - `analysis.results` and `analysis.trends` summaries surface thermo coupling posture fields for lightweight client gating,

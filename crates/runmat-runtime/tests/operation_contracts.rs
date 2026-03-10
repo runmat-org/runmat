@@ -1504,6 +1504,11 @@ fn analysis_results_by_run_id_contract_roundtrip() {
     assert_eq!(results.data.summary.final_step_converged, None);
     assert_eq!(results.data.summary.thermo_coupling_enabled, None);
     assert_eq!(results.data.summary.thermo_coupling_fingerprint, None);
+    assert_eq!(
+        results.data.summary.thermo_constitutive_temperature_factor,
+        None
+    );
+    assert_eq!(results.data.summary.thermo_effective_modulus_scale, None);
     assert_eq!(results.data.summary.thermo_transient_severity, None);
     assert_eq!(results.data.summary.thermo_nonlinear_severity, None);
 }

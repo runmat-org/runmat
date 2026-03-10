@@ -1845,6 +1845,16 @@ pub fn analysis_results_op(
         "FEA_TM_COUPLING",
         "coupling_fingerprint",
     );
+    let thermo_constitutive_temperature_factor = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_COUPLING",
+        "constitutive_temperature_factor",
+    );
+    let thermo_effective_modulus_scale = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_COUPLING",
+        "effective_modulus_scale",
+    );
     let thermo_transient_severity =
         diagnostic_metric(&run_result.run.diagnostics, "FEA_TM_TRANSIENT", "severity");
     let thermo_nonlinear_severity =
@@ -1883,6 +1893,8 @@ pub fn analysis_results_op(
         prep_acceptance_fingerprint,
         thermo_coupling_enabled,
         thermo_coupling_fingerprint,
+        thermo_constitutive_temperature_factor,
+        thermo_effective_modulus_scale,
         thermo_transient_severity,
         thermo_nonlinear_severity,
     };

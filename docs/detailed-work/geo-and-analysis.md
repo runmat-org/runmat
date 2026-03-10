@@ -1379,6 +1379,7 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-09: Implemented the next Phase-1 thermo constitutive slice by adding temperature/Poisson-coupled effective modulus scaling in FEA assembly (`FEA_TM_COUPLING` now emits constitutive factors), applying that scale to both stiffness diagonal and coupling bands, and plumbing constitutive thermo fields through `analysis.results`, conformance records, validators, and summary/trend scripts.
 - 2026-03-09: Added branch-scoped CI thermo safety check by introducing strict validator mode (`RUNMAT_VALIDATE_REQUIRE_THERMO_SUMMARY=true`) in `validate_analysis_report_nonlinear.py` and wiring a dedicated `main`/`release/*` CI step to fail fast when thermo summary fields disappear from conformance artifacts.
 - 2026-03-09: Closed the thermo governance artifact loop by extending nonlinear conformance records with thermo posture summary fields, adding thermo schema checks to `validate_analysis_report_nonlinear.py`, surfacing thermo posture in conformance/trend summaries, and adding nonlinear thermo severity threshold gating (`thermo_nonlinear_severity`) in the path-mix fixture harness.
 - 2026-03-09: Extended nonlinear release-readiness governance to consume thermo summary/trend metrics directly from conformance report records by adding thermo posture fields to harness report records (`thermo_coupling_enabled`/fingerprint/severity metrics) and adding branch-profile thermo thresholds/reason codes in `scripts/release_readiness_nonlinear.py` (`THERMO_*`) with unit-test coverage.

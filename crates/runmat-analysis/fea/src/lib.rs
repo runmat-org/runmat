@@ -945,13 +945,16 @@ fn thermo_mechanical_diagnostic(
         code: "FEA_TM_COUPLING".to_string(),
         severity: FeaDiagnosticSeverity::Info,
         message: format!(
-            "enabled={} reference_temperature_k={} applied_temperature_delta_k={} thermal_expansion_coefficient={} thermal_strain_scale={} thermal_load_scale={} coupling_fingerprint={}",
+            "enabled={} reference_temperature_k={} applied_temperature_delta_k={} thermal_expansion_coefficient={} thermal_strain_scale={} thermal_load_scale={} constitutive_temperature_factor={} constitutive_poisson_coupling={} effective_modulus_scale={} coupling_fingerprint={}",
             summary.enabled,
             summary.reference_temperature_k,
             summary.applied_temperature_delta_k,
             summary.thermal_expansion_coefficient,
             summary.thermal_strain_scale,
             summary.thermal_load_scale,
+            summary.constitutive_temperature_factor,
+            summary.constitutive_poisson_coupling,
+            summary.effective_modulus_scale,
             summary.coupling_fingerprint,
         ),
     }
@@ -1206,6 +1209,13 @@ mod tests {
             .diagnostics
             .iter()
             .any(|diag| diag.code == "FEA_TM_COUPLING"));
+        let coupling = result
+            .run
+            .diagnostics
+            .iter()
+            .find(|diag| diag.code == "FEA_TM_COUPLING")
+            .expect("thermo coupling diagnostic should be present");
+        assert!(coupling.message.contains("effective_modulus_scale="));
         let profile = result
             .run
             .diagnostics

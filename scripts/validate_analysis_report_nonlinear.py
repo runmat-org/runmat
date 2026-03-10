@@ -25,11 +25,13 @@ REQUIRED_FIXTURES = {
         "nonlinear_path_mix_total_increments",
         "nonlinear_path_mix_max_backtracks_per_increment",
         "nonlinear_path_mix_backtrack_bursts",
+        "nonlinear_path_mix_effective_modulus_scale",
         "thermo_nonlinear_severity",
     },
     "thermo_mech_kickoff_gpu_provider": {
         "thermo_mech_thermal_strain_scale",
         "thermo_mech_thermal_load_scale",
+        "thermo_mech_effective_modulus_scale",
         "thermo_mech_transient_severity",
         "thermo_mech_transient_residual_relaxation",
     },
@@ -38,6 +40,8 @@ REQUIRED_FIXTURES = {
 THERMO_REQUIRED_FIELDS = {
     "thermo_coupling_enabled",
     "thermo_coupling_fingerprint",
+    "thermo_constitutive_temperature_factor",
+    "thermo_effective_modulus_scale",
     "thermo_transient_severity",
     "thermo_nonlinear_severity",
 }

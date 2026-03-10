@@ -153,6 +153,8 @@ struct FixtureRunRecord {
     prep_acceptance_fingerprint: Option<u64>,
     thermo_coupling_enabled: Option<bool>,
     thermo_coupling_fingerprint: Option<u64>,
+    thermo_constitutive_temperature_factor: Option<f64>,
+    thermo_effective_modulus_scale: Option<f64>,
     thermo_transient_severity: Option<f64>,
     thermo_nonlinear_severity: Option<f64>,
     publishable: Option<bool>,

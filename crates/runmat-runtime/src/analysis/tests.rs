@@ -831,6 +831,16 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
 
     assert_eq!(results.data.summary.thermo_coupling_enabled, Some(true));
     assert!(results.data.summary.thermo_coupling_fingerprint.is_some());
+    assert!(results
+        .data
+        .summary
+        .thermo_constitutive_temperature_factor
+        .is_some());
+    assert!(results
+        .data
+        .summary
+        .thermo_effective_modulus_scale
+        .is_some());
     assert!(results.data.summary.thermo_transient_severity.is_some());
     assert!(results.data.summary.thermo_nonlinear_severity.is_none());
 }
@@ -869,6 +879,16 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
 
     assert_eq!(results.data.summary.thermo_coupling_enabled, Some(true));
     assert!(results.data.summary.thermo_coupling_fingerprint.is_some());
+    assert!(results
+        .data
+        .summary
+        .thermo_constitutive_temperature_factor
+        .is_some());
+    assert!(results
+        .data
+        .summary
+        .thermo_effective_modulus_scale
+        .is_some());
     assert!(results.data.summary.thermo_nonlinear_severity.is_some());
     assert!(results.data.summary.thermo_transient_severity.is_some());
 }

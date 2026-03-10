@@ -131,6 +131,9 @@ pub struct ThermoMechanicalAssemblySummary {
     pub thermal_expansion_coefficient: f64,
     pub thermal_strain_scale: f64,
     pub thermal_load_scale: f64,
+    pub constitutive_temperature_factor: f64,
+    pub constitutive_poisson_coupling: f64,
+    pub effective_modulus_scale: f64,
     pub coupling_fingerprint: u64,
 }
 
@@ -156,6 +159,16 @@ pub fn assemble_linear_system(
             .materials
             .iter()
             .map(|material| material.youngs_modulus_pa.max(1.0))
+            .sum::<f64>()
+            / model.materials.len() as f64
+    };
+    let avg_poisson_ratio = if model.materials.is_empty() {
+        0.3
+    } else {
+        model
+            .materials
+            .iter()
+            .map(|material| material.poisson_ratio.clamp(0.0, 0.49))
             .sum::<f64>()
             / model.materials.len() as f64
     };
@@ -488,12 +501,25 @@ pub fn assemble_linear_system(
                 * context.applied_temperature_delta_k.abs())
             .clamp(0.0, 0.05);
             let thermal_load_scale = (context.applied_temperature_delta_k / 50.0).clamp(-2.0, 2.0);
+            let constitutive_temperature_factor =
+                (context.applied_temperature_delta_k / 600.0).clamp(-0.25, 0.25);
+            let constitutive_poisson_coupling =
+                (0.6 + avg_poisson_ratio.clamp(0.0, 0.49)).clamp(0.6, 1.2);
+            let modulus_temperature_scale = (1.0
+                - constitutive_temperature_factor * constitutive_poisson_coupling)
+                .clamp(0.75, 1.15);
+            let thermal_stiffening_scale = (1.0 + 0.35 * thermal_strain_scale).clamp(1.0, 1.06);
+            let effective_modulus_scale =
+                (modulus_temperature_scale * thermal_stiffening_scale).clamp(0.75, 1.2);
             for i in 0..dof_count {
                 let thermal_bias = 1.0 + thermal_strain_scale * (1.0 + (i % 3) as f64 * 0.1);
-                stiffness_diag[i] *= thermal_bias;
+                stiffness_diag[i] *= thermal_bias * effective_modulus_scale;
                 if !constrained[i] {
                     rhs[i] += thermal_load_scale * (1.0 + (i % 5) as f64 * 0.05);
                 }
+            }
+            for value in &mut stiffness_upper {
+                *value *= effective_modulus_scale;
             }
             thermo_mechanical = Some(ThermoMechanicalAssemblySummary {
                 enabled: true,
@@ -502,7 +528,16 @@ pub fn assemble_linear_system(
                 thermal_expansion_coefficient: context.thermal_expansion_coefficient,
                 thermal_strain_scale,
                 thermal_load_scale,
-                coupling_fingerprint: thermo_mechanical_fingerprint(context, dof_count),
+                constitutive_temperature_factor,
+                constitutive_poisson_coupling,
+                effective_modulus_scale,
+                coupling_fingerprint: thermo_mechanical_fingerprint(
+                    context,
+                    dof_count,
+                    constitutive_temperature_factor,
+                    constitutive_poisson_coupling,
+                    effective_modulus_scale,
+                ),
             });
         }
     }
@@ -1360,13 +1395,22 @@ fn acceptance_fingerprint(
     hash
 }
 
-fn thermo_mechanical_fingerprint(context: FeaThermoMechanicalContext, dof_count: usize) -> u64 {
+fn thermo_mechanical_fingerprint(
+    context: FeaThermoMechanicalContext,
+    dof_count: usize,
+    constitutive_temperature_factor: f64,
+    constitutive_poisson_coupling: f64,
+    effective_modulus_scale: f64,
+) -> u64 {
     let mut hash = 1469598103934665603_u64;
     for value in [
         dof_count as u64,
         context.reference_temperature_k.to_bits(),
         context.applied_temperature_delta_k.to_bits(),
         context.thermal_expansion_coefficient.to_bits(),
+        constitutive_temperature_factor.to_bits(),
+        constitutive_poisson_coupling.to_bits(),
+        effective_modulus_scale.to_bits(),
     ] {
         hash ^= value;
         hash = hash.wrapping_mul(1099511628211_u64);
