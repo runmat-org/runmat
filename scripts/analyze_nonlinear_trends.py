@@ -73,6 +73,12 @@ def collect_metrics(reports, window):
                     "thermo_assignment_heterogeneity_index": record.get(
                         "thermo_assignment_heterogeneity_index"
                     ),
+                    "thermo_spatial_coverage_ratio": record.get(
+                        "thermo_spatial_coverage_ratio"
+                    ),
+                    "thermo_field_extrapolation_ratio": record.get(
+                        "thermo_field_extrapolation_ratio"
+                    ),
                     "thermo_transient_severity": record.get("thermo_transient_severity"),
                     "thermo_nonlinear_severity": record.get("thermo_nonlinear_severity"),
                 }
@@ -189,6 +195,12 @@ def main():
     thermo_heterogeneity_trend_limit = float(
         os.getenv("RUNMAT_ANALYSIS_THERMO_MAX_HETEROGENEITY_TREND_RATIO", "1.2")
     )
+    thermo_coverage_drop_limit = float(
+        os.getenv("RUNMAT_ANALYSIS_THERMO_MAX_COVERAGE_DROP_RATIO", "1.25")
+    )
+    thermo_extrapolation_trend_limit = float(
+        os.getenv("RUNMAT_ANALYSIS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO", "1.25")
+    )
     protected_only = (
         os.getenv("RUNMAT_ANALYSIS_ENFORCE_BASELINE_ON_PROTECTED", "false").lower() == "true"
     )
@@ -287,6 +299,38 @@ def main():
                 if heterogeneity_ratio > thermo_heterogeneity_trend_limit:
                     warnings.append(
                         f"THERMO_HETEROGENEITY_TREND_WORSENING:{fixture}: ratio {heterogeneity_ratio:.3f} exceeds {thermo_heterogeneity_trend_limit:.3f}"
+                    )
+
+        coverage = [
+            v["thermo_spatial_coverage_ratio"]
+            for v in values
+            if isinstance(v.get("thermo_spatial_coverage_ratio"), (int, float))
+        ]
+        if len(coverage) >= 2:
+            latest_coverage = coverage[-1]
+            baseline_coverage = statistics.median(coverage[:-1])
+            if latest_coverage > 0:
+                coverage_drop_ratio = baseline_coverage / latest_coverage
+                if coverage_drop_ratio > thermo_coverage_drop_limit:
+                    warnings.append(
+                        f"THERMO_FIELD_COVERAGE_WORSENING:{fixture}: drop ratio {coverage_drop_ratio:.3f} exceeds {thermo_coverage_drop_limit:.3f}"
+                    )
+
+        extrapolation = [
+            v["thermo_field_extrapolation_ratio"]
+            for v in values
+            if isinstance(v.get("thermo_field_extrapolation_ratio"), (int, float))
+        ]
+        if len(extrapolation) >= 2:
+            baseline_extrapolation = (
+                statistics.median(extrapolation[:-1]) if len(extrapolation) > 1 else extrapolation[0]
+            )
+            latest_extrapolation = extrapolation[-1]
+            if baseline_extrapolation > 0:
+                extrapolation_ratio = latest_extrapolation / baseline_extrapolation
+                if extrapolation_ratio > thermo_extrapolation_trend_limit:
+                    warnings.append(
+                        f"THERMO_FIELD_EXTRAPOLATION_WORSENING:{fixture}: ratio {extrapolation_ratio:.3f} exceeds {thermo_extrapolation_trend_limit:.3f}"
                     )
 
     if warnings:

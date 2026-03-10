@@ -62,6 +62,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_BREACH_RATE": "0.1",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_THERMO_MIN_FIELD_COVERAGE_RATIO": "0.55",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO": "0.02",
         },
         "development": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.2",
@@ -78,6 +80,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_BREACH_RATE": "0.25",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_THERMO_MIN_FIELD_COVERAGE_RATIO": "0.45",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO": "0.08",
         },
         "feature": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.25",
@@ -94,6 +98,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_BREACH_RATE": "0.5",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_THERMO_MIN_FIELD_COVERAGE_RATIO": "0.3",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO": "0.18",
         },
     }
     return profile_map.get(profile, {}).get(name, default)
@@ -627,6 +633,20 @@ def evaluate_release_readiness(
             ),
         )
     )
+    thermo_min_field_coverage_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MIN_FIELD_COVERAGE_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_THERMO_MIN_FIELD_COVERAGE_RATIO", "0.45"),
+        )
+    )
+    thermo_max_field_extrapolation_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO", "0.08"
+            ),
+        )
+    )
     thermo_max_spread_trend_ratio = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_TREND_RATIO",
@@ -655,6 +675,8 @@ def evaluate_release_readiness(
     thermo_max_nonlinear_severity = None
     thermo_max_spread_ratio = None
     thermo_max_heterogeneity_index = None
+    thermo_min_field_coverage_ratio = None
+    thermo_max_field_extrapolation_ratio = None
     thermo_spread_breach_rate = None
     thermo_heterogeneity_breach_rate = None
     thermo_spread_trend_ratio = None
@@ -781,6 +803,57 @@ def evaluate_release_readiness(
                         detail=(
                             f"max thermo assignment heterogeneity index {thermo_max_heterogeneity_index:.3f} exceeds "
                             f"threshold {thermo_max_heterogeneity_index_threshold:.3f}"
+                        ),
+                    )
+                )
+
+        coverage_values = []
+        for rec in thermo_records:
+            raw_region_count = rec.get("thermo_region_delta_count")
+            if isinstance(raw_region_count, (int, float)) and float(raw_region_count) <= 0:
+                continue
+            raw_value = rec.get("thermo_spatial_coverage_ratio")
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                if math.isfinite(value):
+                    coverage_values.append(value)
+        if coverage_values:
+            thermo_min_field_coverage_ratio = min(coverage_values)
+            if (
+                thermo_min_field_coverage_ratio
+                < thermo_min_field_coverage_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="THERMO_FIELD_COVERAGE_LOW",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"min thermo field coverage ratio {thermo_min_field_coverage_ratio:.3f} below "
+                            f"threshold {thermo_min_field_coverage_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
+
+        extrapolation_values = []
+        for rec in thermo_records:
+            raw_value = rec.get("thermo_field_extrapolation_ratio")
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                if math.isfinite(value):
+                    extrapolation_values.append(value)
+        if extrapolation_values:
+            thermo_max_field_extrapolation_ratio = max(extrapolation_values)
+            if (
+                thermo_max_field_extrapolation_ratio
+                > thermo_max_field_extrapolation_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="THERMO_FIELD_EXTRAPOLATION_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"max thermo field extrapolation ratio {thermo_max_field_extrapolation_ratio:.3f} exceeds "
+                            f"threshold {thermo_max_field_extrapolation_ratio_threshold:.3f}"
                         ),
                     )
                 )
@@ -933,7 +1006,11 @@ def evaluate_release_readiness(
         "thermo_max_nonlinear_severity": thermo_max_nonlinear_severity,
         "thermo_max_spread_ratio": thermo_max_spread_ratio,
         "thermo_max_heterogeneity_index": thermo_max_heterogeneity_index,
+        "thermo_min_field_coverage_ratio": thermo_min_field_coverage_ratio,
+        "thermo_max_field_extrapolation_ratio": thermo_max_field_extrapolation_ratio,
         "thermo_max_spread_ratio_threshold": thermo_max_spread_ratio_threshold,
+        "thermo_min_field_coverage_ratio_threshold": thermo_min_field_coverage_ratio_threshold,
+        "thermo_max_field_extrapolation_ratio_threshold": thermo_max_field_extrapolation_ratio_threshold,
         "thermo_spread_breach_rate": thermo_spread_breach_rate,
         "thermo_heterogeneity_breach_rate": thermo_heterogeneity_breach_rate,
         "thermo_spread_trend_ratio": thermo_spread_trend_ratio,
@@ -972,6 +1049,22 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Max thermo assignment heterogeneity index: "
         f"`{result.get('thermo_max_heterogeneity_index') if result.get('thermo_max_heterogeneity_index') is not None else '-'}`"
+    )
+    lines.append(
+        "- Min thermo field coverage ratio: "
+        f"`{result.get('thermo_min_field_coverage_ratio') if result.get('thermo_min_field_coverage_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermo field coverage threshold: "
+        f"`{result.get('thermo_min_field_coverage_ratio_threshold') if result.get('thermo_min_field_coverage_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Max thermo field extrapolation ratio: "
+        f"`{result.get('thermo_max_field_extrapolation_ratio') if result.get('thermo_max_field_extrapolation_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermo field extrapolation threshold: "
+        f"`{result.get('thermo_max_field_extrapolation_ratio_threshold') if result.get('thermo_max_field_extrapolation_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
         "- Thermo spread breach rate: "

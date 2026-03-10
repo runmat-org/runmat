@@ -6,6 +6,7 @@ use crate::{
     assembly::AssemblySummary,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     solve::runtime_tensor_solver::RuntimeTensorPreparedLinearSystem,
+    thermo::{sample_time_profile_scale, temporal_profile_variation},
     ComputeBackend, FeaPrepContext, FeaThermoMechanicalContext,
 };
 
@@ -108,10 +109,15 @@ pub fn solve_transient_system(
     let use_runtime_tensor = backend == ComputeBackend::Gpu;
     let thermo_severity_base =
         thermo_mechanical_severity(options.thermo_mechanical_context.clone());
-    let thermo_temporal_variation =
-        thermo_temporal_profile_variation(options.thermo_mechanical_context.clone());
+    let thermo_temporal_variation = options
+        .thermo_mechanical_context
+        .as_ref()
+        .map(temporal_profile_variation)
+        .unwrap_or(0.0);
     let mut thermo_severity_sum = 0.0_f64;
     let mut thermo_time_scale_sum = 0.0_f64;
+    let mut thermo_time_extrapolated = 0usize;
+    let mut thermo_time_clamped = 0usize;
     let mut thermo_severity_peak = 0.0_f64;
     let mut effective_residual_target_peak = options.residual_target;
     let mut thermo_growth_limit_min = 1.0_f64;
@@ -155,8 +161,19 @@ pub fn solve_transient_system(
         } else {
             step_index as f64 / (options.step_count - 1) as f64
         };
-        let thermo_time_scale =
-            thermo_time_scale(options.thermo_mechanical_context.clone(), step_progress);
+        let thermo_time_sample = options
+            .thermo_mechanical_context
+            .as_ref()
+            .map(|context| sample_time_profile_scale(context, step_progress));
+        let thermo_time_scale = thermo_time_sample.map(|sample| sample.scale).unwrap_or(1.0);
+        if let Some(sample) = thermo_time_sample {
+            if sample.extrapolated {
+                thermo_time_extrapolated = thermo_time_extrapolated.saturating_add(1);
+            }
+            if sample.clamped {
+                thermo_time_clamped = thermo_time_clamped.saturating_add(1);
+            }
+        }
         let thermo_severity = (thermo_severity_base * thermo_time_scale).clamp(0.0, 1.0);
         thermo_severity_sum += thermo_severity;
         thermo_time_scale_sum += thermo_time_scale;
@@ -348,6 +365,8 @@ pub fn solve_transient_system(
         },
         thermo_severity_peak,
         thermo_temporal_variation,
+        thermo_time_extrapolated,
+        thermo_time_clamped,
         effective_residual_target_peak,
         thermo_growth_limit_min,
         thermo_nonconverged_shrink_min,
@@ -403,54 +422,6 @@ fn recommend_next_time_step(
     }
     factor = factor.min(thermo_growth_limit.max(0.5));
     (step_dt * factor).clamp(min_dt, max_dt)
-}
-
-fn thermo_time_scale(context: Option<FeaThermoMechanicalContext>, normalized_time: f64) -> f64 {
-    let Some(context) = context else {
-        return 1.0;
-    };
-    if context.time_profile.is_empty() {
-        return 1.0;
-    }
-    let t = normalized_time.clamp(0.0, 1.0);
-    let mut points = context.time_profile;
-    points.sort_by(|a, b| a.normalized_time.total_cmp(&b.normalized_time));
-    if t <= points[0].normalized_time {
-        return points[0].scale.clamp(0.2, 2.0);
-    }
-    for pair in points.windows(2) {
-        let a = &pair[0];
-        let b = &pair[1];
-        if t >= a.normalized_time && t <= b.normalized_time {
-            let span = (b.normalized_time - a.normalized_time).abs().max(1.0e-9);
-            let alpha = (t - a.normalized_time) / span;
-            let scale = a.scale + (b.scale - a.scale) * alpha;
-            return scale.clamp(0.2, 2.0);
-        }
-    }
-    points
-        .last()
-        .map(|p| p.scale.clamp(0.2, 2.0))
-        .unwrap_or(1.0)
-}
-
-fn thermo_temporal_profile_variation(context: Option<FeaThermoMechanicalContext>) -> f64 {
-    let Some(context) = context else {
-        return 0.0;
-    };
-    if context.time_profile.len() < 2 {
-        return 0.0;
-    }
-    let mut min_scale = f64::INFINITY;
-    let mut max_scale = -f64::INFINITY;
-    for point in &context.time_profile {
-        min_scale = min_scale.min(point.scale);
-        max_scale = max_scale.max(point.scale);
-    }
-    if !min_scale.is_finite() || !max_scale.is_finite() {
-        return 0.0;
-    }
-    ((max_scale - min_scale).abs() / 2.0).clamp(0.0, 1.0)
 }
 
 fn thermo_mechanical_severity(context: Option<FeaThermoMechanicalContext>) -> f64 {

@@ -15,8 +15,8 @@ use runmat_builtins::Value;
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_gc_api::GcPtr;
 
-pub mod dispatcher;
 pub mod analysis;
+pub mod dispatcher;
 pub mod geometry;
 pub mod operations;
 

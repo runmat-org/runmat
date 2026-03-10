@@ -31,6 +31,8 @@ pub(super) fn push_transient_quality_diagnostics(
     thermo_time_scale_mean: f64,
     thermo_severity_peak: f64,
     thermo_temporal_variation: f64,
+    thermo_time_extrapolated: usize,
+    thermo_time_clamped: usize,
     effective_residual_target_peak: f64,
     thermo_growth_limit_min: f64,
     thermo_nonconverged_shrink_min: f64,
@@ -142,11 +144,21 @@ pub(super) fn push_transient_quality_diagnostics(
                 FeaDiagnosticSeverity::Warning
             },
             message: format!(
-                "severity_mean={} time_scale_mean={} severity_peak={} temporal_variation={} effective_residual_target_peak={} growth_limit_min={} nonconverged_shrink_min={}",
+                "severity_mean={} time_scale_mean={} severity_peak={} temporal_variation={} field_extrapolation_ratio={} field_clamp_ratio={} effective_residual_target_peak={} growth_limit_min={} nonconverged_shrink_min={}",
                 thermo_severity_mean,
                 thermo_time_scale_mean,
                 thermo_severity_peak,
                 thermo_temporal_variation,
+                if options.step_count == 0 {
+                    0.0
+                } else {
+                    thermo_time_extrapolated as f64 / options.step_count as f64
+                },
+                if options.step_count == 0 {
+                    0.0
+                } else {
+                    thermo_time_clamped as f64 / options.step_count as f64
+                },
                 effective_residual_target_peak,
                 thermo_growth_limit_min,
                 thermo_nonconverged_shrink_min,

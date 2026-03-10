@@ -7,6 +7,7 @@ pub mod operator;
 pub mod parity;
 pub mod post;
 pub mod solve;
+pub(crate) mod thermo;
 
 use runmat_analysis_core::{
     validate_model, AnalysisField, AnalysisModel, EvidenceConfidence, MaterialAssignment,
@@ -89,12 +90,28 @@ pub struct FeaThermoTimeProfilePoint {
     pub scale: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FeaThermoFieldInterpolationMode {
+    Linear,
+    Step,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeaThermoFieldSource {
+    pub source_id: String,
+    pub revision: u32,
+    pub interpolation_mode: Option<FeaThermoFieldInterpolationMode>,
+    pub expected_region_ids: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FeaThermoMechanicalContext {
     pub enabled: bool,
     pub reference_temperature_k: f64,
     pub applied_temperature_delta_k: f64,
     pub thermal_expansion_coefficient: f64,
+    pub field_source: Option<FeaThermoFieldSource>,
     pub region_temperature_deltas: Vec<FeaThermoRegionTemperatureDelta>,
     pub time_profile: Vec<FeaThermoTimeProfilePoint>,
 }
@@ -955,7 +972,7 @@ fn thermo_mechanical_diagnostic(
         code: "FEA_TM_COUPLING".to_string(),
         severity: FeaDiagnosticSeverity::Info,
         message: format!(
-            "enabled={} reference_temperature_k={} applied_temperature_delta_k={} thermal_expansion_coefficient={} thermal_strain_scale={} thermal_load_scale={} constitutive_temperature_factor={} constitutive_poisson_coupling={} effective_modulus_scale={} constitutive_material_spread_ratio={} assignment_heterogeneity_index={} spatial_gradient_index={} temporal_profile_variation={} region_delta_count={} coupling_fingerprint={}",
+            "enabled={} reference_temperature_k={} applied_temperature_delta_k={} thermal_expansion_coefficient={} thermal_strain_scale={} thermal_load_scale={} constitutive_temperature_factor={} constitutive_poisson_coupling={} effective_modulus_scale={} constitutive_material_spread_ratio={} assignment_heterogeneity_index={} spatial_gradient_index={} spatial_coverage_ratio={} temporal_profile_variation={} region_delta_count={} coupling_fingerprint={}",
             summary.enabled,
             summary.reference_temperature_k,
             summary.applied_temperature_delta_k,
@@ -968,6 +985,7 @@ fn thermo_mechanical_diagnostic(
             summary.constitutive_material_spread_ratio,
             summary.assignment_heterogeneity_index,
             summary.spatial_gradient_index,
+            summary.spatial_coverage_ratio,
             summary.temporal_profile_variation,
             summary.region_delta_count,
             summary.coupling_fingerprint,
@@ -1213,6 +1231,7 @@ mod tests {
                     reference_temperature_k: 293.15,
                     applied_temperature_delta_k: 65.0,
                     thermal_expansion_coefficient: 1.2e-5,
+                    field_source: None,
                     region_temperature_deltas: Vec::new(),
                     time_profile: Vec::new(),
                 }),
@@ -1294,6 +1313,7 @@ mod tests {
                     reference_temperature_k: 293.15,
                     applied_temperature_delta_k: 90.0,
                     thermal_expansion_coefficient: 1.4e-5,
+                    field_source: None,
                     region_temperature_deltas: Vec::new(),
                     time_profile: Vec::new(),
                 }),

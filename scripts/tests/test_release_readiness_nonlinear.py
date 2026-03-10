@@ -19,6 +19,8 @@ def report(
     thermo_nonlinear_severity=None,
     thermo_constitutive_material_spread_ratio=None,
     thermo_assignment_heterogeneity_index=None,
+    thermo_spatial_coverage_ratio=None,
+    thermo_field_extrapolation_ratio=None,
 ):
     fixtures = [
         "nonlinear_assembly_gpu_provider",
@@ -56,6 +58,12 @@ def report(
             rec["thermo_assignment_heterogeneity_index"] = (
                 thermo_assignment_heterogeneity_index
             )
+    if thermo_spatial_coverage_ratio is not None:
+        for rec in records:
+            rec["thermo_spatial_coverage_ratio"] = thermo_spatial_coverage_ratio
+    if thermo_field_extrapolation_ratio is not None:
+        for rec in records:
+            rec["thermo_field_extrapolation_ratio"] = thermo_field_extrapolation_ratio
 
     return {
         "passed": passed,
@@ -92,6 +100,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMO_MIN_FIELD_COVERAGE_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO",
             "GITHUB_REF_NAME",
         ]:
             os.environ.pop(key, None)
@@ -662,6 +672,40 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMO_HETEROGENEITY_TREND_WORSENING", codes)
 
+    def test_thermo_field_coverage_low_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermo_coupling_enabled=True,
+            thermo_spatial_coverage_ratio=0.2,
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_THERMO_MIN_FIELD_COVERAGE_RATIO"] = "0.4"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_FIELD_COVERAGE_LOW", codes)
+
+    def test_thermo_field_extrapolation_high_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermo_coupling_enabled=True,
+            thermo_field_extrapolation_ratio=0.3,
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO"] = "0.1"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_FIELD_EXTRAPOLATION_HIGH", codes)
+
     def test_markdown_summary_prints_thermo_posture_section(self):
         latest = report(
             passed=True,
@@ -672,6 +716,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             thermo_nonlinear_severity=0.2,
             thermo_constitutive_material_spread_ratio=1.1,
             thermo_assignment_heterogeneity_index=0.08,
+            thermo_spatial_coverage_ratio=0.7,
+            thermo_field_extrapolation_ratio=0.01,
         )
         result = evaluate_release_readiness(
             latest,
@@ -686,6 +732,10 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Max thermo material spread ratio", summary)
         self.assertIn("Thermo spread ratio threshold", summary)
         self.assertIn("Max thermo assignment heterogeneity index", summary)
+        self.assertIn("Min thermo field coverage ratio", summary)
+        self.assertIn("Thermo field coverage threshold", summary)
+        self.assertIn("Max thermo field extrapolation ratio", summary)
+        self.assertIn("Thermo field extrapolation threshold", summary)
         self.assertIn("Thermo spread breach rate", summary)
         self.assertIn("Thermo heterogeneity breach rate", summary)
         self.assertIn("Thermo spread trend ratio", summary)

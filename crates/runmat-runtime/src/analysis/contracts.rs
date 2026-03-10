@@ -108,12 +108,31 @@ pub struct ThermoTimeProfilePoint {
     pub scale: f64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ThermoFieldInterpolationMode {
+    Linear,
+    Step,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ThermoFieldSource {
+    pub source_id: String,
+    pub revision: u32,
+    #[serde(default)]
+    pub interpolation_mode: Option<ThermoFieldInterpolationMode>,
+    #[serde(default)]
+    pub expected_region_ids: Vec<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ThermoMechanicalCouplingOptions {
     pub enabled: bool,
     pub reference_temperature_k: f64,
     pub applied_temperature_delta_k: f64,
     pub thermal_expansion_coefficient: f64,
+    #[serde(default)]
+    pub field_source: Option<ThermoFieldSource>,
     #[serde(default)]
     pub region_temperature_deltas: Vec<ThermoRegionTemperatureDelta>,
     #[serde(default)]
@@ -139,6 +158,8 @@ pub enum QualityReasonCode {
     ThermoMechanicalConstitutiveSpreadHigh,
     ThermoMechanicalAssignmentHeterogeneityHigh,
     ThermoMechanicalGradientInstability,
+    ThermoMechanicalFieldCoverageLow,
+    ThermoMechanicalFieldExtrapolationHigh,
     NonlinearResidualExceeded,
     NonlinearIncrementFailure,
     ThermoMechanicalNonlinearStress,
@@ -612,6 +633,9 @@ pub struct AnalysisResultsSummary {
     pub thermo_effective_modulus_scale: Option<f64>,
     pub thermo_constitutive_material_spread_ratio: Option<f64>,
     pub thermo_assignment_heterogeneity_index: Option<f64>,
+    pub thermo_region_delta_count: Option<f64>,
+    pub thermo_spatial_coverage_ratio: Option<f64>,
+    pub thermo_field_extrapolation_ratio: Option<f64>,
     pub thermo_transient_severity: Option<f64>,
     pub thermo_nonlinear_severity: Option<f64>,
 }

@@ -13,8 +13,8 @@ pub use stats::{compute_stats, GeometryStats};
 #[cfg(test)]
 mod tests {
     use runmat_geometry_core::{
-        GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, SourceGeometry, SourceGeometryKind,
-        TessellationProfile, UnitSystem,
+        GeometryAsset, GeometrySource, MeshDescriptor, MeshKind, SourceGeometry,
+        SourceGeometryKind, TessellationProfile, UnitSystem,
     };
 
     use crate::{compute_axis_aligned_bounds, compute_stats, evaluate_quality};

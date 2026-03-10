@@ -388,6 +388,10 @@ jobs:
               thermo_max_spread = ready.get('thermo_max_spread_ratio')
               thermo_spread_threshold = ready.get('thermo_max_spread_ratio_threshold')
               thermo_max_heterogeneity = ready.get('thermo_max_heterogeneity_index')
+              thermo_min_field_coverage = ready.get('thermo_min_field_coverage_ratio')
+              thermo_field_coverage_threshold = ready.get('thermo_min_field_coverage_ratio_threshold')
+              thermo_max_field_extrapolation = ready.get('thermo_max_field_extrapolation_ratio')
+              thermo_field_extrapolation_threshold = ready.get('thermo_max_field_extrapolation_ratio_threshold')
               thermo_spread_breach_rate = ready.get('thermo_spread_breach_rate')
               thermo_heterogeneity_breach_rate = ready.get('thermo_heterogeneity_breach_rate')
               lines.append(
@@ -417,6 +421,22 @@ jobs:
               lines.append(
                   "- Thermo max heterogeneity index: "
                   f"{thermo_max_heterogeneity if thermo_max_heterogeneity is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo min field coverage ratio: "
+                  f"{thermo_min_field_coverage if thermo_min_field_coverage is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo field coverage threshold: "
+                  f"{thermo_field_coverage_threshold if thermo_field_coverage_threshold is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo max field extrapolation ratio: "
+                  f"{thermo_max_field_extrapolation if thermo_max_field_extrapolation is not None else '-'}"
+              )
+              lines.append(
+                  "- Thermo field extrapolation threshold: "
+                  f"{thermo_field_extrapolation_threshold if thermo_field_extrapolation_threshold is not None else '-'}"
               )
               lines.append(
                   "- Thermo spread breach rate: "

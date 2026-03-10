@@ -93,9 +93,11 @@ Typed prep-reference failure families:
   - benchmark harness includes a kickoff fixture with coupling metric thresholds.
 - **Phase 2B thermo field realism**: spatial + temporal thermo shaping and policy sensitivity.
   - thermo coupling contracts support per-region temperature deltas and normalized time-profile points,
+  - thermo coupling contracts can also carry field-source lineage (`source_id`/`revision`) and interpolation mode,
   - assembly diagnostics now surface `spatial_gradient_index`, `temporal_profile_variation`, and `region_delta_count`,
-  - transient/nonlinear diagnostics now report peak/mean thermo severity and temporal variation,
+  - transient/nonlinear diagnostics now report peak/mean thermo severity, temporal variation, and temporal field extrapolation/clamp ratios,
   - runtime quality policy adds `ThermoMechanicalGradientInstability` when spatial/temporal gradients cross policy thresholds,
+  - runtime quality policy also flags low spatial field coverage and high temporal extrapolation,
   - conformance harness adds smooth-ramp and oscillatory-shock thermo fixtures with threshold assertions.
 
 ## Diagnostics
@@ -136,6 +138,14 @@ Runtime quality-policy thermo gradient-instability thresholds:
 | `strict` | 0.22 | 0.25 |
 | `balanced` | 0.30 | 0.35 |
 | `exploratory` | 0.45 | 0.55 |
+
+Runtime quality-policy thermo field-quality thresholds:
+
+| Runtime policy | min spatial coverage ratio | max field extrapolation ratio |
+| --- | ---: | ---: |
+| `strict` | 0.55 | 0.02 |
+| `balanced` | 0.45 | 0.08 |
+| `exploratory` | 0.30 | 0.18 |
 
 Release-readiness branch profile defaults:
 

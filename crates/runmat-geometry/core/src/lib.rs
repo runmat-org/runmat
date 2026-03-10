@@ -72,7 +72,9 @@ mod tests {
     fn unit_metadata_must_be_present() {
         let mut asset = sample_asset();
         asset.units = UnitSystem::Unspecified;
-        let error = asset.validate().expect_err("expected unspecified units to fail");
+        let error = asset
+            .validate()
+            .expect_err("expected unspecified units to fail");
         assert_eq!(error, "geometry units must be specified");
     }
 }

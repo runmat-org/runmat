@@ -72,6 +72,7 @@ fn nonlinear_options_for_spec(spec: &FixtureSpec) -> AnalysisNonlinearRunOptions
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 75.0,
             thermal_expansion_coefficient: 1.2e-5,
+            field_source: None,
             region_temperature_deltas: Vec::new(),
             time_profile: Vec::new(),
         });
@@ -87,6 +88,7 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 65.0,
             thermal_expansion_coefficient: 1.2e-5,
+            field_source: None,
             region_temperature_deltas: vec![
                 ThermoRegionTemperatureDelta {
                     region_id: "tip_steel".to_string(),
@@ -113,6 +115,7 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 55.0,
             thermal_expansion_coefficient: 1.0e-5,
+            field_source: None,
             region_temperature_deltas: vec![
                 ThermoRegionTemperatureDelta {
                     region_id: "tip_steel".to_string(),
@@ -139,6 +142,7 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 220.0,
             thermal_expansion_coefficient: 2.5e-5,
+            field_source: None,
             region_temperature_deltas: vec![
                 ThermoRegionTemperatureDelta {
                     region_id: "tip_steel".to_string(),
@@ -169,6 +173,7 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 70.0,
             thermal_expansion_coefficient: 1.1e-5,
+            field_source: None,
             region_temperature_deltas: vec![
                 ThermoRegionTemperatureDelta {
                     region_id: "tip_steel".to_string(),
@@ -199,6 +204,7 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
             reference_temperature_k: 293.15,
             applied_temperature_delta_k: 140.0,
             thermal_expansion_coefficient: 2.0e-5,
+            field_source: None,
             region_temperature_deltas: vec![
                 ThermoRegionTemperatureDelta {
                     region_id: "tip_steel".to_string(),
@@ -516,6 +522,9 @@ pub(super) fn run_fixture(
     let mut thermo_effective_modulus_scale = None;
     let mut thermo_constitutive_material_spread_ratio = None;
     let mut thermo_assignment_heterogeneity_index = None;
+    let mut thermo_region_delta_count = None;
+    let mut thermo_spatial_coverage_ratio = None;
+    let mut thermo_field_extrapolation_ratio = None;
     let mut thermo_transient_severity = None;
     let mut thermo_nonlinear_severity = None;
     let mut publishable = None;
@@ -565,6 +574,9 @@ pub(super) fn run_fixture(
                     thermo_effective_modulus_scale,
                     thermo_constitutive_material_spread_ratio,
                     thermo_assignment_heterogeneity_index,
+                    thermo_region_delta_count,
+                    thermo_spatial_coverage_ratio,
+                    thermo_field_extrapolation_ratio,
                     thermo_transient_severity,
                     thermo_nonlinear_severity,
                     publishable,
@@ -1236,6 +1248,34 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.25),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_ramp_smooth_spatial_coverage_ratio",
+                            "FEA_TM_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_COUPLING",
+                                "spatial_coverage_ratio",
+                            ),
+                            Some(0.35),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_ramp_smooth_field_extrapolation_ratio",
+                            "FEA_TM_TRANSIENT",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_TRANSIENT",
+                                "field_extrapolation_ratio",
+                            ),
+                            Some(0.0),
+                            Some(0.02),
+                        );
                     } else if spec.id == "thermo_shock_oscillatory_gpu_provider" {
                         push_threshold_assertion(
                             spec.id,
@@ -1264,6 +1304,34 @@ pub(super) fn run_fixture(
                             ),
                             Some(0.25),
                             Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_shock_oscillatory_spatial_coverage_ratio",
+                            "FEA_TM_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_COUPLING",
+                                "spatial_coverage_ratio",
+                            ),
+                            Some(0.30),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_shock_oscillatory_field_extrapolation_ratio",
+                            "FEA_TM_TRANSIENT",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_TRANSIENT",
+                                "field_extrapolation_ratio",
+                            ),
+                            Some(0.0),
+                            Some(0.2),
                         );
                     }
                     if spec.id == "nonlinear_assembly_gpu_provider" {
@@ -1609,6 +1677,9 @@ pub(super) fn run_fixture(
                                 thermo_effective_modulus_scale,
                                 thermo_constitutive_material_spread_ratio,
                                 thermo_assignment_heterogeneity_index,
+                                thermo_region_delta_count,
+                                thermo_spatial_coverage_ratio,
+                                thermo_field_extrapolation_ratio,
                                 thermo_transient_severity,
                                 thermo_nonlinear_severity,
                                 publishable,
@@ -1649,6 +1720,11 @@ pub(super) fn run_fixture(
                         .data
                         .summary
                         .thermo_assignment_heterogeneity_index;
+                    thermo_region_delta_count = gpu_results.data.summary.thermo_region_delta_count;
+                    thermo_spatial_coverage_ratio =
+                        gpu_results.data.summary.thermo_spatial_coverage_ratio;
+                    thermo_field_extrapolation_ratio =
+                        gpu_results.data.summary.thermo_field_extrapolation_ratio;
                     thermo_transient_severity = gpu_results.data.summary.thermo_transient_severity;
                     thermo_nonlinear_severity = gpu_results.data.summary.thermo_nonlinear_severity;
 
@@ -1795,6 +1871,9 @@ pub(super) fn run_fixture(
                                     thermo_effective_modulus_scale,
                                     thermo_constitutive_material_spread_ratio,
                                     thermo_assignment_heterogeneity_index,
+                                    thermo_region_delta_count,
+                                    thermo_spatial_coverage_ratio,
+                                    thermo_field_extrapolation_ratio,
                                     thermo_transient_severity,
                                     thermo_nonlinear_severity,
                                     publishable,
@@ -1893,6 +1972,9 @@ pub(super) fn run_fixture(
         thermo_effective_modulus_scale,
         thermo_constitutive_material_spread_ratio,
         thermo_assignment_heterogeneity_index,
+        thermo_region_delta_count,
+        thermo_spatial_coverage_ratio,
+        thermo_field_extrapolation_ratio,
         thermo_transient_severity,
         thermo_nonlinear_severity,
         publishable,

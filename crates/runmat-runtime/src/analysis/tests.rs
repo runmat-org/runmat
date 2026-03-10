@@ -839,6 +839,7 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 65.0,
                 thermal_expansion_coefficient: 1.2e-5,
+                field_source: None,
                 region_temperature_deltas: Vec::new(),
                 time_profile: Vec::new(),
             }),
@@ -899,6 +900,7 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 80.0,
                 thermal_expansion_coefficient: 1.2e-5,
+                field_source: None,
                 region_temperature_deltas: Vec::new(),
                 time_profile: Vec::new(),
             }),
@@ -1737,6 +1739,7 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 90.0,
                 thermal_expansion_coefficient: 1.0e-3,
+                field_source: None,
                 region_temperature_deltas: Vec::new(),
                 time_profile: Vec::new(),
             }),
@@ -1774,6 +1777,7 @@ fn nonlinear_balanced_degrades_when_thermo_heterogeneity_is_high() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 90.0,
                 thermal_expansion_coefficient: 1.2e-5,
+                field_source: None,
                 region_temperature_deltas: Vec::new(),
                 time_profile: Vec::new(),
             }),
@@ -1985,6 +1989,90 @@ fn analysis_run_transient_with_options_controls_timeline() {
 }
 
 #[test]
+fn analysis_run_transient_rejects_non_monotonic_thermo_time_profile() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "transient_1".to_string(),
+        kind: AnalysisStepKind::Transient,
+    }];
+
+    let err = analysis_run_transient_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisTransientRunOptions {
+            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 70.0,
+                thermal_expansion_coefficient: 1.1e-5,
+                field_source: Some(ThermoFieldSource {
+                    source_id: "field/transient-a".to_string(),
+                    revision: 1,
+                    interpolation_mode: Some(ThermoFieldInterpolationMode::Linear),
+                    expected_region_ids: vec!["tip".to_string()],
+                }),
+                region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
+                    region_id: "tip".to_string(),
+                    temperature_delta_k: 70.0,
+                }],
+                time_profile: vec![
+                    ThermoTimeProfilePoint {
+                        normalized_time: 0.8,
+                        scale: 1.0,
+                    },
+                    ThermoTimeProfilePoint {
+                        normalized_time: 0.5,
+                        scale: 0.9,
+                    },
+                ],
+            }),
+            ..AnalysisTransientRunOptions::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect_err("non-monotonic thermo time profile should be rejected");
+
+    assert_eq!(err.error_code, "ANALYSIS_RUN_TRANSIENT_INVALID_OPTIONS");
+}
+
+#[test]
+fn analysis_run_nonlinear_rejects_unknown_thermo_expected_region_ids() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+
+    let err = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 80.0,
+                thermal_expansion_coefficient: 1.2e-5,
+                field_source: Some(ThermoFieldSource {
+                    source_id: "field/nonlinear-a".to_string(),
+                    revision: 2,
+                    interpolation_mode: Some(ThermoFieldInterpolationMode::Step),
+                    expected_region_ids: vec!["missing_region".to_string()],
+                }),
+                region_temperature_deltas: Vec::new(),
+                time_profile: Vec::new(),
+            }),
+            ..AnalysisNonlinearRunOptions::production_recommended()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect_err("unknown thermo expected region should be rejected");
+
+    assert_eq!(err.error_code, "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS");
+}
+
+#[test]
 fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
@@ -2005,6 +2093,7 @@ fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 90.0,
                 thermal_expansion_coefficient: 1.0e-3,
+                field_source: None,
                 region_temperature_deltas: Vec::new(),
                 time_profile: Vec::new(),
             }),
@@ -2044,6 +2133,7 @@ fn transient_balanced_degrades_when_thermo_heterogeneity_is_high() {
                 reference_temperature_k: 293.15,
                 applied_temperature_delta_k: 90.0,
                 thermal_expansion_coefficient: 1.2e-5,
+                field_source: None,
                 region_temperature_deltas: Vec::new(),
                 time_profile: Vec::new(),
             }),

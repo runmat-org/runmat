@@ -32,9 +32,9 @@ pub use contracts::{
     AnalysisValidateResult, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
     NonlinearMethod, NonlinearResultsData, PrecisionMode, PreconditionerMode,
     PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
-    RunProvenance, RunStatus, ThermoMechanicalCouplingOptions, TransientIntegrationMethod,
-    ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
-    TransientResultsData,
+    RunProvenance, RunStatus, ThermoFieldInterpolationMode, ThermoFieldSource,
+    ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
+    TransientIntegrationMethod, TransientResultsData,
 };
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "analysis.create_model";
@@ -468,6 +468,24 @@ pub fn analysis_run_modal_with_options_op(
         ));
     }
 
+    if let Some(thermo_options) = options.thermo_mechanical_coupling.as_ref() {
+        if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
+            return Err(operation_error(
+                ANALYSIS_RUN_MODAL_OPERATION,
+                ANALYSIS_RUN_MODAL_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_RUN_MODAL_INVALID_OPTIONS",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                detail,
+                metadata,
+            ));
+        }
+    }
+
     let prep_context = resolve_run_prep_context(
         model,
         options.prep_artifact_id.as_deref(),
@@ -774,6 +792,24 @@ pub fn analysis_run_transient_with_options_op(
         ));
     }
 
+    if let Some(thermo_options) = options.thermo_mechanical_coupling.as_ref() {
+        if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
+            return Err(operation_error(
+                ANALYSIS_RUN_TRANSIENT_OPERATION,
+                ANALYSIS_RUN_TRANSIENT_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_RUN_TRANSIENT_INVALID_OPTIONS",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                detail,
+                metadata,
+            ));
+        }
+    }
+
     let transient_run = run_transient_with_options(model, backend, {
         let prep_context = resolve_run_prep_context(
             model,
@@ -874,10 +910,23 @@ pub fn analysis_run_transient_with_options_op(
         item.code == "FEA_TM_TRANSIENT"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
     });
-    let thermo_spatial_gradient_index =
-        diagnostic_metric(&run.diagnostics, "FEA_TM_COUPLING", "spatial_gradient_index");
+    let thermo_spatial_gradient_index = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_TM_COUPLING",
+        "spatial_gradient_index",
+    );
+    let thermo_spatial_coverage_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_TM_COUPLING",
+        "spatial_coverage_ratio",
+    );
     let thermo_temporal_variation =
         diagnostic_metric(&run.diagnostics, "FEA_TM_TRANSIENT", "temporal_variation");
+    let thermo_field_extrapolation_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_TM_TRANSIENT",
+        "field_extrapolation_ratio",
+    );
     let (thermo_gradient_spatial_threshold, thermo_gradient_temporal_threshold) =
         thermo_gradient_thresholds_for_policy(options.quality_policy);
     let thermo_gradient_instability = thermo_spatial_gradient_index
@@ -898,11 +947,19 @@ pub fn analysis_run_transient_with_options_op(
     );
     let (thermo_spread_threshold, thermo_heterogeneity_threshold) =
         thermo_thresholds_for_policy(options.quality_policy);
+    let (thermo_field_coverage_min, thermo_field_extrapolation_max) =
+        thermo_field_quality_thresholds_for_policy(options.quality_policy);
     let thermo_spread_breach = thermo_spread_ratio
         .map(|value| value > thermo_spread_threshold)
         .unwrap_or(false);
     let thermo_heterogeneity_breach = thermo_heterogeneity_index
         .map(|value| value > thermo_heterogeneity_threshold)
+        .unwrap_or(false);
+    let thermo_field_coverage_breach = thermo_spatial_coverage_ratio
+        .map(|value| value < thermo_field_coverage_min)
+        .unwrap_or(false);
+    let thermo_field_extrapolation_breach = thermo_field_extrapolation_ratio
+        .map(|value| value > thermo_field_extrapolation_max)
         .unwrap_or(false);
 
     let mut quality_reasons = Vec::new();
@@ -969,6 +1026,26 @@ pub fn analysis_run_transient_with_options_op(
                 thermo_temporal_variation.unwrap_or(0.0),
                 thermo_gradient_spatial_threshold,
                 thermo_gradient_temporal_threshold,
+            ),
+        });
+    }
+    if thermo_field_coverage_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ThermoMechanicalFieldCoverageLow,
+            detail: format!(
+                "thermo field spatial coverage ratio {} is below minimum {}",
+                thermo_spatial_coverage_ratio.unwrap_or(0.0),
+                thermo_field_coverage_min
+            ),
+        });
+    }
+    if thermo_field_extrapolation_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ThermoMechanicalFieldExtrapolationHigh,
+            detail: format!(
+                "thermo field extrapolation ratio {} exceeds maximum {}",
+                thermo_field_extrapolation_ratio.unwrap_or(0.0),
+                thermo_field_extrapolation_max
             ),
         });
     }
@@ -1266,6 +1343,24 @@ pub fn analysis_run_nonlinear_with_options_op(
         ));
     }
 
+    if let Some(thermo_options) = options.thermo_mechanical_coupling.as_ref() {
+        if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
+            return Err(operation_error(
+                ANALYSIS_RUN_NONLINEAR_OPERATION,
+                ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                detail,
+                metadata,
+            ));
+        }
+    }
+
     let nonlinear_run = run_nonlinear_with_options(model, backend, {
         let prep_context = resolve_run_prep_context(
             model,
@@ -1373,10 +1468,23 @@ pub fn analysis_run_nonlinear_with_options_op(
         item.code == "FEA_TM_NONLINEAR"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
     });
-    let thermo_spatial_gradient_index =
-        diagnostic_metric(&run.diagnostics, "FEA_TM_COUPLING", "spatial_gradient_index");
+    let thermo_spatial_gradient_index = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_TM_COUPLING",
+        "spatial_gradient_index",
+    );
+    let thermo_spatial_coverage_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_TM_COUPLING",
+        "spatial_coverage_ratio",
+    );
     let thermo_temporal_variation =
         diagnostic_metric(&run.diagnostics, "FEA_TM_NONLINEAR", "temporal_variation");
+    let thermo_field_extrapolation_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_TM_NONLINEAR",
+        "field_extrapolation_ratio",
+    );
     let (thermo_gradient_spatial_threshold, thermo_gradient_temporal_threshold) =
         thermo_gradient_thresholds_for_policy(options.quality_policy);
     let thermo_gradient_instability = thermo_spatial_gradient_index
@@ -1397,11 +1505,19 @@ pub fn analysis_run_nonlinear_with_options_op(
     );
     let (thermo_spread_threshold, thermo_heterogeneity_threshold) =
         thermo_thresholds_for_policy(options.quality_policy);
+    let (thermo_field_coverage_min, thermo_field_extrapolation_max) =
+        thermo_field_quality_thresholds_for_policy(options.quality_policy);
     let thermo_spread_breach = thermo_spread_ratio
         .map(|value| value > thermo_spread_threshold)
         .unwrap_or(false);
     let thermo_heterogeneity_breach = thermo_heterogeneity_index
         .map(|value| value > thermo_heterogeneity_threshold)
+        .unwrap_or(false);
+    let thermo_field_coverage_breach = thermo_spatial_coverage_ratio
+        .map(|value| value < thermo_field_coverage_min)
+        .unwrap_or(false);
+    let thermo_field_extrapolation_breach = thermo_field_extrapolation_ratio
+        .map(|value| value > thermo_field_extrapolation_max)
         .unwrap_or(false);
 
     let mut quality_reasons = Vec::new();
@@ -1468,6 +1584,26 @@ pub fn analysis_run_nonlinear_with_options_op(
                 thermo_temporal_variation.unwrap_or(0.0),
                 thermo_gradient_spatial_threshold,
                 thermo_gradient_temporal_threshold,
+            ),
+        });
+    }
+    if thermo_field_coverage_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ThermoMechanicalFieldCoverageLow,
+            detail: format!(
+                "thermo field spatial coverage ratio {} is below minimum {}",
+                thermo_spatial_coverage_ratio.unwrap_or(0.0),
+                thermo_field_coverage_min
+            ),
+        });
+    }
+    if thermo_field_extrapolation_breach {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ThermoMechanicalFieldExtrapolationHigh,
+            detail: format!(
+                "thermo field extrapolation ratio {} exceeds maximum {}",
+                thermo_field_extrapolation_ratio.unwrap_or(0.0),
+                thermo_field_extrapolation_max
             ),
         });
     }
@@ -1602,6 +1738,24 @@ pub fn analysis_run_linear_static_with_options(
     options: AnalysisRunOptions,
     context: OperationContext,
 ) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    if let Some(thermo_options) = options.thermo_mechanical_coupling.as_ref() {
+        if let Err((detail, metadata)) = validate_thermo_coupling_options(model, thermo_options) {
+            return Err(operation_error(
+                ANALYSIS_RUN_OPERATION,
+                ANALYSIS_RUN_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_RUN_INVALID_OPTIONS",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                detail,
+                metadata,
+            ));
+        }
+    }
+
     let requested_preconditioner = match options.preconditioner_mode {
         PreconditionerMode::Auto | PreconditionerMode::Jacobi => SpdPreconditionerKind::Jacobi,
         PreconditionerMode::Ilu => SpdPreconditionerKind::Ilu0,
@@ -1998,6 +2152,28 @@ pub fn analysis_results_op(
         "FEA_TM_COUPLING",
         "assignment_heterogeneity_index",
     );
+    let thermo_region_delta_count = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_COUPLING",
+        "region_delta_count",
+    );
+    let thermo_spatial_coverage_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_COUPLING",
+        "spatial_coverage_ratio",
+    );
+    let thermo_field_extrapolation_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_TRANSIENT",
+        "field_extrapolation_ratio",
+    )
+    .or_else(|| {
+        diagnostic_metric(
+            &run_result.run.diagnostics,
+            "FEA_TM_NONLINEAR",
+            "field_extrapolation_ratio",
+        )
+    });
     let thermo_transient_severity = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_TM_TRANSIENT",
@@ -2048,6 +2224,9 @@ pub fn analysis_results_op(
         thermo_effective_modulus_scale,
         thermo_constitutive_material_spread_ratio,
         thermo_assignment_heterogeneity_index,
+        thermo_region_delta_count,
+        thermo_spatial_coverage_ratio,
+        thermo_field_extrapolation_ratio,
         thermo_transient_severity,
         thermo_nonlinear_severity,
     };
@@ -2745,6 +2924,21 @@ fn to_fea_thermo_mechanical_context(
         reference_temperature_k: tm.reference_temperature_k,
         applied_temperature_delta_k: tm.applied_temperature_delta_k,
         thermal_expansion_coefficient: tm.thermal_expansion_coefficient,
+        field_source: tm
+            .field_source
+            .map(|source| runmat_analysis_fea::FeaThermoFieldSource {
+                source_id: source.source_id,
+                revision: source.revision,
+                interpolation_mode: source.interpolation_mode.map(|mode| match mode {
+                    contracts::ThermoFieldInterpolationMode::Linear => {
+                        runmat_analysis_fea::FeaThermoFieldInterpolationMode::Linear
+                    }
+                    contracts::ThermoFieldInterpolationMode::Step => {
+                        runmat_analysis_fea::FeaThermoFieldInterpolationMode::Step
+                    }
+                }),
+                expected_region_ids: source.expected_region_ids,
+            }),
         region_temperature_deltas: tm
             .region_temperature_deltas
             .into_iter()
@@ -2772,6 +2966,127 @@ fn to_fea_thermo_mechanical_context(
             )
             .collect(),
     })
+}
+
+fn validate_thermo_coupling_options(
+    model: &AnalysisModel,
+    options: &ThermoMechanicalCouplingOptions,
+) -> Result<(), (String, BTreeMap<String, String>)> {
+    if !options.enabled {
+        return Ok(());
+    }
+    if !options.reference_temperature_k.is_finite() || options.reference_temperature_k <= 0.0 {
+        return Err((
+            "thermo coupling requires finite positive reference_temperature_k".to_string(),
+            BTreeMap::from([(
+                "reference_temperature_k".to_string(),
+                options.reference_temperature_k.to_string(),
+            )]),
+        ));
+    }
+    if !options.applied_temperature_delta_k.is_finite() {
+        return Err((
+            "thermo coupling requires finite applied_temperature_delta_k".to_string(),
+            BTreeMap::from([(
+                "applied_temperature_delta_k".to_string(),
+                options.applied_temperature_delta_k.to_string(),
+            )]),
+        ));
+    }
+    if !options.thermal_expansion_coefficient.is_finite()
+        || options.thermal_expansion_coefficient < 0.0
+    {
+        return Err((
+            "thermo coupling requires finite non-negative thermal_expansion_coefficient"
+                .to_string(),
+            BTreeMap::from([(
+                "thermal_expansion_coefficient".to_string(),
+                options.thermal_expansion_coefficient.to_string(),
+            )]),
+        ));
+    }
+
+    let mut last_t = -1.0_f64;
+    for (idx, point) in options.time_profile.iter().enumerate() {
+        if !point.normalized_time.is_finite()
+            || point.normalized_time < 0.0
+            || point.normalized_time > 1.0
+        {
+            return Err((
+                "thermo time_profile normalized_time must be finite and within [0, 1]".to_string(),
+                BTreeMap::from([
+                    ("time_profile_index".to_string(), idx.to_string()),
+                    (
+                        "normalized_time".to_string(),
+                        point.normalized_time.to_string(),
+                    ),
+                ]),
+            ));
+        }
+        if !point.scale.is_finite() {
+            return Err((
+                "thermo time_profile scale must be finite".to_string(),
+                BTreeMap::from([
+                    ("time_profile_index".to_string(), idx.to_string()),
+                    ("scale".to_string(), point.scale.to_string()),
+                ]),
+            ));
+        }
+        if point.normalized_time + 1.0e-12 < last_t {
+            return Err((
+                "thermo time_profile normalized_time must be monotonic non-decreasing".to_string(),
+                BTreeMap::from([
+                    ("time_profile_index".to_string(), idx.to_string()),
+                    (
+                        "normalized_time".to_string(),
+                        point.normalized_time.to_string(),
+                    ),
+                ]),
+            ));
+        }
+        last_t = point.normalized_time;
+    }
+
+    let model_region_ids = model
+        .material_assignments
+        .iter()
+        .map(|assignment| assignment.region_id.as_str())
+        .collect::<HashSet<_>>();
+
+    for delta in &options.region_temperature_deltas {
+        if !delta.temperature_delta_k.is_finite() {
+            return Err((
+                "thermo region_temperature_deltas must use finite temperature_delta_k".to_string(),
+                BTreeMap::from([
+                    ("region_id".to_string(), delta.region_id.clone()),
+                    (
+                        "temperature_delta_k".to_string(),
+                        delta.temperature_delta_k.to_string(),
+                    ),
+                ]),
+            ));
+        }
+    }
+
+    if let Some(source) = options.field_source.as_ref() {
+        if source.source_id.trim().is_empty() {
+            return Err((
+                "thermo field_source requires a non-empty source_id".to_string(),
+                BTreeMap::new(),
+            ));
+        }
+        for expected_region in &source.expected_region_ids {
+            if !model_region_ids.contains(expected_region.as_str()) {
+                return Err((
+                    "thermo field_source expected_region_ids must exist in model material assignments"
+                        .to_string(),
+                    BTreeMap::from([("region_id".to_string(), expected_region.clone())]),
+                ));
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn resolve_run_prep_context(
@@ -3276,6 +3591,14 @@ fn thermo_gradient_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64) {
         QualityPolicy::Strict => (0.22, 0.25),
         QualityPolicy::Balanced => (0.30, 0.35),
         QualityPolicy::Exploratory => (0.45, 0.55),
+    }
+}
+
+fn thermo_field_quality_thresholds_for_policy(policy: QualityPolicy) -> (f64, f64) {
+    match policy {
+        QualityPolicy::Strict => (0.55, 0.02),
+        QualityPolicy::Balanced => (0.45, 0.08),
+        QualityPolicy::Exploratory => (0.30, 0.18),
     }
 }
 

@@ -2,6 +2,7 @@ use runmat_analysis_core::AnalysisModel;
 use serde::{Deserialize, Serialize};
 
 use crate::operator::OperatorSystem;
+use crate::thermo::temporal_profile_variation;
 use crate::{FeaPrepCalibrationProfile, FeaPrepContext, FeaThermoMechanicalContext};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -137,6 +138,7 @@ pub struct ThermoMechanicalAssemblySummary {
     pub constitutive_material_spread_ratio: f64,
     pub assignment_heterogeneity_index: f64,
     pub spatial_gradient_index: f64,
+    pub spatial_coverage_ratio: f64,
     pub temporal_profile_variation: f64,
     pub region_delta_count: usize,
     pub coupling_fingerprint: u64,
@@ -550,9 +552,9 @@ pub fn assemble_linear_system(
                 context.applied_temperature_delta_k,
                 &mut dof_adjustments,
             );
-            let spatial_gradient_index =
+            let spatial_field =
                 apply_thermo_spatial_field(&context, dof_count, &mut dof_adjustments);
-            let temporal_profile_variation = thermo_temporal_profile_variation(&context);
+            let temporal_profile_variation = temporal_profile_variation(&context);
             let mut local_modulus_scales = vec![effective_modulus_scale; dof_count];
             for i in 0..dof_count {
                 let thermal_bias = 1.0 + thermal_strain_scale * (1.0 + (i % 3) as f64 * 0.1);
@@ -591,7 +593,8 @@ pub fn assemble_linear_system(
                 effective_modulus_scale,
                 constitutive_material_spread_ratio,
                 assignment_heterogeneity_index,
-                spatial_gradient_index,
+                spatial_gradient_index: spatial_field.gradient_index,
+                spatial_coverage_ratio: spatial_field.coverage_ratio,
                 temporal_profile_variation,
                 region_delta_count: context.region_temperature_deltas.len(),
                 coupling_fingerprint: thermo_mechanical_fingerprint(
@@ -602,7 +605,7 @@ pub fn assemble_linear_system(
                     effective_modulus_scale,
                     constitutive_material_spread_ratio,
                     assignment_heterogeneity_index,
-                    spatial_gradient_index,
+                    spatial_field.gradient_index,
                     temporal_profile_variation,
                 ),
             });
@@ -1493,14 +1496,24 @@ fn thermo_mechanical_fingerprint(
     hash
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct ThermoSpatialFieldSummary {
+    gradient_index: f64,
+    coverage_ratio: f64,
+}
+
 fn apply_thermo_spatial_field(
     context: &FeaThermoMechanicalContext,
     dof_count: usize,
     dof_adjustments: &mut [f64],
-) -> f64 {
+) -> ThermoSpatialFieldSummary {
     if dof_count == 0 || context.region_temperature_deltas.is_empty() {
-        return 0.0;
+        return ThermoSpatialFieldSummary {
+            gradient_index: 0.0,
+            coverage_ratio: 0.0,
+        };
     }
+    let mut touched = vec![false; dof_count];
     let mut min_delta = f64::INFINITY;
     let mut max_delta = -f64::INFINITY;
     for (idx, region_delta) in context.region_temperature_deltas.iter().enumerate() {
@@ -1523,29 +1536,21 @@ fn apply_thermo_spatial_field(
             }
             let wave = 1.0 + ((hop + idx) % 7) as f64 * 0.02;
             dof_adjustments[cursor] += normalized * wave;
+            touched[cursor] = true;
             cursor = (cursor + stride) % dof_count;
         }
     }
     if !min_delta.is_finite() || !max_delta.is_finite() {
-        return 0.0;
+        return ThermoSpatialFieldSummary {
+            gradient_index: 0.0,
+            coverage_ratio: 0.0,
+        };
     }
-    ((max_delta - min_delta).abs() / 240.0).clamp(0.0, 1.0)
-}
-
-fn thermo_temporal_profile_variation(context: &FeaThermoMechanicalContext) -> f64 {
-    if context.time_profile.len() < 2 {
-        return 0.0;
+    let touched_count = touched.iter().filter(|entry| **entry).count() as f64;
+    ThermoSpatialFieldSummary {
+        gradient_index: ((max_delta - min_delta).abs() / 240.0).clamp(0.0, 1.0),
+        coverage_ratio: (touched_count / dof_count as f64).clamp(0.0, 1.0),
     }
-    let mut min_scale = f64::INFINITY;
-    let mut max_scale = -f64::INFINITY;
-    for point in &context.time_profile {
-        min_scale = min_scale.min(point.scale);
-        max_scale = max_scale.max(point.scale);
-    }
-    if !min_scale.is_finite() || !max_scale.is_finite() {
-        return 0.0;
-    }
-    (max_scale - min_scale).abs().clamp(0.0, 2.0) / 2.0
 }
 
 fn apply_thermo_material_heterogeneity(
