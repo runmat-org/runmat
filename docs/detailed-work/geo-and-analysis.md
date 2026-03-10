@@ -1023,6 +1023,7 @@ Release readiness criteria (default):
 - Thermo-coupling posture guard:
   - when thermo metrics are present, release readiness evaluates max transient/nonlinear thermo severity against branch-aware thresholds (`RUNMAT_RELEASE_READINESS_THERMO_MAX_TRANSIENT_SEVERITY`, `RUNMAT_RELEASE_READINESS_THERMO_MAX_NONLINEAR_SEVERITY`),
   - constitutive heterogeneity is also bounded via branch-aware thresholds (`RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_RATIO`, `RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_INDEX`),
+  - rolling thermo breach-rate ceilings can be enforced with `RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_BREACH_RATE` and `RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_BREACH_RATE`,
   - coupling enabled-rate can be enforced via `RUNMAT_RELEASE_READINESS_THERMO_MIN_ENABLED_RATE`,
   - metrics presence can be required via `RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_METRICS`.
 - Protected branches:
@@ -1380,6 +1381,7 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-09: Added rolling thermo posture governance in release readiness by introducing profile-aware breach-rate thresholds (`RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_BREACH_RATE`, `RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_BREACH_RATE`), new typed reasons (`THERMO_SPREAD_BREACH_RATE_HIGH`, `THERMO_HETEROGENEITY_BREACH_RATE_HIGH`), and markdown/report output fields for the computed breach rates.
 - 2026-03-09: Extended runtime thermo decisioning by adding quality-policy reasons for constitutive spread/assignment heterogeneity breaches and adding thermo breach-rate aggregates to `analysis.trends` summaries (`thermo_spread_breach_rate`, `thermo_heterogeneity_breach_rate`).
 - 2026-03-09: Updated CI Tier-7.5 governance summary emission (`tier75-governance-summary.md`) to include thermo posture rollups from nonlinear readiness artifacts (enabled-rate, max transient/nonlinear severity, max spread ratio, max heterogeneity index) for quick reviewer triage.
 - 2026-03-09: Added branch/profile thermo heterogeneity release gating by extending `release_readiness_nonlinear.py` with spread/heterogeneity thresholds and typed reasons (`THERMO_MATERIAL_SPREAD_RATIO_HIGH`, `THERMO_ASSIGNMENT_HETEROGENEITY_HIGH`), plus markdown posture output and unit coverage.

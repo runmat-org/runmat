@@ -58,6 +58,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_METRICS": "true",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_INDEX": "0.2",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_BREACH_RATE": "0.1",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_BREACH_RATE": "0.1",
         },
         "development": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.2",
@@ -70,6 +72,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_RATIO": "1.3",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_INDEX": "0.3",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_BREACH_RATE": "0.25",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_BREACH_RATE": "0.25",
         },
         "feature": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.25",
@@ -82,6 +86,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_RATIO": "1.5",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_INDEX": "0.5",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_BREACH_RATE": "0.5",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_BREACH_RATE": "0.5",
         },
     }
     return profile_map.get(profile, {}).get(name, default)
@@ -599,6 +605,22 @@ def evaluate_release_readiness(
             ),
         )
     )
+    thermo_max_spread_breach_rate_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_BREACH_RATE",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMO_MAX_SPREAD_BREACH_RATE", "0.25"
+            ),
+        )
+    )
+    thermo_max_heterogeneity_breach_rate_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_BREACH_RATE",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_BREACH_RATE", "0.25"
+            ),
+        )
+    )
     thermo_records = [
         rec
         for rec in report_records(latest)
@@ -613,6 +635,8 @@ def evaluate_release_readiness(
     thermo_max_nonlinear_severity = None
     thermo_max_spread_ratio = None
     thermo_max_heterogeneity_index = None
+    thermo_spread_breach_rate = None
+    thermo_heterogeneity_breach_rate = None
     if not thermo_records:
         if protected or thermo_require_metrics:
             reasons.append(
@@ -739,6 +763,70 @@ def evaluate_release_readiness(
                     )
                 )
 
+    trend_reports = [latest] + rolling
+    trend_thermo_records = []
+    for report in trend_reports:
+        for rec in report_records(report):
+            if not isinstance(rec, dict):
+                continue
+            if isinstance(rec.get("thermo_constitutive_material_spread_ratio"), (int, float)) or isinstance(
+                rec.get("thermo_assignment_heterogeneity_index"), (int, float)
+            ):
+                trend_thermo_records.append(rec)
+
+    spread_breach_values = []
+    heterogeneity_breach_values = []
+    for rec in trend_thermo_records:
+        spread = rec.get("thermo_constitutive_material_spread_ratio")
+        if isinstance(spread, (int, float)):
+            value = float(spread)
+            if math.isfinite(value):
+                spread_breach_values.append(value > thermo_max_spread_ratio_threshold)
+        heterogeneity = rec.get("thermo_assignment_heterogeneity_index")
+        if isinstance(heterogeneity, (int, float)):
+            value = float(heterogeneity)
+            if math.isfinite(value):
+                heterogeneity_breach_values.append(
+                    value > thermo_max_heterogeneity_index_threshold
+                )
+
+    if spread_breach_values:
+        thermo_spread_breach_rate = (
+            sum(1 for breached in spread_breach_values if breached)
+            / len(spread_breach_values)
+        )
+        if thermo_spread_breach_rate > thermo_max_spread_breach_rate_threshold:
+            reasons.append(
+                Reason(
+                    code="THERMO_SPREAD_BREACH_RATE_HIGH",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"thermo spread breach rate {thermo_spread_breach_rate:.3f} exceeds "
+                        f"threshold {thermo_max_spread_breach_rate_threshold:.3f}"
+                    ),
+                )
+            )
+
+    if heterogeneity_breach_values:
+        thermo_heterogeneity_breach_rate = (
+            sum(1 for breached in heterogeneity_breach_values if breached)
+            / len(heterogeneity_breach_values)
+        )
+        if (
+            thermo_heterogeneity_breach_rate
+            > thermo_max_heterogeneity_breach_rate_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="THERMO_HETEROGENEITY_BREACH_RATE_HIGH",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"thermo heterogeneity breach rate {thermo_heterogeneity_breach_rate:.3f} exceeds "
+                        f"threshold {thermo_max_heterogeneity_breach_rate_threshold:.3f}"
+                    ),
+                )
+            )
+
     if any(reason.severity == "fail" for reason in reasons):
         verdict = "fail"
     elif reasons:
@@ -761,6 +849,8 @@ def evaluate_release_readiness(
         "thermo_max_nonlinear_severity": thermo_max_nonlinear_severity,
         "thermo_max_spread_ratio": thermo_max_spread_ratio,
         "thermo_max_heterogeneity_index": thermo_max_heterogeneity_index,
+        "thermo_spread_breach_rate": thermo_spread_breach_rate,
+        "thermo_heterogeneity_breach_rate": thermo_heterogeneity_breach_rate,
         "governance_profile": governance_profile_name(),
     }
 
@@ -791,6 +881,14 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Max thermo assignment heterogeneity index: "
         f"`{result.get('thermo_max_heterogeneity_index') if result.get('thermo_max_heterogeneity_index') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermo spread breach rate: "
+        f"`{result.get('thermo_spread_breach_rate') if result.get('thermo_spread_breach_rate') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermo heterogeneity breach rate: "
+        f"`{result.get('thermo_heterogeneity_breach_rate') if result.get('thermo_heterogeneity_breach_rate') is not None else '-'}`"
     )
     lines.append("")
     if result["reasons"]:
