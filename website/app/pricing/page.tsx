@@ -66,7 +66,7 @@ const pricingFaqItems: { question: string; answer: string; answerContent?: React
   {
     question: "How does RunMat Cloud billing work?",
     answer:
-      "Pro and Team are monthly subscriptions billed per user (per seat). You can upgrade or change plan from your account. Beyond included storage, usage is pay-as-you-go; you can set a usage cap so you never spend more than you're comfortable with.",
+      "Pro and Team are monthly subscriptions billed per user (per seat). You can upgrade or change plan from your account. Need more storage? Add space from your account settings.",
   },
   {
     question: "When do I need RunMat Enterprise instead of Cloud?",

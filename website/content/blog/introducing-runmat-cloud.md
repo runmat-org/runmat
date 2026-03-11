@@ -124,7 +124,7 @@ RunMat Cloud launches with three tiers:
 
 **Hobby (free)** — 100 MB of storage. Unlimited projects. Sign in and start working.
 
-**Pro ($30/month per user)** — 10 GB of storage with on-demand overage. For individuals and small teams shipping real work.
+**Pro ($30/month per user)** — 10 GB of storage. Additional storage available from your account. For individuals and small teams shipping real work.
 
 **Team ($100/month per user)** — 100 GB of storage, SSO/SCIM, and admin controls. For organizations that need governance.
 
@@ -160,4 +160,4 @@ MATLAB Online runs your code on MathWorks' servers and requires a paid license. 
 Chrome, Edge, Safari 18+, and Firefox 139+ all support WebGPU. If WebGPU is not available, the runtime falls back to CPU execution in the browser.
 
 **Can I use RunMat Cloud for large simulations?**
-Yes. The storage system is designed for large numerical outputs and deduplicates efficiently across runs. Storage limits depend on your plan. The Hobby tier includes 100 MB, and paid plans offer 10 GB to 100 GB with on-demand overage available.
+Yes. The storage system is designed for large numerical outputs and deduplicates efficiently across runs. Storage limits depend on your plan. The Hobby tier includes 100 MB, and paid plans offer 10 GB to 100 GB. Additional storage is available from your account.
