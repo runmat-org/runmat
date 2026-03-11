@@ -166,6 +166,14 @@ pub struct ElectroThermalCouplingOptions {
     pub time_profile: Vec<ElectroTimeProfilePoint>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PlasticityProxyOptions {
+    pub enabled: bool,
+    pub yield_strain: f64,
+    pub hardening_modulus_ratio: f64,
+    pub saturation_exponent: f64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QualityReasonCode {
@@ -189,6 +197,7 @@ pub enum QualityReasonCode {
     ThermoMechanicalFieldExtrapolationHigh,
     ElectroThermalTransientStress,
     ElectroThermalNonlinearStress,
+    PlasticityNonlinearStress,
     NonlinearResidualExceeded,
     NonlinearIncrementFailure,
     ThermoMechanicalNonlinearStress,
@@ -411,6 +420,8 @@ pub struct AnalysisNonlinearRunOptions {
     pub thermo_mechanical_coupling: Option<ThermoMechanicalCouplingOptions>,
     #[serde(default)]
     pub electro_thermal_coupling: Option<ElectroThermalCouplingOptions>,
+    #[serde(default)]
+    pub plasticity_proxy: Option<PlasticityProxyOptions>,
 }
 
 impl Default for AnalysisNonlinearRunOptions {
@@ -433,6 +444,7 @@ impl Default for AnalysisNonlinearRunOptions {
             prep_calibration_profile: None,
             thermo_mechanical_coupling: None,
             electro_thermal_coupling: None,
+            plasticity_proxy: None,
         }
     }
 }
@@ -457,6 +469,7 @@ impl AnalysisNonlinearRunOptions {
             prep_calibration_profile: None,
             thermo_mechanical_coupling: None,
             electro_thermal_coupling: None,
+            plasticity_proxy: None,
         }
     }
 
@@ -483,6 +496,7 @@ impl AnalysisNonlinearRunOptions {
             prep_calibration_profile: None,
             thermo_mechanical_coupling: None,
             electro_thermal_coupling: None,
+            plasticity_proxy: None,
         }
     }
 
@@ -505,6 +519,7 @@ impl AnalysisNonlinearRunOptions {
             prep_calibration_profile: None,
             thermo_mechanical_coupling: None,
             electro_thermal_coupling: None,
+            plasticity_proxy: None,
         }
     }
 }

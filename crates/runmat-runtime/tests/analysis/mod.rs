@@ -215,6 +215,7 @@ const ROLLING_TARGET_FIXTURES: &[&str] = &[
     "nonlinear_assembly_stress_gpu_provider",
     "nonlinear_softening_proxy_gpu_provider",
     "nonlinear_load_path_mix_gpu_provider",
+    "nonlinear_plasticity_proxy_gpu_provider",
 ];
 
 const SYNTHETIC_TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";

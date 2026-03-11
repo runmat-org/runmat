@@ -300,9 +300,9 @@ This section defines where upcoming multiphysics logic should live so the system
 
 ## Near-Term Next 3 Chunks
 
-1. Phase 3 electro-thermal Layer 1: additive coupled-study contracts + runtime validation + deterministic assembly diagnostics (`FEA_ET_COUPLING`).
-2. Phase 3 electro-thermal Layer 2: solver-policy shaping and electro-thermal transient/nonlinear diagnostics with benchmark threshold assertions.
-3. Phase 3 electro-thermal Layer 3: results/trends/readiness governance parity (branch-profile thresholds, trend drift reasons, CI summary posture) aligned with thermo-mechanical depth.
+1. Phase 4 kickoff Layer 1: additive nonlinear plasticity-proxy contracts and runtime validation for a single controlled stress path (`plasticity_proxy` in nonlinear run options).
+2. Phase 4 kickoff Layer 2: nonlinear solver diagnostic shaping for plasticity stress (`FEA_PLASTIC_NONLINEAR`) with quality-reason mapping (`PlasticityNonlinearStress`) under balanced/strict policy gates.
+3. Phase 4 kickoff Layer 3: conformance fixture and threshold governance for plasticity-proxy nonlinear behavior, then extend readiness/trend scripts with plastic drift posture once fixture stability is established.
 
 ## Success Milestones
 

@@ -139,6 +139,14 @@ pub struct FeaElectroThermalContext {
     pub time_profile: Vec<FeaElectroTimeProfilePoint>,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeaPlasticityProxyContext {
+    pub enabled: bool,
+    pub yield_strain: f64,
+    pub hardening_modulus_ratio: f64,
+    pub saturation_exponent: f64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FeaPrepCalibrationProfile {

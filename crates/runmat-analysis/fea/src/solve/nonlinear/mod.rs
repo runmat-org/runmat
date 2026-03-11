@@ -6,7 +6,8 @@ use crate::{
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     solve::transient::{solve_transient_system, TransientSolveOptions},
     thermo::{sample_time_profile_scale, temporal_profile_variation},
-    ComputeBackend, FeaElectroThermalContext, FeaPrepContext, FeaThermoMechanicalContext,
+    ComputeBackend, FeaElectroThermalContext, FeaPlasticityProxyContext, FeaPrepContext,
+    FeaThermoMechanicalContext,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -23,6 +24,7 @@ pub struct NonlinearSolveOptions {
     pub prep_context: Option<FeaPrepContext>,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     pub electro_thermal_context: Option<FeaElectroThermalContext>,
+    pub plasticity_proxy_context: Option<FeaPlasticityProxyContext>,
 }
 
 impl Default for NonlinearSolveOptions {
@@ -40,6 +42,7 @@ impl Default for NonlinearSolveOptions {
             prep_context: None,
             thermo_mechanical_context: None,
             electro_thermal_context: None,
+            plasticity_proxy_context: None,
         }
     }
 }
@@ -144,6 +147,8 @@ pub fn solve_nonlinear_system(
     let electro_severity_base = electro_thermal_severity(options.electro_thermal_context.clone());
     let electro_temporal_variation =
         electro_temporal_profile_variation(options.electro_thermal_context.clone());
+    let plasticity_severity_base =
+        plasticity_proxy_severity(options.plasticity_proxy_context.clone());
     let line_search_reduction = options.line_search_reduction.clamp(0.05, 0.95);
     let tangent_refresh_interval = options.tangent_refresh_interval.max(1);
 
@@ -173,6 +178,8 @@ pub fn solve_nonlinear_system(
     let mut electro_time_scale_sum = 0.0_f64;
     let mut thermo_residual_target_peak = options.tolerance;
     let mut thermo_increment_target_peak = options.increment_norm_tolerance;
+    let mut plasticity_severity_peak = 0.0_f64;
+    let mut plasticity_severity_sum = 0.0_f64;
 
     for index in 0..options.increment_count {
         let load_factor = load_factors.get(index).copied().unwrap_or(1.0);
@@ -193,6 +200,8 @@ pub fn solve_nonlinear_system(
             electro_time_scale(options.electro_thermal_context.clone(), load_factor);
         let thermo_severity = (thermo_severity_base * thermo_time_scale).clamp(0.0, 1.0);
         let electro_severity = (electro_severity_base * electro_time_scale).clamp(0.0, 1.0);
+        let plasticity_severity =
+            (plasticity_severity_base * (0.65 + 0.35 * load_factor)).clamp(0.0, 1.0);
         let thermo_residual_relaxation = 1.0 + 2.0 * thermo_severity;
         let thermo_increment_relaxation = 1.0 + 1.4 * thermo_severity;
         let convergence_residual_target = options.tolerance
@@ -208,6 +217,8 @@ pub fn solve_nonlinear_system(
         electro_severity_peak = electro_severity_peak.max(electro_severity);
         electro_severity_sum += electro_severity;
         electro_time_scale_sum += electro_time_scale;
+        plasticity_severity_peak = plasticity_severity_peak.max(plasticity_severity);
+        plasticity_severity_sum += plasticity_severity;
         let candidate = transient
             .displacement_snapshots
             .get(index)
@@ -428,6 +439,29 @@ pub fn solve_nonlinear_system(
             ),
         });
     }
+    if plasticity_severity_peak > 0.0 {
+        let plasticity = options.plasticity_proxy_context.as_ref();
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_PLASTIC_NONLINEAR".to_string(),
+            severity: if plasticity_severity_peak <= 0.6 {
+                FeaDiagnosticSeverity::Info
+            } else {
+                FeaDiagnosticSeverity::Warning
+            },
+            message: format!(
+                "severity_peak={} severity_mean={} yield_strain={} hardening_modulus_ratio={} saturation_exponent={}",
+                plasticity_severity_peak,
+                if options.increment_count == 0 {
+                    0.0
+                } else {
+                    plasticity_severity_sum / options.increment_count as f64
+                },
+                plasticity.map(|p| p.yield_strain).unwrap_or(0.0),
+                plasticity.map(|p| p.hardening_modulus_ratio).unwrap_or(0.0),
+                plasticity.map(|p| p.saturation_exponent).unwrap_or(0.0),
+            ),
+        });
+    }
     diagnostics.extend(transient.diagnostics);
 
     NonlinearSolveResult {
@@ -548,4 +582,18 @@ fn electro_temporal_profile_variation(context: Option<FeaElectroThermalContext>)
         return 0.0;
     }
     ((max_scale - min_scale).abs() / 2.0).clamp(0.0, 1.0)
+}
+
+fn plasticity_proxy_severity(context: Option<FeaPlasticityProxyContext>) -> f64 {
+    let Some(ctx) = context else {
+        return 0.0;
+    };
+    if !ctx.enabled {
+        return 0.0;
+    }
+    let yield_component = (0.012 / ctx.yield_strain.max(1.0e-6)).clamp(0.0, 1.5) / 1.5;
+    let hardening_component = (ctx.hardening_modulus_ratio / 0.2).clamp(0.0, 1.5) / 1.5;
+    let saturation_component = (ctx.saturation_exponent / 4.0).clamp(0.0, 1.5) / 1.5;
+    (0.55 * yield_component + 0.35 * hardening_component + 0.10 * saturation_component)
+        .clamp(0.0, 1.0)
 }

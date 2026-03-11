@@ -3,7 +3,8 @@ use super::manifest::default_options;
 use super::*;
 use runmat_runtime::analysis::{
     ElectroRegionConductivityScale, ElectroThermalCouplingOptions, ElectroTimeProfilePoint,
-    ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
+    PlasticityProxyOptions, ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta,
+    ThermoTimeProfilePoint,
 };
 use sha2::{Digest, Sha256};
 
@@ -191,8 +192,21 @@ fn nonlinear_options_for_spec(spec: &FixtureSpec) -> AnalysisNonlinearRunOptions
         });
     }
     options.electro_thermal_coupling = electro_coupling_for_fixture(spec.id);
+    options.plasticity_proxy = plasticity_proxy_for_fixture(spec.id);
 
     options
+}
+
+fn plasticity_proxy_for_fixture(spec_id: &str) -> Option<PlasticityProxyOptions> {
+    match spec_id {
+        "nonlinear_plasticity_proxy_gpu_provider" => Some(PlasticityProxyOptions {
+            enabled: true,
+            yield_strain: 2.0e-4,
+            hardening_modulus_ratio: 0.2,
+            saturation_exponent: 4.0,
+        }),
+        _ => None,
+    }
 }
 
 fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCouplingOptions> {
@@ -2137,6 +2151,36 @@ pub(super) fn run_fixture(
                             ),
                             Some(0.0),
                             Some(0.8),
+                        );
+                    }
+                    if spec.id == "nonlinear_plasticity_proxy_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "plasticity_nonlinear_severity_peak",
+                            "FEA_PLASTIC_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_PLASTIC_NONLINEAR",
+                                "severity_peak",
+                            ),
+                            Some(0.8),
+                            Some(0.95),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "plasticity_nonlinear_severity_mean",
+                            "FEA_PLASTIC_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_PLASTIC_NONLINEAR",
+                                "severity_mean",
+                            ),
+                            Some(0.6),
+                            Some(1.0),
                         );
                     }
 

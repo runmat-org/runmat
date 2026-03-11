@@ -32,6 +32,10 @@ REQUIRED_FIXTURES = {
         "electro_nonlinear_conductivity_spread_ratio",
         "electro_nonlinear_severity_peak",
     },
+    "nonlinear_plasticity_proxy_gpu_provider": {
+        "plasticity_nonlinear_severity_peak",
+        "plasticity_nonlinear_severity_mean",
+    },
     "thermo_mech_kickoff_gpu_provider": {
         "thermo_mech_thermal_strain_scale",
         "thermo_mech_thermal_load_scale",
@@ -192,6 +196,7 @@ def main() -> int:
             "electro_thermal_joule_benign_gpu_provider",
             "electro_thermal_joule_pathological_gpu_provider",
             "nonlinear_load_path_mix_gpu_provider",
+            "nonlinear_plasticity_proxy_gpu_provider",
         }:
             missing_fields = sorted(
                 field for field in ELECTRO_REQUIRED_FIELDS if field not in record

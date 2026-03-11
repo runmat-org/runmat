@@ -35,7 +35,7 @@ pub use contracts::{
     AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
     AnalysisValidateResult, ElectroRegionConductivityScale, ElectroThermalCouplingOptions,
     ElectroTimeProfilePoint, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
-    NonlinearMethod, NonlinearResultsData, PrecisionMode, PreconditionerMode,
+    NonlinearMethod, NonlinearResultsData, PlasticityProxyOptions, PrecisionMode, PreconditionerMode,
     PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
     RunProvenance, RunStatus, ThermoFieldInterpolationMode, ThermoFieldSource,
     ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
@@ -1467,6 +1467,23 @@ pub fn analysis_run_nonlinear_with_options_op(
             ));
         }
     }
+    if let Some(plasticity_options) = options.plasticity_proxy.as_ref() {
+        if let Err((detail, metadata)) = validate_plasticity_proxy_options(plasticity_options) {
+            return Err(operation_error(
+                ANALYSIS_RUN_NONLINEAR_OPERATION,
+                ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                detail,
+                metadata,
+            ));
+        }
+    }
 
     let nonlinear_run = run_nonlinear_with_options(model, backend, {
         let prep_context = resolve_run_prep_context(
@@ -1492,6 +1509,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             electro_thermal_context: to_fea_electro_thermal_context(
                 options.electro_thermal_coupling,
             ),
+            plasticity_proxy_context: to_fea_plasticity_proxy_context(options.plasticity_proxy),
         }
     })
     .map_err(|err| {
@@ -1578,6 +1596,10 @@ pub fn analysis_run_nonlinear_with_options_op(
     });
     let electro_nonlinear_warn = run.diagnostics.iter().any(|item| {
         item.code == "FEA_ET_NONLINEAR"
+            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    });
+    let plastic_nonlinear_warn = run.diagnostics.iter().any(|item| {
+        item.code == "FEA_PLASTIC_NONLINEAR"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
     });
     let thermo_spatial_gradient_index = diagnostic_metric(
@@ -1674,6 +1696,12 @@ pub fn analysis_run_nonlinear_with_options_op(
                 .to_string(),
         });
     }
+    if plastic_nonlinear_warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::PlasticityNonlinearStress,
+            detail: "plasticity nonlinear severity exceeded balanced threshold".to_string(),
+        });
+    }
     if thermo_spread_breach {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh,
@@ -1761,6 +1789,7 @@ pub fn analysis_run_nonlinear_with_options_op(
                         QualityReasonCode::NonlinearResidualExceeded
                             | QualityReasonCode::NonlinearIncrementFailure
                             | QualityReasonCode::ThermoMechanicalNonlinearStress
+                            | QualityReasonCode::PlasticityNonlinearStress
                             | QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
                             | QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
                             | QualityReasonCode::ThermoMechanicalGradientInstability
@@ -3194,6 +3223,17 @@ fn to_fea_electro_thermal_context(
     })
 }
 
+fn to_fea_plasticity_proxy_context(
+    options: Option<PlasticityProxyOptions>,
+) -> Option<runmat_analysis_fea::FeaPlasticityProxyContext> {
+    options.map(|plasticity| runmat_analysis_fea::FeaPlasticityProxyContext {
+        enabled: plasticity.enabled,
+        yield_strain: plasticity.yield_strain,
+        hardening_modulus_ratio: plasticity.hardening_modulus_ratio,
+        saturation_exponent: plasticity.saturation_exponent,
+    })
+}
+
 fn validate_thermo_coupling_options(
     model: &AnalysisModel,
     options: &ThermoMechanicalCouplingOptions,
@@ -3430,6 +3470,39 @@ fn validate_electro_coupling_options(
                 BTreeMap::from([("region_id".to_string(), scale.region_id.clone())]),
             ));
         }
+    }
+    Ok(())
+}
+
+fn validate_plasticity_proxy_options(
+    options: &PlasticityProxyOptions,
+) -> Result<(), (String, BTreeMap<String, String>)> {
+    if !options.enabled {
+        return Ok(());
+    }
+    if !options.yield_strain.is_finite() || options.yield_strain <= 0.0 {
+        return Err((
+            "plasticity proxy requires finite positive yield_strain".to_string(),
+            BTreeMap::from([("yield_strain".to_string(), options.yield_strain.to_string())]),
+        ));
+    }
+    if !options.hardening_modulus_ratio.is_finite() || options.hardening_modulus_ratio < 0.0 {
+        return Err((
+            "plasticity proxy requires finite non-negative hardening_modulus_ratio".to_string(),
+            BTreeMap::from([(
+                "hardening_modulus_ratio".to_string(),
+                options.hardening_modulus_ratio.to_string(),
+            )]),
+        ));
+    }
+    if !options.saturation_exponent.is_finite() || options.saturation_exponent < 0.0 {
+        return Err((
+            "plasticity proxy requires finite non-negative saturation_exponent".to_string(),
+            BTreeMap::from([(
+                "saturation_exponent".to_string(),
+                options.saturation_exponent.to_string(),
+            )]),
+        ));
     }
     Ok(())
 }

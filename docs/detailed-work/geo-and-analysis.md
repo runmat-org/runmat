@@ -1381,6 +1381,7 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-10: Began Phase-4 kickoff vertical slice (materials/contact depth prelude) with additive nonlinear `plasticity_proxy` contracts/validation, new nonlinear solver stress diagnostic `FEA_PLASTIC_NONLINEAR`, runtime quality-reason mapping (`PlasticityNonlinearStress`), and conformance harness coverage via `nonlinear_plasticity_proxy_gpu_provider` threshold assertions.
 - 2026-03-10: Extended electro-thermal governance drift parity by adding branch-profiled electro Joule/spread thresholds, breach-rate gates, and rolling trend-ratio checks to nonlinear release-readiness policy (`ELECTRO_*` reasons), then surfaced those new electro threshold/trend metrics in markdown and Tier-7.5 CI governance summaries.
 - 2026-03-10: Completed Phase-3 electro-thermal Layer-3 CI summary posture by extending nonlinear-conformance branch-gated report validation to require electro summary fields and by adding electro enabled/severity lines to Tier-7.5 governance summary output in CI step reports.
 - 2026-03-10: Started Phase-3 electro-thermal Layer-3 governance parity by surfacing electro-thermal summary metrics in `analysis.results` (coupling enabled/fingerprint, Joule/spread, transient/nonlinear severity), extending `analysis.trends` kind summaries with electro enabled/warn-rate posture fields, and wiring release-readiness/script validators and report summaries to consume electro posture signals alongside existing thermo governance.

@@ -2135,6 +2135,34 @@ fn analysis_run_nonlinear_rejects_unknown_thermo_expected_region_ids() {
 }
 
 #[test]
+fn analysis_run_nonlinear_rejects_invalid_plasticity_proxy_options() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+
+    let err = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            plasticity_proxy: Some(PlasticityProxyOptions {
+                enabled: true,
+                yield_strain: -1.0,
+                hardening_modulus_ratio: 0.1,
+                saturation_exponent: 1.0,
+            }),
+            ..AnalysisNonlinearRunOptions::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect_err("nonlinear run should reject invalid plasticity options");
+
+    assert_eq!(err.error_code, "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS");
+}
+
+#[test]
 fn analysis_run_transient_can_resolve_thermo_field_artifact() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
@@ -2458,6 +2486,47 @@ fn transient_balanced_degrades_when_thermo_heterogeneity_is_high() {
         reason.code == QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
             || reason.code == QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
     }));
+}
+
+#[test]
+fn nonlinear_balanced_degrades_when_plasticity_severity_is_high() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+
+    let run = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            quality_policy: QualityPolicy::Balanced,
+            plasticity_proxy: Some(PlasticityProxyOptions {
+                enabled: true,
+                yield_strain: 2.0e-4,
+                hardening_modulus_ratio: 0.2,
+                saturation_exponent: 4.0,
+            }),
+            ..AnalysisNonlinearRunOptions::balanced()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("nonlinear run should return envelope");
+
+    assert!(!run.data.publishable);
+    assert_eq!(run.data.run_status, RunStatus::Degraded);
+    assert!(run
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::PlasticityNonlinearStress));
+    assert!(run
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_PLASTIC_NONLINEAR"));
 }
 
 #[test]
