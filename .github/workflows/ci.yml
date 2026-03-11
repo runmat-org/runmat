@@ -440,6 +440,7 @@ jobs:
         if: always()
         env:
           RUNMAT_VALIDATE_THRESHOLD_RATCHET_ENFORCE: "true"
+          RUNMAT_VALIDATE_THRESHOLD_RATCHET_REQUIRE_OBSERVED: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
         run: python3 scripts/validate_threshold_ratchet_report.py
 
       - name: Summarize governance artifacts

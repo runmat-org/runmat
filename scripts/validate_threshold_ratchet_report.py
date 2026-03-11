@@ -16,6 +16,9 @@ def main() -> int:
         )
     )
     enforce = _is_true(os.getenv("RUNMAT_VALIDATE_THRESHOLD_RATCHET_ENFORCE", "false"))
+    require_observed = _is_true(
+        os.getenv("RUNMAT_VALIDATE_THRESHOLD_RATCHET_REQUIRE_OBSERVED", "false")
+    )
 
     if not report_path.exists():
         print(f"threshold ratchet report missing: {report_path}")
@@ -46,6 +49,24 @@ def main() -> int:
                 errors.append(f"{key}: old/new must be numeric")
             elif float(new) >= float(old):
                 errors.append(f"{key}: expected new < old for non-release ratchet")
+    elif profile == "release":
+        for entry in entries:
+            old = entry.get("old")
+            new = entry.get("new")
+            key = entry.get("threshold_key", "<unknown>")
+            if not isinstance(old, (int, float)) or not isinstance(new, (int, float)):
+                errors.append(f"{key}: old/new must be numeric")
+            elif float(new) > float(old):
+                errors.append(
+                    f"{key}: release profile must be non-regressive (new <= old)"
+                )
+
+    if require_observed:
+        for entry in entries:
+            key = entry.get("threshold_key", "<unknown>")
+            observed = entry.get("observed")
+            if not isinstance(observed, (int, float)):
+                errors.append(f"{key}: observed metric required but missing/non-numeric")
 
     if errors:
         print("threshold ratchet validation failed:")
