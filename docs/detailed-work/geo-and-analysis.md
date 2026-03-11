@@ -1381,6 +1381,7 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-10: Added auditable threshold-ratchet artifacts by generating `threshold_ratchet_report.json/.md` from readiness outputs (old/new/profile deltas with observed ratios), integrating the report into Tier-7.5 CI summaries/uploads, and adding unit-test coverage for report generation.
 - 2026-03-10: Performed threshold-ratcheting pass for reference drift governance by tightening development/feature plastic+contact trend thresholds, preserving stricter release caps, and surfacing explicit ratchet rationale (`rolling_median_reference_fixtures`) with rolling sample-count context in Tier-7.5 CI summaries.
 - 2026-03-10: Expanded non-proxy plastic reference evidence with a second complex hardening scenario (`nonlinear_plastic_hardening_reference_complex_gpu_provider`), added bounded complex hardening severity thresholds, and folded both reference plastic fixtures into rolling plastic-reference trend governance calibration.
 - 2026-03-10: Started Phase-4 constitutive depth by adding a first non-proxy elastic-plastic reference fixture (`nonlinear_plastic_hardening_reference_gpu_provider`) with bounded hardening severity envelopes and plastic reference trend-governance checks (`PLASTIC_REFERENCE_TREND_WORSENING`) surfaced through readiness and CI summaries.
