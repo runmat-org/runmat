@@ -28,6 +28,8 @@ def report(
     electro_thermal_coupling_enabled=None,
     electro_transient_severity=None,
     electro_nonlinear_severity=None,
+    electro_joule_heating_scale=None,
+    electro_conductivity_spread_ratio=None,
 ):
     fixtures = [
         "nonlinear_assembly_gpu_provider",
@@ -94,6 +96,12 @@ def report(
     if electro_nonlinear_severity is not None:
         for rec in records:
             rec["electro_nonlinear_severity"] = electro_nonlinear_severity
+    if electro_joule_heating_scale is not None:
+        for rec in records:
+            rec["electro_joule_heating_scale"] = electro_joule_heating_scale
+    if electro_conductivity_spread_ratio is not None:
+        for rec in records:
+            rec["electro_conductivity_spread_ratio"] = electro_conductivity_spread_ratio
 
     return {
         "passed": passed,
@@ -140,6 +148,12 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_NONLINEAR_SEVERITY",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MIN_ENABLED_RATE",
             "RUNMAT_RELEASE_READINESS_ELECTRO_REQUIRE_METRICS",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_HEATING_SCALE",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_CONDUCTIVITY_SPREAD_RATIO",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_BREACH_RATE",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_BREACH_RATE",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO",
             "RUNMAT_THERMO_FIELD_PROMOTION_REPORT",
             "RUNMAT_THERMO_FIELD_SIGNING_KEY",
             "GITHUB_REF_NAME",
@@ -614,6 +628,92 @@ class ReleaseReadinessTests(unittest.TestCase):
         )
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("ELECTRO_COUPLING_METRICS_MISSING", codes)
+
+    def test_electro_joule_heating_scale_high_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            electro_thermal_coupling_enabled=True,
+            electro_joule_heating_scale=11.6,
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_HEATING_SCALE"] = "10.5"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("ELECTRO_JOULE_HEATING_SCALE_HIGH", codes)
+
+    def test_electro_spread_ratio_high_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            electro_thermal_coupling_enabled=True,
+            electro_conductivity_spread_ratio=2.1,
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_MAX_CONDUCTIVITY_SPREAD_RATIO"] = "1.8"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("ELECTRO_CONDUCTIVITY_SPREAD_RATIO_HIGH", codes)
+
+    def test_electro_joule_breach_rate_high_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            electro_thermal_coupling_enabled=True,
+            electro_joule_heating_scale=11.4,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                electro_thermal_coupling_enabled=True,
+                electro_joule_heating_scale=11.0,
+            ),
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=92.0,
+                electro_thermal_coupling_enabled=True,
+                electro_joule_heating_scale=9.8,
+            ),
+        ]
+        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_HEATING_SCALE"] = "10.5"
+        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_BREACH_RATE"] = "0.5"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("ELECTRO_JOULE_BREACH_RATE_HIGH", codes)
+
+    def test_electro_spread_trend_worsening_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            electro_thermal_coupling_enabled=True,
+            electro_conductivity_spread_ratio=2.0,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                electro_thermal_coupling_enabled=True,
+                electro_conductivity_spread_ratio=1.4,
+            )
+        ]
+        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO"] = "1.3"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("ELECTRO_SPREAD_TREND_WORSENING", codes)
 
     def test_thermo_spread_ratio_high_reason_is_emitted(self):
         latest = report(

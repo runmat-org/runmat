@@ -465,6 +465,14 @@ jobs:
               electro_enabled_rate = ready.get('electro_coupling_enabled_rate')
               electro_max_transient = ready.get('electro_max_transient_severity')
               electro_max_nonlinear = ready.get('electro_max_nonlinear_severity')
+              electro_max_joule = ready.get('electro_max_joule_heating_scale')
+              electro_joule_threshold = ready.get('electro_max_joule_heating_scale_threshold')
+              electro_max_spread = ready.get('electro_max_conductivity_spread_ratio')
+              electro_spread_threshold = ready.get('electro_max_conductivity_spread_ratio_threshold')
+              electro_joule_breach_rate = ready.get('electro_joule_breach_rate')
+              electro_spread_breach_rate = ready.get('electro_spread_breach_rate')
+              electro_joule_trend_ratio = ready.get('electro_joule_trend_ratio')
+              electro_spread_trend_ratio = ready.get('electro_spread_trend_ratio')
               lines.append(
                   "- Thermo coupling enabled-rate: "
                   f"{thermo_enabled_rate if thermo_enabled_rate is not None else '-'}"
@@ -552,6 +560,38 @@ jobs:
               lines.append(
                   "- Electro-thermal max nonlinear severity: "
                   f"{electro_max_nonlinear if electro_max_nonlinear is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal max Joule heating scale: "
+                  f"{electro_max_joule if electro_max_joule is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal Joule threshold: "
+                  f"{electro_joule_threshold if electro_joule_threshold is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal max conductivity spread ratio: "
+                  f"{electro_max_spread if electro_max_spread is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal spread threshold: "
+                  f"{electro_spread_threshold if electro_spread_threshold is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal Joule breach rate: "
+                  f"{electro_joule_breach_rate if electro_joule_breach_rate is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal spread breach rate: "
+                  f"{electro_spread_breach_rate if electro_spread_breach_rate is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal Joule trend ratio: "
+                  f"{electro_joule_trend_ratio if electro_joule_trend_ratio is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal spread trend ratio: "
+                  f"{electro_spread_trend_ratio if electro_spread_trend_ratio is not None else '-'}"
               )
           else:
               lines.append("- Readiness artifact: missing")
