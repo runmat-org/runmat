@@ -359,6 +359,7 @@ jobs:
           python3 -m unittest \
             scripts.tests.test_release_readiness_nonlinear \
             scripts.tests.test_generate_threshold_ratchet_report \
+            scripts.tests.test_validate_threshold_ratchet_report \
             scripts.tests.test_evaluate_prep_calibration_drift \
             scripts.tests.test_promote_prep_calibration_evidence
 
@@ -434,6 +435,12 @@ jobs:
         run: |
           python3 scripts/generate_threshold_ratchet_report.py | tee threshold-ratchet.md
           cat threshold-ratchet.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Validate threshold ratchet report
+        if: always()
+        env:
+          RUNMAT_VALIDATE_THRESHOLD_RATCHET_ENFORCE: "true"
+        run: python3 scripts/validate_threshold_ratchet_report.py
 
       - name: Summarize governance artifacts
         if: always()

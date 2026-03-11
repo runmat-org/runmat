@@ -1381,6 +1381,7 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-10: Added enforceable ratchet-policy validation by introducing `validate_threshold_ratchet_report.py` (non-release profiles must remain truly ratcheted with reference-median rationale), wiring it into CI as a required Tier-7.5 gate, and adding dedicated unit-test coverage.
 - 2026-03-10: Added auditable threshold-ratchet artifacts by generating `threshold_ratchet_report.json/.md` from readiness outputs (old/new/profile deltas with observed ratios), integrating the report into Tier-7.5 CI summaries/uploads, and adding unit-test coverage for report generation.
 - 2026-03-10: Performed threshold-ratcheting pass for reference drift governance by tightening development/feature plastic+contact trend thresholds, preserving stricter release caps, and surfacing explicit ratchet rationale (`rolling_median_reference_fixtures`) with rolling sample-count context in Tier-7.5 CI summaries.
 - 2026-03-10: Expanded non-proxy plastic reference evidence with a second complex hardening scenario (`nonlinear_plastic_hardening_reference_complex_gpu_provider`), added bounded complex hardening severity thresholds, and folded both reference plastic fixtures into rolling plastic-reference trend governance calibration.

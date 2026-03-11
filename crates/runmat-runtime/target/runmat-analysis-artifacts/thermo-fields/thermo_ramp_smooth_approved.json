@@ -1,0 +1,41 @@
+{
+  "approved_at": "2026-03-10T00:05:00Z",
+  "approved_by": "release-bot",
+  "artifact_status": "approved",
+  "created_at": "2026-03-10T00:00:00Z",
+  "field_source": {
+    "expected_region_ids": [],
+    "interpolation_mode": "linear",
+    "revision": 1,
+    "source_id": "field/thermo-ramp-smooth"
+  },
+  "payload_hash": "sha256:4cdf93f79084444818e66ea0803c91abd85835b50f87135a52ae5ece8bbcf6b3",
+  "region_temperature_deltas": [
+    {
+      "region_id": "tip_steel",
+      "temperature_delta_k": 72.0
+    },
+    {
+      "region_id": "mid_aluminum",
+      "temperature_delta_k": 68.0
+    }
+  ],
+  "schema_version": "analysis_thermo_field_artifact/v1",
+  "signature": "sigv1:sha256:402cc6eff499c012c808e938ae85567698a9d3ea76b88785c78b9bde1986df8e",
+  "source_geometry_id": "geo:cantilever",
+  "source_geometry_revision": 1,
+  "time_profile": [
+    {
+      "normalized_time": 0.0,
+      "scale": 0.3
+    },
+    {
+      "normalized_time": 0.5,
+      "scale": 0.7
+    },
+    {
+      "normalized_time": 1.0,
+      "scale": 1.0
+    }
+  ]
+}

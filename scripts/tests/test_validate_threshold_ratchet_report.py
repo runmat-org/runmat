@@ -1,0 +1,69 @@
+import json
+import os
+import tempfile
+import unittest
+from pathlib import Path
+
+from scripts.validate_threshold_ratchet_report import main
+
+
+class ValidateThresholdRatchetReportTests(unittest.TestCase):
+    def test_passes_for_non_release_ratcheted_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ratchet.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "governance_profile": "development",
+                        "rationale": "rolling_median_reference_fixtures",
+                        "entries": [
+                            {
+                                "threshold_key": "A",
+                                "status": "ratcheted",
+                                "old": 1.2,
+                                "new": 1.1,
+                            }
+                        ],
+                    }
+                )
+            )
+            os.environ["RUNMAT_THRESHOLD_RATCHET_REPORT"] = str(path)
+            os.environ["RUNMAT_VALIDATE_THRESHOLD_RATCHET_ENFORCE"] = "true"
+            try:
+                rc = main()
+            finally:
+                os.environ.pop("RUNMAT_THRESHOLD_RATCHET_REPORT", None)
+                os.environ.pop("RUNMAT_VALIDATE_THRESHOLD_RATCHET_ENFORCE", None)
+            self.assertEqual(rc, 0)
+
+    def test_fails_when_non_release_not_ratcheted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "ratchet.json"
+            path.write_text(
+                json.dumps(
+                    {
+                        "governance_profile": "feature",
+                        "rationale": "rolling_median_reference_fixtures",
+                        "entries": [
+                            {
+                                "threshold_key": "A",
+                                "status": "unchanged",
+                                "old": 1.2,
+                                "new": 1.2,
+                            }
+                        ],
+                    }
+                )
+            )
+            os.environ["RUNMAT_THRESHOLD_RATCHET_REPORT"] = str(path)
+            os.environ["RUNMAT_VALIDATE_THRESHOLD_RATCHET_ENFORCE"] = "true"
+            try:
+                rc = main()
+            finally:
+                os.environ.pop("RUNMAT_THRESHOLD_RATCHET_REPORT", None)
+                os.environ.pop("RUNMAT_VALIDATE_THRESHOLD_RATCHET_ENFORCE", None)
+            self.assertEqual(rc, 1)
+
+
+if __name__ == "__main__":
+    unittest.main()
