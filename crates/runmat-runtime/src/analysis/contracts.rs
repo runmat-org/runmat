@@ -206,6 +206,7 @@ pub enum QualityReasonCode {
     ElectroThermalTransientStress,
     ElectroThermalNonlinearStress,
     PlasticityNonlinearStress,
+    ContactNonlinearStress,
     NonlinearResidualExceeded,
     NonlinearIncrementFailure,
     ThermoMechanicalNonlinearStress,
@@ -722,6 +723,7 @@ pub struct AnalysisResultsSummary {
     pub electro_transient_severity: Option<f64>,
     pub electro_nonlinear_severity: Option<f64>,
     pub plastic_nonlinear_severity: Option<f64>,
+    pub contact_nonlinear_severity: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -801,6 +803,7 @@ pub struct AnalysisTrendKindSummary {
     pub electro_transient_warn_rate: Option<f64>,
     pub electro_nonlinear_warn_rate: Option<f64>,
     pub plastic_nonlinear_warn_rate: Option<f64>,
+    pub contact_nonlinear_warn_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

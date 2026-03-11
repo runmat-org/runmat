@@ -822,6 +822,7 @@ fn analysis_trends_summarizes_recent_nonlinear_runs() {
     assert!(nonlinear.electro_transient_warn_rate.is_none());
     assert!(nonlinear.electro_nonlinear_warn_rate.is_none());
     assert!(nonlinear.plastic_nonlinear_warn_rate.is_none());
+    assert!(nonlinear.contact_nonlinear_warn_rate.is_none());
 
     storage::reset_artifact_store_for_tests();
 }
@@ -910,6 +911,7 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
     assert!(results.data.summary.electro_transient_severity.is_some());
     assert!(results.data.summary.electro_nonlinear_severity.is_none());
     assert!(results.data.summary.plastic_nonlinear_severity.is_none());
+    assert!(results.data.summary.contact_nonlinear_severity.is_none());
 }
 
 #[test]
@@ -996,6 +998,7 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
     assert!(results.data.summary.electro_nonlinear_severity.is_some());
     assert!(results.data.summary.electro_transient_severity.is_some());
     assert!(results.data.summary.plastic_nonlinear_severity.is_none());
+    assert!(results.data.summary.contact_nonlinear_severity.is_none());
 }
 
 #[test]
@@ -2558,6 +2561,47 @@ fn nonlinear_balanced_degrades_when_plasticity_severity_is_high() {
         .diagnostics
         .iter()
         .any(|diag| diag.code == "FEA_PLASTIC_NONLINEAR"));
+}
+
+#[test]
+fn nonlinear_balanced_degrades_when_contact_severity_is_high() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+
+    let run = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            quality_policy: QualityPolicy::Balanced,
+            contact_proxy: Some(ContactProxyOptions {
+                enabled: true,
+                penalty_stiffness_scale: 0.15,
+                max_penetration_ratio: 0.035,
+                friction_coefficient: 0.9,
+            }),
+            ..AnalysisNonlinearRunOptions::balanced()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("nonlinear run should return envelope");
+
+    assert!(!run.data.publishable);
+    assert_eq!(run.data.run_status, RunStatus::Degraded);
+    assert!(run
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::ContactNonlinearStress));
+    assert!(run
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_CONTACT_NONLINEAR"));
 }
 
 #[test]

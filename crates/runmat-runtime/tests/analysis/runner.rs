@@ -2,9 +2,9 @@ use super::harness::with_harness_provider;
 use super::manifest::default_options;
 use super::*;
 use runmat_runtime::analysis::{
-    ElectroRegionConductivityScale, ElectroThermalCouplingOptions, ElectroTimeProfilePoint,
-    PlasticityProxyOptions, ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta,
-    ThermoTimeProfilePoint,
+    ContactProxyOptions, ElectroRegionConductivityScale, ElectroThermalCouplingOptions,
+    ElectroTimeProfilePoint, PlasticityProxyOptions, ThermoMechanicalCouplingOptions,
+    ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
 };
 use sha2::{Digest, Sha256};
 
@@ -193,6 +193,7 @@ fn nonlinear_options_for_spec(spec: &FixtureSpec) -> AnalysisNonlinearRunOptions
     }
     options.electro_thermal_coupling = electro_coupling_for_fixture(spec.id);
     options.plasticity_proxy = plasticity_proxy_for_fixture(spec.id);
+    options.contact_proxy = contact_proxy_for_fixture(spec.id);
 
     options
 }
@@ -204,6 +205,24 @@ fn plasticity_proxy_for_fixture(spec_id: &str) -> Option<PlasticityProxyOptions>
             yield_strain: 2.0e-4,
             hardening_modulus_ratio: 0.2,
             saturation_exponent: 4.0,
+        }),
+        _ => None,
+    }
+}
+
+fn contact_proxy_for_fixture(spec_id: &str) -> Option<ContactProxyOptions> {
+    match spec_id {
+        "nonlinear_contact_proxy_gpu_provider" => Some(ContactProxyOptions {
+            enabled: true,
+            penalty_stiffness_scale: 0.15,
+            max_penetration_ratio: 0.035,
+            friction_coefficient: 0.9,
+        }),
+        "nonlinear_contact_frictionless_reference_gpu_provider" => Some(ContactProxyOptions {
+            enabled: true,
+            penalty_stiffness_scale: 2.0,
+            max_penetration_ratio: 0.01,
+            friction_coefficient: 0.0,
         }),
         _ => None,
     }
@@ -873,6 +892,7 @@ pub(super) fn run_fixture(
     let mut electro_transient_severity = None;
     let mut electro_nonlinear_severity = None;
     let mut plastic_nonlinear_severity = None;
+    let mut contact_nonlinear_severity = None;
     let mut publishable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
@@ -936,6 +956,7 @@ pub(super) fn run_fixture(
                     electro_transient_severity,
                     electro_nonlinear_severity,
                     plastic_nonlinear_severity,
+                    contact_nonlinear_severity,
                     publishable,
                     parity,
                     threshold_assertions,
@@ -2185,6 +2206,66 @@ pub(super) fn run_fixture(
                             Some(1.0),
                         );
                     }
+                    if spec.id == "nonlinear_contact_proxy_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "contact_nonlinear_severity_peak",
+                            "FEA_CONTACT_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_CONTACT_NONLINEAR",
+                                "severity_peak",
+                            ),
+                            Some(0.9),
+                            Some(1.05),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "contact_nonlinear_severity_mean",
+                            "FEA_CONTACT_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_CONTACT_NONLINEAR",
+                                "severity_mean",
+                            ),
+                            Some(0.6),
+                            Some(1.0),
+                        );
+                    }
+                    if spec.id == "nonlinear_contact_frictionless_reference_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "contact_frictionless_severity_peak",
+                            "FEA_CONTACT_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_CONTACT_NONLINEAR",
+                                "severity_peak",
+                            ),
+                            Some(0.2),
+                            Some(0.35),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "contact_frictionless_severity_mean",
+                            "FEA_CONTACT_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_CONTACT_NONLINEAR",
+                                "severity_mean",
+                            ),
+                            Some(0.15),
+                            Some(0.35),
+                        );
+                    }
 
                     let gpu_results = analysis_results_op(
                         &gpu_envelope.data,
@@ -2254,6 +2335,7 @@ pub(super) fn run_fixture(
                                 electro_transient_severity,
                                 electro_nonlinear_severity,
                                 plastic_nonlinear_severity,
+                                contact_nonlinear_severity,
                                 publishable,
                                 parity,
                                 threshold_assertions,
@@ -2315,6 +2397,8 @@ pub(super) fn run_fixture(
                         gpu_results.data.summary.electro_nonlinear_severity;
                     plastic_nonlinear_severity =
                         gpu_results.data.summary.plastic_nonlinear_severity;
+                    contact_nonlinear_severity =
+                        gpu_results.data.summary.contact_nonlinear_severity;
 
                     if let Some(root) = filesystem_root {
                         runmat_runtime::analysis::storage::configure_artifact_store(
@@ -2475,6 +2559,7 @@ pub(super) fn run_fixture(
                                     electro_transient_severity,
                                     electro_nonlinear_severity,
                                     plastic_nonlinear_severity,
+                                    contact_nonlinear_severity,
                                     publishable,
                                     parity,
                                     threshold_assertions,
@@ -2587,6 +2672,7 @@ pub(super) fn run_fixture(
         electro_transient_severity,
         electro_nonlinear_severity,
         plastic_nonlinear_severity,
+        contact_nonlinear_severity,
         publishable,
         parity,
         threshold_assertions,

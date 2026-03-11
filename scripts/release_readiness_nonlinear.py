@@ -82,6 +82,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE": "0.1",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS": "true",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY": "0.65",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_BREACH_RATE": "0.1",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS": "true",
         },
         "development": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.2",
@@ -118,6 +122,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE": "0.25",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS": "false",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY": "0.75",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_BREACH_RATE": "0.25",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS": "false",
         },
         "feature": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.25",
@@ -154,6 +162,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE": "0.5",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS": "false",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY": "0.9",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_BREACH_RATE": "0.5",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS": "false",
         },
     }
     return profile_map.get(profile, {}).get(name, default)
@@ -832,6 +844,30 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS", "false"),
         )
     )
+    contact_max_nonlinear_severity_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY",
+            profile_default("RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY", "0.75"),
+        )
+    )
+    contact_max_breach_rate_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_BREACH_RATE",
+            profile_default("RUNMAT_RELEASE_READINESS_CONTACT_MAX_BREACH_RATE", "0.25"),
+        )
+    )
+    contact_max_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO", "1.2"),
+        )
+    )
+    contact_require_metrics = is_true(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS",
+            profile_default("RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS", "false"),
+        )
+    )
     thermo_records = [
         rec
         for rec in report_records(latest)
@@ -866,6 +902,9 @@ def evaluate_release_readiness(
     plastic_max_nonlinear_severity = None
     plastic_breach_rate = None
     plastic_trend_ratio = None
+    contact_max_nonlinear_severity = None
+    contact_breach_rate = None
+    contact_trend_ratio = None
     if not thermo_records:
         if protected or thermo_require_metrics:
             reasons.append(
@@ -1293,6 +1332,42 @@ def evaluate_release_readiness(
                     )
                 )
 
+    contact_records = [
+        rec
+        for rec in report_records(latest)
+        if isinstance(rec.get("contact_nonlinear_severity"), (int, float))
+    ]
+    if not contact_records:
+        if protected or contact_require_metrics:
+            reasons.append(
+                Reason(
+                    code="CONTACT_METRICS_MISSING",
+                    severity="warn",
+                    detail="contact nonlinear posture metrics missing from report records",
+                )
+            )
+    else:
+        contact_values = []
+        for rec in contact_records:
+            raw_value = rec.get("contact_nonlinear_severity")
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                if math.isfinite(value):
+                    contact_values.append(value)
+        if contact_values:
+            contact_max_nonlinear_severity = max(contact_values)
+            if contact_max_nonlinear_severity > contact_max_nonlinear_severity_threshold:
+                reasons.append(
+                    Reason(
+                        code="CONTACT_NONLINEAR_SEVERITY_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"max contact nonlinear severity {contact_max_nonlinear_severity:.3f} exceeds "
+                            f"threshold {contact_max_nonlinear_severity_threshold:.3f}"
+                        ),
+                    )
+                )
+
     trend_reports = [latest] + rolling
     trend_thermo_records = []
     for report in trend_reports:
@@ -1443,6 +1518,34 @@ def evaluate_release_readiness(
                     detail=(
                         f"plastic nonlinear severity breach rate {plastic_breach_rate:.3f} exceeds "
                         f"threshold {plastic_max_breach_rate_threshold:.3f}"
+                    ),
+                )
+            )
+
+    contact_breach_values = []
+    for report in trend_reports:
+        for rec in report_records(report):
+            raw_value = rec.get("contact_nonlinear_severity")
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                if math.isfinite(value):
+                    contact_breach_values.append(
+                        value > contact_max_nonlinear_severity_threshold
+                    )
+
+    if contact_breach_values:
+        contact_breach_rate = (
+            sum(1 for breached in contact_breach_values if breached)
+            / len(contact_breach_values)
+        )
+        if contact_breach_rate > contact_max_breach_rate_threshold:
+            reasons.append(
+                Reason(
+                    code="CONTACT_BREACH_RATE_HIGH",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"contact nonlinear severity breach rate {contact_breach_rate:.3f} exceeds "
+                        f"threshold {contact_max_breach_rate_threshold:.3f}"
                     ),
                 )
             )
@@ -1676,6 +1779,34 @@ def evaluate_release_readiness(
                         )
                     )
 
+        latest_contact_values = []
+        for rec in report_records(latest):
+            raw_value = rec.get("contact_nonlinear_severity")
+            if isinstance(raw_value, (int, float)):
+                latest_contact_values.append(float(raw_value))
+        rolling_contact_values = []
+        for report in rolling:
+            for rec in report_records(report):
+                raw_value = rec.get("contact_nonlinear_severity")
+                if isinstance(raw_value, (int, float)):
+                    rolling_contact_values.append(float(raw_value))
+        if latest_contact_values and rolling_contact_values:
+            latest_contact = max(latest_contact_values)
+            baseline_contact = statistics.median(rolling_contact_values)
+            if baseline_contact > 0:
+                contact_trend_ratio = latest_contact / baseline_contact
+                if contact_trend_ratio > contact_max_trend_ratio_threshold:
+                    reasons.append(
+                        Reason(
+                            code="CONTACT_TREND_WORSENING",
+                            severity="fail" if protected else "warn",
+                            detail=(
+                                f"contact nonlinear severity trend ratio {contact_trend_ratio:.3f} exceeds "
+                                f"threshold {contact_max_trend_ratio_threshold:.3f}"
+                            ),
+                        )
+                    )
+
     if isinstance(thermo_promotion_report, dict) and thermo_promotion_report.get("blocked"):
         blocked_reasons = thermo_promotion_report.get("reasons")
         if isinstance(blocked_reasons, list) and blocked_reasons:
@@ -1764,6 +1895,12 @@ def evaluate_release_readiness(
         "plastic_max_breach_rate_threshold": plastic_max_breach_rate_threshold,
         "plastic_trend_ratio": plastic_trend_ratio,
         "plastic_max_trend_ratio_threshold": plastic_max_trend_ratio_threshold,
+        "contact_max_nonlinear_severity": contact_max_nonlinear_severity,
+        "contact_max_nonlinear_severity_threshold": contact_max_nonlinear_severity_threshold,
+        "contact_breach_rate": contact_breach_rate,
+        "contact_max_breach_rate_threshold": contact_max_breach_rate_threshold,
+        "contact_trend_ratio": contact_trend_ratio,
+        "contact_max_trend_ratio_threshold": contact_max_trend_ratio_threshold,
         "governance_profile": governance_profile_name(),
     }
 
@@ -1922,6 +2059,24 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Plastic trend ratio: "
         f"`{result.get('plastic_trend_ratio') if result.get('plastic_trend_ratio') is not None else '-'}`"
+    )
+    lines.append("")
+    lines.append("### Contact Posture")
+    lines.append(
+        "- Max contact nonlinear severity: "
+        f"`{result.get('contact_max_nonlinear_severity') if result.get('contact_max_nonlinear_severity') is not None else '-'}`"
+    )
+    lines.append(
+        "- Contact severity threshold: "
+        f"`{result.get('contact_max_nonlinear_severity_threshold') if result.get('contact_max_nonlinear_severity_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Contact breach rate: "
+        f"`{result.get('contact_breach_rate') if result.get('contact_breach_rate') is not None else '-'}`"
+    )
+    lines.append(
+        "- Contact trend ratio: "
+        f"`{result.get('contact_trend_ratio') if result.get('contact_trend_ratio') is not None else '-'}`"
     )
     lines.append("")
     if result["reasons"]:

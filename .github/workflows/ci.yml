@@ -288,6 +288,7 @@ jobs:
           RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY: "true"
           RUNMAT_VALIDATE_REQUIRE_ELECTRO_SUMMARY: "true"
           RUNMAT_VALIDATE_REQUIRE_PLASTIC_SUMMARY: "true"
+          RUNMAT_VALIDATE_REQUIRE_CONTACT_SUMMARY: "true"
         run: python3 scripts/validate_analysis_report_nonlinear.py
 
       - name: Enforce non-default thermo signing key on release branches
@@ -478,6 +479,10 @@ jobs:
               plastic_severity_threshold = ready.get('plastic_max_nonlinear_severity_threshold')
               plastic_breach_rate = ready.get('plastic_breach_rate')
               plastic_trend_ratio = ready.get('plastic_trend_ratio')
+              contact_max_severity = ready.get('contact_max_nonlinear_severity')
+              contact_severity_threshold = ready.get('contact_max_nonlinear_severity_threshold')
+              contact_breach_rate = ready.get('contact_breach_rate')
+              contact_trend_ratio = ready.get('contact_trend_ratio')
               lines.append(
                   "- Thermo coupling enabled-rate: "
                   f"{thermo_enabled_rate if thermo_enabled_rate is not None else '-'}"
@@ -613,6 +618,22 @@ jobs:
               lines.append(
                   "- Plastic trend ratio: "
                   f"{plastic_trend_ratio if plastic_trend_ratio is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact max nonlinear severity: "
+                  f"{contact_max_severity if contact_max_severity is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact severity threshold: "
+                  f"{contact_severity_threshold if contact_severity_threshold is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact breach rate: "
+                  f"{contact_breach_rate if contact_breach_rate is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact trend ratio: "
+                  f"{contact_trend_ratio if contact_trend_ratio is not None else '-'}"
               )
           else:
               lines.append("- Readiness artifact: missing")

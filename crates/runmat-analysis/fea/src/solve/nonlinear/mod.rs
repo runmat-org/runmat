@@ -151,6 +151,7 @@ pub fn solve_nonlinear_system(
         electro_temporal_profile_variation(options.electro_thermal_context.clone());
     let plasticity_severity_base =
         plasticity_proxy_severity(options.plasticity_proxy_context.clone());
+    let contact_severity_base = contact_proxy_severity(options.contact_proxy_context.clone());
     let line_search_reduction = options.line_search_reduction.clamp(0.05, 0.95);
     let tangent_refresh_interval = options.tangent_refresh_interval.max(1);
 
@@ -182,6 +183,8 @@ pub fn solve_nonlinear_system(
     let mut thermo_increment_target_peak = options.increment_norm_tolerance;
     let mut plasticity_severity_peak = 0.0_f64;
     let mut plasticity_severity_sum = 0.0_f64;
+    let mut contact_severity_peak = 0.0_f64;
+    let mut contact_severity_sum = 0.0_f64;
 
     for index in 0..options.increment_count {
         let load_factor = load_factors.get(index).copied().unwrap_or(1.0);
@@ -204,6 +207,7 @@ pub fn solve_nonlinear_system(
         let electro_severity = (electro_severity_base * electro_time_scale).clamp(0.0, 1.0);
         let plasticity_severity =
             (plasticity_severity_base * (0.65 + 0.35 * load_factor)).clamp(0.0, 1.0);
+        let contact_severity = (contact_severity_base * (0.7 + 0.3 * load_factor)).clamp(0.0, 1.0);
         let thermo_residual_relaxation = 1.0 + 2.0 * thermo_severity;
         let thermo_increment_relaxation = 1.0 + 1.4 * thermo_severity;
         let convergence_residual_target = options.tolerance
@@ -221,6 +225,8 @@ pub fn solve_nonlinear_system(
         electro_time_scale_sum += electro_time_scale;
         plasticity_severity_peak = plasticity_severity_peak.max(plasticity_severity);
         plasticity_severity_sum += plasticity_severity;
+        contact_severity_peak = contact_severity_peak.max(contact_severity);
+        contact_severity_sum += contact_severity;
         let candidate = transient
             .displacement_snapshots
             .get(index)
@@ -464,6 +470,29 @@ pub fn solve_nonlinear_system(
             ),
         });
     }
+    if contact_severity_peak > 0.0 {
+        let contact = options.contact_proxy_context.as_ref();
+        diagnostics.push(FeaDiagnostic {
+            code: "FEA_CONTACT_NONLINEAR".to_string(),
+            severity: if contact_severity_peak <= 0.6 {
+                FeaDiagnosticSeverity::Info
+            } else {
+                FeaDiagnosticSeverity::Warning
+            },
+            message: format!(
+                "severity_peak={} severity_mean={} penalty_stiffness_scale={} max_penetration_ratio={} friction_coefficient={}",
+                contact_severity_peak,
+                if options.increment_count == 0 {
+                    0.0
+                } else {
+                    contact_severity_sum / options.increment_count as f64
+                },
+                contact.map(|p| p.penalty_stiffness_scale).unwrap_or(0.0),
+                contact.map(|p| p.max_penetration_ratio).unwrap_or(0.0),
+                contact.map(|p| p.friction_coefficient).unwrap_or(0.0),
+            ),
+        });
+    }
     diagnostics.extend(transient.diagnostics);
 
     NonlinearSolveResult {
@@ -597,5 +626,19 @@ fn plasticity_proxy_severity(context: Option<FeaPlasticityProxyContext>) -> f64 
     let hardening_component = (ctx.hardening_modulus_ratio / 0.2).clamp(0.0, 1.5) / 1.5;
     let saturation_component = (ctx.saturation_exponent / 4.0).clamp(0.0, 1.5) / 1.5;
     (0.55 * yield_component + 0.35 * hardening_component + 0.10 * saturation_component)
+        .clamp(0.0, 1.0)
+}
+
+fn contact_proxy_severity(context: Option<FeaContactProxyContext>) -> f64 {
+    let Some(ctx) = context else {
+        return 0.0;
+    };
+    if !ctx.enabled {
+        return 0.0;
+    }
+    let penetration_component = (ctx.max_penetration_ratio / 0.02).clamp(0.0, 1.5) / 1.5;
+    let penalty_component = (1.0 / ctx.penalty_stiffness_scale.max(1.0e-6)).clamp(0.0, 1.5) / 1.5;
+    let friction_component = (ctx.friction_coefficient / 0.8).clamp(0.0, 1.5) / 1.5;
+    (0.5 * penetration_component + 0.3 * penalty_component + 0.2 * friction_component)
         .clamp(0.0, 1.0)
 }

@@ -1621,6 +1621,10 @@ pub fn analysis_run_nonlinear_with_options_op(
         item.code == "FEA_PLASTIC_NONLINEAR"
             && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
     });
+    let contact_nonlinear_warn = run.diagnostics.iter().any(|item| {
+        item.code == "FEA_CONTACT_NONLINEAR"
+            && item.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning
+    });
     let thermo_spatial_gradient_index = diagnostic_metric(
         &run.diagnostics,
         "FEA_TM_COUPLING",
@@ -1721,6 +1725,12 @@ pub fn analysis_run_nonlinear_with_options_op(
             detail: "plasticity nonlinear severity exceeded balanced threshold".to_string(),
         });
     }
+    if contact_nonlinear_warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ContactNonlinearStress,
+            detail: "contact nonlinear severity exceeded balanced threshold".to_string(),
+        });
+    }
     if thermo_spread_breach {
         quality_reasons.push(QualityReason {
             code: QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh,
@@ -1809,6 +1819,7 @@ pub fn analysis_run_nonlinear_with_options_op(
                             | QualityReasonCode::NonlinearIncrementFailure
                             | QualityReasonCode::ThermoMechanicalNonlinearStress
                             | QualityReasonCode::PlasticityNonlinearStress
+                            | QualityReasonCode::ContactNonlinearStress
                             | QualityReasonCode::ThermoMechanicalConstitutiveSpreadHigh
                             | QualityReasonCode::ThermoMechanicalAssignmentHeterogeneityHigh
                             | QualityReasonCode::ThermoMechanicalGradientInstability
@@ -2402,6 +2413,18 @@ pub fn analysis_results_op(
             "severity",
         )
     });
+    let contact_nonlinear_severity = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_CONTACT_NONLINEAR",
+        "severity_peak",
+    )
+    .or_else(|| {
+        diagnostic_metric(
+            &run_result.run.diagnostics,
+            "FEA_CONTACT_NONLINEAR",
+            "severity",
+        )
+    });
 
     let summary = AnalysisResultsSummary {
         field_count: fields.len(),
@@ -2452,6 +2475,7 @@ pub fn analysis_results_op(
         electro_transient_severity,
         electro_nonlinear_severity,
         plastic_nonlinear_severity,
+        contact_nonlinear_severity,
     };
 
     let modal_results = if query.include_modal_results {
@@ -3074,6 +3098,11 @@ pub fn analysis_trends_op(
         } else {
             None
         };
+        let contact_nonlinear_warn_rate = if kind == AnalysisRunKind::Nonlinear {
+            diagnostic_warning_rate(&entries, "FEA_CONTACT_NONLINEAR")
+        } else {
+            None
+        };
 
         summaries.push(AnalysisTrendKindSummary {
             run_kind: kind,
@@ -3097,6 +3126,7 @@ pub fn analysis_trends_op(
             electro_transient_warn_rate,
             electro_nonlinear_warn_rate,
             plastic_nonlinear_warn_rate,
+            contact_nonlinear_warn_rate,
         });
     }
 

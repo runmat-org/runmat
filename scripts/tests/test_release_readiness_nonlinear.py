@@ -31,6 +31,7 @@ def report(
     electro_joule_heating_scale=None,
     electro_conductivity_spread_ratio=None,
     plastic_nonlinear_severity=None,
+    contact_nonlinear_severity=None,
 ):
     fixtures = [
         "nonlinear_assembly_gpu_provider",
@@ -106,6 +107,9 @@ def report(
     if plastic_nonlinear_severity is not None:
         for rec in records:
             rec["plastic_nonlinear_severity"] = plastic_nonlinear_severity
+    if contact_nonlinear_severity is not None:
+        for rec in records:
+            rec["contact_nonlinear_severity"] = contact_nonlinear_severity
 
     return {
         "passed": passed,
@@ -162,6 +166,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_BREACH_RATE",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS",
             "RUNMAT_THERMO_FIELD_PROMOTION_REPORT",
             "RUNMAT_THERMO_FIELD_SIGNING_KEY",
             "GITHUB_REF_NAME",
@@ -796,6 +804,80 @@ class ReleaseReadinessTests(unittest.TestCase):
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("PLASTIC_TREND_WORSENING", codes)
+
+    def test_contact_nonlinear_severity_high_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            contact_nonlinear_severity=0.92,
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY"] = "0.8"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("CONTACT_NONLINEAR_SEVERITY_HIGH", codes)
+
+    def test_contact_metrics_missing_warn_when_required(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        os.environ["RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS"] = "true"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("CONTACT_METRICS_MISSING", codes)
+
+    def test_contact_breach_rate_high_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            contact_nonlinear_severity=0.9,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                contact_nonlinear_severity=0.84,
+            ),
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=92.0,
+                contact_nonlinear_severity=0.5,
+            ),
+        ]
+        os.environ["RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY"] = "0.8"
+        os.environ["RUNMAT_RELEASE_READINESS_CONTACT_MAX_BREACH_RATE"] = "0.5"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("CONTACT_BREACH_RATE_HIGH", codes)
+
+    def test_contact_trend_worsening_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            contact_nonlinear_severity=0.88,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                contact_nonlinear_severity=0.6,
+            )
+        ]
+        os.environ["RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO"] = "1.3"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("CONTACT_TREND_WORSENING", codes)
 
     def test_thermo_spread_ratio_high_reason_is_emitted(self):
         latest = report(

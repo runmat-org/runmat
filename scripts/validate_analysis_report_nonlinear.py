@@ -36,6 +36,14 @@ REQUIRED_FIXTURES = {
         "plasticity_nonlinear_severity_peak",
         "plasticity_nonlinear_severity_mean",
     },
+    "nonlinear_contact_proxy_gpu_provider": {
+        "contact_nonlinear_severity_peak",
+        "contact_nonlinear_severity_mean",
+    },
+    "nonlinear_contact_frictionless_reference_gpu_provider": {
+        "contact_frictionless_severity_peak",
+        "contact_frictionless_severity_mean",
+    },
     "thermo_mech_kickoff_gpu_provider": {
         "thermo_mech_thermal_strain_scale",
         "thermo_mech_thermal_load_scale",
@@ -119,6 +127,10 @@ PLASTIC_REQUIRED_FIELDS = {
     "plastic_nonlinear_severity",
 }
 
+CONTACT_REQUIRED_FIELDS = {
+    "contact_nonlinear_severity",
+}
+
 
 def is_true(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
@@ -146,6 +158,9 @@ def main() -> int:
     )
     require_plastic_summary = is_true(
         os.getenv("RUNMAT_VALIDATE_REQUIRE_PLASTIC_SUMMARY", "false")
+    )
+    require_contact_summary = is_true(
+        os.getenv("RUNMAT_VALIDATE_REQUIRE_CONTACT_SUMMARY", "false")
     )
     records = {
         record.get("fixture_id"): record
@@ -224,6 +239,18 @@ def main() -> int:
                     f"fixture {fixture_id} missing plastic summary fields: {', '.join(missing_fields)}"
                 )
 
+        if fixture_id in {
+            "nonlinear_contact_proxy_gpu_provider",
+            "nonlinear_contact_frictionless_reference_gpu_provider",
+        }:
+            missing_fields = sorted(
+                field for field in CONTACT_REQUIRED_FIELDS if field not in record
+            )
+            if missing_fields:
+                errors.append(
+                    f"fixture {fixture_id} missing contact summary fields: {', '.join(missing_fields)}"
+                )
+
     if require_thermo_summary:
         thermo_records = [
             record
@@ -286,6 +313,17 @@ def main() -> int:
         if not plastic_records:
             errors.append(
                 "plastic summary fields missing across all records while RUNMAT_VALIDATE_REQUIRE_PLASTIC_SUMMARY=true"
+            )
+
+    if require_contact_summary:
+        contact_records = [
+            record
+            for record in records.values()
+            if isinstance(record.get("contact_nonlinear_severity"), (int, float))
+        ]
+        if not contact_records:
+            errors.append(
+                "contact summary fields missing across all records while RUNMAT_VALIDATE_REQUIRE_CONTACT_SUMMARY=true"
             )
 
     if errors:

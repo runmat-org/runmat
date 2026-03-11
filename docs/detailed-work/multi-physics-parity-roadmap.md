@@ -300,9 +300,9 @@ This section defines where upcoming multiphysics logic should live so the system
 
 ## Near-Term Next 3 Chunks
 
-1. Phase 4 contact Layer 2: contact-proxy nonlinear solver diagnostics (e.g., penetration/compliance signals) and quality-reason mapping under balanced/strict policy gates.
-2. Phase 4 contact Layer 3: conformance fixture thresholds and readiness/trend drift posture for contact proxy, aligned with plastic/electro governance depth.
-3. Phase 4 material/contact promotion: tighten branch-profile thresholds and promote from proxy diagnostics toward reference-backed contact/plastic benchmark evidence.
+1. Phase 4 material/contact promotion: tighten branch-profile thresholds and promote from proxy diagnostics toward reference-backed contact/plastic benchmark evidence.
+2. Phase 4 constitutive depth: add first non-proxy elastic-plastic benchmark with bounded hardening-path drift thresholds and release-readiness trend checks.
+3. Phase 4 realism hardening: add a second reference-backed contact scenario (higher load path complexity) and calibrate drift thresholds from rolling evidence.
 
 ## Success Milestones
 

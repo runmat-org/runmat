@@ -17,6 +17,7 @@ pub enum FixtureId {
     NonlinearAssemblyStress,
     NonlinearSofteningProxy,
     NonlinearLoadPathMix,
+    NonlinearContactFrictionlessReference,
     ThermoMechanicalKickoff,
     ThermoGradientBenign,
     ThermoGradientPathological,
@@ -41,6 +42,9 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
         FixtureId::NonlinearAssemblyStress => nonlinear_assembly_stress_fixture(),
         FixtureId::NonlinearSofteningProxy => nonlinear_softening_proxy_fixture(),
         FixtureId::NonlinearLoadPathMix => nonlinear_load_path_mix_fixture(),
+        FixtureId::NonlinearContactFrictionlessReference => {
+            nonlinear_contact_frictionless_reference_fixture()
+        }
         FixtureId::ThermoMechanicalKickoff => thermo_mechanical_kickoff_fixture(),
         FixtureId::ThermoGradientBenign => thermo_gradient_benign_fixture(),
         FixtureId::ThermoGradientPathological => thermo_gradient_pathological_fixture(),
@@ -330,6 +334,33 @@ fn nonlinear_load_path_mix_fixture() -> AnalysisModel {
         step_id: "nonlinear_mix_1".to_string(),
         kind: AnalysisStepKind::Nonlinear,
     }];
+    model
+}
+
+fn nonlinear_contact_frictionless_reference_fixture() -> AnalysisModel {
+    let mut model = nonlinear_load_path_mix_fixture();
+    model.model_id =
+        AnalysisModelId("nonlinear_contact_frictionless_reference_fixture".to_string());
+    model.material_assignments = vec![
+        MaterialAssignment {
+            region_id: "tip_steel".to_string(),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+        MaterialAssignment {
+            region_id: "mid_aluminum".to_string(),
+            expected_material_id: "mat_aluminum".to_string(),
+            assigned_material_id: "mat_aluminum".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+        MaterialAssignment {
+            region_id: "polymer_segment".to_string(),
+            expected_material_id: "mat_polymer".to_string(),
+            assigned_material_id: "mat_polymer".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+    ];
     model
 }
 
