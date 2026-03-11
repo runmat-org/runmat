@@ -9,6 +9,7 @@ NONLINEAR_FIXTURES = (
     "nonlinear_assembly_stress_gpu_provider",
     "nonlinear_softening_proxy_gpu_provider",
     "nonlinear_load_path_mix_gpu_provider",
+    "nonlinear_plasticity_proxy_gpu_provider",
 )
 
 THERMO_FIXTURE = "thermo_mech_kickoff_gpu_provider"
@@ -46,10 +47,10 @@ def build_summary(report):
     )
     lines.append("")
     lines.append(
-        "| Fixture | Publishable | GPU ms | Speedup | Failed increments | Backtracks | Tangent rebuilds | Calibration profile | Acceptance score | Thermo enabled | Thermo modulus scale | Thermo spread ratio | Thermo heterogeneity | Thermo transient sev | Thermo nonlinear sev | Electro enabled | Electro joule scale | Electro spread ratio | Electro transient sev | Electro nonlinear sev |"
+        "| Fixture | Publishable | GPU ms | Speedup | Failed increments | Backtracks | Tangent rebuilds | Calibration profile | Acceptance score | Thermo enabled | Thermo modulus scale | Thermo spread ratio | Thermo heterogeneity | Thermo transient sev | Thermo nonlinear sev | Electro enabled | Electro joule scale | Electro spread ratio | Electro transient sev | Electro nonlinear sev | Plastic nonlinear sev |"
     )
     lines.append(
-        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |"
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: |"
     )
 
     for fixture_id in NONLINEAR_FIXTURES:
@@ -74,7 +75,7 @@ def build_summary(report):
             tangent = tmap.get("nonlinear_tangent_rebuild_count", {}).get("observed")
 
         lines.append(
-            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+            "| {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
                 fixture_id,
                 record.get("publishable", "-"),
                 format_num(record.get("gpu_run_ms")),
@@ -95,6 +96,7 @@ def build_summary(report):
                 format_num(record.get("electro_conductivity_spread_ratio")),
                 format_num(record.get("electro_transient_severity")),
                 format_num(record.get("electro_nonlinear_severity")),
+                format_num(record.get("plastic_nonlinear_severity")),
             )
         )
 

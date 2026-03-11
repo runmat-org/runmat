@@ -172,6 +172,7 @@ struct FixtureRunRecord {
     electro_conductivity_spread_ratio: Option<f64>,
     electro_transient_severity: Option<f64>,
     electro_nonlinear_severity: Option<f64>,
+    plastic_nonlinear_severity: Option<f64>,
     publishable: Option<bool>,
     parity: Option<ParitySummary>,
     threshold_assertions: Vec<ThresholdAssertionRecord>,

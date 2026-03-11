@@ -6,8 +6,8 @@ use crate::{
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     solve::transient::{solve_transient_system, TransientSolveOptions},
     thermo::{sample_time_profile_scale, temporal_profile_variation},
-    ComputeBackend, FeaElectroThermalContext, FeaPlasticityProxyContext, FeaPrepContext,
-    FeaThermoMechanicalContext,
+    ComputeBackend, FeaContactProxyContext, FeaElectroThermalContext, FeaPlasticityProxyContext,
+    FeaPrepContext, FeaThermoMechanicalContext,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -25,6 +25,7 @@ pub struct NonlinearSolveOptions {
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     pub electro_thermal_context: Option<FeaElectroThermalContext>,
     pub plasticity_proxy_context: Option<FeaPlasticityProxyContext>,
+    pub contact_proxy_context: Option<FeaContactProxyContext>,
 }
 
 impl Default for NonlinearSolveOptions {
@@ -43,6 +44,7 @@ impl Default for NonlinearSolveOptions {
             thermo_mechanical_context: None,
             electro_thermal_context: None,
             plasticity_proxy_context: None,
+            contact_proxy_context: None,
         }
     }
 }

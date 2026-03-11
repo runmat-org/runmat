@@ -18,6 +18,7 @@ NONLINEAR_FIXTURES = {
     "nonlinear_assembly_stress_gpu_provider",
     "nonlinear_softening_proxy_gpu_provider",
     "nonlinear_load_path_mix_gpu_provider",
+    "nonlinear_plasticity_proxy_gpu_provider",
 }
 
 
@@ -90,6 +91,7 @@ def collect_metrics(reports, window):
                     ),
                     "electro_transient_severity": record.get("electro_transient_severity"),
                     "electro_nonlinear_severity": record.get("electro_nonlinear_severity"),
+                    "plastic_nonlinear_severity": record.get("plastic_nonlinear_severity"),
                 }
             )
     return fixture_samples
@@ -98,14 +100,14 @@ def collect_metrics(reports, window):
 def summarize(samples):
     lines = ["## Nonlinear Trend Summary", ""]
     lines.append(
-        "| Fixture | Samples | Median GPU ms | Median speedup | Publishable rate | Median acceptance score | Thermo enabled rate | Median thermo modulus scale | Median thermo spread ratio | Median thermo heterogeneity | Median thermo transient sev | Median thermo nonlinear sev | Electro enabled rate | Median electro joule scale | Median electro spread ratio | Median electro transient sev | Median electro nonlinear sev |"
+        "| Fixture | Samples | Median GPU ms | Median speedup | Publishable rate | Median acceptance score | Thermo enabled rate | Median thermo modulus scale | Median thermo spread ratio | Median thermo heterogeneity | Median thermo transient sev | Median thermo nonlinear sev | Electro enabled rate | Median electro joule scale | Median electro spread ratio | Median electro transient sev | Median electro nonlinear sev | Median plastic nonlinear sev |"
     )
     lines.append(
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
     )
     for fixture, values in sorted(samples.items()):
         if not values:
-            lines.append(f"| {fixture} | 0 | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - |")
+            lines.append(f"| {fixture} | 0 | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - |")
             continue
         gpu = [v["gpu_run_ms"] for v in values if isinstance(v["gpu_run_ms"], (int, float))]
         speedup = [
@@ -174,8 +176,13 @@ def summarize(samples):
             for v in values
             if isinstance(v.get("electro_nonlinear_severity"), (int, float))
         ]
+        plastic_nonlinear_values = [
+            v["plastic_nonlinear_severity"]
+            for v in values
+            if isinstance(v.get("plastic_nonlinear_severity"), (int, float))
+        ]
         lines.append(
-            "| {} | {} | {} | {} | {:.2f} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
+            "| {} | {} | {} | {} | {:.2f} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
                 fixture,
                 len(values),
                 f"{statistics.median(gpu):.3f}" if gpu else "-",
@@ -235,6 +242,11 @@ def summarize(samples):
                 (
                     f"{statistics.median(electro_nonlinear_values):.3f}"
                     if electro_nonlinear_values
+                    else "-"
+                ),
+                (
+                    f"{statistics.median(plastic_nonlinear_values):.3f}"
+                    if plastic_nonlinear_values
                     else "-"
                 ),
             )

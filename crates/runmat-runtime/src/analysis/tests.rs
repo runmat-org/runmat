@@ -821,6 +821,7 @@ fn analysis_trends_summarizes_recent_nonlinear_runs() {
     assert!(nonlinear.electro_thermal_coupling_enabled_rate.is_none());
     assert!(nonlinear.electro_transient_warn_rate.is_none());
     assert!(nonlinear.electro_nonlinear_warn_rate.is_none());
+    assert!(nonlinear.plastic_nonlinear_warn_rate.is_none());
 
     storage::reset_artifact_store_for_tests();
 }
@@ -908,6 +909,7 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
         .is_some());
     assert!(results.data.summary.electro_transient_severity.is_some());
     assert!(results.data.summary.electro_nonlinear_severity.is_none());
+    assert!(results.data.summary.plastic_nonlinear_severity.is_none());
 }
 
 #[test]
@@ -993,6 +995,7 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
         .is_some());
     assert!(results.data.summary.electro_nonlinear_severity.is_some());
     assert!(results.data.summary.electro_transient_severity.is_some());
+    assert!(results.data.summary.plastic_nonlinear_severity.is_none());
 }
 
 #[test]
@@ -2158,6 +2161,34 @@ fn analysis_run_nonlinear_rejects_invalid_plasticity_proxy_options() {
         OperationContext::new(None, None),
     )
     .expect_err("nonlinear run should reject invalid plasticity options");
+
+    assert_eq!(err.error_code, "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS");
+}
+
+#[test]
+fn analysis_run_nonlinear_rejects_invalid_contact_proxy_options() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "nonlinear_1".to_string(),
+        kind: AnalysisStepKind::Nonlinear,
+    }];
+
+    let err = analysis_run_nonlinear_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisNonlinearRunOptions {
+            contact_proxy: Some(ContactProxyOptions {
+                enabled: true,
+                penalty_stiffness_scale: 0.0,
+                max_penetration_ratio: 0.01,
+                friction_coefficient: 0.0,
+            }),
+            ..AnalysisNonlinearRunOptions::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect_err("nonlinear run should reject invalid contact options");
 
     assert_eq!(err.error_code, "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS");
 }

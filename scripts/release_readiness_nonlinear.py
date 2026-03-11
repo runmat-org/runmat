@@ -78,6 +78,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_BREACH_RATE": "0.1",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.65",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE": "0.1",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS": "true",
         },
         "development": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.2",
@@ -110,6 +114,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_BREACH_RATE": "0.25",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.75",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE": "0.25",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS": "false",
         },
         "feature": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.25",
@@ -142,6 +150,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_BREACH_RATE": "0.5",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.9",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE": "0.5",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS": "false",
         },
     }
     return profile_map.get(profile, {}).get(name, default)
@@ -796,6 +808,30 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO", "1.2"),
         )
     )
+    plastic_max_nonlinear_severity_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY",
+            profile_default("RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY", "0.75"),
+        )
+    )
+    plastic_max_breach_rate_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE",
+            profile_default("RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE", "0.25"),
+        )
+    )
+    plastic_max_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO", "1.2"),
+        )
+    )
+    plastic_require_metrics = is_true(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS",
+            profile_default("RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS", "false"),
+        )
+    )
     thermo_records = [
         rec
         for rec in report_records(latest)
@@ -827,6 +863,9 @@ def evaluate_release_readiness(
     electro_spread_breach_rate = None
     electro_joule_trend_ratio = None
     electro_spread_trend_ratio = None
+    plastic_max_nonlinear_severity = None
+    plastic_breach_rate = None
+    plastic_trend_ratio = None
     if not thermo_records:
         if protected or thermo_require_metrics:
             reasons.append(
@@ -1218,6 +1257,42 @@ def evaluate_release_readiness(
                     )
                 )
 
+    plastic_records = [
+        rec
+        for rec in report_records(latest)
+        if isinstance(rec.get("plastic_nonlinear_severity"), (int, float))
+    ]
+    if not plastic_records:
+        if protected or plastic_require_metrics:
+            reasons.append(
+                Reason(
+                    code="PLASTIC_METRICS_MISSING",
+                    severity="warn",
+                    detail="plastic nonlinear posture metrics missing from report records",
+                )
+            )
+    else:
+        plastic_values = []
+        for rec in plastic_records:
+            raw_value = rec.get("plastic_nonlinear_severity")
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                if math.isfinite(value):
+                    plastic_values.append(value)
+        if plastic_values:
+            plastic_max_nonlinear_severity = max(plastic_values)
+            if plastic_max_nonlinear_severity > plastic_max_nonlinear_severity_threshold:
+                reasons.append(
+                    Reason(
+                        code="PLASTIC_NONLINEAR_SEVERITY_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"max plastic nonlinear severity {plastic_max_nonlinear_severity:.3f} exceeds "
+                            f"threshold {plastic_max_nonlinear_severity_threshold:.3f}"
+                        ),
+                    )
+                )
+
     trend_reports = [latest] + rolling
     trend_thermo_records = []
     for report in trend_reports:
@@ -1340,6 +1415,34 @@ def evaluate_release_readiness(
                     detail=(
                         f"electro-thermal spread breach rate {electro_spread_breach_rate:.3f} exceeds "
                         f"threshold {electro_max_spread_breach_rate_threshold:.3f}"
+                    ),
+                )
+            )
+
+    plastic_breach_values = []
+    for report in trend_reports:
+        for rec in report_records(report):
+            raw_value = rec.get("plastic_nonlinear_severity")
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                if math.isfinite(value):
+                    plastic_breach_values.append(
+                        value > plastic_max_nonlinear_severity_threshold
+                    )
+
+    if plastic_breach_values:
+        plastic_breach_rate = (
+            sum(1 for breached in plastic_breach_values if breached)
+            / len(plastic_breach_values)
+        )
+        if plastic_breach_rate > plastic_max_breach_rate_threshold:
+            reasons.append(
+                Reason(
+                    code="PLASTIC_BREACH_RATE_HIGH",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"plastic nonlinear severity breach rate {plastic_breach_rate:.3f} exceeds "
+                        f"threshold {plastic_max_breach_rate_threshold:.3f}"
                     ),
                 )
             )
@@ -1545,6 +1648,34 @@ def evaluate_release_readiness(
                         )
                     )
 
+        latest_plastic_values = []
+        for rec in report_records(latest):
+            raw_value = rec.get("plastic_nonlinear_severity")
+            if isinstance(raw_value, (int, float)):
+                latest_plastic_values.append(float(raw_value))
+        rolling_plastic_values = []
+        for report in rolling:
+            for rec in report_records(report):
+                raw_value = rec.get("plastic_nonlinear_severity")
+                if isinstance(raw_value, (int, float)):
+                    rolling_plastic_values.append(float(raw_value))
+        if latest_plastic_values and rolling_plastic_values:
+            latest_plastic = max(latest_plastic_values)
+            baseline_plastic = statistics.median(rolling_plastic_values)
+            if baseline_plastic > 0:
+                plastic_trend_ratio = latest_plastic / baseline_plastic
+                if plastic_trend_ratio > plastic_max_trend_ratio_threshold:
+                    reasons.append(
+                        Reason(
+                            code="PLASTIC_TREND_WORSENING",
+                            severity="fail" if protected else "warn",
+                            detail=(
+                                f"plastic nonlinear severity trend ratio {plastic_trend_ratio:.3f} exceeds "
+                                f"threshold {plastic_max_trend_ratio_threshold:.3f}"
+                            ),
+                        )
+                    )
+
     if isinstance(thermo_promotion_report, dict) and thermo_promotion_report.get("blocked"):
         blocked_reasons = thermo_promotion_report.get("reasons")
         if isinstance(blocked_reasons, list) and blocked_reasons:
@@ -1627,6 +1758,12 @@ def evaluate_release_readiness(
         "electro_spread_trend_ratio": electro_spread_trend_ratio,
         "electro_max_joule_trend_ratio_threshold": electro_max_joule_trend_ratio_threshold,
         "electro_max_spread_trend_ratio_threshold": electro_max_spread_trend_ratio_threshold,
+        "plastic_max_nonlinear_severity": plastic_max_nonlinear_severity,
+        "plastic_max_nonlinear_severity_threshold": plastic_max_nonlinear_severity_threshold,
+        "plastic_breach_rate": plastic_breach_rate,
+        "plastic_max_breach_rate_threshold": plastic_max_breach_rate_threshold,
+        "plastic_trend_ratio": plastic_trend_ratio,
+        "plastic_max_trend_ratio_threshold": plastic_max_trend_ratio_threshold,
         "governance_profile": governance_profile_name(),
     }
 
@@ -1767,6 +1904,24 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Electro-thermal spread trend ratio: "
         f"`{result.get('electro_spread_trend_ratio') if result.get('electro_spread_trend_ratio') is not None else '-'}`"
+    )
+    lines.append("")
+    lines.append("### Plasticity Posture")
+    lines.append(
+        "- Max plastic nonlinear severity: "
+        f"`{result.get('plastic_max_nonlinear_severity') if result.get('plastic_max_nonlinear_severity') is not None else '-'}`"
+    )
+    lines.append(
+        "- Plastic severity threshold: "
+        f"`{result.get('plastic_max_nonlinear_severity_threshold') if result.get('plastic_max_nonlinear_severity_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Plastic breach rate: "
+        f"`{result.get('plastic_breach_rate') if result.get('plastic_breach_rate') is not None else '-'}`"
+    )
+    lines.append(
+        "- Plastic trend ratio: "
+        f"`{result.get('plastic_trend_ratio') if result.get('plastic_trend_ratio') is not None else '-'}`"
     )
     lines.append("")
     if result["reasons"]:

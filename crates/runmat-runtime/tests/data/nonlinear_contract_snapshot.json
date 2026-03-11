@@ -62,6 +62,7 @@
     "electro_joule_heating_scale": null,
     "electro_conductivity_spread_ratio": null,
     "electro_transient_severity": null,
-    "electro_nonlinear_severity": null
+    "electro_nonlinear_severity": null,
+    "plastic_nonlinear_severity": null
   }
 }

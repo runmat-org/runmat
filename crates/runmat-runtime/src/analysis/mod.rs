@@ -33,9 +33,10 @@ pub use contracts::{
     AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunKind, AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult,
     AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
-    AnalysisValidateResult, ElectroRegionConductivityScale, ElectroThermalCouplingOptions,
-    ElectroTimeProfilePoint, ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData,
-    NonlinearMethod, NonlinearResultsData, PlasticityProxyOptions, PrecisionMode, PreconditionerMode,
+    AnalysisValidateResult, ContactProxyOptions, ElectroRegionConductivityScale,
+    ElectroThermalCouplingOptions, ElectroTimeProfilePoint, ModalFrequencyBasis,
+    ModalFrequencyUnits, ModalResultsData, NonlinearMethod, NonlinearResultsData,
+    PlasticityProxyOptions, PrecisionMode, PreconditionerMode,
     PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
     RunProvenance, RunStatus, ThermoFieldInterpolationMode, ThermoFieldSource,
     ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
@@ -1484,6 +1485,23 @@ pub fn analysis_run_nonlinear_with_options_op(
             ));
         }
     }
+    if let Some(contact_options) = options.contact_proxy.as_ref() {
+        if let Err((detail, metadata)) = validate_contact_proxy_options(contact_options) {
+            return Err(operation_error(
+                ANALYSIS_RUN_NONLINEAR_OPERATION,
+                ANALYSIS_RUN_NONLINEAR_OP_VERSION,
+                &context,
+                OperationErrorSpec {
+                    error_code: "ANALYSIS_RUN_NONLINEAR_INVALID_OPTIONS",
+                    error_type: OperationErrorType::Input,
+                    retryable: false,
+                    severity: OperationErrorSeverity::Error,
+                },
+                detail,
+                metadata,
+            ));
+        }
+    }
 
     let nonlinear_run = run_nonlinear_with_options(model, backend, {
         let prep_context = resolve_run_prep_context(
@@ -1510,6 +1528,7 @@ pub fn analysis_run_nonlinear_with_options_op(
                 options.electro_thermal_coupling,
             ),
             plasticity_proxy_context: to_fea_plasticity_proxy_context(options.plasticity_proxy),
+            contact_proxy_context: to_fea_contact_proxy_context(options.contact_proxy),
         }
     })
     .map_err(|err| {
@@ -2371,6 +2390,18 @@ pub fn analysis_results_op(
         "severity_peak",
     )
     .or_else(|| diagnostic_metric(&run_result.run.diagnostics, "FEA_ET_NONLINEAR", "severity"));
+    let plastic_nonlinear_severity = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_PLASTIC_NONLINEAR",
+        "severity_peak",
+    )
+    .or_else(|| {
+        diagnostic_metric(
+            &run_result.run.diagnostics,
+            "FEA_PLASTIC_NONLINEAR",
+            "severity",
+        )
+    });
 
     let summary = AnalysisResultsSummary {
         field_count: fields.len(),
@@ -2420,6 +2451,7 @@ pub fn analysis_results_op(
         electro_conductivity_spread_ratio,
         electro_transient_severity,
         electro_nonlinear_severity,
+        plastic_nonlinear_severity,
     };
 
     let modal_results = if query.include_modal_results {
@@ -3037,6 +3069,11 @@ pub fn analysis_trends_op(
         } else {
             None
         };
+        let plastic_nonlinear_warn_rate = if kind == AnalysisRunKind::Nonlinear {
+            diagnostic_warning_rate(&entries, "FEA_PLASTIC_NONLINEAR")
+        } else {
+            None
+        };
 
         summaries.push(AnalysisTrendKindSummary {
             run_kind: kind,
@@ -3059,6 +3096,7 @@ pub fn analysis_trends_op(
             electro_thermal_coupling_enabled_rate,
             electro_transient_warn_rate,
             electro_nonlinear_warn_rate,
+            plastic_nonlinear_warn_rate,
         });
     }
 
@@ -3231,6 +3269,17 @@ fn to_fea_plasticity_proxy_context(
         yield_strain: plasticity.yield_strain,
         hardening_modulus_ratio: plasticity.hardening_modulus_ratio,
         saturation_exponent: plasticity.saturation_exponent,
+    })
+}
+
+fn to_fea_contact_proxy_context(
+    options: Option<ContactProxyOptions>,
+) -> Option<runmat_analysis_fea::FeaContactProxyContext> {
+    options.map(|contact| runmat_analysis_fea::FeaContactProxyContext {
+        enabled: contact.enabled,
+        penalty_stiffness_scale: contact.penalty_stiffness_scale,
+        max_penetration_ratio: contact.max_penetration_ratio,
+        friction_coefficient: contact.friction_coefficient,
     })
 }
 
@@ -3501,6 +3550,42 @@ fn validate_plasticity_proxy_options(
             BTreeMap::from([(
                 "saturation_exponent".to_string(),
                 options.saturation_exponent.to_string(),
+            )]),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_contact_proxy_options(
+    options: &ContactProxyOptions,
+) -> Result<(), (String, BTreeMap<String, String>)> {
+    if !options.enabled {
+        return Ok(());
+    }
+    if !options.penalty_stiffness_scale.is_finite() || options.penalty_stiffness_scale <= 0.0 {
+        return Err((
+            "contact proxy requires finite positive penalty_stiffness_scale".to_string(),
+            BTreeMap::from([(
+                "penalty_stiffness_scale".to_string(),
+                options.penalty_stiffness_scale.to_string(),
+            )]),
+        ));
+    }
+    if !options.max_penetration_ratio.is_finite() || options.max_penetration_ratio < 0.0 {
+        return Err((
+            "contact proxy requires finite non-negative max_penetration_ratio".to_string(),
+            BTreeMap::from([(
+                "max_penetration_ratio".to_string(),
+                options.max_penetration_ratio.to_string(),
+            )]),
+        ));
+    }
+    if !options.friction_coefficient.is_finite() || options.friction_coefficient < 0.0 {
+        return Err((
+            "contact proxy requires finite non-negative friction_coefficient".to_string(),
+            BTreeMap::from([(
+                "friction_coefficient".to_string(),
+                options.friction_coefficient.to_string(),
             )]),
         ));
     }

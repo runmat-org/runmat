@@ -300,9 +300,9 @@ This section defines where upcoming multiphysics logic should live so the system
 
 ## Near-Term Next 3 Chunks
 
-1. Phase 4 kickoff Layer 1: additive nonlinear plasticity-proxy contracts and runtime validation for a single controlled stress path (`plasticity_proxy` in nonlinear run options).
-2. Phase 4 kickoff Layer 2: nonlinear solver diagnostic shaping for plasticity stress (`FEA_PLASTIC_NONLINEAR`) with quality-reason mapping (`PlasticityNonlinearStress`) under balanced/strict policy gates.
-3. Phase 4 kickoff Layer 3: conformance fixture and threshold governance for plasticity-proxy nonlinear behavior, then extend readiness/trend scripts with plastic drift posture once fixture stability is established.
+1. Phase 4 contact Layer 2: contact-proxy nonlinear solver diagnostics (e.g., penetration/compliance signals) and quality-reason mapping under balanced/strict policy gates.
+2. Phase 4 contact Layer 3: conformance fixture thresholds and readiness/trend drift posture for contact proxy, aligned with plastic/electro governance depth.
+3. Phase 4 material/contact promotion: tighten branch-profile thresholds and promote from proxy diagnostics toward reference-backed contact/plastic benchmark evidence.
 
 ## Success Milestones
 

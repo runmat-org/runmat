@@ -115,6 +115,10 @@ ELECTRO_REQUIRED_FIELDS = {
     "electro_nonlinear_severity",
 }
 
+PLASTIC_REQUIRED_FIELDS = {
+    "plastic_nonlinear_severity",
+}
+
 
 def is_true(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
@@ -139,6 +143,9 @@ def main() -> int:
     )
     require_electro_summary = is_true(
         os.getenv("RUNMAT_VALIDATE_REQUIRE_ELECTRO_SUMMARY", "false")
+    )
+    require_plastic_summary = is_true(
+        os.getenv("RUNMAT_VALIDATE_REQUIRE_PLASTIC_SUMMARY", "false")
     )
     records = {
         record.get("fixture_id"): record
@@ -206,6 +213,17 @@ def main() -> int:
                     f"fixture {fixture_id} missing electro summary fields: {', '.join(missing_fields)}"
                 )
 
+        if fixture_id in {
+            "nonlinear_plasticity_proxy_gpu_provider",
+        }:
+            missing_fields = sorted(
+                field for field in PLASTIC_REQUIRED_FIELDS if field not in record
+            )
+            if missing_fields:
+                errors.append(
+                    f"fixture {fixture_id} missing plastic summary fields: {', '.join(missing_fields)}"
+                )
+
     if require_thermo_summary:
         thermo_records = [
             record
@@ -257,6 +275,17 @@ def main() -> int:
         if not electro_records:
             errors.append(
                 "electro summary fields missing across all records while RUNMAT_VALIDATE_REQUIRE_ELECTRO_SUMMARY=true"
+            )
+
+    if require_plastic_summary:
+        plastic_records = [
+            record
+            for record in records.values()
+            if isinstance(record.get("plastic_nonlinear_severity"), (int, float))
+        ]
+        if not plastic_records:
+            errors.append(
+                "plastic summary fields missing across all records while RUNMAT_VALIDATE_REQUIRE_PLASTIC_SUMMARY=true"
             )
 
     if errors:

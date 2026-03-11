@@ -30,6 +30,7 @@ def report(
     electro_nonlinear_severity=None,
     electro_joule_heating_scale=None,
     electro_conductivity_spread_ratio=None,
+    plastic_nonlinear_severity=None,
 ):
     fixtures = [
         "nonlinear_assembly_gpu_provider",
@@ -102,6 +103,9 @@ def report(
     if electro_conductivity_spread_ratio is not None:
         for rec in records:
             rec["electro_conductivity_spread_ratio"] = electro_conductivity_spread_ratio
+    if plastic_nonlinear_severity is not None:
+        for rec in records:
+            rec["plastic_nonlinear_severity"] = plastic_nonlinear_severity
 
     return {
         "passed": passed,
@@ -154,6 +158,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS",
             "RUNMAT_THERMO_FIELD_PROMOTION_REPORT",
             "RUNMAT_THERMO_FIELD_SIGNING_KEY",
             "GITHUB_REF_NAME",
@@ -714,6 +722,80 @@ class ReleaseReadinessTests(unittest.TestCase):
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("ELECTRO_SPREAD_TREND_WORSENING", codes)
+
+    def test_plastic_nonlinear_severity_high_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            plastic_nonlinear_severity=0.92,
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY"] = "0.8"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PLASTIC_NONLINEAR_SEVERITY_HIGH", codes)
+
+    def test_plastic_metrics_missing_warn_when_required(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        os.environ["RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS"] = "true"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PLASTIC_METRICS_MISSING", codes)
+
+    def test_plastic_breach_rate_high_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            plastic_nonlinear_severity=0.9,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                plastic_nonlinear_severity=0.84,
+            ),
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=92.0,
+                plastic_nonlinear_severity=0.5,
+            ),
+        ]
+        os.environ["RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY"] = "0.8"
+        os.environ["RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE"] = "0.5"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PLASTIC_BREACH_RATE_HIGH", codes)
+
+    def test_plastic_trend_worsening_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            plastic_nonlinear_severity=0.88,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                plastic_nonlinear_severity=0.6,
+            )
+        ]
+        os.environ["RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO"] = "1.3"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PLASTIC_TREND_WORSENING", codes)
 
     def test_thermo_spread_ratio_high_reason_is_emitted(self):
         latest = report(

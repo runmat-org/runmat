@@ -174,6 +174,14 @@ pub struct PlasticityProxyOptions {
     pub saturation_exponent: f64,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ContactProxyOptions {
+    pub enabled: bool,
+    pub penalty_stiffness_scale: f64,
+    pub max_penetration_ratio: f64,
+    pub friction_coefficient: f64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum QualityReasonCode {
@@ -422,6 +430,8 @@ pub struct AnalysisNonlinearRunOptions {
     pub electro_thermal_coupling: Option<ElectroThermalCouplingOptions>,
     #[serde(default)]
     pub plasticity_proxy: Option<PlasticityProxyOptions>,
+    #[serde(default)]
+    pub contact_proxy: Option<ContactProxyOptions>,
 }
 
 impl Default for AnalysisNonlinearRunOptions {
@@ -445,6 +455,7 @@ impl Default for AnalysisNonlinearRunOptions {
             thermo_mechanical_coupling: None,
             electro_thermal_coupling: None,
             plasticity_proxy: None,
+            contact_proxy: None,
         }
     }
 }
@@ -470,6 +481,7 @@ impl AnalysisNonlinearRunOptions {
             thermo_mechanical_coupling: None,
             electro_thermal_coupling: None,
             plasticity_proxy: None,
+            contact_proxy: None,
         }
     }
 
@@ -497,6 +509,7 @@ impl AnalysisNonlinearRunOptions {
             thermo_mechanical_coupling: None,
             electro_thermal_coupling: None,
             plasticity_proxy: None,
+            contact_proxy: None,
         }
     }
 
@@ -520,6 +533,7 @@ impl AnalysisNonlinearRunOptions {
             thermo_mechanical_coupling: None,
             electro_thermal_coupling: None,
             plasticity_proxy: None,
+            contact_proxy: None,
         }
     }
 }
@@ -707,6 +721,7 @@ pub struct AnalysisResultsSummary {
     pub electro_conductivity_spread_ratio: Option<f64>,
     pub electro_transient_severity: Option<f64>,
     pub electro_nonlinear_severity: Option<f64>,
+    pub plastic_nonlinear_severity: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -785,6 +800,7 @@ pub struct AnalysisTrendKindSummary {
     pub electro_thermal_coupling_enabled_rate: Option<f64>,
     pub electro_transient_warn_rate: Option<f64>,
     pub electro_nonlinear_warn_rate: Option<f64>,
+    pub plastic_nonlinear_warn_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

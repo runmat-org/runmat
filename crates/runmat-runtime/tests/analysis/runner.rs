@@ -872,6 +872,7 @@ pub(super) fn run_fixture(
     let mut electro_conductivity_spread_ratio = None;
     let mut electro_transient_severity = None;
     let mut electro_nonlinear_severity = None;
+    let mut plastic_nonlinear_severity = None;
     let mut publishable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
@@ -934,6 +935,7 @@ pub(super) fn run_fixture(
                     electro_conductivity_spread_ratio,
                     electro_transient_severity,
                     electro_nonlinear_severity,
+                    plastic_nonlinear_severity,
                     publishable,
                     parity,
                     threshold_assertions,
@@ -2251,6 +2253,7 @@ pub(super) fn run_fixture(
                                 electro_conductivity_spread_ratio,
                                 electro_transient_severity,
                                 electro_nonlinear_severity,
+                                plastic_nonlinear_severity,
                                 publishable,
                                 parity,
                                 threshold_assertions,
@@ -2310,6 +2313,8 @@ pub(super) fn run_fixture(
                         gpu_results.data.summary.electro_transient_severity;
                     electro_nonlinear_severity =
                         gpu_results.data.summary.electro_nonlinear_severity;
+                    plastic_nonlinear_severity =
+                        gpu_results.data.summary.plastic_nonlinear_severity;
 
                     if let Some(root) = filesystem_root {
                         runmat_runtime::analysis::storage::configure_artifact_store(
@@ -2469,6 +2474,7 @@ pub(super) fn run_fixture(
                                     electro_conductivity_spread_ratio,
                                     electro_transient_severity,
                                     electro_nonlinear_severity,
+                                    plastic_nonlinear_severity,
                                     publishable,
                                     parity,
                                     threshold_assertions,
@@ -2580,6 +2586,7 @@ pub(super) fn run_fixture(
         electro_conductivity_spread_ratio,
         electro_transient_severity,
         electro_nonlinear_severity,
+        plastic_nonlinear_severity,
         publishable,
         parity,
         threshold_assertions,
