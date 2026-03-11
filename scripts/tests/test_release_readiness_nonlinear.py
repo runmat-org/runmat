@@ -38,6 +38,11 @@ def report(
         "nonlinear_assembly_stress_gpu_provider",
         "nonlinear_softening_proxy_gpu_provider",
         "nonlinear_load_path_mix_gpu_provider",
+        "nonlinear_contact_proxy_gpu_provider",
+        "nonlinear_contact_frictionless_reference_gpu_provider",
+        "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+        "nonlinear_plastic_hardening_reference_gpu_provider",
+        "nonlinear_plastic_hardening_reference_complex_gpu_provider",
     ]
     records = [
         {
@@ -166,10 +171,12 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_REFERENCE_MAX_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS",
+            "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO",
             "RUNMAT_THERMO_FIELD_PROMOTION_REPORT",
             "RUNMAT_THERMO_FIELD_SIGNING_KEY",
             "GITHUB_REF_NAME",
@@ -805,6 +812,26 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("PLASTIC_TREND_WORSENING", codes)
 
+    def test_plastic_reference_trend_worsening_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            plastic_nonlinear_severity=0.42,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                plastic_nonlinear_severity=0.3,
+            )
+        ]
+        os.environ["RUNMAT_RELEASE_READINESS_PLASTIC_REFERENCE_MAX_TREND_RATIO"] = "1.3"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PLASTIC_REFERENCE_TREND_WORSENING", codes)
+
     def test_contact_nonlinear_severity_high_reason_is_emitted(self):
         latest = report(
             passed=True,
@@ -878,6 +905,26 @@ class ReleaseReadinessTests(unittest.TestCase):
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("CONTACT_TREND_WORSENING", codes)
+
+    def test_contact_reference_trend_worsening_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            contact_nonlinear_severity=0.45,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                contact_nonlinear_severity=0.3,
+            )
+        ]
+        os.environ["RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO"] = "1.3"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("CONTACT_REFERENCE_TREND_WORSENING", codes)
 
     def test_thermo_spread_ratio_high_reason_is_emitted(self):
         latest = report(

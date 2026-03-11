@@ -301,8 +301,8 @@ This section defines where upcoming multiphysics logic should live so the system
 ## Near-Term Next 3 Chunks
 
 1. Phase 4 material/contact promotion: tighten branch-profile thresholds and promote from proxy diagnostics toward reference-backed contact/plastic benchmark evidence.
-2. Phase 4 constitutive depth: add first non-proxy elastic-plastic benchmark with bounded hardening-path drift thresholds and release-readiness trend checks.
-3. Phase 4 realism hardening: add a second reference-backed contact scenario (higher load path complexity) and calibrate drift thresholds from rolling evidence.
+2. Phase 4 constitutive depth: expand non-proxy elastic-plastic evidence with additional reference hardening/load-path scenarios and calibrate bounded drift thresholds from rolling history.
+3. Phase 4 realism hardening: ratchet contact/plastic drift thresholds from rolling benchmark history while preserving protected-branch stability.
 
 ## Success Milestones
 

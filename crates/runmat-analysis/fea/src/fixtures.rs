@@ -18,6 +18,9 @@ pub enum FixtureId {
     NonlinearSofteningProxy,
     NonlinearLoadPathMix,
     NonlinearContactFrictionlessReference,
+    NonlinearContactFrictionlessReferenceComplex,
+    NonlinearPlasticHardeningReference,
+    NonlinearPlasticHardeningReferenceComplex,
     ThermoMechanicalKickoff,
     ThermoGradientBenign,
     ThermoGradientPathological,
@@ -44,6 +47,15 @@ pub fn fixture_model(fixture: FixtureId) -> AnalysisModel {
         FixtureId::NonlinearLoadPathMix => nonlinear_load_path_mix_fixture(),
         FixtureId::NonlinearContactFrictionlessReference => {
             nonlinear_contact_frictionless_reference_fixture()
+        }
+        FixtureId::NonlinearContactFrictionlessReferenceComplex => {
+            nonlinear_contact_frictionless_reference_complex_fixture()
+        }
+        FixtureId::NonlinearPlasticHardeningReference => {
+            nonlinear_plastic_hardening_reference_fixture()
+        }
+        FixtureId::NonlinearPlasticHardeningReferenceComplex => {
+            nonlinear_plastic_hardening_reference_complex_fixture()
         }
         FixtureId::ThermoMechanicalKickoff => thermo_mechanical_kickoff_fixture(),
         FixtureId::ThermoGradientBenign => thermo_gradient_benign_fixture(),
@@ -361,6 +373,104 @@ fn nonlinear_contact_frictionless_reference_fixture() -> AnalysisModel {
             confidence: EvidenceConfidence::Verified,
         },
     ];
+    model
+}
+
+fn nonlinear_contact_frictionless_reference_complex_fixture() -> AnalysisModel {
+    let mut model = nonlinear_contact_frictionless_reference_fixture();
+    model.model_id =
+        AnalysisModelId("nonlinear_contact_frictionless_reference_complex_fixture".to_string());
+    model.loads = (0..560)
+        .map(|i| {
+            let scale = 1.0 + (i as f64) * 0.004;
+            if i % 2 == 0 {
+                LoadCase {
+                    load_id: format!("contact_ref_force_{i}"),
+                    region_id: format!("contact_ref_force_region_{}", i % 32),
+                    kind: LoadKind::Force {
+                        fx: 80.0 * scale,
+                        fy: -1400.0 * scale,
+                        fz: 32.0 * scale,
+                    },
+                }
+            } else {
+                LoadCase {
+                    load_id: format!("contact_ref_pressure_{i}"),
+                    region_id: format!("contact_ref_pressure_region_{}", i % 28),
+                    kind: LoadKind::Pressure {
+                        magnitude_pa: 1.05e6 * scale,
+                    },
+                }
+            }
+        })
+        .collect();
+    model
+}
+
+fn nonlinear_plastic_hardening_reference_fixture() -> AnalysisModel {
+    let mut model = nonlinear_load_path_mix_fixture();
+    model.model_id = AnalysisModelId("nonlinear_plastic_hardening_reference_fixture".to_string());
+    model.material_assignments = vec![
+        MaterialAssignment {
+            region_id: "tip_steel".to_string(),
+            expected_material_id: "mat_steel".to_string(),
+            assigned_material_id: "mat_steel".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+        MaterialAssignment {
+            region_id: "mid_aluminum".to_string(),
+            expected_material_id: "mat_aluminum".to_string(),
+            assigned_material_id: "mat_aluminum".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+        MaterialAssignment {
+            region_id: "polymer_segment".to_string(),
+            expected_material_id: "mat_polymer".to_string(),
+            assigned_material_id: "mat_polymer".to_string(),
+            confidence: EvidenceConfidence::Verified,
+        },
+    ];
+    model
+}
+
+fn nonlinear_plastic_hardening_reference_complex_fixture() -> AnalysisModel {
+    let mut model = nonlinear_plastic_hardening_reference_fixture();
+    model.model_id =
+        AnalysisModelId("nonlinear_plastic_hardening_reference_complex_fixture".to_string());
+    model.loads = (0..620)
+        .map(|i| {
+            let scale = 1.0 + (i as f64) * 0.0045;
+            if i % 3 == 0 {
+                LoadCase {
+                    load_id: format!("plastic_ref_force_{i}"),
+                    region_id: format!("plastic_ref_force_region_{}", i % 36),
+                    kind: LoadKind::Force {
+                        fx: 85.0 * scale,
+                        fy: -1450.0 * scale,
+                        fz: 28.0 * scale,
+                    },
+                }
+            } else if i % 3 == 1 {
+                LoadCase {
+                    load_id: format!("plastic_ref_pressure_{i}"),
+                    region_id: format!("plastic_ref_pressure_region_{}", i % 30),
+                    kind: LoadKind::Pressure {
+                        magnitude_pa: 1.1e6 * scale,
+                    },
+                }
+            } else {
+                LoadCase {
+                    load_id: format!("plastic_ref_body_{i}"),
+                    region_id: format!("plastic_ref_body_region_{}", i % 22),
+                    kind: LoadKind::BodyForce {
+                        gx: 0.28 * scale,
+                        gy: -9.81 * scale,
+                        gz: 0.09 * scale,
+                    },
+                }
+            }
+        })
+        .collect();
     model
 }
 

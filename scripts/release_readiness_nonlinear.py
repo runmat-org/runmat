@@ -82,10 +82,12 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE": "0.1",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS": "true",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_REFERENCE_MAX_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY": "0.65",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_BREACH_RATE": "0.1",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS": "true",
+            "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO": "1.1",
         },
         "development": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.2",
@@ -120,12 +122,14 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.75",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE": "0.25",
-            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO": "1.16",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS": "false",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_REFERENCE_MAX_TREND_RATIO": "1.15",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY": "0.75",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_BREACH_RATE": "0.25",
-            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO": "1.16",
             "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS": "false",
+            "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO": "1.15",
         },
         "feature": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.25",
@@ -160,12 +164,14 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.9",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE": "0.5",
-            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO": "1.28",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS": "false",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_REFERENCE_MAX_TREND_RATIO": "1.26",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY": "0.9",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_BREACH_RATE": "0.5",
-            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO": "1.28",
             "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS": "false",
+            "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO": "1.26",
         },
     }
     return profile_map.get(profile, {}).get(name, default)
@@ -844,6 +850,14 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS", "false"),
         )
     )
+    plastic_reference_max_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PLASTIC_REFERENCE_MAX_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_PLASTIC_REFERENCE_MAX_TREND_RATIO", "1.2"
+            ),
+        )
+    )
     contact_max_nonlinear_severity_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY",
@@ -866,6 +880,14 @@ def evaluate_release_readiness(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS",
             profile_default("RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS", "false"),
+        )
+    )
+    contact_reference_max_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO", "1.2"
+            ),
         )
     )
     thermo_records = [
@@ -902,9 +924,11 @@ def evaluate_release_readiness(
     plastic_max_nonlinear_severity = None
     plastic_breach_rate = None
     plastic_trend_ratio = None
+    plastic_reference_trend_ratio = None
     contact_max_nonlinear_severity = None
     contact_breach_rate = None
     contact_trend_ratio = None
+    contact_reference_trend_ratio = None
     if not thermo_records:
         if protected or thermo_require_metrics:
             reasons.append(
@@ -1779,6 +1803,47 @@ def evaluate_release_readiness(
                         )
                     )
 
+        plastic_reference_fixture_ids = {
+            "nonlinear_plastic_hardening_reference_gpu_provider",
+            "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+        }
+        latest_plastic_reference_values = []
+        for rec in report_records(latest):
+            if rec.get("fixture_id") not in plastic_reference_fixture_ids:
+                continue
+            raw_value = rec.get("plastic_nonlinear_severity")
+            if isinstance(raw_value, (int, float)):
+                latest_plastic_reference_values.append(float(raw_value))
+        rolling_plastic_reference_values = []
+        for report in rolling:
+            for rec in report_records(report):
+                if rec.get("fixture_id") not in plastic_reference_fixture_ids:
+                    continue
+                raw_value = rec.get("plastic_nonlinear_severity")
+                if isinstance(raw_value, (int, float)):
+                    rolling_plastic_reference_values.append(float(raw_value))
+        if latest_plastic_reference_values and rolling_plastic_reference_values:
+            latest_reference_plastic = statistics.median(latest_plastic_reference_values)
+            baseline_reference_plastic = statistics.median(rolling_plastic_reference_values)
+            if baseline_reference_plastic > 0:
+                plastic_reference_trend_ratio = (
+                    latest_reference_plastic / baseline_reference_plastic
+                )
+                if (
+                    plastic_reference_trend_ratio
+                    > plastic_reference_max_trend_ratio_threshold
+                ):
+                    reasons.append(
+                        Reason(
+                            code="PLASTIC_REFERENCE_TREND_WORSENING",
+                            severity="fail" if protected else "warn",
+                            detail=(
+                                f"plastic reference trend ratio {plastic_reference_trend_ratio:.3f} exceeds "
+                                f"threshold {plastic_reference_max_trend_ratio_threshold:.3f}"
+                            ),
+                        )
+                    )
+
         latest_contact_values = []
         for rec in report_records(latest):
             raw_value = rec.get("contact_nonlinear_severity")
@@ -1803,6 +1868,47 @@ def evaluate_release_readiness(
                             detail=(
                                 f"contact nonlinear severity trend ratio {contact_trend_ratio:.3f} exceeds "
                                 f"threshold {contact_max_trend_ratio_threshold:.3f}"
+                            ),
+                        )
+                    )
+
+        reference_fixture_ids = {
+            "nonlinear_contact_frictionless_reference_gpu_provider",
+            "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+        }
+        latest_contact_reference_values = []
+        for rec in report_records(latest):
+            if rec.get("fixture_id") not in reference_fixture_ids:
+                continue
+            raw_value = rec.get("contact_nonlinear_severity")
+            if isinstance(raw_value, (int, float)):
+                latest_contact_reference_values.append(float(raw_value))
+        rolling_contact_reference_values = []
+        for report in rolling:
+            for rec in report_records(report):
+                if rec.get("fixture_id") not in reference_fixture_ids:
+                    continue
+                raw_value = rec.get("contact_nonlinear_severity")
+                if isinstance(raw_value, (int, float)):
+                    rolling_contact_reference_values.append(float(raw_value))
+        if latest_contact_reference_values and rolling_contact_reference_values:
+            latest_reference_contact = statistics.median(latest_contact_reference_values)
+            baseline_reference_contact = statistics.median(rolling_contact_reference_values)
+            if baseline_reference_contact > 0:
+                contact_reference_trend_ratio = (
+                    latest_reference_contact / baseline_reference_contact
+                )
+                if (
+                    contact_reference_trend_ratio
+                    > contact_reference_max_trend_ratio_threshold
+                ):
+                    reasons.append(
+                        Reason(
+                            code="CONTACT_REFERENCE_TREND_WORSENING",
+                            severity="fail" if protected else "warn",
+                            detail=(
+                                f"contact reference trend ratio {contact_reference_trend_ratio:.3f} exceeds "
+                                f"threshold {contact_reference_max_trend_ratio_threshold:.3f}"
                             ),
                         )
                     )
@@ -1895,12 +2001,19 @@ def evaluate_release_readiness(
         "plastic_max_breach_rate_threshold": plastic_max_breach_rate_threshold,
         "plastic_trend_ratio": plastic_trend_ratio,
         "plastic_max_trend_ratio_threshold": plastic_max_trend_ratio_threshold,
+        "plastic_reference_trend_ratio": plastic_reference_trend_ratio,
+        "plastic_reference_max_trend_ratio_threshold": plastic_reference_max_trend_ratio_threshold,
         "contact_max_nonlinear_severity": contact_max_nonlinear_severity,
         "contact_max_nonlinear_severity_threshold": contact_max_nonlinear_severity_threshold,
         "contact_breach_rate": contact_breach_rate,
         "contact_max_breach_rate_threshold": contact_max_breach_rate_threshold,
         "contact_trend_ratio": contact_trend_ratio,
         "contact_max_trend_ratio_threshold": contact_max_trend_ratio_threshold,
+        "contact_reference_trend_ratio": contact_reference_trend_ratio,
+        "contact_reference_max_trend_ratio_threshold": contact_reference_max_trend_ratio_threshold,
+        "reference_trend_ratcheted": True,
+        "reference_trend_rationale": "rolling_median_reference_fixtures",
+        "rolling_report_count": len(rolling),
         "governance_profile": governance_profile_name(),
     }
 
@@ -1910,6 +2023,11 @@ def markdown_summary(result: dict) -> str:
     lines.append(f"Verdict: **{result['verdict']}**")
     lines.append(f"Governance profile: **{result.get('governance_profile', 'unknown')}**")
     lines.append(f"Protected branch enforcement: **{result['protected_branch']}**")
+    lines.append(
+        "Reference trend ratchet: "
+        f"**{result.get('reference_trend_ratcheted', False)}** "
+        f"(basis=`{result.get('reference_trend_rationale', '-')}`, rolling_reports=`{result.get('rolling_report_count', 0)}`)"
+    )
     lines.append("")
     lines.append("### Thermo Posture")
     lines.append(
@@ -2060,6 +2178,14 @@ def markdown_summary(result: dict) -> str:
         "- Plastic trend ratio: "
         f"`{result.get('plastic_trend_ratio') if result.get('plastic_trend_ratio') is not None else '-'}`"
     )
+    lines.append(
+        "- Plastic reference trend ratio: "
+        f"`{result.get('plastic_reference_trend_ratio') if result.get('plastic_reference_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Plastic reference trend threshold: "
+        f"`{result.get('plastic_reference_max_trend_ratio_threshold') if result.get('plastic_reference_max_trend_ratio_threshold') is not None else '-'}`"
+    )
     lines.append("")
     lines.append("### Contact Posture")
     lines.append(
@@ -2077,6 +2203,14 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Contact trend ratio: "
         f"`{result.get('contact_trend_ratio') if result.get('contact_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Contact reference trend ratio: "
+        f"`{result.get('contact_reference_trend_ratio') if result.get('contact_reference_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Contact reference trend threshold: "
+        f"`{result.get('contact_reference_max_trend_ratio_threshold') if result.get('contact_reference_max_trend_ratio_threshold') is not None else '-'}`"
     )
     lines.append("")
     if result["reasons"]:

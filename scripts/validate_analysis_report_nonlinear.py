@@ -44,6 +44,18 @@ REQUIRED_FIXTURES = {
         "contact_frictionless_severity_peak",
         "contact_frictionless_severity_mean",
     },
+    "nonlinear_contact_frictionless_reference_complex_gpu_provider": {
+        "contact_frictionless_complex_severity_peak",
+        "contact_frictionless_complex_severity_mean",
+    },
+    "nonlinear_plastic_hardening_reference_gpu_provider": {
+        "plasticity_hardening_reference_severity_peak",
+        "plasticity_hardening_reference_severity_mean",
+    },
+    "nonlinear_plastic_hardening_reference_complex_gpu_provider": {
+        "plasticity_hardening_reference_complex_severity_peak",
+        "plasticity_hardening_reference_complex_severity_mean",
+    },
     "thermo_mech_kickoff_gpu_provider": {
         "thermo_mech_thermal_strain_scale",
         "thermo_mech_thermal_load_scale",
@@ -242,6 +254,7 @@ def main() -> int:
         if fixture_id in {
             "nonlinear_contact_proxy_gpu_provider",
             "nonlinear_contact_frictionless_reference_gpu_provider",
+            "nonlinear_contact_frictionless_reference_complex_gpu_provider",
         }:
             missing_fields = sorted(
                 field for field in CONTACT_REQUIRED_FIELDS if field not in record

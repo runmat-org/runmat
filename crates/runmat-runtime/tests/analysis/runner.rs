@@ -206,6 +206,20 @@ fn plasticity_proxy_for_fixture(spec_id: &str) -> Option<PlasticityProxyOptions>
             hardening_modulus_ratio: 0.2,
             saturation_exponent: 4.0,
         }),
+        "nonlinear_plastic_hardening_reference_gpu_provider" => Some(PlasticityProxyOptions {
+            enabled: true,
+            yield_strain: 0.03,
+            hardening_modulus_ratio: 0.06,
+            saturation_exponent: 1.0,
+        }),
+        "nonlinear_plastic_hardening_reference_complex_gpu_provider" => {
+            Some(PlasticityProxyOptions {
+                enabled: true,
+                yield_strain: 0.018,
+                hardening_modulus_ratio: 0.09,
+                saturation_exponent: 1.25,
+            })
+        }
         _ => None,
     }
 }
@@ -224,6 +238,14 @@ fn contact_proxy_for_fixture(spec_id: &str) -> Option<ContactProxyOptions> {
             max_penetration_ratio: 0.01,
             friction_coefficient: 0.0,
         }),
+        "nonlinear_contact_frictionless_reference_complex_gpu_provider" => {
+            Some(ContactProxyOptions {
+                enabled: true,
+                penalty_stiffness_scale: 1.2,
+                max_penetration_ratio: 0.014,
+                friction_coefficient: 0.0,
+            })
+        }
         _ => None,
     }
 }
@@ -2206,6 +2228,66 @@ pub(super) fn run_fixture(
                             Some(1.0),
                         );
                     }
+                    if spec.id == "nonlinear_plastic_hardening_reference_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "plasticity_hardening_reference_severity_peak",
+                            "FEA_PLASTIC_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_PLASTIC_NONLINEAR",
+                                "severity_peak",
+                            ),
+                            Some(0.15),
+                            Some(0.32),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "plasticity_hardening_reference_severity_mean",
+                            "FEA_PLASTIC_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_PLASTIC_NONLINEAR",
+                                "severity_mean",
+                            ),
+                            Some(0.12),
+                            Some(0.3),
+                        );
+                    }
+                    if spec.id == "nonlinear_plastic_hardening_reference_complex_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "plasticity_hardening_reference_complex_severity_peak",
+                            "FEA_PLASTIC_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_PLASTIC_NONLINEAR",
+                                "severity_peak",
+                            ),
+                            Some(0.28),
+                            Some(0.48),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "plasticity_hardening_reference_complex_severity_mean",
+                            "FEA_PLASTIC_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_PLASTIC_NONLINEAR",
+                                "severity_mean",
+                            ),
+                            Some(0.2),
+                            Some(0.4),
+                        );
+                    }
                     if spec.id == "nonlinear_contact_proxy_gpu_provider" {
                         push_threshold_assertion(
                             spec.id,
@@ -2264,6 +2346,36 @@ pub(super) fn run_fixture(
                             ),
                             Some(0.15),
                             Some(0.35),
+                        );
+                    }
+                    if spec.id == "nonlinear_contact_frictionless_reference_complex_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "contact_frictionless_complex_severity_peak",
+                            "FEA_CONTACT_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_CONTACT_NONLINEAR",
+                                "severity_peak",
+                            ),
+                            Some(0.35),
+                            Some(0.5),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "contact_frictionless_complex_severity_mean",
+                            "FEA_CONTACT_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_CONTACT_NONLINEAR",
+                                "severity_mean",
+                            ),
+                            Some(0.25),
+                            Some(0.45),
                         );
                     }
 

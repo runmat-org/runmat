@@ -12,6 +12,9 @@ NONLINEAR_FIXTURES = (
     "nonlinear_plasticity_proxy_gpu_provider",
     "nonlinear_contact_proxy_gpu_provider",
     "nonlinear_contact_frictionless_reference_gpu_provider",
+    "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+    "nonlinear_plastic_hardening_reference_gpu_provider",
+    "nonlinear_plastic_hardening_reference_complex_gpu_provider",
 )
 
 THERMO_FIXTURE = "thermo_mech_kickoff_gpu_provider"

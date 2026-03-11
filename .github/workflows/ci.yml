@@ -479,10 +479,17 @@ jobs:
               plastic_severity_threshold = ready.get('plastic_max_nonlinear_severity_threshold')
               plastic_breach_rate = ready.get('plastic_breach_rate')
               plastic_trend_ratio = ready.get('plastic_trend_ratio')
+              plastic_reference_trend_ratio = ready.get('plastic_reference_trend_ratio')
+              plastic_reference_trend_threshold = ready.get('plastic_reference_max_trend_ratio_threshold')
               contact_max_severity = ready.get('contact_max_nonlinear_severity')
               contact_severity_threshold = ready.get('contact_max_nonlinear_severity_threshold')
               contact_breach_rate = ready.get('contact_breach_rate')
               contact_trend_ratio = ready.get('contact_trend_ratio')
+              contact_reference_trend_ratio = ready.get('contact_reference_trend_ratio')
+              contact_reference_trend_threshold = ready.get('contact_reference_max_trend_ratio_threshold')
+              reference_trend_ratcheted = ready.get('reference_trend_ratcheted')
+              reference_trend_rationale = ready.get('reference_trend_rationale')
+              rolling_report_count = ready.get('rolling_report_count')
               lines.append(
                   "- Thermo coupling enabled-rate: "
                   f"{thermo_enabled_rate if thermo_enabled_rate is not None else '-'}"
@@ -620,6 +627,14 @@ jobs:
                   f"{plastic_trend_ratio if plastic_trend_ratio is not None else '-'}"
               )
               lines.append(
+                  "- Plastic reference trend ratio: "
+                  f"{plastic_reference_trend_ratio if plastic_reference_trend_ratio is not None else '-'}"
+              )
+              lines.append(
+                  "- Plastic reference trend threshold: "
+                  f"{plastic_reference_trend_threshold if plastic_reference_trend_threshold is not None else '-'}"
+              )
+              lines.append(
                   "- Contact max nonlinear severity: "
                   f"{contact_max_severity if contact_max_severity is not None else '-'}"
               )
@@ -634,6 +649,26 @@ jobs:
               lines.append(
                   "- Contact trend ratio: "
                   f"{contact_trend_ratio if contact_trend_ratio is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact reference trend ratio: "
+                  f"{contact_reference_trend_ratio if contact_reference_trend_ratio is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact reference trend threshold: "
+                  f"{contact_reference_trend_threshold if contact_reference_trend_threshold is not None else '-'}"
+              )
+              lines.append(
+                  "- Reference trend ratchet active: "
+                  f"{reference_trend_ratcheted if reference_trend_ratcheted is not None else '-'}"
+              )
+              lines.append(
+                  "- Reference trend ratchet basis: "
+                  f"{reference_trend_rationale if reference_trend_rationale is not None else '-'}"
+              )
+              lines.append(
+                  "- Rolling report count used for ratchet: "
+                  f"{rolling_report_count if rolling_report_count is not None else '-'}"
               )
           else:
               lines.append("- Readiness artifact: missing")

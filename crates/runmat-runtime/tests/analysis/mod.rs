@@ -220,6 +220,9 @@ const ROLLING_TARGET_FIXTURES: &[&str] = &[
     "nonlinear_plasticity_proxy_gpu_provider",
     "nonlinear_contact_proxy_gpu_provider",
     "nonlinear_contact_frictionless_reference_gpu_provider",
+    "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+    "nonlinear_plastic_hardening_reference_gpu_provider",
+    "nonlinear_plastic_hardening_reference_complex_gpu_provider",
 ];
 
 const SYNTHETIC_TRIANGLE_STL: &str = "solid tri\n  facet normal 0 0 1\n    outer loop\n      vertex 0 0 0\n      vertex 1 0 0\n      vertex 0 1 0\n    endloop\n  endfacet\nendsolid tri\n";
