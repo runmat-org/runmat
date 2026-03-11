@@ -56,6 +56,12 @@
     "thermo_spatial_coverage_ratio": null,
     "thermo_field_extrapolation_ratio": null,
     "thermo_transient_severity": null,
-    "thermo_nonlinear_severity": null
+    "thermo_nonlinear_severity": null,
+    "electro_thermal_coupling_enabled": null,
+    "electro_thermal_coupling_fingerprint": null,
+    "electro_joule_heating_scale": null,
+    "electro_conductivity_spread_ratio": null,
+    "electro_transient_severity": null,
+    "electro_nonlinear_severity": null
   }
 }

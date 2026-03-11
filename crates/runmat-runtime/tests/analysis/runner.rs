@@ -852,6 +852,12 @@ pub(super) fn run_fixture(
     }
     let mut thermo_transient_severity = None;
     let mut thermo_nonlinear_severity = None;
+    let mut electro_thermal_coupling_enabled = None;
+    let mut electro_thermal_coupling_fingerprint = None;
+    let mut electro_joule_heating_scale = None;
+    let mut electro_conductivity_spread_ratio = None;
+    let mut electro_transient_severity = None;
+    let mut electro_nonlinear_severity = None;
     let mut publishable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
@@ -908,6 +914,12 @@ pub(super) fn run_fixture(
                     thermo_field_artifact_provenance_valid,
                     thermo_transient_severity,
                     thermo_nonlinear_severity,
+                    electro_thermal_coupling_enabled,
+                    electro_thermal_coupling_fingerprint,
+                    electro_joule_heating_scale,
+                    electro_conductivity_spread_ratio,
+                    electro_transient_severity,
+                    electro_nonlinear_severity,
                     publishable,
                     parity,
                     threshold_assertions,
@@ -2189,6 +2201,12 @@ pub(super) fn run_fixture(
                                 thermo_field_artifact_provenance_valid,
                                 thermo_transient_severity,
                                 thermo_nonlinear_severity,
+                                electro_thermal_coupling_enabled,
+                                electro_thermal_coupling_fingerprint,
+                                electro_joule_heating_scale,
+                                electro_conductivity_spread_ratio,
+                                electro_transient_severity,
+                                electro_nonlinear_severity,
                                 publishable,
                                 parity,
                                 threshold_assertions,
@@ -2234,6 +2252,20 @@ pub(super) fn run_fixture(
                         gpu_results.data.summary.thermo_field_extrapolation_ratio;
                     thermo_transient_severity = gpu_results.data.summary.thermo_transient_severity;
                     thermo_nonlinear_severity = gpu_results.data.summary.thermo_nonlinear_severity;
+                    electro_thermal_coupling_enabled =
+                        gpu_results.data.summary.electro_thermal_coupling_enabled;
+                    electro_thermal_coupling_fingerprint = gpu_results
+                        .data
+                        .summary
+                        .electro_thermal_coupling_fingerprint;
+                    electro_joule_heating_scale =
+                        gpu_results.data.summary.electro_joule_heating_scale;
+                    electro_conductivity_spread_ratio =
+                        gpu_results.data.summary.electro_conductivity_spread_ratio;
+                    electro_transient_severity =
+                        gpu_results.data.summary.electro_transient_severity;
+                    electro_nonlinear_severity =
+                        gpu_results.data.summary.electro_nonlinear_severity;
 
                     if let Some(root) = filesystem_root {
                         runmat_runtime::analysis::storage::configure_artifact_store(
@@ -2387,6 +2419,12 @@ pub(super) fn run_fixture(
                                     thermo_field_artifact_provenance_valid,
                                     thermo_transient_severity,
                                     thermo_nonlinear_severity,
+                                    electro_thermal_coupling_enabled,
+                                    electro_thermal_coupling_fingerprint,
+                                    electro_joule_heating_scale,
+                                    electro_conductivity_spread_ratio,
+                                    electro_transient_severity,
+                                    electro_nonlinear_severity,
                                     publishable,
                                     parity,
                                     threshold_assertions,
@@ -2492,6 +2530,12 @@ pub(super) fn run_fixture(
         thermo_field_artifact_provenance_valid,
         thermo_transient_severity,
         thermo_nonlinear_severity,
+        electro_thermal_coupling_enabled,
+        electro_thermal_coupling_fingerprint,
+        electro_joule_heating_scale,
+        electro_conductivity_spread_ratio,
+        electro_transient_severity,
+        electro_nonlinear_severity,
         publishable,
         parity,
         threshold_assertions,

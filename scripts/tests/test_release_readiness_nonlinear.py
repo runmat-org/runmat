@@ -25,6 +25,9 @@ def report(
     thermo_field_artifact_approved=None,
     thermo_field_artifact_age_days=None,
     thermo_field_artifact_provenance_valid=None,
+    electro_thermal_coupling_enabled=None,
+    electro_transient_severity=None,
+    electro_nonlinear_severity=None,
 ):
     fixtures = [
         "nonlinear_assembly_gpu_provider",
@@ -82,6 +85,15 @@ def report(
             rec["thermo_field_artifact_provenance_valid"] = (
                 thermo_field_artifact_provenance_valid
             )
+    if electro_thermal_coupling_enabled is not None:
+        for rec in records:
+            rec["electro_thermal_coupling_enabled"] = electro_thermal_coupling_enabled
+    if electro_transient_severity is not None:
+        for rec in records:
+            rec["electro_transient_severity"] = electro_transient_severity
+    if electro_nonlinear_severity is not None:
+        for rec in records:
+            rec["electro_nonlinear_severity"] = electro_nonlinear_severity
 
     return {
         "passed": passed,
@@ -124,6 +136,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED",
             "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TRANSIENT_SEVERITY",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_NONLINEAR_SEVERITY",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MIN_ENABLED_RATE",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_REQUIRE_METRICS",
             "RUNMAT_THERMO_FIELD_PROMOTION_REPORT",
             "RUNMAT_THERMO_FIELD_SIGNING_KEY",
             "GITHUB_REF_NAME",
@@ -553,6 +569,51 @@ class ReleaseReadinessTests(unittest.TestCase):
         )
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMO_COUPLING_METRICS_MISSING", codes)
+
+    def test_electro_transient_severity_high_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            electro_thermal_coupling_enabled=True,
+            electro_transient_severity=0.55,
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TRANSIENT_SEVERITY"] = "0.2"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("ELECTRO_TRANSIENT_SEVERITY_HIGH", codes)
+
+    def test_electro_nonlinear_severity_high_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            electro_thermal_coupling_enabled=True,
+            electro_nonlinear_severity=0.55,
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_MAX_NONLINEAR_SEVERITY"] = "0.2"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("ELECTRO_NONLINEAR_SEVERITY_HIGH", codes)
+
+    def test_electro_metrics_missing_warn_when_required(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_REQUIRE_METRICS"] = "true"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("ELECTRO_COUPLING_METRICS_MISSING", codes)
 
     def test_thermo_spread_ratio_high_reason_is_emitted(self):
         latest = report(

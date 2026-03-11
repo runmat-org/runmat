@@ -2313,6 +2313,35 @@ pub fn analysis_results_op(
         "severity_peak",
     )
     .or_else(|| diagnostic_metric(&run_result.run.diagnostics, "FEA_TM_NONLINEAR", "severity"));
+    let electro_thermal_coupling_enabled =
+        diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_ET_COUPLING", "enabled");
+    let electro_thermal_coupling_fingerprint = diagnostic_metric_u64(
+        &run_result.run.diagnostics,
+        "FEA_ET_COUPLING",
+        "coupling_fingerprint",
+    );
+    let electro_joule_heating_scale = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_ET_COUPLING",
+        "joule_heating_scale",
+    );
+    let electro_conductivity_spread_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_ET_COUPLING",
+        "conductivity_spread_ratio",
+    );
+    let electro_transient_severity = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_ET_TRANSIENT",
+        "severity_peak",
+    )
+    .or_else(|| diagnostic_metric(&run_result.run.diagnostics, "FEA_ET_TRANSIENT", "severity"));
+    let electro_nonlinear_severity = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_ET_NONLINEAR",
+        "severity_peak",
+    )
+    .or_else(|| diagnostic_metric(&run_result.run.diagnostics, "FEA_ET_NONLINEAR", "severity"));
 
     let summary = AnalysisResultsSummary {
         field_count: fields.len(),
@@ -2356,6 +2385,12 @@ pub fn analysis_results_op(
         thermo_field_extrapolation_ratio,
         thermo_transient_severity,
         thermo_nonlinear_severity,
+        electro_thermal_coupling_enabled,
+        electro_thermal_coupling_fingerprint,
+        electro_joule_heating_scale,
+        electro_conductivity_spread_ratio,
+        electro_transient_severity,
+        electro_nonlinear_severity,
     };
 
     let modal_results = if query.include_modal_results {
@@ -2950,6 +2985,29 @@ pub fn analysis_trends_op(
                 )
             }
         };
+        let electro_thermal_coupling_enabled_rate = {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric_bool(&run.run.diagnostics, "FEA_ET_COUPLING", "enabled")
+                })
+                .collect::<Vec<_>>();
+            if values.is_empty() {
+                None
+            } else {
+                Some(values.iter().filter(|value| **value).count() as f64 / values.len() as f64)
+            }
+        };
+        let electro_transient_warn_rate = if kind == AnalysisRunKind::Transient {
+            diagnostic_warning_rate(&entries, "FEA_ET_TRANSIENT")
+        } else {
+            None
+        };
+        let electro_nonlinear_warn_rate = if kind == AnalysisRunKind::Nonlinear {
+            diagnostic_warning_rate(&entries, "FEA_ET_NONLINEAR")
+        } else {
+            None
+        };
 
         summaries.push(AnalysisTrendKindSummary {
             run_kind: kind,
@@ -2969,6 +3027,9 @@ pub fn analysis_trends_op(
             thermo_nonlinear_warn_rate,
             thermo_spread_breach_rate,
             thermo_heterogeneity_breach_rate,
+            electro_thermal_coupling_enabled_rate,
+            electro_transient_warn_rate,
+            electro_nonlinear_warn_rate,
         });
     }
 

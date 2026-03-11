@@ -68,6 +68,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED": "true",
             "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS": "14",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TRANSIENT_SEVERITY": "0.25",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_NONLINEAR_SEVERITY": "0.25",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MIN_ENABLED_RATE": "0.5",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_REQUIRE_METRICS": "true",
         },
         "development": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.2",
@@ -90,6 +94,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED": "true",
             "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS": "21",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TRANSIENT_SEVERITY": "0.3",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_NONLINEAR_SEVERITY": "0.3",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MIN_ENABLED_RATE": "0.0",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_REQUIRE_METRICS": "false",
         },
         "feature": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.25",
@@ -112,6 +120,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED": "false",
             "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS": "30",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TRANSIENT_SEVERITY": "0.4",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_NONLINEAR_SEVERITY": "0.4",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MIN_ENABLED_RATE": "0.0",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_REQUIRE_METRICS": "false",
         },
     }
     return profile_map.get(profile, {}).get(name, default)
@@ -704,6 +716,30 @@ def evaluate_release_readiness(
             ),
         )
     )
+    electro_max_transient_severity_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TRANSIENT_SEVERITY",
+            profile_default("RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TRANSIENT_SEVERITY", "0.3"),
+        )
+    )
+    electro_max_nonlinear_severity_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_NONLINEAR_SEVERITY",
+            profile_default("RUNMAT_RELEASE_READINESS_ELECTRO_MAX_NONLINEAR_SEVERITY", "0.3"),
+        )
+    )
+    electro_min_enabled_rate = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MIN_ENABLED_RATE",
+            profile_default("RUNMAT_RELEASE_READINESS_ELECTRO_MIN_ENABLED_RATE", "0.0"),
+        )
+    )
+    electro_require_metrics = is_true(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ELECTRO_REQUIRE_METRICS",
+            profile_default("RUNMAT_RELEASE_READINESS_ELECTRO_REQUIRE_METRICS", "false"),
+        )
+    )
     thermo_records = [
         rec
         for rec in report_records(latest)
@@ -726,6 +762,9 @@ def evaluate_release_readiness(
     thermo_heterogeneity_breach_rate = None
     thermo_spread_trend_ratio = None
     thermo_heterogeneity_trend_ratio = None
+    electro_coupling_enabled_rate = None
+    electro_max_transient_severity = None
+    electro_max_nonlinear_severity = None
     if not thermo_records:
         if protected or thermo_require_metrics:
             reasons.append(
@@ -978,6 +1017,184 @@ def evaluate_release_readiness(
                         detail=(
                             f"max thermo field extrapolation ratio {thermo_max_field_extrapolation_ratio:.3f} exceeds "
                             f"threshold {thermo_max_field_extrapolation_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
+
+    electro_records = [
+        rec
+        for rec in report_records(latest)
+        if isinstance(rec.get("electro_thermal_coupling_enabled"), bool)
+        or isinstance(rec.get("electro_transient_severity"), (int, float))
+        or isinstance(rec.get("electro_nonlinear_severity"), (int, float))
+    ]
+    if not electro_records:
+        if protected or electro_require_metrics:
+            reasons.append(
+                Reason(
+                    code="ELECTRO_COUPLING_METRICS_MISSING",
+                    severity="warn",
+                    detail="electro-thermal coupling posture metrics missing from report records",
+                )
+            )
+    else:
+        electro_enabled_values = [
+            rec.get("electro_thermal_coupling_enabled")
+            for rec in electro_records
+            if isinstance(rec.get("electro_thermal_coupling_enabled"), bool)
+        ]
+        if electro_enabled_values:
+            electro_coupling_enabled_rate = (
+                sum(1 for value in electro_enabled_values if value)
+                / len(electro_enabled_values)
+            )
+            if electro_coupling_enabled_rate < electro_min_enabled_rate:
+                reasons.append(
+                    Reason(
+                        code="ELECTRO_COUPLING_ENABLED_RATE_LOW",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"electro-thermal coupling enabled rate {electro_coupling_enabled_rate:.3f} below "
+                            f"minimum {electro_min_enabled_rate:.3f}"
+                        ),
+                    )
+                )
+        elif protected or electro_require_metrics:
+            reasons.append(
+                Reason(
+                    code="ELECTRO_COUPLING_ENABLED_RATE_MISSING",
+                    severity="warn",
+                    detail="electro-thermal coupling enabled-rate metric missing from report records",
+                )
+            )
+
+        electro_transient_values = []
+        for rec in electro_records:
+            raw_value = rec.get("electro_transient_severity")
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                if math.isfinite(value):
+                    electro_transient_values.append(value)
+        if electro_transient_values:
+            electro_max_transient_severity = max(electro_transient_values)
+            if electro_max_transient_severity > electro_max_transient_severity_threshold:
+                reasons.append(
+                    Reason(
+                        code="ELECTRO_TRANSIENT_SEVERITY_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"max electro-thermal transient severity {electro_max_transient_severity:.3f} exceeds "
+                            f"threshold {electro_max_transient_severity_threshold:.3f}"
+                        ),
+                    )
+                )
+
+        electro_nonlinear_values = []
+        for rec in electro_records:
+            raw_value = rec.get("electro_nonlinear_severity")
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                if math.isfinite(value):
+                    electro_nonlinear_values.append(value)
+        if electro_nonlinear_values:
+            electro_max_nonlinear_severity = max(electro_nonlinear_values)
+            if electro_max_nonlinear_severity > electro_max_nonlinear_severity_threshold:
+                reasons.append(
+                    Reason(
+                        code="ELECTRO_NONLINEAR_SEVERITY_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"max electro-thermal nonlinear severity {electro_max_nonlinear_severity:.3f} exceeds "
+                            f"threshold {electro_max_nonlinear_severity_threshold:.3f}"
+                        ),
+                    )
+                )
+
+    electro_records = [
+        rec
+        for rec in report_records(latest)
+        if isinstance(rec.get("electro_thermal_coupling_enabled"), bool)
+        or isinstance(rec.get("electro_transient_severity"), (int, float))
+        or isinstance(rec.get("electro_nonlinear_severity"), (int, float))
+    ]
+    if not electro_records:
+        if protected or electro_require_metrics:
+            reasons.append(
+                Reason(
+                    code="ELECTRO_COUPLING_METRICS_MISSING",
+                    severity="warn",
+                    detail="electro-thermal coupling posture metrics missing from report records",
+                )
+            )
+    else:
+        electro_enabled_values = [
+            rec.get("electro_thermal_coupling_enabled")
+            for rec in electro_records
+            if isinstance(rec.get("electro_thermal_coupling_enabled"), bool)
+        ]
+        if electro_enabled_values:
+            electro_coupling_enabled_rate = (
+                sum(1 for value in electro_enabled_values if value)
+                / len(electro_enabled_values)
+            )
+            if electro_coupling_enabled_rate < electro_min_enabled_rate:
+                reasons.append(
+                    Reason(
+                        code="ELECTRO_COUPLING_ENABLED_RATE_LOW",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"electro-thermal coupling enabled rate {electro_coupling_enabled_rate:.3f} below "
+                            f"minimum {electro_min_enabled_rate:.3f}"
+                        ),
+                    )
+                )
+        elif protected or electro_require_metrics:
+            reasons.append(
+                Reason(
+                    code="ELECTRO_COUPLING_ENABLED_RATE_MISSING",
+                    severity="warn",
+                    detail="electro-thermal coupling enabled-rate metric missing from report records",
+                )
+            )
+
+        electro_transient_values = []
+        for rec in electro_records:
+            raw_value = rec.get("electro_transient_severity")
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                if math.isfinite(value):
+                    electro_transient_values.append(value)
+        if electro_transient_values:
+            electro_max_transient_severity = max(electro_transient_values)
+            if electro_max_transient_severity > electro_max_transient_severity_threshold:
+                reasons.append(
+                    Reason(
+                        code="ELECTRO_TRANSIENT_SEVERITY_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"max electro-thermal transient severity {electro_max_transient_severity:.3f} exceeds "
+                            f"threshold {electro_max_transient_severity_threshold:.3f}"
+                        ),
+                    )
+                )
+
+        electro_nonlinear_values = []
+        for rec in electro_records:
+            raw_value = rec.get("electro_nonlinear_severity")
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                if math.isfinite(value):
+                    electro_nonlinear_values.append(value)
+        if electro_nonlinear_values:
+            electro_max_nonlinear_severity = max(electro_nonlinear_values)
+            if electro_max_nonlinear_severity > electro_max_nonlinear_severity_threshold:
+                reasons.append(
+                    Reason(
+                        code="ELECTRO_NONLINEAR_SEVERITY_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"max electro-thermal nonlinear severity {electro_max_nonlinear_severity:.3f} exceeds "
+                            f"threshold {electro_max_nonlinear_severity_threshold:.3f}"
                         ),
                     )
                 )
@@ -1258,6 +1475,9 @@ def evaluate_release_readiness(
         "thermo_heterogeneity_breach_rate": thermo_heterogeneity_breach_rate,
         "thermo_spread_trend_ratio": thermo_spread_trend_ratio,
         "thermo_heterogeneity_trend_ratio": thermo_heterogeneity_trend_ratio,
+        "electro_coupling_enabled_rate": electro_coupling_enabled_rate,
+        "electro_max_transient_severity": electro_max_transient_severity,
+        "electro_max_nonlinear_severity": electro_max_nonlinear_severity,
         "governance_profile": governance_profile_name(),
     }
 
@@ -1352,6 +1572,20 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Thermo heterogeneity trend ratio: "
         f"`{result.get('thermo_heterogeneity_trend_ratio') if result.get('thermo_heterogeneity_trend_ratio') is not None else '-'}`"
+    )
+    lines.append("")
+    lines.append("### Electro-Thermal Posture")
+    lines.append(
+        "- Electro-thermal coupling enabled-rate: "
+        f"`{result.get('electro_coupling_enabled_rate') if result.get('electro_coupling_enabled_rate') is not None else '-'}`"
+    )
+    lines.append(
+        "- Max electro-thermal transient severity: "
+        f"`{result.get('electro_max_transient_severity') if result.get('electro_max_transient_severity') is not None else '-'}`"
+    )
+    lines.append(
+        "- Max electro-thermal nonlinear severity: "
+        f"`{result.get('electro_max_nonlinear_severity') if result.get('electro_max_nonlinear_severity') is not None else '-'}`"
     )
     lines.append("")
     if result["reasons"]:

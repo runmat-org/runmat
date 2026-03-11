@@ -81,6 +81,15 @@ def collect_metrics(reports, window):
                     ),
                     "thermo_transient_severity": record.get("thermo_transient_severity"),
                     "thermo_nonlinear_severity": record.get("thermo_nonlinear_severity"),
+                    "electro_thermal_coupling_enabled": record.get(
+                        "electro_thermal_coupling_enabled"
+                    ),
+                    "electro_joule_heating_scale": record.get("electro_joule_heating_scale"),
+                    "electro_conductivity_spread_ratio": record.get(
+                        "electro_conductivity_spread_ratio"
+                    ),
+                    "electro_transient_severity": record.get("electro_transient_severity"),
+                    "electro_nonlinear_severity": record.get("electro_nonlinear_severity"),
                 }
             )
     return fixture_samples
@@ -89,14 +98,14 @@ def collect_metrics(reports, window):
 def summarize(samples):
     lines = ["## Nonlinear Trend Summary", ""]
     lines.append(
-        "| Fixture | Samples | Median GPU ms | Median speedup | Publishable rate | Median acceptance score | Thermo enabled rate | Median thermo modulus scale | Median thermo spread ratio | Median thermo heterogeneity | Median thermo transient sev | Median thermo nonlinear sev |"
+        "| Fixture | Samples | Median GPU ms | Median speedup | Publishable rate | Median acceptance score | Thermo enabled rate | Median thermo modulus scale | Median thermo spread ratio | Median thermo heterogeneity | Median thermo transient sev | Median thermo nonlinear sev | Electro enabled rate | Median electro joule scale | Median electro spread ratio | Median electro transient sev | Median electro nonlinear sev |"
     )
     lines.append(
-        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |"
     )
     for fixture, values in sorted(samples.items()):
         if not values:
-            lines.append(f"| {fixture} | 0 | - | - | - | - | - | - | - | - | - | - |")
+            lines.append(f"| {fixture} | 0 | - | - | - | - | - | - | - | - | - | - | - | - | - | - | - |")
             continue
         gpu = [v["gpu_run_ms"] for v in values if isinstance(v["gpu_run_ms"], (int, float))]
         speedup = [
@@ -140,8 +149,33 @@ def summarize(samples):
             for v in values
             if isinstance(v.get("thermo_assignment_heterogeneity_index"), (int, float))
         ]
+        electro_enabled_values = [
+            v["electro_thermal_coupling_enabled"]
+            for v in values
+            if isinstance(v.get("electro_thermal_coupling_enabled"), bool)
+        ]
+        electro_joule_values = [
+            v["electro_joule_heating_scale"]
+            for v in values
+            if isinstance(v.get("electro_joule_heating_scale"), (int, float))
+        ]
+        electro_spread_values = [
+            v["electro_conductivity_spread_ratio"]
+            for v in values
+            if isinstance(v.get("electro_conductivity_spread_ratio"), (int, float))
+        ]
+        electro_transient_values = [
+            v["electro_transient_severity"]
+            for v in values
+            if isinstance(v.get("electro_transient_severity"), (int, float))
+        ]
+        electro_nonlinear_values = [
+            v["electro_nonlinear_severity"]
+            for v in values
+            if isinstance(v.get("electro_nonlinear_severity"), (int, float))
+        ]
         lines.append(
-            "| {} | {} | {} | {} | {:.2f} | {} | {} | {} | {} | {} | {} | {} |".format(
+            "| {} | {} | {} | {} | {:.2f} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} | {} |".format(
                 fixture,
                 len(values),
                 f"{statistics.median(gpu):.3f}" if gpu else "-",
@@ -176,6 +210,31 @@ def summarize(samples):
                 (
                     f"{statistics.median(thermo_nonlinear_values):.3f}"
                     if thermo_nonlinear_values
+                    else "-"
+                ),
+                (
+                    f"{sum(1 for v in electro_enabled_values if v) / len(electro_enabled_values):.3f}"
+                    if electro_enabled_values
+                    else "-"
+                ),
+                (
+                    f"{statistics.median(electro_joule_values):.3f}"
+                    if electro_joule_values
+                    else "-"
+                ),
+                (
+                    f"{statistics.median(electro_spread_values):.3f}"
+                    if electro_spread_values
+                    else "-"
+                ),
+                (
+                    f"{statistics.median(electro_transient_values):.3f}"
+                    if electro_transient_values
+                    else "-"
+                ),
+                (
+                    f"{statistics.median(electro_nonlinear_values):.3f}"
+                    if electro_nonlinear_values
                     else "-"
                 ),
             )

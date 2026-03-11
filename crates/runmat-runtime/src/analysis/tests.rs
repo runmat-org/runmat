@@ -818,6 +818,9 @@ fn analysis_trends_summarizes_recent_nonlinear_runs() {
     assert!(nonlinear.thermo_nonlinear_warn_rate.is_none());
     assert!(nonlinear.thermo_spread_breach_rate.is_none());
     assert!(nonlinear.thermo_heterogeneity_breach_rate.is_none());
+    assert!(nonlinear.electro_thermal_coupling_enabled_rate.is_none());
+    assert!(nonlinear.electro_transient_warn_rate.is_none());
+    assert!(nonlinear.electro_nonlinear_warn_rate.is_none());
 
     storage::reset_artifact_store_for_tests();
 }
@@ -843,6 +846,15 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
                 field_artifact_id: None,
                 field_source: None,
                 region_temperature_deltas: Vec::new(),
+                time_profile: Vec::new(),
+            }),
+            electro_thermal_coupling: Some(ElectroThermalCouplingOptions {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_voltage_v: 36.0,
+                base_electrical_conductivity_s_per_m: 3.5e7,
+                resistive_heating_coefficient: 4.0e-4,
+                region_conductivity_scales: Vec::new(),
                 time_profile: Vec::new(),
             }),
             ..AnalysisTransientRunOptions::default()
@@ -882,6 +894,20 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
         .is_some());
     assert!(results.data.summary.thermo_transient_severity.is_some());
     assert!(results.data.summary.thermo_nonlinear_severity.is_none());
+    assert_eq!(results.data.summary.electro_thermal_coupling_enabled, Some(true));
+    assert!(results
+        .data
+        .summary
+        .electro_thermal_coupling_fingerprint
+        .is_some());
+    assert!(results.data.summary.electro_joule_heating_scale.is_some());
+    assert!(results
+        .data
+        .summary
+        .electro_conductivity_spread_ratio
+        .is_some());
+    assert!(results.data.summary.electro_transient_severity.is_some());
+    assert!(results.data.summary.electro_nonlinear_severity.is_none());
 }
 
 #[test]
@@ -905,6 +931,15 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
                 field_artifact_id: None,
                 field_source: None,
                 region_temperature_deltas: Vec::new(),
+                time_profile: Vec::new(),
+            }),
+            electro_thermal_coupling: Some(ElectroThermalCouplingOptions {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_voltage_v: 82.0,
+                base_electrical_conductivity_s_per_m: 2.6e7,
+                resistive_heating_coefficient: 6.0e-4,
+                region_conductivity_scales: Vec::new(),
                 time_profile: Vec::new(),
             }),
             ..AnalysisNonlinearRunOptions::production_recommended()
@@ -944,6 +979,20 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
         .is_some());
     assert!(results.data.summary.thermo_nonlinear_severity.is_some());
     assert!(results.data.summary.thermo_transient_severity.is_some());
+    assert_eq!(results.data.summary.electro_thermal_coupling_enabled, Some(true));
+    assert!(results
+        .data
+        .summary
+        .electro_thermal_coupling_fingerprint
+        .is_some());
+    assert!(results.data.summary.electro_joule_heating_scale.is_some());
+    assert!(results
+        .data
+        .summary
+        .electro_conductivity_spread_ratio
+        .is_some());
+    assert!(results.data.summary.electro_nonlinear_severity.is_some());
+    assert!(results.data.summary.electro_transient_severity.is_some());
 }
 
 #[test]

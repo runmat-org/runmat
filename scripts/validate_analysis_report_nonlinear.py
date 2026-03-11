@@ -28,6 +28,9 @@ REQUIRED_FIXTURES = {
         "nonlinear_path_mix_effective_modulus_scale",
         "nonlinear_path_mix_material_spread_ratio",
         "thermo_nonlinear_severity",
+        "electro_nonlinear_joule_heating_scale",
+        "electro_nonlinear_conductivity_spread_ratio",
+        "electro_nonlinear_severity_peak",
     },
     "thermo_mech_kickoff_gpu_provider": {
         "thermo_mech_thermal_strain_scale",
@@ -71,6 +74,18 @@ REQUIRED_FIXTURES = {
         "thermo_shock_oscillatory_spatial_coverage_ratio",
         "thermo_shock_oscillatory_field_extrapolation_ratio",
     },
+    "electro_thermal_joule_benign_gpu_provider": {
+        "electro_thermal_benign_joule_heating_scale",
+        "electro_thermal_benign_conductivity_spread_ratio",
+        "electro_thermal_benign_transient_severity_peak",
+        "electro_thermal_benign_temporal_variation",
+    },
+    "electro_thermal_joule_pathological_gpu_provider": {
+        "electro_thermal_pathological_joule_heating_scale",
+        "electro_thermal_pathological_conductivity_spread_ratio",
+        "electro_thermal_pathological_transient_severity_peak",
+        "electro_thermal_pathological_temporal_variation",
+    },
 }
 
 THERMO_REQUIRED_FIELDS = {
@@ -85,6 +100,15 @@ THERMO_REQUIRED_FIELDS = {
     "thermo_field_extrapolation_ratio",
     "thermo_transient_severity",
     "thermo_nonlinear_severity",
+}
+
+ELECTRO_REQUIRED_FIELDS = {
+    "electro_thermal_coupling_enabled",
+    "electro_thermal_coupling_fingerprint",
+    "electro_joule_heating_scale",
+    "electro_conductivity_spread_ratio",
+    "electro_transient_severity",
+    "electro_nonlinear_severity",
 }
 
 
@@ -108,6 +132,9 @@ def main() -> int:
     )
     require_thermo_field_summary = is_true(
         os.getenv("RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY", "false")
+    )
+    require_electro_summary = is_true(
+        os.getenv("RUNMAT_VALIDATE_REQUIRE_ELECTRO_SUMMARY", "false")
     )
     records = {
         record.get("fixture_id"): record
@@ -161,6 +188,19 @@ def main() -> int:
                             f"fixture {fixture_id} missing thermo artifact field: {required_field}"
                         )
 
+        if fixture_id in {
+            "electro_thermal_joule_benign_gpu_provider",
+            "electro_thermal_joule_pathological_gpu_provider",
+            "nonlinear_load_path_mix_gpu_provider",
+        }:
+            missing_fields = sorted(
+                field for field in ELECTRO_REQUIRED_FIELDS if field not in record
+            )
+            if missing_fields:
+                errors.append(
+                    f"fixture {fixture_id} missing electro summary fields: {', '.join(missing_fields)}"
+                )
+
     if require_thermo_summary:
         thermo_records = [
             record
@@ -200,6 +240,19 @@ def main() -> int:
                 errors.append(
                     "thermo_field_extrapolation_ratio missing across thermo field records while RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY=true"
                 )
+
+    if require_electro_summary:
+        electro_records = [
+            record
+            for record in records.values()
+            if isinstance(record.get("electro_thermal_coupling_enabled"), bool)
+            or isinstance(record.get("electro_transient_severity"), (int, float))
+            or isinstance(record.get("electro_nonlinear_severity"), (int, float))
+        ]
+        if not electro_records:
+            errors.append(
+                "electro summary fields missing across all records while RUNMAT_VALIDATE_REQUIRE_ELECTRO_SUMMARY=true"
+            )
 
     if errors:
         for error in errors:

@@ -286,6 +286,7 @@ jobs:
         env:
           RUNMAT_VALIDATE_REQUIRE_THERMO_SUMMARY: "true"
           RUNMAT_VALIDATE_REQUIRE_THERMO_FIELD_SUMMARY: "true"
+          RUNMAT_VALIDATE_REQUIRE_ELECTRO_SUMMARY: "true"
         run: python3 scripts/validate_analysis_report_nonlinear.py
 
       - name: Enforce non-default thermo signing key on release branches
@@ -461,6 +462,9 @@ jobs:
               thermo_field_artifact_max_age_days = ready.get('thermo_field_artifact_max_age_days')
               thermo_spread_breach_rate = ready.get('thermo_spread_breach_rate')
               thermo_heterogeneity_breach_rate = ready.get('thermo_heterogeneity_breach_rate')
+              electro_enabled_rate = ready.get('electro_coupling_enabled_rate')
+              electro_max_transient = ready.get('electro_max_transient_severity')
+              electro_max_nonlinear = ready.get('electro_max_nonlinear_severity')
               lines.append(
                   "- Thermo coupling enabled-rate: "
                   f"{thermo_enabled_rate if thermo_enabled_rate is not None else '-'}"
@@ -536,6 +540,18 @@ jobs:
               lines.append(
                   "- Thermo heterogeneity breach rate: "
                   f"{thermo_heterogeneity_breach_rate if thermo_heterogeneity_breach_rate is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal coupling enabled-rate: "
+                  f"{electro_enabled_rate if electro_enabled_rate is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal max transient severity: "
+                  f"{electro_max_transient if electro_max_transient is not None else '-'}"
+              )
+              lines.append(
+                  "- Electro-thermal max nonlinear severity: "
+                  f"{electro_max_nonlinear if electro_max_nonlinear is not None else '-'}"
               )
           else:
               lines.append("- Readiness artifact: missing")

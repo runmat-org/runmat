@@ -686,6 +686,12 @@ pub struct AnalysisResultsSummary {
     pub thermo_field_extrapolation_ratio: Option<f64>,
     pub thermo_transient_severity: Option<f64>,
     pub thermo_nonlinear_severity: Option<f64>,
+    pub electro_thermal_coupling_enabled: Option<bool>,
+    pub electro_thermal_coupling_fingerprint: Option<u64>,
+    pub electro_joule_heating_scale: Option<f64>,
+    pub electro_conductivity_spread_ratio: Option<f64>,
+    pub electro_transient_severity: Option<f64>,
+    pub electro_nonlinear_severity: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -761,6 +767,9 @@ pub struct AnalysisTrendKindSummary {
     pub thermo_nonlinear_warn_rate: Option<f64>,
     pub thermo_spread_breach_rate: Option<f64>,
     pub thermo_heterogeneity_breach_rate: Option<f64>,
+    pub electro_thermal_coupling_enabled_rate: Option<f64>,
+    pub electro_transient_warn_rate: Option<f64>,
+    pub electro_nonlinear_warn_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
