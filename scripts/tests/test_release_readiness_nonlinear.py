@@ -172,11 +172,17 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REFERENCE_MAX_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MIN_SAMPLES",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MAX_BLOCKERS",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS",
             "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MIN_SAMPLES",
+            "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MAX_BLOCKERS",
+            "RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY",
+            "RUNMAT_RELEASE_READINESS_PROMOTION_MAX_BLOCKER_REGRESSION",
             "RUNMAT_THERMO_FIELD_PROMOTION_REPORT",
             "RUNMAT_THERMO_FIELD_SIGNING_KEY",
             "GITHUB_REF_NAME",
@@ -925,6 +931,109 @@ class ReleaseReadinessTests(unittest.TestCase):
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("CONTACT_REFERENCE_TREND_WORSENING", codes)
+
+    def test_promotion_ready_signals_true_when_reference_metrics_are_healthy(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            plastic_nonlinear_severity=0.22,
+            contact_nonlinear_severity=0.22,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                plastic_nonlinear_severity=0.21,
+                contact_nonlinear_severity=0.21,
+            )
+        ]
+        os.environ["RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY"] = "true"
+        os.environ["RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MIN_SAMPLES"] = "2"
+        os.environ["RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MIN_SAMPLES"] = "2"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        self.assertTrue(result["plastic_promotion_ready"])
+        self.assertTrue(result["contact_promotion_ready"])
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertNotIn("PLASTIC_PROMOTION_NOT_READY", codes)
+        self.assertNotIn("CONTACT_PROMOTION_NOT_READY", codes)
+
+    def test_promotion_not_ready_reason_when_reference_samples_insufficient(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            plastic_nonlinear_severity=0.22,
+            contact_nonlinear_severity=0.22,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                plastic_nonlinear_severity=0.21,
+                contact_nonlinear_severity=0.21,
+            )
+        ]
+        os.environ["RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY"] = "true"
+        os.environ["RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MIN_SAMPLES"] = "3"
+        os.environ["RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MIN_SAMPLES"] = "3"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        self.assertFalse(result["plastic_promotion_ready"])
+        self.assertFalse(result["contact_promotion_ready"])
+        self.assertIn("sample_count<3", result["plastic_promotion_blockers"])
+        self.assertIn("sample_count<3", result["contact_promotion_blockers"])
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PLASTIC_PROMOTION_NOT_READY", codes)
+        self.assertIn("CONTACT_PROMOTION_NOT_READY", codes)
+
+    def test_promotion_blocker_budget_exceeded_reasons_are_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            plastic_nonlinear_severity=0.9,
+            contact_nonlinear_severity=0.9,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                plastic_nonlinear_severity=0.2,
+                contact_nonlinear_severity=0.2,
+            )
+        ]
+        os.environ["RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MAX_BLOCKERS"] = "0"
+        os.environ["RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MAX_BLOCKERS"] = "0"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PLASTIC_PROMOTION_BLOCKER_BUDGET_EXCEEDED", codes)
+        self.assertIn("CONTACT_PROMOTION_BLOCKER_BUDGET_EXCEEDED", codes)
+
+    def test_promotion_blocker_burndown_stalled_reasons_are_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            plastic_nonlinear_severity=0.9,
+            contact_nonlinear_severity=0.9,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                plastic_nonlinear_severity=0.2,
+                contact_nonlinear_severity=0.2,
+            )
+        ]
+        os.environ["RUNMAT_RELEASE_READINESS_PROMOTION_MAX_BLOCKER_REGRESSION"] = "0"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PLASTIC_PROMOTION_BLOCKER_BURNDOWN_STALLED", codes)
+        self.assertIn("CONTACT_PROMOTION_BLOCKER_BURNDOWN_STALLED", codes)
 
     def test_thermo_spread_ratio_high_reason_is_emitted(self):
         latest = report(

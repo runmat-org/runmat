@@ -88,6 +88,12 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS": "true",
             "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MIN_SAMPLES": "2",
+            "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MIN_SAMPLES": "2",
+            "RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY": "true",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MAX_BLOCKERS": "0",
+            "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MAX_BLOCKERS": "0",
+            "RUNMAT_RELEASE_READINESS_PROMOTION_MAX_BLOCKER_REGRESSION": "0",
         },
         "development": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.2",
@@ -130,6 +136,12 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO": "1.16",
             "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO": "1.15",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MIN_SAMPLES": "2",
+            "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MIN_SAMPLES": "2",
+            "RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY": "false",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MAX_BLOCKERS": "1",
+            "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MAX_BLOCKERS": "1",
+            "RUNMAT_RELEASE_READINESS_PROMOTION_MAX_BLOCKER_REGRESSION": "0",
         },
         "feature": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.25",
@@ -172,6 +184,12 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO": "1.28",
             "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO": "1.26",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MIN_SAMPLES": "2",
+            "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MIN_SAMPLES": "2",
+            "RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY": "false",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MAX_BLOCKERS": "2",
+            "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MAX_BLOCKERS": "2",
+            "RUNMAT_RELEASE_READINESS_PROMOTION_MAX_BLOCKER_REGRESSION": "1",
         },
     }
     return profile_map.get(profile, {}).get(name, default)
@@ -890,6 +908,42 @@ def evaluate_release_readiness(
             ),
         )
     )
+    plastic_promotion_min_samples = int(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MIN_SAMPLES",
+            profile_default("RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MIN_SAMPLES", "2"),
+        )
+    )
+    contact_promotion_min_samples = int(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MIN_SAMPLES",
+            profile_default("RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MIN_SAMPLES", "2"),
+        )
+    )
+    require_promotion_ready = is_true(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY",
+            profile_default("RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY", "false"),
+        )
+    )
+    plastic_promotion_max_blockers = int(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MAX_BLOCKERS",
+            profile_default("RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MAX_BLOCKERS", "1"),
+        )
+    )
+    contact_promotion_max_blockers = int(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MAX_BLOCKERS",
+            profile_default("RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MAX_BLOCKERS", "1"),
+        )
+    )
+    promotion_max_blocker_regression = int(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PROMOTION_MAX_BLOCKER_REGRESSION",
+            profile_default("RUNMAT_RELEASE_READINESS_PROMOTION_MAX_BLOCKER_REGRESSION", "0"),
+        )
+    )
     thermo_records = [
         rec
         for rec in report_records(latest)
@@ -925,10 +979,20 @@ def evaluate_release_readiness(
     plastic_breach_rate = None
     plastic_trend_ratio = None
     plastic_reference_trend_ratio = None
+    plastic_promotion_ready = False
+    plastic_promotion_blockers = []
+    plastic_promotion_sample_count = 0
+    plastic_promotion_blocker_count = 0
+    plastic_promotion_blocker_regression = None
     contact_max_nonlinear_severity = None
     contact_breach_rate = None
     contact_trend_ratio = None
     contact_reference_trend_ratio = None
+    contact_promotion_ready = False
+    contact_promotion_blockers = []
+    contact_promotion_sample_count = 0
+    contact_promotion_blocker_count = 0
+    contact_promotion_blocker_regression = None
     if not thermo_records:
         if protected or thermo_require_metrics:
             reasons.append(
@@ -1913,6 +1977,179 @@ def evaluate_release_readiness(
                         )
                     )
 
+    plastic_reference_fixture_ids = {
+        "nonlinear_plastic_hardening_reference_gpu_provider",
+        "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+    }
+    contact_reference_fixture_ids = {
+        "nonlinear_contact_frictionless_reference_gpu_provider",
+        "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+    }
+    plastic_promotion_sample_count = sum(
+        1
+        for rec in report_records(latest)
+        if rec.get("fixture_id") in plastic_reference_fixture_ids
+        and isinstance(rec.get("plastic_nonlinear_severity"), (int, float))
+    )
+    contact_promotion_sample_count = sum(
+        1
+        for rec in report_records(latest)
+        if rec.get("fixture_id") in contact_reference_fixture_ids
+        and isinstance(rec.get("contact_nonlinear_severity"), (int, float))
+    )
+
+    if plastic_promotion_sample_count < plastic_promotion_min_samples:
+        plastic_promotion_blockers.append(f"sample_count<{plastic_promotion_min_samples}")
+    if plastic_reference_trend_ratio is None:
+        plastic_promotion_blockers.append("reference_trend_ratio_missing")
+    elif plastic_reference_trend_ratio > plastic_reference_max_trend_ratio_threshold:
+        plastic_promotion_blockers.append("reference_trend_ratio_high")
+    if plastic_breach_rate is None:
+        plastic_promotion_blockers.append("breach_rate_missing")
+    elif plastic_breach_rate > plastic_max_breach_rate_threshold:
+        plastic_promotion_blockers.append("breach_rate_high")
+    plastic_promotion_ready = len(plastic_promotion_blockers) == 0
+
+    if contact_promotion_sample_count < contact_promotion_min_samples:
+        contact_promotion_blockers.append(f"sample_count<{contact_promotion_min_samples}")
+    if contact_reference_trend_ratio is None:
+        contact_promotion_blockers.append("reference_trend_ratio_missing")
+    elif contact_reference_trend_ratio > contact_reference_max_trend_ratio_threshold:
+        contact_promotion_blockers.append("reference_trend_ratio_high")
+    if contact_breach_rate is None:
+        contact_promotion_blockers.append("breach_rate_missing")
+    elif contact_breach_rate > contact_max_breach_rate_threshold:
+        contact_promotion_blockers.append("breach_rate_high")
+    contact_promotion_ready = len(contact_promotion_blockers) == 0
+    plastic_promotion_blocker_count = len(plastic_promotion_blockers)
+    contact_promotion_blocker_count = len(contact_promotion_blockers)
+
+    if plastic_promotion_blocker_count > plastic_promotion_max_blockers:
+        reasons.append(
+            Reason(
+                code="PLASTIC_PROMOTION_BLOCKER_BUDGET_EXCEEDED",
+                severity="fail" if protected else "warn",
+                detail=(
+                    f"plastic promotion blocker count {plastic_promotion_blocker_count} exceeds budget "
+                    f"{plastic_promotion_max_blockers}"
+                ),
+            )
+        )
+    if contact_promotion_blocker_count > contact_promotion_max_blockers:
+        reasons.append(
+            Reason(
+                code="CONTACT_PROMOTION_BLOCKER_BUDGET_EXCEEDED",
+                severity="fail" if protected else "warn",
+                detail=(
+                    f"contact promotion blocker count {contact_promotion_blocker_count} exceeds budget "
+                    f"{contact_promotion_max_blockers}"
+                ),
+            )
+        )
+
+    def _promotion_blocker_count_for_report(
+        report: dict,
+        fixture_ids: set[str],
+        severity_field: str,
+        min_samples: int,
+        severity_threshold: float,
+    ) -> int:
+        values = []
+        for rec in report_records(report):
+            if rec.get("fixture_id") not in fixture_ids:
+                continue
+            raw = rec.get(severity_field)
+            if isinstance(raw, (int, float)):
+                values.append(float(raw))
+        count = 0
+        if len(values) < min_samples:
+            count += 1
+        if not values:
+            count += 1
+        else:
+            breach_rate = sum(1 for value in values if value > severity_threshold) / len(values)
+            if breach_rate > 0.0:
+                count += 1
+        return count
+
+    if rolling:
+        rolling_plastic_blockers = [
+            _promotion_blocker_count_for_report(
+                report,
+                plastic_reference_fixture_ids,
+                "plastic_nonlinear_severity",
+                plastic_promotion_min_samples,
+                plastic_max_nonlinear_severity_threshold,
+            )
+            for report in rolling
+        ]
+        if rolling_plastic_blockers:
+            plastic_promotion_blocker_regression = (
+                plastic_promotion_blocker_count
+                - int(statistics.median(rolling_plastic_blockers))
+            )
+            if plastic_promotion_blocker_regression > promotion_max_blocker_regression:
+                reasons.append(
+                    Reason(
+                        code="PLASTIC_PROMOTION_BLOCKER_BURNDOWN_STALLED",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"plastic promotion blocker regression {plastic_promotion_blocker_regression} exceeds "
+                            f"allowed {promotion_max_blocker_regression}"
+                        ),
+                    )
+                )
+
+        rolling_contact_blockers = [
+            _promotion_blocker_count_for_report(
+                report,
+                contact_reference_fixture_ids,
+                "contact_nonlinear_severity",
+                contact_promotion_min_samples,
+                contact_max_nonlinear_severity_threshold,
+            )
+            for report in rolling
+        ]
+        if rolling_contact_blockers:
+            contact_promotion_blocker_regression = (
+                contact_promotion_blocker_count
+                - int(statistics.median(rolling_contact_blockers))
+            )
+            if contact_promotion_blocker_regression > promotion_max_blocker_regression:
+                reasons.append(
+                    Reason(
+                        code="CONTACT_PROMOTION_BLOCKER_BURNDOWN_STALLED",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"contact promotion blocker regression {contact_promotion_blocker_regression} exceeds "
+                            f"allowed {promotion_max_blocker_regression}"
+                        ),
+                    )
+                )
+
+    if not plastic_promotion_ready and (protected or require_promotion_ready):
+        reasons.append(
+            Reason(
+                code="PLASTIC_PROMOTION_NOT_READY",
+                severity="fail" if protected else "warn",
+                detail=(
+                    "plastic promotion blockers: "
+                    + ", ".join(sorted(plastic_promotion_blockers))
+                ),
+            )
+        )
+    if not contact_promotion_ready and (protected or require_promotion_ready):
+        reasons.append(
+            Reason(
+                code="CONTACT_PROMOTION_NOT_READY",
+                severity="fail" if protected else "warn",
+                detail=(
+                    "contact promotion blockers: "
+                    + ", ".join(sorted(contact_promotion_blockers))
+                ),
+            )
+        )
+
     if isinstance(thermo_promotion_report, dict) and thermo_promotion_report.get("blocked"):
         blocked_reasons = thermo_promotion_report.get("reasons")
         if isinstance(blocked_reasons, list) and blocked_reasons:
@@ -2003,6 +2240,13 @@ def evaluate_release_readiness(
         "plastic_max_trend_ratio_threshold": plastic_max_trend_ratio_threshold,
         "plastic_reference_trend_ratio": plastic_reference_trend_ratio,
         "plastic_reference_max_trend_ratio_threshold": plastic_reference_max_trend_ratio_threshold,
+        "plastic_promotion_ready": plastic_promotion_ready,
+        "plastic_promotion_blockers": plastic_promotion_blockers,
+        "plastic_promotion_sample_count": plastic_promotion_sample_count,
+        "plastic_promotion_min_samples": plastic_promotion_min_samples,
+        "plastic_promotion_blocker_count": plastic_promotion_blocker_count,
+        "plastic_promotion_max_blockers": plastic_promotion_max_blockers,
+        "plastic_promotion_blocker_regression": plastic_promotion_blocker_regression,
         "contact_max_nonlinear_severity": contact_max_nonlinear_severity,
         "contact_max_nonlinear_severity_threshold": contact_max_nonlinear_severity_threshold,
         "contact_breach_rate": contact_breach_rate,
@@ -2011,6 +2255,15 @@ def evaluate_release_readiness(
         "contact_max_trend_ratio_threshold": contact_max_trend_ratio_threshold,
         "contact_reference_trend_ratio": contact_reference_trend_ratio,
         "contact_reference_max_trend_ratio_threshold": contact_reference_max_trend_ratio_threshold,
+        "contact_promotion_ready": contact_promotion_ready,
+        "contact_promotion_blockers": contact_promotion_blockers,
+        "contact_promotion_sample_count": contact_promotion_sample_count,
+        "contact_promotion_min_samples": contact_promotion_min_samples,
+        "contact_promotion_blocker_count": contact_promotion_blocker_count,
+        "contact_promotion_max_blockers": contact_promotion_max_blockers,
+        "contact_promotion_blocker_regression": contact_promotion_blocker_regression,
+        "require_promotion_ready": require_promotion_ready,
+        "promotion_max_blocker_regression": promotion_max_blocker_regression,
         "reference_trend_ratcheted": True,
         "reference_trend_rationale": "rolling_median_reference_fixtures",
         "rolling_report_count": len(rolling),
@@ -2211,6 +2464,52 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Contact reference trend threshold: "
         f"`{result.get('contact_reference_max_trend_ratio_threshold') if result.get('contact_reference_max_trend_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append("")
+    lines.append("### Promotion Readiness")
+    lines.append(
+        "- Promotion-ready required: "
+        f"`{result.get('require_promotion_ready') if result.get('require_promotion_ready') is not None else '-'}`"
+    )
+    lines.append(
+        "- Plastic promotion ready: "
+        f"`{result.get('plastic_promotion_ready') if result.get('plastic_promotion_ready') is not None else '-'}`"
+    )
+    lines.append(
+        "- Plastic promotion samples/min: "
+        f"`{result.get('plastic_promotion_sample_count') if result.get('plastic_promotion_sample_count') is not None else '-'}`/`{result.get('plastic_promotion_min_samples') if result.get('plastic_promotion_min_samples') is not None else '-'}`"
+    )
+    lines.append(
+        "- Plastic promotion blockers: "
+        f"`{', '.join(result.get('plastic_promotion_blockers', [])) if result.get('plastic_promotion_blockers') else '-'}`"
+    )
+    lines.append(
+        "- Plastic blocker count/max: "
+        f"`{result.get('plastic_promotion_blocker_count') if result.get('plastic_promotion_blocker_count') is not None else '-'}`/`{result.get('plastic_promotion_max_blockers') if result.get('plastic_promotion_max_blockers') is not None else '-'}`"
+    )
+    lines.append(
+        "- Plastic blocker regression/allowed: "
+        f"`{result.get('plastic_promotion_blocker_regression') if result.get('plastic_promotion_blocker_regression') is not None else '-'}`/`{result.get('promotion_max_blocker_regression') if result.get('promotion_max_blocker_regression') is not None else '-'}`"
+    )
+    lines.append(
+        "- Contact promotion ready: "
+        f"`{result.get('contact_promotion_ready') if result.get('contact_promotion_ready') is not None else '-'}`"
+    )
+    lines.append(
+        "- Contact promotion samples/min: "
+        f"`{result.get('contact_promotion_sample_count') if result.get('contact_promotion_sample_count') is not None else '-'}`/`{result.get('contact_promotion_min_samples') if result.get('contact_promotion_min_samples') is not None else '-'}`"
+    )
+    lines.append(
+        "- Contact promotion blockers: "
+        f"`{', '.join(result.get('contact_promotion_blockers', [])) if result.get('contact_promotion_blockers') else '-'}`"
+    )
+    lines.append(
+        "- Contact blocker count/max: "
+        f"`{result.get('contact_promotion_blocker_count') if result.get('contact_promotion_blocker_count') is not None else '-'}`/`{result.get('contact_promotion_max_blockers') if result.get('contact_promotion_max_blockers') is not None else '-'}`"
+    )
+    lines.append(
+        "- Contact blocker regression/allowed: "
+        f"`{result.get('contact_promotion_blocker_regression') if result.get('contact_promotion_blocker_regression') is not None else '-'}`/`{result.get('promotion_max_blocker_regression') if result.get('promotion_max_blocker_regression') is not None else '-'}`"
     )
     lines.append("")
     if result["reasons"]:

@@ -424,6 +424,7 @@ jobs:
           RUNMAT_RELEASE_READINESS_PREP_MAX_REJECT_RATE: "0.25"
           RUNMAT_RELEASE_READINESS_PREP_REQUIRE_RECOMMENDATION_ARTIFACT: "true"
           RUNMAT_RELEASE_READINESS_PREP_CANDIDATE_MAX_AGE_DAYS: "14"
+          RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
           RUNMAT_PREP_CALIBRATION_RECOMMENDATIONS_INPUT: target/runmat-analysis-artifacts/prep_calibration_recommendations.json
           RUNMAT_THERMO_FIELD_SIGNING_KEY: ${{ secrets.RUNMAT_THERMO_FIELD_SIGNING_KEY }}
         run: |
@@ -503,6 +504,22 @@ jobs:
               contact_trend_ratio = ready.get('contact_trend_ratio')
               contact_reference_trend_ratio = ready.get('contact_reference_trend_ratio')
               contact_reference_trend_threshold = ready.get('contact_reference_max_trend_ratio_threshold')
+              require_promotion_ready = ready.get('require_promotion_ready')
+              plastic_promotion_ready = ready.get('plastic_promotion_ready')
+              plastic_promotion_sample_count = ready.get('plastic_promotion_sample_count')
+              plastic_promotion_min_samples = ready.get('plastic_promotion_min_samples')
+              plastic_promotion_blockers = ready.get('plastic_promotion_blockers')
+              plastic_promotion_blocker_count = ready.get('plastic_promotion_blocker_count')
+              plastic_promotion_max_blockers = ready.get('plastic_promotion_max_blockers')
+              plastic_promotion_blocker_regression = ready.get('plastic_promotion_blocker_regression')
+              contact_promotion_ready = ready.get('contact_promotion_ready')
+              contact_promotion_sample_count = ready.get('contact_promotion_sample_count')
+              contact_promotion_min_samples = ready.get('contact_promotion_min_samples')
+              contact_promotion_blockers = ready.get('contact_promotion_blockers')
+              contact_promotion_blocker_count = ready.get('contact_promotion_blocker_count')
+              contact_promotion_max_blockers = ready.get('contact_promotion_max_blockers')
+              contact_promotion_blocker_regression = ready.get('contact_promotion_blocker_regression')
+              promotion_max_blocker_regression = ready.get('promotion_max_blocker_regression')
               reference_trend_ratcheted = ready.get('reference_trend_ratcheted')
               reference_trend_rationale = ready.get('reference_trend_rationale')
               rolling_report_count = ready.get('rolling_report_count')
@@ -673,6 +690,50 @@ jobs:
               lines.append(
                   "- Contact reference trend threshold: "
                   f"{contact_reference_trend_threshold if contact_reference_trend_threshold is not None else '-'}"
+              )
+              lines.append(
+                  "- Promotion-ready required: "
+                  f"{require_promotion_ready if require_promotion_ready is not None else '-'}"
+              )
+              lines.append(
+                  "- Plastic promotion ready: "
+                  f"{plastic_promotion_ready if plastic_promotion_ready is not None else '-'}"
+              )
+              lines.append(
+                  "- Plastic promotion samples/min: "
+                  f"{plastic_promotion_sample_count if plastic_promotion_sample_count is not None else '-'}/{plastic_promotion_min_samples if plastic_promotion_min_samples is not None else '-'}"
+              )
+              lines.append(
+                  "- Plastic promotion blockers: "
+                  f"{', '.join(plastic_promotion_blockers) if isinstance(plastic_promotion_blockers, list) and plastic_promotion_blockers else '-'}"
+              )
+              lines.append(
+                  "- Plastic blocker count/max: "
+                  f"{plastic_promotion_blocker_count if plastic_promotion_blocker_count is not None else '-'}/{plastic_promotion_max_blockers if plastic_promotion_max_blockers is not None else '-'}"
+              )
+              lines.append(
+                  "- Plastic blocker regression/allowed: "
+                  f"{plastic_promotion_blocker_regression if plastic_promotion_blocker_regression is not None else '-'}/{promotion_max_blocker_regression if promotion_max_blocker_regression is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact promotion ready: "
+                  f"{contact_promotion_ready if contact_promotion_ready is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact promotion samples/min: "
+                  f"{contact_promotion_sample_count if contact_promotion_sample_count is not None else '-'}/{contact_promotion_min_samples if contact_promotion_min_samples is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact promotion blockers: "
+                  f"{', '.join(contact_promotion_blockers) if isinstance(contact_promotion_blockers, list) and contact_promotion_blockers else '-'}"
+              )
+              lines.append(
+                  "- Contact blocker count/max: "
+                  f"{contact_promotion_blocker_count if contact_promotion_blocker_count is not None else '-'}/{contact_promotion_max_blockers if contact_promotion_max_blockers is not None else '-'}"
+              )
+              lines.append(
+                  "- Contact blocker regression/allowed: "
+                  f"{contact_promotion_blocker_regression if contact_promotion_blocker_regression is not None else '-'}/{promotion_max_blocker_regression if promotion_max_blocker_regression is not None else '-'}"
               )
               lines.append(
                   "- Reference trend ratchet active: "

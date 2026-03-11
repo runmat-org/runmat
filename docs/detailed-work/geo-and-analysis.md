@@ -1381,6 +1381,8 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-10: Completed promotion-readiness second pass by adding explicit plastic/contact promotion blocker budgets and blocker-regression (burn-down stall) policy reasons, surfacing blocker count/regression metrics in readiness + Tier-7.5 summaries, and extending readiness tests for budget/burndown enforcement.
+- 2026-03-10: Added first-pass promotion readiness gating for plastic/contact reference tracks by surfacing `*_promotion_ready` status and blocker vectors in readiness artifacts, enforcing optional promotion-required policy via env (`RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY`), and exposing promotion readiness posture in Tier-7.5 CI governance summaries.
 - 2026-03-10: Completed second-pass ratchet policy hardening by adding release-profile non-regression checks (`new <= old`) and protected-branch observed-metric requirements to threshold-ratchet validation, then wiring protected-branch observed enforcement via CI env policy.
 - 2026-03-10: Added enforceable ratchet-policy validation by introducing `validate_threshold_ratchet_report.py` (non-release profiles must remain truly ratcheted with reference-median rationale), wiring it into CI as a required Tier-7.5 gate, and adding dedicated unit-test coverage.
 - 2026-03-10: Added auditable threshold-ratchet artifacts by generating `threshold_ratchet_report.json/.md` from readiness outputs (old/new/profile deltas with observed ratios), integrating the report into Tier-7.5 CI summaries/uploads, and adding unit-test coverage for report generation.
