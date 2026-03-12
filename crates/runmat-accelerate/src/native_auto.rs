@@ -668,11 +668,17 @@ pub async fn global() -> Option<&'static NativeAutoOffload> {
     }
     // If auto-offload is disabled or there is no GPU provider registered,
     // initialize_async() would return None immediately (no I/O, no blocking).
-    // Resolve without acquiring the async lock so single-poll callers (e.g.
-    // the turbine JIT interpreter fallback) never observe a spurious Pending.
+    // Return None directly without acquiring the async lock so single-poll
+    // callers (e.g. the turbine JIT interpreter fallback) never observe a
+    // spurious Pending.  We intentionally do NOT write to GLOBAL here: doing
+    // so without holding GLOBAL_INIT_LOCK would race with a concurrent thread
+    // that is partway through initialize_async() and has found a valid
+    // provider.  That thread's subsequent GLOBAL.set(Some(offload)) would
+    // silently fail (OnceCell is set-once), permanently disabling the
+    // accelerator for the lifetime of the process.  These two checks are
+    // cheap (no I/O), so re-evaluating them on each call is acceptable.
     if !auto_enabled() || runmat_accelerate_api::provider().is_none() {
-        let _ = GLOBAL.set(None);
-        return GLOBAL.get().and_then(|v| v.as_ref());
+        return None;
     }
     let _guard = GLOBAL_INIT_LOCK.lock().await;
     if let Some(existing) = GLOBAL.get() {
