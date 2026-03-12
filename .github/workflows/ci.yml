@@ -361,6 +361,7 @@ jobs:
             scripts.tests.test_generate_threshold_ratchet_report \
             scripts.tests.test_generate_promotion_threshold_calibration \
             scripts.tests.test_validate_threshold_ratchet_report \
+            scripts.tests.test_validate_promotion_threshold_calibration \
             scripts.tests.test_evaluate_prep_calibration_drift \
             scripts.tests.test_promote_prep_calibration_evidence
 
@@ -417,6 +418,15 @@ jobs:
       - name: Generate promotion threshold calibration
         if: always()
         run: python3 scripts/generate_promotion_threshold_calibration.py
+
+      - name: Validate promotion threshold calibration
+        if: always()
+        env:
+          RUNMAT_VALIDATE_PROMOTION_CALIBRATION_ENFORCE: "true"
+          RUNMAT_VALIDATE_PROMOTION_CALIBRATION_REQUIRE_CADENCE: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
+          RUNMAT_VALIDATE_PROMOTION_CALIBRATION_MIN_SOURCE_REPORTS: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && '4' || '0' }}
+          RUNMAT_PROMOTION_THRESHOLD_CALIBRATION_INPUT: target/runmat-analysis-artifacts/promotion_threshold_calibration.json
+        run: python3 scripts/validate_promotion_threshold_calibration.py
 
       - name: Evaluate nonlinear release readiness
         if: always()

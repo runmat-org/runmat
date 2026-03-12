@@ -120,6 +120,8 @@ def main() -> int:
         "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         "rationale": "rolling_median_reference_fixtures",
         "source_report_count": len(reports),
+        "cadence_days": {"release": 7, "development": 14, "feature": 30},
+        "max_missed_cycles_allowed": 1,
         "by_profile": by_profile,
     }
     out.parent.mkdir(parents=True, exist_ok=True)

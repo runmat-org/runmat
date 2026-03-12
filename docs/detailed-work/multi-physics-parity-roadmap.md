@@ -300,7 +300,7 @@ This section defines where upcoming multiphysics logic should live so the system
 
 ## Near-Term Next 3 Chunks
 
-1. Phase 4 material/contact promotion (final hardening): enforce rolling-data-calibrated promotion blocker budgets/regression policy in protected-branch readiness with documented adjustment cadence.
+1. Phase 4 material/contact promotion (operational closeout): automate cadence adherence checks and stale-calibration escalation for protected branches.
 2. Phase 4 constitutive depth: expand non-proxy elastic-plastic evidence with additional reference hardening/load-path scenarios and calibrate bounded drift thresholds from rolling history.
 3. Phase 4 realism hardening: ratchet contact/plastic drift thresholds from rolling benchmark history while preserving protected-branch stability.
 

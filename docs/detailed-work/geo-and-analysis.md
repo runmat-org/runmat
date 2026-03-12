@@ -1381,6 +1381,7 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-10: Completed promotion evidence-quality hardening by adding calibration freshness/history sufficiency policy signals (`PROMOTION_CALIBRATION_STALE`, `PROMOTION_HISTORY_INSUFFICIENT`) and explicit baseline-missing blocker-regression reasons, then reflecting these as local readiness + Tier-7.5 CI evidence-quality lines.
 - 2026-03-10: Added a dedicated `Promotion Evidence Quality` subsection to local readiness markdown output, aligning calibration/history signal presentation with Tier-7.5 CI governance summary lines for consistent local-vs-CI audit readability.
 - 2026-03-10: Hardened promotion evidence quality by adding calibration freshness checks (`PROMOTION_CALIBRATION_STALE`), minimum rolling-history gates (`PROMOTION_HISTORY_INSUFFICIENT`), and explicit baseline-missing blocker-regression reasons for plastic/contact promotion tracks, with readiness/CI posture surfacing for age/history sufficiency.
 - 2026-03-10: Added data-calibrated promotion-threshold path by generating `promotion_threshold_calibration.json` from rolling reference fixtures, wiring optional/required calibration consumption into release readiness (`PROMOTION_CALIBRATION_MISSING` guard), and exposing calibration applied/required posture in Tier-7.5 governance summaries.
