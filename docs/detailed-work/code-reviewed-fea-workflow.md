@@ -82,9 +82,9 @@ Notes:
 
 Status:
 
-- `analysis.validate_study`, `analysis.plan_study`, and `analysis.run_study` are planned study builtins.
-- `analysis.resolve_study`, `analysis.latest_run`, `analysis.open_run`, and `analysis.open_run_data` are planned discovery helpers.
-- Until helper builtins exist, callers can read index/pointer files directly via the schema contracts in this document.
+- Planned study builtins: `analysis.validate_study`, `analysis.plan_study`, `analysis.run_study`.
+- Planned discovery helpers: `analysis.resolve_study`, `analysis.latest_run`, `analysis.open_run`, `analysis.open_run_data`.
+- Interim behavior: callers may read index/pointer files directly using the contracts in this document.
 
 - `analysis.validate_study(path, options?)`
   - parses YAML/JSON,
@@ -261,47 +261,47 @@ JSON equivalent is accepted for automation-heavy contexts.
 
 Study field to currently implemented type mapping:
 
-| Study path | Rust type |
-| --- | --- |
-| `create_model_intent` | `runmat_runtime::analysis::contracts::AnalysisCreateModelIntentSpec` |
-| `create_model_intent.profile` | `runmat_runtime::analysis::contracts::AnalysisCreateModelProfile` |
-| `create_model_intent.prep_context` | `runmat_runtime::analysis::contracts::AnalysisCreateModelPrepContext` |
-| `create_model_intent.prep_context.region_mappings[]` | `runmat_meshing_core::RegionMeshMapping` |
-| `model` | `runmat_analysis_core::problem::model::AnalysisModel` (study-owned fields only; `model_id`, `geometry_id`, `geometry_revision` are resolved during execution) |
-| `model.frame` | `runmat_analysis_core::problem::model::ReferenceFrame` |
-| `model.units` | `runmat_geometry_core::UnitSystem` |
-| `model.materials[]` | `runmat_analysis_core::problem::materials::MaterialModel` |
-| `model.material_assignments[]` | `runmat_analysis_core::problem::material_assignment::MaterialAssignment` |
-| `model.material_assignments[].confidence` | `runmat_analysis_core::problem::material_assignment::EvidenceConfidence` |
-| `model.boundary_conditions[]` | `runmat_analysis_core::problem::bc::BoundaryCondition` |
-| `model.boundary_conditions[].kind` | `runmat_analysis_core::problem::bc::BoundaryConditionKind` |
-| `model.loads[]` | `runmat_analysis_core::problem::loads::LoadCase` |
-| `model.loads[].kind` | `runmat_analysis_core::problem::loads::LoadKind` |
-| `model.steps[]` | `runmat_analysis_core::problem::steps::AnalysisStep` |
-| `model.steps[].kind` | `runmat_analysis_core::problem::steps::AnalysisStepKind` |
-| `execution.backend` | `runmat_analysis_fea::ComputeBackend` |
-| `execution.options` (linear static) | `runmat_runtime::analysis::contracts::AnalysisRunOptions` |
-| `execution.options` (modal) | `runmat_runtime::analysis::contracts::AnalysisModalRunOptions` |
-| `execution.options` (transient) | `runmat_runtime::analysis::contracts::AnalysisTransientRunOptions` |
-| `execution.options` (nonlinear) | `runmat_runtime::analysis::contracts::AnalysisNonlinearRunOptions` |
-| `execution.options.precision_mode` | `runmat_runtime::analysis::contracts::PrecisionMode` |
-| `execution.options.quality_policy` | `runmat_runtime::analysis::contracts::QualityPolicy` |
-| `execution.options.prep_calibration_profile` | `runmat_runtime::analysis::contracts::PrepCalibrationProfile` |
-| `execution.options.thermo_mechanical_coupling` | `runmat_runtime::analysis::contracts::ThermoMechanicalCouplingOptions` |
-| `execution.options.electro_thermal_coupling` | `runmat_runtime::analysis::contracts::ElectroThermalCouplingOptions` |
-| `execution.options.plasticity_proxy` | `runmat_runtime::analysis::contracts::PlasticityProxyOptions` |
-| `execution.options.contact_proxy` | `runmat_runtime::analysis::contracts::ContactProxyOptions` |
-| `results_query` | `runmat_runtime::analysis::contracts::AnalysisResultsQuery` |
+| Study path | Required | Source | Rust type |
+| --- | --- | --- | --- |
+| `create_model_intent` | yes | study | `runmat_runtime::analysis::contracts::AnalysisCreateModelIntentSpec` |
+| `create_model_intent.profile` | yes | study | `runmat_runtime::analysis::contracts::AnalysisCreateModelProfile` |
+| `create_model_intent.prep_context` | no | study | `runmat_runtime::analysis::contracts::AnalysisCreateModelPrepContext` |
+| `create_model_intent.prep_context.region_mappings[]` | conditional | study | `runmat_meshing_core::RegionMeshMapping` |
+| `model` | yes | study | `runmat_analysis_core::problem::model::AnalysisModel` (study-owned fields only; `model_id`, `geometry_id`, `geometry_revision` are resolved during execution) |
+| `model.frame` | yes | study | `runmat_analysis_core::problem::model::ReferenceFrame` |
+| `model.units` | yes | study | `runmat_geometry_core::UnitSystem` |
+| `model.materials[]` | conditional | study | `runmat_analysis_core::problem::materials::MaterialModel` |
+| `model.material_assignments[]` | yes | study | `runmat_analysis_core::problem::material_assignment::MaterialAssignment` |
+| `model.material_assignments[].confidence` | no | study | `runmat_analysis_core::problem::material_assignment::EvidenceConfidence` |
+| `model.boundary_conditions[]` | yes | study | `runmat_analysis_core::problem::bc::BoundaryCondition` |
+| `model.boundary_conditions[].kind` | yes | study | `runmat_analysis_core::problem::bc::BoundaryConditionKind` |
+| `model.loads[]` | yes | study | `runmat_analysis_core::problem::loads::LoadCase` |
+| `model.loads[].kind` | yes | study | `runmat_analysis_core::problem::loads::LoadKind` |
+| `model.steps[]` | yes | study | `runmat_analysis_core::problem::steps::AnalysisStep` |
+| `model.steps[].kind` | yes | study | `runmat_analysis_core::problem::steps::AnalysisStepKind` |
+| `execution.backend` | yes | study | `runmat_analysis_fea::ComputeBackend` |
+| `execution.options` (linear static) | conditional | study | `runmat_runtime::analysis::contracts::AnalysisRunOptions` |
+| `execution.options` (modal) | conditional | study | `runmat_runtime::analysis::contracts::AnalysisModalRunOptions` |
+| `execution.options` (transient) | conditional | study | `runmat_runtime::analysis::contracts::AnalysisTransientRunOptions` |
+| `execution.options` (nonlinear) | conditional | study | `runmat_runtime::analysis::contracts::AnalysisNonlinearRunOptions` |
+| `execution.options.precision_mode` | no | study/defaulted | `runmat_runtime::analysis::contracts::PrecisionMode` |
+| `execution.options.quality_policy` | no | study/defaulted | `runmat_runtime::analysis::contracts::QualityPolicy` |
+| `execution.options.prep_calibration_profile` | no | study | `runmat_runtime::analysis::contracts::PrepCalibrationProfile` |
+| `execution.options.thermo_mechanical_coupling` | no | study | `runmat_runtime::analysis::contracts::ThermoMechanicalCouplingOptions` |
+| `execution.options.electro_thermal_coupling` | no | study | `runmat_runtime::analysis::contracts::ElectroThermalCouplingOptions` |
+| `execution.options.plasticity_proxy` | no | study | `runmat_runtime::analysis::contracts::PlasticityProxyOptions` |
+| `execution.options.contact_proxy` | no | study | `runmat_runtime::analysis::contracts::ContactProxyOptions` |
+| `results_query` | no | study/defaulted | `runmat_runtime::analysis::contracts::AnalysisResultsQuery` |
 
 Runtime operation bindings used by study builtins:
 
-| Builtin stage | Runtime function |
-| --- | --- |
-| create model | `analysis_create_model_op` |
-| run linear static | `analysis_run_linear_static_with_options` |
-| run modal | `analysis_run_modal_with_options_op` |
-| run transient | `analysis_run_transient_with_options_op` |
-| run nonlinear | `analysis_run_nonlinear_with_options_op` |
+| Builtin stage | Required | Runtime function |
+| --- | --- | --- |
+| create model | yes | `analysis_create_model_op` |
+| run linear static | conditional (`profile=linear_static_structural`) | `analysis_run_linear_static_with_options` |
+| run modal | conditional (`profile=modal_structural`) | `analysis_run_modal_with_options_op` |
+| run transient | conditional (`profile=transient_structural`) | `analysis_run_transient_with_options_op` |
+| run nonlinear | conditional (`profile=nonlinear_structural`) | `analysis_run_nonlinear_with_options_op` |
 
 Import object fields:
 
@@ -461,14 +461,14 @@ ID and collision policy:
 
 ## Discovery and Loading
 
-Callers should avoid manual path construction. Preferred discovery uses helper/builtin APIs (planned):
+Callers should avoid manual path construction. Preferred discovery uses helper APIs:
 
 - `analysis.resolve_study(study_path)` -> `{ analysis_id, study_fingerprint, root }`
 - `analysis.latest_run(analysis_id)` -> `{ run_id, status, updated_at }`
 - `analysis.open_run(analysis_id, run_id)` -> run artifact metadata/paths
 - `analysis.open_run_data(analysis_id, run_id)` -> `Dataset` handle for `run.data`
 
-These APIs are thin wrappers over the on-disk index/pointer files.
+These helpers are thin wrappers over on-disk index/pointer files.
 
 Direct-file fallback (no helper builtins):
 
@@ -513,7 +513,7 @@ function run_simulation(study_path)
 end
 ```
 
-### `scripts/inspect_results.m` (planned helper API usage)
+### `scripts/inspect_results.m` (helper-based pattern)
 
 ```matlab
 function inspect_results(study_path, run_id)
@@ -551,7 +551,6 @@ function inspect_results(study_path, run_id)
   end
 
   % Optional desktop field hooks:
-  % visualize_field_3d(results, 'displacement_magnitude');
   % visualize_field_3d(ds, 'displacement');
   % visualize_field_3d(ds, 'von_mises');
 end
@@ -579,7 +578,7 @@ Generated artifacts include JSON envelopes and a native `.data` dataset under `.
 
 - `analysis_results.json`
   - `analysis.results/v1` envelope payload,
-  - contract summary/status/provenance surface for governance and CI,
+  - governance/CI summary/status/provenance surface,
   - should not be treated as the primary field-array inspection API.
 
 - `analysis_diagnostics.json`
@@ -601,12 +600,12 @@ Dataset-level expectations:
 
 Required arrays by run kind:
 
-| Run kind | Required arrays |
-| --- | --- |
-| linear static | `displacement`, `von_mises` |
-| modal | `modal_eigenvalues_hz`, `modal_residual_norms` |
-| transient | `transient_time_points_s`, `transient_residual_norms` |
-| nonlinear | `nonlinear_load_factors`, `nonlinear_residual_norms`, `nonlinear_iteration_counts` |
+| Run kind | Required | Arrays |
+| --- | --- | --- |
+| linear static | yes | `displacement`, `von_mises` |
+| modal | yes | `modal_eigenvalues_hz`, `modal_residual_norms` |
+| transient | yes | `transient_time_points_s`, `transient_residual_norms` |
+| nonlinear | yes | `nonlinear_load_factors`, `nonlinear_residual_norms`, `nonlinear_iteration_counts` |
 
 Optional arrays by run kind:
 
@@ -614,7 +613,7 @@ Optional arrays by run kind:
 - transient: displacement snapshot arrays,
 - nonlinear: displacement snapshot arrays and nonlinear line-search/tangent-rebuild series.
 
-This keeps field and series inspection on the RunMat data plane while JSON envelopes remain governance-friendly summaries.
+This keeps field/series inspection on the RunMat data plane while JSON envelopes stay governance-focused.
 
 ## Provenance Model
 
