@@ -6,6 +6,8 @@ Define the development plan from the current Tier-7.5 state to a stellar program
 
 This roadmap is internal engineering guidance. Customer-facing capability messaging should remain in `docs/analysis/prep-aware-solves.md` and `docs/geometry/prep-for-analysis.md`.
 
+Code-reviewed simulation package workflow details are tracked in `docs/detailed-work/code-reviewed-fea-workflow.md`.
+
 ## Current Baseline
 
 ### Strengths already in place
