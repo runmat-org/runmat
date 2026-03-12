@@ -300,9 +300,9 @@ This section defines where upcoming multiphysics logic should live so the system
 
 ## Near-Term Next 3 Chunks
 
-1. Phase 4 material/contact promotion (operational closeout): automate cadence adherence checks and stale-calibration escalation for protected branches.
-2. Phase 4 constitutive depth: expand non-proxy elastic-plastic evidence with additional reference hardening/load-path scenarios and calibrate bounded drift thresholds from rolling history.
-3. Phase 4 realism hardening: ratchet contact/plastic drift thresholds from rolling benchmark history while preserving protected-branch stability.
+1. M6 industrial credibility slice: expand external-reference comparator beyond severity proxies to include load-displacement key points and probe-based stress/plastic metrics.
+2. M6 industrial credibility slice: tune protected-branch external-reference tolerance bands from rolling cross-check evidence and benchmark source uncertainty.
+3. Phase 4 realism hardening: continue ratcheting contact/plastic drift thresholds from rolling benchmark history while preserving protected-branch stability.
 
 ## Success Milestones
 

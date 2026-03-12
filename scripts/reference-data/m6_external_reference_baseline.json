@@ -1,0 +1,42 @@
+{
+  "schema_version": "external-reference-baseline/v1",
+  "scenario_id": "m6_elastoplastic_contact_bracket_v1",
+  "reference_source": {
+    "primary": "nafems_elastoplastic_contact_reference_pack",
+    "secondary": "calculix_cross_check"
+  },
+  "metrics": [
+    {
+      "name": "plastic_reference_severity",
+      "fixture_id": "nonlinear_plastic_hardening_reference_gpu_provider",
+      "field": "plastic_nonlinear_severity",
+      "reference": 0.2333333333,
+      "tolerance_abs": 0.08,
+      "tolerance_rel": 0.35
+    },
+    {
+      "name": "plastic_reference_complex_severity",
+      "fixture_id": "nonlinear_plastic_hardening_reference_complex_gpu_provider",
+      "field": "plastic_nonlinear_severity",
+      "reference": 0.3702777778,
+      "tolerance_abs": 0.1,
+      "tolerance_rel": 0.35
+    },
+    {
+      "name": "contact_reference_severity",
+      "fixture_id": "nonlinear_contact_frictionless_reference_gpu_provider",
+      "field": "contact_nonlinear_severity",
+      "reference": 0.2666666667,
+      "tolerance_abs": 0.09,
+      "tolerance_rel": 0.35
+    },
+    {
+      "name": "contact_reference_complex_severity",
+      "fixture_id": "nonlinear_contact_frictionless_reference_complex_gpu_provider",
+      "field": "contact_nonlinear_severity",
+      "reference": 0.4,
+      "tolerance_abs": 0.12,
+      "tolerance_rel": 0.35
+    }
+  ]
+}

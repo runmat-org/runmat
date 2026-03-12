@@ -1381,6 +1381,8 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-10: Implemented first M6 external-reference comparator pipeline by adding `generate_external_reference_benchmark.py` (baseline-driven metric extraction from conformance reports), promoting external-reference validation to enforced CI artifact/schema checks, and enabling protected-branch pass-band enforcement for external metric comparisons.
+- 2026-03-10: Started M6 external-reference kickoff by defining an industrial-credibility benchmark spec (`m6-industrial-credibility-benchmark-spec.md`) and wiring a placeholder external-reference artifact validator path (`validate_external_reference_benchmark.py`) into CI summaries/tests without enforcing branch failures yet.
 - 2026-03-10: Completed promotion evidence-quality hardening by adding calibration freshness/history sufficiency policy signals (`PROMOTION_CALIBRATION_STALE`, `PROMOTION_HISTORY_INSUFFICIENT`) and explicit baseline-missing blocker-regression reasons, then reflecting these as local readiness + Tier-7.5 CI evidence-quality lines.
 - 2026-03-10: Added a dedicated `Promotion Evidence Quality` subsection to local readiness markdown output, aligning calibration/history signal presentation with Tier-7.5 CI governance summary lines for consistent local-vs-CI audit readability.
 - 2026-03-10: Hardened promotion evidence quality by adding calibration freshness checks (`PROMOTION_CALIBRATION_STALE`), minimum rolling-history gates (`PROMOTION_HISTORY_INSUFFICIENT`), and explicit baseline-missing blocker-regression reasons for plastic/contact promotion tracks, with readiness/CI posture surfacing for age/history sufficiency.
