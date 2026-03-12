@@ -184,6 +184,8 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY",
             "RUNMAT_RELEASE_READINESS_PROMOTION_MAX_BLOCKER_REGRESSION",
             "RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_CALIBRATION",
+            "RUNMAT_RELEASE_READINESS_PROMOTION_MIN_ROLLING_REPORTS",
+            "RUNMAT_RELEASE_READINESS_PROMOTION_CALIBRATION_MAX_AGE_DAYS",
             "RUNMAT_THERMO_FIELD_PROMOTION_REPORT",
             "RUNMAT_THERMO_FIELD_SIGNING_KEY",
             "GITHUB_REF_NAME",
@@ -1036,6 +1038,41 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("PLASTIC_PROMOTION_BLOCKER_BURNDOWN_STALLED", codes)
         self.assertIn("CONTACT_PROMOTION_BLOCKER_BURNDOWN_STALLED", codes)
 
+    def test_promotion_history_insufficient_reason_is_emitted_when_required(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        os.environ["RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY"] = "true"
+        os.environ["RUNMAT_RELEASE_READINESS_PROMOTION_MIN_ROLLING_REPORTS"] = "2"
+        result = evaluate_release_readiness(latest, [], protected=False)
+        self.assertFalse(result["promotion_history_sufficient"])
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PROMOTION_HISTORY_INSUFFICIENT", codes)
+        self.assertIn("PLASTIC_PROMOTION_BLOCKER_BASELINE_MISSING", codes)
+        self.assertIn("CONTACT_PROMOTION_BLOCKER_BASELINE_MISSING", codes)
+
+    def test_promotion_calibration_stale_reason_is_emitted_when_required(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        os.environ["RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_CALIBRATION"] = "true"
+        os.environ["RUNMAT_RELEASE_READINESS_PROMOTION_CALIBRATION_MAX_AGE_DAYS"] = "7"
+        calibration = {
+            "generated_at": "2000-01-01T00:00:00Z",
+            "by_profile": {
+                "feature": {
+                    "plastic_promotion_max_blockers": 1,
+                    "contact_promotion_max_blockers": 1,
+                    "promotion_max_blocker_regression": 0,
+                }
+            },
+        }
+        result = evaluate_release_readiness(
+            latest,
+            rolling,
+            protected=False,
+            promotion_calibration=calibration,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PROMOTION_CALIBRATION_STALE", codes)
+
     def test_promotion_calibration_is_applied_when_present(self):
         latest = report(
             passed=True,
@@ -1443,6 +1480,10 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Thermo heterogeneity breach rate", summary)
         self.assertIn("Thermo spread trend ratio", summary)
         self.assertIn("Thermo heterogeneity trend ratio", summary)
+        self.assertIn("### Promotion Evidence Quality", summary)
+        self.assertIn("Promotion calibration applied/required", summary)
+        self.assertIn("Promotion calibration age/max days", summary)
+        self.assertIn("Promotion history sufficient (rolling/min)", summary)
 
 
 if __name__ == "__main__":

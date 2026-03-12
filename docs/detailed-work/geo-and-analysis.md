@@ -1381,6 +1381,8 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-10: Added a dedicated `Promotion Evidence Quality` subsection to local readiness markdown output, aligning calibration/history signal presentation with Tier-7.5 CI governance summary lines for consistent local-vs-CI audit readability.
+- 2026-03-10: Hardened promotion evidence quality by adding calibration freshness checks (`PROMOTION_CALIBRATION_STALE`), minimum rolling-history gates (`PROMOTION_HISTORY_INSUFFICIENT`), and explicit baseline-missing blocker-regression reasons for plastic/contact promotion tracks, with readiness/CI posture surfacing for age/history sufficiency.
 - 2026-03-10: Added data-calibrated promotion-threshold path by generating `promotion_threshold_calibration.json` from rolling reference fixtures, wiring optional/required calibration consumption into release readiness (`PROMOTION_CALIBRATION_MISSING` guard), and exposing calibration applied/required posture in Tier-7.5 governance summaries.
 - 2026-03-10: Completed promotion-readiness second pass by adding explicit plastic/contact promotion blocker budgets and blocker-regression (burn-down stall) policy reasons, surfacing blocker count/regression metrics in readiness + Tier-7.5 summaries, and extending readiness tests for budget/burndown enforcement.
 - 2026-03-10: Added first-pass promotion readiness gating for plastic/contact reference tracks by surfacing `*_promotion_ready` status and blocker vectors in readiness artifacts, enforcing optional promotion-required policy via env (`RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY`), and exposing promotion readiness posture in Tier-7.5 CI governance summaries.

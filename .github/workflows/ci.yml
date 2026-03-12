@@ -530,6 +530,10 @@ jobs:
               promotion_max_blocker_regression = ready.get('promotion_max_blocker_regression')
               promotion_calibration_applied = ready.get('promotion_calibration_applied')
               require_promotion_calibration = ready.get('require_promotion_calibration')
+              promotion_calibration_age_days = ready.get('promotion_calibration_age_days')
+              promotion_calibration_max_age_days = ready.get('promotion_calibration_max_age_days')
+              promotion_history_sufficient = ready.get('promotion_history_sufficient')
+              promotion_min_rolling_reports = ready.get('promotion_min_rolling_reports')
               reference_trend_ratcheted = ready.get('reference_trend_ratcheted')
               reference_trend_rationale = ready.get('reference_trend_rationale')
               rolling_report_count = ready.get('rolling_report_count')
@@ -748,6 +752,14 @@ jobs:
               lines.append(
                   "- Promotion calibration applied/required: "
                   f"{promotion_calibration_applied if promotion_calibration_applied is not None else '-'}/{require_promotion_calibration if require_promotion_calibration is not None else '-'}"
+              )
+              lines.append(
+                  "- Promotion calibration age/max days: "
+                  f"{promotion_calibration_age_days if promotion_calibration_age_days is not None else '-'}/{promotion_calibration_max_age_days if promotion_calibration_max_age_days is not None else '-'}"
+              )
+              lines.append(
+                  "- Promotion history sufficient: "
+                  f"{promotion_history_sufficient if promotion_history_sufficient is not None else '-'} (rolling={rolling_report_count if rolling_report_count is not None else '-'}, min={promotion_min_rolling_reports if promotion_min_rolling_reports is not None else '-'})"
               )
               lines.append(
                   "- Reference trend ratchet active: "

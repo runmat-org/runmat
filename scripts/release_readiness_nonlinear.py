@@ -4,6 +4,7 @@ import math
 import os
 import statistics
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List
 
@@ -94,6 +95,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MAX_BLOCKERS": "0",
             "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MAX_BLOCKERS": "0",
             "RUNMAT_RELEASE_READINESS_PROMOTION_MAX_BLOCKER_REGRESSION": "0",
+            "RUNMAT_RELEASE_READINESS_PROMOTION_MIN_ROLLING_REPORTS": "4",
+            "RUNMAT_RELEASE_READINESS_PROMOTION_CALIBRATION_MAX_AGE_DAYS": "7",
         },
         "development": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.2",
@@ -142,6 +145,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MAX_BLOCKERS": "1",
             "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MAX_BLOCKERS": "1",
             "RUNMAT_RELEASE_READINESS_PROMOTION_MAX_BLOCKER_REGRESSION": "0",
+            "RUNMAT_RELEASE_READINESS_PROMOTION_MIN_ROLLING_REPORTS": "2",
+            "RUNMAT_RELEASE_READINESS_PROMOTION_CALIBRATION_MAX_AGE_DAYS": "14",
         },
         "feature": {
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_MAX_DRIFT": "0.25",
@@ -190,6 +195,8 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MAX_BLOCKERS": "2",
             "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MAX_BLOCKERS": "2",
             "RUNMAT_RELEASE_READINESS_PROMOTION_MAX_BLOCKER_REGRESSION": "1",
+            "RUNMAT_RELEASE_READINESS_PROMOTION_MIN_ROLLING_REPORTS": "0",
+            "RUNMAT_RELEASE_READINESS_PROMOTION_CALIBRATION_MAX_AGE_DAYS": "30",
         },
     }
     return profile_map.get(profile, {}).get(name, default)
@@ -224,6 +231,16 @@ def rolling_reports(rolling_dir: Path) -> List[dict]:
         if isinstance(parsed, dict):
             reports.append(parsed)
     return reports
+
+
+def parse_iso8601_utc(raw: str) -> datetime | None:
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
 
 
 def prep_artifacts(prep_root: Path) -> List[dict]:
@@ -948,10 +965,48 @@ def evaluate_release_readiness(
     require_promotion_calibration = is_true(
         os.getenv("RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_CALIBRATION", "false")
     )
+    promotion_min_rolling_reports = int(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PROMOTION_MIN_ROLLING_REPORTS",
+            profile_default("RUNMAT_RELEASE_READINESS_PROMOTION_MIN_ROLLING_REPORTS", "0"),
+        )
+    )
+    promotion_calibration_max_age_days = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PROMOTION_CALIBRATION_MAX_AGE_DAYS",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_PROMOTION_CALIBRATION_MAX_AGE_DAYS", "30"
+            ),
+        )
+    )
     promotion_calibration_applied = False
+    promotion_calibration_age_days = None
+    promotion_history_sufficient = len(rolling) >= promotion_min_rolling_reports
 
     profile = governance_profile_name()
     if isinstance(promotion_calibration, dict):
+        generated_raw = promotion_calibration.get("generated_at")
+        if isinstance(generated_raw, str):
+            generated_at = parse_iso8601_utc(generated_raw)
+            if generated_at is not None:
+                promotion_calibration_age_days = (
+                    datetime.now(timezone.utc) - generated_at
+                ).total_seconds() / 86400.0
+        if (
+            promotion_calibration_age_days is not None
+            and promotion_calibration_age_days > promotion_calibration_max_age_days
+            and (protected or require_promotion_calibration)
+        ):
+            reasons.append(
+                Reason(
+                    code="PROMOTION_CALIBRATION_STALE",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"promotion calibration age {promotion_calibration_age_days:.2f}d exceeds "
+                        f"max {promotion_calibration_max_age_days:.2f}d"
+                    ),
+                )
+            )
         by_profile = promotion_calibration.get("by_profile")
         if isinstance(by_profile, dict):
             profile_entry = by_profile.get(profile)
@@ -974,6 +1029,17 @@ def evaluate_release_readiness(
                 code="PROMOTION_CALIBRATION_MISSING",
                 severity="fail" if protected else "warn",
                 detail="promotion calibration artifact missing or invalid",
+            )
+        )
+
+    if (protected or require_promotion_ready) and not promotion_history_sufficient:
+        reasons.append(
+            Reason(
+                code="PROMOTION_HISTORY_INSUFFICIENT",
+                severity="fail" if protected else "warn",
+                detail=(
+                    f"rolling report count {len(rolling)} below minimum {promotion_min_rolling_reports}"
+                ),
             )
         )
     thermo_records = [
@@ -2158,6 +2224,21 @@ def evaluate_release_readiness(
                         ),
                     )
                 )
+    elif protected or require_promotion_ready:
+        reasons.append(
+            Reason(
+                code="PLASTIC_PROMOTION_BLOCKER_BASELINE_MISSING",
+                severity="fail" if protected else "warn",
+                detail="no rolling reports available to compute plastic promotion blocker regression",
+            )
+        )
+        reasons.append(
+            Reason(
+                code="CONTACT_PROMOTION_BLOCKER_BASELINE_MISSING",
+                severity="fail" if protected else "warn",
+                detail="no rolling reports available to compute contact promotion blocker regression",
+            )
+        )
 
     if not plastic_promotion_ready and (protected or require_promotion_ready):
         reasons.append(
@@ -2298,6 +2379,10 @@ def evaluate_release_readiness(
         "promotion_max_blocker_regression": promotion_max_blocker_regression,
         "promotion_calibration_applied": promotion_calibration_applied,
         "require_promotion_calibration": require_promotion_calibration,
+        "promotion_calibration_age_days": promotion_calibration_age_days,
+        "promotion_calibration_max_age_days": promotion_calibration_max_age_days,
+        "promotion_min_rolling_reports": promotion_min_rolling_reports,
+        "promotion_history_sufficient": promotion_history_sufficient,
         "reference_trend_ratcheted": True,
         "reference_trend_rationale": "rolling_median_reference_fixtures",
         "rolling_report_count": len(rolling),
@@ -2319,6 +2404,15 @@ def markdown_summary(result: dict) -> str:
         "Promotion calibration applied: "
         f"**{result.get('promotion_calibration_applied', False)}** "
         f"(required=`{result.get('require_promotion_calibration', False)}`)"
+    )
+    lines.append(
+        "Promotion calibration age/max days: "
+        f"`{result.get('promotion_calibration_age_days') if result.get('promotion_calibration_age_days') is not None else '-'}`/`{result.get('promotion_calibration_max_age_days') if result.get('promotion_calibration_max_age_days') is not None else '-'}`"
+    )
+    lines.append(
+        "Promotion history sufficient: "
+        f"**{result.get('promotion_history_sufficient', False)}** "
+        f"(rolling=`{result.get('rolling_report_count', 0)}`, min=`{result.get('promotion_min_rolling_reports', 0)}`)"
     )
     lines.append("")
     lines.append("### Thermo Posture")
@@ -2549,6 +2643,20 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Contact blocker regression/allowed: "
         f"`{result.get('contact_promotion_blocker_regression') if result.get('contact_promotion_blocker_regression') is not None else '-'}`/`{result.get('promotion_max_blocker_regression') if result.get('promotion_max_blocker_regression') is not None else '-'}`"
+    )
+    lines.append("")
+    lines.append("### Promotion Evidence Quality")
+    lines.append(
+        "- Promotion calibration applied/required: "
+        f"`{result.get('promotion_calibration_applied') if result.get('promotion_calibration_applied') is not None else '-'}`/`{result.get('require_promotion_calibration') if result.get('require_promotion_calibration') is not None else '-'}`"
+    )
+    lines.append(
+        "- Promotion calibration age/max days: "
+        f"`{result.get('promotion_calibration_age_days') if result.get('promotion_calibration_age_days') is not None else '-'}`/`{result.get('promotion_calibration_max_age_days') if result.get('promotion_calibration_max_age_days') is not None else '-'}`"
+    )
+    lines.append(
+        "- Promotion history sufficient (rolling/min): "
+        f"`{result.get('promotion_history_sufficient') if result.get('promotion_history_sufficient') is not None else '-'}` (`{result.get('rolling_report_count') if result.get('rolling_report_count') is not None else '-'}`/`{result.get('promotion_min_rolling_reports') if result.get('promotion_min_rolling_reports') is not None else '-'}`)"
     )
     lines.append("")
     if result["reasons"]:
