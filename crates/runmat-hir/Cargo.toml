@@ -12,7 +12,10 @@ repository = "https://github.com/runmat-org/runmat"
 runmat-parser = { workspace = true }
 runmat-builtins = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [dev-dependencies]
 runmat-lexer = { workspace = true }
 runmat-runtime = { workspace = true }
+runmat-static-analysis = { workspace = true }
+tempfile = "3"

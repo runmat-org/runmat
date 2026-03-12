@@ -24,6 +24,12 @@ pub use sandbox::SandboxFsProvider;
 #[cfg(target_arch = "wasm32")]
 pub use wasm::PlaceholderFsProvider;
 
+pub mod data_contract;
+
+use data_contract::{
+    DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
+};
+
 pub trait FileHandle: Read + Write + Seek + Send + Sync {}
 
 impl<T> FileHandle for T where T: Read + Write + Seek + Send + Sync + 'static {}
@@ -231,6 +237,33 @@ pub trait FsProvider: Send + Sync + 'static {
     fn remove_dir_all(&self, path: &Path) -> io::Result<()>;
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
     fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()>;
+
+    fn data_manifest_descriptor(
+        &self,
+        _request: &DataManifestRequest,
+    ) -> io::Result<DataManifestDescriptor> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "data manifest descriptor is unsupported by this provider",
+        ))
+    }
+
+    fn data_chunk_upload_targets(
+        &self,
+        _request: &DataChunkUploadRequest,
+    ) -> io::Result<Vec<DataChunkUploadTarget>> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "data chunk upload targets are unsupported by this provider",
+        ))
+    }
+
+    fn data_upload_chunk(&self, _target: &DataChunkUploadTarget, _data: &[u8]) -> io::Result<()> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "data chunk upload is unsupported by this provider",
+        ))
+    }
 }
 
 pub struct File {
@@ -480,6 +513,22 @@ pub fn set_readonly(path: impl AsRef<Path>, readonly: bool) -> io::Result<()> {
     with_provider(|provider| provider.set_readonly(&resolved, readonly))
 }
 
+pub fn data_manifest_descriptor(
+    request: &DataManifestRequest,
+) -> io::Result<DataManifestDescriptor> {
+    with_provider(|provider| provider.data_manifest_descriptor(request))
+}
+
+pub fn data_chunk_upload_targets(
+    request: &DataChunkUploadRequest,
+) -> io::Result<Vec<DataChunkUploadTarget>> {
+    with_provider(|provider| provider.data_chunk_upload_targets(request))
+}
+
+pub fn data_upload_chunk(target: &DataChunkUploadTarget, data: &[u8]) -> io::Result<()> {
+    with_provider(|provider| provider.data_upload_chunk(target, data))
+}
+
 /// Copy a file from `from` to `to`, truncating the destination when it exists.
 /// Returns the number of bytes written, matching `std::fs::copy`.
 pub fn copy_file(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<u64> {
@@ -569,6 +618,28 @@ mod tests {
         }
 
         fn set_readonly(&self, _path: &Path, _readonly: bool) -> io::Result<()> {
+            Err(unsupported())
+        }
+
+        fn data_manifest_descriptor(
+            &self,
+            _request: &DataManifestRequest,
+        ) -> io::Result<DataManifestDescriptor> {
+            Err(unsupported())
+        }
+
+        fn data_chunk_upload_targets(
+            &self,
+            _request: &DataChunkUploadRequest,
+        ) -> io::Result<Vec<DataChunkUploadTarget>> {
+            Err(unsupported())
+        }
+
+        fn data_upload_chunk(
+            &self,
+            _target: &DataChunkUploadTarget,
+            _data: &[u8],
+        ) -> io::Result<()> {
             Err(unsupported())
         }
     }

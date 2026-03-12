@@ -1,8 +1,8 @@
 use crate::plots::{
-    AreaPlot, ErrorBar, Figure, LegendEntry, LinePlot, MarkerStyle, PlotElement, PlotType,
-    ScatterPlot, StairsPlot, StemPlot,
+    AreaPlot, ColorMap, ErrorBar, Figure, LegendEntry, LinePlot, MarkerStyle, PlotElement,
+    PlotType, Scatter3Plot, ScatterPlot, ShadingMode, StairsPlot, StemPlot, SurfacePlot,
 };
-use glam::Vec4;
+use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
 
 /// High-level event emitted whenever a figure changes.
@@ -48,7 +48,9 @@ pub struct FigureScene {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ScenePlot {
     Line {
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         x: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
         color_rgba: [f32; 4],
         line_width: f32,
@@ -58,7 +60,9 @@ pub enum ScenePlot {
         visible: bool,
     },
     Scatter {
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         x: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
         color_rgba: [f32; 4],
         marker_size: f32,
@@ -68,9 +72,13 @@ pub enum ScenePlot {
         visible: bool,
     },
     ErrorBar {
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         x: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         err_low: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         err_high: Vec<f64>,
         color_rgba: [f32; 4],
         line_width: f32,
@@ -80,7 +88,9 @@ pub enum ScenePlot {
         visible: bool,
     },
     Stairs {
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         x: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
         color_rgba: [f32; 4],
         line_width: f32,
@@ -89,8 +99,11 @@ pub enum ScenePlot {
         visible: bool,
     },
     Stem {
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         x: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_f64_lossy")]
         baseline: f64,
         color_rgba: [f32; 4],
         marker_color_rgba: [f32; 4],
@@ -99,10 +112,40 @@ pub enum ScenePlot {
         visible: bool,
     },
     Area {
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         x: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_f64_lossy")]
         baseline: f64,
         color_rgba: [f32; 4],
+        axes_index: u32,
+        label: Option<String>,
+        visible: bool,
+    },
+    Surface {
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
+        x: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
+        y: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_matrix_f64_lossy")]
+        z: Vec<Vec<f64>>,
+        colormap: String,
+        shading_mode: String,
+        wireframe: bool,
+        alpha: f32,
+        flatten_z: bool,
+        #[serde(default, deserialize_with = "deserialize_option_pair_f64_lossy")]
+        color_limits: Option<[f64; 2]>,
+        axes_index: u32,
+        label: Option<String>,
+        visible: bool,
+    },
+    Scatter3 {
+        points: Vec<[f32; 3]>,
+        colors_rgba: Vec<[f32; 4]>,
+        point_size: f32,
+        point_sizes: Option<Vec<f32>>,
         axes_index: u32,
         label: Option<String>,
         visible: bool,
@@ -344,6 +387,37 @@ impl ScenePlot {
                 label: area.label.clone(),
                 visible: area.visible,
             },
+            PlotElement::Surface(surface) => Self::Surface {
+                x: surface.x_data.clone(),
+                y: surface.y_data.clone(),
+                z: surface.z_data.clone().unwrap_or_default(),
+                colormap: format!("{:?}", surface.colormap),
+                shading_mode: format!("{:?}", surface.shading_mode),
+                wireframe: surface.wireframe,
+                alpha: surface.alpha,
+                flatten_z: surface.flatten_z,
+                color_limits: surface.color_limits.map(|(lo, hi)| [lo, hi]),
+                axes_index,
+                label: surface.label.clone(),
+                visible: surface.visible,
+            },
+            PlotElement::Scatter3(scatter3) => Self::Scatter3 {
+                points: scatter3
+                    .points
+                    .iter()
+                    .map(|point| vec3_to_xyz(*point))
+                    .collect(),
+                colors_rgba: scatter3
+                    .colors
+                    .iter()
+                    .map(|color| vec4_to_rgba(*color))
+                    .collect(),
+                point_size: scatter3.point_size,
+                point_sizes: scatter3.point_sizes.clone(),
+                axes_index,
+                label: scatter3.label.clone(),
+                visible: scatter3.visible,
+            },
             _ => Self::Unsupported {
                 plot_kind: PlotKind::from(plot.plot_type()),
                 axes_index,
@@ -461,6 +535,52 @@ impl ScenePlot {
                 area.set_visible(visible);
                 figure.add_area_plot_on_axes(area, axes_index as usize);
             }
+            ScenePlot::Surface {
+                x,
+                y,
+                z,
+                colormap,
+                shading_mode,
+                wireframe,
+                alpha,
+                flatten_z,
+                color_limits,
+                axes_index,
+                label,
+                visible,
+            } => {
+                let mut surface = SurfacePlot::new(x, y, z)?;
+                surface.colormap = parse_colormap(&colormap);
+                surface.shading_mode = parse_shading_mode(&shading_mode);
+                surface.wireframe = wireframe;
+                surface.alpha = alpha.clamp(0.0, 1.0);
+                surface.flatten_z = flatten_z;
+                surface.color_limits = color_limits.map(|[lo, hi]| (lo, hi));
+                surface.label = label;
+                surface.visible = visible;
+                figure.add_surface_plot_on_axes(surface, axes_index as usize);
+            }
+            ScenePlot::Scatter3 {
+                points,
+                colors_rgba,
+                point_size,
+                point_sizes,
+                axes_index,
+                label,
+                visible,
+            } => {
+                let points: Vec<Vec3> = points.into_iter().map(xyz_to_vec3).collect();
+                let colors: Vec<Vec4> = colors_rgba.into_iter().map(rgba_to_vec4).collect();
+                let mut scatter3 = Scatter3Plot::new(points)?;
+                if !colors.is_empty() {
+                    scatter3 = scatter3.with_colors(colors)?;
+                }
+                scatter3.point_size = point_size.max(1.0);
+                scatter3.point_sizes = point_sizes;
+                scatter3.label = label;
+                scatter3.visible = visible;
+                figure.add_scatter3_plot_on_axes(scatter3, axes_index as usize);
+            }
             ScenePlot::Unsupported { .. } => {}
         }
         Ok(())
@@ -487,6 +607,48 @@ fn parse_marker_style(value: &str) -> MarkerStyle {
         "Hexagon" => MarkerStyle::Hexagon,
         _ => MarkerStyle::Circle,
     }
+}
+
+fn parse_colormap(value: &str) -> ColorMap {
+    match value {
+        "Jet" => ColorMap::Jet,
+        "Hot" => ColorMap::Hot,
+        "Cool" => ColorMap::Cool,
+        "Spring" => ColorMap::Spring,
+        "Summer" => ColorMap::Summer,
+        "Autumn" => ColorMap::Autumn,
+        "Winter" => ColorMap::Winter,
+        "Gray" => ColorMap::Gray,
+        "Bone" => ColorMap::Bone,
+        "Copper" => ColorMap::Copper,
+        "Pink" => ColorMap::Pink,
+        "Lines" => ColorMap::Lines,
+        "Viridis" => ColorMap::Viridis,
+        "Plasma" => ColorMap::Plasma,
+        "Inferno" => ColorMap::Inferno,
+        "Magma" => ColorMap::Magma,
+        "Turbo" => ColorMap::Turbo,
+        "Parula" => ColorMap::Parula,
+        _ => ColorMap::Parula,
+    }
+}
+
+fn parse_shading_mode(value: &str) -> ShadingMode {
+    match value {
+        "Flat" => ShadingMode::Flat,
+        "Smooth" => ShadingMode::Smooth,
+        "Faceted" => ShadingMode::Faceted,
+        "None" => ShadingMode::None,
+        _ => ShadingMode::Smooth,
+    }
+}
+
+fn xyz_to_vec3(value: [f32; 3]) -> Vec3 {
+    Vec3::new(value[0], value[1], value[2])
+}
+
+fn vec3_to_xyz(value: Vec3) -> [f32; 3] {
+    [value.x, value.y, value.z]
 }
 
 fn rgba_to_vec4(value: [f32; 4]) -> Vec4 {
@@ -557,10 +719,53 @@ fn vec4_to_rgba(value: Vec4) -> [f32; 4] {
     [value.x, value.y, value.z, value.w]
 }
 
+fn deserialize_f64_lossy<'de, D>(deserializer: D) -> Result<f64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<f64>::deserialize(deserializer)?;
+    Ok(value.unwrap_or(f64::NAN))
+}
+
+fn deserialize_vec_f64_lossy<'de, D>(deserializer: D) -> Result<Vec<f64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let values = Vec::<Option<f64>>::deserialize(deserializer)?;
+    Ok(values
+        .into_iter()
+        .map(|value| value.unwrap_or(f64::NAN))
+        .collect())
+}
+
+fn deserialize_matrix_f64_lossy<'de, D>(deserializer: D) -> Result<Vec<Vec<f64>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let rows = Vec::<Vec<Option<f64>>>::deserialize(deserializer)?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            row.into_iter()
+                .map(|value| value.unwrap_or(f64::NAN))
+                .collect()
+        })
+        .collect())
+}
+
+fn deserialize_option_pair_f64_lossy<'de, D>(deserializer: D) -> Result<Option<[f64; 2]>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<[Option<f64>; 2]>::deserialize(deserializer)?;
+    Ok(value.map(|pair| [pair[0].unwrap_or(f64::NAN), pair[1].unwrap_or(f64::NAN)]))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plots::{Figure, LinePlot, ScatterPlot};
+    use crate::plots::{Figure, LinePlot, Scatter3Plot, ScatterPlot, SurfacePlot};
+    use glam::Vec3;
 
     #[test]
     fn capture_snapshot_reflects_layout_and_metadata() {
@@ -597,5 +802,80 @@ mod tests {
         assert_eq!(rebuilt.axes_grid(), (1, 2));
         assert_eq!(rebuilt.plots().count(), 2);
         assert_eq!(rebuilt.title.as_deref(), Some("Replay"));
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_reconstructs_surface_and_scatter3() {
+        let mut figure = Figure::new().with_title("Replay3D").with_subplot_grid(1, 2);
+        let mut surface = SurfacePlot::new(
+            vec![0.0, 1.0],
+            vec![0.0, 1.0],
+            vec![vec![0.0, 1.0], vec![1.0, 2.0]],
+        )
+        .expect("surface data should be valid");
+        surface.label = Some("surface".to_string());
+        figure.add_surface_plot_on_axes(surface, 0);
+
+        let mut scatter3 = Scatter3Plot::new(vec![
+            Vec3::new(0.0, 0.0, 0.0),
+            Vec3::new(1.0, 2.0, 3.0),
+            Vec3::new(2.0, 3.0, 4.0),
+        ])
+        .expect("scatter3 data should be valid");
+        scatter3.label = Some("scatter3".to_string());
+        figure.add_scatter3_plot_on_axes(scatter3, 1);
+
+        let scene = FigureScene::capture(&figure);
+        let rebuilt = scene.into_figure().expect("scene restore should succeed");
+        assert_eq!(rebuilt.axes_grid(), (1, 2));
+        assert_eq!(rebuilt.plots().count(), 2);
+        assert_eq!(rebuilt.title.as_deref(), Some("Replay3D"));
+        assert!(matches!(
+            rebuilt.plots().next(),
+            Some(PlotElement::Surface(_))
+        ));
+        assert!(matches!(
+            rebuilt.plots().nth(1),
+            Some(PlotElement::Scatter3(_))
+        ));
+    }
+
+    #[test]
+    fn scene_plot_deserialize_maps_null_numeric_values_to_nan() {
+        let json = r#"{
+          "schemaVersion": 1,
+          "layout": { "axesRows": 1, "axesCols": 1, "axesIndices": [0] },
+          "metadata": {
+            "gridEnabled": true,
+            "legendEnabled": false,
+            "colorbarEnabled": false,
+            "axisEqual": false,
+            "backgroundRgba": [1,1,1,1],
+            "legendEntries": []
+          },
+          "plots": [
+            {
+              "kind": "surface",
+              "x": [0.0, null],
+              "y": [0.0, 1.0],
+              "z": [[0.0, null], [1.0, 2.0]],
+              "colormap": "Parula",
+              "shading_mode": "Smooth",
+              "wireframe": false,
+              "alpha": 1.0,
+              "flatten_z": false,
+              "color_limits": null,
+              "axes_index": 0,
+              "label": null,
+              "visible": true
+            }
+          ]
+        }"#;
+        let scene: FigureScene = serde_json::from_str(json).expect("scene should deserialize");
+        let ScenePlot::Surface { x, z, .. } = &scene.plots[0] else {
+            panic!("expected surface plot");
+        };
+        assert!(x[1].is_nan());
+        assert!(z[0][1].is_nan());
     }
 }

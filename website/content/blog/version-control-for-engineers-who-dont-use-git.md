@@ -1,20 +1,23 @@
 ---
 title: "Version Control for Engineers Who Don't Use Git"
-description: "Most engineers who write MATLAB don't use version control — not because they don't know about git, but because git wasn't built for them. RunMat gives engineers automatic versioning, snapshots, and audit trails without the cognitive overhead of learning a developer tool."
+description: "Most engineers -- from MATLAB scripting to FPGA verification to test automation -- don't use version control because git wasn't built for them. RunMat gives engineers automatic versioning, snapshots, and audit trails without the cognitive overhead of learning a developer tool."
 date: "2026-02-20"
+dateModified: "2026-03-10"
 authors:
   - name: "Fin Watterson"
     url: "https://www.linkedin.com/in/finbarrwatterson/"
 readTime: "7 min read"
 slug: "version-control-for-engineers-who-dont-use-git"
-tags: ["version control", "MATLAB", "RunMat Cloud", "scientific computing", "collaboration", "git alternative"]
-keywords: "version control MATLAB, git alternative scientific computing, MATLAB version history, version control for engineers, RunMat versioning, git alternative large datasets, reproducibility scientific computing"
+tags: ["version control", "MATLAB", "RunMat Cloud", "scientific computing", "collaboration", "git alternative", "electrical engineering", "engineering workflows"]
+collections: ["guides"]
+keywords: "version control for engineers, version control without git, git alternative for engineers, version control for engineers building hardware, engineering file versioning, version control MATLAB, automatic version control, version control for non-developers, simulation version control, FEA version control, reproducibility scientific computing, RunMat versioning"
+visibility: public
 excerpt: "Engineers shouldn't need a CS degree to have a history of their work. RunMat versions every save automatically — no staging, no commits, no git required."
-image: "https://web.runmatstatic.com/runmat-sandbox-dark.png"
-imageAlt: "RunMat desktop environment showing version history"
+image: "https://web.runmatstatic.com/blog-images/runmat-version-git.png"
+imageAlt: "RunMat automatic version control for engineers -- file versioning without git"
 ogType: "article"
 ogTitle: "Version Control for Engineers Who Don't Use Git"
-ogDescription: "Most engineers who write MATLAB don't use version control. The problem isn't the engineers — it's the tools. RunMat fixes that with automatic versioning built into the filesystem."
+ogDescription: "Most engineers who write MATLAB don't use version control because git wasn't built for them. RunMat fixes that with automatic versioning built into the filesystem."
 twitterCard: "summary_large_image"
 twitterTitle: "Version Control for Engineers Who Don't Use Git"
 twitterDescription: "Engineers shouldn't need a CS degree to have a history of their work. RunMat versions every save automatically — no git required."
@@ -41,10 +44,10 @@ jsonLd:
       "@id": "https://runmat.com/blog/version-control-for-engineers-who-dont-use-git#article"
       headline: "Version Control for Engineers Who Don't Use Git"
       alternativeHeadline: "Why most engineers don't use version control, and how to fix it"
-      description: "Most engineers who write MATLAB don't use version control — not because they don't know about git, but because git wasn't built for them. RunMat gives engineers automatic versioning without the cognitive overhead."
+      description: "Most engineers who write MATLAB don't use version control because git wasn't built for them. RunMat gives engineers automatic versioning without the cognitive overhead."
       image: "https://web.runmatstatic.com/runmat-sandbox-dark.png"
       datePublished: "2026-02-20T00:00:00Z"
-      dateModified: "2026-02-20T00:00:00Z"
+      dateModified: "2026-03-10T00:00:00Z"
       author:
         - "@type": "Person"
           name: "Fin Watterson"
@@ -69,18 +72,58 @@ jsonLd:
           name: "Git"
           sameAs: "https://en.wikipedia.org/wiki/Git"
           applicationCategory: "DeveloperApplication"
+          operatingSystem: "Windows, Linux, macOS"
+          offers:
+            "@type": "Offer"
+            price: "0"
+            priceCurrency: "USD"
 
       speakable:
         "@type": "SpeakableSpecification"
         cssSelector: ["h1"]
 
+    - "@type": "FAQPage"
+      mainEntity:
+        - "@type": "Question"
+          name: "Do I need to learn git to use version control?"
+          acceptedAnswer:
+            "@type": "Answer"
+            text: "No. RunMat versions every file save automatically. There are no commits, no staging area, and no git commands to learn. You save your file and the history exists."
+        - "@type": "Question"
+          name: "Does version control work with large simulation and measurement files?"
+          acceptedAnswer:
+            "@type": "Answer"
+            text: "Yes. RunMat versions the manifest (a small pointer file) rather than duplicating terabytes of data, so you get full lineage on large datasets without the storage cost. Large binary outputs are only versioned when it is useful."
+        - "@type": "Question"
+          name: "Can I export my history to git for compliance?"
+          acceptedAnswer:
+            "@type": "Answer"
+            text: "Yes. Your snapshot chain can be exported as a git-compatible history. Each snapshot becomes a git commit, and tags become git tags. Git is an export format, not a daily workflow."
+        - "@type": "Question"
+          name: "Does version control work offline or in air-gapped environments?"
+          acceptedAnswer:
+            "@type": "Answer"
+            text: "Yes. Versioning is built into the RunMat filesystem, not a cloud service. The entire system runs on local storage with no internet connection required."
+        - "@type": "Question"
+          name: "What's the difference between RunMat versioning and git?"
+          acceptedAnswer:
+            "@type": "Answer"
+            text: "Git requires staging, commits, branching, and merge-conflict resolution. RunMat versions every save automatically with no commands to run, forms a linear snapshot chain with no branching or merge conflicts, and exports to git when compliance or CI/CD requires it."
+        - "@type": "Question"
+          name: "Can engineers building hardware use RunMat for version control?"
+          acceptedAnswer:
+            "@type": "Answer"
+            text: "Yes. Any engineer writing scripts, analysis code, or test automation benefits from automatic versioning. Electrical engineers, embedded systems engineers, and engineers building hardware who manage FPGA configurations, test benches, or board-level analysis scripts all get full version history without learning git."
+
 ---
 
 *Engineers shouldn't need a CS degree to have a history of their work.*
 
+![RunMat desktop environment showing version history](https://web.runmatstatic.com/blog-images/runmat-version-git.png)
+
 ## TL;DR
 
-- **RunMat** versions every file save automatically — no commits, no staging area, no git commands to learn.
+- **RunMat** versions every file save automatically. There are no commits, no staging area, and no git commands to learn.
 - Snapshots capture full project state at any point; restore any version with one click.
 - Every change creates an immutable audit trail with actor, action, and timestamp.
 - Snapshot chains export as git-compatible history when compliance or CI/CD requires it.
@@ -97,74 +140,40 @@ thermal_analysis_v3_FINAL_v2.m
 thermal_analysis_v3_FINAL_v2_USE_THIS_ONE.m
 ```
 
-This is version control for tens of thousands of engineers. Not because they have never heard of git. Because git asks too much of them.
+This is version control for tens of thousands of engineers. Most have heard of git. Git just asks too much of them.
 
-## Why don't most engineers use git?
+## Why git doesn't fit the engineers who need it most
 
-Because git's mental model — staging, branching, merge conflicts, detached HEAD — demands significant learning investment for a capability that has nothing to do with their actual job.
+There is a large population of people who write code every day but work without version control: aerospace engineers analyzing thermal data, mechanical engineers running FEA simulations, physicists fitting models to experimental results, GNC engineers tuning control loops during a test campaign, electrical engineers writing signal processing scripts, engineers building hardware who version FPGA test benches and board-level analysis code, and embedded systems engineers managing firmware verification scripts. They learned MATLAB in a dynamics class or picked up Python on the job. Their relationship with code is practical: write it to solve a problem, run it, tweak it, run it again. Code is a tool for engineering, not the product itself.
 
-There is a massive population of people who write code every day but have never used version control. They are aerospace engineers analyzing thermal data. Mechanical engineers running FEA simulations. Physicists fitting models to experimental results. GNC engineers tuning control loops during a test campaign.
+Git was designed for professional software development teams and carries that audience's assumptions into everything it does. Its mental model — staging, branching, merge conflicts, detached HEAD — demands real learning. To use git you need working tree vs. staging area vs. committed state; branches, HEAD, detached HEAD; merge conflicts and resolution; remotes, push, pull, fetch; `.gitignore`, `.gitattributes`, git-lfs; and the difference between `reset`, `revert`, and `checkout`. For someone whose job is analyzing attitude control data or running Monte Carlo simulations, that is a real investment in a capability that has nothing to do with the work itself.
 
-They learned MATLAB in a dynamics class or picked up Python on the job. Their relationship with code is practical: write it to solve a problem, run it, tweak it, run it again. Code is a tool for engineering, not the product itself.
+The friction does not stop at concepts. Git asks you to care about the difference between your working tree and your staging area. To an engineer focused on analysis, that distinction is meaningless. If I changed the file, I changed the file. Why tell the tool *that* I changed it before I tell it to *save* the change? It is a layer of bureaucracy between you and your work. Git also requires discipline to provide value: if you do not commit frequently, write descriptive messages, and manage branches carefully, you get almost nothing. A repo with three commits over six months — "initial commit," "updates," "more updates" — gives no meaningful history, and the discipline to make git useful comes from software culture that this audience does not live in. When things go wrong, git punishes harshly. A bad merge, a force-push, a detached HEAD, all confusing even for experienced developers, and for someone who just wants their analysis to work, a cryptic message about divergent branches is terrifying. Scientific computing adds another mismatch: large files. A default git clone downloads the complete history of every file, so a 500MB simulation result checked in today means everyone who clones that repo without special flags five years from now downloads it. In [air-gapped environments](/blog/mission-critical-math-airgap), locked-down corporate machines, and classified networks, exactly where many of these engineers work, installing and configuring git is non-trivial: one more tool to get approved, one more dependency to maintain.
 
-Version control never entered the picture — not because they are incapable, but because the cost-benefit math does not work. To use git, you need to understand:
-
-- Working tree vs. staging area vs. committed state
-- Branches, HEAD, detached HEAD
-- Merge conflicts and resolution
-- Remotes, push, pull, fetch
-- `.gitignore`, `.gitattributes`, git-lfs
-- The difference between `reset`, `revert`, and `checkout`
-
-That is a significant learning curve for someone whose actual job is analyzing attitude control data or running Monte Carlo simulations. They would spend days learning git to get a capability that takes 30 seconds to explain but 30 hours to master.
-
-So they make the rational choice: spend their time on the engineering, not on learning developer workflows. They rename files and move on.
+So they make the rational choice: spend their time on the engineering, not on learning developer workflows. They rename files and move on. Git is excellent for its intended audience. These engineers are simply not that audience, and the distance between "I want to undo a mistake" and "learn git" is too far to cross on goodwill alone.
 
 ## What do engineers lose without version control?
 
-No undo, no accountability, no collaboration, and no reproducibility. These are the four costs, and in mission-critical environments they are risks, not inconveniences. They accumulate over months and years, and they are felt most acutely when it matters most:
+In mission-critical environments the costs accumulate over months and years and show up when it matters most.
 
-**No undo.** You overwrite your working script with an experimental change. The old version is gone. You hope you remember what you changed. Sometimes you do. Sometimes you lose an afternoon reconstructing it.
+"Which version of the thermal model ran during the qualification test?" In a room of five engineers, nobody can answer with certainty. In defense and space programs, that is a compliance gap, not just an inconvenience. Accountability is the sharp end. The rest compounds: overwrite your working script with an experimental change and the old version is gone — sometimes you remember what you changed, sometimes you lose an afternoon reconstructing it. Two people need to work on the same analysis and they email the file back and forth, or both edit their own copy on a shared drive; changes get lost, work gets duplicated, nobody is confident they have the latest version. A result from six months ago cannot be recreated because the script has been modified twenty times since with no record of what changed or when. That kind of irreproducibility undermines both research and quality assurance.
 
-**No accountability.** "Which version of the thermal model ran during the qualification test?" In a room of five engineers, nobody can answer this question with certainty. In defense and space programs, that is not just inconvenient — it is a compliance gap.
-
-**No collaboration.** Two people need to work on the same analysis. They email the file back and forth, or worse, both edit their own copy on a shared drive. Changes get lost. Work gets duplicated. Nobody is confident they have the latest version.
-
-**No reproducibility.** A result from six months ago cannot be recreated because the script has been modified twenty times since, with no record of what changed or when. In research, this is the reproducibility crisis. In industry, it is a quality assurance problem.
-
-## Why doesn't git work for engineers?
-
-These are not minor inconveniences. In mission-critical environments, they are risks.
-
-Git is an extraordinary tool. It powers most of the world's software development, and for good reason. But git was designed for a specific audience — professional software development teams — and it carries the assumptions of that audience into everything it does.
-
-**Git assumes your primary identity is "programmer."** The mental model of staging, branching, and merge resolution comes from software engineering culture.
-
-Git asks you to care about the difference between your 'working tree' and your 'staging area.' To an engineer, this distinction is meaningless. If I changed the file, I changed the file. Why do I have to tell the tool *that* I changed it before I tell it to *save* the change? It is a layer of bureaucracy between you and your work.
-
-**Git requires discipline to provide value.** If you do not commit frequently, write descriptive messages, and manage branches carefully, git gives you almost nothing. A repository with three commits over six months — "initial commit," "updates," "more updates" — provides no meaningful history. The discipline to make git useful comes from software culture, and this audience does not live there.
-
-**Git punishes mistakes harshly.** A bad merge, a force-push, a detached HEAD — these situations are confusing even for experienced developers. For someone who just wants their analysis to work, a cryptic error message about divergent branches is terrifying. The risk of making things worse by trying to fix it is real.
-
-**Git does not handle large data well.** Scientific computing produces large files — simulation outputs, datasets, model checkpoints. Git tries to download every version of every file ever saved. If you check in a 500MB simulation result today, every person who clones that repo five years from now has to download it. RunMat's architecture separates the history (metadata) from the bulk data, so history remains fast even when your data is massive.
-
-**Git requires installation and configuration.** In air-gapped environments, locked-down corporate machines, and classified networks — exactly where many of these engineers work — installing and configuring git is non-trivial. It is one more tool to get approved, one more dependency to maintain.
-
-The point is not that git is bad. Git is excellent for its intended audience. The point is that these engineers are not that audience, and the gap between "I want to undo a mistake" and "learn git" is too wide.
+| | No version control | Git | RunMat |
+|---|---|---|---|
+| **Learning curve** | None | Significant | None |
+| **When versioning happens** | Never | Manual commits | Every save |
+| **Large file handling** | N/A | git-lfs (complex setup) | Manifest versioning |
+| **Offline / air-gap** | N/A | Requires install and config | Built into filesystem |
+| **Audit trail** | None | Depends on commit discipline | Automatic |
+| **Team collaboration** | Email / shared drives | Push/pull/merge conflicts | Real-time sync |
 
 ## What if version control just happened?
 
-When we built RunMat Cloud, we asked a simple question: what if version control worked like autosave? Not something you do. Something the platform does for you.
+When we built RunMat Cloud, we asked a simple question: what if version control worked like autosave, something the platform does for you rather than something you have to remember to do?
 
-**Every save creates a version.** When you save a file in a RunMat project, the platform creates an immutable version record — content hash, file size, who made the change, and when. No commands to run. No staging area. No workflow to learn. It is built into the filesystem itself.
+Save a file in a RunMat project and the platform creates an immutable version record: content hash, file size, who made the change, and when. It is built into the filesystem, so there are no commands to run and no workflow to learn. Code and config files (`.m`, `.py`, `.json`, `.yaml`, and others) always get full history; large binary outputs only get versioned when it is useful. For [massive datasets](/docs/large-dataset-persistence), RunMat versions the manifest (a small pointer file) rather than the terabytes of data, so you get full lineage without the storage cost.
 
-**Smart about what to version.** Code and config files (`.m`, `.py`, `.json`, `.yaml`, and others) always get full history. Large binary outputs only get versioned when it is useful. For massive datasets, RunMat versions the manifest — a small pointer file — not the terabytes of data. You get full lineage without the storage cost.
-
-**Snapshots instead of commits.** When you want to capture your entire project state — before a test campaign, before a major change, at a milestone — you take a snapshot. One click. It records every file and every version at that moment. Snapshots form a simple, linear chain. There is no branching, no merge conflicts, and no DAG to reason about. Just a clean timeline of project states.
-
-**Instant restore.** Pick any version of any file, or any snapshot of the entire project, and restore it. The restore itself creates a new version, so your history is never lost. You can always see what was restored and undo it if needed.
-
-**Audit trail for free.** Every change is recorded with who, what, and when. No discipline required. No commit messages to write. The trail exists because the platform creates it, not because someone remembered to.
+When you want to capture your entire project state — before a test campaign, before a major change, at a milestone — you take a snapshot. One click. It records every file and every version at that moment. Snapshots form a simple, linear chain — a clean timeline of project states without branching or merge conflicts. Pick any version of any file, or any snapshot of the entire project, and restore it. The restore itself creates a new version, so your history is never lost and you can always see what was restored and undo it if needed. Every change is recorded with who, what, and when; the trail exists because the platform creates it, not because someone remembered to write a commit message.
 
 ## Can RunMat export history as git?
 
@@ -178,26 +187,15 @@ For teams that want git as a continuous secondary record, RunMat supports two-wa
 
 ## What else does RunMat automate for engineers?
 
-Automatic versioning is not an isolated feature. It is part of a design philosophy that runs through everything we build: **bring modern platform capabilities to engineers without asking them to become software engineers first.**
+Automatic versioning is part of a broader design: bring modern platform capabilities to engineers without asking them to become software engineers first. File changes stream to teammates in real time via the collaboration layer — shared projects that stay in sync without push, pull, or merge conflicts. The theme is consistent: the best developer tools should not require you to be a developer.
 
-- **GPU acceleration without CUDA.** Write normal MATLAB-syntax code. RunMat detects whatever GPU is in the machine and compiles optimized kernels automatically. No toolkit to install, no device flags, no driver configuration.
-- **AI assistance without API setup.** RunMat Agent integrates directly with the runtime. Engineers get code completion and analysis help without configuring API keys or managing model endpoints.
-- **Collaboration without git workflows.** File changes stream to teammates in real time via the collaboration layer. No push, no pull, no merge conflicts. Just shared projects that stay in sync.
-- **Version control without version control.** Every save is a version. Every snapshot is restorable. History exists because the platform creates it.
+## Who fills the space between git and nothing?
 
-The theme is consistent: the best developer tools should not require you to be a developer.
+There is a gap in the market that nobody talks about. On one side, there are professional developers with sophisticated git workflows, CI/CD pipelines, and code review processes. On the other side, there are entire teams of engineers writing critical analysis code with no version history at all.
 
-## The version control gap
+Most of the second group are not going to adopt git. They have tried, or they have looked at it and decided it is not worth the investment. And that is a rational decision given the tools available today.
 
-There is a gap in the market that nobody talks about. On one side, there are professional developers with sophisticated git workflows, CI/CD pipelines, and code review processes. On the other side, there are hundreds of thousands of engineers writing critical analysis code with no version history at all.
-
-The second group is not going to learn git. They have tried, or they have looked at it and decided it is not worth the investment. And that is a rational decision given the tools available today.
-
-But the consequences — lost work, no audit trail, irreproducible results, compliance gaps — are real and growing. As engineering becomes more computational, as models get more complex, as regulatory requirements tighten, the cost of having no version history gets higher every year.
-
-The answer is not to tell engineers to learn git. The answer is to build version control that works the way engineers already work: save your file, and the history takes care of itself.
-
-That is what we built.
+But the consequences — lost work, no audit trail, irreproducible results, compliance gaps — are real and growing. As engineering becomes more computational, as models get more complex, as regulatory requirements tighten, the cost of having no version history gets higher every year. The teams that figure out version control that fits how engineers actually work will have a real advantage when the next audit or reproducibility review lands.
 
 ---
 
@@ -205,4 +203,4 @@ That is what we built.
 
 Go to [runmat.com/sandbox](https://runmat.com/sandbox), write a script, save it, and then click "History." That's it. You're done. You have version control.
 
-*RunMat Cloud ships with automatic versioning, snapshots, and git export built in. [Read the full Versioning & History reference](/docs/versioning) for details on how it works.*
+*RunMat Cloud ships with automatic versioning, snapshots, and git export built in. [Read the full Versioning & History reference](/docs/versioning) for details on how it works, or see [how RunMat compares to other MATLAB alternatives](/blog/free-matlab-alternatives) for the broader picture.*

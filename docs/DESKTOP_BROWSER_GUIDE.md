@@ -3,17 +3,50 @@ collections:
   - guides
 image: "https://web.runmatstatic.com/runmat-sandbox-dark.png"
 imageAlt: "RunMat Sandbox"
+jsonLd:
+  "@context": "https://schema.org"
+  "@type": "WebApplication"
+  name: "RunMat Sandbox"
+  url: "https://runmat.com/sandbox"
+  applicationCategory: "DeveloperApplication"
+  operatingSystem: "Any"
+  offers:
+    "@type": "Offer"
+    price: "0"
+    priceCurrency: "USD"
+  featureList:
+    - "GPU-accelerated MATLAB-style code execution via WebGPU"
+    - "Interactive 2D and 3D plotting"
+    - "Real-time variable inspector with type and shape tracking"
+    - "Syntax highlighting and error diagnostics"
+    - "Cloud storage and automatic file versioning (with free account)"
 ---
 
-# Desktop & Browser Guide
+# Browser Guide
 
-RunMat Desktop is a browser-based development environment for writing and running MATLAB-style code with GPU acceleration. It provides a full IDE experience—code editor, file explorer, console output, and live plotting—all running locally in your browser.
+The RunMat sandbox is a browser-based development environment for writing and running MATLAB-style code with GPU acceleration. It provides a full IDE experience—code editor, file explorer, console output, and live plotting—all running locally in your browser.
 
 ---
 
-## What is RunMat Desktop?
+## Sandbox vs Sandbox + Cloud
 
-RunMat Desktop lets you:
+| Feature | Sandbox (no account) | Sandbox + Cloud (signed in) |
+|---|---|---|
+| Installation required | No | No |
+| Account required | No | Yes (free) |
+| GPU acceleration | WebGPU (browser-throttled) | WebGPU (browser-throttled) |
+| Interactive IDE | Yes | Yes |
+| Interactive plotting | Yes | Yes |
+| Variable inspector | Yes | Yes |
+| File storage | In-memory (cleared on tab close) | Cloud (persists across sessions and devices) |
+| File versioning | No | Automatic on every save |
+| Project sharing | No | Paid plans |
+
+---
+
+## What is the RunMat sandbox?
+
+The sandbox lets you:
 
 - **Write MATLAB-style code** in a full-featured editor with syntax highlighting
 - **Run scripts instantly** with automatic CPU/GPU acceleration
@@ -24,9 +57,9 @@ All computation happens locally in your browser. There's no server-side executio
 
 ---
 
-## Accessing RunMat Desktop
+## Accessing the sandbox
 
-Visit **[runmat.org/sandbox](https://runmat.org/sandbox)** to launch the desktop environment.
+Visit **[runmat.com/sandbox](https://runmat.com/sandbox)** to launch the sandbox.
 
 No installation required. Works in Chrome, Edge, Firefox, and Safari.
 
@@ -36,7 +69,7 @@ No installation required. Works in Chrome, Edge, Firefox, and Safari.
 
 ## The Interface
 
-When you open RunMat Desktop, you'll see three main areas:
+When you open the sandbox, you'll see three main areas:
 
 ```
 ┌─────────────┬────────────────────────┬─────────────────────┐
@@ -71,24 +104,7 @@ All three panels are resizable—drag the borders to adjust.
 
 ## First Run Walkthrough
 
-When you first open RunMat Desktop, a demo file (`demo.m`) is already loaded:
-
-```matlab
-a = 0:pi/100:2*pi;
-
-b = sin(a);
-c = cos(a);
-
-g = b.^2 + c.^2;
-
-sum_g = sum(g);
-max_g = max(g);
-
-disp([ ...
-   'Sum of g: ', num2str(sum_g), ' | ', ...
-   'Max of g: ', num2str(max_g) ...
-]);
-```
+When you first open the sandbox, a set of example files is already loaded.
 
 ### Step 1: Click "Run demo.m"
 
@@ -104,7 +120,7 @@ After execution:
 
 Try editing the script. For example, add a plot:
 
-```matlab
+```matlab:runnable
 plot(a, b);
 title("Sine Wave");
 ```
@@ -126,7 +142,7 @@ Click **Run** again. A new **Figure** tab appears in the Runtime Panel showing y
 
 The editor supports standard MATLAB syntax:
 
-```matlab
+```matlab:runnable
 % Element-wise operations (automatically GPU-accelerated for large arrays)
 x = rand(1000000, 1);
 y = sin(x) .* exp(-x);
@@ -152,7 +168,7 @@ ylabel('sin(x) * exp(-x)');
 
 ### Local Execution
 
-RunMat Desktop runs entirely in your browser using WebAssembly. When you click Run:
+The sandbox runs entirely in your browser using WebAssembly. When you click Run:
 
 1. Your script is compiled and executed locally
 2. RunMat automatically decides whether to use CPU or GPU for each operation
@@ -160,7 +176,7 @@ RunMat Desktop runs entirely in your browser using WebAssembly. When you click R
 
 ### GPU Acceleration
 
-For large arrays and intensive math, RunMat automatically fuses operations and runs them on your GPU (via WebGPU). This happens transparently—you don't need to write any special GPU code.
+For large arrays and intensive math, RunMat automatically fuses operations and runs them on your GPU (via WebGPU). This happens transparently—you don't need to write any special GPU code. Browsers throttle GPU and CPU usage to preserve battery life, so sandbox benchmarks will be slower than the CLI running the same code natively. For full GPU throughput, use the [CLI](https://runmat.com/docs/cli).
 
 The Variables pane shows **Residency** for each variable:
 - **cpu** — data is on the CPU
@@ -168,27 +184,40 @@ The Variables pane shows **Residency** for each variable:
 
 ### Plotting
 
-> **Note:** Plotting support is still in development. Some plot types may not be fully functional yet.
-
-Plots render directly in the browser using GPU-accelerated graphics. Currently supported plot types include:
+Plots render directly in the browser using GPU-accelerated graphics. Currently supported:
 - `plot` — line plots
 - `scatter` — scatter plots
+- `surf`, `mesh` — 3D surface plots (interactive rotate, zoom, pan)
 
-More plot types (bar charts, histograms, 3D plots, etc.) are being added.
+Additional chart types (bar, histogram, subplots, figure handles) are in progress.
 
 ---
 
-## Sandbox Storage
+## Storage
 
-The sandbox runs entirely in your browser. Your files are stored in memory within your browser tab, and the RunMat runtime executes locally via WebAssembly. In sandbox mode, your code stays on your machine—it's never sent to our servers.
+### Without an account (sandbox mode)
 
-This means:
+Without signing in, the sandbox runs entirely in your browser. Your files are stored in memory within your browser tab, and the RunMat runtime executes locally via WebAssembly. Your code stays on your machine—it is never sent to our servers.
 
-- ✅ No account required
-- ✅ Your code stays local—we can't see it
-- ⚠️ Files are cleared when you close or refresh the tab
+- No account required
+- Your code stays local
+- Files are cleared when you close or refresh the tab
 
-**Tip:** Copy your code to a local file before closing the tab. We'll be adding sign-in and download options soon to make saving easier.
+### With a RunMat Cloud account
+
+Sign in to get cloud storage, automatic file versioning, and access to your projects from any device. Your files sync to RunMat Cloud and persist across sessions.
+
+- **Hobby tier** — 100 MB storage, unlimited projects, automatic version history
+- **Pro** — 10 GB storage, version history ($30/mo per user)
+- **Team** — 100 GB storage, project sharing, SSO ($100/mo per user)
+
+#### File versioning
+
+Every time you save a file, RunMat Cloud records a version automatically. You can browse and restore previous versions of any file at any time. Version history is available on all Cloud tiers (Hobby, Pro, and Team). Stored versions count toward your storage quota.
+
+When signed in, your code is transmitted to RunMat Cloud for storage and sync. Execution still happens locally in your browser—your code is not executed on our servers.
+
+See [pricing](https://runmat.com/pricing) for full plan details. For local persistence without an account, use the [CLI](https://runmat.com/docs/cli).
 
 ---
 
@@ -212,7 +241,7 @@ See the [Language Coverage](LANGUAGE_COVERAGE.md) guide for supported features.
 
 Use `input()` for interactive prompts:
 
-```matlab
+```matlab:runnable
 name = input('Enter your name: ', 's');
 fprintf('Hello, %s!\n', name);
 ```
@@ -223,10 +252,31 @@ When your script calls `input()`, the console prompts you for input.
 
 Browsers limit how much GPU and CPU a website can use to preserve battery life. For maximum performance:
 
-1. **Download RunMat CLI** — Run scripts from your terminal with full native GPU access
-2. **Use RunMat Desktop App** — Coming soon, provides native performance in a desktop window
+1. **Install the RunMat CLI** — Run scripts from your terminal with full native GPU access. See the [CLI guide](https://runmat.com/docs/cli).
+2. **RunMat desktop app** — Coming soon. Will provide a native IDE with full local file system access.
 
-Visit [runmat.org/download](https://runmat.org/download) for installation options.
+---
+
+## Teams and Enterprise
+
+### Team features (Cloud Team plan)
+
+- **Project sharing** — share projects with collaborators in your organization. Each editor is billed as a seat.
+- **Team workspaces** — organize projects under your team's organization.
+- **SSO / SAML** — single sign-on for your identity provider.
+- **Priority support** — faster response times from the RunMat team.
+
+### Enterprise
+
+For organizations that need on-premises or air-gapped deployment:
+
+- **Self-hosted deployment** — run RunMat on your own infrastructure.
+- **Data residency and ITAR compliance** — keep data in your environment.
+- **Audit logs** — track access and changes for compliance.
+- **Offline licensing** — no internet connection required.
+- **SCIM provisioning** — automated user management.
+
+See [pricing](https://runmat.com/pricing) for plan details. For Enterprise inquiries, [contact sales](https://runmat.com/contact?type=enterprise) or email [team@runmat.com](mailto:team@runmat.com).
 
 ---
 
@@ -234,16 +284,16 @@ Visit [runmat.org/download](https://runmat.org/download) for installation option
 
 Now that you've run your first script:
 
-- **Explore the built-in functions** — See the [Library Reference](LIBRARY.md)
-- **Learn about GPU acceleration** — Read [Introduction to RunMat GPU](INTRODUCTION_TO_RUNMAT_GPU.md)
-- **Install the CLI** — For local file access and scripting: [CLI Guide](CLI.md)
+- **Explore the built-in functions** — See the [Function Reference](https://runmat.com/docs/matlab-function-reference)
+- **Learn about GPU acceleration** — Read [GPU Acceleration](https://runmat.com/docs/accelerate/fusion-intro)
+- **Install the CLI** — For local file access and scripting: [CLI Guide](https://runmat.com/docs/cli)
 - **Try the benchmarks** — Compare RunMat performance against NumPy and PyTorch
 
 ---
 
 ## Getting Help
 
-- **Documentation**: [runmat.org/docs](https://runmat.org/docs)
+- **Documentation**: [runmat.com/docs](https://runmat.com/docs)
 - **GitHub Issues**: [Report bugs or request features](https://github.com/runmat-org/runmat/issues)
 - **Discussions**: [Ask questions and share ideas](https://github.com/runmat-org/runmat/discussions)
 

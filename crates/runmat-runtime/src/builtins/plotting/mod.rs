@@ -76,9 +76,10 @@ pub use state::{
     FigureHandle, HoldMode,
 };
 pub use web::{
-    bind_surface_to_figure, detach_surface, fit_surface_extents, install_surface,
-    present_figure_on_surface, present_surface, render_current_scene, reset_surface_camera,
-    resize_surface, set_plot_theme_config, web_renderer_ready,
+    bind_surface_to_figure, detach_surface, fit_surface_extents, get_surface_camera_state,
+    install_surface, present_figure_on_surface, present_surface, render_current_scene,
+    reset_surface_camera, resize_surface, set_plot_theme_config, set_surface_camera_state,
+    web_renderer_ready, PlotCameraProjection, PlotCameraState, PlotSurfaceCameraState,
 };
 
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import React from "react";
 import Link from "next/link";
 import { Check } from "lucide-react";
 
@@ -9,45 +10,58 @@ import CloudPricingCard from "@/components/pricing/CloudPricingCard";
 import { CompareProductsTable } from "@/components/pricing/ComparisonTables";
 
 export const metadata: Metadata = {
-  title: "RunMat Pricing | Free, Cloud, and Enterprise",
+  title: "RunMat Pricing | Hobby, Pro, Team, and Enterprise",
   description:
-    "Simple RunMat pricing: free runtime and app (open source CLI, free browser & desktop), RunMat Cloud, and RunMat Enterprise for on-prem.",
+    "Simple RunMat pricing: free runtime, $0 Hobby cloud tier. Pro from $30/mo per user, Team from $100/mo per user. Enterprise for on-prem and air-gapped deployment.",
   alternates: { canonical: "https://runmat.com/pricing" },
+  openGraph: {
+    title: "RunMat Pricing | Hobby, Pro, Team, and Enterprise",
+    description:
+      "Free runtime, $0 Hobby cloud tier. Pro from $30/mo per user, Team from $100/mo per user. RunMat Enterprise for on-prem and air-gapped deployment.",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "RunMat Pricing | Hobby, Pro, Team, and Enterprise",
+    description:
+      "Free runtime, $0 Hobby cloud tier. Pro from $30/mo per user, Team from $100/mo per user. RunMat Enterprise for on-prem and air-gapped deployment.",
+  },
 };
 
 const runmatFreeFeatures = [
   "GPU acceleration (Metal/Vulkan/DX12)",
   "Interactive, high performance 2D/3D plotting",
   "CLI for scripts and CI/CD",
-  "Zero-install (in browser) and IDE desktop app",
+  "Zero-install (in browser) and desktop app (coming soon)",
 ];
 
 const serverFeatures = [
   "Self-hosted air-gapped deployment",
-  "SSO and audit logs",
+  "Data residency and ITAR compliance",
+  "SSO, SCIM, and audit logs",
+  "Offline licensing",
   "Dedicated support",
 ];
 
-const pricingFaqItems: { question: string; answer: string }[] = [
+const pricingFaqItems: { question: string; answer: string; answerContent?: React.ReactNode }[] = [
   {
-    question: "What's the difference between RunMat (free), Cloud, and Enterprise?",
+    question: "What's the difference between RunMat, Cloud, and Enterprise?",
     answer:
-      "RunMat is free: the runtime is open source (CLI), and the browser sandbox and desktop app are free to use. RunMat Cloud adds cloud storage, sharing, and team workspaces with optional Pro and Team paid plans. RunMat Enterprise is self-hosted and air-gapped with SSO and audit logs for organizations.",
+      "RunMat is the free, open-source runtime — GPU acceleration, plotting, CLI, and browser sandbox. The desktop app is coming soon. RunMat Cloud adds cloud storage, project sharing, and version history on top, with Hobby, Pro, and Team tiers. RunMat Enterprise is everything in Cloud, deployed on your own infrastructure for air-gapped, compliance-ready environments.",
   },
   {
     question: "Is RunMat really free?",
     answer:
-      "Yes. The RunMat runtime is open source and the browser and desktop app are free. RunMat Cloud has a free tier with unlimited projects and 200MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.",
+      "Yes. The RunMat runtime is open source and the browser sandbox is free. The desktop app is coming soon and will also be free. RunMat Cloud has a $0 Hobby tier with unlimited projects and 100 MB storage. Pro ($30/mo per user) and Team ($100/mo per user) are paid; RunMat Enterprise is custom pricing.",
   },
   {
     question: "Do I need an account to use RunMat?",
     answer:
-      "No. The browser sandbox and desktop app work without an account. An account is only required for cloud storage and team features.",
+      "No. The browser sandbox works without an account. The desktop app (coming soon) will also work without one. An account is only required for cloud storage and team features.",
   },
   {
-    question: "What's included in Cloud Free vs Pro vs Team?",
+    question: "What's included in Cloud Hobby vs Pro vs Team?",
     answer:
-      "Free: unlimited projects, 200MB storage, version history (counts toward storage). Pro: unlimited projects, 10GB storage, version history (counts toward storage) ($30/mo per user). Team: SSO / SAML (and SCIM), 100GB storage, version history (counts toward storage), priority support ($100/mo per user).",
+      "Hobby: unlimited projects, 100 MB storage, version history (counts toward storage). Pro: unlimited projects, 10GB storage, version history (counts toward storage) ($30/mo per user). Team: unlimited projects, SSO / SAML (and SCIM), 100GB storage, version history (counts toward storage), priority support ($100/mo per user).",
   },
   {
     question: "How does RunMat Cloud billing work?",
@@ -61,13 +75,12 @@ const pricingFaqItems: { question: string; answer: string }[] = [
   },
   {
     question: "Is there a free trial for Pro or Team?",
-    answer:
-      "You can start on the free tier and upgrade when you need more. Contact us for trial or pilot options for Team.",
+    answer: "Start on the Hobby tier and upgrade to Pro or Team from your account when you're ready. No sales call needed.",
   },
   {
-    question: "Who do I contact for Team or Enterprise pricing?",
-    answer:
-      "For Team plans and RunMat Enterprise (custom deployment), use the Contact Sales option on this page or visit our contact page.",
+    question: "Who do I contact for Enterprise pricing?",
+    answer: "You can sign up for Pro and Team directly from your account. For Enterprise, reach out via our contact page or email team@runmat.com.",
+    answerContent: <>You can sign up for Pro and Team directly from your account. For Enterprise, reach out via our <Link href="/contact" className="underline hover:text-foreground">contact page</Link> or email <a href="mailto:team@runmat.com" className="underline hover:text-foreground">team@runmat.com</a>.</>,
   },
 ];
 
@@ -100,7 +113,7 @@ export default function PricingPage() {
               Simple, transparent pricing
             </h1>
             <p className="mx-auto max-w-[42rem] leading-relaxed text-base text-muted-foreground sm:text-lg">
-              From open source CLI to enterprise on-prem. Pick what fits your workflow.
+              Free runtime, $0 cloud tier, no account required. Paid plans for teams that need more.
             </p>
           </div>
         </section>
@@ -113,10 +126,8 @@ export default function PricingPage() {
                   Open Source Runtime
                 </Badge>
                 <CardTitle className="text-xl text-foreground">RunMat</CardTitle>
+                <p className="text-xs text-muted-foreground">Open-source, GPU-accelerated math runtime. MATLAB syntax, no account required.</p>
                 <p className="text-3xl font-bold text-foreground">Free, forever</p>
-                <p className="text-sm text-muted-foreground">
-                  Blazing fast, MIT licensed math runtime
-                </p>
               </CardHeader>
               <CardContent className="flex flex-1 min-h-0 flex-col space-y-6">
                 <div className="flex min-h-0 flex-1 flex-col">
@@ -142,7 +153,7 @@ export default function PricingPage() {
                     asChild
                     className="w-full rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow border-0 hover:from-blue-600 hover:to-purple-700 transition-colors"
                   >
-                    <Link href="/sandbox">Try in Browser</Link>
+                    <Link href="/sandbox">Open Sandbox</Link>
                   </Button>
                 </div>
               </CardContent>
@@ -156,6 +167,7 @@ export default function PricingPage() {
                   Enterprise
                 </Badge>
                 <CardTitle className="text-xl text-foreground">RunMat Enterprise</CardTitle>
+                <p className="text-xs text-muted-foreground">Everything in RunMat Cloud, plus on-prem deployment and compliance.</p>
                 <p className="text-3xl font-bold text-foreground">Custom</p>
                 <p className="text-sm text-muted-foreground">Self-hosted deployment for secure, air-gapped environments.</p>
               </CardHeader>
@@ -170,7 +182,10 @@ export default function PricingPage() {
                     ))}
                   </ul>
                 </div>
-                <Button asChild variant="outline" className="w-full">
+                <Button
+                  asChild
+                  className="w-full rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow border-0 hover:from-blue-600 hover:to-purple-700 transition-colors"
+                >
                   <Link
                     href="/contact?type=enterprise"
                     data-ph-capture-attribute-destination="contact"
@@ -210,12 +225,21 @@ export default function PricingPage() {
                   </span>
                 </summary>
                 <div className="px-6 pb-4 text-lg text-muted-foreground">
-                  {item.answer}
+                  {item.answerContent ?? item.answer}
                 </div>
               </details>
             ))}
           </div>
         </section>
+
+        <div className="text-center pb-16">
+          <p className="text-muted-foreground">
+            Still have questions?{" "}
+            <Link href="/contact" className="underline hover:text-foreground">
+              Get in touch
+            </Link>
+          </p>
+        </div>
       </div>
     </div>
   );

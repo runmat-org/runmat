@@ -1,6 +1,8 @@
 ## Language Compatibility Modes
 
-Philosophy: RunMat is a superset language. We want to run existing MATLAB/Octave-style code, while steadily steering toward clearer, explicit, and more strongly-typed patterns (similar in spirit to how TypeScript tightens JavaScript). Divergences from legacy behavior will be explicit, opt-in/opt-out via config, and documented here.
+Philosophy: RunMat accepts MATLAB syntax so the language you already know works here — no new language to learn. The goal is not to replicate a legacy runtime function-for-function, but to give engineers a modern, high-performance environment for math and physics that feels immediately familiar. Where MATLAB conventions conflict with clarity or performance, RunMat offers explicit opt-in/opt-out controls via compatibility modes.
+
+RunMat is a superset language. We want to run existing MATLAB/Octave-style code, while steadily steering toward clearer, explicit, and more strongly-typed patterns (similar in spirit to how TypeScript tightens JavaScript). Divergences from legacy behavior will be explicit, opt-in/opt-out via config, and documented here.
 
 ### Compat modes (configured in `.runmat`)
 

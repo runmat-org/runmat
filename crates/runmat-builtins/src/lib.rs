@@ -953,6 +953,27 @@ pub enum Type {
     },
     /// Multiple return values captured as a list (internal destructuring helper)
     OutputList(Vec<Type>),
+    /// Dataset handle with optional compile-time schema information
+    DataDataset {
+        arrays: Option<std::collections::BTreeMap<String, DataArrayTypeInfo>>,
+    },
+    /// Data array handle with optional dtype/shape metadata
+    DataArray {
+        dtype: Option<String>,
+        shape: Option<Vec<Option<usize>>>,
+        chunk_shape: Option<Vec<Option<usize>>>,
+        codec: Option<String>,
+    },
+    /// Data transaction handle
+    DataTransaction,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+pub struct DataArrayTypeInfo {
+    pub dtype: Option<String>,
+    pub shape: Option<Vec<Option<usize>>>,
+    pub chunk_shape: Option<Vec<Option<usize>>>,
+    pub codec: Option<String>,
 }
 
 impl Type {
@@ -1003,6 +1024,9 @@ impl Type {
             (Type::Int, Type::Num) | (Type::Num, Type::Int) => true, // Number compatibility
             (Type::Tensor { .. }, Type::Tensor { .. }) => true, // Tensor compatibility regardless of dims for now
             (Type::OutputList(a), Type::OutputList(b)) => a.len() == b.len(),
+            (Type::DataDataset { .. }, Type::DataDataset { .. }) => true,
+            (Type::DataArray { .. }, Type::DataArray { .. }) => true,
+            (Type::DataTransaction, Type::DataTransaction) => true,
             (a, b) => a == b,
         }
     }
@@ -1093,6 +1117,44 @@ impl Type {
                     Type::OutputList(vec![Type::Unknown; a.len().max(b.len())])
                 }
             }
+            (Type::DataDataset { arrays: a }, Type::DataDataset { arrays: b }) => {
+                let merged = match (a, b) {
+                    (None, None) => None,
+                    (Some(sa), None) | (None, Some(sa)) => Some(sa.clone()),
+                    (Some(sa), Some(sb)) => {
+                        let mut out = sa.clone();
+                        for (name, right) in sb {
+                            out.entry(name.clone())
+                                .and_modify(|left| {
+                                    *left = unify_array_type_info(left, right);
+                                })
+                                .or_insert_with(|| right.clone());
+                        }
+                        Some(out)
+                    }
+                };
+                Type::DataDataset { arrays: merged }
+            }
+            (
+                Type::DataArray {
+                    dtype: ad,
+                    shape: ashp,
+                    chunk_shape: ach,
+                    codec: ac,
+                },
+                Type::DataArray {
+                    dtype: bd,
+                    shape: bshp,
+                    chunk_shape: bch,
+                    codec: bc,
+                },
+            ) => Type::DataArray {
+                dtype: ad.clone().or_else(|| bd.clone()),
+                shape: unify_optional_dims(ashp, bshp),
+                chunk_shape: unify_optional_dims(ach, bch),
+                codec: ac.clone().or_else(|| bc.clone()),
+            },
+            (Type::DataTransaction, Type::DataTransaction) => Type::DataTransaction,
             (a, b) if a == b => a.clone(),
             _ => Type::Union(vec![self.clone(), other.clone()]),
         }
@@ -1159,6 +1221,33 @@ impl Type {
                 Type::OutputList(values.iter().map(Type::from_value).collect())
             }
         }
+    }
+}
+
+fn unify_optional_dims(
+    lhs: &Option<Vec<Option<usize>>>,
+    rhs: &Option<Vec<Option<usize>>>,
+) -> Option<Vec<Option<usize>>> {
+    match (lhs, rhs) {
+        (None, None) => None,
+        (Some(a), None) | (None, Some(a)) => Some(a.clone()),
+        (Some(a), Some(b)) if a == b => Some(a.clone()),
+        (Some(a), Some(b)) if a.len() == b.len() => Some(
+            a.iter()
+                .zip(b.iter())
+                .map(|(x, y)| if x == y { *x } else { None })
+                .collect(),
+        ),
+        (Some(_), Some(_)) => None,
+    }
+}
+
+fn unify_array_type_info(lhs: &DataArrayTypeInfo, rhs: &DataArrayTypeInfo) -> DataArrayTypeInfo {
+    DataArrayTypeInfo {
+        dtype: lhs.dtype.clone().or_else(|| rhs.dtype.clone()),
+        shape: unify_optional_dims(&lhs.shape, &rhs.shape),
+        chunk_shape: unify_optional_dims(&lhs.chunk_shape, &rhs.chunk_shape),
+        codec: lhs.codec.clone().or_else(|| rhs.codec.clone()),
     }
 }
 

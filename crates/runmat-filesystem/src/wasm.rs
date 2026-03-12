@@ -1,3 +1,6 @@
+use crate::data_contract::{
+    DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
+};
 use crate::{DirEntry, FsMetadata, FsProvider, OpenFlags};
 use std::io::{self, ErrorKind};
 use std::path::Path;
@@ -59,6 +62,24 @@ impl FsProvider for PlaceholderFsProvider {
     }
 
     fn set_readonly(&self, _path: &Path, _readonly: bool) -> io::Result<()> {
+        Err(unsupported())
+    }
+
+    fn data_manifest_descriptor(
+        &self,
+        _request: &DataManifestRequest,
+    ) -> io::Result<DataManifestDescriptor> {
+        Err(unsupported())
+    }
+
+    fn data_chunk_upload_targets(
+        &self,
+        _request: &DataChunkUploadRequest,
+    ) -> io::Result<Vec<DataChunkUploadTarget>> {
+        Err(unsupported())
+    }
+
+    fn data_upload_chunk(&self, _target: &DataChunkUploadTarget, _data: &[u8]) -> io::Result<()> {
         Err(unsupported())
     }
 }

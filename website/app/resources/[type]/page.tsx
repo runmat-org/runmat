@@ -23,7 +23,7 @@ export async function generateMetadata({ params }: { params: Promise<Params> }):
   const type = normalizeType(rawType, available);
   if (!type) return {};
   const label = resourceTypeLabel(type);
-  const path = `https://runmat.org/resources/${type}`;
+  const path = `https://runmat.com/resources/${type}`;
   return {
     title: `${label} | RunMat Resources`,
     description: `${label} curated resources for RunMat.`,

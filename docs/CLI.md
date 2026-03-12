@@ -192,6 +192,21 @@ runmat remote run /scripts/job.m --project <project-id> --server https://api.run
 
 If `--server` is omitted, the CLI defaults to `https://api.runmat.com`.
 
+### replay (coming soon)
+
+Replay artifact inspection/export commands are planned but not yet shipped in the CLI.
+Current replay persistence/switching is available through runtime APIs and host integrations.
+
+Planned command surface:
+
+```sh
+runmat replay runs list [--doc <path>]
+runmat replay run show <run-id>
+runmat replay scene export <run-id> [--output scene.json]
+runmat replay scene import <file>
+runmat replay workspace export <run-id> [--output workspace.json]
+```
+
 ### project select
 Set the default project for remote filesystem commands.
 

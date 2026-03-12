@@ -27,6 +27,7 @@ members = [
     "crates/runmat-thread-local",
     "crates/runmat-filesystem",
     "crates/runmat-config",
+    "crates/runmat-static-analysis",
 ]
 resolver = "2"
 
@@ -77,6 +78,7 @@ runmat-gc = { version = "=0.2.8", path = "crates/runmat-gc" }
 runmat-snapshot = { version = "=0.2.8", path = "crates/runmat-snapshot", default-features = false }
 runmat-filesystem = { version = "=0.2.8", path = "crates/runmat-filesystem" }
 runmat-config = { version = "=0.2.8", path = "crates/runmat-config" }
+runmat-static-analysis = { version = "=0.2.8", path = "crates/runmat-static-analysis" }
 runmat-accelerate = { version = "=0.2.8", path = "crates/runmat-accelerate" }
 runmat-accelerate-api = { version = "=0.2.8", path = "crates/runmat-accelerate-api" }
 runmat-gc-api = { version = "=0.2.8", path = "crates/runmat-gc-api" }

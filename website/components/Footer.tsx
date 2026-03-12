@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { Heart, MapPin } from "lucide-react";
+import { Heart } from "lucide-react";
 import { SiGithub, SiLinkedin, SiX } from "react-icons/si";
 import Image from "next/image";
 import NewsletterCta from "@/components/NewsletterCta";
@@ -44,7 +44,7 @@ export default function Footer() {
             </Link>
           </div>
           <p className="text-sm text-muted-foreground leading-relaxed">
-            The Fastest Runtime for Math
+            Run your math, blazing fast
           </p>
           <div className="flex items-center gap-3 mt-1">
             <Link href="https://github.com/runmat-org/runmat" target="_blank" rel="noopener noreferrer" className="text-muted-foreground hover:text-foreground transition-colors">
@@ -60,28 +60,24 @@ export default function Footer() {
               <span className="sr-only">LinkedIn</span>
             </Link>
           </div>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <MapPin className="h-3.5 w-3.5" />
-            <span>San Francisco, CA · Seattle, WA · New York, NY</span>
-          </div>
         </div>
         <div className="grid w-full md:flex-1 gap-y-6 md:gap-x-8 md:grid-cols-[minmax(6rem,1fr)_minmax(6rem,1fr)] text-sm text-muted-foreground">
           <div>
-            <Link href="/resources" className="text-foreground font-semibold mb-2 block">Resources</Link>
+            <h3 className="text-foreground font-semibold mb-2">Company</h3>
             <ul className="space-y-1">
               <li><Link href="/about" className="hover:underline">About</Link></li>
               <li><Link href="/pricing" className="hover:underline">Pricing</Link></li>
               <li><Link href="/contact" className="hover:underline">Contact</Link></li>
               <li><Link href="/license" className="hover:underline">License</Link></li>
-              <li><Link href="/matlab-online" className="hover:underline">MATLAB Online</Link></li>
             </ul>
           </div>
           <div>
             <h3 className="text-foreground font-semibold mb-2">Learn</h3>
             <ul className="space-y-1">
+              <li><Link href="/docs" className="hover:underline">Docs</Link></li>
               <li><Link href="/blog" className="hover:underline">Blog</Link></li>
               <li><Link href="/benchmarks" className="hover:underline">Benchmarks</Link></li>
-              <li><Link href="/docs/fusion-guide" className="hover:underline">Fusion Guide</Link></li>
+              <li><Link href="/matlab-online" className="hover:underline">RunMat vs MATLAB Online</Link></li>
             </ul>
           </div>
         </div>
@@ -98,6 +94,8 @@ export default function Footer() {
           <div className="text-sm text-center md:text-left" style={{ color: 'hsl(var(--muted-foreground))' }}>
             <p>
             © {currentYear} Dystr Inc. All rights reserved. MIT+ Licensed.
+            {" · "}
+            <Link href="/docs/terms" className="hover:underline underline-offset-2">Terms</Link>
             </p>
             <p>
               MATLAB is a registered trademark of The MathWorks, Inc.
