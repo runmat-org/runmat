@@ -183,6 +183,7 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MAX_BLOCKERS",
             "RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY",
             "RUNMAT_RELEASE_READINESS_PROMOTION_MAX_BLOCKER_REGRESSION",
+            "RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_CALIBRATION",
             "RUNMAT_THERMO_FIELD_PROMOTION_REPORT",
             "RUNMAT_THERMO_FIELD_SIGNING_KEY",
             "GITHUB_REF_NAME",
@@ -1034,6 +1035,50 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("PLASTIC_PROMOTION_BLOCKER_BURNDOWN_STALLED", codes)
         self.assertIn("CONTACT_PROMOTION_BLOCKER_BURNDOWN_STALLED", codes)
+
+    def test_promotion_calibration_is_applied_when_present(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            plastic_nonlinear_severity=0.2,
+            contact_nonlinear_severity=0.2,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                plastic_nonlinear_severity=0.2,
+                contact_nonlinear_severity=0.2,
+            )
+        ]
+        calibration = {
+            "by_profile": {
+                "feature": {
+                    "plastic_promotion_max_blockers": 0,
+                    "contact_promotion_max_blockers": 0,
+                    "promotion_max_blocker_regression": 0,
+                }
+            }
+        }
+        result = evaluate_release_readiness(
+            latest,
+            rolling,
+            protected=False,
+            promotion_calibration=calibration,
+        )
+        self.assertTrue(result["promotion_calibration_applied"])
+        self.assertEqual(result["plastic_promotion_max_blockers"], 0)
+        self.assertEqual(result["contact_promotion_max_blockers"], 0)
+
+    def test_missing_promotion_calibration_reason_when_required(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        rolling = [report(passed=True, publishable=True, gpu_ms=95.0)]
+        os.environ["RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_CALIBRATION"] = "true"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PROMOTION_CALIBRATION_MISSING", codes)
 
     def test_thermo_spread_ratio_high_reason_is_emitted(self):
         latest = report(

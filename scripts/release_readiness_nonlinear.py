@@ -299,6 +299,7 @@ def evaluate_release_readiness(
     calibration_evidence: dict | None = None,
     recommendation_artifact: dict | None = None,
     thermo_promotion_report: dict | None = None,
+    promotion_calibration: dict | None = None,
 ) -> dict:
     reasons: List[Reason] = []
     latest_passed = bool(latest.get("passed", False))
@@ -944,6 +945,37 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_PROMOTION_MAX_BLOCKER_REGRESSION", "0"),
         )
     )
+    require_promotion_calibration = is_true(
+        os.getenv("RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_CALIBRATION", "false")
+    )
+    promotion_calibration_applied = False
+
+    profile = governance_profile_name()
+    if isinstance(promotion_calibration, dict):
+        by_profile = promotion_calibration.get("by_profile")
+        if isinstance(by_profile, dict):
+            profile_entry = by_profile.get(profile)
+            if isinstance(profile_entry, dict):
+                plastic_override = profile_entry.get("plastic_promotion_max_blockers")
+                contact_override = profile_entry.get("contact_promotion_max_blockers")
+                regression_override = profile_entry.get("promotion_max_blocker_regression")
+                if isinstance(plastic_override, (int, float)):
+                    plastic_promotion_max_blockers = int(plastic_override)
+                    promotion_calibration_applied = True
+                if isinstance(contact_override, (int, float)):
+                    contact_promotion_max_blockers = int(contact_override)
+                    promotion_calibration_applied = True
+                if isinstance(regression_override, (int, float)):
+                    promotion_max_blocker_regression = int(regression_override)
+                    promotion_calibration_applied = True
+    elif protected or require_promotion_calibration:
+        reasons.append(
+            Reason(
+                code="PROMOTION_CALIBRATION_MISSING",
+                severity="fail" if protected else "warn",
+                detail="promotion calibration artifact missing or invalid",
+            )
+        )
     thermo_records = [
         rec
         for rec in report_records(latest)
@@ -2264,6 +2296,8 @@ def evaluate_release_readiness(
         "contact_promotion_blocker_regression": contact_promotion_blocker_regression,
         "require_promotion_ready": require_promotion_ready,
         "promotion_max_blocker_regression": promotion_max_blocker_regression,
+        "promotion_calibration_applied": promotion_calibration_applied,
+        "require_promotion_calibration": require_promotion_calibration,
         "reference_trend_ratcheted": True,
         "reference_trend_rationale": "rolling_median_reference_fixtures",
         "rolling_report_count": len(rolling),
@@ -2280,6 +2314,11 @@ def markdown_summary(result: dict) -> str:
         "Reference trend ratchet: "
         f"**{result.get('reference_trend_ratcheted', False)}** "
         f"(basis=`{result.get('reference_trend_rationale', '-')}`, rolling_reports=`{result.get('rolling_report_count', 0)}`)"
+    )
+    lines.append(
+        "Promotion calibration applied: "
+        f"**{result.get('promotion_calibration_applied', False)}** "
+        f"(required=`{result.get('require_promotion_calibration', False)}`)"
     )
     lines.append("")
     lines.append("### Thermo Posture")
@@ -2554,6 +2593,12 @@ def main() -> int:
             "target/runmat-analysis-artifacts/thermo_field_promotion_report.json",
         )
     )
+    promotion_calibration_path = Path(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PROMOTION_CALIBRATION",
+            "target/runmat-analysis-artifacts/promotion_threshold_calibration.json",
+        )
+    )
     output_path = Path(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_OUTPUT",
@@ -2575,6 +2620,7 @@ def main() -> int:
         calibration_evidence=load_evidence(calibration_evidence_path),
         recommendation_artifact=load_json(recommendation_artifact_path),
         thermo_promotion_report=load_json(thermo_promotion_report_path),
+        promotion_calibration=load_json(promotion_calibration_path),
     )
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(result, indent=2))

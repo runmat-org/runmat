@@ -1381,6 +1381,7 @@ For maintainers onboarding mid-project, verify:
 
 ## Progress Log (OSS)
 
+- 2026-03-10: Added data-calibrated promotion-threshold path by generating `promotion_threshold_calibration.json` from rolling reference fixtures, wiring optional/required calibration consumption into release readiness (`PROMOTION_CALIBRATION_MISSING` guard), and exposing calibration applied/required posture in Tier-7.5 governance summaries.
 - 2026-03-10: Completed promotion-readiness second pass by adding explicit plastic/contact promotion blocker budgets and blocker-regression (burn-down stall) policy reasons, surfacing blocker count/regression metrics in readiness + Tier-7.5 summaries, and extending readiness tests for budget/burndown enforcement.
 - 2026-03-10: Added first-pass promotion readiness gating for plastic/contact reference tracks by surfacing `*_promotion_ready` status and blocker vectors in readiness artifacts, enforcing optional promotion-required policy via env (`RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY`), and exposing promotion readiness posture in Tier-7.5 CI governance summaries.
 - 2026-03-10: Completed second-pass ratchet policy hardening by adding release-profile non-regression checks (`new <= old`) and protected-branch observed-metric requirements to threshold-ratchet validation, then wiring protected-branch observed enforcement via CI env policy.

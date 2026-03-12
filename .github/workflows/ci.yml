@@ -359,6 +359,7 @@ jobs:
           python3 -m unittest \
             scripts.tests.test_release_readiness_nonlinear \
             scripts.tests.test_generate_threshold_ratchet_report \
+            scripts.tests.test_generate_promotion_threshold_calibration \
             scripts.tests.test_validate_threshold_ratchet_report \
             scripts.tests.test_evaluate_prep_calibration_drift \
             scripts.tests.test_promote_prep_calibration_evidence
@@ -413,6 +414,10 @@ jobs:
           python3 scripts/summarize_prep_artifacts.py | tee prep-artifact-slo.md
           cat prep-artifact-slo.md >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Generate promotion threshold calibration
+        if: always()
+        run: python3 scripts/generate_promotion_threshold_calibration.py
+
       - name: Evaluate nonlinear release readiness
         if: always()
         env:
@@ -425,6 +430,8 @@ jobs:
           RUNMAT_RELEASE_READINESS_PREP_REQUIRE_RECOMMENDATION_ARTIFACT: "true"
           RUNMAT_RELEASE_READINESS_PREP_CANDIDATE_MAX_AGE_DAYS: "14"
           RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_READY: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
+          RUNMAT_RELEASE_READINESS_REQUIRE_PROMOTION_CALIBRATION: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
+          RUNMAT_RELEASE_READINESS_PROMOTION_CALIBRATION: target/runmat-analysis-artifacts/promotion_threshold_calibration.json
           RUNMAT_PREP_CALIBRATION_RECOMMENDATIONS_INPUT: target/runmat-analysis-artifacts/prep_calibration_recommendations.json
           RUNMAT_THERMO_FIELD_SIGNING_KEY: ${{ secrets.RUNMAT_THERMO_FIELD_SIGNING_KEY }}
         run: |
@@ -453,6 +460,7 @@ jobs:
           rec_path = Path("target/runmat-analysis-artifacts/prep_calibration_recommendations.json")
           ready_path = Path("target/runmat-analysis-artifacts/nonlinear_release_readiness.json")
           ratchet_path = Path("target/runmat-analysis-artifacts/threshold_ratchet_report.json")
+          promotion_calib_path = Path("target/runmat-analysis-artifacts/promotion_threshold_calibration.json")
           lines = ["## Tier 7.5 Governance", ""]
           if rec_path.exists():
               rec = json.loads(rec_path.read_text())
@@ -520,6 +528,8 @@ jobs:
               contact_promotion_max_blockers = ready.get('contact_promotion_max_blockers')
               contact_promotion_blocker_regression = ready.get('contact_promotion_blocker_regression')
               promotion_max_blocker_regression = ready.get('promotion_max_blocker_regression')
+              promotion_calibration_applied = ready.get('promotion_calibration_applied')
+              require_promotion_calibration = ready.get('require_promotion_calibration')
               reference_trend_ratcheted = ready.get('reference_trend_ratcheted')
               reference_trend_rationale = ready.get('reference_trend_rationale')
               rolling_report_count = ready.get('rolling_report_count')
@@ -736,6 +746,10 @@ jobs:
                   f"{contact_promotion_blocker_regression if contact_promotion_blocker_regression is not None else '-'}/{promotion_max_blocker_regression if promotion_max_blocker_regression is not None else '-'}"
               )
               lines.append(
+                  "- Promotion calibration applied/required: "
+                  f"{promotion_calibration_applied if promotion_calibration_applied is not None else '-'}/{require_promotion_calibration if require_promotion_calibration is not None else '-'}"
+              )
+              lines.append(
                   "- Reference trend ratchet active: "
                   f"{reference_trend_ratcheted if reference_trend_ratcheted is not None else '-'}"
               )
@@ -755,6 +769,10 @@ jobs:
                   )
               else:
                   lines.append("- Ratchet report: missing")
+              lines.append(
+                  "- Promotion calibration artifact: "
+                  f"{'present' if promotion_calib_path.exists() else 'missing'}"
+              )
           else:
               lines.append("- Readiness artifact: missing")
           out = Path("tier75-governance-summary.md")
@@ -773,6 +791,7 @@ jobs:
             target/runmat-analysis-artifacts/nonlinear_release_readiness.json
             target/runmat-analysis-artifacts/threshold_ratchet_report.json
             target/runmat-analysis-artifacts/threshold_ratchet_report.md
+            target/runmat-analysis-artifacts/promotion_threshold_calibration.json
             target/runmat-analysis-artifacts/prep_calibration_evidence_validation.json
             target/runmat-analysis-artifacts/prep_calibration_recommendations.json
             target/runmat-analysis-artifacts/prep_calibration_evidence_approved.json
