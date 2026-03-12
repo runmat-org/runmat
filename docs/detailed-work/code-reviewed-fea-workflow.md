@@ -78,7 +78,13 @@ Notes:
 - `.artifacts/analysis/by-id/<analysis_id>/runs/<run_id>/` is the immutable execution root.
 - `run.data` under each run root is the canonical script-facing inspection surface.
 
-## Builtin Surface (Proposed)
+## Builtin Surface (Planned)
+
+Status:
+
+- `analysis.validate_study`, `analysis.plan_study`, and `analysis.run_study` are planned study builtins.
+- `analysis.resolve_study`, `analysis.latest_run`, `analysis.open_run`, and `analysis.open_run_data` are planned discovery helpers.
+- Until helper builtins exist, callers can read index/pointer files directly via the schema contracts in this document.
 
 - `analysis.validate_study(path, options?)`
   - parses YAML/JSON,
@@ -368,6 +374,7 @@ Representative error codes:
 - `STUDY_REFERENCE_NOT_FOUND`
 - `STUDY_REGION_REFERENCE_INVALID`
 - `STUDY_SOLVER_OPTION_INVALID`
+- `STUDY_IMPORT_MERGE_CONFLICT`
 
 ## Composability / Includes
 
@@ -375,9 +382,23 @@ v1 include model:
 
 - `imports` is an ordered list of documents to merge into the root study.
 - merge semantics are deterministic:
-  - scalar/object keys: last import wins,
-  - list fields with ids (`materials`, named `loads`) merge by id,
+  - scalar/object keys: later imports override earlier imports; root study overrides all imports,
+  - keyed list fields merge by stable key,
   - unkeyed list fields append in order.
+
+Keyed list merge keys (v1):
+
+- `model.materials`: `material_id`
+- `model.material_assignments`: `region_id`
+- `model.boundary_conditions`: `bc_id`
+- `model.loads`: `load_id`
+- `model.steps`: `step_id`
+
+Merge conflict rules:
+
+- duplicate keyed entry with additive-compatible values: merge,
+- duplicate keyed entry with incompatible structural type or `kind`: hard fail (`STUDY_IMPORT_MERGE_CONFLICT`),
+- duplicate import path in a single resolution chain: deduplicate by normalized absolute path.
 
 Required guards:
 
@@ -432,10 +453,6 @@ Run-level files (immutable per run):
 - `.artifacts/analysis/index/runs.jsonl`
   - append-only run index (`analysis_id`, `run_id`, `status`, timestamps, profile).
 
-Optional compatibility alias:
-
-- package-local `outputs/` may contain pointers/copies for convenience, but `<workspace-root>/.artifacts/analysis/...` is source of truth.
-
 ID and collision policy:
 
 - `analysis_id` and `run_id` are generated opaque ids (ULID/UUIDv7 style),
@@ -444,14 +461,32 @@ ID and collision policy:
 
 ## Discovery and Loading
 
-Callers should avoid manual path construction. Discovery should use helper/builtin APIs:
+Callers should avoid manual path construction. Preferred discovery uses helper/builtin APIs (planned):
 
 - `analysis.resolve_study(study_path)` -> `{ analysis_id, study_fingerprint, root }`
 - `analysis.latest_run(analysis_id)` -> `{ run_id, status, updated_at }`
 - `analysis.open_run(analysis_id, run_id)` -> run artifact metadata/paths
 - `analysis.open_run_data(analysis_id, run_id)` -> `Dataset` handle for `run.data`
 
-These APIs can be thin wrappers over the on-disk index/pointer files.
+These APIs are thin wrappers over the on-disk index/pointer files.
+
+Direct-file fallback (no helper builtins):
+
+1. resolve `analysis_id` from `.artifacts/analysis/by-study/<study_fingerprint>/pointer.json`,
+2. resolve `run_id` from `.artifacts/analysis/by-id/<analysis_id>/latest.json` (or explicit run selection),
+3. load run artifacts from `.artifacts/analysis/by-id/<analysis_id>/runs/<run_id>/...`.
+
+## Study Fingerprint Canonicalization (v1)
+
+`study_fingerprint` is computed from resolved study intent, not volatile run metadata.
+
+- source payload: fully resolved study document after import merge,
+- excluded fields: runtime-generated fields (`analysis_id`, `run_id`, timestamps, artifact paths),
+- canonicalization: deterministic JSON encoding with sorted keys and UTF-8 bytes,
+- hash: `sha256` over canonical bytes,
+- storage key format: `sha256_<hex>` used under `by-study/`.
+
+This keeps discovery stable across reruns while changing when reviewed study intent changes.
 
 ## `.m` Script Examples
 
@@ -478,7 +513,7 @@ function run_simulation(study_path)
 end
 ```
 
-### `scripts/inspect_results.m`
+### `scripts/inspect_results.m` (planned helper API usage)
 
 ```matlab
 function inspect_results(study_path, run_id)
@@ -529,8 +564,8 @@ Generated artifacts include JSON envelopes and a native `.data` dataset under `.
 - `run.data`
   - primary script/plot/desktop inspection substrate,
   - managed via `data.*`, `Dataset.*`, and `DataArray.*` builtins,
-  - canonical arrays should include at minimum `displacement` and `von_mises` when available,
-  - additional arrays may include modal/transient/nonlinear series views.
+  - required arrays are run-kind-specific (see table below),
+  - optional arrays may include mode/snapshot/diagnostic series views.
 
 - `study_lock.json`
   - resolved study after include merge,
@@ -564,16 +599,20 @@ Dataset-level expectations:
 - `attrs` should include `run_id`, `study_id`, `profile`, `op_version`, and `created_at`,
 - array naming remains stable across runs for script portability.
 
-Minimum array set for structural runs:
+Required arrays by run kind:
 
-- `displacement` (f64 tensor),
-- `von_mises` (f64 tensor).
+| Run kind | Required arrays |
+| --- | --- |
+| linear static | `displacement`, `von_mises` |
+| modal | `modal_eigenvalues_hz`, `modal_residual_norms` |
+| transient | `transient_time_points_s`, `transient_residual_norms` |
+| nonlinear | `nonlinear_load_factors`, `nonlinear_residual_norms`, `nonlinear_iteration_counts` |
 
 Optional arrays by run kind:
 
-- modal: `modal_eigenvalues_hz`, `modal_residual_norms`,
-- transient: `transient_time_points_s`, `transient_residual_norms`,
-- nonlinear: `nonlinear_load_factors`, `nonlinear_residual_norms`, `nonlinear_iteration_counts`.
+- modal: mode-shape arrays (for example `modal_mode_shape_<index>`),
+- transient: displacement snapshot arrays,
+- nonlinear: displacement snapshot arrays and nonlinear line-search/tangent-rebuild series.
 
 This keeps field and series inspection on the RunMat data plane while JSON envelopes remain governance-friendly summaries.
 
