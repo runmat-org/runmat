@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime, timezone
 
-from scripts.evaluate_prep_calibration_drift import (
+from scripts.analysis.prep_calibration.evaluate_prep_calibration_drift import (
     build_recommendation_artifact,
     evaluate_record_drift,
     evaluate_report_drift,

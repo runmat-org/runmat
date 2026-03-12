@@ -2,11 +2,15 @@
 import argparse
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
+if __package__ is None or __package__ == "":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
 try:
-    from scripts.validate_thermo_field_artifact import (
+    from scripts.analysis.thermo_artifacts.validate_thermo_field_artifact import (
         compute_payload_hash,
         compute_signature,
     )

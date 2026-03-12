@@ -3,7 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.generate_threshold_ratchet_report import main
+from scripts.analysis.governance.generate_threshold_ratchet_report import main
 
 
 class GenerateThresholdRatchetReportTests(unittest.TestCase):

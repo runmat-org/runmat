@@ -104,9 +104,9 @@ Typed prep-reference failure families:
 
 Thermo field artifact lifecycle scripts:
 
-- `scripts/generate_thermo_field_artifact.py` creates candidate/approved thermo field artifacts.
-- `scripts/validate_thermo_field_artifact.py` enforces artifact schema + monotonic time-profile constraints.
-- `scripts/promote_thermo_field_artifact.py` promotes validated candidates to approved artifacts with age checks.
+- `scripts/analysis/thermo_artifacts/generate_thermo_field_artifact.py` creates candidate/approved thermo field artifacts.
+- `scripts/analysis/thermo_artifacts/validate_thermo_field_artifact.py` enforces artifact schema + monotonic time-profile constraints.
+- `scripts/analysis/thermo_artifacts/promote_thermo_field_artifact.py` promotes validated candidates to approved artifacts with age checks.
 
 Thermo field artifact trust-chain policy:
 

@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.generate_promotion_threshold_calibration import main
+from scripts.analysis.governance.generate_promotion_threshold_calibration import main
 
 
 class GeneratePromotionThresholdCalibrationTests(unittest.TestCase):

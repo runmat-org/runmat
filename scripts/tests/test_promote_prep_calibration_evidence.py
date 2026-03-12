@@ -4,7 +4,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.promote_prep_calibration_evidence import main as promote_main
+from scripts.analysis.prep_calibration.promote_prep_calibration_evidence import (
+    main as promote_main,
+)
 
 
 class PromotePrepCalibrationEvidenceTests(unittest.TestCase):

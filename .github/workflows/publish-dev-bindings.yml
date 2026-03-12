@@ -9,7 +9,7 @@ on:
       - "crates/runmat-wasm/**"
       - "crates/runmat-runtime/**"
       - "crates/runmat-lsp/**"
-      - "scripts/test-wasm-headless.sh"
+      - "scripts/runtime/test-wasm-headless.sh"
       - "Cargo.toml"
       - "Cargo.lock"
       - ".github/workflows/publish-dev-bindings.yml"
@@ -84,7 +84,7 @@ jobs:
         env:
           RUNMAT_CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
           WASM_BINDGEN_TEST_TIMEOUT: "300"
-        run: scripts/test-wasm-headless.sh
+        run: scripts/runtime/test-wasm-headless.sh
 
       - name: Build bindings package
         working-directory: bindings/ts

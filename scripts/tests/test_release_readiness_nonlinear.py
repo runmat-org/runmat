@@ -1,7 +1,7 @@
 import unittest
 import os
 
-from scripts.release_readiness_nonlinear import (
+from scripts.analysis.governance.release_readiness_nonlinear import (
     evaluate_release_readiness,
     markdown_summary,
 )

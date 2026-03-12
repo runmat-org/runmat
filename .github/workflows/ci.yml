@@ -279,7 +279,7 @@ jobs:
         run: echo "RUNMAT_RELEASE_READINESS_ARTIFACT_REPLAY_OK=true" >> "$GITHUB_ENV"
 
       - name: Validate nonlinear benchmark report keys
-        run: python3 scripts/validate_analysis_report_nonlinear.py
+        run: python3 scripts/analysis/governance/validate_analysis_report_nonlinear.py
 
       - name: Enforce thermo summary presence on thermo-gated branches
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')
@@ -289,7 +289,7 @@ jobs:
           RUNMAT_VALIDATE_REQUIRE_ELECTRO_SUMMARY: "true"
           RUNMAT_VALIDATE_REQUIRE_PLASTIC_SUMMARY: "true"
           RUNMAT_VALIDATE_REQUIRE_CONTACT_SUMMARY: "true"
-        run: python3 scripts/validate_analysis_report_nonlinear.py
+        run: python3 scripts/analysis/governance/validate_analysis_report_nonlinear.py
 
       - name: Enforce non-default thermo signing key on release branches
         if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')
@@ -323,7 +323,7 @@ jobs:
           lines = ["## Thermo Field Trust Report", "", f"Artifacts: `{len(artifacts)}`"]
           for artifact in artifacts:
               proc = subprocess.run(
-                  ["python3", "scripts/validate_thermo_field_artifact.py", str(artifact)],
+                  ["python3", "scripts/analysis/thermo_artifacts/validate_thermo_field_artifact.py", str(artifact)],
                   capture_output=True,
                   text=True,
               )
@@ -368,12 +368,12 @@ jobs:
             scripts.tests.test_promote_prep_calibration_evidence
 
       - name: Validate prep calibration evidence
-        run: python3 scripts/validate_prep_calibration_evidence.py
+        run: python3 scripts/analysis/prep_calibration/validate_prep_calibration_evidence.py
 
       - name: Generate prep calibration recommendations
         env:
           RUNMAT_RELEASE_READINESS_PREP_RETRAIN_TRIGGER_DRIFT: "0.1"
-        run: python3 scripts/generate_prep_calibration_recommendations.py
+        run: python3 scripts/analysis/prep_calibration/generate_prep_calibration_recommendations.py
 
       - name: Verify governance artifacts exist
         run: |
@@ -382,11 +382,11 @@ jobs:
 
       - name: Validate prep calibration evidence promotion
         env:
-          RUNMAT_PREP_CALIBRATION_EVIDENCE_CANDIDATE: scripts/prep_calibration_evidence.json
+          RUNMAT_PREP_CALIBRATION_EVIDENCE_CANDIDATE: scripts/analysis/prep_calibration/evidence/prep_calibration_evidence.json
           RUNMAT_PREP_CALIBRATION_EVIDENCE_APPROVED: target/runmat-analysis-artifacts/prep_calibration_evidence_approved.json
           RUNMAT_PREP_CALIBRATION_RECOMMENDATIONS_INPUT: target/runmat-analysis-artifacts/prep_calibration_recommendations.json
           RUNMAT_PREP_CALIBRATION_PROMOTION_MAX_RECOMMENDATIONS: "64"
-        run: python3 scripts/promote_prep_calibration_evidence.py
+        run: python3 scripts/analysis/prep_calibration/promote_prep_calibration_evidence.py
 
       - name: Verify promotion artifact exists
         run: test -f target/runmat-analysis-artifacts/prep_calibration_evidence_approved.json
@@ -397,13 +397,13 @@ jobs:
           RUNMAT_ANALYSIS_TREND_WINDOW: "8"
           RUNMAT_ANALYSIS_TREND_MAX_SLOWDOWN_RATIO: "1.25"
         run: |
-          python3 scripts/analyze_nonlinear_trends.py | tee nonlinear-trends.md
+          python3 scripts/analysis/reporting/analyze_nonlinear_trends.py | tee nonlinear-trends.md
           cat nonlinear-trends.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Summarize nonlinear report
         if: always()
         run: |
-          python3 scripts/summarize_analysis_report.py | tee nonlinear-summary.md
+          python3 scripts/analysis/reporting/summarize_analysis_report.py | tee nonlinear-summary.md
           cat nonlinear-summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Summarize prep artifact SLO
@@ -414,12 +414,12 @@ jobs:
           RUNMAT_PREP_SLO_WARN_P95_AGE_SECONDS: "604800"
           RUNMAT_PREP_SLO_FAIL_P95_AGE_SECONDS: "1209600"
         run: |
-          python3 scripts/summarize_prep_artifacts.py | tee prep-artifact-slo.md
+          python3 scripts/analysis/prep_calibration/summarize_prep_artifacts.py | tee prep-artifact-slo.md
           cat prep-artifact-slo.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Generate promotion threshold calibration
         if: always()
-        run: python3 scripts/generate_promotion_threshold_calibration.py
+        run: python3 scripts/analysis/governance/generate_promotion_threshold_calibration.py
 
       - name: Validate promotion threshold calibration
         if: always()
@@ -428,15 +428,15 @@ jobs:
           RUNMAT_VALIDATE_PROMOTION_CALIBRATION_REQUIRE_CADENCE: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
           RUNMAT_VALIDATE_PROMOTION_CALIBRATION_MIN_SOURCE_REPORTS: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/')) && '4' || '0' }}
           RUNMAT_PROMOTION_THRESHOLD_CALIBRATION_INPUT: target/runmat-analysis-artifacts/promotion_threshold_calibration.json
-        run: python3 scripts/validate_promotion_threshold_calibration.py
+        run: python3 scripts/analysis/governance/validate_promotion_threshold_calibration.py
 
       - name: Generate external reference benchmark artifact
         if: always()
         env:
           RUNMAT_EXTERNAL_REFERENCE_REPORT_PATH: target/runmat-analysis-artifacts/analysis_benchmark_report.json
-          RUNMAT_EXTERNAL_REFERENCE_BASELINE_PATH: scripts/reference-data/m6_external_reference_baseline.json
+          RUNMAT_EXTERNAL_REFERENCE_BASELINE_PATH: scripts/analysis/reference_data/m6_external_reference_baseline.json
           RUNMAT_EXTERNAL_REFERENCE_BENCHMARK_PATH: target/runmat-analysis-artifacts/external_reference_benchmark.json
-        run: python3 scripts/generate_external_reference_benchmark.py
+        run: python3 scripts/analysis/governance/generate_external_reference_benchmark.py
 
       - name: Validate external reference benchmark artifact
         if: always()
@@ -444,7 +444,7 @@ jobs:
           RUNMAT_EXTERNAL_REFERENCE_BENCHMARK_PATH: target/runmat-analysis-artifacts/external_reference_benchmark.json
           RUNMAT_VALIDATE_EXTERNAL_REFERENCE_ENFORCE: "true"
           RUNMAT_VALIDATE_EXTERNAL_REFERENCE_REQUIRE_PASS: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
-        run: python3 scripts/validate_external_reference_benchmark.py
+        run: python3 scripts/analysis/governance/validate_external_reference_benchmark.py
 
       - name: Evaluate nonlinear release readiness
         if: always()
@@ -463,13 +463,13 @@ jobs:
           RUNMAT_PREP_CALIBRATION_RECOMMENDATIONS_INPUT: target/runmat-analysis-artifacts/prep_calibration_recommendations.json
           RUNMAT_THERMO_FIELD_SIGNING_KEY: ${{ secrets.RUNMAT_THERMO_FIELD_SIGNING_KEY }}
         run: |
-          python3 scripts/release_readiness_nonlinear.py | tee nonlinear-release-readiness.md
+          python3 scripts/analysis/governance/release_readiness_nonlinear.py | tee nonlinear-release-readiness.md
           cat nonlinear-release-readiness.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Generate threshold ratchet report
         if: always()
         run: |
-          python3 scripts/generate_threshold_ratchet_report.py | tee threshold-ratchet.md
+          python3 scripts/analysis/governance/generate_threshold_ratchet_report.py | tee threshold-ratchet.md
           cat threshold-ratchet.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Validate threshold ratchet report
@@ -477,7 +477,7 @@ jobs:
         env:
           RUNMAT_VALIDATE_THRESHOLD_RATCHET_ENFORCE: "true"
           RUNMAT_VALIDATE_THRESHOLD_RATCHET_REQUIRE_OBSERVED: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release/') }}
-        run: python3 scripts/validate_threshold_ratchet_report.py
+        run: python3 scripts/analysis/governance/validate_threshold_ratchet_report.py
 
       - name: Summarize governance artifacts
         if: always()
@@ -1033,7 +1033,7 @@ jobs:
           # Explicitly absent: RUNMAT_GENERATE_WASM_REGISTRY must NOT be set here;
           # the script sets it only for the regeneration cargo check and unsets it
           # before wasm-pack test to prevent an infinite rebuild loop.
-        run: scripts/test-wasm-headless.sh
+        run: scripts/runtime/test-wasm-headless.sh
 
       - name: Build bindings package
         working-directory: bindings/ts

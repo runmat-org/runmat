@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.validate_threshold_ratchet_report import main
+from scripts.analysis.governance.validate_threshold_ratchet_report import main
 
 
 class ValidateThresholdRatchetReportTests(unittest.TestCase):

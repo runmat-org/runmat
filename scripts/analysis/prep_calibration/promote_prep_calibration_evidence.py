@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
-from scripts.evaluate_prep_calibration_drift import (
+if __package__ is None or __package__ == "":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
+from scripts.analysis.prep_calibration.evaluate_prep_calibration_drift import (
     load_evidence,
     validate_evidence,
     validate_recommendation_artifact,
@@ -15,7 +19,7 @@ def main() -> int:
     candidate_path = Path(
         os.getenv(
             "RUNMAT_PREP_CALIBRATION_EVIDENCE_CANDIDATE",
-            "scripts/prep_calibration_evidence.json",
+            "scripts/analysis/prep_calibration/evidence/prep_calibration_evidence.json",
         )
     )
     approved_path = Path(

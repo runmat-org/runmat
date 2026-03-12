@@ -26,18 +26,18 @@ jobs:
           ref: ${{ github.ref_name }}
 
       - name: Validate prep calibration evidence
-        run: python3 scripts/validate_prep_calibration_evidence.py
+        run: python3 scripts/analysis/prep_calibration/validate_prep_calibration_evidence.py
 
       - name: Generate prep calibration recommendations
-        run: python3 scripts/generate_prep_calibration_recommendations.py
+        run: python3 scripts/analysis/prep_calibration/generate_prep_calibration_recommendations.py
 
       - name: Promote approved prep calibration evidence
         env:
-          RUNMAT_PREP_CALIBRATION_EVIDENCE_CANDIDATE: scripts/prep_calibration_evidence.json
+          RUNMAT_PREP_CALIBRATION_EVIDENCE_CANDIDATE: scripts/analysis/prep_calibration/evidence/prep_calibration_evidence.json
           RUNMAT_PREP_CALIBRATION_EVIDENCE_APPROVED: target/runmat-analysis-artifacts/prep_calibration_evidence_approved.json
           RUNMAT_PREP_CALIBRATION_RECOMMENDATIONS_INPUT: target/runmat-analysis-artifacts/prep_calibration_recommendations.json
           RUNMAT_PREP_CALIBRATION_PROMOTION_MAX_RECOMMENDATIONS: "128"
-        run: python3 scripts/promote_prep_calibration_evidence.py
+        run: python3 scripts/analysis/prep_calibration/promote_prep_calibration_evidence.py
 
       - name: Upload governance artifacts
         uses: actions/upload-artifact@v4
@@ -573,7 +573,7 @@ jobs:
         env:
           RUNMAT_CHROME_BIN: ${{ steps.chrome.outputs.chrome-path }}
           WASM_BINDGEN_TEST_TIMEOUT: "300"
-        run: scripts/test-wasm-headless.sh
+        run: scripts/runtime/test-wasm-headless.sh
 
       - name: Build bindings package
         run: npm run build --workspace bindings/ts

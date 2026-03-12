@@ -18,9 +18,9 @@ Initial target slice:
 - One canonical reference artifact path:
   - `target/runmat-analysis-artifacts/external_reference_benchmark.json`
 - One placeholder validator path:
-  - `scripts/validate_external_reference_benchmark.py`
+  - `scripts/analysis/governance/validate_external_reference_benchmark.py`
 - One comparator/generator path:
-  - `scripts/generate_external_reference_benchmark.py`
+  - `scripts/analysis/governance/generate_external_reference_benchmark.py`
 
 ## External Reference Strategy
 

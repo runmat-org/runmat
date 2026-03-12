@@ -1,16 +1,23 @@
 #!/usr/bin/env python3
 import json
 import os
+import sys
 from pathlib import Path
 
-from scripts.evaluate_prep_calibration_drift import load_evidence, validate_evidence
+if __package__ is None or __package__ == "":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
+from scripts.analysis.prep_calibration.evaluate_prep_calibration_drift import (
+    load_evidence,
+    validate_evidence,
+)
 
 
 def main() -> int:
     evidence_path = Path(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_EVIDENCE",
-            "scripts/prep_calibration_evidence.json",
+            "scripts/analysis/prep_calibration/evidence/prep_calibration_evidence.json",
         )
     )
     output_path = Path(

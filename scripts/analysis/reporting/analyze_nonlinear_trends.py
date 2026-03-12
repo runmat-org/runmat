@@ -5,7 +5,10 @@ import statistics
 import sys
 from pathlib import Path
 
-from scripts.evaluate_prep_calibration_drift import (
+if __package__ is None or __package__ == "":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
+from scripts.analysis.prep_calibration.evaluate_prep_calibration_drift import (
     evaluate_report_drift,
     evaluate_rolling_drift,
     load_evidence,
@@ -311,7 +314,7 @@ def main():
     evidence_path = Path(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_EVIDENCE",
-            "scripts/prep_calibration_evidence.json",
+            "scripts/analysis/prep_calibration/evidence/prep_calibration_evidence.json",
         )
     )
     evidence = load_evidence(evidence_path)

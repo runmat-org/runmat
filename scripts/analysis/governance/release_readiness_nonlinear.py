@@ -3,12 +3,16 @@ import json
 import math
 import os
 import statistics
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List
 
-from scripts.evaluate_prep_calibration_drift import (
+if __package__ is None or __package__ == "":
+    sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+
+from scripts.analysis.prep_calibration.evaluate_prep_calibration_drift import (
     load_evidence,
     evaluate_report_drift,
     recommend_profile_shifts,
@@ -2686,7 +2690,7 @@ def main() -> int:
     calibration_evidence_path = Path(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_PREP_CALIBRATION_EVIDENCE",
-            "scripts/prep_calibration_evidence.json",
+            "scripts/analysis/prep_calibration/evidence/prep_calibration_evidence.json",
         )
     )
     recommendation_artifact_path = Path(

@@ -1,11 +1,11 @@
 # Browser Test Harness
 
 We can now exercise the crates that ship inside the `runmat-wasm` bundle directly in
-headless Chrome via `wasm-pack test`. The entry point is `scripts/test-wasm-headless.sh`.
+headless Chrome via `wasm-pack test`. The entry point is `scripts/runtime/test-wasm-headless.sh`.
 
 ```bash
 cd runmat
-scripts/test-wasm-headless.sh
+scripts/runtime/test-wasm-headless.sh
 ```
 
 What the script does:
@@ -13,7 +13,7 @@ What the script does:
 1. Regenerates the wasm builtin registry (`RUNMAT_GENERATE_WASM_REGISTRY=1 cargo check …`).
 2. Runs `wasm-pack test --chrome --headless` for each crate we currently support
    (`runmat-core` by default).
-3. Uses `scripts/chrome-headless.sh` to start Chrome/Chromium with the right WebGPU flags
+3. Uses `scripts/runtime/chrome-headless.sh` to start Chrome/Chromium with the right WebGPU flags
    (`--headless=new --enable-unsafe-webgpu --use-angle=metal|vulkan`).
 
 ## Configuration

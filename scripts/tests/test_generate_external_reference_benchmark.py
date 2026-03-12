@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.generate_external_reference_benchmark import main
+from scripts.analysis.governance.generate_external_reference_benchmark import main
 
 
 class GenerateExternalReferenceBenchmarkTests(unittest.TestCase):

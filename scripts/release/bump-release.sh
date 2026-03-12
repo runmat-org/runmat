@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Usage: scripts/bump-release.sh <new_version> [--yes]
-# Example: scripts/bump-release.sh 0.0.11 --yes
+# Usage: scripts/release/bump-release.sh <new_version> [--yes]
+# Example: scripts/release/bump-release.sh 0.0.11 --yes
 
 ROOT_DIR=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 cd "$ROOT_DIR"
@@ -99,5 +99,4 @@ git push origin main
 git push origin "${TAG}"
 
 echo "Done. GitHub Actions will now publish the release for ${TAG}."
-
 

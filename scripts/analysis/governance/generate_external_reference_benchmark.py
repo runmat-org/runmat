@@ -28,7 +28,7 @@ def main() -> int:
     baseline_path = Path(
         os.getenv(
             "RUNMAT_EXTERNAL_REFERENCE_BASELINE_PATH",
-            "scripts/reference-data/m6_external_reference_baseline.json",
+            "scripts/analysis/reference_data/m6_external_reference_baseline.json",
         )
     )
     output_path = Path(

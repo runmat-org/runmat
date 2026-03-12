@@ -2,7 +2,7 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-CHROME_WRAPPER="${REPO_ROOT}/scripts/chrome-headless.sh"
+CHROME_WRAPPER="${REPO_ROOT}/scripts/runtime/chrome-headless.sh"
 
 export CHROME_BIN="${CHROME_BIN:-${CHROME_WRAPPER}}"
 export CHROMEDRIVER_ARGS="${CHROMEDRIVER_ARGS:---log-level=SEVERE}"
