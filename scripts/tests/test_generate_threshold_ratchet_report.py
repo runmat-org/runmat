@@ -23,6 +23,7 @@ class GenerateThresholdRatchetReportTests(unittest.TestCase):
                         "plastic_reference_trend_ratio": 1.03,
                         "contact_trend_ratio": 1.01,
                         "contact_reference_trend_ratio": 1.04,
+                        "thermal_spread_trend_ratio": 1.02,
                     }
                 )
             )
@@ -43,7 +44,14 @@ class GenerateThresholdRatchetReportTests(unittest.TestCase):
             report = json.loads(out_json.read_text())
             self.assertEqual(report["governance_profile"], "development")
             self.assertEqual(report["rolling_report_count"], 6)
-            self.assertEqual(len(report["entries"]), 4)
+            self.assertEqual(len(report["entries"]), 5)
+            self.assertTrue(
+                any(
+                    entry["threshold_key"]
+                    == "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO"
+                    for entry in report["entries"]
+                )
+            )
             self.assertIn("Threshold Ratchet Report", out_md.read_text())
 
 

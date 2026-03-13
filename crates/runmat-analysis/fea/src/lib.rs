@@ -27,7 +27,7 @@ use crate::{
         preconditioner::SpdPreconditionerKind,
         transient::{solve_transient_system, TransientSolveOptions},
     },
-    thermo::{sample_time_profile_scale, temporal_profile_variation},
+    thermo::sample_time_profile_scale,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -823,23 +823,6 @@ pub fn run_thermal_with_options(
             response_rate,
             conductivity_spread_ratio,
             heat_capacity_spread_ratio,
-        ),
-    });
-    diagnostics.push(FeaDiagnostic {
-        code: "FEA_TM_TRANSIENT".to_string(),
-        severity: if max_residual_norm <= options.residual_target {
-            FeaDiagnosticSeverity::Info
-        } else {
-            FeaDiagnosticSeverity::Warning
-        },
-        message: format!(
-            "severity_peak={} severity_mean={} time_scale_mean={} temporal_variation={} field_extrapolation_ratio={}"
-            ,
-            max_residual_norm,
-            residual_mean,
-            1.0,
-            temporal_profile_variation(&thermo_context),
-            0.0,
         ),
     });
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));

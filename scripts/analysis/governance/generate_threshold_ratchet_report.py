@@ -25,6 +25,11 @@ RATCHET_HISTORY = {
         "development": {"old": 1.2, "new": 1.15},
         "feature": {"old": 1.35, "new": 1.26},
     },
+    "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO": {
+        "release": {"old": 1.1, "new": 1.08},
+        "development": {"old": 1.2, "new": 1.15},
+        "feature": {"old": 1.35, "new": 1.3},
+    },
 }
 
 OBSERVED_FIELDS = {
@@ -32,6 +37,7 @@ OBSERVED_FIELDS = {
     "RUNMAT_RELEASE_READINESS_PLASTIC_REFERENCE_MAX_TREND_RATIO": "plastic_reference_trend_ratio",
     "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO": "contact_trend_ratio",
     "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO": "contact_reference_trend_ratio",
+    "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO": "thermal_spread_trend_ratio",
 }
 
 

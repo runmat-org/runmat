@@ -3340,8 +3340,7 @@ pub fn analysis_trends_op(
                 Some(values.iter().filter(|value| **value).count() as f64 / values.len() as f64)
             }
         };
-        let thermo_transient_warn_rate =
-            if kind == AnalysisRunKind::Transient || kind == AnalysisRunKind::Thermal {
+        let thermo_transient_warn_rate = if kind == AnalysisRunKind::Transient {
             diagnostic_warning_rate(&entries, "FEA_TM_TRANSIENT")
         } else {
             None
