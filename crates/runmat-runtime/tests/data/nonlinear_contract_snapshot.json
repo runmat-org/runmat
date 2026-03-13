@@ -64,11 +64,18 @@
     "electro_transient_severity": null,
     "electro_nonlinear_severity": null,
     "plastic_nonlinear_severity": null,
+    "plastic_load_realization_ratio": null,
+    "plastic_load_amplification_ratio": null,
     "contact_nonlinear_severity": null,
+    "contact_load_realization_ratio": null,
+    "contact_load_amplification_ratio": null,
     "thermal_max_residual_norm": null,
     "thermal_min_temperature_k": null,
     "thermal_max_temperature_k": null,
     "thermal_conductivity_spread_ratio": null,
-    "thermal_heat_capacity_spread_ratio": null
+    "thermal_heat_capacity_spread_ratio": null,
+    "thermal_spatial_gradient_index": null,
+    "thermal_monotonic_response_fraction": null,
+    "thermal_response_realization_ratio": null
   }
 }

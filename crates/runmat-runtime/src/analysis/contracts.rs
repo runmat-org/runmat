@@ -710,12 +710,19 @@ pub struct AnalysisResultsSummary {
     pub electro_transient_severity: Option<f64>,
     pub electro_nonlinear_severity: Option<f64>,
     pub plastic_nonlinear_severity: Option<f64>,
+    pub plastic_load_realization_ratio: Option<f64>,
+    pub plastic_load_amplification_ratio: Option<f64>,
     pub contact_nonlinear_severity: Option<f64>,
+    pub contact_load_realization_ratio: Option<f64>,
+    pub contact_load_amplification_ratio: Option<f64>,
     pub thermal_max_residual_norm: Option<f64>,
     pub thermal_min_temperature_k: Option<f64>,
     pub thermal_max_temperature_k: Option<f64>,
     pub thermal_conductivity_spread_ratio: Option<f64>,
     pub thermal_heat_capacity_spread_ratio: Option<f64>,
+    pub thermal_spatial_gradient_index: Option<f64>,
+    pub thermal_monotonic_response_fraction: Option<f64>,
+    pub thermal_response_realization_ratio: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -21,7 +21,7 @@ RunMat today is strongest in structural mechanics and partially implemented in m
 | Electro-thermal coupling | partial | Not a full EM domain. |
 | Plasticity | partial | Model-owned schema is in place; constitutive context wiring is active, with further fidelity work pending. |
 | Contact | partial | Model-owned schema is in place; interface context wiring is active, with further fidelity work pending. |
-| Full standalone thermal domain | partial | Dedicated thermal step + runtime operation + payload now exist, with thermal constitutive diagnostics and readiness posture thresholds; fidelity/calibration depth still needs expansion. |
+| Full standalone thermal domain | partial | Dedicated thermal step + runtime operation + payload now exist, with constitutive/outcome diagnostics and readiness posture thresholds; high-fidelity calibration depth still needs expansion. |
 | Full EM domain (Maxwell-class) | not implemented | Out of scope for near-term "most engineers" target. |
 
 ## Hard-Cutover Rule
@@ -84,12 +84,12 @@ Not required for this milestone:
    - Keep behavior equivalent while removing proxy framing from diagnostics and APIs.
 
 2. **Strengthen thermo/electro from governance-level coupling to constitutive solve depth**
-   - Expand beyond coupling severity/quality signals toward richer field evolution and constitutive feedback loops.
+   - Continue beyond severity/quality signaling toward richer constitutive field evolution.
    - Keep artifact-backed thermo field path and validation as first-class, not side-path.
 
 3. **Deepen standalone thermal constitutive fidelity**
    - Thermal step kind and operation contract now exist (`analysis.run_thermal`).
-   - Next increment is constitutive depth/calibration quality, not schema plumbing.
+   - Constitutive/outcome acceptance envelopes now exist; next increment is calibration depth and richer thermal constitutive realism.
 
 4. **Codify exit criteria in tests/manifests per domain**
    - Structural: keep parity/perf + publishability gates.
@@ -112,6 +112,27 @@ Not required for this milestone:
 4. **Phase D: Hard-cutover finalization**
    - Remove stale migration wording and any residual legacy references in docs/tests.
    - Keep this doc and `code-reviewed-fea-workflow.md` synchronized as the canonical statement of ownership and capability.
+
+### Slice A/B Completion Status (2026-03-12)
+
+- **Slice A (thermal fidelity hardening + acceptance envelopes): completed baseline scope**
+  - standalone thermal now emits constitutive + outcome diagnostics (`FEA_THERMAL_CONSTITUTIVE`, `FEA_THERMAL_OUTCOME`),
+  - conformance thresholds cover residual/temperature/spread plus outcome metrics (spatial gradient, monotonic response fraction, response realization ratio),
+  - readiness policy includes thermal posture thresholds for these outcome indicators.
+- **Slice B (thermo/electro constitutive outcome assertions): completed baseline scope**
+  - thermo fixture thresholds now include constitutive indicators beyond severity-only checks,
+  - electro fixture thresholds include temporal/time-scale constitutive indicators alongside Joule/spread posture,
+  - thermo/electro acceptance now uses deterministic constitutive assertions in conformance and governance surfaces.
+
+### Slice C Bootstrap Status (2026-03-13)
+
+- **Plastic/contact constitutive outcome assertions: advanced beyond severity-only checks**
+  - nonlinear diagnostics now emit load-path constitutive outcome metrics for plastic/contact (`load_realization_ratio`, `load_amplification_ratio`),
+  - nonlinear conformance fixtures assert deterministic envelopes for these new outcome metrics across stress and reference-backed fixture families,
+  - `analysis.results` summary now exposes these plastic/contact outcome metrics directly for contract consumers,
+  - release-readiness governance now enforces threshold envelopes, breach-rate controls, and rolling-trend checks for these load-path metrics,
+  - branch-profile defaults were calibrated against rolling benchmark artifacts to keep load-path checks stable pre-hardening (lower false-positive risk on feature/development/release profiles),
+  - legacy severity/spread trend checks were recalibrated to fixture-aligned rolling baselines (instead of mixed-fixture global medians) to suppress cross-fixture false positives while preserving drift sensitivity.
 
 ## Closeout Checklist for This Track
 

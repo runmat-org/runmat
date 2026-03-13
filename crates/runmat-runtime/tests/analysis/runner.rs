@@ -1112,12 +1112,19 @@ pub(super) fn run_fixture(
     let mut electro_transient_severity = None;
     let mut electro_nonlinear_severity = None;
     let mut plastic_nonlinear_severity = None;
+    let mut plastic_load_realization_ratio = None;
+    let mut plastic_load_amplification_ratio = None;
     let mut contact_nonlinear_severity = None;
+    let mut contact_load_realization_ratio = None;
+    let mut contact_load_amplification_ratio = None;
     let mut thermal_max_residual_norm = None;
     let mut thermal_min_temperature_k = None;
     let mut thermal_max_temperature_k = None;
     let mut thermal_conductivity_spread_ratio = None;
     let mut thermal_heat_capacity_spread_ratio = None;
+    let mut thermal_spatial_gradient_index = None;
+    let mut thermal_monotonic_response_fraction = None;
+    let mut thermal_response_realization_ratio = None;
     let mut publishable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
@@ -1181,12 +1188,19 @@ pub(super) fn run_fixture(
                     electro_transient_severity,
                     electro_nonlinear_severity,
                     plastic_nonlinear_severity,
+                    plastic_load_realization_ratio,
+                    plastic_load_amplification_ratio,
                     contact_nonlinear_severity,
+                    contact_load_realization_ratio,
+                    contact_load_amplification_ratio,
                     thermal_max_residual_norm,
                     thermal_min_temperature_k,
                     thermal_max_temperature_k,
                     thermal_conductivity_spread_ratio,
                     thermal_heat_capacity_spread_ratio,
+                    thermal_spatial_gradient_index,
+                    thermal_monotonic_response_fraction,
+                    thermal_response_realization_ratio,
                     publishable,
                     parity,
                     threshold_assertions,
@@ -1834,6 +1848,34 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
+                            "thermo_ramp_smooth_constitutive_temperature_factor",
+                            "FEA_TM_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_COUPLING",
+                                "constitutive_temperature_factor",
+                            ),
+                            Some(-0.1),
+                            Some(0.1),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_ramp_smooth_effective_modulus_scale",
+                            "FEA_TM_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_COUPLING",
+                                "effective_modulus_scale",
+                            ),
+                            Some(0.85),
+                            Some(1.2),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
                             "thermo_ramp_smooth_temporal_variation",
                             "FEA_TM_TRANSIENT",
                             diagnostic_metric(
@@ -1889,6 +1931,34 @@ pub(super) fn run_fixture(
                     } else if spec.id == "thermo_shock_oscillatory_gpu_provider"
                         || spec.id == "thermo_shock_oscillatory_field_artifact_gpu_provider"
                     {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_shock_constitutive_temperature_factor",
+                            "FEA_TM_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_COUPLING",
+                                "constitutive_temperature_factor",
+                            ),
+                            Some(-0.2),
+                            Some(0.1),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_shock_effective_modulus_scale",
+                            "FEA_TM_COUPLING",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_COUPLING",
+                                "effective_modulus_scale",
+                            ),
+                            Some(0.8),
+                            Some(1.25),
+                        );
                         push_threshold_assertion(
                             spec.id,
                             &mut threshold_assertions,
@@ -2016,6 +2086,48 @@ pub(super) fn run_fixture(
                             Some(1.0),
                             Some(2.0),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermal_standalone_spatial_gradient_index",
+                            "FEA_THERMAL_OUTCOME",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_THERMAL_OUTCOME",
+                                "spatial_gradient_index",
+                            ),
+                            Some(0.05),
+                            Some(2.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermal_standalone_monotonic_response_fraction",
+                            "FEA_THERMAL_OUTCOME",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_THERMAL_OUTCOME",
+                                "monotonic_response_fraction",
+                            ),
+                            Some(0.8),
+                            Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermal_standalone_response_realization_ratio",
+                            "FEA_THERMAL_OUTCOME",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_THERMAL_OUTCOME",
+                                "thermal_response_realization_ratio",
+                            ),
+                            Some(0.5),
+                            Some(1.6),
+                        );
                     } else if spec.id == "electro_thermal_joule_benign_gpu_provider" {
                         push_threshold_assertion(
                             spec.id,
@@ -2073,6 +2185,20 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.4),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_benign_time_scale_mean",
+                            "FEA_ET_TRANSIENT",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_TRANSIENT",
+                                "time_scale_mean",
+                            ),
+                            Some(0.8),
+                            Some(1.05),
+                        );
                     } else if spec.id == "electro_thermal_joule_pathological_gpu_provider" {
                         push_threshold_assertion(
                             spec.id,
@@ -2129,6 +2255,20 @@ pub(super) fn run_fixture(
                             ),
                             Some(0.2),
                             Some(1.5),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_thermal_pathological_time_scale_mean",
+                            "FEA_ET_TRANSIENT",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_TRANSIENT",
+                                "time_scale_mean",
+                            ),
+                            Some(0.7),
+                            Some(1.3),
                         );
                     }
                     if spec.id == "nonlinear_assembly_gpu_provider" {
@@ -2506,6 +2646,34 @@ pub(super) fn run_fixture(
                             Some(0.6),
                             Some(1.0),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "plasticity_nonlinear_load_realization_ratio",
+                            "FEA_PLASTIC_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_PLASTIC_NONLINEAR",
+                                "load_realization_ratio",
+                            ),
+                            Some(0.82),
+                            Some(0.84),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "plasticity_nonlinear_load_amplification_ratio",
+                            "FEA_PLASTIC_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_PLASTIC_NONLINEAR",
+                                "load_amplification_ratio",
+                            ),
+                            Some(1.50),
+                            Some(1.53),
+                        );
                     }
                     if spec.id == "nonlinear_plastic_hardening_reference_gpu_provider" {
                         push_threshold_assertion(
@@ -2535,6 +2703,34 @@ pub(super) fn run_fixture(
                             ),
                             Some(0.12),
                             Some(0.3),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "plasticity_hardening_reference_load_realization_ratio",
+                            "FEA_PLASTIC_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_PLASTIC_NONLINEAR",
+                                "load_realization_ratio",
+                            ),
+                            Some(0.82),
+                            Some(0.84),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "plasticity_hardening_reference_load_amplification_ratio",
+                            "FEA_PLASTIC_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_PLASTIC_NONLINEAR",
+                                "load_amplification_ratio",
+                            ),
+                            Some(1.50),
+                            Some(1.53),
                         );
                     }
                     if spec.id == "nonlinear_plastic_hardening_reference_complex_gpu_provider" {
@@ -2566,6 +2762,34 @@ pub(super) fn run_fixture(
                             Some(0.2),
                             Some(0.4),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "plasticity_hardening_reference_complex_load_realization_ratio",
+                            "FEA_PLASTIC_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_PLASTIC_NONLINEAR",
+                                "load_realization_ratio",
+                            ),
+                            Some(0.82),
+                            Some(0.84),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "plasticity_hardening_reference_complex_load_amplification_ratio",
+                            "FEA_PLASTIC_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_PLASTIC_NONLINEAR",
+                                "load_amplification_ratio",
+                            ),
+                            Some(1.50),
+                            Some(1.53),
+                        );
                     }
                     if spec.id == "nonlinear_contact_proxy_gpu_provider" {
                         push_threshold_assertion(
@@ -2595,6 +2819,34 @@ pub(super) fn run_fixture(
                             ),
                             Some(0.6),
                             Some(1.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "contact_nonlinear_load_realization_ratio",
+                            "FEA_CONTACT_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_CONTACT_NONLINEAR",
+                                "load_realization_ratio",
+                            ),
+                            Some(0.84),
+                            Some(0.87),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "contact_nonlinear_load_amplification_ratio",
+                            "FEA_CONTACT_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_CONTACT_NONLINEAR",
+                                "load_amplification_ratio",
+                            ),
+                            Some(1.39),
+                            Some(1.43),
                         );
                     }
                     if spec.id == "nonlinear_contact_frictionless_reference_gpu_provider" {
@@ -2626,6 +2878,34 @@ pub(super) fn run_fixture(
                             Some(0.15),
                             Some(0.35),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "contact_frictionless_load_realization_ratio",
+                            "FEA_CONTACT_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_CONTACT_NONLINEAR",
+                                "load_realization_ratio",
+                            ),
+                            Some(0.84),
+                            Some(0.87),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "contact_frictionless_load_amplification_ratio",
+                            "FEA_CONTACT_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_CONTACT_NONLINEAR",
+                                "load_amplification_ratio",
+                            ),
+                            Some(1.39),
+                            Some(1.43),
+                        );
                     }
                     if spec.id == "nonlinear_contact_frictionless_reference_complex_gpu_provider" {
                         push_threshold_assertion(
@@ -2655,6 +2935,34 @@ pub(super) fn run_fixture(
                             ),
                             Some(0.25),
                             Some(0.45),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "contact_frictionless_complex_load_realization_ratio",
+                            "FEA_CONTACT_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_CONTACT_NONLINEAR",
+                                "load_realization_ratio",
+                            ),
+                            Some(0.84),
+                            Some(0.87),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "contact_frictionless_complex_load_amplification_ratio",
+                            "FEA_CONTACT_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_CONTACT_NONLINEAR",
+                                "load_amplification_ratio",
+                            ),
+                            Some(1.39),
+                            Some(1.43),
                         );
                     }
 
@@ -2726,12 +3034,19 @@ pub(super) fn run_fixture(
                                 electro_transient_severity,
                                 electro_nonlinear_severity,
                                 plastic_nonlinear_severity,
+                                plastic_load_realization_ratio,
+                                plastic_load_amplification_ratio,
                                 contact_nonlinear_severity,
+                                contact_load_realization_ratio,
+                                contact_load_amplification_ratio,
                                 thermal_max_residual_norm,
                                 thermal_min_temperature_k,
                                 thermal_max_temperature_k,
                                 thermal_conductivity_spread_ratio,
                                 thermal_heat_capacity_spread_ratio,
+                                thermal_spatial_gradient_index,
+                                thermal_monotonic_response_fraction,
+                                thermal_response_realization_ratio,
                                 publishable,
                                 parity,
                                 threshold_assertions,
@@ -2793,8 +3108,16 @@ pub(super) fn run_fixture(
                         gpu_results.data.summary.electro_nonlinear_severity;
                     plastic_nonlinear_severity =
                         gpu_results.data.summary.plastic_nonlinear_severity;
+                    plastic_load_realization_ratio =
+                        gpu_results.data.summary.plastic_load_realization_ratio;
+                    plastic_load_amplification_ratio =
+                        gpu_results.data.summary.plastic_load_amplification_ratio;
                     contact_nonlinear_severity =
                         gpu_results.data.summary.contact_nonlinear_severity;
+                    contact_load_realization_ratio =
+                        gpu_results.data.summary.contact_load_realization_ratio;
+                    contact_load_amplification_ratio =
+                        gpu_results.data.summary.contact_load_amplification_ratio;
                     thermal_max_residual_norm = gpu_results.data.summary.thermal_max_residual_norm;
                     thermal_min_temperature_k = gpu_results.data.summary.thermal_min_temperature_k;
                     thermal_max_temperature_k = gpu_results.data.summary.thermal_max_temperature_k;
@@ -2802,6 +3125,12 @@ pub(super) fn run_fixture(
                         gpu_results.data.summary.thermal_conductivity_spread_ratio;
                     thermal_heat_capacity_spread_ratio =
                         gpu_results.data.summary.thermal_heat_capacity_spread_ratio;
+                    thermal_spatial_gradient_index =
+                        gpu_results.data.summary.thermal_spatial_gradient_index;
+                    thermal_monotonic_response_fraction =
+                        gpu_results.data.summary.thermal_monotonic_response_fraction;
+                    thermal_response_realization_ratio =
+                        gpu_results.data.summary.thermal_response_realization_ratio;
 
                     if let Some(root) = filesystem_root {
                         runmat_runtime::analysis::storage::configure_artifact_store(
@@ -2962,12 +3291,19 @@ pub(super) fn run_fixture(
                                     electro_transient_severity,
                                     electro_nonlinear_severity,
                                     plastic_nonlinear_severity,
+                                    plastic_load_realization_ratio,
+                                    plastic_load_amplification_ratio,
                                     contact_nonlinear_severity,
+                                    contact_load_realization_ratio,
+                                    contact_load_amplification_ratio,
                                     thermal_max_residual_norm,
                                     thermal_min_temperature_k,
                                     thermal_max_temperature_k,
                                     thermal_conductivity_spread_ratio,
                                     thermal_heat_capacity_spread_ratio,
+                                    thermal_spatial_gradient_index,
+                                    thermal_monotonic_response_fraction,
+                                    thermal_response_realization_ratio,
                                     publishable,
                                     parity,
                                     threshold_assertions,
@@ -3080,12 +3416,19 @@ pub(super) fn run_fixture(
         electro_transient_severity,
         electro_nonlinear_severity,
         plastic_nonlinear_severity,
+        plastic_load_realization_ratio,
+        plastic_load_amplification_ratio,
         contact_nonlinear_severity,
+        contact_load_realization_ratio,
+        contact_load_amplification_ratio,
         thermal_max_residual_norm,
         thermal_min_temperature_k,
         thermal_max_temperature_k,
         thermal_conductivity_spread_ratio,
         thermal_heat_capacity_spread_ratio,
+        thermal_spatial_gradient_index,
+        thermal_monotonic_response_fraction,
+        thermal_response_realization_ratio,
         publishable,
         parity,
         threshold_assertions,

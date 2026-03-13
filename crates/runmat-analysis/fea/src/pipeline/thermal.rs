@@ -60,11 +60,14 @@ pub fn run_thermal_with_options(
     let constitutive = constitutive_stats(model);
 
     let mut time_points_s = Vec::with_capacity(step_count);
-    let mut temperature_snapshots = Vec::with_capacity(step_count);
+    let mut temperature_snapshots_raw = Vec::with_capacity(step_count);
     let mut residual_norms = Vec::with_capacity(step_count.saturating_sub(1));
-    let mut previous_temperatures: Option<Vec<f64>> = None;
+    let mut previous_temperatures = vec![thermo_context.reference_temperature_k; node_count];
     let mut min_temperature_k = f64::INFINITY;
     let mut max_temperature_k = f64::NEG_INFINITY;
+    let dt = options.time_step_s.max(1.0e-9);
+    let relax_gain = (constitutive.response_rate * dt * 10.0).clamp(0.05, 0.7);
+    let diffusion_gain = (constitutive.diffusivity_proxy * dt * 2.0e6).clamp(0.0, 0.2);
 
     for step in 0..step_count {
         let normalized_time = if step_count <= 1 {
@@ -81,35 +84,100 @@ pub fn run_thermal_with_options(
             * profile.scale
             * transient_response_scale.max(0.05);
 
-        let mut temperatures = Vec::with_capacity(node_count);
+        let mut target_temperatures = Vec::with_capacity(node_count);
         for i in 0..node_count {
             let spatial_factor = if node_count <= 1 {
                 1.0
             } else {
                 0.9 + 0.2 * (i as f64 / (node_count - 1) as f64)
             };
-            let temp = thermo_context.reference_temperature_k + effective_delta * spatial_factor;
-            min_temperature_k = min_temperature_k.min(temp);
-            max_temperature_k = max_temperature_k.max(temp);
-            temperatures.push(temp);
+            target_temperatures
+                .push(thermo_context.reference_temperature_k + effective_delta * spatial_factor);
         }
 
-        if let Some(previous) = previous_temperatures.as_ref() {
-            let mut sum = 0.0;
-            for (lhs, rhs) in temperatures.iter().zip(previous.iter()) {
-                sum += (lhs - rhs).abs();
-            }
-            residual_norms.push(sum / node_count as f64);
+        let mut temperatures = Vec::with_capacity(node_count);
+        let mut residual_sum = 0.0;
+        for i in 0..node_count {
+            let prev = previous_temperatures[i];
+            let left = if i == 0 {
+                prev
+            } else {
+                previous_temperatures[i - 1]
+            };
+            let right = if i + 1 >= node_count {
+                prev
+            } else {
+                previous_temperatures[i + 1]
+            };
+            let laplacian = left + right - 2.0 * prev;
+            let candidate =
+                prev + relax_gain * (target_temperatures[i] - prev) + diffusion_gain * laplacian;
+            residual_sum += (candidate - prev).abs();
+            min_temperature_k = min_temperature_k.min(candidate);
+            max_temperature_k = max_temperature_k.max(candidate);
+            temperatures.push(candidate);
         }
-        previous_temperatures = Some(temperatures.clone());
+        if step > 0 {
+            residual_norms.push(residual_sum / node_count as f64);
+        }
+        previous_temperatures = temperatures.clone();
 
         time_points_s.push(step as f64 * options.time_step_s.max(1.0e-9));
-        temperature_snapshots.push(AnalysisField::host_f64(
-            format!("temperature_t{step}"),
-            vec![node_count],
-            temperatures,
-        ));
+        temperature_snapshots_raw.push(temperatures);
     }
+
+    let temperature_snapshots = temperature_snapshots_raw
+        .iter()
+        .enumerate()
+        .map(|(step, temperatures)| {
+            AnalysisField::host_f64(
+                format!("temperature_t{step}"),
+                vec![node_count],
+                temperatures.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let final_snapshot = temperature_snapshots_raw
+        .last()
+        .cloned()
+        .unwrap_or_else(|| vec![thermo_context.reference_temperature_k; node_count]);
+    let initial_snapshot = temperature_snapshots_raw
+        .first()
+        .cloned()
+        .unwrap_or_else(|| vec![thermo_context.reference_temperature_k; node_count]);
+    let final_mean_temperature_k =
+        final_snapshot.iter().sum::<f64>() / final_snapshot.len().max(1) as f64;
+    let final_mean_delta_k = final_mean_temperature_k - thermo_context.reference_temperature_k;
+    let peak_delta_k = max_temperature_k - thermo_context.reference_temperature_k;
+    let spatial_gradient_index = if final_mean_delta_k.abs() <= 1.0e-9 {
+        0.0
+    } else {
+        ((max_temperature_k - min_temperature_k).abs() / final_mean_delta_k.abs()).clamp(0.0, 5.0)
+    };
+    let expected_final_delta = {
+        let end_profile = thermo_mechanical::sample_time_profile(Some(&thermo_context), 1.0).scale;
+        (0.65 * thermo_context.applied_temperature_delta_k + 0.35 * region_avg_delta)
+            * end_profile
+            * (1.0 - (-constitutive.response_rate).exp()).max(0.05)
+    };
+    let thermal_response_realization_ratio = if expected_final_delta.abs() <= 1.0e-9 {
+        1.0
+    } else {
+        (final_mean_delta_k / expected_final_delta).clamp(-3.0, 3.0)
+    };
+    let monotonic_response_fraction = {
+        let mut monotonic = 0usize;
+        let heating = expected_final_delta >= 0.0;
+        for (initial, final_value) in initial_snapshot.iter().zip(final_snapshot.iter()) {
+            if (heating && *final_value >= *initial - 1.0e-9)
+                || (!heating && *final_value <= *initial + 1.0e-9)
+            {
+                monotonic = monotonic.saturating_add(1);
+            }
+        }
+        monotonic as f64 / node_count.max(1) as f64
+    };
 
     let max_residual_norm = residual_norms.iter().copied().fold(0.0_f64, f64::max);
     let residual_mean = if residual_norms.is_empty() {
@@ -153,6 +221,26 @@ pub fn run_thermal_with_options(
             constitutive.response_rate,
             constitutive.conductivity_spread_ratio,
             constitutive.heat_capacity_spread_ratio,
+        ),
+    });
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_THERMAL_OUTCOME".to_string(),
+        severity: if monotonic_response_fraction >= 0.75
+            && thermal_response_realization_ratio >= 0.5
+            && thermal_response_realization_ratio <= 1.6
+        {
+            FeaDiagnosticSeverity::Info
+        } else {
+            FeaDiagnosticSeverity::Warning
+        },
+        message: format!(
+            "final_mean_temperature_k={} final_mean_delta_k={} peak_delta_k={} spatial_gradient_index={} monotonic_response_fraction={} thermal_response_realization_ratio={}",
+            final_mean_temperature_k,
+            final_mean_delta_k,
+            peak_delta_k,
+            spatial_gradient_index,
+            monotonic_response_fraction,
+            thermal_response_realization_ratio,
         ),
     });
     diagnostics.extend(material_assignment_diagnostics(&model.material_assignments));

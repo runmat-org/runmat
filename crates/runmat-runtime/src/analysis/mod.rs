@@ -2714,6 +2714,16 @@ pub fn analysis_results_op(
             "severity",
         )
     });
+    let plastic_load_realization_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_PLASTIC_NONLINEAR",
+        "load_realization_ratio",
+    );
+    let plastic_load_amplification_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_PLASTIC_NONLINEAR",
+        "load_amplification_ratio",
+    );
     let contact_nonlinear_severity = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_CONTACT_NONLINEAR",
@@ -2726,6 +2736,16 @@ pub fn analysis_results_op(
             "severity",
         )
     });
+    let contact_load_realization_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_CONTACT_NONLINEAR",
+        "load_realization_ratio",
+    );
+    let contact_load_amplification_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_CONTACT_NONLINEAR",
+        "load_amplification_ratio",
+    );
     let thermal_max_residual_norm =
         diagnostic_metric(&run_result.run.diagnostics, "FEA_THERMAL_STABILITY", "max_residual_norm");
     let thermal_min_temperature_k =
@@ -2741,6 +2761,21 @@ pub fn analysis_results_op(
         &run_result.run.diagnostics,
         "FEA_THERMAL_CONSTITUTIVE",
         "heat_capacity_spread_ratio",
+    );
+    let thermal_spatial_gradient_index = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_THERMAL_OUTCOME",
+        "spatial_gradient_index",
+    );
+    let thermal_monotonic_response_fraction = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_THERMAL_OUTCOME",
+        "monotonic_response_fraction",
+    );
+    let thermal_response_realization_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_THERMAL_OUTCOME",
+        "thermal_response_realization_ratio",
     );
 
     let summary = AnalysisResultsSummary {
@@ -2792,12 +2827,19 @@ pub fn analysis_results_op(
         electro_transient_severity,
         electro_nonlinear_severity,
         plastic_nonlinear_severity,
+        plastic_load_realization_ratio,
+        plastic_load_amplification_ratio,
         contact_nonlinear_severity,
+        contact_load_realization_ratio,
+        contact_load_amplification_ratio,
         thermal_max_residual_norm,
         thermal_min_temperature_k,
         thermal_max_temperature_k,
         thermal_conductivity_spread_ratio,
         thermal_heat_capacity_spread_ratio,
+        thermal_spatial_gradient_index,
+        thermal_monotonic_response_fraction,
+        thermal_response_realization_ratio,
     };
 
     let modal_results = if query.include_modal_results {

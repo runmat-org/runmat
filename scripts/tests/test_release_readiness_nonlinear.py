@@ -31,12 +31,19 @@ def report(
     electro_joule_heating_scale=None,
     electro_conductivity_spread_ratio=None,
     plastic_nonlinear_severity=None,
+    plastic_load_realization_ratio=None,
+    plastic_load_amplification_ratio=None,
     contact_nonlinear_severity=None,
+    contact_load_realization_ratio=None,
+    contact_load_amplification_ratio=None,
     thermal_max_residual_norm=None,
     thermal_min_temperature_k=None,
     thermal_max_temperature_k=None,
     thermal_conductivity_spread_ratio=None,
     thermal_heat_capacity_spread_ratio=None,
+    thermal_spatial_gradient_index=None,
+    thermal_monotonic_response_fraction=None,
+    thermal_response_realization_ratio=None,
 ):
     fixtures = [
         "nonlinear_assembly_gpu_provider",
@@ -117,9 +124,21 @@ def report(
     if plastic_nonlinear_severity is not None:
         for rec in records:
             rec["plastic_nonlinear_severity"] = plastic_nonlinear_severity
+    if plastic_load_realization_ratio is not None:
+        for rec in records:
+            rec["plastic_load_realization_ratio"] = plastic_load_realization_ratio
+    if plastic_load_amplification_ratio is not None:
+        for rec in records:
+            rec["plastic_load_amplification_ratio"] = plastic_load_amplification_ratio
     if contact_nonlinear_severity is not None:
         for rec in records:
             rec["contact_nonlinear_severity"] = contact_nonlinear_severity
+    if contact_load_realization_ratio is not None:
+        for rec in records:
+            rec["contact_load_realization_ratio"] = contact_load_realization_ratio
+    if contact_load_amplification_ratio is not None:
+        for rec in records:
+            rec["contact_load_amplification_ratio"] = contact_load_amplification_ratio
     if thermal_max_residual_norm is not None:
         for rec in records:
             rec["thermal_max_residual_norm"] = thermal_max_residual_norm
@@ -135,6 +154,17 @@ def report(
     if thermal_heat_capacity_spread_ratio is not None:
         for rec in records:
             rec["thermal_heat_capacity_spread_ratio"] = thermal_heat_capacity_spread_ratio
+    if thermal_spatial_gradient_index is not None:
+        for rec in records:
+            rec["thermal_spatial_gradient_index"] = thermal_spatial_gradient_index
+    if thermal_monotonic_response_fraction is not None:
+        for rec in records:
+            rec["thermal_monotonic_response_fraction"] = (
+                thermal_monotonic_response_fraction
+            )
+    if thermal_response_realization_ratio is not None:
+        for rec in records:
+            rec["thermal_response_realization_ratio"] = thermal_response_realization_ratio
 
     return {
         "passed": passed,
@@ -182,6 +212,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_TEMPERATURE_K",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_CONDUCTIVITY_SPREAD_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_HEAT_CAPACITY_SPREAD_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPATIAL_GRADIENT_INDEX",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_MONOTONIC_RESPONSE_FRACTION",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_RESPONSE_REALIZATION_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESPONSE_REALIZATION_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMAL_REQUIRE_METRICS",
@@ -196,15 +230,31 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_AMPLIFICATION_RATIO",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_BREACH_RATE",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REFERENCE_MAX_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MIN_SAMPLES",
             "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MAX_BLOCKERS",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MIN_LOAD_REALIZATION_RATIO",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_RATIO",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MIN_LOAD_AMPLIFICATION_RATIO",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_RATIO",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_BREACH_RATE",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_BREACH_RATE",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_DROP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS",
             "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_CONTACT_PROMOTION_MIN_SAMPLES",
@@ -686,6 +736,47 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMAL_CONDUCTIVITY_SPREAD_RATIO_HIGH", codes)
 
+    def test_thermal_outcome_reasons_are_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermal_max_residual_norm=1.0,
+            thermal_min_temperature_k=300.0,
+            thermal_max_temperature_k=350.0,
+            thermal_conductivity_spread_ratio=1.2,
+            thermal_heat_capacity_spread_ratio=1.1,
+            thermal_spatial_gradient_index=2.2,
+            thermal_monotonic_response_fraction=0.5,
+            thermal_response_realization_ratio=0.2,
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPATIAL_GRADIENT_INDEX"] = "1.5"
+        os.environ["RUNMAT_RELEASE_READINESS_THERMAL_MIN_MONOTONIC_RESPONSE_FRACTION"] = "0.8"
+        os.environ["RUNMAT_RELEASE_READINESS_THERMAL_MIN_RESPONSE_REALIZATION_RATIO"] = "0.5"
+        result = evaluate_release_readiness(
+            latest,
+            [
+                report(
+                    passed=True,
+                    publishable=True,
+                    gpu_ms=95.0,
+                    thermal_max_residual_norm=1.0,
+                    thermal_min_temperature_k=300.0,
+                    thermal_max_temperature_k=350.0,
+                    thermal_conductivity_spread_ratio=1.2,
+                    thermal_heat_capacity_spread_ratio=1.1,
+                    thermal_spatial_gradient_index=1.0,
+                    thermal_monotonic_response_fraction=0.95,
+                    thermal_response_realization_ratio=1.0,
+                )
+            ],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMAL_SPATIAL_GRADIENT_HIGH", codes)
+        self.assertIn("THERMAL_MONOTONIC_RESPONSE_LOW", codes)
+        self.assertIn("THERMAL_RESPONSE_REALIZATION_RATIO_LOW", codes)
+
     def test_electro_transient_severity_high_reason_is_emitted(self):
         latest = report(
             passed=True,
@@ -910,6 +1001,94 @@ class ReleaseReadinessTests(unittest.TestCase):
         result = evaluate_release_readiness(latest, rolling, protected=False)
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("PLASTIC_REFERENCE_TREND_WORSENING", codes)
+
+    def test_plastic_load_path_ratio_out_of_range_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            plastic_nonlinear_severity=0.4,
+            plastic_load_realization_ratio=0.55,
+            plastic_load_amplification_ratio=1.5,
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO"] = "0.7"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PLASTIC_LOAD_REALIZATION_RATIO_OUT_OF_RANGE", codes)
+
+    def test_contact_load_path_ratio_out_of_range_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            contact_nonlinear_severity=0.4,
+            contact_load_realization_ratio=0.86,
+            contact_load_amplification_ratio=2.2,
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_RATIO"] = "1.7"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("CONTACT_LOAD_AMPLIFICATION_RATIO_OUT_OF_RANGE", codes)
+
+    def test_plastic_load_amplification_trend_worsening_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            plastic_nonlinear_severity=0.35,
+            plastic_load_realization_ratio=0.83,
+            plastic_load_amplification_ratio=1.8,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                plastic_nonlinear_severity=0.3,
+                plastic_load_realization_ratio=0.83,
+                plastic_load_amplification_ratio=1.3,
+            )
+        ]
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_TREND_RATIO"
+        ] = "1.2"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("PLASTIC_LOAD_AMPLIFICATION_TREND_WORSENING", codes)
+
+    def test_contact_load_realization_drop_trend_worsening_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            contact_nonlinear_severity=0.35,
+            contact_load_realization_ratio=0.7,
+            contact_load_amplification_ratio=1.4,
+        )
+        rolling = [
+            report(
+                passed=True,
+                publishable=True,
+                gpu_ms=95.0,
+                contact_nonlinear_severity=0.3,
+                contact_load_realization_ratio=0.9,
+                contact_load_amplification_ratio=1.4,
+            )
+        ]
+        os.environ[
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_DROP_TREND_RATIO"
+        ] = "1.2"
+        result = evaluate_release_readiness(latest, rolling, protected=False)
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("CONTACT_LOAD_REALIZATION_DROP_TREND_WORSENING", codes)
 
     def test_contact_nonlinear_severity_high_reason_is_emitted(self):
         latest = report(
@@ -1558,6 +1737,8 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("### Thermal Posture", summary)
         self.assertIn("Max thermal residual norm", summary)
         self.assertIn("Max thermal conductivity spread ratio", summary)
+        self.assertIn("Max thermal spatial gradient index", summary)
+        self.assertIn("Min thermal monotonic response fraction", summary)
         self.assertIn("Thermal spread trend ratio", summary)
         self.assertIn("### Promotion Evidence Quality", summary)
         self.assertIn("Promotion calibration applied/required", summary)

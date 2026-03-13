@@ -78,6 +78,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_TEMPERATURE_K": "375.0",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_CONDUCTIVITY_SPREAD_RATIO": "1.6",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_HEAT_CAPACITY_SPREAD_RATIO": "1.6",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPATIAL_GRADIENT_INDEX": "1.5",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_MONOTONIC_RESPONSE_FRACTION": "0.8",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_RESPONSE_REALIZATION_RATIO": "0.5",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESPONSE_REALIZATION_RATIO": "1.6",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_BREACH_RATE": "0.05",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO": "1.08",
             "RUNMAT_RELEASE_READINESS_THERMAL_REQUIRE_METRICS": "true",
@@ -92,13 +96,29 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.65",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO": "0.72",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO": "0.98",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_AMPLIFICATION_RATIO": "1.3",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_RATIO": "1.8",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE": "0.1",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_BREACH_RATE": "0.1",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_BREACH_RATE": "0.1",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS": "true",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REFERENCE_MAX_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY": "0.65",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MIN_LOAD_REALIZATION_RATIO": "0.75",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_RATIO": "0.98",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MIN_LOAD_AMPLIFICATION_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_RATIO": "1.7",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_BREACH_RATE": "0.1",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_BREACH_RATE": "0.1",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_BREACH_RATE": "0.1",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_DROP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS": "true",
             "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MIN_SAMPLES": "2",
@@ -136,6 +156,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_TEMPERATURE_K": "390.0",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_CONDUCTIVITY_SPREAD_RATIO": "1.8",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_HEAT_CAPACITY_SPREAD_RATIO": "1.8",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPATIAL_GRADIENT_INDEX": "1.8",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_MONOTONIC_RESPONSE_FRACTION": "0.7",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_RESPONSE_REALIZATION_RATIO": "0.4",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESPONSE_REALIZATION_RATIO": "1.8",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_BREACH_RATE": "0.15",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO": "1.15",
             "RUNMAT_RELEASE_READINESS_THERMAL_REQUIRE_METRICS": "false",
@@ -150,13 +174,29 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.75",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO": "0.68",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO": "1.02",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_AMPLIFICATION_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_RATIO": "1.9",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE": "0.25",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_BREACH_RATE": "0.25",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_BREACH_RATE": "0.25",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO": "1.16",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_DROP_TREND_RATIO": "1.25",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_TREND_RATIO": "1.25",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REFERENCE_MAX_TREND_RATIO": "1.15",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY": "0.75",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MIN_LOAD_REALIZATION_RATIO": "0.7",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_RATIO": "1.02",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MIN_LOAD_AMPLIFICATION_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_RATIO": "1.8",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_BREACH_RATE": "0.25",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_BREACH_RATE": "0.25",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_BREACH_RATE": "0.25",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO": "1.16",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_DROP_TREND_RATIO": "1.25",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_TREND_RATIO": "1.25",
             "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO": "1.15",
             "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MIN_SAMPLES": "2",
@@ -194,6 +234,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_TEMPERATURE_K": "420.0",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_CONDUCTIVITY_SPREAD_RATIO": "2.2",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_HEAT_CAPACITY_SPREAD_RATIO": "2.2",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPATIAL_GRADIENT_INDEX": "2.5",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_MONOTONIC_RESPONSE_FRACTION": "0.6",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_RESPONSE_REALIZATION_RATIO": "0.3",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESPONSE_REALIZATION_RATIO": "2.2",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_BREACH_RATE": "0.4",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO": "1.3",
             "RUNMAT_RELEASE_READINESS_THERMAL_REQUIRE_METRICS": "false",
@@ -208,13 +252,29 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.9",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO": "0.6",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_AMPLIFICATION_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_RATIO": "2.1",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE": "0.5",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_BREACH_RATE": "0.5",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_BREACH_RATE": "0.5",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO": "1.28",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_PLASTIC_REFERENCE_MAX_TREND_RATIO": "1.26",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_NONLINEAR_SEVERITY": "0.9",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MIN_LOAD_REALIZATION_RATIO": "0.6",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MIN_LOAD_AMPLIFICATION_RATIO": "1.0",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_RATIO": "2.0",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_BREACH_RATE": "0.5",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_BREACH_RATE": "0.5",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_BREACH_RATE": "0.5",
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO": "1.28",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_DROP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_CONTACT_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_CONTACT_REFERENCE_MAX_TREND_RATIO": "1.26",
             "RUNMAT_RELEASE_READINESS_PLASTIC_PROMOTION_MIN_SAMPLES": "2",
@@ -862,6 +922,38 @@ def evaluate_release_readiness(
             ),
         )
     )
+    thermal_max_spatial_gradient_index_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPATIAL_GRADIENT_INDEX",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPATIAL_GRADIENT_INDEX", "2.5"
+            ),
+        )
+    )
+    thermal_min_monotonic_response_fraction_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_MONOTONIC_RESPONSE_FRACTION",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMAL_MIN_MONOTONIC_RESPONSE_FRACTION", "0.6"
+            ),
+        )
+    )
+    thermal_min_response_realization_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_RESPONSE_REALIZATION_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMAL_MIN_RESPONSE_REALIZATION_RATIO", "0.3"
+            ),
+        )
+    )
+    thermal_max_response_realization_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESPONSE_REALIZATION_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESPONSE_REALIZATION_RATIO", "2.2"
+            ),
+        )
+    )
     thermal_max_spread_breach_rate_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_BREACH_RATE",
@@ -954,10 +1046,70 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_PLASTIC_MAX_BREACH_RATE", "0.25"),
         )
     )
+    plastic_min_load_realization_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO", "0.7"),
+        )
+    )
+    plastic_max_load_realization_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO", "1.0"),
+        )
+    )
+    plastic_min_load_amplification_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_AMPLIFICATION_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_AMPLIFICATION_RATIO", "1.2"
+            ),
+        )
+    )
+    plastic_max_load_amplification_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_RATIO", "1.9"
+            ),
+        )
+    )
+    plastic_max_load_realization_breach_rate_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_BREACH_RATE",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_BREACH_RATE", "0.25"
+            ),
+        )
+    )
+    plastic_max_load_amplification_breach_rate_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_BREACH_RATE",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_BREACH_RATE", "0.25"
+            ),
+        )
+    )
     plastic_max_trend_ratio_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO",
             profile_default("RUNMAT_RELEASE_READINESS_PLASTIC_MAX_TREND_RATIO", "1.2"),
+        )
+    )
+    plastic_max_load_realization_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_DROP_TREND_RATIO", "1.2"
+            ),
+        )
+    )
+    plastic_max_load_amplification_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_AMPLIFICATION_TREND_RATIO", "1.2"
+            ),
         )
     )
     plastic_require_metrics = is_true(
@@ -986,10 +1138,70 @@ def evaluate_release_readiness(
             profile_default("RUNMAT_RELEASE_READINESS_CONTACT_MAX_BREACH_RATE", "0.25"),
         )
     )
+    contact_min_load_realization_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CONTACT_MIN_LOAD_REALIZATION_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_CONTACT_MIN_LOAD_REALIZATION_RATIO", "0.72"),
+        )
+    )
+    contact_max_load_realization_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_RATIO", "1.0"),
+        )
+    )
+    contact_min_load_amplification_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CONTACT_MIN_LOAD_AMPLIFICATION_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CONTACT_MIN_LOAD_AMPLIFICATION_RATIO", "1.1"
+            ),
+        )
+    )
+    contact_max_load_amplification_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_RATIO", "1.8"
+            ),
+        )
+    )
+    contact_max_load_realization_breach_rate_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_BREACH_RATE",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_BREACH_RATE", "0.25"
+            ),
+        )
+    )
+    contact_max_load_amplification_breach_rate_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_BREACH_RATE",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_BREACH_RATE", "0.25"
+            ),
+        )
+    )
     contact_max_trend_ratio_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO",
             profile_default("RUNMAT_RELEASE_READINESS_CONTACT_MAX_TREND_RATIO", "1.2"),
+        )
+    )
+    contact_max_load_realization_drop_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_DROP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_REALIZATION_DROP_TREND_RATIO", "1.2"
+            ),
+        )
+    )
+    contact_max_load_amplification_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_CONTACT_MAX_LOAD_AMPLIFICATION_TREND_RATIO", "1.2"
+            ),
         )
     )
     contact_require_metrics = is_true(
@@ -1149,6 +1361,10 @@ def evaluate_release_readiness(
     thermal_max_temperature_k = None
     thermal_max_conductivity_spread_ratio = None
     thermal_max_heat_capacity_spread_ratio = None
+    thermal_max_spatial_gradient_index = None
+    thermal_min_monotonic_response_fraction = None
+    thermal_min_response_realization_ratio = None
+    thermal_max_response_realization_ratio = None
     thermal_spread_breach_rate = None
     thermal_spread_trend_ratio = None
     electro_coupling_enabled_rate = None
@@ -1161,8 +1377,16 @@ def evaluate_release_readiness(
     electro_joule_trend_ratio = None
     electro_spread_trend_ratio = None
     plastic_max_nonlinear_severity = None
+    plastic_load_realization_ratio_min = None
+    plastic_load_realization_ratio_max = None
+    plastic_load_amplification_ratio_min = None
+    plastic_load_amplification_ratio_max = None
     plastic_breach_rate = None
+    plastic_load_realization_breach_rate = None
+    plastic_load_amplification_breach_rate = None
     plastic_trend_ratio = None
+    plastic_load_realization_drop_trend_ratio = None
+    plastic_load_amplification_trend_ratio = None
     plastic_reference_trend_ratio = None
     plastic_promotion_ready = False
     plastic_promotion_blockers = []
@@ -1170,8 +1394,16 @@ def evaluate_release_readiness(
     plastic_promotion_blocker_count = 0
     plastic_promotion_blocker_regression = None
     contact_max_nonlinear_severity = None
+    contact_load_realization_ratio_min = None
+    contact_load_realization_ratio_max = None
+    contact_load_amplification_ratio_min = None
+    contact_load_amplification_ratio_max = None
     contact_breach_rate = None
+    contact_load_realization_breach_rate = None
+    contact_load_amplification_breach_rate = None
     contact_trend_ratio = None
+    contact_load_realization_drop_trend_ratio = None
+    contact_load_amplification_trend_ratio = None
     contact_reference_trend_ratio = None
     contact_promotion_ready = False
     contact_promotion_blockers = []
@@ -1186,6 +1418,9 @@ def evaluate_release_readiness(
         or isinstance(rec.get("thermal_max_temperature_k"), (int, float))
         or isinstance(rec.get("thermal_conductivity_spread_ratio"), (int, float))
         or isinstance(rec.get("thermal_heat_capacity_spread_ratio"), (int, float))
+        or isinstance(rec.get("thermal_spatial_gradient_index"), (int, float))
+        or isinstance(rec.get("thermal_monotonic_response_fraction"), (int, float))
+        or isinstance(rec.get("thermal_response_realization_ratio"), (int, float))
     ]
     if not thermal_records:
         if protected or thermal_require_metrics:
@@ -1202,6 +1437,9 @@ def evaluate_release_readiness(
         thermal_max_temp_values = []
         thermal_conductivity_spread_values = []
         thermal_heat_capacity_spread_values = []
+        thermal_spatial_gradient_values = []
+        thermal_monotonic_response_values = []
+        thermal_response_realization_values = []
         thermal_spread_values = []
         for rec in thermal_records:
             for key, target in [
@@ -1210,6 +1448,15 @@ def evaluate_release_readiness(
                 ("thermal_max_temperature_k", thermal_max_temp_values),
                 ("thermal_conductivity_spread_ratio", thermal_conductivity_spread_values),
                 ("thermal_heat_capacity_spread_ratio", thermal_heat_capacity_spread_values),
+                ("thermal_spatial_gradient_index", thermal_spatial_gradient_values),
+                (
+                    "thermal_monotonic_response_fraction",
+                    thermal_monotonic_response_values,
+                ),
+                (
+                    "thermal_response_realization_ratio",
+                    thermal_response_realization_values,
+                ),
             ]:
                 raw = rec.get(key)
                 if isinstance(raw, (int, float)):
@@ -1294,6 +1541,66 @@ def evaluate_release_readiness(
                         detail=(
                             f"max thermal heat-capacity spread ratio {thermal_max_heat_capacity_spread_ratio:.3f} exceeds "
                             f"threshold {thermal_max_heat_capacity_spread_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
+        if thermal_spatial_gradient_values:
+            thermal_max_spatial_gradient_index = max(thermal_spatial_gradient_values)
+            if thermal_max_spatial_gradient_index > thermal_max_spatial_gradient_index_threshold:
+                reasons.append(
+                    Reason(
+                        code="THERMAL_SPATIAL_GRADIENT_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"max thermal spatial gradient index {thermal_max_spatial_gradient_index:.3f} exceeds "
+                            f"threshold {thermal_max_spatial_gradient_index_threshold:.3f}"
+                        ),
+                    )
+                )
+        if thermal_monotonic_response_values:
+            thermal_min_monotonic_response_fraction = min(thermal_monotonic_response_values)
+            if (
+                thermal_min_monotonic_response_fraction
+                < thermal_min_monotonic_response_fraction_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="THERMAL_MONOTONIC_RESPONSE_LOW",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"min thermal monotonic response fraction {thermal_min_monotonic_response_fraction:.3f} below "
+                            f"threshold {thermal_min_monotonic_response_fraction_threshold:.3f}"
+                        ),
+                    )
+                )
+        if thermal_response_realization_values:
+            thermal_min_response_realization_ratio = min(thermal_response_realization_values)
+            thermal_max_response_realization_ratio = max(thermal_response_realization_values)
+            if (
+                thermal_min_response_realization_ratio
+                < thermal_min_response_realization_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="THERMAL_RESPONSE_REALIZATION_RATIO_LOW",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"min thermal response realization ratio {thermal_min_response_realization_ratio:.3f} below "
+                            f"threshold {thermal_min_response_realization_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
+            if (
+                thermal_max_response_realization_ratio
+                > thermal_max_response_realization_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="THERMAL_RESPONSE_REALIZATION_RATIO_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"max thermal response realization ratio {thermal_max_response_realization_ratio:.3f} exceeds "
+                            f"threshold {thermal_max_response_realization_ratio_threshold:.3f}"
                         ),
                     )
                 )
@@ -1749,6 +2056,68 @@ def evaluate_release_readiness(
                     )
                 )
 
+        plastic_load_realization_values = []
+        plastic_load_amplification_values = []
+        for rec in plastic_records:
+            raw_realization = rec.get("plastic_load_realization_ratio")
+            if isinstance(raw_realization, (int, float)):
+                value = float(raw_realization)
+                if math.isfinite(value):
+                    plastic_load_realization_values.append(value)
+            raw_amplification = rec.get("plastic_load_amplification_ratio")
+            if isinstance(raw_amplification, (int, float)):
+                value = float(raw_amplification)
+                if math.isfinite(value):
+                    plastic_load_amplification_values.append(value)
+        if not plastic_load_realization_values or not plastic_load_amplification_values:
+            if protected or plastic_require_metrics:
+                reasons.append(
+                    Reason(
+                        code="PLASTIC_LOAD_PATH_METRICS_MISSING",
+                        severity="warn",
+                        detail="plastic load-path constitutive metrics missing from report records",
+                    )
+                )
+        else:
+            plastic_load_realization_ratio_min = min(plastic_load_realization_values)
+            plastic_load_realization_ratio_max = max(plastic_load_realization_values)
+            plastic_load_amplification_ratio_min = min(plastic_load_amplification_values)
+            plastic_load_amplification_ratio_max = max(plastic_load_amplification_values)
+            if (
+                plastic_load_realization_ratio_min
+                < plastic_min_load_realization_ratio_threshold
+                or plastic_load_realization_ratio_max
+                > plastic_max_load_realization_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="PLASTIC_LOAD_REALIZATION_RATIO_OUT_OF_RANGE",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "plastic load realization ratio outside threshold envelope: "
+                            f"min={plastic_load_realization_ratio_min:.3f} max={plastic_load_realization_ratio_max:.3f} "
+                            f"allowed=[{plastic_min_load_realization_ratio_threshold:.3f}, {plastic_max_load_realization_ratio_threshold:.3f}]"
+                        ),
+                    )
+                )
+            if (
+                plastic_load_amplification_ratio_min
+                < plastic_min_load_amplification_ratio_threshold
+                or plastic_load_amplification_ratio_max
+                > plastic_max_load_amplification_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="PLASTIC_LOAD_AMPLIFICATION_RATIO_OUT_OF_RANGE",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "plastic load amplification ratio outside threshold envelope: "
+                            f"min={plastic_load_amplification_ratio_min:.3f} max={plastic_load_amplification_ratio_max:.3f} "
+                            f"allowed=[{plastic_min_load_amplification_ratio_threshold:.3f}, {plastic_max_load_amplification_ratio_threshold:.3f}]"
+                        ),
+                    )
+                )
+
     contact_records = [
         rec
         for rec in report_records(latest)
@@ -1781,6 +2150,68 @@ def evaluate_release_readiness(
                         detail=(
                             f"max contact nonlinear severity {contact_max_nonlinear_severity:.3f} exceeds "
                             f"threshold {contact_max_nonlinear_severity_threshold:.3f}"
+                        ),
+                    )
+                )
+
+        contact_load_realization_values = []
+        contact_load_amplification_values = []
+        for rec in contact_records:
+            raw_realization = rec.get("contact_load_realization_ratio")
+            if isinstance(raw_realization, (int, float)):
+                value = float(raw_realization)
+                if math.isfinite(value):
+                    contact_load_realization_values.append(value)
+            raw_amplification = rec.get("contact_load_amplification_ratio")
+            if isinstance(raw_amplification, (int, float)):
+                value = float(raw_amplification)
+                if math.isfinite(value):
+                    contact_load_amplification_values.append(value)
+        if not contact_load_realization_values or not contact_load_amplification_values:
+            if protected or contact_require_metrics:
+                reasons.append(
+                    Reason(
+                        code="CONTACT_LOAD_PATH_METRICS_MISSING",
+                        severity="warn",
+                        detail="contact load-path constitutive metrics missing from report records",
+                    )
+                )
+        else:
+            contact_load_realization_ratio_min = min(contact_load_realization_values)
+            contact_load_realization_ratio_max = max(contact_load_realization_values)
+            contact_load_amplification_ratio_min = min(contact_load_amplification_values)
+            contact_load_amplification_ratio_max = max(contact_load_amplification_values)
+            if (
+                contact_load_realization_ratio_min
+                < contact_min_load_realization_ratio_threshold
+                or contact_load_realization_ratio_max
+                > contact_max_load_realization_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="CONTACT_LOAD_REALIZATION_RATIO_OUT_OF_RANGE",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "contact load realization ratio outside threshold envelope: "
+                            f"min={contact_load_realization_ratio_min:.3f} max={contact_load_realization_ratio_max:.3f} "
+                            f"allowed=[{contact_min_load_realization_ratio_threshold:.3f}, {contact_max_load_realization_ratio_threshold:.3f}]"
+                        ),
+                    )
+                )
+            if (
+                contact_load_amplification_ratio_min
+                < contact_min_load_amplification_ratio_threshold
+                or contact_load_amplification_ratio_max
+                > contact_max_load_amplification_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="CONTACT_LOAD_AMPLIFICATION_RATIO_OUT_OF_RANGE",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "contact load amplification ratio outside threshold envelope: "
+                            f"min={contact_load_amplification_ratio_min:.3f} max={contact_load_amplification_ratio_max:.3f} "
+                            f"allowed=[{contact_min_load_amplification_ratio_threshold:.3f}, {contact_max_load_amplification_ratio_threshold:.3f}]"
                         ),
                     )
                 )
@@ -1939,6 +2370,67 @@ def evaluate_release_readiness(
                 )
             )
 
+    plastic_load_realization_breach_values = []
+    plastic_load_amplification_breach_values = []
+    for report in trend_reports:
+        for rec in report_records(report):
+            raw_realization = rec.get("plastic_load_realization_ratio")
+            if isinstance(raw_realization, (int, float)):
+                value = float(raw_realization)
+                if math.isfinite(value):
+                    plastic_load_realization_breach_values.append(
+                        value < plastic_min_load_realization_ratio_threshold
+                        or value > plastic_max_load_realization_ratio_threshold
+                    )
+            raw_amplification = rec.get("plastic_load_amplification_ratio")
+            if isinstance(raw_amplification, (int, float)):
+                value = float(raw_amplification)
+                if math.isfinite(value):
+                    plastic_load_amplification_breach_values.append(
+                        value < plastic_min_load_amplification_ratio_threshold
+                        or value > plastic_max_load_amplification_ratio_threshold
+                    )
+
+    if plastic_load_realization_breach_values:
+        plastic_load_realization_breach_rate = (
+            sum(1 for breached in plastic_load_realization_breach_values if breached)
+            / len(plastic_load_realization_breach_values)
+        )
+        if (
+            plastic_load_realization_breach_rate
+            > plastic_max_load_realization_breach_rate_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="PLASTIC_LOAD_REALIZATION_BREACH_RATE_HIGH",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"plastic load realization breach rate {plastic_load_realization_breach_rate:.3f} exceeds "
+                        f"threshold {plastic_max_load_realization_breach_rate_threshold:.3f}"
+                    ),
+                )
+            )
+
+    if plastic_load_amplification_breach_values:
+        plastic_load_amplification_breach_rate = (
+            sum(1 for breached in plastic_load_amplification_breach_values if breached)
+            / len(plastic_load_amplification_breach_values)
+        )
+        if (
+            plastic_load_amplification_breach_rate
+            > plastic_max_load_amplification_breach_rate_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="PLASTIC_LOAD_AMPLIFICATION_BREACH_RATE_HIGH",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"plastic load amplification breach rate {plastic_load_amplification_breach_rate:.3f} exceeds "
+                        f"threshold {plastic_max_load_amplification_breach_rate_threshold:.3f}"
+                    ),
+                )
+            )
+
     contact_breach_values = []
     for report in trend_reports:
         for rec in report_records(report):
@@ -1967,67 +2459,147 @@ def evaluate_release_readiness(
                 )
             )
 
-    if rolling:
-        latest_spread_values = []
-        for rec in report_records(latest):
-            raw_value = rec.get("thermo_constitutive_material_spread_ratio")
-            if isinstance(raw_value, (int, float)):
-                latest_spread_values.append(float(raw_value))
-        rolling_spread_values = []
-        for report in rolling:
-            for rec in report_records(report):
-                raw_value = rec.get("thermo_constitutive_material_spread_ratio")
-                if isinstance(raw_value, (int, float)):
-                    rolling_spread_values.append(float(raw_value))
-        if latest_spread_values and rolling_spread_values:
-            latest_spread = max(latest_spread_values)
-            baseline_spread = statistics.median(rolling_spread_values)
-            if baseline_spread > 0:
-                thermo_spread_trend_ratio = latest_spread / baseline_spread
-                if thermo_spread_trend_ratio > thermo_max_spread_trend_ratio:
-                    reasons.append(
-                        Reason(
-                            code="THERMO_SPREAD_TREND_WORSENING",
-                            severity="fail" if protected else "warn",
-                            detail=(
-                                f"thermo spread trend ratio {thermo_spread_trend_ratio:.3f} exceeds "
-                                f"threshold {thermo_max_spread_trend_ratio:.3f}"
-                            ),
-                        )
+    contact_load_realization_breach_values = []
+    contact_load_amplification_breach_values = []
+    for report in trend_reports:
+        for rec in report_records(report):
+            raw_realization = rec.get("contact_load_realization_ratio")
+            if isinstance(raw_realization, (int, float)):
+                value = float(raw_realization)
+                if math.isfinite(value):
+                    contact_load_realization_breach_values.append(
+                        value < contact_min_load_realization_ratio_threshold
+                        or value > contact_max_load_realization_ratio_threshold
+                    )
+            raw_amplification = rec.get("contact_load_amplification_ratio")
+            if isinstance(raw_amplification, (int, float)):
+                value = float(raw_amplification)
+                if math.isfinite(value):
+                    contact_load_amplification_breach_values.append(
+                        value < contact_min_load_amplification_ratio_threshold
+                        or value > contact_max_load_amplification_ratio_threshold
                     )
 
-        latest_heterogeneity_values = []
+    if contact_load_realization_breach_values:
+        contact_load_realization_breach_rate = (
+            sum(1 for breached in contact_load_realization_breach_values if breached)
+            / len(contact_load_realization_breach_values)
+        )
+        if (
+            contact_load_realization_breach_rate
+            > contact_max_load_realization_breach_rate_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="CONTACT_LOAD_REALIZATION_BREACH_RATE_HIGH",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"contact load realization breach rate {contact_load_realization_breach_rate:.3f} exceeds "
+                        f"threshold {contact_max_load_realization_breach_rate_threshold:.3f}"
+                    ),
+                )
+            )
+
+    if contact_load_amplification_breach_values:
+        contact_load_amplification_breach_rate = (
+            sum(1 for breached in contact_load_amplification_breach_values if breached)
+            / len(contact_load_amplification_breach_values)
+        )
+        if (
+            contact_load_amplification_breach_rate
+            > contact_max_load_amplification_breach_rate_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="CONTACT_LOAD_AMPLIFICATION_BREACH_RATE_HIGH",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"contact load amplification breach rate {contact_load_amplification_breach_rate:.3f} exceeds "
+                        f"threshold {contact_max_load_amplification_breach_rate_threshold:.3f}"
+                    ),
+                )
+            )
+
+    if rolling:
+        latest_by_fixture = {}
         for rec in report_records(latest):
-            raw_value = rec.get("thermo_assignment_heterogeneity_index")
-            if isinstance(raw_value, (int, float)):
-                latest_heterogeneity_values.append(float(raw_value))
-        rolling_heterogeneity_values = []
+            fixture_id = rec.get("fixture_id")
+            if isinstance(fixture_id, str):
+                latest_by_fixture[fixture_id] = rec
+        rolling_by_fixture = {}
         for report in rolling:
             for rec in report_records(report):
-                raw_value = rec.get("thermo_assignment_heterogeneity_index")
-                if isinstance(raw_value, (int, float)):
-                    rolling_heterogeneity_values.append(float(raw_value))
-        if latest_heterogeneity_values and rolling_heterogeneity_values:
-            latest_heterogeneity = max(latest_heterogeneity_values)
-            baseline_heterogeneity = statistics.median(rolling_heterogeneity_values)
-            if baseline_heterogeneity > 0:
-                thermo_heterogeneity_trend_ratio = (
-                    latest_heterogeneity / baseline_heterogeneity
+                fixture_id = rec.get("fixture_id")
+                if isinstance(fixture_id, str):
+                    rolling_by_fixture.setdefault(fixture_id, []).append(rec)
+
+        def fixture_trend_ratio(field: str, latest_reducer=max, ratio_mode="increase"):
+            ratios = []
+            for fixture_id, latest_rec in latest_by_fixture.items():
+                baseline_records = rolling_by_fixture.get(fixture_id, [])
+                if not baseline_records:
+                    continue
+                latest_raw = latest_rec.get(field)
+                if not isinstance(latest_raw, (int, float)):
+                    continue
+                latest_value = float(latest_raw)
+                if not math.isfinite(latest_value):
+                    continue
+                baseline_values = []
+                for rec in baseline_records:
+                    raw = rec.get(field)
+                    if isinstance(raw, (int, float)):
+                        value = float(raw)
+                        if math.isfinite(value):
+                            baseline_values.append(value)
+                if not baseline_values:
+                    continue
+                baseline_value = statistics.median(baseline_values)
+                if baseline_value <= 0 or latest_value <= 0:
+                    continue
+                if ratio_mode == "drop":
+                    ratios.append(baseline_value / latest_value)
+                else:
+                    ratios.append(latest_value / baseline_value)
+            if not ratios:
+                return None
+            return max(ratios)
+
+        thermo_spread_trend_ratio = fixture_trend_ratio(
+            "thermo_constitutive_material_spread_ratio"
+        )
+        if (
+            thermo_spread_trend_ratio is not None
+            and thermo_spread_trend_ratio > thermo_max_spread_trend_ratio
+        ):
+            reasons.append(
+                Reason(
+                    code="THERMO_SPREAD_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"thermo spread trend ratio {thermo_spread_trend_ratio:.3f} exceeds "
+                        f"threshold {thermo_max_spread_trend_ratio:.3f}"
+                    ),
                 )
-                if (
-                    thermo_heterogeneity_trend_ratio
-                    > thermo_max_heterogeneity_trend_ratio
-                ):
-                    reasons.append(
-                        Reason(
-                            code="THERMO_HETEROGENEITY_TREND_WORSENING",
-                            severity="fail" if protected else "warn",
-                            detail=(
-                                f"thermo heterogeneity trend ratio {thermo_heterogeneity_trend_ratio:.3f} exceeds "
-                                f"threshold {thermo_max_heterogeneity_trend_ratio:.3f}"
-                            ),
-                        )
-                    )
+            )
+
+        thermo_heterogeneity_trend_ratio = fixture_trend_ratio(
+            "thermo_assignment_heterogeneity_index"
+        )
+        if (
+            thermo_heterogeneity_trend_ratio is not None
+            and thermo_heterogeneity_trend_ratio > thermo_max_heterogeneity_trend_ratio
+        ):
+            reasons.append(
+                Reason(
+                    code="THERMO_HETEROGENEITY_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"thermo heterogeneity trend ratio {thermo_heterogeneity_trend_ratio:.3f} exceeds "
+                        f"threshold {thermo_max_heterogeneity_trend_ratio:.3f}"
+                    ),
+                )
+            )
 
         latest_thermal_spread_values = []
         for rec in report_records(latest):
@@ -2068,18 +2640,6 @@ def evaluate_release_readiness(
                             ),
                         )
                     )
-
-        latest_by_fixture = {}
-        for rec in report_records(latest):
-            fixture_id = rec.get("fixture_id")
-            if isinstance(fixture_id, str):
-                latest_by_fixture[fixture_id] = rec
-        rolling_by_fixture = {}
-        for report in rolling:
-            for rec in report_records(report):
-                fixture_id = rec.get("fixture_id")
-                if isinstance(fixture_id, str):
-                    rolling_by_fixture.setdefault(fixture_id, []).append(rec)
 
         coverage_drop_ratios = []
         extrapolation_trend_ratios = []
@@ -2152,89 +2712,93 @@ def evaluate_release_readiness(
                     )
                 )
 
-        latest_electro_joule_values = []
-        for rec in report_records(latest):
-            raw_value = rec.get("electro_joule_heating_scale")
-            if isinstance(raw_value, (int, float)):
-                latest_electro_joule_values.append(float(raw_value))
-        rolling_electro_joule_values = []
-        for report in rolling:
-            for rec in report_records(report):
-                raw_value = rec.get("electro_joule_heating_scale")
-                if isinstance(raw_value, (int, float)):
-                    rolling_electro_joule_values.append(float(raw_value))
-        if latest_electro_joule_values and rolling_electro_joule_values:
-            latest_electro_joule = max(latest_electro_joule_values)
-            baseline_electro_joule = statistics.median(rolling_electro_joule_values)
-            if baseline_electro_joule > 0:
-                electro_joule_trend_ratio = latest_electro_joule / baseline_electro_joule
-                if electro_joule_trend_ratio > electro_max_joule_trend_ratio_threshold:
-                    reasons.append(
-                        Reason(
-                            code="ELECTRO_JOULE_TREND_WORSENING",
-                            severity="fail" if protected else "warn",
-                            detail=(
-                                f"electro-thermal Joule trend ratio {electro_joule_trend_ratio:.3f} exceeds "
-                                f"threshold {electro_max_joule_trend_ratio_threshold:.3f}"
-                            ),
-                        )
-                    )
+        electro_joule_trend_ratio = fixture_trend_ratio("electro_joule_heating_scale")
+        if (
+            electro_joule_trend_ratio is not None
+            and electro_joule_trend_ratio > electro_max_joule_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="ELECTRO_JOULE_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"electro-thermal Joule trend ratio {electro_joule_trend_ratio:.3f} exceeds "
+                        f"threshold {electro_max_joule_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
 
-        latest_electro_spread_values = []
-        for rec in report_records(latest):
-            raw_value = rec.get("electro_conductivity_spread_ratio")
-            if isinstance(raw_value, (int, float)):
-                latest_electro_spread_values.append(float(raw_value))
-        rolling_electro_spread_values = []
-        for report in rolling:
-            for rec in report_records(report):
-                raw_value = rec.get("electro_conductivity_spread_ratio")
-                if isinstance(raw_value, (int, float)):
-                    rolling_electro_spread_values.append(float(raw_value))
-        if latest_electro_spread_values and rolling_electro_spread_values:
-            latest_electro_spread = max(latest_electro_spread_values)
-            baseline_electro_spread = statistics.median(rolling_electro_spread_values)
-            if baseline_electro_spread > 0:
-                electro_spread_trend_ratio = latest_electro_spread / baseline_electro_spread
-                if electro_spread_trend_ratio > electro_max_spread_trend_ratio_threshold:
-                    reasons.append(
-                        Reason(
-                            code="ELECTRO_SPREAD_TREND_WORSENING",
-                            severity="fail" if protected else "warn",
-                            detail=(
-                                f"electro-thermal spread trend ratio {electro_spread_trend_ratio:.3f} exceeds "
-                                f"threshold {electro_max_spread_trend_ratio_threshold:.3f}"
-                            ),
-                        )
-                    )
+        electro_spread_trend_ratio = fixture_trend_ratio("electro_conductivity_spread_ratio")
+        if (
+            electro_spread_trend_ratio is not None
+            and electro_spread_trend_ratio > electro_max_spread_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="ELECTRO_SPREAD_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"electro-thermal spread trend ratio {electro_spread_trend_ratio:.3f} exceeds "
+                        f"threshold {electro_max_spread_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
 
-        latest_plastic_values = []
-        for rec in report_records(latest):
-            raw_value = rec.get("plastic_nonlinear_severity")
-            if isinstance(raw_value, (int, float)):
-                latest_plastic_values.append(float(raw_value))
-        rolling_plastic_values = []
-        for report in rolling:
-            for rec in report_records(report):
-                raw_value = rec.get("plastic_nonlinear_severity")
-                if isinstance(raw_value, (int, float)):
-                    rolling_plastic_values.append(float(raw_value))
-        if latest_plastic_values and rolling_plastic_values:
-            latest_plastic = max(latest_plastic_values)
-            baseline_plastic = statistics.median(rolling_plastic_values)
-            if baseline_plastic > 0:
-                plastic_trend_ratio = latest_plastic / baseline_plastic
-                if plastic_trend_ratio > plastic_max_trend_ratio_threshold:
-                    reasons.append(
-                        Reason(
-                            code="PLASTIC_TREND_WORSENING",
-                            severity="fail" if protected else "warn",
-                            detail=(
-                                f"plastic nonlinear severity trend ratio {plastic_trend_ratio:.3f} exceeds "
-                                f"threshold {plastic_max_trend_ratio_threshold:.3f}"
-                            ),
-                        )
-                    )
+        plastic_trend_ratio = fixture_trend_ratio("plastic_nonlinear_severity")
+        if (
+            plastic_trend_ratio is not None
+            and plastic_trend_ratio > plastic_max_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="PLASTIC_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"plastic nonlinear severity trend ratio {plastic_trend_ratio:.3f} exceeds "
+                        f"threshold {plastic_max_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        plastic_load_realization_drop_trend_ratio = fixture_trend_ratio(
+            "plastic_load_realization_ratio", ratio_mode="drop"
+        )
+        if (
+            plastic_load_realization_drop_trend_ratio is not None
+            and plastic_load_realization_drop_trend_ratio
+            > plastic_max_load_realization_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="PLASTIC_LOAD_REALIZATION_DROP_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "plastic load realization drop trend ratio "
+                        f"{plastic_load_realization_drop_trend_ratio:.3f} exceeds "
+                        f"threshold {plastic_max_load_realization_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        plastic_load_amplification_trend_ratio = fixture_trend_ratio(
+            "plastic_load_amplification_ratio"
+        )
+        if (
+            plastic_load_amplification_trend_ratio is not None
+            and plastic_load_amplification_trend_ratio
+            > plastic_max_load_amplification_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="PLASTIC_LOAD_AMPLIFICATION_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "plastic load amplification trend ratio "
+                        f"{plastic_load_amplification_trend_ratio:.3f} exceeds "
+                        f"threshold {plastic_max_load_amplification_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
 
         plastic_reference_fixture_ids = {
             "nonlinear_plastic_hardening_reference_gpu_provider",
@@ -2277,33 +2841,61 @@ def evaluate_release_readiness(
                         )
                     )
 
-        latest_contact_values = []
-        for rec in report_records(latest):
-            raw_value = rec.get("contact_nonlinear_severity")
-            if isinstance(raw_value, (int, float)):
-                latest_contact_values.append(float(raw_value))
-        rolling_contact_values = []
-        for report in rolling:
-            for rec in report_records(report):
-                raw_value = rec.get("contact_nonlinear_severity")
-                if isinstance(raw_value, (int, float)):
-                    rolling_contact_values.append(float(raw_value))
-        if latest_contact_values and rolling_contact_values:
-            latest_contact = max(latest_contact_values)
-            baseline_contact = statistics.median(rolling_contact_values)
-            if baseline_contact > 0:
-                contact_trend_ratio = latest_contact / baseline_contact
-                if contact_trend_ratio > contact_max_trend_ratio_threshold:
-                    reasons.append(
-                        Reason(
-                            code="CONTACT_TREND_WORSENING",
-                            severity="fail" if protected else "warn",
-                            detail=(
-                                f"contact nonlinear severity trend ratio {contact_trend_ratio:.3f} exceeds "
-                                f"threshold {contact_max_trend_ratio_threshold:.3f}"
-                            ),
-                        )
-                    )
+        contact_trend_ratio = fixture_trend_ratio("contact_nonlinear_severity")
+        if (
+            contact_trend_ratio is not None
+            and contact_trend_ratio > contact_max_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="CONTACT_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"contact nonlinear severity trend ratio {contact_trend_ratio:.3f} exceeds "
+                        f"threshold {contact_max_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        contact_load_realization_drop_trend_ratio = fixture_trend_ratio(
+            "contact_load_realization_ratio", ratio_mode="drop"
+        )
+        if (
+            contact_load_realization_drop_trend_ratio is not None
+            and contact_load_realization_drop_trend_ratio
+            > contact_max_load_realization_drop_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="CONTACT_LOAD_REALIZATION_DROP_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "contact load realization drop trend ratio "
+                        f"{contact_load_realization_drop_trend_ratio:.3f} exceeds "
+                        f"threshold {contact_max_load_realization_drop_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
+
+        contact_load_amplification_trend_ratio = fixture_trend_ratio(
+            "contact_load_amplification_ratio"
+        )
+        if (
+            contact_load_amplification_trend_ratio is not None
+            and contact_load_amplification_trend_ratio
+            > contact_max_load_amplification_trend_ratio_threshold
+        ):
+            reasons.append(
+                Reason(
+                    code="CONTACT_LOAD_AMPLIFICATION_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        "contact load amplification trend ratio "
+                        f"{contact_load_amplification_trend_ratio:.3f} exceeds "
+                        f"threshold {contact_max_load_amplification_trend_ratio_threshold:.3f}"
+                    ),
+                )
+            )
 
         reference_fixture_ids = {
             "nonlinear_contact_frictionless_reference_gpu_provider",
@@ -2611,6 +3203,14 @@ def evaluate_release_readiness(
         "thermal_max_conductivity_spread_ratio_threshold": thermal_max_conductivity_spread_ratio_threshold,
         "thermal_max_heat_capacity_spread_ratio": thermal_max_heat_capacity_spread_ratio,
         "thermal_max_heat_capacity_spread_ratio_threshold": thermal_max_heat_capacity_spread_ratio_threshold,
+        "thermal_max_spatial_gradient_index": thermal_max_spatial_gradient_index,
+        "thermal_max_spatial_gradient_index_threshold": thermal_max_spatial_gradient_index_threshold,
+        "thermal_min_monotonic_response_fraction": thermal_min_monotonic_response_fraction,
+        "thermal_min_monotonic_response_fraction_threshold": thermal_min_monotonic_response_fraction_threshold,
+        "thermal_min_response_realization_ratio": thermal_min_response_realization_ratio,
+        "thermal_min_response_realization_ratio_threshold": thermal_min_response_realization_ratio_threshold,
+        "thermal_max_response_realization_ratio": thermal_max_response_realization_ratio,
+        "thermal_max_response_realization_ratio_threshold": thermal_max_response_realization_ratio_threshold,
         "thermal_spread_breach_rate": thermal_spread_breach_rate,
         "thermal_max_spread_breach_rate_threshold": thermal_max_spread_breach_rate_threshold,
         "thermal_spread_trend_ratio": thermal_spread_trend_ratio,
@@ -2632,10 +3232,26 @@ def evaluate_release_readiness(
         "electro_max_spread_trend_ratio_threshold": electro_max_spread_trend_ratio_threshold,
         "plastic_max_nonlinear_severity": plastic_max_nonlinear_severity,
         "plastic_max_nonlinear_severity_threshold": plastic_max_nonlinear_severity_threshold,
+        "plastic_load_realization_ratio_min": plastic_load_realization_ratio_min,
+        "plastic_load_realization_ratio_max": plastic_load_realization_ratio_max,
+        "plastic_min_load_realization_ratio_threshold": plastic_min_load_realization_ratio_threshold,
+        "plastic_max_load_realization_ratio_threshold": plastic_max_load_realization_ratio_threshold,
+        "plastic_load_amplification_ratio_min": plastic_load_amplification_ratio_min,
+        "plastic_load_amplification_ratio_max": plastic_load_amplification_ratio_max,
+        "plastic_min_load_amplification_ratio_threshold": plastic_min_load_amplification_ratio_threshold,
+        "plastic_max_load_amplification_ratio_threshold": plastic_max_load_amplification_ratio_threshold,
         "plastic_breach_rate": plastic_breach_rate,
         "plastic_max_breach_rate_threshold": plastic_max_breach_rate_threshold,
+        "plastic_load_realization_breach_rate": plastic_load_realization_breach_rate,
+        "plastic_max_load_realization_breach_rate_threshold": plastic_max_load_realization_breach_rate_threshold,
+        "plastic_load_amplification_breach_rate": plastic_load_amplification_breach_rate,
+        "plastic_max_load_amplification_breach_rate_threshold": plastic_max_load_amplification_breach_rate_threshold,
         "plastic_trend_ratio": plastic_trend_ratio,
         "plastic_max_trend_ratio_threshold": plastic_max_trend_ratio_threshold,
+        "plastic_load_realization_drop_trend_ratio": plastic_load_realization_drop_trend_ratio,
+        "plastic_max_load_realization_drop_trend_ratio_threshold": plastic_max_load_realization_drop_trend_ratio_threshold,
+        "plastic_load_amplification_trend_ratio": plastic_load_amplification_trend_ratio,
+        "plastic_max_load_amplification_trend_ratio_threshold": plastic_max_load_amplification_trend_ratio_threshold,
         "plastic_reference_trend_ratio": plastic_reference_trend_ratio,
         "plastic_reference_max_trend_ratio_threshold": plastic_reference_max_trend_ratio_threshold,
         "plastic_promotion_ready": plastic_promotion_ready,
@@ -2647,10 +3263,26 @@ def evaluate_release_readiness(
         "plastic_promotion_blocker_regression": plastic_promotion_blocker_regression,
         "contact_max_nonlinear_severity": contact_max_nonlinear_severity,
         "contact_max_nonlinear_severity_threshold": contact_max_nonlinear_severity_threshold,
+        "contact_load_realization_ratio_min": contact_load_realization_ratio_min,
+        "contact_load_realization_ratio_max": contact_load_realization_ratio_max,
+        "contact_min_load_realization_ratio_threshold": contact_min_load_realization_ratio_threshold,
+        "contact_max_load_realization_ratio_threshold": contact_max_load_realization_ratio_threshold,
+        "contact_load_amplification_ratio_min": contact_load_amplification_ratio_min,
+        "contact_load_amplification_ratio_max": contact_load_amplification_ratio_max,
+        "contact_min_load_amplification_ratio_threshold": contact_min_load_amplification_ratio_threshold,
+        "contact_max_load_amplification_ratio_threshold": contact_max_load_amplification_ratio_threshold,
         "contact_breach_rate": contact_breach_rate,
         "contact_max_breach_rate_threshold": contact_max_breach_rate_threshold,
+        "contact_load_realization_breach_rate": contact_load_realization_breach_rate,
+        "contact_max_load_realization_breach_rate_threshold": contact_max_load_realization_breach_rate_threshold,
+        "contact_load_amplification_breach_rate": contact_load_amplification_breach_rate,
+        "contact_max_load_amplification_breach_rate_threshold": contact_max_load_amplification_breach_rate_threshold,
         "contact_trend_ratio": contact_trend_ratio,
         "contact_max_trend_ratio_threshold": contact_max_trend_ratio_threshold,
+        "contact_load_realization_drop_trend_ratio": contact_load_realization_drop_trend_ratio,
+        "contact_max_load_realization_drop_trend_ratio_threshold": contact_max_load_realization_drop_trend_ratio_threshold,
+        "contact_load_amplification_trend_ratio": contact_load_amplification_trend_ratio,
+        "contact_max_load_amplification_trend_ratio_threshold": contact_max_load_amplification_trend_ratio_threshold,
         "contact_reference_trend_ratio": contact_reference_trend_ratio,
         "contact_reference_max_trend_ratio_threshold": contact_reference_max_trend_ratio_threshold,
         "contact_promotion_ready": contact_promotion_ready,
@@ -2828,6 +3460,38 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('thermal_max_heat_capacity_spread_ratio_threshold') if result.get('thermal_max_heat_capacity_spread_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- Max thermal spatial gradient index: "
+        f"`{result.get('thermal_max_spatial_gradient_index') if result.get('thermal_max_spatial_gradient_index') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermal spatial gradient threshold: "
+        f"`{result.get('thermal_max_spatial_gradient_index_threshold') if result.get('thermal_max_spatial_gradient_index_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Min thermal monotonic response fraction: "
+        f"`{result.get('thermal_min_monotonic_response_fraction') if result.get('thermal_min_monotonic_response_fraction') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermal monotonic response threshold: "
+        f"`{result.get('thermal_min_monotonic_response_fraction_threshold') if result.get('thermal_min_monotonic_response_fraction_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Min thermal response realization ratio: "
+        f"`{result.get('thermal_min_response_realization_ratio') if result.get('thermal_min_response_realization_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermal min response realization threshold: "
+        f"`{result.get('thermal_min_response_realization_ratio_threshold') if result.get('thermal_min_response_realization_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Max thermal response realization ratio: "
+        f"`{result.get('thermal_max_response_realization_ratio') if result.get('thermal_max_response_realization_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermal max response realization threshold: "
+        f"`{result.get('thermal_max_response_realization_ratio_threshold') if result.get('thermal_max_response_realization_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
         "- Thermal spread breach rate: "
         f"`{result.get('thermal_spread_breach_rate') if result.get('thermal_spread_breach_rate') is not None else '-'}`"
     )
@@ -2904,8 +3568,40 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('plastic_breach_rate') if result.get('plastic_breach_rate') is not None else '-'}`"
     )
     lines.append(
+        "- Plastic load realization min/max: "
+        f"`{result.get('plastic_load_realization_ratio_min') if result.get('plastic_load_realization_ratio_min') is not None else '-'}`/`{result.get('plastic_load_realization_ratio_max') if result.get('plastic_load_realization_ratio_max') is not None else '-'}`"
+    )
+    lines.append(
+        "- Plastic load realization thresholds (min/max): "
+        f"`{result.get('plastic_min_load_realization_ratio_threshold') if result.get('plastic_min_load_realization_ratio_threshold') is not None else '-'}`/`{result.get('plastic_max_load_realization_ratio_threshold') if result.get('plastic_max_load_realization_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Plastic load amplification min/max: "
+        f"`{result.get('plastic_load_amplification_ratio_min') if result.get('plastic_load_amplification_ratio_min') is not None else '-'}`/`{result.get('plastic_load_amplification_ratio_max') if result.get('plastic_load_amplification_ratio_max') is not None else '-'}`"
+    )
+    lines.append(
+        "- Plastic load amplification thresholds (min/max): "
+        f"`{result.get('plastic_min_load_amplification_ratio_threshold') if result.get('plastic_min_load_amplification_ratio_threshold') is not None else '-'}`/`{result.get('plastic_max_load_amplification_ratio_threshold') if result.get('plastic_max_load_amplification_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Plastic load realization breach rate: "
+        f"`{result.get('plastic_load_realization_breach_rate') if result.get('plastic_load_realization_breach_rate') is not None else '-'}`"
+    )
+    lines.append(
+        "- Plastic load amplification breach rate: "
+        f"`{result.get('plastic_load_amplification_breach_rate') if result.get('plastic_load_amplification_breach_rate') is not None else '-'}`"
+    )
+    lines.append(
         "- Plastic trend ratio: "
         f"`{result.get('plastic_trend_ratio') if result.get('plastic_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Plastic load realization drop trend ratio: "
+        f"`{result.get('plastic_load_realization_drop_trend_ratio') if result.get('plastic_load_realization_drop_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Plastic load amplification trend ratio: "
+        f"`{result.get('plastic_load_amplification_trend_ratio') if result.get('plastic_load_amplification_trend_ratio') is not None else '-'}`"
     )
     lines.append(
         "- Plastic reference trend ratio: "
@@ -2930,8 +3626,40 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('contact_breach_rate') if result.get('contact_breach_rate') is not None else '-'}`"
     )
     lines.append(
+        "- Contact load realization min/max: "
+        f"`{result.get('contact_load_realization_ratio_min') if result.get('contact_load_realization_ratio_min') is not None else '-'}`/`{result.get('contact_load_realization_ratio_max') if result.get('contact_load_realization_ratio_max') is not None else '-'}`"
+    )
+    lines.append(
+        "- Contact load realization thresholds (min/max): "
+        f"`{result.get('contact_min_load_realization_ratio_threshold') if result.get('contact_min_load_realization_ratio_threshold') is not None else '-'}`/`{result.get('contact_max_load_realization_ratio_threshold') if result.get('contact_max_load_realization_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Contact load amplification min/max: "
+        f"`{result.get('contact_load_amplification_ratio_min') if result.get('contact_load_amplification_ratio_min') is not None else '-'}`/`{result.get('contact_load_amplification_ratio_max') if result.get('contact_load_amplification_ratio_max') is not None else '-'}`"
+    )
+    lines.append(
+        "- Contact load amplification thresholds (min/max): "
+        f"`{result.get('contact_min_load_amplification_ratio_threshold') if result.get('contact_min_load_amplification_ratio_threshold') is not None else '-'}`/`{result.get('contact_max_load_amplification_ratio_threshold') if result.get('contact_max_load_amplification_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Contact load realization breach rate: "
+        f"`{result.get('contact_load_realization_breach_rate') if result.get('contact_load_realization_breach_rate') is not None else '-'}`"
+    )
+    lines.append(
+        "- Contact load amplification breach rate: "
+        f"`{result.get('contact_load_amplification_breach_rate') if result.get('contact_load_amplification_breach_rate') is not None else '-'}`"
+    )
+    lines.append(
         "- Contact trend ratio: "
         f"`{result.get('contact_trend_ratio') if result.get('contact_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Contact load realization drop trend ratio: "
+        f"`{result.get('contact_load_realization_drop_trend_ratio') if result.get('contact_load_realization_drop_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Contact load amplification trend ratio: "
+        f"`{result.get('contact_load_amplification_trend_ratio') if result.get('contact_load_amplification_trend_ratio') is not None else '-'}`"
     )
     lines.append(
         "- Contact reference trend ratio: "

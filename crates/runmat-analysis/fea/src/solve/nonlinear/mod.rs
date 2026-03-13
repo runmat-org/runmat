@@ -183,8 +183,12 @@ pub fn solve_nonlinear_system(
     let mut thermo_increment_target_peak = options.increment_norm_tolerance;
     let mut plasticity_severity_peak = 0.0_f64;
     let mut plasticity_severity_sum = 0.0_f64;
+    let mut plasticity_first_severity = 0.0_f64;
+    let mut plasticity_last_severity = 0.0_f64;
     let mut contact_severity_peak = 0.0_f64;
     let mut contact_severity_sum = 0.0_f64;
+    let mut contact_first_severity = 0.0_f64;
+    let mut contact_last_severity = 0.0_f64;
 
     for index in 0..options.increment_count {
         let load_factor = load_factors.get(index).copied().unwrap_or(1.0);
@@ -203,6 +207,12 @@ pub fn solve_nonlinear_system(
         let plasticity_severity =
             (plasticity_severity_base * (0.65 + 0.35 * load_factor)).clamp(0.0, 1.0);
         let contact_severity = (contact_severity_base * (0.7 + 0.3 * load_factor)).clamp(0.0, 1.0);
+        if index == 0 {
+            plasticity_first_severity = plasticity_severity;
+            contact_first_severity = contact_severity;
+        }
+        plasticity_last_severity = plasticity_severity;
+        contact_last_severity = contact_severity;
         let thermo_policy = thermo_mechanical::nonlinear_policy(
             options.tolerance,
             options.residual_convergence_factor,
@@ -446,6 +456,21 @@ pub fn solve_nonlinear_system(
     }
     if plasticity_severity_peak > 0.0 {
         let plasticity = options.plasticity_context.as_ref();
+        let plasticity_severity_mean = if options.increment_count == 0 {
+            0.0
+        } else {
+            plasticity_severity_sum / options.increment_count as f64
+        };
+        let plasticity_load_realization_ratio = if plasticity_severity_base > 0.0 {
+            plasticity_severity_mean / plasticity_severity_base
+        } else {
+            0.0
+        };
+        let plasticity_load_amplification_ratio = if plasticity_first_severity > 0.0 {
+            plasticity_last_severity / plasticity_first_severity
+        } else {
+            1.0
+        };
         diagnostics.push(FeaDiagnostic {
             code: "FEA_PLASTIC_NONLINEAR".to_string(),
             severity: if plasticity_severity_peak <= 0.6 {
@@ -454,13 +479,11 @@ pub fn solve_nonlinear_system(
                 FeaDiagnosticSeverity::Warning
             },
             message: format!(
-                "severity_peak={} severity_mean={} yield_strain={} hardening_modulus_ratio={} saturation_exponent={}",
+                "severity_peak={} severity_mean={} load_realization_ratio={} load_amplification_ratio={} yield_strain={} hardening_modulus_ratio={} saturation_exponent={}",
                 plasticity_severity_peak,
-                if options.increment_count == 0 {
-                    0.0
-                } else {
-                    plasticity_severity_sum / options.increment_count as f64
-                },
+                plasticity_severity_mean,
+                plasticity_load_realization_ratio,
+                plasticity_load_amplification_ratio,
                 plasticity.map(|p| p.yield_strain).unwrap_or(0.0),
                 plasticity.map(|p| p.hardening_modulus_ratio).unwrap_or(0.0),
                 plasticity.map(|p| p.saturation_exponent).unwrap_or(0.0),
@@ -469,6 +492,21 @@ pub fn solve_nonlinear_system(
     }
     if contact_severity_peak > 0.0 {
         let contact = options.contact_context.as_ref();
+        let contact_severity_mean = if options.increment_count == 0 {
+            0.0
+        } else {
+            contact_severity_sum / options.increment_count as f64
+        };
+        let contact_load_realization_ratio = if contact_severity_base > 0.0 {
+            contact_severity_mean / contact_severity_base
+        } else {
+            0.0
+        };
+        let contact_load_amplification_ratio = if contact_first_severity > 0.0 {
+            contact_last_severity / contact_first_severity
+        } else {
+            1.0
+        };
         diagnostics.push(FeaDiagnostic {
             code: "FEA_CONTACT_NONLINEAR".to_string(),
             severity: if contact_severity_peak <= 0.6 {
@@ -477,13 +515,11 @@ pub fn solve_nonlinear_system(
                 FeaDiagnosticSeverity::Warning
             },
             message: format!(
-                "severity_peak={} severity_mean={} penalty_stiffness_scale={} max_penetration_ratio={} friction_coefficient={}",
+                "severity_peak={} severity_mean={} load_realization_ratio={} load_amplification_ratio={} penalty_stiffness_scale={} max_penetration_ratio={} friction_coefficient={}",
                 contact_severity_peak,
-                if options.increment_count == 0 {
-                    0.0
-                } else {
-                    contact_severity_sum / options.increment_count as f64
-                },
+                contact_severity_mean,
+                contact_load_realization_ratio,
+                contact_load_amplification_ratio,
                 contact.map(|p| p.penalty_stiffness_scale).unwrap_or(0.0),
                 contact.map(|p| p.max_penetration_ratio).unwrap_or(0.0),
                 contact.map(|p| p.friction_coefficient).unwrap_or(0.0),
