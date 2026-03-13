@@ -203,7 +203,7 @@ pub fn assemble_linear_system(
         model
             .materials
             .iter()
-            .map(|material| material.reference_temperature_k)
+            .map(|material| material.thermal.reference_temperature_k)
             .sum::<f64>()
             / model.materials.len() as f64
     };
@@ -545,10 +545,12 @@ pub fn assemble_linear_system(
                     .iter()
                     .map(|material| {
                         let adjusted_delta = context.applied_temperature_delta_k
-                            + (context.reference_temperature_k - material.reference_temperature_k)
-                            + (avg_reference_temperature_k - material.reference_temperature_k)
+                            + (context.reference_temperature_k
+                                - material.thermal.reference_temperature_k)
+                            + (avg_reference_temperature_k
+                                - material.thermal.reference_temperature_k)
                                 * 0.1;
-                        material.modulus_temp_coeff_per_k * adjusted_delta
+                        material.thermal.modulus_temp_coeff_per_k * adjusted_delta
                     })
                     .sum::<f64>()
                     / model.materials.len() as f64;
@@ -1707,9 +1709,9 @@ fn apply_thermo_material_heterogeneity(
             .iter()
             .find(|material| material.material_id == assignment.expected_material_id)
             .map(|material| {
-                material.modulus_temp_coeff_per_k
+                material.thermal.modulus_temp_coeff_per_k
                     * (applied_temperature_delta_k
-                        + (reference_temperature_k - material.reference_temperature_k))
+                        + (reference_temperature_k - material.thermal.reference_temperature_k))
             })
             .unwrap_or(constitutive_temperature_factor)
             .clamp(-0.4, 0.2);
@@ -1718,9 +1720,9 @@ fn apply_thermo_material_heterogeneity(
             .iter()
             .find(|material| material.material_id == assignment.assigned_material_id)
             .map(|material| {
-                material.modulus_temp_coeff_per_k
+                material.thermal.modulus_temp_coeff_per_k
                     * (applied_temperature_delta_k
-                        + (reference_temperature_k - material.reference_temperature_k))
+                        + (reference_temperature_k - material.thermal.reference_temperature_k))
             })
             .unwrap_or(expected_temp_response)
             .clamp(-0.4, 0.2);

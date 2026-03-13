@@ -2,8 +2,8 @@ use runmat_geometry_core::UnitSystem;
 use serde::{Deserialize, Serialize};
 
 use super::{
-    bc::BoundaryCondition, loads::LoadCase, material_assignment::MaterialAssignment,
-    materials::MaterialModel, steps::AnalysisStep,
+    bc::BoundaryCondition, interfaces::AnalysisInterface, loads::LoadCase,
+    material_assignment::MaterialAssignment, materials::MaterialModel, steps::AnalysisStep,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -26,6 +26,8 @@ pub struct AnalysisModel {
     pub materials: Vec<MaterialModel>,
     #[serde(default)]
     pub material_assignments: Vec<MaterialAssignment>,
+    #[serde(default)]
+    pub interfaces: Vec<AnalysisInterface>,
     pub boundary_conditions: Vec<BoundaryCondition>,
     pub loads: Vec<LoadCase>,
     pub steps: Vec<AnalysisStep>,

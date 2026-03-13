@@ -2,6 +2,7 @@
 
 pub mod problem {
     pub mod bc;
+    pub mod interfaces;
     pub mod loads;
     pub mod material_assignment;
     pub mod materials;
@@ -13,9 +14,12 @@ pub mod validate;
 
 pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
 pub use problem::bc::{BoundaryCondition, BoundaryConditionKind};
+pub use problem::interfaces::{AnalysisInterface, AnalysisInterfaceKind, ContactInterfaceModel};
 pub use problem::loads::{LoadCase, LoadKind};
 pub use problem::material_assignment::{EvidenceConfidence, MaterialAssignment};
-pub use problem::materials::MaterialModel;
+pub use problem::materials::{
+    MaterialElectricalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
+};
 pub use problem::model::{AnalysisModel, AnalysisModelId, ReferenceFrame};
 pub use problem::steps::{AnalysisStep, AnalysisStepKind};
 pub use validate::{validate_model, validate_model_against_geometry, AnalysisValidationError};
@@ -38,10 +42,12 @@ mod tests {
                 name: "Steel".to_string(),
                 youngs_modulus_pa: 200e9,
                 poisson_ratio: 0.3,
-                reference_temperature_k: 293.15,
-                modulus_temp_coeff_per_k: -2.5e-4,
+                thermal: MaterialThermalModel::default(),
+                electrical: None,
+                plastic: None,
             }],
             material_assignments: Vec::new(),
+            interfaces: Vec::new(),
             boundary_conditions: vec![BoundaryCondition {
                 bc_id: "bc_fixed_root".to_string(),
                 region_id: "root".to_string(),

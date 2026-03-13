@@ -10,7 +10,7 @@ use runmat_accelerate_api::{
 use runmat_analysis_core::{
     AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind,
     BoundaryCondition, BoundaryConditionKind, EvidenceConfidence, LoadCase, LoadKind,
-    MaterialAssignment, MaterialModel, ReferenceFrame,
+    MaterialAssignment, MaterialModel, MaterialThermalModel, ReferenceFrame,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{
@@ -39,10 +39,16 @@ fn sample_model() -> AnalysisModel {
             name: "Steel".to_string(),
             youngs_modulus_pa: 200e9,
             poisson_ratio: 0.3,
-            reference_temperature_k: 293.15,
-            modulus_temp_coeff_per_k: -2.5e-4,
+            thermal: MaterialThermalModel {
+                reference_temperature_k: 293.15,
+                modulus_temp_coeff_per_k: -2.5e-4,
+                ..MaterialThermalModel::default()
+            },
+            electrical: None,
+            plastic: None,
         }],
         material_assignments: Vec::new(),
+        interfaces: Vec::new(),
         boundary_conditions: vec![BoundaryCondition {
             bc_id: "bc_root".to_string(),
             region_id: "root".to_string(),
@@ -71,8 +77,13 @@ fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
         name: "Polymer".to_string(),
         youngs_modulus_pa: 3.2e9,
         poisson_ratio: 0.37,
-        reference_temperature_k: 293.15,
-        modulus_temp_coeff_per_k: -7.0e-4,
+        thermal: MaterialThermalModel {
+            reference_temperature_k: 293.15,
+            modulus_temp_coeff_per_k: -7.0e-4,
+            ..MaterialThermalModel::default()
+        },
+        electrical: None,
+        plastic: None,
     });
     model.material_assignments = vec![MaterialAssignment {
         region_id: "tip".to_string(),

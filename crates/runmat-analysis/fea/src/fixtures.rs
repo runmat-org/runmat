@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
     AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind, BoundaryCondition,
     BoundaryConditionKind, EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment,
-    MaterialModel, ReferenceFrame,
+    MaterialModel, MaterialThermalModel, ReferenceFrame,
 };
 use runmat_geometry_core::UnitSystem;
 
@@ -82,8 +82,13 @@ fn cantilever_linear_static() -> AnalysisModel {
             name: "Steel".to_string(),
             youngs_modulus_pa: 200e9,
             poisson_ratio: 0.3,
-            reference_temperature_k: 293.15,
-            modulus_temp_coeff_per_k: -2.5e-4,
+            thermal: MaterialThermalModel {
+                reference_temperature_k: 293.15,
+                modulus_temp_coeff_per_k: -2.5e-4,
+                ..MaterialThermalModel::default()
+            },
+            electrical: None,
+            plastic: None,
         }],
         material_assignments: vec![MaterialAssignment {
             region_id: "tip".to_string(),
@@ -91,6 +96,7 @@ fn cantilever_linear_static() -> AnalysisModel {
             assigned_material_id: "mat_steel".to_string(),
             confidence: EvidenceConfidence::Verified,
         }],
+        interfaces: Vec::new(),
         boundary_conditions: vec![BoundaryCondition {
             bc_id: "bc_root".to_string(),
             region_id: "root".to_string(),
@@ -251,16 +257,26 @@ fn nonlinear_softening_proxy_fixture() -> AnalysisModel {
             name: "Soft Polymer".to_string(),
             youngs_modulus_pa: 1.4e9,
             poisson_ratio: 0.39,
-            reference_temperature_k: 293.15,
-            modulus_temp_coeff_per_k: -1.2e-3,
+            thermal: MaterialThermalModel {
+                reference_temperature_k: 293.15,
+                modulus_temp_coeff_per_k: -1.2e-3,
+                ..MaterialThermalModel::default()
+            },
+            electrical: None,
+            plastic: None,
         },
         MaterialModel {
             material_id: "mat_aluminum".to_string(),
             name: "Aluminum".to_string(),
             youngs_modulus_pa: 69e9,
             poisson_ratio: 0.33,
-            reference_temperature_k: 293.15,
-            modulus_temp_coeff_per_k: -3.6e-4,
+            thermal: MaterialThermalModel {
+                reference_temperature_k: 293.15,
+                modulus_temp_coeff_per_k: -3.6e-4,
+                ..MaterialThermalModel::default()
+            },
+            electrical: None,
+            plastic: None,
         },
     ];
     model.material_assignments = vec![
@@ -648,24 +664,39 @@ fn multi_material_assembly() -> AnalysisModel {
             name: "Steel".to_string(),
             youngs_modulus_pa: 200e9,
             poisson_ratio: 0.3,
-            reference_temperature_k: 293.15,
-            modulus_temp_coeff_per_k: -2.5e-4,
+            thermal: MaterialThermalModel {
+                reference_temperature_k: 293.15,
+                modulus_temp_coeff_per_k: -2.5e-4,
+                ..MaterialThermalModel::default()
+            },
+            electrical: None,
+            plastic: None,
         },
         MaterialModel {
             material_id: "mat_aluminum".to_string(),
             name: "Aluminum".to_string(),
             youngs_modulus_pa: 69e9,
             poisson_ratio: 0.33,
-            reference_temperature_k: 293.15,
-            modulus_temp_coeff_per_k: -3.6e-4,
+            thermal: MaterialThermalModel {
+                reference_temperature_k: 293.15,
+                modulus_temp_coeff_per_k: -3.6e-4,
+                ..MaterialThermalModel::default()
+            },
+            electrical: None,
+            plastic: None,
         },
         MaterialModel {
             material_id: "mat_polymer".to_string(),
             name: "Polymer".to_string(),
             youngs_modulus_pa: 3.2e9,
             poisson_ratio: 0.37,
-            reference_temperature_k: 293.15,
-            modulus_temp_coeff_per_k: -8.0e-4,
+            thermal: MaterialThermalModel {
+                reference_temperature_k: 293.15,
+                modulus_temp_coeff_per_k: -8.0e-4,
+                ..MaterialThermalModel::default()
+            },
+            electrical: None,
+            plastic: None,
         },
     ];
 

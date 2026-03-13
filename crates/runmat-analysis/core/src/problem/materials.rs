@@ -8,14 +8,89 @@ fn default_modulus_temp_coeff_per_k() -> f64 {
     -2.5e-4
 }
 
+fn default_thermal_conductivity_w_per_mk() -> f64 {
+    45.0
+}
+
+fn default_specific_heat_j_per_kgk() -> f64 {
+    500.0
+}
+
+fn default_thermal_expansion_coefficient_per_k() -> f64 {
+    1.2e-5
+}
+
+fn default_electrical_conductivity_s_per_m() -> f64 {
+    1.0
+}
+
+fn default_resistive_heating_coefficient() -> f64 {
+    0.0
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MaterialThermalModel {
+    #[serde(default = "default_reference_temperature_k")]
+    pub reference_temperature_k: f64,
+    #[serde(default = "default_modulus_temp_coeff_per_k")]
+    pub modulus_temp_coeff_per_k: f64,
+    #[serde(default = "default_thermal_conductivity_w_per_mk")]
+    pub conductivity_w_per_mk: f64,
+    #[serde(default = "default_specific_heat_j_per_kgk")]
+    pub specific_heat_j_per_kgk: f64,
+    #[serde(default = "default_thermal_expansion_coefficient_per_k")]
+    pub expansion_coefficient_per_k: f64,
+}
+
+impl Default for MaterialThermalModel {
+    fn default() -> Self {
+        Self {
+            reference_temperature_k: default_reference_temperature_k(),
+            modulus_temp_coeff_per_k: default_modulus_temp_coeff_per_k(),
+            conductivity_w_per_mk: default_thermal_conductivity_w_per_mk(),
+            specific_heat_j_per_kgk: default_specific_heat_j_per_kgk(),
+            expansion_coefficient_per_k: default_thermal_expansion_coefficient_per_k(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MaterialElectricalModel {
+    #[serde(default = "default_reference_temperature_k")]
+    pub reference_temperature_k: f64,
+    #[serde(default = "default_electrical_conductivity_s_per_m")]
+    pub conductivity_s_per_m: f64,
+    #[serde(default = "default_resistive_heating_coefficient")]
+    pub resistive_heating_coefficient: f64,
+}
+
+impl Default for MaterialElectricalModel {
+    fn default() -> Self {
+        Self {
+            reference_temperature_k: default_reference_temperature_k(),
+            conductivity_s_per_m: default_electrical_conductivity_s_per_m(),
+            resistive_heating_coefficient: default_resistive_heating_coefficient(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MaterialPlasticModel {
+    pub yield_strain: f64,
+    pub hardening_modulus_ratio: f64,
+    pub saturation_exponent: f64,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MaterialModel {
     pub material_id: String,
     pub name: String,
     pub youngs_modulus_pa: f64,
     pub poisson_ratio: f64,
-    #[serde(default = "default_reference_temperature_k")]
-    pub reference_temperature_k: f64,
-    #[serde(default = "default_modulus_temp_coeff_per_k")]
-    pub modulus_temp_coeff_per_k: f64,
+    #[serde(default)]
+    pub thermal: MaterialThermalModel,
+    #[serde(default)]
+    pub electrical: Option<MaterialElectricalModel>,
+    #[serde(default)]
+    pub plastic: Option<MaterialPlasticModel>,
 }

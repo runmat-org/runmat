@@ -148,8 +148,20 @@ model:
       name: AISI 1018
       youngs_modulus_pa: 2.1e11
       poisson_ratio: 0.29
-      reference_temperature_k: 293.15
-      modulus_temp_coeff_per_k: -2.5e-4
+      thermal:
+        reference_temperature_k: 293.15
+        modulus_temp_coeff_per_k: -2.5e-4
+        conductivity_w_per_mk: 45.0
+        specific_heat_j_per_kgk: 500.0
+        expansion_coefficient_per_k: 1.2e-5
+      electrical:
+        reference_temperature_k: 293.15
+        conductivity_s_per_m: 1.0
+        resistive_heating_coefficient: 0.0
+      plastic:
+        yield_strain: 0.002
+        hardening_modulus_ratio: 0.02
+        saturation_exponent: 2.0
   material_assignments:
     - region_id: bracket_body
       expected_material_id: steel_1018
@@ -179,6 +191,15 @@ model:
   steps:
     - step_id: step_nonlinear
       kind: nonlinear
+  interfaces:
+    - interface_id: contact_mount
+      primary_region_id: bracket_body
+      secondary_region_id: mount_holes
+      kind:
+        contact:
+          penalty_stiffness_scale: 1.0
+          max_penetration_ratio: 0.01
+          friction_coefficient: 0.0
 
 execution:
   backend: gpu
@@ -197,35 +218,6 @@ execution:
     tangent_refresh_interval: 2
     prep_artifact_id: prep_bracket_v3
     prep_calibration_profile: balanced
-    thermo_mechanical_coupling:
-      enabled: true
-      reference_temperature_k: 293.15
-      applied_temperature_delta_k: 20.0
-      thermal_expansion_coefficient: 1.2e-5
-      region_temperature_deltas:
-        - region_id: bracket_body
-          temperature_delta_k: 20.0
-      time_profile:
-        - normalized_time: 0.0
-          scale: 0.0
-        - normalized_time: 1.0
-          scale: 1.0
-    electro_thermal_coupling:
-      enabled: false
-      reference_temperature_k: 293.15
-      applied_voltage_v: 0.0
-      base_electrical_conductivity_s_per_m: 1.0
-      resistive_heating_coefficient: 0.0
-    plasticity_proxy:
-      enabled: true
-      yield_strain: 0.002
-      hardening_modulus_ratio: 0.02
-      saturation_exponent: 2.0
-    contact_proxy:
-      enabled: true
-      penalty_stiffness_scale: 1.0
-      max_penetration_ratio: 0.01
-      friction_coefficient: 0.0
 
 results_query:
   include_fields: []
@@ -271,6 +263,9 @@ Study field to currently implemented type mapping:
 | `model.frame` | yes | study | `runmat_analysis_core::problem::model::ReferenceFrame` |
 | `model.units` | yes | study | `runmat_geometry_core::UnitSystem` |
 | `model.materials[]` | conditional | study | `runmat_analysis_core::problem::materials::MaterialModel` |
+| `model.materials[].thermal` | conditional | study | `runmat_analysis_core::problem::materials::MaterialThermalModel` |
+| `model.materials[].electrical` | conditional | study | `runmat_analysis_core::problem::materials::MaterialElectricalModel` |
+| `model.materials[].plastic` | conditional | study | `runmat_analysis_core::problem::materials::MaterialPlasticModel` |
 | `model.material_assignments[]` | yes | study | `runmat_analysis_core::problem::material_assignment::MaterialAssignment` |
 | `model.material_assignments[].confidence` | no | study | `runmat_analysis_core::problem::material_assignment::EvidenceConfidence` |
 | `model.boundary_conditions[]` | yes | study | `runmat_analysis_core::problem::bc::BoundaryCondition` |
@@ -279,6 +274,8 @@ Study field to currently implemented type mapping:
 | `model.loads[].kind` | yes | study | `runmat_analysis_core::problem::loads::LoadKind` |
 | `model.steps[]` | yes | study | `runmat_analysis_core::problem::steps::AnalysisStep` |
 | `model.steps[].kind` | yes | study | `runmat_analysis_core::problem::steps::AnalysisStepKind` |
+| `model.interfaces[]` | conditional | study | `runmat_analysis_core::problem::interfaces::AnalysisInterface` |
+| `model.interfaces[].kind` | conditional | study | `runmat_analysis_core::problem::interfaces::AnalysisInterfaceKind` |
 | `execution.backend` | yes | study | `runmat_analysis_fea::ComputeBackend` |
 | `execution.options` (linear static) | conditional | study | `runmat_runtime::analysis::contracts::AnalysisRunOptions` |
 | `execution.options` (modal) | conditional | study | `runmat_runtime::analysis::contracts::AnalysisModalRunOptions` |
@@ -287,10 +284,6 @@ Study field to currently implemented type mapping:
 | `execution.options.precision_mode` | no | study/defaulted | `runmat_runtime::analysis::contracts::PrecisionMode` |
 | `execution.options.quality_policy` | no | study/defaulted | `runmat_runtime::analysis::contracts::QualityPolicy` |
 | `execution.options.prep_calibration_profile` | no | study | `runmat_runtime::analysis::contracts::PrepCalibrationProfile` |
-| `execution.options.thermo_mechanical_coupling` | no | study | `runmat_runtime::analysis::contracts::ThermoMechanicalCouplingOptions` |
-| `execution.options.electro_thermal_coupling` | no | study | `runmat_runtime::analysis::contracts::ElectroThermalCouplingOptions` |
-| `execution.options.plasticity_proxy` | no | study | `runmat_runtime::analysis::contracts::PlasticityProxyOptions` |
-| `execution.options.contact_proxy` | no | study | `runmat_runtime::analysis::contracts::ContactProxyOptions` |
 | `results_query` | no | study/defaulted | `runmat_runtime::analysis::contracts::AnalysisResultsQuery` |
 
 Runtime operation bindings used by study builtins:
@@ -316,7 +309,7 @@ Execution option shapes by profile (matching current runtime structs):
 - linear static: `AnalysisRunOptions`.
 - modal: `AnalysisModalRunOptions`.
 - transient: `AnalysisTransientRunOptions`.
-- nonlinear: `AnalysisNonlinearRunOptions` (`increment_count`, `max_newton_iters`, `tolerance`, `residual_convergence_factor`, `increment_norm_tolerance`, `line_search`, `max_line_search_backtracks`, `line_search_reduction`, `tangent_refresh_interval`, optional `plasticity_proxy`, optional `contact_proxy`).
+- nonlinear: `AnalysisNonlinearRunOptions` (`increment_count`, `max_newton_iters`, `tolerance`, `residual_convergence_factor`, `increment_norm_tolerance`, `line_search`, `max_line_search_backtracks`, `line_search_reduction`, `tangent_refresh_interval`).
 
 ## Companion Schemas
 

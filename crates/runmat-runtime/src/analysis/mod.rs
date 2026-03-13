@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisModel, AnalysisModelId, AnalysisStep,
     AnalysisStepKind, AnalysisValidationError, BoundaryCondition, BoundaryConditionKind,
-    EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment, MaterialModel, ReferenceFrame,
+    EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment, MaterialModel,
+    MaterialThermalModel, ReferenceFrame,
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
@@ -362,6 +363,7 @@ pub fn analysis_create_model_op(
         frame: ReferenceFrame::Global,
         materials: inferred_materials,
         material_assignments: inferred_assignments,
+        interfaces: Vec::new(),
         boundary_conditions: vec![default_bc],
         loads: vec![default_load],
         steps: vec![default_step],
@@ -4506,8 +4508,13 @@ fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
             name: name.to_string(),
             youngs_modulus_pa,
             poisson_ratio,
-            reference_temperature_k: 293.15,
-            modulus_temp_coeff_per_k: -2.5e-4,
+            thermal: MaterialThermalModel {
+                reference_temperature_k: 293.15,
+                modulus_temp_coeff_per_k: -2.5e-4,
+                ..MaterialThermalModel::default()
+            },
+            electrical: None,
+            plastic: None,
         });
     }
 
@@ -4517,8 +4524,13 @@ fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
             name: "Steel (Default)".to_string(),
             youngs_modulus_pa: 200e9,
             poisson_ratio: 0.3,
-            reference_temperature_k: 293.15,
-            modulus_temp_coeff_per_k: -2.5e-4,
+            thermal: MaterialThermalModel {
+                reference_temperature_k: 293.15,
+                modulus_temp_coeff_per_k: -2.5e-4,
+                ..MaterialThermalModel::default()
+            },
+            electrical: None,
+            plastic: None,
         });
     }
 
