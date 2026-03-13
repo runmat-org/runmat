@@ -73,6 +73,14 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED": "true",
             "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS": "14",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM": "6.0",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_TEMPERATURE_K": "290.0",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_TEMPERATURE_K": "390.0",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_CONDUCTIVITY_SPREAD_RATIO": "1.8",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_HEAT_CAPACITY_SPREAD_RATIO": "1.8",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_BREACH_RATE": "0.1",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_THERMAL_REQUIRE_METRICS": "true",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TRANSIENT_SEVERITY": "0.25",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_NONLINEAR_SEVERITY": "0.25",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MIN_ENABLED_RATE": "0.5",
@@ -123,6 +131,14 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED": "true",
             "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS": "21",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM": "7.0",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_TEMPERATURE_K": "285.0",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_TEMPERATURE_K": "405.0",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_CONDUCTIVITY_SPREAD_RATIO": "2.0",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_HEAT_CAPACITY_SPREAD_RATIO": "2.0",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_BREACH_RATE": "0.25",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_THERMAL_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TRANSIENT_SEVERITY": "0.3",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_NONLINEAR_SEVERITY": "0.3",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MIN_ENABLED_RATE": "0.0",
@@ -173,6 +189,14 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED": "false",
             "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS": "30",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM": "8.0",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_TEMPERATURE_K": "280.0",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_TEMPERATURE_K": "430.0",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_CONDUCTIVITY_SPREAD_RATIO": "2.5",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_HEAT_CAPACITY_SPREAD_RATIO": "2.5",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_BREACH_RATE": "0.5",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_THERMAL_REQUIRE_METRICS": "false",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TRANSIENT_SEVERITY": "0.4",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_NONLINEAR_SEVERITY": "0.4",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MIN_ENABLED_RATE": "0.0",
@@ -804,6 +828,58 @@ def evaluate_release_readiness(
             ),
         )
     )
+    thermal_max_residual_norm_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM",
+            profile_default("RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM", "8.0"),
+        )
+    )
+    thermal_min_temperature_k_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_TEMPERATURE_K",
+            profile_default("RUNMAT_RELEASE_READINESS_THERMAL_MIN_TEMPERATURE_K", "280.0"),
+        )
+    )
+    thermal_max_temperature_k_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_TEMPERATURE_K",
+            profile_default("RUNMAT_RELEASE_READINESS_THERMAL_MAX_TEMPERATURE_K", "430.0"),
+        )
+    )
+    thermal_max_conductivity_spread_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_CONDUCTIVITY_SPREAD_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMAL_MAX_CONDUCTIVITY_SPREAD_RATIO", "2.5"
+            ),
+        )
+    )
+    thermal_max_heat_capacity_spread_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_HEAT_CAPACITY_SPREAD_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMAL_MAX_HEAT_CAPACITY_SPREAD_RATIO", "2.5"
+            ),
+        )
+    )
+    thermal_max_spread_breach_rate_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_BREACH_RATE",
+            profile_default("RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_BREACH_RATE", "0.5"),
+        )
+    )
+    thermal_max_spread_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO", "1.35"),
+        )
+    )
+    thermal_require_metrics = is_true(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMAL_REQUIRE_METRICS",
+            profile_default("RUNMAT_RELEASE_READINESS_THERMAL_REQUIRE_METRICS", "false"),
+        )
+    )
     electro_max_transient_severity_threshold = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TRANSIENT_SEVERITY",
@@ -1068,6 +1144,13 @@ def evaluate_release_readiness(
     thermo_heterogeneity_breach_rate = None
     thermo_spread_trend_ratio = None
     thermo_heterogeneity_trend_ratio = None
+    thermal_max_residual_norm = None
+    thermal_min_temperature_k = None
+    thermal_max_temperature_k = None
+    thermal_max_conductivity_spread_ratio = None
+    thermal_max_heat_capacity_spread_ratio = None
+    thermal_spread_breach_rate = None
+    thermal_spread_trend_ratio = None
     electro_coupling_enabled_rate = None
     electro_max_transient_severity = None
     electro_max_nonlinear_severity = None
@@ -1095,6 +1178,150 @@ def evaluate_release_readiness(
     contact_promotion_sample_count = 0
     contact_promotion_blocker_count = 0
     contact_promotion_blocker_regression = None
+    thermal_records = [
+        rec
+        for rec in report_records(latest)
+        if isinstance(rec.get("thermal_max_residual_norm"), (int, float))
+        or isinstance(rec.get("thermal_min_temperature_k"), (int, float))
+        or isinstance(rec.get("thermal_max_temperature_k"), (int, float))
+        or isinstance(rec.get("thermal_conductivity_spread_ratio"), (int, float))
+        or isinstance(rec.get("thermal_heat_capacity_spread_ratio"), (int, float))
+    ]
+    if not thermal_records:
+        if protected or thermal_require_metrics:
+            reasons.append(
+                Reason(
+                    code="THERMAL_METRICS_MISSING",
+                    severity="warn",
+                    detail="standalone thermal posture metrics missing from report records",
+                )
+            )
+    else:
+        thermal_residual_values = []
+        thermal_min_temp_values = []
+        thermal_max_temp_values = []
+        thermal_conductivity_spread_values = []
+        thermal_heat_capacity_spread_values = []
+        thermal_spread_values = []
+        for rec in thermal_records:
+            for key, target in [
+                ("thermal_max_residual_norm", thermal_residual_values),
+                ("thermal_min_temperature_k", thermal_min_temp_values),
+                ("thermal_max_temperature_k", thermal_max_temp_values),
+                ("thermal_conductivity_spread_ratio", thermal_conductivity_spread_values),
+                ("thermal_heat_capacity_spread_ratio", thermal_heat_capacity_spread_values),
+            ]:
+                raw = rec.get(key)
+                if isinstance(raw, (int, float)):
+                    value = float(raw)
+                    if math.isfinite(value):
+                        target.append(value)
+            spread_raw = rec.get("thermal_conductivity_spread_ratio")
+            spread2_raw = rec.get("thermal_heat_capacity_spread_ratio")
+            spread_candidates = []
+            if isinstance(spread_raw, (int, float)) and math.isfinite(float(spread_raw)):
+                spread_candidates.append(float(spread_raw))
+            if isinstance(spread2_raw, (int, float)) and math.isfinite(float(spread2_raw)):
+                spread_candidates.append(float(spread2_raw))
+            if spread_candidates:
+                thermal_spread_values.append(max(spread_candidates))
+
+        if thermal_residual_values:
+            thermal_max_residual_norm = max(thermal_residual_values)
+            if thermal_max_residual_norm > thermal_max_residual_norm_threshold:
+                reasons.append(
+                    Reason(
+                        code="THERMAL_RESIDUAL_NORM_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"max thermal residual norm {thermal_max_residual_norm:.3f} exceeds "
+                            f"threshold {thermal_max_residual_norm_threshold:.3f}"
+                        ),
+                    )
+                )
+        if thermal_min_temp_values:
+            thermal_min_temperature_k = min(thermal_min_temp_values)
+            if thermal_min_temperature_k < thermal_min_temperature_k_threshold:
+                reasons.append(
+                    Reason(
+                        code="THERMAL_MIN_TEMPERATURE_LOW",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"min thermal temperature {thermal_min_temperature_k:.3f}K below "
+                            f"threshold {thermal_min_temperature_k_threshold:.3f}K"
+                        ),
+                    )
+                )
+        if thermal_max_temp_values:
+            thermal_max_temperature_k = max(thermal_max_temp_values)
+            if thermal_max_temperature_k > thermal_max_temperature_k_threshold:
+                reasons.append(
+                    Reason(
+                        code="THERMAL_MAX_TEMPERATURE_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"max thermal temperature {thermal_max_temperature_k:.3f}K exceeds "
+                            f"threshold {thermal_max_temperature_k_threshold:.3f}K"
+                        ),
+                    )
+                )
+        if thermal_conductivity_spread_values:
+            thermal_max_conductivity_spread_ratio = max(thermal_conductivity_spread_values)
+            if (
+                thermal_max_conductivity_spread_ratio
+                > thermal_max_conductivity_spread_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="THERMAL_CONDUCTIVITY_SPREAD_RATIO_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"max thermal conductivity spread ratio {thermal_max_conductivity_spread_ratio:.3f} exceeds "
+                            f"threshold {thermal_max_conductivity_spread_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
+        if thermal_heat_capacity_spread_values:
+            thermal_max_heat_capacity_spread_ratio = max(thermal_heat_capacity_spread_values)
+            if (
+                thermal_max_heat_capacity_spread_ratio
+                > thermal_max_heat_capacity_spread_ratio_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="THERMAL_HEAT_CAPACITY_SPREAD_RATIO_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"max thermal heat-capacity spread ratio {thermal_max_heat_capacity_spread_ratio:.3f} exceeds "
+                            f"threshold {thermal_max_heat_capacity_spread_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
+        if thermal_spread_values:
+            thermal_spread_breach_rate = (
+                sum(
+                    1
+                    for value in thermal_spread_values
+                    if value
+                    > max(
+                        thermal_max_conductivity_spread_ratio_threshold,
+                        thermal_max_heat_capacity_spread_ratio_threshold,
+                    )
+                )
+                / len(thermal_spread_values)
+            )
+            if thermal_spread_breach_rate > thermal_max_spread_breach_rate_threshold:
+                reasons.append(
+                    Reason(
+                        code="THERMAL_SPREAD_BREACH_RATE_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"thermal spread breach rate {thermal_spread_breach_rate:.3f} exceeds "
+                            f"threshold {thermal_max_spread_breach_rate_threshold:.3f}"
+                        ),
+                    )
+                )
+
     if not thermo_records:
         if protected or thermo_require_metrics:
             reasons.append(
@@ -1802,6 +2029,46 @@ def evaluate_release_readiness(
                         )
                     )
 
+        latest_thermal_spread_values = []
+        for rec in report_records(latest):
+            spread_candidates = []
+            raw_cond = rec.get("thermal_conductivity_spread_ratio")
+            raw_cp = rec.get("thermal_heat_capacity_spread_ratio")
+            if isinstance(raw_cond, (int, float)) and math.isfinite(float(raw_cond)):
+                spread_candidates.append(float(raw_cond))
+            if isinstance(raw_cp, (int, float)) and math.isfinite(float(raw_cp)):
+                spread_candidates.append(float(raw_cp))
+            if spread_candidates:
+                latest_thermal_spread_values.append(max(spread_candidates))
+        rolling_thermal_spread_values = []
+        for report in rolling:
+            for rec in report_records(report):
+                spread_candidates = []
+                raw_cond = rec.get("thermal_conductivity_spread_ratio")
+                raw_cp = rec.get("thermal_heat_capacity_spread_ratio")
+                if isinstance(raw_cond, (int, float)) and math.isfinite(float(raw_cond)):
+                    spread_candidates.append(float(raw_cond))
+                if isinstance(raw_cp, (int, float)) and math.isfinite(float(raw_cp)):
+                    spread_candidates.append(float(raw_cp))
+                if spread_candidates:
+                    rolling_thermal_spread_values.append(max(spread_candidates))
+        if latest_thermal_spread_values and rolling_thermal_spread_values:
+            latest_thermal_spread = max(latest_thermal_spread_values)
+            baseline_thermal_spread = statistics.median(rolling_thermal_spread_values)
+            if baseline_thermal_spread > 0:
+                thermal_spread_trend_ratio = latest_thermal_spread / baseline_thermal_spread
+                if thermal_spread_trend_ratio > thermal_max_spread_trend_ratio_threshold:
+                    reasons.append(
+                        Reason(
+                            code="THERMAL_SPREAD_TREND_WORSENING",
+                            severity="fail" if protected else "warn",
+                            detail=(
+                                f"thermal spread trend ratio {thermal_spread_trend_ratio:.3f} exceeds "
+                                f"threshold {thermal_max_spread_trend_ratio_threshold:.3f}"
+                            ),
+                        )
+                    )
+
         latest_by_fixture = {}
         for rec in report_records(latest):
             fixture_id = rec.get("fixture_id")
@@ -2334,6 +2601,20 @@ def evaluate_release_readiness(
         "thermo_heterogeneity_breach_rate": thermo_heterogeneity_breach_rate,
         "thermo_spread_trend_ratio": thermo_spread_trend_ratio,
         "thermo_heterogeneity_trend_ratio": thermo_heterogeneity_trend_ratio,
+        "thermal_max_residual_norm": thermal_max_residual_norm,
+        "thermal_max_residual_norm_threshold": thermal_max_residual_norm_threshold,
+        "thermal_min_temperature_k": thermal_min_temperature_k,
+        "thermal_min_temperature_k_threshold": thermal_min_temperature_k_threshold,
+        "thermal_max_temperature_k": thermal_max_temperature_k,
+        "thermal_max_temperature_k_threshold": thermal_max_temperature_k_threshold,
+        "thermal_max_conductivity_spread_ratio": thermal_max_conductivity_spread_ratio,
+        "thermal_max_conductivity_spread_ratio_threshold": thermal_max_conductivity_spread_ratio_threshold,
+        "thermal_max_heat_capacity_spread_ratio": thermal_max_heat_capacity_spread_ratio,
+        "thermal_max_heat_capacity_spread_ratio_threshold": thermal_max_heat_capacity_spread_ratio_threshold,
+        "thermal_spread_breach_rate": thermal_spread_breach_rate,
+        "thermal_max_spread_breach_rate_threshold": thermal_max_spread_breach_rate_threshold,
+        "thermal_spread_trend_ratio": thermal_spread_trend_ratio,
+        "thermal_max_spread_trend_ratio_threshold": thermal_max_spread_trend_ratio_threshold,
         "electro_coupling_enabled_rate": electro_coupling_enabled_rate,
         "electro_max_transient_severity": electro_max_transient_severity,
         "electro_max_nonlinear_severity": electro_max_nonlinear_severity,
@@ -2503,6 +2784,64 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Thermo heterogeneity trend ratio: "
         f"`{result.get('thermo_heterogeneity_trend_ratio') if result.get('thermo_heterogeneity_trend_ratio') is not None else '-'}`"
+    )
+    lines.append("")
+    lines.append("### Thermal Posture")
+    lines.append(
+        "- Max thermal residual norm: "
+        f"`{result.get('thermal_max_residual_norm') if result.get('thermal_max_residual_norm') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermal residual threshold: "
+        f"`{result.get('thermal_max_residual_norm_threshold') if result.get('thermal_max_residual_norm_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Min thermal temperature (K): "
+        f"`{result.get('thermal_min_temperature_k') if result.get('thermal_min_temperature_k') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermal min temperature threshold (K): "
+        f"`{result.get('thermal_min_temperature_k_threshold') if result.get('thermal_min_temperature_k_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Max thermal temperature (K): "
+        f"`{result.get('thermal_max_temperature_k') if result.get('thermal_max_temperature_k') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermal max temperature threshold (K): "
+        f"`{result.get('thermal_max_temperature_k_threshold') if result.get('thermal_max_temperature_k_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Max thermal conductivity spread ratio: "
+        f"`{result.get('thermal_max_conductivity_spread_ratio') if result.get('thermal_max_conductivity_spread_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermal conductivity spread threshold: "
+        f"`{result.get('thermal_max_conductivity_spread_ratio_threshold') if result.get('thermal_max_conductivity_spread_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Max thermal heat-capacity spread ratio: "
+        f"`{result.get('thermal_max_heat_capacity_spread_ratio') if result.get('thermal_max_heat_capacity_spread_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermal heat-capacity spread threshold: "
+        f"`{result.get('thermal_max_heat_capacity_spread_ratio_threshold') if result.get('thermal_max_heat_capacity_spread_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermal spread breach rate: "
+        f"`{result.get('thermal_spread_breach_rate') if result.get('thermal_spread_breach_rate') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermal spread breach threshold: "
+        f"`{result.get('thermal_max_spread_breach_rate_threshold') if result.get('thermal_max_spread_breach_rate_threshold') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermal spread trend ratio: "
+        f"`{result.get('thermal_spread_trend_ratio') if result.get('thermal_spread_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermal spread trend threshold: "
+        f"`{result.get('thermal_max_spread_trend_ratio_threshold') if result.get('thermal_max_spread_trend_ratio_threshold') is not None else '-'}`"
     )
     lines.append("")
     lines.append("### Electro-Thermal Posture")

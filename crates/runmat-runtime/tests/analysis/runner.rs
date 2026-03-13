@@ -1113,6 +1113,11 @@ pub(super) fn run_fixture(
     let mut electro_nonlinear_severity = None;
     let mut plastic_nonlinear_severity = None;
     let mut contact_nonlinear_severity = None;
+    let mut thermal_max_residual_norm = None;
+    let mut thermal_min_temperature_k = None;
+    let mut thermal_max_temperature_k = None;
+    let mut thermal_conductivity_spread_ratio = None;
+    let mut thermal_heat_capacity_spread_ratio = None;
     let mut publishable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
@@ -1177,6 +1182,11 @@ pub(super) fn run_fixture(
                     electro_nonlinear_severity,
                     plastic_nonlinear_severity,
                     contact_nonlinear_severity,
+                    thermal_max_residual_norm,
+                    thermal_min_temperature_k,
+                    thermal_max_temperature_k,
+                    thermal_conductivity_spread_ratio,
+                    thermal_heat_capacity_spread_ratio,
                     publishable,
                     parity,
                     threshold_assertions,
@@ -1935,6 +1945,77 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.2),
                         );
+                    } else if spec.id == "thermal_standalone_ramp_gpu_provider" {
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermal_standalone_max_residual_norm",
+                            "FEA_THERMAL_STABILITY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_THERMAL_STABILITY",
+                                "max_residual_norm",
+                            ),
+                            Some(0.0),
+                            Some(8.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermal_standalone_min_temperature_k",
+                            "FEA_THERMAL_STABILITY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_THERMAL_STABILITY",
+                                "min_temperature_k",
+                            ),
+                            Some(290.0),
+                            Some(380.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermal_standalone_max_temperature_k",
+                            "FEA_THERMAL_STABILITY",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_THERMAL_STABILITY",
+                                "max_temperature_k",
+                            ),
+                            Some(300.0),
+                            Some(420.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermal_standalone_conductivity_spread_ratio",
+                            "FEA_THERMAL_CONSTITUTIVE",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_THERMAL_CONSTITUTIVE",
+                                "conductivity_spread_ratio",
+                            ),
+                            Some(1.0),
+                            Some(2.0),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermal_standalone_heat_capacity_spread_ratio",
+                            "FEA_THERMAL_CONSTITUTIVE",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_THERMAL_CONSTITUTIVE",
+                                "heat_capacity_spread_ratio",
+                            ),
+                            Some(1.0),
+                            Some(2.0),
+                        );
                     } else if spec.id == "electro_thermal_joule_benign_gpu_provider" {
                         push_threshold_assertion(
                             spec.id,
@@ -2646,6 +2727,11 @@ pub(super) fn run_fixture(
                                 electro_nonlinear_severity,
                                 plastic_nonlinear_severity,
                                 contact_nonlinear_severity,
+                                thermal_max_residual_norm,
+                                thermal_min_temperature_k,
+                                thermal_max_temperature_k,
+                                thermal_conductivity_spread_ratio,
+                                thermal_heat_capacity_spread_ratio,
                                 publishable,
                                 parity,
                                 threshold_assertions,
@@ -2709,6 +2795,13 @@ pub(super) fn run_fixture(
                         gpu_results.data.summary.plastic_nonlinear_severity;
                     contact_nonlinear_severity =
                         gpu_results.data.summary.contact_nonlinear_severity;
+                    thermal_max_residual_norm = gpu_results.data.summary.thermal_max_residual_norm;
+                    thermal_min_temperature_k = gpu_results.data.summary.thermal_min_temperature_k;
+                    thermal_max_temperature_k = gpu_results.data.summary.thermal_max_temperature_k;
+                    thermal_conductivity_spread_ratio =
+                        gpu_results.data.summary.thermal_conductivity_spread_ratio;
+                    thermal_heat_capacity_spread_ratio =
+                        gpu_results.data.summary.thermal_heat_capacity_spread_ratio;
 
                     if let Some(root) = filesystem_root {
                         runmat_runtime::analysis::storage::configure_artifact_store(
@@ -2870,6 +2963,11 @@ pub(super) fn run_fixture(
                                     electro_nonlinear_severity,
                                     plastic_nonlinear_severity,
                                     contact_nonlinear_severity,
+                                    thermal_max_residual_norm,
+                                    thermal_min_temperature_k,
+                                    thermal_max_temperature_k,
+                                    thermal_conductivity_spread_ratio,
+                                    thermal_heat_capacity_spread_ratio,
                                     publishable,
                                     parity,
                                     threshold_assertions,
@@ -2983,6 +3081,11 @@ pub(super) fn run_fixture(
         electro_nonlinear_severity,
         plastic_nonlinear_severity,
         contact_nonlinear_severity,
+        thermal_max_residual_norm,
+        thermal_min_temperature_k,
+        thermal_max_temperature_k,
+        thermal_conductivity_spread_ratio,
+        thermal_heat_capacity_spread_ratio,
         publishable,
         parity,
         threshold_assertions,

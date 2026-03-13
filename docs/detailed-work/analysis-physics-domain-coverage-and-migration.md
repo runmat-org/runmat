@@ -21,7 +21,7 @@ RunMat today is strongest in structural mechanics and partially implemented in m
 | Electro-thermal coupling | partial | Not a full EM domain. |
 | Plasticity | partial | Model-owned schema is in place; constitutive context wiring is active, with further fidelity work pending. |
 | Contact | partial | Model-owned schema is in place; interface context wiring is active, with further fidelity work pending. |
-| Full standalone thermal domain | partial | Dedicated thermal step + runtime operation + payload now exist; constitutive fidelity and calibration depth still need expansion. |
+| Full standalone thermal domain | partial | Dedicated thermal step + runtime operation + payload now exist, with thermal constitutive diagnostics and readiness posture thresholds; fidelity/calibration depth still needs expansion. |
 | Full EM domain (Maxwell-class) | not implemented | Out of scope for near-term "most engineers" target. |
 
 ## Hard-Cutover Rule

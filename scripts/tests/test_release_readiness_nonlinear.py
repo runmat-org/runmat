@@ -32,6 +32,11 @@ def report(
     electro_conductivity_spread_ratio=None,
     plastic_nonlinear_severity=None,
     contact_nonlinear_severity=None,
+    thermal_max_residual_norm=None,
+    thermal_min_temperature_k=None,
+    thermal_max_temperature_k=None,
+    thermal_conductivity_spread_ratio=None,
+    thermal_heat_capacity_spread_ratio=None,
 ):
     fixtures = [
         "nonlinear_assembly_gpu_provider",
@@ -115,6 +120,21 @@ def report(
     if contact_nonlinear_severity is not None:
         for rec in records:
             rec["contact_nonlinear_severity"] = contact_nonlinear_severity
+    if thermal_max_residual_norm is not None:
+        for rec in records:
+            rec["thermal_max_residual_norm"] = thermal_max_residual_norm
+    if thermal_min_temperature_k is not None:
+        for rec in records:
+            rec["thermal_min_temperature_k"] = thermal_min_temperature_k
+    if thermal_max_temperature_k is not None:
+        for rec in records:
+            rec["thermal_max_temperature_k"] = thermal_max_temperature_k
+    if thermal_conductivity_spread_ratio is not None:
+        for rec in records:
+            rec["thermal_conductivity_spread_ratio"] = thermal_conductivity_spread_ratio
+    if thermal_heat_capacity_spread_ratio is not None:
+        for rec in records:
+            rec["thermal_heat_capacity_spread_ratio"] = thermal_heat_capacity_spread_ratio
 
     return {
         "passed": passed,
@@ -157,6 +177,14 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED",
             "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MIN_TEMPERATURE_K",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_TEMPERATURE_K",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_CONDUCTIVITY_SPREAD_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_HEAT_CAPACITY_SPREAD_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_BREACH_RATE",
+            "RUNMAT_RELEASE_READINESS_THERMAL_MAX_SPREAD_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMAL_REQUIRE_METRICS",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TRANSIENT_SEVERITY",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_NONLINEAR_SEVERITY",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MIN_ENABLED_RATE",
@@ -615,6 +643,48 @@ class ReleaseReadinessTests(unittest.TestCase):
         )
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMO_COUPLING_METRICS_MISSING", codes)
+
+    def test_thermal_metrics_missing_warn_when_required(self):
+        latest = report(passed=True, publishable=True, gpu_ms=100.0)
+        os.environ["RUNMAT_RELEASE_READINESS_THERMAL_REQUIRE_METRICS"] = "true"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMAL_METRICS_MISSING", codes)
+
+    def test_thermal_spread_ratio_high_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermal_max_residual_norm=1.0,
+            thermal_min_temperature_k=300.0,
+            thermal_max_temperature_k=350.0,
+            thermal_conductivity_spread_ratio=3.0,
+            thermal_heat_capacity_spread_ratio=1.4,
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_THERMAL_MAX_CONDUCTIVITY_SPREAD_RATIO"] = "2.0"
+        result = evaluate_release_readiness(
+            latest,
+            [
+                report(
+                    passed=True,
+                    publishable=True,
+                    gpu_ms=95.0,
+                    thermal_max_residual_norm=1.0,
+                    thermal_min_temperature_k=300.0,
+                    thermal_max_temperature_k=350.0,
+                    thermal_conductivity_spread_ratio=1.2,
+                    thermal_heat_capacity_spread_ratio=1.1,
+                )
+            ],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMAL_CONDUCTIVITY_SPREAD_RATIO_HIGH", codes)
 
     def test_electro_transient_severity_high_reason_is_emitted(self):
         latest = report(
@@ -1451,6 +1521,11 @@ class ReleaseReadinessTests(unittest.TestCase):
             thermo_assignment_heterogeneity_index=0.08,
             thermo_spatial_coverage_ratio=0.7,
             thermo_field_extrapolation_ratio=0.01,
+            thermal_max_residual_norm=1.0,
+            thermal_min_temperature_k=300.0,
+            thermal_max_temperature_k=350.0,
+            thermal_conductivity_spread_ratio=1.2,
+            thermal_heat_capacity_spread_ratio=1.1,
         )
         result = evaluate_release_readiness(
             latest,
@@ -1480,6 +1555,10 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Thermo heterogeneity breach rate", summary)
         self.assertIn("Thermo spread trend ratio", summary)
         self.assertIn("Thermo heterogeneity trend ratio", summary)
+        self.assertIn("### Thermal Posture", summary)
+        self.assertIn("Max thermal residual norm", summary)
+        self.assertIn("Max thermal conductivity spread ratio", summary)
+        self.assertIn("Thermal spread trend ratio", summary)
         self.assertIn("### Promotion Evidence Quality", summary)
         self.assertIn("Promotion calibration applied/required", summary)
         self.assertIn("Promotion calibration age/max days", summary)

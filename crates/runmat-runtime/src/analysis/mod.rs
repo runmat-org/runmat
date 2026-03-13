@@ -965,12 +965,41 @@ pub fn analysis_run_thermal_with_options_op(
             ),
         });
     }
+    let thermal_conductivity_spread_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_THERMAL_CONSTITUTIVE",
+        "conductivity_spread_ratio",
+    );
+    let thermal_heat_capacity_spread_ratio = diagnostic_metric(
+        &run.diagnostics,
+        "FEA_THERMAL_CONSTITUTIVE",
+        "heat_capacity_spread_ratio",
+    );
+    if thermal_conductivity_spread_ratio.unwrap_or(1.0) > 2.5
+        || thermal_heat_capacity_spread_ratio.unwrap_or(1.0) > 2.5
+    {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ThermalConstitutiveSpreadHigh,
+            detail: format!(
+                "thermal constitutive spread exceeds limit: conductivity_spread_ratio={} heat_capacity_spread_ratio={}",
+                thermal_conductivity_spread_ratio.unwrap_or(1.0),
+                thermal_heat_capacity_spread_ratio.unwrap_or(1.0)
+            ),
+        });
+    }
 
     let publishable = match options.quality_policy {
         QualityPolicy::Strict => {
-            solver_convergence == QualityGate::Pass && result_quality == QualityGate::Pass
+            solver_convergence == QualityGate::Pass
+                && result_quality == QualityGate::Pass
+                && quality_reasons.is_empty()
         }
-        QualityPolicy::Balanced => result_quality != QualityGate::Fail,
+        QualityPolicy::Balanced => {
+            result_quality != QualityGate::Fail
+                && !quality_reasons
+                    .iter()
+                    .any(|reason| reason.code == QualityReasonCode::ThermalConstitutiveSpreadHigh)
+        }
         QualityPolicy::Exploratory => true,
     };
     let run_status = if publishable {
@@ -2697,6 +2726,22 @@ pub fn analysis_results_op(
             "severity",
         )
     });
+    let thermal_max_residual_norm =
+        diagnostic_metric(&run_result.run.diagnostics, "FEA_THERMAL_STABILITY", "max_residual_norm");
+    let thermal_min_temperature_k =
+        diagnostic_metric(&run_result.run.diagnostics, "FEA_THERMAL_STABILITY", "min_temperature_k");
+    let thermal_max_temperature_k =
+        diagnostic_metric(&run_result.run.diagnostics, "FEA_THERMAL_STABILITY", "max_temperature_k");
+    let thermal_conductivity_spread_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_THERMAL_CONSTITUTIVE",
+        "conductivity_spread_ratio",
+    );
+    let thermal_heat_capacity_spread_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_THERMAL_CONSTITUTIVE",
+        "heat_capacity_spread_ratio",
+    );
 
     let summary = AnalysisResultsSummary {
         field_count: fields.len(),
@@ -2748,6 +2793,11 @@ pub fn analysis_results_op(
         electro_nonlinear_severity,
         plastic_nonlinear_severity,
         contact_nonlinear_severity,
+        thermal_max_residual_norm,
+        thermal_min_temperature_k,
+        thermal_max_temperature_k,
+        thermal_conductivity_spread_ratio,
+        thermal_heat_capacity_spread_ratio,
     };
 
     let modal_results = if query.include_modal_results {
@@ -3380,6 +3430,35 @@ pub fn analysis_trends_op(
         } else {
             None
         };
+        let thermal_stability_warn_rate = if kind == AnalysisRunKind::Thermal {
+            diagnostic_warning_rate(&entries, "FEA_THERMAL_STABILITY")
+        } else {
+            None
+        };
+        let thermal_constitutive_warn_rate = if kind == AnalysisRunKind::Thermal {
+            diagnostic_warning_rate(&entries, "FEA_THERMAL_CONSTITUTIVE")
+        } else {
+            None
+        };
+        let thermal_spread_breach_rate = if kind == AnalysisRunKind::Thermal {
+            let values = entries
+                .iter()
+                .filter_map(|run| {
+                    diagnostic_metric(
+                        &run.run.diagnostics,
+                        "FEA_THERMAL_CONSTITUTIVE",
+                        "conductivity_spread_ratio",
+                    )
+                })
+                .collect::<Vec<_>>();
+            if values.is_empty() {
+                None
+            } else {
+                Some(values.iter().filter(|value| **value > 2.5).count() as f64 / values.len() as f64)
+            }
+        } else {
+            None
+        };
 
         summaries.push(AnalysisTrendKindSummary {
             run_kind: kind,
@@ -3404,6 +3483,9 @@ pub fn analysis_trends_op(
             electro_nonlinear_warn_rate,
             plastic_nonlinear_warn_rate,
             contact_nonlinear_warn_rate,
+            thermal_stability_warn_rate,
+            thermal_constitutive_warn_rate,
+            thermal_spread_breach_rate,
         });
     }
 

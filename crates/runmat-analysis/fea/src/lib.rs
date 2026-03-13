@@ -682,6 +682,56 @@ pub fn run_thermal_with_options(
             / thermo_context.region_temperature_deltas.len() as f64
     };
 
+    let mut conductivities = Vec::new();
+    let mut heat_capacities = Vec::new();
+    for material in &model.materials {
+        conductivities.push(material.thermal.conductivity_w_per_mk.max(1.0e-6));
+        heat_capacities.push(material.thermal.specific_heat_j_per_kgk.max(1.0));
+    }
+    let conductivity_mean = if conductivities.is_empty() {
+        1.0
+    } else {
+        conductivities.iter().sum::<f64>() / conductivities.len() as f64
+    };
+    let heat_capacity_mean = if heat_capacities.is_empty() {
+        1.0
+    } else {
+        heat_capacities.iter().sum::<f64>() / heat_capacities.len() as f64
+    };
+    let density_mean = 7_800.0;
+    let conductivity_spread_ratio = if conductivities.is_empty() {
+        1.0
+    } else {
+        let min = conductivities
+            .iter()
+            .copied()
+            .reduce(f64::min)
+            .unwrap_or(1.0);
+        let max = conductivities
+            .iter()
+            .copied()
+            .reduce(f64::max)
+            .unwrap_or(1.0);
+        (max / min.max(1.0e-9)).clamp(1.0, 32.0)
+    };
+    let heat_capacity_spread_ratio = if heat_capacities.is_empty() {
+        1.0
+    } else {
+        let min = heat_capacities
+            .iter()
+            .copied()
+            .reduce(f64::min)
+            .unwrap_or(1.0);
+        let max = heat_capacities
+            .iter()
+            .copied()
+            .reduce(f64::max)
+            .unwrap_or(1.0);
+        (max / min.max(1.0e-9)).clamp(1.0, 32.0)
+    };
+    let diffusivity_proxy = conductivity_mean / (density_mean * heat_capacity_mean).max(1.0e-9);
+    let response_rate = (diffusivity_proxy * 5.0e6).clamp(0.02, 2.0);
+
     let mut time_points_s = Vec::with_capacity(step_count);
     let mut temperature_snapshots = Vec::with_capacity(step_count);
     let mut residual_norms = Vec::with_capacity(step_count.saturating_sub(1));
@@ -696,9 +746,12 @@ pub fn run_thermal_with_options(
             step as f64 / (step_count - 1) as f64
         };
         let profile = sample_time_profile_scale(&thermo_context, normalized_time);
+        let transient_response_scale =
+            (1.0 - (-response_rate * normalized_time.max(0.0)).exp()).clamp(0.0, 1.0);
         let effective_delta = (0.65 * thermo_context.applied_temperature_delta_k
             + 0.35 * region_avg_delta)
-            * profile.scale;
+            * profile.scale
+            * transient_response_scale.max(0.05);
 
         let mut temperatures = Vec::with_capacity(node_count);
         for i in 0..node_count {
@@ -731,6 +784,11 @@ pub fn run_thermal_with_options(
     }
 
     let max_residual_norm = residual_norms.iter().copied().fold(0.0_f64, f64::max);
+    let residual_mean = if residual_norms.is_empty() {
+        0.0
+    } else {
+        residual_norms.iter().sum::<f64>() / residual_norms.len() as f64
+    };
     let mut diagnostics = vec![FeaDiagnostic {
         code: "FEA_THERMAL_STABILITY".to_string(),
         severity: if max_residual_norm <= options.residual_target {
@@ -739,15 +797,34 @@ pub fn run_thermal_with_options(
             FeaDiagnosticSeverity::Warning
         },
         message: format!(
-            "step_count={} time_step_s={} residual_target={} max_residual_norm={} min_temperature_k={} max_temperature_k={}",
+            "step_count={} time_step_s={} residual_target={} max_residual_norm={} residual_mean={} min_temperature_k={} max_temperature_k={}",
             step_count,
             options.time_step_s,
             options.residual_target,
             max_residual_norm,
+            residual_mean,
             min_temperature_k,
             max_temperature_k,
         ),
     }];
+    diagnostics.push(FeaDiagnostic {
+        code: "FEA_THERMAL_CONSTITUTIVE".to_string(),
+        severity: if conductivity_spread_ratio > 2.5 || heat_capacity_spread_ratio > 2.5 {
+            FeaDiagnosticSeverity::Warning
+        } else {
+            FeaDiagnosticSeverity::Info
+        },
+        message: format!(
+            "conductivity_mean={} heat_capacity_mean={} density_mean={} diffusivity_proxy={} response_rate={} conductivity_spread_ratio={} heat_capacity_spread_ratio={}",
+            conductivity_mean,
+            heat_capacity_mean,
+            density_mean,
+            diffusivity_proxy,
+            response_rate,
+            conductivity_spread_ratio,
+            heat_capacity_spread_ratio,
+        ),
+    });
     diagnostics.push(FeaDiagnostic {
         code: "FEA_TM_TRANSIENT".to_string(),
         severity: if max_residual_norm <= options.residual_target {
@@ -759,11 +836,7 @@ pub fn run_thermal_with_options(
             "severity_peak={} severity_mean={} time_scale_mean={} temporal_variation={} field_extrapolation_ratio={}"
             ,
             max_residual_norm,
-            if residual_norms.is_empty() {
-                0.0
-            } else {
-                residual_norms.iter().sum::<f64>() / residual_norms.len() as f64
-            },
+            residual_mean,
             1.0,
             temporal_profile_variation(&thermo_context),
             0.0,

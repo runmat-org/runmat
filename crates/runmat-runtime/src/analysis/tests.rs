@@ -1728,6 +1728,83 @@ fn analysis_run_thermal_returns_temperature_payload() {
 }
 
 #[test]
+fn analysis_run_thermal_balanced_degrades_on_high_constitutive_spread() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "thermal_1".to_string(),
+        kind: AnalysisStepKind::Thermal,
+    }];
+    model.materials.push(MaterialModel {
+        material_id: "mat_poly_high_k".to_string(),
+        name: "High K Composite".to_string(),
+        mechanical: MaterialMechanicalModel {
+            youngs_modulus_pa: 5.0e9,
+            poisson_ratio: 0.33,
+        },
+        thermal: MaterialThermalModel {
+            reference_temperature_k: 293.15,
+            conductivity_w_per_mk: 1200.0,
+            specific_heat_j_per_kgk: 160.0,
+            ..MaterialThermalModel::default()
+        },
+        electrical: None,
+        plastic: None,
+    });
+    set_model_thermo_coupling(
+        &mut model,
+        ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 80.0,
+            thermal_expansion_coefficient: 1.2e-5,
+            field_artifact_id: None,
+            field_source: None,
+            region_temperature_deltas: vec![
+                ThermoRegionTemperatureDelta {
+                    region_id: "tip".to_string(),
+                    temperature_delta_k: 95.0,
+                },
+                ThermoRegionTemperatureDelta {
+                    region_id: "root".to_string(),
+                    temperature_delta_k: 60.0,
+                },
+            ],
+            time_profile: vec![
+                ThermoTimeProfilePoint {
+                    normalized_time: 0.0,
+                    scale: 0.3,
+                },
+                ThermoTimeProfilePoint {
+                    normalized_time: 1.0,
+                    scale: 1.0,
+                },
+            ],
+        },
+    );
+
+    let run = analysis_run_thermal_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisThermalRunOptions {
+            quality_policy: QualityPolicy::Balanced,
+            step_count: 8,
+            ..AnalysisThermalRunOptions::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("thermal run should execute");
+
+    assert!(!run.data.publishable);
+    assert_eq!(run.data.run_status, RunStatus::Degraded);
+    assert!(run
+        .data
+        .quality_reasons
+        .iter()
+        .any(|reason| reason.code == QualityReasonCode::ThermalConstitutiveSpreadHigh));
+}
+
+#[test]
 fn analysis_run_nonlinear_rejects_models_without_nonlinear_step() {
     let _guard = analysis_test_guard();
     let model = sample_model();

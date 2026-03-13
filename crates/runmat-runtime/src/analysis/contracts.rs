@@ -212,6 +212,7 @@ pub enum QualityReasonCode {
     NonlinearIncrementFailure,
     ThermoMechanicalNonlinearStress,
     ThermalResidualExceeded,
+    ThermalConstitutiveSpreadHigh,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -710,6 +711,11 @@ pub struct AnalysisResultsSummary {
     pub electro_nonlinear_severity: Option<f64>,
     pub plastic_nonlinear_severity: Option<f64>,
     pub contact_nonlinear_severity: Option<f64>,
+    pub thermal_max_residual_norm: Option<f64>,
+    pub thermal_min_temperature_k: Option<f64>,
+    pub thermal_max_temperature_k: Option<f64>,
+    pub thermal_conductivity_spread_ratio: Option<f64>,
+    pub thermal_heat_capacity_spread_ratio: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -793,6 +799,9 @@ pub struct AnalysisTrendKindSummary {
     pub electro_nonlinear_warn_rate: Option<f64>,
     pub plastic_nonlinear_warn_rate: Option<f64>,
     pub contact_nonlinear_warn_rate: Option<f64>,
+    pub thermal_stability_warn_rate: Option<f64>,
+    pub thermal_constitutive_warn_rate: Option<f64>,
+    pub thermal_spread_breach_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
