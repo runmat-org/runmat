@@ -9,7 +9,6 @@ use crate::{
         structural,
     },
     solve::transient::{solve_transient_system, TransientSolveOptions},
-    thermo::{sample_time_profile_scale, temporal_profile_variation},
     ComputeBackend, FeaContactInterfaceContext, FeaElectroThermalContext,
     FeaPlasticityConstitutiveContext, FeaPrepContext, FeaThermoMechanicalContext,
 };
@@ -143,20 +142,16 @@ pub fn solve_nonlinear_system(
     let load_factors = (1..=options.increment_count)
         .map(|idx| idx as f64 / options.increment_count as f64)
         .collect::<Vec<_>>();
-    let thermo_severity_base =
-        thermo_mechanical::severity(options.thermo_mechanical_context.clone());
-    let thermo_temporal_variation = options
-        .thermo_mechanical_context
-        .as_ref()
-        .map(temporal_profile_variation)
-        .unwrap_or(0.0);
-    let electro_severity_base = electro_thermal::severity(options.electro_thermal_context.clone());
-    let electro_temporal_variation =
-        electro_thermal::temporal_profile_variation(options.electro_thermal_context.clone());
-    let plasticity_severity_base =
-        coupling_nonlinear::plasticity_severity(options.plasticity_context.clone());
-    let contact_severity_base =
-        coupling_nonlinear::contact_severity(options.contact_context.clone());
+    let thermo_context = options.thermo_mechanical_context.as_ref();
+    let electro_context = options.electro_thermal_context.as_ref();
+    let plasticity_context = options.plasticity_context.as_ref();
+    let contact_context = options.contact_context.as_ref();
+    let thermo_severity_base = thermo_mechanical::severity(thermo_context);
+    let thermo_temporal_variation = thermo_mechanical::temporal_profile_variation(thermo_context);
+    let electro_severity_base = electro_thermal::severity(electro_context);
+    let electro_temporal_variation = electro_thermal::temporal_profile_variation(electro_context);
+    let plasticity_severity_base = coupling_nonlinear::plasticity_severity(plasticity_context);
+    let contact_severity_base = coupling_nonlinear::contact_severity(contact_context);
     let line_search_reduction = options.line_search_reduction.clamp(0.05, 0.95);
     let tangent_refresh_interval = options.tangent_refresh_interval.max(1);
 
@@ -193,33 +188,29 @@ pub fn solve_nonlinear_system(
 
     for index in 0..options.increment_count {
         let load_factor = load_factors.get(index).copied().unwrap_or(1.0);
-        let thermo_time_sample = options
-            .thermo_mechanical_context
-            .as_ref()
-            .map(|context| sample_time_profile_scale(context, load_factor));
-        let thermo_time_scale = thermo_time_sample.map(|sample| sample.scale).unwrap_or(1.0);
-        if let Some(sample) = thermo_time_sample {
-            if sample.extrapolated {
-                thermo_time_extrapolated = thermo_time_extrapolated.saturating_add(1);
-            }
-            if sample.clamped {
-                thermo_time_clamped = thermo_time_clamped.saturating_add(1);
-            }
+        let thermo_time_sample =
+            thermo_mechanical::sample_time_profile(thermo_context, load_factor);
+        let thermo_time_scale = thermo_time_sample.scale;
+        if thermo_time_sample.extrapolated {
+            thermo_time_extrapolated = thermo_time_extrapolated.saturating_add(1);
         }
-        let electro_time_scale =
-            electro_thermal::time_scale(options.electro_thermal_context.clone(), load_factor);
+        if thermo_time_sample.clamped {
+            thermo_time_clamped = thermo_time_clamped.saturating_add(1);
+        }
+        let electro_time_scale = electro_thermal::time_scale(electro_context, load_factor);
         let thermo_severity = (thermo_severity_base * thermo_time_scale).clamp(0.0, 1.0);
         let electro_severity = (electro_severity_base * electro_time_scale).clamp(0.0, 1.0);
         let plasticity_severity =
             (plasticity_severity_base * (0.65 + 0.35 * load_factor)).clamp(0.0, 1.0);
         let contact_severity = (contact_severity_base * (0.7 + 0.3 * load_factor)).clamp(0.0, 1.0);
-        let thermo_residual_relaxation = 1.0 + 2.0 * thermo_severity;
-        let thermo_increment_relaxation = 1.0 + 1.4 * thermo_severity;
-        let convergence_residual_target = options.tolerance
-            * options.residual_convergence_factor.max(1.0)
-            * thermo_residual_relaxation;
-        let convergence_increment_target =
-            options.increment_norm_tolerance * thermo_increment_relaxation;
+        let thermo_policy = thermo_mechanical::nonlinear_policy(
+            options.tolerance,
+            options.residual_convergence_factor,
+            options.increment_norm_tolerance,
+            thermo_severity,
+        );
+        let convergence_residual_target = thermo_policy.convergence_residual_target;
+        let convergence_increment_target = thermo_policy.convergence_increment_target;
         thermo_severity_peak = thermo_severity_peak.max(thermo_severity);
         thermo_time_scale_sum += thermo_time_scale;
         thermo_residual_target_peak = thermo_residual_target_peak.max(convergence_residual_target);
@@ -265,11 +256,11 @@ pub fn solve_nonlinear_system(
 
             iterations += 1;
             tangent_age = tangent_age.saturating_add(1);
-            let mut damping = if options.line_search { 0.62 } else { 0.72 };
-            if refresh_tangent {
-                damping *= 0.85;
-            }
-            damping *= (1.0 - 0.08 * thermo_severity).clamp(0.65, 1.0);
+            let damping = structural::nonlinear_iteration_damping(
+                options.line_search,
+                refresh_tangent,
+                thermo_severity,
+            );
 
             if options.line_search && options.max_line_search_backtracks > 0 {
                 let mut accepted = false;
@@ -279,7 +270,8 @@ pub fn solve_nonlinear_system(
                     line_search_backtracks = line_search_backtracks.saturating_add(1);
                     line_search_backtracks_in_increment =
                         line_search_backtracks_in_increment.saturating_add(1);
-                    let trial_residual = residual * (0.85 * trial_scale + 0.1);
+                    let trial_residual =
+                        structural::nonlinear_trial_residual(residual, trial_scale);
                     if trial_residual < residual * 0.95 {
                         residual = trial_residual;
                         increment_norm *= trial_scale.max(0.25);
@@ -311,7 +303,7 @@ pub fn solve_nonlinear_system(
             convergence_stall_count = convergence_stall_count.saturating_add(1);
         }
         let spike_threshold =
-            ((options.max_newton_iters as f64) * 0.7 / complexity_scale.sqrt()).ceil() as usize;
+            structural::nonlinear_spike_threshold(options.max_newton_iters, complexity_scale);
         if iterations.max(1) >= spike_threshold.max(2) {
             iteration_spike_count = iteration_spike_count.saturating_add(1);
         }

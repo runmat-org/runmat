@@ -5,9 +5,11 @@ use std::time::Instant;
 use crate::{
     assembly::AssemblySummary,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
-    physics::coupling::{electro_thermal, thermo_mechanical},
+    physics::{
+        coupling::{electro_thermal, thermo_mechanical},
+        structural,
+    },
     solve::runtime_tensor_solver::RuntimeTensorPreparedLinearSystem,
-    thermo::{sample_time_profile_scale, temporal_profile_variation},
     ComputeBackend, FeaElectroThermalContext, FeaPrepContext, FeaThermoMechanicalContext,
 };
 
@@ -110,16 +112,12 @@ pub fn solve_transient_system(
     }
 
     let use_runtime_tensor = backend == ComputeBackend::Gpu;
-    let thermo_severity_base =
-        thermo_mechanical::severity(options.thermo_mechanical_context.clone());
-    let thermo_temporal_variation = options
-        .thermo_mechanical_context
-        .as_ref()
-        .map(temporal_profile_variation)
-        .unwrap_or(0.0);
-    let electro_severity_base = electro_thermal::severity(options.electro_thermal_context.clone());
-    let electro_temporal_variation =
-        electro_thermal::temporal_profile_variation(options.electro_thermal_context.clone());
+    let thermo_context = options.thermo_mechanical_context.as_ref();
+    let electro_context = options.electro_thermal_context.as_ref();
+    let thermo_severity_base = thermo_mechanical::severity(thermo_context);
+    let thermo_temporal_variation = thermo_mechanical::temporal_profile_variation(thermo_context);
+    let electro_severity_base = electro_thermal::severity(electro_context);
+    let electro_temporal_variation = electro_thermal::temporal_profile_variation(electro_context);
     let mut thermo_severity_sum = 0.0_f64;
     let mut thermo_time_scale_sum = 0.0_f64;
     let mut thermo_time_extrapolated = 0usize;
@@ -170,21 +168,16 @@ pub fn solve_transient_system(
         } else {
             step_index as f64 / (options.step_count - 1) as f64
         };
-        let thermo_time_sample = options
-            .thermo_mechanical_context
-            .as_ref()
-            .map(|context| sample_time_profile_scale(context, step_progress));
-        let thermo_time_scale = thermo_time_sample.map(|sample| sample.scale).unwrap_or(1.0);
-        if let Some(sample) = thermo_time_sample {
-            if sample.extrapolated {
-                thermo_time_extrapolated = thermo_time_extrapolated.saturating_add(1);
-            }
-            if sample.clamped {
-                thermo_time_clamped = thermo_time_clamped.saturating_add(1);
-            }
+        let thermo_time_sample =
+            thermo_mechanical::sample_time_profile(thermo_context, step_progress);
+        let thermo_time_scale = thermo_time_sample.scale;
+        if thermo_time_sample.extrapolated {
+            thermo_time_extrapolated = thermo_time_extrapolated.saturating_add(1);
         }
-        let electro_time_scale =
-            electro_thermal::time_scale(options.electro_thermal_context.clone(), step_progress);
+        if thermo_time_sample.clamped {
+            thermo_time_clamped = thermo_time_clamped.saturating_add(1);
+        }
+        let electro_time_scale = electro_thermal::time_scale(electro_context, step_progress);
         let thermo_severity = (thermo_severity_base * thermo_time_scale).clamp(0.0, 1.0);
         let electro_severity = (electro_severity_base * electro_time_scale).clamp(0.0, 1.0);
         thermo_severity_sum += thermo_severity;
@@ -193,10 +186,11 @@ pub fn solve_transient_system(
         electro_severity_sum += electro_severity;
         electro_time_scale_sum += electro_time_scale;
         electro_severity_peak = electro_severity_peak.max(electro_severity);
-        let thermo_residual_relaxation = 1.0 + 1.5 * thermo_severity;
-        let effective_residual_target = options.residual_target * thermo_residual_relaxation;
-        let thermo_growth_limit = (1.0 - 0.12 * thermo_severity).clamp(0.75, 1.0);
-        let thermo_nonconverged_shrink = (1.0 - 0.20 * thermo_severity).clamp(0.65, 1.0);
+        let thermo_policy =
+            thermo_mechanical::transient_policy(options.residual_target, thermo_severity);
+        let effective_residual_target = thermo_policy.effective_residual_target;
+        let thermo_growth_limit = thermo_policy.growth_limit;
+        let thermo_nonconverged_shrink = thermo_policy.nonconverged_shrink;
         effective_residual_target_peak =
             effective_residual_target_peak.max(effective_residual_target);
         thermo_growth_limit_min = thermo_growth_limit_min.min(thermo_growth_limit);
@@ -277,18 +271,22 @@ pub fn solve_transient_system(
         }
 
         if options.adaptive_time_step {
-            let next_dt = recommend_next_time_step(
+            let next_dt = recommend_next_time_step(structural::TransientAdaptivityInput {
                 step_dt,
                 residual_norm,
-                effective_residual_target,
+                residual_target: effective_residual_target,
                 min_dt,
                 max_dt,
                 converged,
                 retries,
-                &options,
+                adapt_nonconverged_shrink: options.adapt_nonconverged_shrink,
+                adapt_growth_exponent: options.adapt_growth_exponent,
+                adapt_min_scale: options.adapt_min_scale,
+                adapt_max_scale: options.adapt_max_scale,
+                adapt_retry_growth_cap: options.adapt_retry_growth_cap,
                 thermo_growth_limit,
                 thermo_nonconverged_shrink,
-            );
+            });
             let scale = next_dt / step_dt.max(1.0e-12);
             adapt_scale_sum += scale;
             adapt_scale_min = adapt_scale_min.min(scale);
@@ -429,37 +427,6 @@ pub fn solve_transient_system(
     }
 }
 
-fn recommend_next_time_step(
-    step_dt: f64,
-    residual_norm: f64,
-    residual_target: f64,
-    min_dt: f64,
-    max_dt: f64,
-    converged: bool,
-    retries: usize,
-    options: &TransientSolveOptions,
-    thermo_growth_limit: f64,
-    thermo_nonconverged_shrink: f64,
-) -> f64 {
-    if !converged {
-        return (step_dt
-            * options.adapt_nonconverged_shrink.clamp(0.2, 1.0)
-            * thermo_nonconverged_shrink)
-            .clamp(min_dt, max_dt);
-    }
-
-    let target = residual_target.max(1.0e-12);
-    let ratio = (target / residual_norm.max(1.0e-12)).clamp(0.25, 4.0);
-    let mut factor = ratio.powf(options.adapt_growth_exponent.clamp(0.1, 1.0));
-    factor = factor.clamp(
-        options.adapt_min_scale.clamp(0.2, 1.0),
-        options.adapt_max_scale.clamp(1.0, 2.0),
-    );
-    if retries > 0 {
-        factor = factor.min(options.adapt_retry_growth_cap.clamp(1.0, 1.5));
-    } else if residual_norm <= target * 0.1 {
-        factor = factor.max((1.0 + (options.adapt_max_scale - 1.0) * 0.6).clamp(1.0, 1.5));
-    }
-    factor = factor.min(thermo_growth_limit.max(0.5));
-    (step_dt * factor).clamp(min_dt, max_dt)
+fn recommend_next_time_step(input: structural::TransientAdaptivityInput) -> f64 {
+    structural::recommend_next_time_step(input)
 }

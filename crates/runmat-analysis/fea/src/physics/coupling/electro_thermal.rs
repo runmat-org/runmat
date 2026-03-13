@@ -1,6 +1,6 @@
 use crate::FeaElectroThermalContext;
 
-pub fn severity(context: Option<FeaElectroThermalContext>) -> f64 {
+pub fn severity(context: Option<&FeaElectroThermalContext>) -> f64 {
     let Some(context) = context else {
         return 0.0;
     };
@@ -14,7 +14,7 @@ pub fn severity(context: Option<FeaElectroThermalContext>) -> f64 {
         .clamp(0.0, 1.0)
 }
 
-pub fn time_scale(context: Option<FeaElectroThermalContext>, normalized_time: f64) -> f64 {
+pub fn time_scale(context: Option<&FeaElectroThermalContext>, normalized_time: f64) -> f64 {
     let Some(context) = context else {
         return 1.0;
     };
@@ -22,7 +22,7 @@ pub fn time_scale(context: Option<FeaElectroThermalContext>, normalized_time: f6
         return 1.0;
     }
     let t = normalized_time.clamp(0.0, 1.0);
-    let mut points = context.time_profile;
+    let mut points = context.time_profile.clone();
     points.sort_by(|a, b| a.normalized_time.total_cmp(&b.normalized_time));
     if t <= points[0].normalized_time {
         return points[0].current_scale.clamp(0.2, 2.0);
@@ -42,7 +42,7 @@ pub fn time_scale(context: Option<FeaElectroThermalContext>, normalized_time: f6
         .unwrap_or(1.0)
 }
 
-pub fn temporal_profile_variation(context: Option<FeaElectroThermalContext>) -> f64 {
+pub fn temporal_profile_variation(context: Option<&FeaElectroThermalContext>) -> f64 {
     let Some(context) = context else {
         return 0.0;
     };
@@ -85,7 +85,7 @@ mod tests {
                 },
             ],
         };
-        let scale = time_scale(Some(context), 0.5);
+        let scale = time_scale(Some(&context), 0.5);
         assert!(scale >= 0.5 && scale <= 1.5);
     }
 }

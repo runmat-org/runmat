@@ -1,6 +1,6 @@
 use crate::{FeaContactInterfaceContext, FeaPlasticityConstitutiveContext};
 
-pub fn plasticity_severity(context: Option<FeaPlasticityConstitutiveContext>) -> f64 {
+pub fn plasticity_severity(context: Option<&FeaPlasticityConstitutiveContext>) -> f64 {
     let Some(ctx) = context else {
         return 0.0;
     };
@@ -14,7 +14,7 @@ pub fn plasticity_severity(context: Option<FeaPlasticityConstitutiveContext>) ->
         .clamp(0.0, 1.0)
 }
 
-pub fn contact_severity(context: Option<FeaContactInterfaceContext>) -> f64 {
+pub fn contact_severity(context: Option<&FeaContactInterfaceContext>) -> f64 {
     let Some(ctx) = context else {
         return 0.0;
     };
@@ -46,8 +46,8 @@ mod tests {
             max_penetration_ratio: 0.03,
             friction_coefficient: 0.8,
         };
-        let p = plasticity_severity(Some(plastic));
-        let c = contact_severity(Some(contact));
+        let p = plasticity_severity(Some(&plastic));
+        let c = contact_severity(Some(&contact));
         assert!((0.0..=1.0).contains(&p));
         assert!((0.0..=1.0).contains(&c));
     }
