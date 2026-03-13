@@ -57,6 +57,7 @@ pub struct AnalysisRunPrepContext {
 pub enum AnalysisCreateModelProfile {
     LinearStaticStructural,
     ThermoMechanicalCoupled,
+    ThermalStandalone,
     ModalStructural,
     TransientStructural,
     NonlinearStructural,
@@ -210,6 +211,7 @@ pub enum QualityReasonCode {
     NonlinearResidualExceeded,
     NonlinearIncrementFailure,
     ThermoMechanicalNonlinearStress,
+    ThermalResidualExceeded,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -295,6 +297,38 @@ impl Default for AnalysisTransientRunOptions {
             adapt_retry_growth_cap: 1.05,
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisThermalRunOptions {
+    pub deterministic_mode: bool,
+    pub precision_mode: PrecisionMode,
+    pub quality_policy: QualityPolicy,
+    pub step_count: usize,
+    pub time_step_s: f64,
+    pub residual_warn_threshold: f64,
+    #[serde(default)]
+    pub prep_context: Option<AnalysisRunPrepContext>,
+    #[serde(default)]
+    pub prep_artifact_id: Option<String>,
+    #[serde(default)]
+    pub prep_calibration_profile: Option<PrepCalibrationProfile>,
+}
+
+impl Default for AnalysisThermalRunOptions {
+    fn default() -> Self {
+        Self {
+            deterministic_mode: false,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            step_count: 10,
+            time_step_s: 1.0e-2,
+            residual_warn_threshold: 1.0e-4,
             prep_context: None,
             prep_artifact_id: None,
             prep_calibration_profile: None,
@@ -577,6 +611,8 @@ pub struct AnalysisRunResult {
     pub run_id: String,
     pub run: FeaRunResult,
     pub modal_results: Option<ModalResultsData>,
+    #[serde(default)]
+    pub thermal_results: Option<ThermalResultsData>,
     pub transient_results: Option<TransientResultsData>,
     pub nonlinear_results: Option<NonlinearResultsData>,
     pub model_validity: QualityGate,
@@ -680,6 +716,8 @@ pub struct AnalysisResultsSummary {
 pub struct AnalysisResultsData {
     pub fields: Vec<AnalysisField>,
     pub modal_results: Option<ModalResultsData>,
+    #[serde(default)]
+    pub thermal_results: Option<ThermalResultsData>,
     pub transient_results: Option<TransientResultsData>,
     pub nonlinear_results: Option<NonlinearResultsData>,
     pub diagnostics: Option<Vec<FeaDiagnostic>>,
@@ -726,6 +764,7 @@ impl Default for AnalysisTrendsQuery {
 pub enum AnalysisRunKind {
     LinearStatic,
     Modal,
+    Thermal,
     Transient,
     Nonlinear,
 }
@@ -770,6 +809,15 @@ pub struct ModalResultsData {
     pub residual_norms: Vec<f64>,
     pub mode_units: ModalFrequencyUnits,
     pub frequency_basis: ModalFrequencyBasis,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ThermalResultsData {
+    pub thermal_payload_version: String,
+    pub time_points_s: Vec<f64>,
+    pub temperature_snapshots: Vec<AnalysisField>,
+    pub residual_norms: Vec<f64>,
+    pub reference_temperature_k: f64,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

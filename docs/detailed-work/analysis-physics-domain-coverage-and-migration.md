@@ -21,7 +21,7 @@ RunMat today is strongest in structural mechanics and partially implemented in m
 | Electro-thermal coupling | partial | Not a full EM domain. |
 | Plasticity | partial | Model-owned schema is in place; constitutive context wiring is active, with further fidelity work pending. |
 | Contact | partial | Model-owned schema is in place; interface context wiring is active, with further fidelity work pending. |
-| Full standalone thermal domain | not complete | Missing full thermal constitutive ownership + dedicated thermal pathway. |
+| Full standalone thermal domain | partial | Dedicated thermal step + runtime operation + payload now exist; constitutive fidelity and calibration depth still need expansion. |
 | Full EM domain (Maxwell-class) | not implemented | Out of scope for near-term "most engineers" target. |
 
 ## Hard-Cutover Rule
@@ -87,9 +87,9 @@ Not required for this milestone:
    - Expand beyond coupling severity/quality signals toward richer field evolution and constitutive feedback loops.
    - Keep artifact-backed thermo field path and validation as first-class, not side-path.
 
-3. **Deliver a dedicated standalone thermal pathway (if included in this milestone family)**
-   - Today there is no thermal-only step kind in core model step taxonomy.
-   - If required for the target set, add thermal step kind + runtime operation + result payload + trend integration.
+3. **Deepen standalone thermal constitutive fidelity**
+   - Thermal step kind and operation contract now exist (`analysis.run_thermal`).
+   - Next increment is constitutive depth/calibration quality, not schema plumbing.
 
 4. **Codify exit criteria in tests/manifests per domain**
    - Structural: keep parity/perf + publishability gates.
@@ -125,9 +125,9 @@ Not required for this milestone:
 
 ### Thermal-Only Scope Decision
 
-- Decision: **out-of-scope for this milestone**.
-- Rationale: this milestone targets model-owned multiphysics hard-cutover and constitutive/interface governance parity for structural + coupled thermo/electro + practical nonlinear plastic/contact.
-- Follow-on: thermal-only step kind/operation contract is tracked as a separate milestone after constitutive depth and promotion-readiness stabilization are complete.
+- Decision: **in-scope baseline delivered for this milestone track**.
+- Delivered shape: thermal step kind in core model, dedicated runtime operation (`analysis.run_thermal`), and typed thermal results payload.
+- Follow-on: improve standalone thermal constitutive fidelity and calibration tightness to match structural-domain confidence levels.
 
 ## Next Major Milestone Exit Criteria (Binary)
 
@@ -166,9 +166,8 @@ This section defines pass/fail checks for the next major milestone. The mileston
    - No unresolved placeholder sections remain in this track.
 
 9. **Thermal-only scope decision is explicit**
-   - Decision is documented as either:
-     - in-scope (with step kind/operation contract plan and target date), or
-     - out-of-scope (with rationale and follow-on milestone owner).
+   - In-scope baseline is documented and implemented with step kind + operation contract + result payload.
+   - Follow-on fidelity/calibration work is explicitly tracked as the next increment.
 
 10. **Release-readiness signal is green on protected branch policy**
     - Tier-7.5 (or equivalent) governance report passes with no unwaived blockers for in-scope domains.

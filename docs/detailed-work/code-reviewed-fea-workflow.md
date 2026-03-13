@@ -281,6 +281,7 @@ Study field to currently implemented type mapping:
 | `execution.backend` | yes | study | `runmat_analysis_fea::ComputeBackend` |
 | `execution.options` (linear static) | conditional | study | `runmat_runtime::analysis::contracts::AnalysisRunOptions` |
 | `execution.options` (modal) | conditional | study | `runmat_runtime::analysis::contracts::AnalysisModalRunOptions` |
+| `execution.options` (thermal) | conditional | study | `runmat_runtime::analysis::contracts::AnalysisThermalRunOptions` |
 | `execution.options` (transient) | conditional | study | `runmat_runtime::analysis::contracts::AnalysisTransientRunOptions` |
 | `execution.options` (nonlinear) | conditional | study | `runmat_runtime::analysis::contracts::AnalysisNonlinearRunOptions` |
 | `execution.options.precision_mode` | no | study/defaulted | `runmat_runtime::analysis::contracts::PrecisionMode` |
@@ -295,6 +296,7 @@ Runtime operation bindings used by study builtins:
 | create model | yes | `analysis_create_model_op` |
 | run linear static | conditional (`profile=linear_static_structural`) | `analysis_run_linear_static_with_options` |
 | run modal | conditional (`profile=modal_structural`) | `analysis_run_modal_with_options_op` |
+| run thermal | conditional (`profile=thermal_standalone`) | `analysis_run_thermal_with_options_op` |
 | run transient | conditional (`profile=transient_structural`) | `analysis_run_transient_with_options_op` |
 | run nonlinear | conditional (`profile=nonlinear_structural`) | `analysis_run_nonlinear_with_options_op` |
 
@@ -310,6 +312,7 @@ Execution option shapes by profile (matching current runtime structs):
 
 - linear static: `AnalysisRunOptions`.
 - modal: `AnalysisModalRunOptions`.
+- thermal: `AnalysisThermalRunOptions` (`step_count`, `time_step_s`, `residual_warn_threshold`).
 - transient: `AnalysisTransientRunOptions`.
 - nonlinear: `AnalysisNonlinearRunOptions` (`increment_count`, `max_newton_iters`, `tolerance`, `residual_convergence_factor`, `increment_norm_tolerance`, `line_search`, `max_line_search_backtracks`, `line_search_reduction`, `tangent_refresh_interval`).
 

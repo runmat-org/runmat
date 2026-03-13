@@ -1648,6 +1648,86 @@ fn analysis_run_transient_rejects_models_without_transient_step() {
 }
 
 #[test]
+fn analysis_run_thermal_rejects_models_without_thermal_step() {
+    let _guard = analysis_test_guard();
+    let model = sample_model();
+    let err = analysis_run_thermal_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(None, None),
+    )
+    .expect_err("thermal run should fail for missing thermal step");
+
+    assert_eq!(err.operation, "analysis.run_thermal");
+    assert_eq!(err.op_version, "analysis.run_thermal/v1");
+    assert_eq!(err.error_code, "ANALYSIS_RUN_THERMAL_INVALID_MODEL");
+}
+
+#[test]
+fn analysis_run_thermal_returns_temperature_payload() {
+    let _guard = analysis_test_guard();
+    let mut model = sample_model();
+    model.steps = vec![AnalysisStep {
+        step_id: "thermal_1".to_string(),
+        kind: AnalysisStepKind::Thermal,
+    }];
+    set_model_thermo_coupling(
+        &mut model,
+        ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 60.0,
+            thermal_expansion_coefficient: 1.2e-5,
+            field_artifact_id: None,
+            field_source: None,
+            region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
+                region_id: "tip".to_string(),
+                temperature_delta_k: 70.0,
+            }],
+            time_profile: vec![
+                ThermoTimeProfilePoint {
+                    normalized_time: 0.0,
+                    scale: 0.5,
+                },
+                ThermoTimeProfilePoint {
+                    normalized_time: 1.0,
+                    scale: 1.0,
+                },
+            ],
+        },
+    );
+    let run = analysis_run_thermal_with_options_op(
+        &model,
+        ComputeBackend::Cpu,
+        AnalysisThermalRunOptions {
+            step_count: 6,
+            ..AnalysisThermalRunOptions::default()
+        },
+        OperationContext::new(None, None),
+    )
+    .expect("thermal run should succeed");
+
+    assert_eq!(run.operation, "analysis.run_thermal");
+    assert_eq!(run.op_version, "analysis.run_thermal/v1");
+    assert!(run.data.thermal_results.is_some());
+    assert!(run.data.transient_results.is_none());
+    let results = analysis_results_op(
+        &run.data,
+        AnalysisResultsQuery::default(),
+        OperationContext::new(None, None),
+    )
+    .expect("analysis.results should return thermal payload");
+    let thermal = results
+        .data
+        .thermal_results
+        .as_ref()
+        .expect("thermal results must be present");
+    assert_eq!(thermal.time_points_s.len(), 6);
+    assert_eq!(thermal.temperature_snapshots.len(), 6);
+    assert_eq!(results.data.summary.snapshot_count, 6);
+}
+
+#[test]
 fn analysis_run_nonlinear_rejects_models_without_nonlinear_step() {
     let _guard = analysis_test_guard();
     let model = sample_model();

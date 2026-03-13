@@ -12,7 +12,8 @@ use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_analysis_fea::{
     run_linear_static_with_options, run_modal_with_options, run_nonlinear_with_options,
-    run_transient_with_options, ComputeBackend, LinearStaticSolveOptions, ModalSolveOptions,
+    run_thermal_with_options, run_transient_with_options, ComputeBackend, LinearStaticSolveOptions,
+    ModalSolveOptions, ThermalSolveOptions,
 };
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 use runmat_meshing_core::{ElementFamilyHint, MeshConnectivityClass};
@@ -33,15 +34,15 @@ pub use contracts::{
     AnalysisModalRunOptions, AnalysisNonlinearRunOptions, AnalysisResultsCompareData,
     AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunKind, AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult,
-    AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
-    AnalysisValidateResult, ContactInterfaceOptions, ElectroRegionConductivityScale,
-    ElectroThermalCouplingOptions, ElectroTimeProfilePoint, ModalFrequencyBasis,
-    ModalFrequencyUnits, ModalResultsData, NonlinearMethod, NonlinearResultsData,
-    PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode,
+    AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendKindSummary,
+    AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult, ContactInterfaceOptions,
+    ElectroRegionConductivityScale, ElectroThermalCouplingOptions, ElectroTimeProfilePoint,
+    ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, NonlinearMethod,
+    NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode,
     PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
     RunProvenance, RunStatus, ThermoFieldInterpolationMode, ThermoFieldSource,
     ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
-    TransientIntegrationMethod, TransientResultsData,
+    ThermalResultsData, TransientIntegrationMethod, TransientResultsData,
 };
 
 const ANALYSIS_CREATE_MODEL_OPERATION: &str = "analysis.create_model";
@@ -54,6 +55,8 @@ const ANALYSIS_RUN_MODAL_OPERATION: &str = "analysis.run_modal";
 const ANALYSIS_RUN_MODAL_OP_VERSION: &str = "analysis.run_modal/v1";
 const ANALYSIS_RUN_TRANSIENT_OPERATION: &str = "analysis.run_transient";
 const ANALYSIS_RUN_TRANSIENT_OP_VERSION: &str = "analysis.run_transient/v1";
+const ANALYSIS_RUN_THERMAL_OPERATION: &str = "analysis.run_thermal";
+const ANALYSIS_RUN_THERMAL_OP_VERSION: &str = "analysis.run_thermal/v1";
 const ANALYSIS_RUN_NONLINEAR_OPERATION: &str = "analysis.run_nonlinear";
 const ANALYSIS_RUN_NONLINEAR_OP_VERSION: &str = "analysis.run_nonlinear/v1";
 const ANALYSIS_RESULTS_OPERATION: &str = "analysis.results";
@@ -291,6 +294,26 @@ pub fn analysis_create_model_op(
             AnalysisStep {
                 step_id: "step_default_thermo_mech".to_string(),
                 kind: AnalysisStepKind::Transient,
+            },
+        ),
+        AnalysisCreateModelProfile::ThermalStandalone => (
+            BoundaryCondition {
+                bc_id: "bc_default_fixed".to_string(),
+                region_id: fixed_region_id,
+                kind: BoundaryConditionKind::Fixed,
+            },
+            LoadCase {
+                load_id: "load_default_thermal_seed".to_string(),
+                region_id: load_region_id,
+                kind: LoadKind::BodyForce {
+                    gx: 0.0,
+                    gy: 0.0,
+                    gz: 0.0,
+                },
+            },
+            AnalysisStep {
+                step_id: "step_default_thermal".to_string(),
+                kind: AnalysisStepKind::Thermal,
             },
         ),
         AnalysisCreateModelProfile::ModalStructural => (
@@ -704,6 +727,7 @@ pub fn analysis_run_modal_with_options_op(
             mode_units: ModalFrequencyUnits::Hz,
             frequency_basis,
         }),
+        thermal_results: None,
         transient_results: None,
         nonlinear_results: None,
         model_validity: QualityGate::Pass,
@@ -795,6 +819,229 @@ pub fn analysis_run_transient_op(
         AnalysisTransientRunOptions::default(),
         context,
     )
+}
+
+pub fn analysis_run_thermal_op(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    analysis_run_thermal_with_options_op(model, backend, AnalysisThermalRunOptions::default(), context)
+}
+
+pub fn analysis_run_thermal_with_options_op(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: AnalysisThermalRunOptions,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let has_thermal_step = model
+        .steps
+        .iter()
+        .any(|step| step.kind == AnalysisStepKind::Thermal);
+    if !has_thermal_step {
+        return Err(operation_error(
+            ANALYSIS_RUN_THERMAL_OPERATION,
+            ANALYSIS_RUN_THERMAL_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_THERMAL_INVALID_MODEL",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis model must include at least one thermal step for analysis.run_thermal",
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("geometry_id".to_string(), model.geometry_id.clone()),
+            ]),
+        ));
+    }
+
+    let thermo_options = resolve_thermo_coupling_options(
+        model,
+        model_thermo_coupling_options(model),
+        ANALYSIS_RUN_THERMAL_OPERATION,
+        ANALYSIS_RUN_THERMAL_OP_VERSION,
+        &context,
+    )?;
+    let Some(thermo_options) = thermo_options else {
+        return Err(operation_error(
+            ANALYSIS_RUN_THERMAL_OPERATION,
+            ANALYSIS_RUN_THERMAL_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_THERMAL_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_thermal requires model.thermo_mechanical to be configured",
+            BTreeMap::new(),
+        ));
+    };
+    if let Err((detail, metadata)) = validate_thermo_coupling_options(model, &thermo_options) {
+        return Err(operation_error(
+            ANALYSIS_RUN_THERMAL_OPERATION,
+            ANALYSIS_RUN_THERMAL_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_THERMAL_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            detail,
+            metadata,
+        ));
+    }
+
+    let prep_context = resolve_run_prep_context(
+        model,
+        options.prep_artifact_id.as_deref(),
+        options.prep_context,
+        ANALYSIS_RUN_THERMAL_OPERATION,
+        ANALYSIS_RUN_THERMAL_OP_VERSION,
+        &context,
+    )?;
+
+    let thermal_run = run_thermal_with_options(
+        model,
+        backend,
+        ThermalSolveOptions {
+            step_count: options.step_count,
+            time_step_s: options.time_step_s,
+            residual_target: options.residual_warn_threshold,
+            prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
+            thermo_mechanical_context: to_fea_thermo_mechanical_context(Some(thermo_options)),
+        },
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_THERMAL_OPERATION,
+            ANALYSIS_RUN_THERMAL_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "SOLVER_MODEL_INVALID",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            err.to_string(),
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("geometry_id".to_string(), model.geometry_id.clone()),
+            ]),
+        )
+    })?;
+
+    let mut run = thermal_run.run;
+    let mut fallback_events = Vec::new();
+    promotion::promote_run_fields_to_device_refs(&mut run, &mut fallback_events);
+    let solver_convergence = if diagnostic_metric(
+        &run.diagnostics,
+        "FEA_THERMAL_STABILITY",
+        "max_residual_norm",
+    )
+    .unwrap_or(0.0)
+        <= options.residual_warn_threshold
+    {
+        QualityGate::Pass
+    } else {
+        QualityGate::Warn
+    };
+    let result_quality = if thermal_run.temperature_snapshots.is_empty() {
+        QualityGate::Fail
+    } else {
+        solver_convergence
+    };
+    let mut quality_reasons = Vec::new();
+    if result_quality == QualityGate::Warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ThermalResidualExceeded,
+            detail: format!(
+                "thermal residual exceeds threshold {}",
+                options.residual_warn_threshold
+            ),
+        });
+    }
+
+    let publishable = match options.quality_policy {
+        QualityPolicy::Strict => {
+            solver_convergence == QualityGate::Pass && result_quality == QualityGate::Pass
+        }
+        QualityPolicy::Balanced => result_quality != QualityGate::Fail,
+        QualityPolicy::Exploratory => true,
+    };
+    let run_status = if publishable {
+        RunStatus::Publishable
+    } else if result_quality == QualityGate::Fail {
+        RunStatus::Rejected
+    } else {
+        RunStatus::Degraded
+    };
+
+    let solver_backend = run.solver_backend.clone();
+    let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
+    let solver_host_sync_count = run.solver_host_sync_count;
+    let solver_method = run.solver_method.clone();
+    let selected_preconditioner = run.preconditioner.clone();
+
+    let result = AnalysisRunResult {
+        run_id: storage::next_run_id(),
+        run,
+        modal_results: None,
+        thermal_results: Some(ThermalResultsData {
+            thermal_payload_version: "thermal_results/v1".to_string(),
+            time_points_s: thermal_run.time_points_s,
+            temperature_snapshots: thermal_run.temperature_snapshots,
+            residual_norms: thermal_run.residual_norms,
+            reference_temperature_k: thermal_run.reference_temperature_k,
+        }),
+        transient_results: None,
+        nonlinear_results: None,
+        model_validity: QualityGate::Pass,
+        solver_convergence,
+        result_quality,
+        run_status,
+        publishable,
+        quality_reasons,
+        provenance: RunProvenance {
+            backend,
+            solver_backend,
+            solver_device_apply_k_ratio,
+            solver_host_sync_count,
+            precision_mode: contracts::format_precision_mode(options.precision_mode),
+            deterministic_mode: options.deterministic_mode,
+            solver_method,
+            preconditioner: selected_preconditioner,
+            quality_policy: contracts::format_quality_policy(options.quality_policy),
+            fallback_events,
+        },
+    };
+
+    storage::persist_run_result(&result).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_THERMAL_OPERATION,
+            ANALYSIS_RUN_THERMAL_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist analysis run artifact: {err}"),
+            BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
+        )
+    })?;
+
+    Ok(OperationEnvelope::new(
+        ANALYSIS_RUN_THERMAL_OPERATION,
+        ANALYSIS_RUN_THERMAL_OP_VERSION,
+        &context,
+        result,
+    ))
 }
 
 pub fn analysis_run_transient_with_options_op(
@@ -1190,6 +1437,7 @@ pub fn analysis_run_transient_with_options_op(
         run_id: storage::next_run_id(),
         run,
         modal_results: None,
+        thermal_results: None,
         transient_results: Some(TransientResultsData {
             transient_payload_version: "transient_results/v1".to_string(),
             time_points_s: transient_run.time_points_s,
@@ -1836,6 +2084,7 @@ pub fn analysis_run_nonlinear_with_options_op(
         run_id: storage::next_run_id(),
         run,
         modal_results: None,
+        thermal_results: None,
         transient_results: None,
         nonlinear_results: Some(NonlinearResultsData {
             nonlinear_payload_version: "nonlinear_results/v1".to_string(),
@@ -2099,6 +2348,7 @@ pub fn analysis_run_linear_static_with_options(
         run_id: storage::next_run_id(),
         run,
         modal_results: None,
+        thermal_results: None,
         transient_results: None,
         nonlinear_results: None,
         model_validity: QualityGate::Pass,
@@ -2242,6 +2492,24 @@ pub fn analysis_results_op(
                 count,
                 transient.time_points_s.first().copied(),
                 transient.time_points_s.get(count - 1).copied(),
+                max_residual,
+                final_step_converged,
+            )
+        }
+    } else if let Some(thermal) = run_result.thermal_results.as_ref() {
+        let count = thermal
+            .time_points_s
+            .len()
+            .min(thermal.temperature_snapshots.len());
+        let max_residual = thermal.residual_norms.iter().copied().reduce(f64::max);
+        let final_step_converged = max_residual.map(|value| value <= 1.0e-6);
+        if count == 0 {
+            (0, None, None, max_residual, final_step_converged)
+        } else {
+            (
+                count,
+                thermal.time_points_s.first().copied(),
+                thermal.time_points_s.get(count - 1).copied(),
                 max_residual,
                 final_step_converged,
             )
@@ -2687,6 +2955,8 @@ pub fn analysis_results_op(
         None
     };
 
+    let thermal_results = run_result.thermal_results.clone();
+
     let nonlinear_results = if query.include_nonlinear_results {
         run_result.nonlinear_results.clone()
     } else {
@@ -2696,6 +2966,7 @@ pub fn analysis_results_op(
     let data = AnalysisResultsData {
         fields,
         modal_results,
+        thermal_results,
         transient_results,
         nonlinear_results,
         diagnostics: if query.include_diagnostics {
@@ -2933,6 +3204,7 @@ pub fn analysis_trends_op(
     for kind in [
         AnalysisRunKind::LinearStatic,
         AnalysisRunKind::Modal,
+        AnalysisRunKind::Thermal,
         AnalysisRunKind::Transient,
         AnalysisRunKind::Nonlinear,
     ] {
@@ -3018,7 +3290,8 @@ pub fn analysis_trends_op(
                 Some(values.iter().filter(|value| **value).count() as f64 / values.len() as f64)
             }
         };
-        let thermo_transient_warn_rate = if kind == AnalysisRunKind::Transient {
+        let thermo_transient_warn_rate =
+            if kind == AnalysisRunKind::Transient || kind == AnalysisRunKind::Thermal {
             diagnostic_warning_rate(&entries, "FEA_TM_TRANSIENT")
         } else {
             None
@@ -3148,6 +3421,8 @@ pub fn analysis_trends_op(
 fn run_kind(run: &AnalysisRunResult) -> AnalysisRunKind {
     if run.nonlinear_results.is_some() {
         AnalysisRunKind::Nonlinear
+    } else if run.thermal_results.is_some() {
+        AnalysisRunKind::Thermal
     } else if run.transient_results.is_some() {
         AnalysisRunKind::Transient
     } else if run.modal_results.is_some() {

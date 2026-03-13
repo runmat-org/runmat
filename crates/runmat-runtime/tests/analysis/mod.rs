@@ -16,10 +16,12 @@ use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_op,
     analysis_run_linear_static_with_options, analysis_run_modal_with_options_op,
-    analysis_run_nonlinear_with_options_op, analysis_run_transient_with_options_op,
+    analysis_run_nonlinear_with_options_op, analysis_run_thermal_with_options_op,
+    analysis_run_transient_with_options_op,
     analysis_validate, AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile,
     AnalysisModalRunOptions, AnalysisNonlinearRunOptions, AnalysisResultsQuery, AnalysisRunOptions,
-    AnalysisTransientRunOptions, PrecisionMode, PreconditionerMode, QualityPolicy,
+    AnalysisThermalRunOptions, AnalysisTransientRunOptions, PrecisionMode, PreconditionerMode,
+    QualityPolicy,
 };
 use runmat_runtime::geometry::geometry_load_op;
 use runmat_runtime::operations::OperationContext;
@@ -41,6 +43,7 @@ enum ResidencyExpectation {
 enum AnalysisRunKind {
     LinearStatic,
     Modal,
+    Thermal,
     Transient,
     Nonlinear,
 }

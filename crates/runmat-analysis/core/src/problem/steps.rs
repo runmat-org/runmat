@@ -6,6 +6,7 @@ pub enum AnalysisStepKind {
     Static,
     Modal,
     Transient,
+    Thermal,
     Nonlinear,
 }
 

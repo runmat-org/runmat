@@ -327,38 +327,40 @@ fn thermo_coupling_for_fixture(spec_id: &str) -> Option<ThermoMechanicalCoupling
                 },
             ],
         }),
-        "thermo_ramp_smooth_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 70.0,
-            thermal_expansion_coefficient: 1.1e-5,
-            field_artifact_id: None,
-            field_source: None,
-            region_temperature_deltas: vec![
-                ThermoRegionTemperatureDelta {
-                    region_id: "tip_steel".to_string(),
-                    temperature_delta_k: 72.0,
-                },
-                ThermoRegionTemperatureDelta {
-                    region_id: "mid_aluminum".to_string(),
-                    temperature_delta_k: 68.0,
-                },
-            ],
-            time_profile: vec![
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.0,
-                    scale: 0.3,
-                },
-                ThermoTimeProfilePoint {
-                    normalized_time: 0.5,
-                    scale: 0.7,
-                },
-                ThermoTimeProfilePoint {
-                    normalized_time: 1.0,
-                    scale: 1.0,
-                },
-            ],
-        }),
+        "thermo_ramp_smooth_gpu_provider" | "thermal_standalone_ramp_gpu_provider" => {
+            Some(ThermoMechanicalCouplingOptions {
+                enabled: true,
+                reference_temperature_k: 293.15,
+                applied_temperature_delta_k: 70.0,
+                thermal_expansion_coefficient: 1.1e-5,
+                field_artifact_id: None,
+                field_source: None,
+                region_temperature_deltas: vec![
+                    ThermoRegionTemperatureDelta {
+                        region_id: "tip_steel".to_string(),
+                        temperature_delta_k: 72.0,
+                    },
+                    ThermoRegionTemperatureDelta {
+                        region_id: "mid_aluminum".to_string(),
+                        temperature_delta_k: 68.0,
+                    },
+                ],
+                time_profile: vec![
+                    ThermoTimeProfilePoint {
+                        normalized_time: 0.0,
+                        scale: 0.3,
+                    },
+                    ThermoTimeProfilePoint {
+                        normalized_time: 0.5,
+                        scale: 0.7,
+                    },
+                    ThermoTimeProfilePoint {
+                        normalized_time: 1.0,
+                        scale: 1.0,
+                    },
+                ],
+            })
+        }
         "thermo_ramp_smooth_field_artifact_gpu_provider" => Some(ThermoMechanicalCouplingOptions {
             enabled: true,
             reference_temperature_k: 293.15,
@@ -829,6 +831,17 @@ fn run_fixture_cpu(
             },
             OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
         ),
+        AnalysisRunKind::Thermal => analysis_run_thermal_with_options_op(
+            model,
+            ComputeBackend::Cpu,
+            AnalysisThermalRunOptions {
+                step_count: spec
+                    .transient_step_count
+                    .unwrap_or(AnalysisThermalRunOptions::default().step_count),
+                ..AnalysisThermalRunOptions::default()
+            },
+            OperationContext::new(Some(format!("trace-cpu-{}", spec.id)), None),
+        ),
         AnalysisRunKind::Nonlinear => analysis_run_nonlinear_with_options_op(
             model,
             ComputeBackend::Cpu,
@@ -881,6 +894,17 @@ fn run_fixture_gpu(
                     ),
                     ..AnalysisTransientRunOptions::production_recommended()
                 }
+            },
+            OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
+        ),
+        AnalysisRunKind::Thermal => analysis_run_thermal_with_options_op(
+            model,
+            ComputeBackend::Gpu,
+            AnalysisThermalRunOptions {
+                step_count: spec
+                    .transient_step_count
+                    .unwrap_or(AnalysisThermalRunOptions::default().step_count),
+                ..AnalysisThermalRunOptions::default()
             },
             OperationContext::new(Some(format!("trace-gpu-{}", spec.id)), None),
         ),
