@@ -179,21 +179,6 @@ fn nonlinear_options_for_spec(spec: &FixtureSpec) -> AnalysisNonlinearRunOptions
     if let Some(value) = env_usize("RUNMAT_NONLINEAR_TANGENT_REFRESH_INTERVAL") {
         options.tangent_refresh_interval = value.max(1);
     }
-    if spec.id == "nonlinear_load_path_mix_gpu_provider" {
-        options.thermo_mechanical_coupling = Some(ThermoMechanicalCouplingOptions {
-            enabled: true,
-            reference_temperature_k: 293.15,
-            applied_temperature_delta_k: 75.0,
-            thermal_expansion_coefficient: 1.2e-5,
-            field_artifact_id: None,
-            field_source: None,
-            region_temperature_deltas: Vec::new(),
-            time_profile: Vec::new(),
-        });
-    }
-    options.electro_thermal_coupling = electro_coupling_for_fixture(spec.id);
-    options.plasticity_proxy = plasticity_proxy_for_fixture(spec.id);
-    options.contact_proxy = contact_proxy_for_fixture(spec.id);
 
     options
 }
@@ -537,6 +522,143 @@ fn electro_coupling_for_fixture(spec_id: &str) -> Option<ElectroThermalCouplingO
     }
 }
 
+fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
+    let mut thermo = thermo_coupling_for_fixture(spec_id);
+    if thermo.is_none() && spec_id == "nonlinear_load_path_mix_gpu_provider" {
+        thermo = Some(ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 75.0,
+            thermal_expansion_coefficient: 1.2e-5,
+            field_artifact_id: None,
+            field_source: None,
+            region_temperature_deltas: Vec::new(),
+            time_profile: Vec::new(),
+        });
+    }
+    model.thermo_mechanical = thermo.map(|value| runmat_analysis_core::ThermoMechanicalDomain {
+        enabled: value.enabled,
+        reference_temperature_k: value.reference_temperature_k,
+        applied_temperature_delta_k: value.applied_temperature_delta_k,
+        field_artifact_id: value.field_artifact_id,
+        field_source: value
+            .field_source
+            .map(|source| runmat_analysis_core::ThermoFieldSource {
+                source_id: source.source_id,
+                revision: source.revision,
+                interpolation_mode: source.interpolation_mode.map(|mode| match mode {
+                    runmat_runtime::analysis::ThermoFieldInterpolationMode::Linear => {
+                        runmat_analysis_core::ThermoFieldInterpolationMode::Linear
+                    }
+                    runmat_runtime::analysis::ThermoFieldInterpolationMode::Step => {
+                        runmat_analysis_core::ThermoFieldInterpolationMode::Step
+                    }
+                }),
+                expected_region_ids: source.expected_region_ids,
+            }),
+        region_temperature_deltas: value
+            .region_temperature_deltas
+            .into_iter()
+            .map(|delta| runmat_analysis_core::ThermoRegionTemperatureDelta {
+                region_id: delta.region_id,
+                temperature_delta_k: delta.temperature_delta_k,
+            })
+            .collect(),
+        time_profile: value
+            .time_profile
+            .into_iter()
+            .map(|point| runmat_analysis_core::ThermoTimeProfilePoint {
+                normalized_time: point.normalized_time,
+                scale: point.scale,
+            })
+            .collect(),
+    });
+
+    if let Some(electro) = electro_coupling_for_fixture(spec_id) {
+        for material in &mut model.materials {
+            material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
+                reference_temperature_k: electro.reference_temperature_k,
+                conductivity_s_per_m: electro.base_electrical_conductivity_s_per_m,
+                resistive_heating_coefficient: electro.resistive_heating_coefficient,
+            });
+        }
+        model.electro_thermal = Some(runmat_analysis_core::ElectroThermalDomain {
+            enabled: electro.enabled,
+            reference_temperature_k: electro.reference_temperature_k,
+            applied_voltage_v: electro.applied_voltage_v,
+            region_conductivity_scales: electro
+                .region_conductivity_scales
+                .into_iter()
+                .map(
+                    |ElectroRegionConductivityScale {
+                         region_id,
+                         conductivity_scale,
+                     }| runmat_analysis_core::ElectroRegionConductivityScale {
+                        region_id,
+                        conductivity_scale,
+                    },
+                )
+                .collect(),
+            time_profile: electro
+                .time_profile
+                .into_iter()
+                .map(
+                    |ElectroTimeProfilePoint {
+                         normalized_time,
+                         current_scale,
+                     }| runmat_analysis_core::ElectroTimeProfilePoint {
+                        normalized_time,
+                        current_scale,
+                    },
+                )
+                .collect(),
+        });
+    }
+
+    if let Some(plastic) = plasticity_proxy_for_fixture(spec_id) {
+        for material in &mut model.materials {
+            material.plastic = Some(runmat_analysis_core::MaterialPlasticModel {
+                yield_strain: plastic.yield_strain,
+                hardening_modulus_ratio: plastic.hardening_modulus_ratio,
+                saturation_exponent: plastic.saturation_exponent,
+            });
+        }
+    }
+
+    if let Some(contact) = contact_proxy_for_fixture(spec_id) {
+        let mut regions = model
+            .material_assignments
+            .iter()
+            .map(|assignment| assignment.region_id.clone())
+            .collect::<Vec<_>>();
+        if regions.is_empty() {
+            regions.push("root".to_string());
+            regions.push("tip".to_string());
+        }
+        let primary = regions
+            .first()
+            .cloned()
+            .unwrap_or_else(|| "root".to_string());
+        let secondary = regions
+            .iter()
+            .find(|region| **region != primary)
+            .cloned()
+            .unwrap_or_else(|| "tip".to_string());
+        model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
+            interface_id: format!("contact_{spec_id}"),
+            primary_region_id: primary,
+            secondary_region_id: secondary,
+            kind: runmat_analysis_core::AnalysisInterfaceKind::Contact(
+                runmat_analysis_core::ContactInterfaceModel {
+                    penalty_stiffness_scale: contact.penalty_stiffness_scale,
+                    max_penetration_ratio: contact.max_penetration_ratio,
+                    friction_coefficient: contact.friction_coefficient,
+                },
+            ),
+        }];
+    }
+}
+
 fn ensure_thermo_field_artifacts_for_fixture(spec_id: &str, model: &AnalysisModel) {
     let root = PathBuf::from("target/runmat-analysis-artifacts/thermo-fields");
     let _ = fs::create_dir_all(&root);
@@ -649,8 +771,6 @@ fn run_fixture_cpu(
                         AnalysisTransientRunOptions::production_recommended()
                             .dt_bucket_rel_tolerance,
                     ),
-                    thermo_mechanical_coupling: thermo_coupling_for_fixture(spec.id),
-                    electro_thermal_coupling: electro_coupling_for_fixture(spec.id),
                     ..AnalysisTransientRunOptions::production_recommended()
                 }
             },
@@ -706,8 +826,6 @@ fn run_fixture_gpu(
                         AnalysisTransientRunOptions::production_recommended()
                             .dt_bucket_rel_tolerance,
                     ),
-                    thermo_mechanical_coupling: thermo_coupling_for_fixture(spec.id),
-                    electro_thermal_coupling: electro_coupling_for_fixture(spec.id),
                     ..AnalysisTransientRunOptions::production_recommended()
                 }
             },
@@ -822,7 +940,8 @@ pub(super) fn run_fixture(
     spec: &FixtureSpec,
     filesystem_root: Option<&PathBuf>,
 ) -> FixtureRunRecord {
-    let model = (spec.model)();
+    let mut model = (spec.model)();
+    configure_model_for_fixture(spec.id, &mut model);
     ensure_thermo_field_artifacts_for_fixture(spec.id, &model);
     let mut failures = Vec::new();
 
@@ -895,8 +1014,10 @@ pub(super) fn run_fixture(
     let mut thermo_region_delta_count = None;
     let mut thermo_spatial_coverage_ratio = None;
     let mut thermo_field_extrapolation_ratio = None;
-    let thermo_field_artifact_id =
-        thermo_coupling_for_fixture(spec.id).and_then(|options| options.field_artifact_id);
+    let thermo_field_artifact_id = model
+        .thermo_mechanical
+        .as_ref()
+        .and_then(|domain| domain.field_artifact_id.clone());
     let mut thermo_field_artifact_approved = None;
     let mut thermo_field_artifact_age_days = None;
     let mut thermo_field_artifact_provenance_valid = None;

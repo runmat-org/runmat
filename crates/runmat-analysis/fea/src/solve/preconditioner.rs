@@ -210,6 +210,8 @@ mod tests {
                 plastic: None,
             }],
             material_assignments: Vec::new(),
+            thermo_mechanical: None,
+            electro_thermal: None,
             interfaces: Vec::new(),
             boundary_conditions: vec![BoundaryCondition {
                 bc_id: "bc".to_string(),

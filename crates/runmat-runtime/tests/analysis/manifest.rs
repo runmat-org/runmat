@@ -988,8 +988,6 @@ pub(super) fn default_options() -> AnalysisRunOptions {
         preconditioner_mode: PreconditionerMode::Auto,
         quality_policy: QualityPolicy::Balanced,
         prep_context: None,
-        thermo_mechanical_coupling: None,
-        electro_thermal_coupling: None,
         prep_artifact_id: None,
         prep_calibration_profile: None,
     }

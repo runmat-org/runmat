@@ -98,6 +98,8 @@ fn cantilever_linear_static() -> AnalysisModel {
             assigned_material_id: "mat_steel".to_string(),
             confidence: EvidenceConfidence::Verified,
         }],
+        thermo_mechanical: None,
+        electro_thermal: None,
         interfaces: Vec::new(),
         boundary_conditions: vec![BoundaryCondition {
             bc_id: "bc_root".to_string(),

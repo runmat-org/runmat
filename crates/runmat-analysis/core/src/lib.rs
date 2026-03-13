@@ -2,6 +2,7 @@
 
 pub mod problem {
     pub mod bc;
+    pub mod domains;
     pub mod interfaces;
     pub mod loads;
     pub mod material_assignment;
@@ -14,6 +15,11 @@ pub mod validate;
 
 pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
 pub use problem::bc::{BoundaryCondition, BoundaryConditionKind};
+pub use problem::domains::{
+    ElectroRegionConductivityScale, ElectroThermalDomain, ElectroTimeProfilePoint,
+    ThermoFieldInterpolationMode, ThermoFieldSource, ThermoMechanicalDomain,
+    ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
+};
 pub use problem::interfaces::{AnalysisInterface, AnalysisInterfaceKind, ContactInterfaceModel};
 pub use problem::loads::{LoadCase, LoadKind};
 pub use problem::material_assignment::{EvidenceConfidence, MaterialAssignment};
@@ -50,6 +56,8 @@ mod tests {
                 plastic: None,
             }],
             material_assignments: Vec::new(),
+            thermo_mechanical: None,
+            electro_thermal: None,
             interfaces: Vec::new(),
             boundary_conditions: vec![BoundaryCondition {
                 bc_id: "bc_fixed_root".to_string(),
