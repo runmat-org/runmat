@@ -93,6 +93,12 @@ This keeps contract/versioning discipline in place while solver/assembly impleme
 2. `analysis.results` summary now carries EM placeholder posture metrics to support downstream readiness/trend consumption.
 3. `analysis.trends` now includes an EM run kind and placeholder warning-rate signal as the initial governance skeleton for the EM domain.
 
+## Maxwell EM Bring-Up Status (Phase 3)
+
+1. Added first FEA-side EM static starter solve path and moved EM solve behavior out of runtime synthetic construction into analysis-fea pipeline execution.
+2. `analysis.run_electromagnetic/v1` now runs the FEA EM pipeline and returns typed EM payloads with `FEA_EM_STATIC` diagnostics.
+3. EM run posture remains deterministic and contract-governed while higher-fidelity Maxwell kernels are still pending.
+
 ## In-Scope Deepening Closure (Thermal + Thermo/Electro + Plastic/Contact)
 
 The current in-scope deepening track (items 1-6) is closed at baseline with the following concrete outcomes:

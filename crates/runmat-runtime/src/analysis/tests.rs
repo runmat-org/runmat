@@ -1705,7 +1705,7 @@ fn analysis_run_electromagnetic_rejects_models_without_em_step() {
 }
 
 #[test]
-fn analysis_run_electromagnetic_is_placeholder_contract() {
+fn analysis_run_electromagnetic_static_contract_emits_typed_payload() {
     let mut model = sample_model();
     model.steps[0].kind = AnalysisStepKind::Electromagnetic;
     model.electromagnetic = Some(ElectromagneticDomain {
@@ -1718,17 +1718,18 @@ fn analysis_run_electromagnetic_is_placeholder_contract() {
         ComputeBackend::Cpu,
         OperationContext::new(Some("trace-em-run-placeholder".to_string()), None),
     )
-    .expect("electromagnetic run should return placeholder payload");
+    .expect("electromagnetic run should return static EM payload");
     assert_eq!(envelope.operation, "analysis.run_electromagnetic");
     assert_eq!(envelope.op_version, "analysis.run_electromagnetic/v1");
-    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
-    assert!(!envelope.data.publishable);
+    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
+    assert!(envelope.data.publishable);
+    assert!(envelope.data.electromagnetic_results.is_some());
     assert!(envelope
         .data
         .run
         .diagnostics
         .iter()
-        .any(|diag| diag.code == "FEA_EM_PLACEHOLDER"));
+        .any(|diag| diag.code == "FEA_EM_STATIC"));
 }
 
 #[test]

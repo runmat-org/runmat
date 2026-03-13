@@ -11,9 +11,10 @@ use runmat_analysis_core::{
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
 use runmat_analysis_fea::{
-    run_linear_static_with_options, run_modal_with_options, run_nonlinear_with_options,
-    run_thermal_with_options, run_transient_with_options, ComputeBackend, LinearStaticSolveOptions,
-    ModalSolveOptions, ThermalSolveOptions,
+    run_electromagnetic_with_options, run_linear_static_with_options, run_modal_with_options,
+    run_nonlinear_with_options, run_thermal_with_options, run_transient_with_options,
+    ComputeBackend, ElectromagneticSolveOptions, LinearStaticSolveOptions, ModalSolveOptions,
+    ThermalSolveOptions,
 };
 use runmat_geometry_core::{GeometryAsset, MaterialEvidenceConfidence, UnitSystem};
 use runmat_meshing_core::{ElementFamilyHint, MeshConnectivityClass};
@@ -734,7 +735,6 @@ pub fn analysis_run_modal_with_options_op(
     } else {
         RunStatus::Degraded
     };
-
     let solver_backend = run.solver_backend.clone();
     let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
     let solver_host_sync_count = run.solver_host_sync_count;
@@ -2375,12 +2375,6 @@ pub fn analysis_run_linear_static_with_options(
             detail: "field promotion fell back to host-backed values".to_string(),
         });
     }
-    let solver_backend = run.solver_backend.clone();
-    let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
-    let solver_host_sync_count = run.solver_host_sync_count;
-    let solver_method = run.solver_method.clone();
-    let selected_preconditioner = run.preconditioner.clone();
-
     let publishable = match options.quality_policy {
         QualityPolicy::Strict => {
             solver_convergence == QualityGate::Pass
@@ -2401,6 +2395,11 @@ pub fn analysis_run_linear_static_with_options(
     } else {
         RunStatus::Degraded
     };
+    let solver_backend = run.solver_backend.clone();
+    let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
+    let solver_host_sync_count = run.solver_host_sync_count;
+    let solver_method = run.solver_method.clone();
+    let preconditioner = run.preconditioner.clone();
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
@@ -2424,7 +2423,7 @@ pub fn analysis_run_linear_static_with_options(
             precision_mode: contracts::format_precision_mode(options.precision_mode),
             deterministic_mode: options.deterministic_mode,
             solver_method,
-            preconditioner: selected_preconditioner,
+            preconditioner,
             quality_policy: contracts::format_quality_policy(options.quality_policy),
             fallback_events,
         },
@@ -2560,40 +2559,97 @@ pub fn analysis_run_electromagnetic_with_options_op(
         ));
     }
 
-    let run = runmat_analysis_fea::FeaRunResult {
-        backend,
-        solver_backend: "contract_placeholder".to_string(),
-        solver_device_apply_k_ratio: 0.0,
-        solver_method: "electromagnetic_placeholder_static_map".to_string(),
-        preconditioner: "none".to_string(),
-        solver_host_sync_count: 0,
-        diagnostics: vec![runmat_analysis_fea::diagnostics::FeaDiagnostic {
-            code: "FEA_EM_PLACEHOLDER".to_string(),
-            severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning,
-            message: format!(
-                "enabled={} reference_frequency_hz={} applied_current_a={} placeholder_quality={} status=placeholder",
-                em_domain.enabled,
-                em_domain.reference_frequency_hz,
-                em_domain.applied_current_a,
-                1.0_f64
-            ),
-        }],
-        displacement_field: runmat_analysis_core::AnalysisField::host_f64(
-            "field_em_vector_potential_proxy",
-            vec![1],
-            vec![em_domain.applied_current_a],
-        ),
-        von_mises_field: runmat_analysis_core::AnalysisField::host_f64(
-            "field_em_flux_density_proxy",
-            vec![1],
-            vec![em_domain.reference_frequency_hz],
-        ),
-    };
+    let prep_context = resolve_run_prep_context(
+        model,
+        options.prep_artifact_id.as_deref(),
+        options.prep_context,
+        ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+        ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+        &context,
+    )?;
 
-    let quality_reasons = vec![QualityReason {
-        code: QualityReasonCode::ElectromagneticPlaceholder,
-        detail: "electromagnetic execution currently returns deterministic placeholder payload".to_string(),
-    }];
+    let em_run = run_electromagnetic_with_options(
+        model,
+        backend,
+        ElectromagneticSolveOptions {
+            prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
+            residual_target: 1.0e-6,
+        },
+    )
+    .map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "SOLVER_MODEL_INVALID",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            err.to_string(),
+            BTreeMap::from([
+                ("analysis_model_id".to_string(), model.model_id.0.clone()),
+                ("geometry_id".to_string(), model.geometry_id.clone()),
+            ]),
+        )
+    })?;
+
+    let run = em_run.run;
+    let solver_convergence = if run.diagnostics.iter().any(|diag| {
+        diag.code == "FEA_EM_STATIC"
+            && diag.severity == runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Info
+    }) {
+        QualityGate::Pass
+    } else {
+        QualityGate::Warn
+    };
+    let result_quality = if em_run.solve_quality >= 0.85 {
+        QualityGate::Pass
+    } else if em_run.solve_quality >= 0.6 {
+        QualityGate::Warn
+    } else {
+        QualityGate::Fail
+    };
+    let mut quality_reasons = Vec::new();
+    if solver_convergence == QualityGate::Warn {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::SolverNotConverged,
+            detail: "electromagnetic solver convergence gate is warning".to_string(),
+        });
+    }
+    if result_quality != QualityGate::Pass {
+        quality_reasons.push(QualityReason {
+            code: QualityReasonCode::ElectromagneticPlaceholder,
+            detail: "electromagnetic static solve quality below production target".to_string(),
+        });
+    }
+
+    let publishable = match options.quality_policy {
+        QualityPolicy::Strict => {
+            solver_convergence == QualityGate::Pass
+                && result_quality == QualityGate::Pass
+                && quality_reasons.is_empty()
+        }
+        QualityPolicy::Balanced => {
+            solver_convergence == QualityGate::Pass && result_quality == QualityGate::Pass
+        }
+        QualityPolicy::Exploratory => {
+            solver_convergence != QualityGate::Fail && result_quality != QualityGate::Fail
+        }
+    };
+    let run_status = if publishable {
+        RunStatus::Publishable
+    } else if result_quality == QualityGate::Fail {
+        RunStatus::Rejected
+    } else {
+        RunStatus::Degraded
+    };
+    let solver_backend = run.solver_backend.clone();
+    let solver_device_apply_k_ratio = run.solver_device_apply_k_ratio;
+    let solver_host_sync_count = run.solver_host_sync_count;
+    let solver_method = run.solver_method.clone();
+    let preconditioner = run.preconditioner.clone();
 
     let result = AnalysisRunResult {
         run_id: storage::next_run_id(),
@@ -2604,40 +2660,29 @@ pub fn analysis_run_electromagnetic_with_options_op(
         nonlinear_results: None,
         electromagnetic_results: Some(ElectromagneticResultsData {
             electromagnetic_payload_version: "electromagnetic_results/v1".to_string(),
-            reference_frequency_hz: em_domain.reference_frequency_hz,
-            applied_current_a: em_domain.applied_current_a,
-            vector_potential_proxy: runmat_analysis_core::AnalysisField::host_f64(
-                "field_em_vector_potential_proxy",
-                vec![1],
-                vec![em_domain.applied_current_a],
-            ),
-            flux_density_proxy: runmat_analysis_core::AnalysisField::host_f64(
-                "field_em_flux_density_proxy",
-                vec![1],
-                vec![em_domain.reference_frequency_hz],
-            ),
-            placeholder_mode: true,
+            reference_frequency_hz: em_run.reference_frequency_hz,
+            applied_current_a: em_run.applied_current_a,
+            vector_potential_proxy: em_run.vector_potential_field,
+            flux_density_proxy: em_run.flux_density_field,
+            placeholder_mode: false,
         }),
         model_validity: QualityGate::Pass,
-        solver_convergence: QualityGate::Warn,
-        result_quality: QualityGate::Warn,
-        run_status: RunStatus::Degraded,
-        publishable: false,
+        solver_convergence,
+        result_quality,
+        run_status,
+        publishable,
         quality_reasons,
         provenance: RunProvenance {
             backend,
-            solver_backend: "contract_placeholder".to_string(),
-            solver_device_apply_k_ratio: 0.0,
-            solver_host_sync_count: 0,
+            solver_backend,
+            solver_device_apply_k_ratio,
+            solver_host_sync_count,
             precision_mode: contracts::format_precision_mode(options.precision_mode),
             deterministic_mode: options.deterministic_mode,
-            solver_method: "electromagnetic_placeholder_static_map".to_string(),
-            preconditioner: "none".to_string(),
+            solver_method,
+            preconditioner,
             quality_policy: contracts::format_quality_policy(options.quality_policy),
-            fallback_events: vec![
-                "EM_PLACEHOLDER_BACKEND:requested=maxwell_solver:using=contract_placeholder"
-                    .to_string(),
-            ],
+            fallback_events: Vec::new(),
         },
     };
 
@@ -3050,23 +3095,44 @@ pub fn analysis_results_op(
         "FEA_THERMAL_OUTCOME",
         "thermal_response_realization_ratio",
     );
-    let electromagnetic_enabled =
-        diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_EM_PLACEHOLDER", "enabled");
+    let electromagnetic_enabled = diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_EM_STATIC", "enabled")
+        .or_else(|| diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_EM_PLACEHOLDER", "enabled"));
     let electromagnetic_reference_frequency_hz = diagnostic_metric(
         &run_result.run.diagnostics,
-        "FEA_EM_PLACEHOLDER",
+        "FEA_EM_STATIC",
         "reference_frequency_hz",
-    );
+    )
+    .or_else(|| {
+        diagnostic_metric(
+            &run_result.run.diagnostics,
+            "FEA_EM_PLACEHOLDER",
+            "reference_frequency_hz",
+        )
+    });
     let electromagnetic_applied_current_a = diagnostic_metric(
         &run_result.run.diagnostics,
-        "FEA_EM_PLACEHOLDER",
+        "FEA_EM_STATIC",
         "applied_current_a",
-    );
+    )
+    .or_else(|| {
+        diagnostic_metric(
+            &run_result.run.diagnostics,
+            "FEA_EM_PLACEHOLDER",
+            "applied_current_a",
+        )
+    });
     let electromagnetic_placeholder_quality = diagnostic_metric(
         &run_result.run.diagnostics,
-        "FEA_EM_PLACEHOLDER",
-        "placeholder_quality",
-    );
+        "FEA_EM_STATIC",
+        "solve_quality",
+    )
+    .or_else(|| {
+        diagnostic_metric(
+            &run_result.run.diagnostics,
+            "FEA_EM_PLACEHOLDER",
+            "placeholder_quality",
+        )
+    });
 
     let summary = AnalysisResultsSummary {
         field_count: fields.len(),
@@ -3807,7 +3873,10 @@ pub fn analysis_trends_op(
             None
         };
         let electromagnetic_placeholder_warn_rate = if kind == AnalysisRunKind::Electromagnetic {
-            diagnostic_warning_rate(&entries, "FEA_EM_PLACEHOLDER")
+            let static_warn = diagnostic_warning_rate(&entries, "FEA_EM_STATIC").unwrap_or(0.0);
+            let placeholder_warn =
+                diagnostic_warning_rate(&entries, "FEA_EM_PLACEHOLDER").unwrap_or(0.0);
+            Some(static_warn.max(placeholder_warn))
         } else {
             None
         };

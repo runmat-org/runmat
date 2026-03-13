@@ -772,7 +772,7 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
 }
 
 #[test]
-fn analysis_run_electromagnetic_contract_is_v1_placeholder() {
+fn analysis_run_electromagnetic_contract_is_v1_typed_payload() {
     let mut model = fixture_model(FixtureId::CantileverLinearStatic);
     model.steps[0].kind = runmat_analysis_core::AnalysisStepKind::Electromagnetic;
     model.electromagnetic = Some(ElectromagneticDomain {
@@ -786,17 +786,18 @@ fn analysis_run_electromagnetic_contract_is_v1_placeholder() {
         ComputeBackend::Cpu,
         OperationContext::new(Some("trace-contract-run-em-1".to_string()), None),
     )
-    .expect("electromagnetic run should return placeholder payload");
+    .expect("electromagnetic run should return typed payload");
     assert_eq!(envelope.operation, "analysis.run_electromagnetic");
     assert_eq!(envelope.op_version, "analysis.run_electromagnetic/v1");
-    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
-    assert!(!envelope.data.publishable);
+    assert_eq!(envelope.data.run_status, RunStatus::Publishable);
+    assert!(envelope.data.publishable);
+    assert!(envelope.data.electromagnetic_results.is_some());
     assert!(envelope
         .data
         .run
         .diagnostics
         .iter()
-        .any(|diag| diag.code == "FEA_EM_PLACEHOLDER"));
+        .any(|diag| diag.code == "FEA_EM_STATIC"));
 }
 
 #[test]

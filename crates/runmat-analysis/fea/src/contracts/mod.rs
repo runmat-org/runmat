@@ -205,6 +205,32 @@ pub struct FeaThermalRunResult {
     pub reference_temperature_k: f64,
 }
 
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FeaElectromagneticRunResult {
+    pub run: FeaRunResult,
+    pub reference_frequency_hz: f64,
+    pub applied_current_a: f64,
+    pub vector_potential_field: AnalysisField,
+    pub flux_density_field: AnalysisField,
+    pub max_residual_norm: f64,
+    pub solve_quality: f64,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ElectromagneticSolveOptions {
+    pub prep_context: Option<FeaPrepContext>,
+    pub residual_target: f64,
+}
+
+impl Default for ElectromagneticSolveOptions {
+    fn default() -> Self {
+        Self {
+            prep_context: None,
+            residual_target: 1.0e-6,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct ThermalSolveOptions {
     pub step_count: usize,
