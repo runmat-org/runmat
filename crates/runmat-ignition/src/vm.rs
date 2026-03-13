@@ -24,7 +24,7 @@ use runmat_runtime::{
     builtins::common::shape::is_scalar_shape,
     builtins::common::tensor,
     builtins::stats::random::stochastic_evolution::stochastic_evolution_host,
-    gather_if_needed,
+    gather_if_needed_async,
     output_context::push_output_count,
     user_functions,
     workspace::{self as runtime_workspace, WorkspaceResolver},
@@ -3366,7 +3366,8 @@ async fn run_interpreter_inner(
                     drift_value,
                     scale_value,
                     steps_value,
-                )?;
+                )
+                .await?;
                 stack.push(evolved);
             }
             Instr::CallBuiltin(name, arg_count) => {
@@ -10402,13 +10403,13 @@ async fn run_interpreter_inner(
     Ok(InterpreterOutcome::Completed(vars))
 }
 
-fn stochastic_evolution_dispatch(
+async fn stochastic_evolution_dispatch(
     state: Value,
     drift: Value,
     scale: Value,
     steps: Value,
 ) -> VmResult<Value> {
-    let steps_u32 = parse_steps_value(&steps)?;
+    let steps_u32 = parse_steps_value(&steps).await?;
     if steps_u32 == 0 {
         return Ok(state);
     }
@@ -10416,9 +10417,12 @@ fn stochastic_evolution_dispatch(
     #[cfg(feature = "native-accel")]
     {
         if let Some(provider) = runmat_accelerate_api::provider() {
-            let (state_handle, state_owned) = ensure_gpu_tensor_for_stochastic(provider, &state)?;
-            let drift_scalar = scalar_from_value_scalar(&drift, "stochastic_evolution drift")?;
-            let scale_scalar = scalar_from_value_scalar(&scale, "stochastic_evolution scale")?;
+            let (state_handle, state_owned) =
+                ensure_gpu_tensor_for_stochastic(provider, &state).await?;
+            let drift_scalar =
+                scalar_from_value_scalar(&drift, "stochastic_evolution drift").await?;
+            let scale_scalar =
+                scalar_from_value_scalar(&scale, "stochastic_evolution scale").await?;
             let output = provider
                 .stochastic_evolution(&state_handle, drift_scalar, scale_scalar, steps_u32)
                 .map_err(|e| format!("stochastic_evolution: {e}"))?;
@@ -10430,20 +10434,21 @@ fn stochastic_evolution_dispatch(
         }
     }
 
-    let gathered_state =
-        gather_if_needed(&state).map_err(|e| format!("stochastic_evolution: {e}"))?;
+    let gathered_state = gather_if_needed_async(&state)
+        .await
+        .map_err(|e| format!("stochastic_evolution: {e}"))?;
     let mut tensor_value = match gathered_state {
         Value::Tensor(t) => t,
         other => tensor::value_into_tensor_for("stochastic_evolution", other)?,
     };
-    let drift_scalar = scalar_from_value_scalar(&drift, "stochastic_evolution drift")?;
-    let scale_scalar = scalar_from_value_scalar(&scale, "stochastic_evolution scale")?;
+    let drift_scalar = scalar_from_value_scalar(&drift, "stochastic_evolution drift").await?;
+    let scale_scalar = scalar_from_value_scalar(&scale, "stochastic_evolution scale").await?;
     stochastic_evolution_host(&mut tensor_value, drift_scalar, scale_scalar, steps_u32)
         .map_err(|err| err.message().to_string())?;
     Ok(Value::Tensor(tensor_value))
 }
 
-fn scalar_from_value_scalar(value: &Value, label: &str) -> VmResult<f64> {
+async fn scalar_from_value_scalar(value: &Value, label: &str) -> VmResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
@@ -10454,15 +10459,27 @@ fn scalar_from_value_scalar(value: &Value, label: &str) -> VmResult<f64> {
         )
         .into()),
         Value::GpuTensor(_) => {
-            let gathered = gather_if_needed(value).map_err(|e| format!("{label}: {e}"))?;
-            scalar_from_value_scalar(&gathered, label)
+            let gathered = gather_if_needed_async(value)
+                .await
+                .map_err(|e| format!("{label}: {e}"))?;
+            match gathered {
+                Value::Num(n) => Ok(n),
+                Value::Int(i) => Ok(i.to_f64()),
+                Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+                Value::Tensor(t) => Err(format!(
+                    "{label}: expected scalar tensor, got {} elements",
+                    t.data.len()
+                )
+                .into()),
+                other => Err(format!("{label}: expected numeric scalar, got {:?}", other).into()),
+            }
         }
         other => Err(format!("{label}: expected numeric scalar, got {:?}", other).into()),
     }
 }
 
-fn parse_steps_value(value: &Value) -> VmResult<u32> {
-    let raw = scalar_from_value_scalar(value, "stochastic_evolution steps")?;
+async fn parse_steps_value(value: &Value) -> VmResult<u32> {
+    let raw = scalar_from_value_scalar(value, "stochastic_evolution steps").await?;
     if !raw.is_finite() || raw < 0.0 {
         return Err("stochastic_evolution: steps must be a non-negative scalar"
             .to_string()
@@ -10472,7 +10489,7 @@ fn parse_steps_value(value: &Value) -> VmResult<u32> {
 }
 
 #[cfg(feature = "native-accel")]
-fn ensure_gpu_tensor_for_stochastic(
+async fn ensure_gpu_tensor_for_stochastic(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     value: &Value,
 ) -> VmResult<(
@@ -10486,8 +10503,9 @@ fn ensure_gpu_tensor_for_stochastic(
             Ok((handle.clone(), Some(handle)))
         }
         _ => {
-            let gathered =
-                gather_if_needed(value).map_err(|e| format!("stochastic_evolution: {e}"))?;
+            let gathered = gather_if_needed_async(value)
+                .await
+                .map_err(|e| format!("stochastic_evolution: {e}"))?;
             match gathered {
                 Value::Tensor(t) => {
                     let handle = upload_tensor_view(provider, &t)?;
