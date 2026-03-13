@@ -8,7 +8,7 @@ const FALLBACK_DESCRIPTION = 'RunMat / MATLAB Language Function documentation';
 export function builtinMetadataForSlug(slug: string): Metadata {
     const builtin = getBuiltinDocBySlug(slug);
     if (!builtin) {
-        const title = `${slug} | MATLAB Language Function Reference`;
+        const title = `${slug} — Open Source, Runnable MATLAB Docs`;
         return buildPageMetadata({
           title,
           description: FALLBACK_DESCRIPTION,
@@ -20,7 +20,7 @@ export function builtinMetadataForSlug(slug: string): Metadata {
 
     const description = (builtin.description || builtin.summary || FALLBACK_DESCRIPTION).trim();
 
-    const title = `${builtin.title} | MATLAB Language Function Reference`;
+    const title = `${builtin.title} — Open Source, Runnable MATLAB Docs`;
     return buildPageMetadata({
       title,
       description,
