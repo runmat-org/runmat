@@ -23,9 +23,9 @@ import {
 } from "lucide-react";
 
 export const metadata: Metadata = {
-  title: "Free Online MATLAB Alternative with GPU Acceleration",
+  title: "Run MATLAB Code Online - Instant GPU Sandbox",
   description:
-    "Run MATLAB-syntax code online with RunMat. GPU acceleration on any vendor, interactive 3D plotting, automatic file versioning, and cross-platform support. No license required.",
+    "Execute MATLAB-syntax code instantly in your browser. Open-source runtime with automatic GPU acceleration. No install required—start coding now.",
   alternates: { canonical: "https://runmat.com/matlab-online" },
   keywords: [
     "matlab online", "matlab online free", "run matlab online",
@@ -34,18 +34,18 @@ export const metadata: Metadata = {
     "webgpu matlab", "matlab web app",
   ],
   openGraph: {
-    title: "Free Online MATLAB Alternative with GPU Acceleration",
+    title: "Run MATLAB Code Online - Instant GPU Sandbox",
     description:
-      "Run MATLAB-syntax code online with RunMat. GPU acceleration on any vendor, interactive 3D plotting, automatic file versioning, and cross-platform support. No license required.",
+      "Execute MATLAB-syntax code instantly in your browser. Open-source runtime with automatic GPU acceleration. No install required—start coding now.",
     url: "/matlab-online",
     siteName: "RunMat",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Free Online MATLAB Alternative with GPU Acceleration",
+    title: "Run MATLAB Code Online - Instant GPU Sandbox",
     description:
-      "Run MATLAB-syntax code online with RunMat. GPU acceleration on any vendor, interactive 3D plotting, automatic file versioning, and cross-platform support. No license required.",
+      "Execute MATLAB-syntax code instantly in your browser. Open-source runtime with automatic GPU acceleration. No install required—start coding now.",
   },
   robots: {
     index: true,
@@ -163,9 +163,9 @@ const jsonLd = {
       "@type": "WebPage",
       "@id": "https://runmat.com/matlab-online#webpage",
       url: "https://runmat.com/matlab-online",
-      name: "Free Online MATLAB Alternative with GPU Acceleration",
+      name: "Run MATLAB Code Online - Instant GPU Sandbox",
       description:
-        "Run MATLAB-syntax code online with RunMat. GPU acceleration on any vendor, interactive 3D plotting, automatic file versioning, and cross-platform support. No license required.",
+        "Execute MATLAB-syntax code instantly in your browser. Open-source runtime with automatic GPU acceleration. No install required—start coding now.",
       inLanguage: "en",
       datePublished: "2026-02-03T00:00:00Z",
       dateModified: "2026-03-05T00:00:00Z",
