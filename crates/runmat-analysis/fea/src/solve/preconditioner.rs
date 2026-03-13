@@ -178,8 +178,8 @@ pub fn build_spd_preconditioner(
 mod tests {
     use runmat_analysis_core::{
         AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind, BoundaryCondition,
-        BoundaryConditionKind, LoadCase, LoadKind, MaterialModel, MaterialThermalModel,
-        ReferenceFrame,
+        BoundaryConditionKind, LoadCase, LoadKind, MaterialMechanicalModel, MaterialModel,
+        MaterialThermalModel, ReferenceFrame,
     };
     use runmat_geometry_core::UnitSystem;
 
@@ -197,8 +197,10 @@ mod tests {
             materials: vec![MaterialModel {
                 material_id: "m1".to_string(),
                 name: "Steel".to_string(),
-                youngs_modulus_pa: 200e9,
-                poisson_ratio: 0.3,
+                mechanical: MaterialMechanicalModel {
+                    youngs_modulus_pa: 200e9,
+                    poisson_ratio: 0.3,
+                },
                 thermal: MaterialThermalModel {
                     reference_temperature_k: 293.15,
                     modulus_temp_coeff_per_k: -2.5e-4,

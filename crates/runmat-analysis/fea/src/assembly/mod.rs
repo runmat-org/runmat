@@ -183,7 +183,7 @@ pub fn assemble_linear_system(
         model
             .materials
             .iter()
-            .map(|material| material.youngs_modulus_pa.max(1.0))
+            .map(|material| material.mechanical.youngs_modulus_pa.max(1.0))
             .sum::<f64>()
             / model.materials.len() as f64
     };
@@ -193,7 +193,7 @@ pub fn assemble_linear_system(
         model
             .materials
             .iter()
-            .map(|material| material.poisson_ratio.clamp(0.0, 0.49))
+            .map(|material| material.mechanical.poisson_ratio.clamp(0.0, 0.49))
             .sum::<f64>()
             / model.materials.len() as f64
     };
@@ -1692,14 +1692,14 @@ fn apply_thermo_material_heterogeneity(
             .materials
             .iter()
             .find(|material| material.material_id == assignment.expected_material_id)
-            .map(|material| material.youngs_modulus_pa)
+            .map(|material| material.mechanical.youngs_modulus_pa)
             .unwrap_or(1.0e9)
             .max(1.0);
         let assigned_modulus = model
             .materials
             .iter()
             .find(|material| material.material_id == assignment.assigned_material_id)
-            .map(|material| material.youngs_modulus_pa)
+            .map(|material| material.mechanical.youngs_modulus_pa)
             .unwrap_or(expected_modulus)
             .max(1.0);
         let modulus_delta_ratio =

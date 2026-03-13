@@ -1,7 +1,7 @@
 use runmat_analysis_core::{
     AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind, BoundaryCondition,
     BoundaryConditionKind, EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment,
-    MaterialModel, MaterialThermalModel, ReferenceFrame,
+    MaterialMechanicalModel, MaterialModel, MaterialThermalModel, ReferenceFrame,
 };
 use runmat_geometry_core::UnitSystem;
 
@@ -80,8 +80,10 @@ fn cantilever_linear_static() -> AnalysisModel {
         materials: vec![MaterialModel {
             material_id: "mat_steel".to_string(),
             name: "Steel".to_string(),
-            youngs_modulus_pa: 200e9,
-            poisson_ratio: 0.3,
+            mechanical: MaterialMechanicalModel {
+                youngs_modulus_pa: 200e9,
+                poisson_ratio: 0.3,
+            },
             thermal: MaterialThermalModel {
                 reference_temperature_k: 293.15,
                 modulus_temp_coeff_per_k: -2.5e-4,
@@ -255,8 +257,10 @@ fn nonlinear_softening_proxy_fixture() -> AnalysisModel {
         MaterialModel {
             material_id: "mat_soft_polymer".to_string(),
             name: "Soft Polymer".to_string(),
-            youngs_modulus_pa: 1.4e9,
-            poisson_ratio: 0.39,
+            mechanical: MaterialMechanicalModel {
+                youngs_modulus_pa: 1.4e9,
+                poisson_ratio: 0.39,
+            },
             thermal: MaterialThermalModel {
                 reference_temperature_k: 293.15,
                 modulus_temp_coeff_per_k: -1.2e-3,
@@ -268,8 +272,10 @@ fn nonlinear_softening_proxy_fixture() -> AnalysisModel {
         MaterialModel {
             material_id: "mat_aluminum".to_string(),
             name: "Aluminum".to_string(),
-            youngs_modulus_pa: 69e9,
-            poisson_ratio: 0.33,
+            mechanical: MaterialMechanicalModel {
+                youngs_modulus_pa: 69e9,
+                poisson_ratio: 0.33,
+            },
             thermal: MaterialThermalModel {
                 reference_temperature_k: 293.15,
                 modulus_temp_coeff_per_k: -3.6e-4,
@@ -662,8 +668,10 @@ fn multi_material_assembly() -> AnalysisModel {
         MaterialModel {
             material_id: "mat_steel".to_string(),
             name: "Steel".to_string(),
-            youngs_modulus_pa: 200e9,
-            poisson_ratio: 0.3,
+            mechanical: MaterialMechanicalModel {
+                youngs_modulus_pa: 200e9,
+                poisson_ratio: 0.3,
+            },
             thermal: MaterialThermalModel {
                 reference_temperature_k: 293.15,
                 modulus_temp_coeff_per_k: -2.5e-4,
@@ -675,8 +683,10 @@ fn multi_material_assembly() -> AnalysisModel {
         MaterialModel {
             material_id: "mat_aluminum".to_string(),
             name: "Aluminum".to_string(),
-            youngs_modulus_pa: 69e9,
-            poisson_ratio: 0.33,
+            mechanical: MaterialMechanicalModel {
+                youngs_modulus_pa: 69e9,
+                poisson_ratio: 0.33,
+            },
             thermal: MaterialThermalModel {
                 reference_temperature_k: 293.15,
                 modulus_temp_coeff_per_k: -3.6e-4,
@@ -688,8 +698,10 @@ fn multi_material_assembly() -> AnalysisModel {
         MaterialModel {
             material_id: "mat_polymer".to_string(),
             name: "Polymer".to_string(),
-            youngs_modulus_pa: 3.2e9,
-            poisson_ratio: 0.37,
+            mechanical: MaterialMechanicalModel {
+                youngs_modulus_pa: 3.2e9,
+                poisson_ratio: 0.37,
+            },
             thermal: MaterialThermalModel {
                 reference_temperature_k: 293.15,
                 modulus_temp_coeff_per_k: -8.0e-4,

@@ -5,8 +5,8 @@ use std::path::PathBuf;
 use runmat_analysis_core::{
     validate_model_against_geometry, AnalysisModel, AnalysisModelId, AnalysisStep,
     AnalysisStepKind, AnalysisValidationError, BoundaryCondition, BoundaryConditionKind,
-    EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment, MaterialModel,
-    MaterialThermalModel, ReferenceFrame,
+    EvidenceConfidence, LoadCase, LoadKind, MaterialAssignment, MaterialMechanicalModel,
+    MaterialModel, MaterialThermalModel, ReferenceFrame,
 };
 use runmat_analysis_fea::solve::backend::kind::LinearAlgebraBackendKind;
 use runmat_analysis_fea::solve::preconditioner::SpdPreconditionerKind;
@@ -4506,8 +4506,10 @@ fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
         materials.push(MaterialModel {
             material_id: material_id.to_string(),
             name: name.to_string(),
-            youngs_modulus_pa,
-            poisson_ratio,
+            mechanical: MaterialMechanicalModel {
+                youngs_modulus_pa,
+                poisson_ratio,
+            },
             thermal: MaterialThermalModel {
                 reference_temperature_k: 293.15,
                 modulus_temp_coeff_per_k: -2.5e-4,
@@ -4522,8 +4524,10 @@ fn infer_material_models(geometry: &GeometryAsset) -> Vec<MaterialModel> {
         materials.push(MaterialModel {
             material_id: "mat_default_steel".to_string(),
             name: "Steel (Default)".to_string(),
-            youngs_modulus_pa: 200e9,
-            poisson_ratio: 0.3,
+            mechanical: MaterialMechanicalModel {
+                youngs_modulus_pa: 200e9,
+                poisson_ratio: 0.3,
+            },
             thermal: MaterialThermalModel {
                 reference_temperature_k: 293.15,
                 modulus_temp_coeff_per_k: -2.5e-4,

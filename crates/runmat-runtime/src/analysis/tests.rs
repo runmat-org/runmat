@@ -10,7 +10,8 @@ use runmat_accelerate_api::{
 use runmat_analysis_core::{
     AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind,
     BoundaryCondition, BoundaryConditionKind, EvidenceConfidence, LoadCase, LoadKind,
-    MaterialAssignment, MaterialModel, MaterialThermalModel, ReferenceFrame,
+    MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
+    ReferenceFrame,
 };
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::{
@@ -37,8 +38,10 @@ fn sample_model() -> AnalysisModel {
         materials: vec![MaterialModel {
             material_id: "mat_steel".to_string(),
             name: "Steel".to_string(),
-            youngs_modulus_pa: 200e9,
-            poisson_ratio: 0.3,
+            mechanical: MaterialMechanicalModel {
+                youngs_modulus_pa: 200e9,
+                poisson_ratio: 0.3,
+            },
             thermal: MaterialThermalModel {
                 reference_temperature_k: 293.15,
                 modulus_temp_coeff_per_k: -2.5e-4,
@@ -75,8 +78,10 @@ fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
     model.materials.push(MaterialModel {
         material_id: "mat_polymer".to_string(),
         name: "Polymer".to_string(),
-        youngs_modulus_pa: 3.2e9,
-        poisson_ratio: 0.37,
+        mechanical: MaterialMechanicalModel {
+            youngs_modulus_pa: 3.2e9,
+            poisson_ratio: 0.37,
+        },
         thermal: MaterialThermalModel {
             reference_temperature_k: 293.15,
             modulus_temp_coeff_per_k: -7.0e-4,

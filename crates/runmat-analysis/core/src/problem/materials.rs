@@ -29,6 +29,12 @@ fn default_resistive_heating_coefficient() -> f64 {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MaterialMechanicalModel {
+    pub youngs_modulus_pa: f64,
+    pub poisson_ratio: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MaterialThermalModel {
     #[serde(default = "default_reference_temperature_k")]
     pub reference_temperature_k: f64,
@@ -85,8 +91,7 @@ pub struct MaterialPlasticModel {
 pub struct MaterialModel {
     pub material_id: String,
     pub name: String,
-    pub youngs_modulus_pa: f64,
-    pub poisson_ratio: f64,
+    pub mechanical: MaterialMechanicalModel,
     #[serde(default)]
     pub thermal: MaterialThermalModel,
     #[serde(default)]

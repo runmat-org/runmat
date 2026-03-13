@@ -146,8 +146,9 @@ model:
   materials:
     - material_id: steel_1018
       name: AISI 1018
-      youngs_modulus_pa: 2.1e11
-      poisson_ratio: 0.29
+      mechanical:
+        youngs_modulus_pa: 2.1e11
+        poisson_ratio: 0.29
       thermal:
         reference_temperature_k: 293.15
         modulus_temp_coeff_per_k: -2.5e-4
@@ -263,6 +264,7 @@ Study field to currently implemented type mapping:
 | `model.frame` | yes | study | `runmat_analysis_core::problem::model::ReferenceFrame` |
 | `model.units` | yes | study | `runmat_geometry_core::UnitSystem` |
 | `model.materials[]` | conditional | study | `runmat_analysis_core::problem::materials::MaterialModel` |
+| `model.materials[].mechanical` | conditional | study | `runmat_analysis_core::problem::materials::MaterialMechanicalModel` |
 | `model.materials[].thermal` | conditional | study | `runmat_analysis_core::problem::materials::MaterialThermalModel` |
 | `model.materials[].electrical` | conditional | study | `runmat_analysis_core::problem::materials::MaterialElectricalModel` |
 | `model.materials[].plastic` | conditional | study | `runmat_analysis_core::problem::materials::MaterialPlasticModel` |

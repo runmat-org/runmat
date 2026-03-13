@@ -18,7 +18,8 @@ pub use problem::interfaces::{AnalysisInterface, AnalysisInterfaceKind, ContactI
 pub use problem::loads::{LoadCase, LoadKind};
 pub use problem::material_assignment::{EvidenceConfidence, MaterialAssignment};
 pub use problem::materials::{
-    MaterialElectricalModel, MaterialModel, MaterialPlasticModel, MaterialThermalModel,
+    MaterialElectricalModel, MaterialMechanicalModel, MaterialModel, MaterialPlasticModel,
+    MaterialThermalModel,
 };
 pub use problem::model::{AnalysisModel, AnalysisModelId, ReferenceFrame};
 pub use problem::steps::{AnalysisStep, AnalysisStepKind};
@@ -40,8 +41,10 @@ mod tests {
             materials: vec![MaterialModel {
                 material_id: "mat_steel".to_string(),
                 name: "Steel".to_string(),
-                youngs_modulus_pa: 200e9,
-                poisson_ratio: 0.3,
+                mechanical: MaterialMechanicalModel {
+                    youngs_modulus_pa: 200e9,
+                    poisson_ratio: 0.3,
+                },
                 thermal: MaterialThermalModel::default(),
                 electrical: None,
                 plastic: None,
