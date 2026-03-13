@@ -9,8 +9,7 @@ use crate::{
         builders::{material_assignment_diagnostics, thermo_mechanical_diagnostic},
         FeaDiagnostic, FeaDiagnosticSeverity,
     },
-    physics::thermal::constitutive_stats,
-    thermo::sample_time_profile_scale,
+    physics::{coupling::thermo_mechanical, thermal::constitutive_stats},
 };
 
 pub fn run_thermal(
@@ -73,7 +72,8 @@ pub fn run_thermal_with_options(
         } else {
             step as f64 / (step_count - 1) as f64
         };
-        let profile = sample_time_profile_scale(&thermo_context, normalized_time);
+        let profile =
+            thermo_mechanical::sample_time_profile(Some(&thermo_context), normalized_time);
         let transient_response_scale =
             (1.0 - (-constitutive.response_rate * normalized_time.max(0.0)).exp()).clamp(0.0, 1.0);
         let effective_delta = (0.65 * thermo_context.applied_temperature_delta_k

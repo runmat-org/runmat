@@ -2,7 +2,7 @@ use runmat_analysis_core::AnalysisModel;
 use serde::{Deserialize, Serialize};
 
 use crate::operator::OperatorSystem;
-use crate::thermo::temporal_profile_variation;
+use crate::physics::coupling::thermo_mechanical;
 use crate::{
     FeaElectroThermalContext, FeaPrepCalibrationProfile, FeaPrepContext, FeaThermoMechanicalContext,
 };
@@ -575,7 +575,8 @@ pub fn assemble_linear_system(
             );
             let spatial_field =
                 apply_thermo_spatial_field(&context, dof_count, &mut dof_adjustments);
-            let temporal_profile_variation = temporal_profile_variation(&context);
+            let temporal_profile_variation =
+                thermo_mechanical::temporal_profile_variation(Some(&context));
             let mut local_modulus_scales = vec![effective_modulus_scale; dof_count];
             for i in 0..dof_count {
                 let thermal_bias = 1.0 + thermal_strain_scale * (1.0 + (i % 3) as f64 * 0.1);

@@ -1,4 +1,4 @@
-use crate::{thermo, FeaThermoMechanicalContext};
+use crate::{FeaThermoFieldInterpolationMode, FeaThermoMechanicalContext};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TimeProfileSample {
@@ -44,18 +44,80 @@ pub fn sample_time_profile(
             clamped: false,
         };
     };
-    let sample = thermo::sample_time_profile_scale(context, normalized_time);
+    if context.time_profile.is_empty() {
+        return TimeProfileSample {
+            scale: 1.0,
+            extrapolated: false,
+            clamped: false,
+        };
+    }
+    let mut points = context.time_profile.clone();
+    points.sort_by(|a, b| a.normalized_time.total_cmp(&b.normalized_time));
+    let t = normalized_time.clamp(0.0, 1.0);
+
+    let interpolation = context
+        .field_source
+        .as_ref()
+        .and_then(|source| source.interpolation_mode)
+        .unwrap_or(FeaThermoFieldInterpolationMode::Linear);
+
+    if t <= points[0].normalized_time {
+        let raw = points[0].scale;
+        let scale = raw.clamp(0.2, 2.0);
+        return TimeProfileSample {
+            scale,
+            extrapolated: t < points[0].normalized_time,
+            clamped: (scale - raw).abs() > 0.0,
+        };
+    }
+
+    for pair in points.windows(2) {
+        let a = &pair[0];
+        let b = &pair[1];
+        if t >= a.normalized_time && t <= b.normalized_time {
+            let raw = match interpolation {
+                FeaThermoFieldInterpolationMode::Linear => {
+                    let span = (b.normalized_time - a.normalized_time).abs().max(1.0e-9);
+                    let alpha = (t - a.normalized_time) / span;
+                    a.scale + (b.scale - a.scale) * alpha
+                }
+                FeaThermoFieldInterpolationMode::Step => a.scale,
+            };
+            let scale = raw.clamp(0.2, 2.0);
+            return TimeProfileSample {
+                scale,
+                extrapolated: false,
+                clamped: (scale - raw).abs() > 0.0,
+            };
+        }
+    }
+
+    let raw = points.last().map(|p| p.scale).unwrap_or(1.0);
+    let scale = raw.clamp(0.2, 2.0);
     TimeProfileSample {
-        scale: sample.scale,
-        extrapolated: sample.extrapolated,
-        clamped: sample.clamped,
+        scale,
+        extrapolated: t > points.last().map(|p| p.normalized_time).unwrap_or(1.0),
+        clamped: (scale - raw).abs() > 0.0,
     }
 }
 
 pub fn temporal_profile_variation(context: Option<&FeaThermoMechanicalContext>) -> f64 {
-    context
-        .map(thermo::temporal_profile_variation)
-        .unwrap_or(0.0)
+    let Some(context) = context else {
+        return 0.0;
+    };
+    if context.time_profile.len() < 2 {
+        return 0.0;
+    }
+    let mut min_scale = f64::INFINITY;
+    let mut max_scale = -f64::INFINITY;
+    for point in &context.time_profile {
+        min_scale = min_scale.min(point.scale);
+        max_scale = max_scale.max(point.scale);
+    }
+    if !min_scale.is_finite() || !max_scale.is_finite() {
+        return 0.0;
+    }
+    ((max_scale - min_scale).abs() / 2.0).clamp(0.0, 1.0)
 }
 
 pub fn transient_policy(base_residual_target: f64, severity: f64) -> TransientPolicy {

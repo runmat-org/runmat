@@ -10,7 +10,6 @@ pub mod physics;
 pub mod pipeline;
 pub mod post;
 pub mod solve;
-pub(crate) mod thermo;
 
 pub use contracts::*;
 pub use pipeline::linear_static::{run_linear_static, run_linear_static_with_options};
