@@ -6,6 +6,7 @@ Companion docs:
 
 - workflow contract: `docs/detailed-work/code-reviewed-fea-workflow.md`
 - program context: `docs/detailed-work/geo-and-analysis.md`
+- over/under + rival build matrix: `docs/detailed-work/fea-rival-gap-matrix.md`
 
 ## Product Position
 

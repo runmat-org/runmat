@@ -8,6 +8,8 @@ This roadmap is internal engineering guidance. Customer-facing capability messag
 
 Code-reviewed simulation package workflow details are tracked in `docs/detailed-work/code-reviewed-fea-workflow.md`.
 
+Physics-domain over/under and required domain build matrix details are tracked in `docs/detailed-work/fea-rival-gap-matrix.md`.
+
 ## Current Baseline
 
 ### Strengths already in place
