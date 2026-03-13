@@ -101,6 +101,108 @@ fn sample_model_with_material_assignment_mismatch() -> AnalysisModel {
     model
 }
 
+fn set_model_thermo_coupling(model: &mut AnalysisModel, coupling: ThermoMechanicalCouplingOptions) {
+    model.thermo_mechanical = Some(runmat_analysis_core::ThermoMechanicalDomain {
+        enabled: coupling.enabled,
+        reference_temperature_k: coupling.reference_temperature_k,
+        applied_temperature_delta_k: coupling.applied_temperature_delta_k,
+        field_artifact_id: coupling.field_artifact_id,
+        field_source: coupling
+            .field_source
+            .map(|source| runmat_analysis_core::ThermoFieldSource {
+                source_id: source.source_id,
+                revision: source.revision,
+                interpolation_mode: source.interpolation_mode.map(|mode| match mode {
+                    ThermoFieldInterpolationMode::Linear => {
+                        runmat_analysis_core::ThermoFieldInterpolationMode::Linear
+                    }
+                    ThermoFieldInterpolationMode::Step => {
+                        runmat_analysis_core::ThermoFieldInterpolationMode::Step
+                    }
+                }),
+                expected_region_ids: source.expected_region_ids,
+            }),
+        region_temperature_deltas: coupling
+            .region_temperature_deltas
+            .into_iter()
+            .map(|delta| runmat_analysis_core::ThermoRegionTemperatureDelta {
+                region_id: delta.region_id,
+                temperature_delta_k: delta.temperature_delta_k,
+            })
+            .collect(),
+        time_profile: coupling
+            .time_profile
+            .into_iter()
+            .map(|point| runmat_analysis_core::ThermoTimeProfilePoint {
+                normalized_time: point.normalized_time,
+                scale: point.scale,
+            })
+            .collect(),
+    });
+}
+
+fn set_model_electro_coupling(model: &mut AnalysisModel, coupling: ElectroThermalCouplingOptions) {
+    for material in &mut model.materials {
+        material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
+            reference_temperature_k: coupling.reference_temperature_k,
+            conductivity_s_per_m: coupling.base_electrical_conductivity_s_per_m,
+            resistive_heating_coefficient: coupling.resistive_heating_coefficient,
+        });
+    }
+    model.electro_thermal = Some(runmat_analysis_core::ElectroThermalDomain {
+        enabled: coupling.enabled,
+        reference_temperature_k: coupling.reference_temperature_k,
+        applied_voltage_v: coupling.applied_voltage_v,
+        region_conductivity_scales: coupling
+            .region_conductivity_scales
+            .into_iter()
+            .map(|scale| runmat_analysis_core::ElectroRegionConductivityScale {
+                region_id: scale.region_id,
+                conductivity_scale: scale.conductivity_scale,
+            })
+            .collect(),
+        time_profile: coupling
+            .time_profile
+            .into_iter()
+            .map(|point| runmat_analysis_core::ElectroTimeProfilePoint {
+                normalized_time: point.normalized_time,
+                current_scale: point.current_scale,
+            })
+            .collect(),
+    });
+}
+
+fn set_model_plasticity(model: &mut AnalysisModel, plasticity: PlasticityConstitutiveOptions) {
+    if !plasticity.enabled {
+        return;
+    }
+    for material in &mut model.materials {
+        material.plastic = Some(runmat_analysis_core::MaterialPlasticModel {
+            yield_strain: plasticity.yield_strain,
+            hardening_modulus_ratio: plasticity.hardening_modulus_ratio,
+            saturation_exponent: plasticity.saturation_exponent,
+        });
+    }
+}
+
+fn set_model_contact(model: &mut AnalysisModel, contact: ContactInterfaceOptions) {
+    if !contact.enabled {
+        return;
+    }
+    model.interfaces = vec![runmat_analysis_core::AnalysisInterface {
+        interface_id: "contact_1".to_string(),
+        primary_region_id: "root".to_string(),
+        secondary_region_id: "tip".to_string(),
+        kind: runmat_analysis_core::AnalysisInterfaceKind::Contact(
+            runmat_analysis_core::ContactInterfaceModel {
+                penalty_stiffness_scale: contact.penalty_stiffness_scale,
+                max_penetration_ratio: contact.max_penetration_ratio,
+                friction_coefficient: contact.friction_coefficient,
+            },
+        ),
+    }];
+}
+
 fn sample_geometry_asset() -> GeometryAsset {
     GeometryAsset {
         geometry_id: "geo:beam".to_string(),
@@ -469,8 +571,6 @@ fn analysis_run_linear_static_returns_typed_envelope() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
-            thermo_mechanical_coupling: None,
-            electro_thermal_coupling: None,
             prep_context: None,
             prep_artifact_id: None,
             prep_calibration_profile: None,
@@ -853,32 +953,36 @@ fn analysis_results_summary_surfaces_thermo_transient_metrics() {
         step_id: "transient_1".to_string(),
         kind: AnalysisStepKind::Transient,
     }];
+    set_model_thermo_coupling(
+        &mut model,
+        ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 65.0,
+            thermal_expansion_coefficient: 1.2e-5,
+            field_artifact_id: None,
+            field_source: None,
+            region_temperature_deltas: Vec::new(),
+            time_profile: Vec::new(),
+        },
+    );
+    set_model_electro_coupling(
+        &mut model,
+        ElectroThermalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_voltage_v: 36.0,
+            base_electrical_conductivity_s_per_m: 3.5e7,
+            resistive_heating_coefficient: 4.0e-4,
+            region_conductivity_scales: Vec::new(),
+            time_profile: Vec::new(),
+        },
+    );
 
     let run = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisTransientRunOptions {
-            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 65.0,
-                thermal_expansion_coefficient: 1.2e-5,
-                field_artifact_id: None,
-                field_source: None,
-                region_temperature_deltas: Vec::new(),
-                time_profile: Vec::new(),
-            }),
-            electro_thermal_coupling: Some(ElectroThermalCouplingOptions {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_voltage_v: 36.0,
-                base_electrical_conductivity_s_per_m: 3.5e7,
-                resistive_heating_coefficient: 4.0e-4,
-                region_conductivity_scales: Vec::new(),
-                time_profile: Vec::new(),
-            }),
-            ..AnalysisTransientRunOptions::default()
-        },
+        AnalysisTransientRunOptions::default(),
         OperationContext::new(None, None),
     )
     .expect("transient run should succeed");
@@ -940,32 +1044,36 @@ fn analysis_results_summary_surfaces_thermo_nonlinear_metrics() {
         step_id: "nonlinear_1".to_string(),
         kind: AnalysisStepKind::Nonlinear,
     }];
+    set_model_thermo_coupling(
+        &mut model,
+        ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 80.0,
+            thermal_expansion_coefficient: 1.2e-5,
+            field_artifact_id: None,
+            field_source: None,
+            region_temperature_deltas: Vec::new(),
+            time_profile: Vec::new(),
+        },
+    );
+    set_model_electro_coupling(
+        &mut model,
+        ElectroThermalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_voltage_v: 82.0,
+            base_electrical_conductivity_s_per_m: 2.6e7,
+            resistive_heating_coefficient: 6.0e-4,
+            region_conductivity_scales: Vec::new(),
+            time_profile: Vec::new(),
+        },
+    );
 
     let run = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions {
-            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 80.0,
-                thermal_expansion_coefficient: 1.2e-5,
-                field_artifact_id: None,
-                field_source: None,
-                region_temperature_deltas: Vec::new(),
-                time_profile: Vec::new(),
-            }),
-            electro_thermal_coupling: Some(ElectroThermalCouplingOptions {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_voltage_v: 82.0,
-                base_electrical_conductivity_s_per_m: 2.6e7,
-                resistive_heating_coefficient: 6.0e-4,
-                region_conductivity_scales: Vec::new(),
-                time_profile: Vec::new(),
-            }),
-            ..AnalysisNonlinearRunOptions::production_recommended()
-        },
+        AnalysisNonlinearRunOptions::production_recommended(),
         OperationContext::new(None, None),
     )
     .expect("nonlinear run should succeed");
@@ -1307,8 +1415,6 @@ fn requested_preconditioner_fallback_is_recorded() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Amg,
             quality_policy: QualityPolicy::Balanced,
-            thermo_mechanical_coupling: None,
-            electro_thermal_coupling: None,
             prep_context: None,
             prep_artifact_id: None,
             prep_calibration_profile: None,
@@ -1338,8 +1444,6 @@ fn ilu_preconditioner_request_is_honored_without_fallback() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Ilu,
             quality_policy: QualityPolicy::Balanced,
-            thermo_mechanical_coupling: None,
-            electro_thermal_coupling: None,
             prep_context: None,
             prep_artifact_id: None,
             prep_calibration_profile: None,
@@ -1371,8 +1475,6 @@ fn quality_policy_exploratory_allows_publishable_warn_path() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Exploratory,
-            thermo_mechanical_coupling: None,
-            electro_thermal_coupling: None,
             prep_context: None,
             prep_artifact_id: None,
             prep_calibration_profile: None,
@@ -1432,8 +1534,6 @@ fn quality_policy_balanced_allows_publishable_with_quality_reasons() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Balanced,
-            thermo_mechanical_coupling: None,
-            electro_thermal_coupling: None,
             prep_context: None,
             prep_artifact_id: None,
             prep_calibration_profile: None,
@@ -1495,8 +1595,6 @@ fn quality_policy_strict_rejects_publishable_with_quality_reasons() {
             precision_mode: PrecisionMode::Fp64,
             preconditioner_mode: PreconditionerMode::Auto,
             quality_policy: QualityPolicy::Strict,
-            thermo_mechanical_coupling: None,
-            electro_thermal_coupling: None,
             prep_context: None,
             prep_artifact_id: None,
             prep_calibration_profile: None,
@@ -1809,22 +1907,28 @@ fn nonlinear_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         step_id: "nonlinear_1".to_string(),
         kind: AnalysisStepKind::Nonlinear,
     }];
+    for material in &mut model.materials {
+        material.thermal.expansion_coefficient_per_k = 1.0e-3;
+    }
+    set_model_thermo_coupling(
+        &mut model,
+        ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 90.0,
+            thermal_expansion_coefficient: 1.0e-3,
+            field_artifact_id: None,
+            field_source: None,
+            region_temperature_deltas: Vec::new(),
+            time_profile: Vec::new(),
+        },
+    );
 
     let run = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             quality_policy: QualityPolicy::Balanced,
-            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 90.0,
-                thermal_expansion_coefficient: 1.0e-3,
-                field_artifact_id: None,
-                field_source: None,
-                region_temperature_deltas: Vec::new(),
-                time_profile: Vec::new(),
-            }),
             ..AnalysisNonlinearRunOptions::production_recommended()
         },
         OperationContext::new(None, None),
@@ -1848,22 +1952,25 @@ fn nonlinear_balanced_degrades_when_thermo_heterogeneity_is_high() {
         step_id: "nonlinear_1".to_string(),
         kind: AnalysisStepKind::Nonlinear,
     }];
+    set_model_thermo_coupling(
+        &mut model,
+        ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 90.0,
+            thermal_expansion_coefficient: 1.2e-5,
+            field_artifact_id: None,
+            field_source: None,
+            region_temperature_deltas: Vec::new(),
+            time_profile: Vec::new(),
+        },
+    );
 
     let run = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             quality_policy: QualityPolicy::Balanced,
-            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 90.0,
-                thermal_expansion_coefficient: 1.2e-5,
-                field_artifact_id: None,
-                field_source: None,
-                region_temperature_deltas: Vec::new(),
-                time_profile: Vec::new(),
-            }),
             ..AnalysisNonlinearRunOptions::production_recommended()
         },
         OperationContext::new(None, None),
@@ -2051,8 +2158,6 @@ fn analysis_run_transient_with_options_controls_timeline() {
             adapt_retry_growth_cap: 1.05,
             adapt_nonconverged_shrink: 0.75,
             dt_bucket_rel_tolerance: 0.0,
-            thermo_mechanical_coupling: None,
-            electro_thermal_coupling: None,
             prep_context: None,
             prep_artifact_id: None,
             prep_calibration_profile: None,
@@ -2080,40 +2185,41 @@ fn analysis_run_transient_rejects_non_monotonic_thermo_time_profile() {
         step_id: "transient_1".to_string(),
         kind: AnalysisStepKind::Transient,
     }];
+    set_model_thermo_coupling(
+        &mut model,
+        ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 70.0,
+            thermal_expansion_coefficient: 1.1e-5,
+            field_artifact_id: None,
+            field_source: Some(ThermoFieldSource {
+                source_id: "field/transient-a".to_string(),
+                revision: 1,
+                interpolation_mode: Some(ThermoFieldInterpolationMode::Linear),
+                expected_region_ids: vec!["tip".to_string()],
+            }),
+            region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
+                region_id: "tip".to_string(),
+                temperature_delta_k: 70.0,
+            }],
+            time_profile: vec![
+                ThermoTimeProfilePoint {
+                    normalized_time: 0.8,
+                    scale: 1.0,
+                },
+                ThermoTimeProfilePoint {
+                    normalized_time: 0.5,
+                    scale: 0.9,
+                },
+            ],
+        },
+    );
 
     let err = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisTransientRunOptions {
-            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 70.0,
-                thermal_expansion_coefficient: 1.1e-5,
-                field_artifact_id: None,
-                field_source: Some(ThermoFieldSource {
-                    source_id: "field/transient-a".to_string(),
-                    revision: 1,
-                    interpolation_mode: Some(ThermoFieldInterpolationMode::Linear),
-                    expected_region_ids: vec!["tip".to_string()],
-                }),
-                region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
-                    region_id: "tip".to_string(),
-                    temperature_delta_k: 70.0,
-                }],
-                time_profile: vec![
-                    ThermoTimeProfilePoint {
-                        normalized_time: 0.8,
-                        scale: 1.0,
-                    },
-                    ThermoTimeProfilePoint {
-                        normalized_time: 0.5,
-                        scale: 0.9,
-                    },
-                ],
-            }),
-            ..AnalysisTransientRunOptions::default()
-        },
+        AnalysisTransientRunOptions::default(),
         OperationContext::new(None, None),
     )
     .expect_err("non-monotonic thermo time profile should be rejected");
@@ -2129,28 +2235,29 @@ fn analysis_run_nonlinear_rejects_unknown_thermo_expected_region_ids() {
         step_id: "nonlinear_1".to_string(),
         kind: AnalysisStepKind::Nonlinear,
     }];
+    set_model_thermo_coupling(
+        &mut model,
+        ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 80.0,
+            thermal_expansion_coefficient: 1.2e-5,
+            field_artifact_id: None,
+            field_source: Some(ThermoFieldSource {
+                source_id: "field/nonlinear-a".to_string(),
+                revision: 2,
+                interpolation_mode: Some(ThermoFieldInterpolationMode::Step),
+                expected_region_ids: vec!["missing_region".to_string()],
+            }),
+            region_temperature_deltas: Vec::new(),
+            time_profile: Vec::new(),
+        },
+    );
 
     let err = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions {
-            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 80.0,
-                thermal_expansion_coefficient: 1.2e-5,
-                field_artifact_id: None,
-                field_source: Some(ThermoFieldSource {
-                    source_id: "field/nonlinear-a".to_string(),
-                    revision: 2,
-                    interpolation_mode: Some(ThermoFieldInterpolationMode::Step),
-                    expected_region_ids: vec!["missing_region".to_string()],
-                }),
-                region_temperature_deltas: Vec::new(),
-                time_profile: Vec::new(),
-            }),
-            ..AnalysisNonlinearRunOptions::production_recommended()
-        },
+        AnalysisNonlinearRunOptions::production_recommended(),
         OperationContext::new(None, None),
     )
     .expect_err("unknown thermo expected region should be rejected");
@@ -2159,26 +2266,27 @@ fn analysis_run_nonlinear_rejects_unknown_thermo_expected_region_ids() {
 }
 
 #[test]
-fn analysis_run_nonlinear_rejects_invalid_plasticity_proxy_options() {
+fn analysis_run_nonlinear_rejects_invalid_plasticity_constitutive_options() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
     model.steps = vec![AnalysisStep {
         step_id: "nonlinear_1".to_string(),
         kind: AnalysisStepKind::Nonlinear,
     }];
+    set_model_plasticity(
+        &mut model,
+        PlasticityConstitutiveOptions {
+            enabled: true,
+            yield_strain: -1.0,
+            hardening_modulus_ratio: 0.1,
+            saturation_exponent: 1.0,
+        },
+    );
 
     let err = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions {
-            plasticity_proxy: Some(PlasticityProxyOptions {
-                enabled: true,
-                yield_strain: -1.0,
-                hardening_modulus_ratio: 0.1,
-                saturation_exponent: 1.0,
-            }),
-            ..AnalysisNonlinearRunOptions::default()
-        },
+        AnalysisNonlinearRunOptions::default(),
         OperationContext::new(None, None),
     )
     .expect_err("nonlinear run should reject invalid plasticity options");
@@ -2187,26 +2295,27 @@ fn analysis_run_nonlinear_rejects_invalid_plasticity_proxy_options() {
 }
 
 #[test]
-fn analysis_run_nonlinear_rejects_invalid_contact_proxy_options() {
+fn analysis_run_nonlinear_rejects_invalid_contact_interface_options() {
     let _guard = analysis_test_guard();
     let mut model = sample_model();
     model.steps = vec![AnalysisStep {
         step_id: "nonlinear_1".to_string(),
         kind: AnalysisStepKind::Nonlinear,
     }];
+    set_model_contact(
+        &mut model,
+        ContactInterfaceOptions {
+            enabled: true,
+            penalty_stiffness_scale: 0.0,
+            max_penetration_ratio: 0.01,
+            friction_coefficient: 0.0,
+        },
+    );
 
     let err = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisNonlinearRunOptions {
-            contact_proxy: Some(ContactProxyOptions {
-                enabled: true,
-                penalty_stiffness_scale: 0.0,
-                max_penetration_ratio: 0.01,
-                friction_coefficient: 0.0,
-            }),
-            ..AnalysisNonlinearRunOptions::default()
-        },
+        AnalysisNonlinearRunOptions::default(),
         OperationContext::new(None, None),
     )
     .expect_err("nonlinear run should reject invalid contact options");
@@ -2260,22 +2369,23 @@ fn analysis_run_transient_can_resolve_thermo_field_artifact() {
         serde_json::to_vec_pretty(&field_artifact).expect("encode thermo field artifact"),
     )
     .expect("write thermo field artifact");
+    set_model_thermo_coupling(
+        &mut model,
+        ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 70.0,
+            thermal_expansion_coefficient: 1.1e-5,
+            field_artifact_id: Some("field_ok".to_string()),
+            field_source: None,
+            region_temperature_deltas: Vec::new(),
+            time_profile: Vec::new(),
+        },
+    );
     let run = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisTransientRunOptions {
-            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 70.0,
-                thermal_expansion_coefficient: 1.1e-5,
-                field_artifact_id: Some("field_ok".to_string()),
-                field_source: None,
-                region_temperature_deltas: Vec::new(),
-                time_profile: Vec::new(),
-            }),
-            ..AnalysisTransientRunOptions::default()
-        },
+        AnalysisTransientRunOptions::default(),
         OperationContext::new(None, None),
     )
     .expect("transient run should resolve thermo field artifact");
@@ -2305,23 +2415,24 @@ fn analysis_run_transient_rejects_missing_thermo_field_artifact() {
     let root = PathBuf::from("target/runmat-analysis-artifacts/thermo-fields");
     let _ = fs::remove_dir_all(&root);
     fs::create_dir_all(&root).expect("create empty thermo field artifact root");
+    set_model_thermo_coupling(
+        &mut model,
+        ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 70.0,
+            thermal_expansion_coefficient: 1.1e-5,
+            field_artifact_id: Some("missing".to_string()),
+            field_source: None,
+            region_temperature_deltas: Vec::new(),
+            time_profile: Vec::new(),
+        },
+    );
 
     let err = analysis_run_transient_with_options_op(
         &model,
         ComputeBackend::Cpu,
-        AnalysisTransientRunOptions {
-            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 70.0,
-                thermal_expansion_coefficient: 1.1e-5,
-                field_artifact_id: Some("missing".to_string()),
-                field_source: None,
-                region_temperature_deltas: Vec::new(),
-                time_profile: Vec::new(),
-            }),
-            ..AnalysisTransientRunOptions::default()
-        },
+        AnalysisTransientRunOptions::default(),
         OperationContext::new(None, None),
     )
     .expect_err("missing thermo field artifact should be rejected");
@@ -2378,54 +2489,58 @@ fn analysis_run_transient_artifact_backed_thermo_matches_inline_profile() {
     )
     .expect("write artifact");
 
-    let inline = analysis_run_transient_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisTransientRunOptions {
-            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 90.0,
-                thermal_expansion_coefficient: 1.2e-5,
-                field_artifact_id: None,
-                field_source: None,
-                region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
-                    region_id: "tip".to_string(),
-                    temperature_delta_k: 90.0,
-                }],
-                time_profile: vec![
-                    ThermoTimeProfilePoint {
-                        normalized_time: 0.0,
-                        scale: 0.4,
-                    },
-                    ThermoTimeProfilePoint {
-                        normalized_time: 1.0,
-                        scale: 1.0,
-                    },
-                ],
-            }),
-            ..AnalysisTransientRunOptions::default()
+    let mut inline_model = model.clone();
+    set_model_thermo_coupling(
+        &mut inline_model,
+        ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 90.0,
+            thermal_expansion_coefficient: 1.2e-5,
+            field_artifact_id: None,
+            field_source: None,
+            region_temperature_deltas: vec![ThermoRegionTemperatureDelta {
+                region_id: "tip".to_string(),
+                temperature_delta_k: 90.0,
+            }],
+            time_profile: vec![
+                ThermoTimeProfilePoint {
+                    normalized_time: 0.0,
+                    scale: 0.4,
+                },
+                ThermoTimeProfilePoint {
+                    normalized_time: 1.0,
+                    scale: 1.0,
+                },
+            ],
         },
+    );
+    let inline = analysis_run_transient_with_options_op(
+        &inline_model,
+        ComputeBackend::Cpu,
+        AnalysisTransientRunOptions::default(),
         OperationContext::new(None, None),
     )
     .expect("inline thermo run should succeed");
 
-    let artifact_backed = analysis_run_transient_with_options_op(
-        &model,
-        ComputeBackend::Cpu,
-        AnalysisTransientRunOptions {
-            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 90.0,
-                thermal_expansion_coefficient: 1.2e-5,
-                field_artifact_id: Some("inline_equivalent".to_string()),
-                field_source: None,
-                region_temperature_deltas: Vec::new(),
-                time_profile: Vec::new(),
-            }),
-            ..AnalysisTransientRunOptions::default()
+    let mut artifact_model = model;
+    set_model_thermo_coupling(
+        &mut artifact_model,
+        ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 90.0,
+            thermal_expansion_coefficient: 1.2e-5,
+            field_artifact_id: Some("inline_equivalent".to_string()),
+            field_source: None,
+            region_temperature_deltas: Vec::new(),
+            time_profile: Vec::new(),
         },
+    );
+    let artifact_backed = analysis_run_transient_with_options_op(
+        &artifact_model,
+        ComputeBackend::Cpu,
+        AnalysisTransientRunOptions::default(),
         OperationContext::new(None, None),
     )
     .expect("artifact-backed thermo run should succeed");
@@ -2467,6 +2582,22 @@ fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
         step_id: "transient_1".to_string(),
         kind: AnalysisStepKind::Transient,
     }];
+    for material in &mut model.materials {
+        material.thermal.expansion_coefficient_per_k = 1.0e-3;
+    }
+    set_model_thermo_coupling(
+        &mut model,
+        ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 90.0,
+            thermal_expansion_coefficient: 1.0e-3,
+            field_artifact_id: None,
+            field_source: None,
+            region_temperature_deltas: Vec::new(),
+            time_profile: Vec::new(),
+        },
+    );
 
     let run = analysis_run_transient_with_options_op(
         &model,
@@ -2475,16 +2606,6 @@ fn transient_balanced_degrades_when_thermo_mechanical_severity_is_high() {
             quality_policy: QualityPolicy::Balanced,
             adaptive_time_step: true,
             step_count: 8,
-            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 90.0,
-                thermal_expansion_coefficient: 1.0e-3,
-                field_artifact_id: None,
-                field_source: None,
-                region_temperature_deltas: Vec::new(),
-                time_profile: Vec::new(),
-            }),
             ..AnalysisTransientRunOptions::default()
         },
         OperationContext::new(None, None),
@@ -2508,6 +2629,19 @@ fn transient_balanced_degrades_when_thermo_heterogeneity_is_high() {
         step_id: "transient_1".to_string(),
         kind: AnalysisStepKind::Transient,
     }];
+    set_model_thermo_coupling(
+        &mut model,
+        ThermoMechanicalCouplingOptions {
+            enabled: true,
+            reference_temperature_k: 293.15,
+            applied_temperature_delta_k: 90.0,
+            thermal_expansion_coefficient: 1.2e-5,
+            field_artifact_id: None,
+            field_source: None,
+            region_temperature_deltas: Vec::new(),
+            time_profile: Vec::new(),
+        },
+    );
 
     let run = analysis_run_transient_with_options_op(
         &model,
@@ -2516,16 +2650,6 @@ fn transient_balanced_degrades_when_thermo_heterogeneity_is_high() {
             quality_policy: QualityPolicy::Balanced,
             adaptive_time_step: true,
             step_count: 8,
-            thermo_mechanical_coupling: Some(ThermoMechanicalCouplingOptions {
-                enabled: true,
-                reference_temperature_k: 293.15,
-                applied_temperature_delta_k: 90.0,
-                thermal_expansion_coefficient: 1.2e-5,
-                field_artifact_id: None,
-                field_source: None,
-                region_temperature_deltas: Vec::new(),
-                time_profile: Vec::new(),
-            }),
             ..AnalysisTransientRunOptions::default()
         },
         OperationContext::new(None, None),
@@ -2548,18 +2672,21 @@ fn nonlinear_balanced_degrades_when_plasticity_severity_is_high() {
         step_id: "nonlinear_1".to_string(),
         kind: AnalysisStepKind::Nonlinear,
     }];
+    set_model_plasticity(
+        &mut model,
+        PlasticityConstitutiveOptions {
+            enabled: true,
+            yield_strain: 2.0e-4,
+            hardening_modulus_ratio: 0.2,
+            saturation_exponent: 4.0,
+        },
+    );
 
     let run = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             quality_policy: QualityPolicy::Balanced,
-            plasticity_proxy: Some(PlasticityProxyOptions {
-                enabled: true,
-                yield_strain: 2.0e-4,
-                hardening_modulus_ratio: 0.2,
-                saturation_exponent: 4.0,
-            }),
             ..AnalysisNonlinearRunOptions::balanced()
         },
         OperationContext::new(None, None),
@@ -2589,18 +2716,21 @@ fn nonlinear_balanced_degrades_when_contact_severity_is_high() {
         step_id: "nonlinear_1".to_string(),
         kind: AnalysisStepKind::Nonlinear,
     }];
+    set_model_contact(
+        &mut model,
+        ContactInterfaceOptions {
+            enabled: true,
+            penalty_stiffness_scale: 0.15,
+            max_penetration_ratio: 0.035,
+            friction_coefficient: 0.9,
+        },
+    );
 
     let run = analysis_run_nonlinear_with_options_op(
         &model,
         ComputeBackend::Cpu,
         AnalysisNonlinearRunOptions {
             quality_policy: QualityPolicy::Balanced,
-            contact_proxy: Some(ContactProxyOptions {
-                enabled: true,
-                penalty_stiffness_scale: 0.15,
-                max_penetration_ratio: 0.035,
-                friction_coefficient: 0.9,
-            }),
             ..AnalysisNonlinearRunOptions::balanced()
         },
         OperationContext::new(None, None),
@@ -2711,8 +2841,6 @@ fn analysis_run_modal_with_options_controls_requested_mode_count() {
             quality_policy: QualityPolicy::Balanced,
             mode_count: 2,
             residual_warn_threshold: 1.0e-2,
-            thermo_mechanical_coupling: None,
-            electro_thermal_coupling: None,
             prep_context: None,
             prep_artifact_id: None,
             prep_calibration_profile: None,

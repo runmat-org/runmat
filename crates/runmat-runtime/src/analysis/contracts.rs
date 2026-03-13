@@ -167,7 +167,7 @@ pub struct ElectroThermalCouplingOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct PlasticityProxyOptions {
+pub struct PlasticityConstitutiveOptions {
     pub enabled: bool,
     pub yield_strain: f64,
     pub hardening_modulus_ratio: f64,
@@ -175,7 +175,7 @@ pub struct PlasticityProxyOptions {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct ContactProxyOptions {
+pub struct ContactInterfaceOptions {
     pub enabled: bool,
     pub penalty_stiffness_scale: f64,
     pub max_penetration_ratio: f64,

@@ -2,8 +2,8 @@ use super::harness::with_harness_provider;
 use super::manifest::default_options;
 use super::*;
 use runmat_runtime::analysis::{
-    ContactProxyOptions, ElectroRegionConductivityScale, ElectroThermalCouplingOptions,
-    ElectroTimeProfilePoint, PlasticityProxyOptions, ThermoMechanicalCouplingOptions,
+    ContactInterfaceOptions, ElectroRegionConductivityScale, ElectroThermalCouplingOptions,
+    ElectroTimeProfilePoint, PlasticityConstitutiveOptions, ThermoMechanicalCouplingOptions,
     ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
 };
 use sha2::{Digest, Sha256};
@@ -183,22 +183,24 @@ fn nonlinear_options_for_spec(spec: &FixtureSpec) -> AnalysisNonlinearRunOptions
     options
 }
 
-fn plasticity_proxy_for_fixture(spec_id: &str) -> Option<PlasticityProxyOptions> {
+fn plasticity_for_fixture(spec_id: &str) -> Option<PlasticityConstitutiveOptions> {
     match spec_id {
-        "nonlinear_plasticity_proxy_gpu_provider" => Some(PlasticityProxyOptions {
+        "nonlinear_plasticity_proxy_gpu_provider" => Some(PlasticityConstitutiveOptions {
             enabled: true,
             yield_strain: 2.0e-4,
             hardening_modulus_ratio: 0.2,
             saturation_exponent: 4.0,
         }),
-        "nonlinear_plastic_hardening_reference_gpu_provider" => Some(PlasticityProxyOptions {
-            enabled: true,
-            yield_strain: 0.03,
-            hardening_modulus_ratio: 0.06,
-            saturation_exponent: 1.0,
-        }),
+        "nonlinear_plastic_hardening_reference_gpu_provider" => {
+            Some(PlasticityConstitutiveOptions {
+                enabled: true,
+                yield_strain: 0.03,
+                hardening_modulus_ratio: 0.06,
+                saturation_exponent: 1.0,
+            })
+        }
         "nonlinear_plastic_hardening_reference_complex_gpu_provider" => {
-            Some(PlasticityProxyOptions {
+            Some(PlasticityConstitutiveOptions {
                 enabled: true,
                 yield_strain: 0.018,
                 hardening_modulus_ratio: 0.09,
@@ -209,22 +211,22 @@ fn plasticity_proxy_for_fixture(spec_id: &str) -> Option<PlasticityProxyOptions>
     }
 }
 
-fn contact_proxy_for_fixture(spec_id: &str) -> Option<ContactProxyOptions> {
+fn contact_for_fixture(spec_id: &str) -> Option<ContactInterfaceOptions> {
     match spec_id {
-        "nonlinear_contact_proxy_gpu_provider" => Some(ContactProxyOptions {
+        "nonlinear_contact_proxy_gpu_provider" => Some(ContactInterfaceOptions {
             enabled: true,
             penalty_stiffness_scale: 0.15,
             max_penetration_ratio: 0.035,
             friction_coefficient: 0.9,
         }),
-        "nonlinear_contact_frictionless_reference_gpu_provider" => Some(ContactProxyOptions {
+        "nonlinear_contact_frictionless_reference_gpu_provider" => Some(ContactInterfaceOptions {
             enabled: true,
             penalty_stiffness_scale: 2.0,
             max_penetration_ratio: 0.01,
             friction_coefficient: 0.0,
         }),
         "nonlinear_contact_frictionless_reference_complex_gpu_provider" => {
-            Some(ContactProxyOptions {
+            Some(ContactInterfaceOptions {
                 enabled: true,
                 penalty_stiffness_scale: 1.2,
                 max_penetration_ratio: 0.014,
@@ -575,6 +577,69 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
     });
 
     if let Some(electro) = electro_coupling_for_fixture(spec_id) {
+        let mut material_region_ids = model
+            .material_assignments
+            .iter()
+            .map(|assignment| assignment.region_id.clone())
+            .collect::<Vec<_>>();
+        if material_region_ids.is_empty() {
+            let material_id = model
+                .materials
+                .first()
+                .map(|material| material.material_id.clone())
+                .unwrap_or_else(|| "mat_default".to_string());
+            model
+                .material_assignments
+                .push(runmat_analysis_core::MaterialAssignment {
+                    region_id: "electro_region_0".to_string(),
+                    expected_material_id: material_id.clone(),
+                    assigned_material_id: material_id,
+                    confidence: runmat_analysis_core::EvidenceConfidence::Verified,
+                });
+            material_region_ids.push("electro_region_0".to_string());
+        }
+
+        let mut region_conductivity_scales =
+            Vec::with_capacity(electro.region_conductivity_scales.len());
+        for (index, scale) in electro.region_conductivity_scales.into_iter().enumerate() {
+            let mapped_region_id = if index < material_region_ids.len() {
+                material_region_ids[index].clone()
+            } else {
+                let synthesized_region_id = format!("electro_region_{index}");
+                let assignment_seed =
+                    model
+                        .material_assignments
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| runmat_analysis_core::MaterialAssignment {
+                            region_id: synthesized_region_id.clone(),
+                            expected_material_id: model
+                                .materials
+                                .first()
+                                .map(|material| material.material_id.clone())
+                                .unwrap_or_else(|| "mat_default".to_string()),
+                            assigned_material_id: model
+                                .materials
+                                .first()
+                                .map(|material| material.material_id.clone())
+                                .unwrap_or_else(|| "mat_default".to_string()),
+                            confidence: runmat_analysis_core::EvidenceConfidence::Verified,
+                        });
+                model
+                    .material_assignments
+                    .push(runmat_analysis_core::MaterialAssignment {
+                        region_id: synthesized_region_id.clone(),
+                        ..assignment_seed
+                    });
+                material_region_ids.push(synthesized_region_id.clone());
+                synthesized_region_id
+            };
+            region_conductivity_scales.push(runmat_analysis_core::ElectroRegionConductivityScale {
+                region_id: mapped_region_id,
+                conductivity_scale: scale.conductivity_scale,
+            });
+        }
+
         for material in &mut model.materials {
             material.electrical = Some(runmat_analysis_core::MaterialElectricalModel {
                 reference_temperature_k: electro.reference_temperature_k,
@@ -586,19 +651,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
             enabled: electro.enabled,
             reference_temperature_k: electro.reference_temperature_k,
             applied_voltage_v: electro.applied_voltage_v,
-            region_conductivity_scales: electro
-                .region_conductivity_scales
-                .into_iter()
-                .map(
-                    |ElectroRegionConductivityScale {
-                         region_id,
-                         conductivity_scale,
-                     }| runmat_analysis_core::ElectroRegionConductivityScale {
-                        region_id,
-                        conductivity_scale,
-                    },
-                )
-                .collect(),
+            region_conductivity_scales,
             time_profile: electro
                 .time_profile
                 .into_iter()
@@ -615,7 +668,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         });
     }
 
-    if let Some(plastic) = plasticity_proxy_for_fixture(spec_id) {
+    if let Some(plastic) = plasticity_for_fixture(spec_id) {
         for material in &mut model.materials {
             material.plastic = Some(runmat_analysis_core::MaterialPlasticModel {
                 yield_strain: plastic.yield_strain,
@@ -625,7 +678,7 @@ fn configure_model_for_fixture(spec_id: &str, model: &mut AnalysisModel) {
         }
     }
 
-    if let Some(contact) = contact_proxy_for_fixture(spec_id) {
+    if let Some(contact) = contact_for_fixture(spec_id) {
         let mut regions = model
             .material_assignments
             .iter()

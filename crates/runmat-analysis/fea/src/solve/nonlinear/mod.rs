@@ -6,8 +6,8 @@ use crate::{
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
     solve::transient::{solve_transient_system, TransientSolveOptions},
     thermo::{sample_time_profile_scale, temporal_profile_variation},
-    ComputeBackend, FeaContactProxyContext, FeaElectroThermalContext, FeaPlasticityProxyContext,
-    FeaPrepContext, FeaThermoMechanicalContext,
+    ComputeBackend, FeaContactInterfaceContext, FeaElectroThermalContext,
+    FeaPlasticityConstitutiveContext, FeaPrepContext, FeaThermoMechanicalContext,
 };
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -24,8 +24,8 @@ pub struct NonlinearSolveOptions {
     pub prep_context: Option<FeaPrepContext>,
     pub thermo_mechanical_context: Option<FeaThermoMechanicalContext>,
     pub electro_thermal_context: Option<FeaElectroThermalContext>,
-    pub plasticity_proxy_context: Option<FeaPlasticityProxyContext>,
-    pub contact_proxy_context: Option<FeaContactProxyContext>,
+    pub plasticity_context: Option<FeaPlasticityConstitutiveContext>,
+    pub contact_context: Option<FeaContactInterfaceContext>,
 }
 
 impl Default for NonlinearSolveOptions {
@@ -43,8 +43,8 @@ impl Default for NonlinearSolveOptions {
             prep_context: None,
             thermo_mechanical_context: None,
             electro_thermal_context: None,
-            plasticity_proxy_context: None,
-            contact_proxy_context: None,
+            plasticity_context: None,
+            contact_context: None,
         }
     }
 }
@@ -149,9 +149,8 @@ pub fn solve_nonlinear_system(
     let electro_severity_base = electro_thermal_severity(options.electro_thermal_context.clone());
     let electro_temporal_variation =
         electro_temporal_profile_variation(options.electro_thermal_context.clone());
-    let plasticity_severity_base =
-        plasticity_proxy_severity(options.plasticity_proxy_context.clone());
-    let contact_severity_base = contact_proxy_severity(options.contact_proxy_context.clone());
+    let plasticity_severity_base = plasticity_severity(options.plasticity_context.clone());
+    let contact_severity_base = contact_severity(options.contact_context.clone());
     let line_search_reduction = options.line_search_reduction.clamp(0.05, 0.95);
     let tangent_refresh_interval = options.tangent_refresh_interval.max(1);
 
@@ -448,7 +447,7 @@ pub fn solve_nonlinear_system(
         });
     }
     if plasticity_severity_peak > 0.0 {
-        let plasticity = options.plasticity_proxy_context.as_ref();
+        let plasticity = options.plasticity_context.as_ref();
         diagnostics.push(FeaDiagnostic {
             code: "FEA_PLASTIC_NONLINEAR".to_string(),
             severity: if plasticity_severity_peak <= 0.6 {
@@ -471,7 +470,7 @@ pub fn solve_nonlinear_system(
         });
     }
     if contact_severity_peak > 0.0 {
-        let contact = options.contact_proxy_context.as_ref();
+        let contact = options.contact_context.as_ref();
         diagnostics.push(FeaDiagnostic {
             code: "FEA_CONTACT_NONLINEAR".to_string(),
             severity: if contact_severity_peak <= 0.6 {
@@ -615,7 +614,7 @@ fn electro_temporal_profile_variation(context: Option<FeaElectroThermalContext>)
     ((max_scale - min_scale).abs() / 2.0).clamp(0.0, 1.0)
 }
 
-fn plasticity_proxy_severity(context: Option<FeaPlasticityProxyContext>) -> f64 {
+fn plasticity_severity(context: Option<FeaPlasticityConstitutiveContext>) -> f64 {
     let Some(ctx) = context else {
         return 0.0;
     };
@@ -629,7 +628,7 @@ fn plasticity_proxy_severity(context: Option<FeaPlasticityProxyContext>) -> f64 
         .clamp(0.0, 1.0)
 }
 
-fn contact_proxy_severity(context: Option<FeaContactProxyContext>) -> f64 {
+fn contact_severity(context: Option<FeaContactInterfaceContext>) -> f64 {
     let Some(ctx) = context else {
         return 0.0;
     };

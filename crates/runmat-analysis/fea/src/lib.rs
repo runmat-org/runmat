@@ -140,7 +140,7 @@ pub struct FeaElectroThermalContext {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeaPlasticityProxyContext {
+pub struct FeaPlasticityConstitutiveContext {
     pub enabled: bool,
     pub yield_strain: f64,
     pub hardening_modulus_ratio: f64,
@@ -148,7 +148,7 @@ pub struct FeaPlasticityProxyContext {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct FeaContactProxyContext {
+pub struct FeaContactInterfaceContext {
     pub enabled: bool,
     pub penalty_stiffness_scale: f64,
     pub max_penetration_ratio: f64,

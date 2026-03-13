@@ -34,10 +34,10 @@ pub use contracts::{
     AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunKind, AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult,
     AnalysisTransientRunOptions, AnalysisTrendKindSummary, AnalysisTrendsData, AnalysisTrendsQuery,
-    AnalysisValidateResult, ContactProxyOptions, ElectroRegionConductivityScale,
+    AnalysisValidateResult, ContactInterfaceOptions, ElectroRegionConductivityScale,
     ElectroThermalCouplingOptions, ElectroTimeProfilePoint, ModalFrequencyBasis,
     ModalFrequencyUnits, ModalResultsData, NonlinearMethod, NonlinearResultsData,
-    PlasticityProxyOptions, PrecisionMode, PreconditionerMode,
+    PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode,
     PrepCalibrationProfile, QualityGate, QualityPolicy, QualityReason, QualityReasonCode,
     RunProvenance, RunStatus, ThermoFieldInterpolationMode, ThermoFieldSource,
     ThermoMechanicalCouplingOptions, ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
@@ -1454,9 +1454,11 @@ pub fn analysis_run_nonlinear_with_options_op(
             ));
         }
     }
-    let plasticity_options = model_plasticity_proxy_options(model);
+    let plasticity_options = model_plasticity_constitutive_options(model);
     if let Some(plasticity_options) = plasticity_options.as_ref() {
-        if let Err((detail, metadata)) = validate_plasticity_proxy_options(plasticity_options) {
+        if let Err((detail, metadata)) =
+            validate_plasticity_constitutive_options(plasticity_options)
+        {
             return Err(operation_error(
                 ANALYSIS_RUN_NONLINEAR_OPERATION,
                 ANALYSIS_RUN_NONLINEAR_OP_VERSION,
@@ -1472,9 +1474,9 @@ pub fn analysis_run_nonlinear_with_options_op(
             ));
         }
     }
-    let contact_options = model_contact_proxy_options(model);
+    let contact_options = model_contact_interface_options(model);
     if let Some(contact_options) = contact_options.as_ref() {
-        if let Err((detail, metadata)) = validate_contact_proxy_options(contact_options) {
+        if let Err((detail, metadata)) = validate_contact_interface_options(contact_options) {
             return Err(operation_error(
                 ANALYSIS_RUN_NONLINEAR_OPERATION,
                 ANALYSIS_RUN_NONLINEAR_OP_VERSION,
@@ -1513,8 +1515,8 @@ pub fn analysis_run_nonlinear_with_options_op(
             prep_context: to_fea_prep_context(prep_context, options.prep_calibration_profile),
             thermo_mechanical_context: to_fea_thermo_mechanical_context(thermo_options),
             electro_thermal_context: to_fea_electro_thermal_context(electro_options),
-            plasticity_proxy_context: to_fea_plasticity_proxy_context(plasticity_options),
-            contact_proxy_context: to_fea_contact_proxy_context(contact_options),
+            plasticity_context: to_fea_plasticity_constitutive_context(plasticity_options),
+            contact_context: to_fea_contact_interface_context(contact_options),
         }
     })
     .map_err(|err| {
@@ -3305,12 +3307,14 @@ fn model_electro_coupling_options(model: &AnalysisModel) -> Option<ElectroTherma
     })
 }
 
-fn model_plasticity_proxy_options(model: &AnalysisModel) -> Option<PlasticityProxyOptions> {
+fn model_plasticity_constitutive_options(
+    model: &AnalysisModel,
+) -> Option<PlasticityConstitutiveOptions> {
     let plastic = model
         .materials
         .iter()
         .find_map(|material| material.plastic.as_ref())?;
-    Some(PlasticityProxyOptions {
+    Some(PlasticityConstitutiveOptions {
         enabled: true,
         yield_strain: plastic.yield_strain,
         hardening_modulus_ratio: plastic.hardening_modulus_ratio,
@@ -3318,12 +3322,12 @@ fn model_plasticity_proxy_options(model: &AnalysisModel) -> Option<PlasticityPro
     })
 }
 
-fn model_contact_proxy_options(model: &AnalysisModel) -> Option<ContactProxyOptions> {
+fn model_contact_interface_options(model: &AnalysisModel) -> Option<ContactInterfaceOptions> {
     model
         .interfaces
         .iter()
         .find_map(|interface| match &interface.kind {
-            AnalysisInterfaceKind::Contact(contact) => Some(ContactProxyOptions {
+            AnalysisInterfaceKind::Contact(contact) => Some(ContactInterfaceOptions {
                 enabled: true,
                 penalty_stiffness_scale: contact.penalty_stiffness_scale,
                 max_penetration_ratio: contact.max_penetration_ratio,
@@ -3422,10 +3426,10 @@ fn to_fea_electro_thermal_context(
     })
 }
 
-fn to_fea_plasticity_proxy_context(
-    options: Option<PlasticityProxyOptions>,
-) -> Option<runmat_analysis_fea::FeaPlasticityProxyContext> {
-    options.map(|plasticity| runmat_analysis_fea::FeaPlasticityProxyContext {
+fn to_fea_plasticity_constitutive_context(
+    options: Option<PlasticityConstitutiveOptions>,
+) -> Option<runmat_analysis_fea::FeaPlasticityConstitutiveContext> {
+    options.map(|plasticity| runmat_analysis_fea::FeaPlasticityConstitutiveContext {
         enabled: plasticity.enabled,
         yield_strain: plasticity.yield_strain,
         hardening_modulus_ratio: plasticity.hardening_modulus_ratio,
@@ -3433,10 +3437,10 @@ fn to_fea_plasticity_proxy_context(
     })
 }
 
-fn to_fea_contact_proxy_context(
-    options: Option<ContactProxyOptions>,
-) -> Option<runmat_analysis_fea::FeaContactProxyContext> {
-    options.map(|contact| runmat_analysis_fea::FeaContactProxyContext {
+fn to_fea_contact_interface_context(
+    options: Option<ContactInterfaceOptions>,
+) -> Option<runmat_analysis_fea::FeaContactInterfaceContext> {
+    options.map(|contact| runmat_analysis_fea::FeaContactInterfaceContext {
         enabled: contact.enabled,
         penalty_stiffness_scale: contact.penalty_stiffness_scale,
         max_penetration_ratio: contact.max_penetration_ratio,
@@ -3684,21 +3688,22 @@ fn validate_electro_coupling_options(
     Ok(())
 }
 
-fn validate_plasticity_proxy_options(
-    options: &PlasticityProxyOptions,
+fn validate_plasticity_constitutive_options(
+    options: &PlasticityConstitutiveOptions,
 ) -> Result<(), (String, BTreeMap<String, String>)> {
     if !options.enabled {
         return Ok(());
     }
     if !options.yield_strain.is_finite() || options.yield_strain <= 0.0 {
         return Err((
-            "plasticity proxy requires finite positive yield_strain".to_string(),
+            "plasticity constitutive model requires finite positive yield_strain".to_string(),
             BTreeMap::from([("yield_strain".to_string(), options.yield_strain.to_string())]),
         ));
     }
     if !options.hardening_modulus_ratio.is_finite() || options.hardening_modulus_ratio < 0.0 {
         return Err((
-            "plasticity proxy requires finite non-negative hardening_modulus_ratio".to_string(),
+            "plasticity constitutive model requires finite non-negative hardening_modulus_ratio"
+                .to_string(),
             BTreeMap::from([(
                 "hardening_modulus_ratio".to_string(),
                 options.hardening_modulus_ratio.to_string(),
@@ -3707,7 +3712,8 @@ fn validate_plasticity_proxy_options(
     }
     if !options.saturation_exponent.is_finite() || options.saturation_exponent < 0.0 {
         return Err((
-            "plasticity proxy requires finite non-negative saturation_exponent".to_string(),
+            "plasticity constitutive model requires finite non-negative saturation_exponent"
+                .to_string(),
             BTreeMap::from([(
                 "saturation_exponent".to_string(),
                 options.saturation_exponent.to_string(),
@@ -3717,15 +3723,15 @@ fn validate_plasticity_proxy_options(
     Ok(())
 }
 
-fn validate_contact_proxy_options(
-    options: &ContactProxyOptions,
+fn validate_contact_interface_options(
+    options: &ContactInterfaceOptions,
 ) -> Result<(), (String, BTreeMap<String, String>)> {
     if !options.enabled {
         return Ok(());
     }
     if !options.penalty_stiffness_scale.is_finite() || options.penalty_stiffness_scale <= 0.0 {
         return Err((
-            "contact proxy requires finite positive penalty_stiffness_scale".to_string(),
+            "contact interface model requires finite positive penalty_stiffness_scale".to_string(),
             BTreeMap::from([(
                 "penalty_stiffness_scale".to_string(),
                 options.penalty_stiffness_scale.to_string(),
@@ -3734,7 +3740,8 @@ fn validate_contact_proxy_options(
     }
     if !options.max_penetration_ratio.is_finite() || options.max_penetration_ratio < 0.0 {
         return Err((
-            "contact proxy requires finite non-negative max_penetration_ratio".to_string(),
+            "contact interface model requires finite non-negative max_penetration_ratio"
+                .to_string(),
             BTreeMap::from([(
                 "max_penetration_ratio".to_string(),
                 options.max_penetration_ratio.to_string(),
@@ -3743,7 +3750,8 @@ fn validate_contact_proxy_options(
     }
     if !options.friction_coefficient.is_finite() || options.friction_coefficient < 0.0 {
         return Err((
-            "contact proxy requires finite non-negative friction_coefficient".to_string(),
+            "contact interface model requires finite non-negative friction_coefficient"
+                .to_string(),
             BTreeMap::from([(
                 "friction_coefficient".to_string(),
                 options.friction_coefficient.to_string(),
