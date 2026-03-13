@@ -2661,6 +2661,18 @@ pub fn analysis_results_op(
             "field_extrapolation_ratio",
         )
     });
+    let thermo_field_clamp_ratio = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_TM_TRANSIENT",
+        "field_clamp_ratio",
+    )
+    .or_else(|| {
+        diagnostic_metric(
+            &run_result.run.diagnostics,
+            "FEA_TM_NONLINEAR",
+            "field_clamp_ratio",
+        )
+    });
     let thermo_transient_severity = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_TM_TRANSIENT",
@@ -2696,12 +2708,22 @@ pub fn analysis_results_op(
         "severity_peak",
     )
     .or_else(|| diagnostic_metric(&run_result.run.diagnostics, "FEA_ET_TRANSIENT", "severity"));
+    let electro_transient_time_scale_mean = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_ET_TRANSIENT",
+        "time_scale_mean",
+    );
     let electro_nonlinear_severity = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_ET_NONLINEAR",
         "severity_peak",
     )
     .or_else(|| diagnostic_metric(&run_result.run.diagnostics, "FEA_ET_NONLINEAR", "severity"));
+    let electro_nonlinear_time_scale_mean = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_ET_NONLINEAR",
+        "time_scale_mean",
+    );
     let plastic_nonlinear_severity = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_PLASTIC_NONLINEAR",
@@ -2714,6 +2736,11 @@ pub fn analysis_results_op(
             "severity",
         )
     });
+    let plastic_nonlinear_severity_mean = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_PLASTIC_NONLINEAR",
+        "severity_mean",
+    );
     let plastic_load_realization_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_PLASTIC_NONLINEAR",
@@ -2736,6 +2763,11 @@ pub fn analysis_results_op(
             "severity",
         )
     });
+    let contact_nonlinear_severity_mean = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_CONTACT_NONLINEAR",
+        "severity_mean",
+    );
     let contact_load_realization_ratio = diagnostic_metric(
         &run_result.run.diagnostics,
         "FEA_CONTACT_NONLINEAR",
@@ -2818,6 +2850,7 @@ pub fn analysis_results_op(
         thermo_region_delta_count,
         thermo_spatial_coverage_ratio,
         thermo_field_extrapolation_ratio,
+        thermo_field_clamp_ratio,
         thermo_transient_severity,
         thermo_nonlinear_severity,
         electro_thermal_coupling_enabled,
@@ -2825,11 +2858,15 @@ pub fn analysis_results_op(
         electro_joule_heating_scale,
         electro_conductivity_spread_ratio,
         electro_transient_severity,
+        electro_transient_time_scale_mean,
         electro_nonlinear_severity,
+        electro_nonlinear_time_scale_mean,
         plastic_nonlinear_severity,
+        plastic_nonlinear_severity_mean,
         plastic_load_realization_ratio,
         plastic_load_amplification_ratio,
         contact_nonlinear_severity,
+        contact_nonlinear_severity_mean,
         contact_load_realization_ratio,
         contact_load_amplification_ratio,
         thermal_max_residual_norm,

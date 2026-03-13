@@ -133,7 +133,8 @@ Not required for this milestone:
   - `analysis.results` summary now exposes these plastic/contact outcome metrics directly for contract consumers,
   - release-readiness governance now enforces threshold envelopes, breach-rate controls, and rolling-trend checks for these load-path metrics,
   - branch-profile defaults were calibrated against rolling benchmark artifacts to keep load-path checks stable pre-hardening (lower false-positive risk on feature/development/release profiles),
-  - legacy severity/spread trend checks were recalibrated to fixture-aligned rolling baselines (instead of mixed-fixture global medians) to suppress cross-fixture false positives while preserving drift sensitivity.
+  - legacy severity/spread trend checks were recalibrated to fixture-aligned rolling baselines (instead of mixed-fixture global medians) to suppress cross-fixture false positives while preserving drift sensitivity,
+  - additional in-scope constitutive posture fields are now surfaced and governed (`thermo_field_clamp_ratio`, electro transient/nonlinear time-scale means, plastic/contact severity means) with conformance and readiness coverage.
 
 ## Closeout Checklist for This Track
 

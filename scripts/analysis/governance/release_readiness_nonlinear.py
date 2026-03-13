@@ -69,8 +69,11 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_THERMO_MIN_FIELD_COVERAGE_RATIO": "0.55",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO": "0.02",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_RATIO": "0.03",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_COVERAGE_DROP_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_TREND_RATIO": "1.15",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_BREACH_RATE": "0.1",
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED": "true",
             "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS": "14",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM": "6.8",
@@ -95,6 +98,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_BREACH_RATE": "0.1",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_TREND_RATIO": "1.1",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO": "1.1",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MIN_TIME_SCALE_MEAN": "0.75",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN": "1.25",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_BREACH_RATE": "0.1",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO": "1.15",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.65",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO": "0.72",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO": "0.98",
@@ -147,8 +154,11 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_THERMO_MIN_FIELD_COVERAGE_RATIO": "0.45",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO": "0.08",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_RATIO": "0.08",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_COVERAGE_DROP_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_BREACH_RATE": "0.25",
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED": "true",
             "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS": "21",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM": "7.2",
@@ -173,6 +183,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_BREACH_RATE": "0.25",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO": "1.2",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MIN_TIME_SCALE_MEAN": "0.7",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN": "1.3",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_BREACH_RATE": "0.25",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO": "1.2",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.75",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO": "0.68",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO": "1.02",
@@ -225,8 +239,11 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_THERMO_MIN_FIELD_COVERAGE_RATIO": "0.3",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO": "0.18",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_RATIO": "0.2",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_COVERAGE_DROP_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_BREACH_RATE": "0.5",
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED": "false",
             "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS": "30",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM": "8.0",
@@ -251,6 +268,10 @@ def profile_default(name: str, default: str) -> str:
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_BREACH_RATE": "0.5",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO": "1.35",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MIN_TIME_SCALE_MEAN": "0.6",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN": "1.5",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_BREACH_RATE": "0.5",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO": "1.35",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY": "0.9",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO": "0.6",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO": "1.1",
@@ -844,6 +865,12 @@ def evaluate_release_readiness(
             ),
         )
     )
+    thermo_max_field_clamp_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_RATIO", "0.08"),
+        )
+    )
     thermo_max_field_coverage_drop_trend_ratio = float(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_COVERAGE_DROP_TREND_RATIO",
@@ -859,6 +886,22 @@ def evaluate_release_readiness(
             profile_default(
                 "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO",
                 "1.2",
+            ),
+        )
+    )
+    thermo_max_field_clamp_trend_ratio = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_TREND_RATIO",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_TREND_RATIO", "1.2"
+            ),
+        )
+    )
+    thermo_max_field_clamp_breach_rate_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_BREACH_RATE",
+            profile_default(
+                "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_BREACH_RATE", "0.25"
             ),
         )
     )
@@ -1032,6 +1075,30 @@ def evaluate_release_readiness(
         os.getenv(
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO",
             profile_default("RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO", "1.2"),
+        )
+    )
+    electro_min_time_scale_mean_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MIN_TIME_SCALE_MEAN",
+            profile_default("RUNMAT_RELEASE_READINESS_ELECTRO_MIN_TIME_SCALE_MEAN", "0.7"),
+        )
+    )
+    electro_max_time_scale_mean_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN",
+            profile_default("RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN", "1.3"),
+        )
+    )
+    electro_max_time_scale_breach_rate_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_BREACH_RATE",
+            profile_default("RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_BREACH_RATE", "0.25"),
+        )
+    )
+    electro_max_time_scale_trend_ratio_threshold = float(
+        os.getenv(
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO",
+            profile_default("RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO", "1.2"),
         )
     )
     plastic_max_nonlinear_severity_threshold = float(
@@ -1350,10 +1417,13 @@ def evaluate_release_readiness(
     thermo_max_heterogeneity_index = None
     thermo_min_field_coverage_ratio = None
     thermo_max_field_extrapolation_ratio = None
+    thermo_max_field_clamp_ratio = None
     thermo_field_coverage_drop_trend_ratio = None
     thermo_field_extrapolation_trend_ratio = None
+    thermo_field_clamp_trend_ratio = None
     thermo_spread_breach_rate = None
     thermo_heterogeneity_breach_rate = None
+    thermo_field_clamp_breach_rate = None
     thermo_spread_trend_ratio = None
     thermo_heterogeneity_trend_ratio = None
     thermal_max_residual_norm = None
@@ -1372,10 +1442,14 @@ def evaluate_release_readiness(
     electro_max_nonlinear_severity = None
     electro_max_joule_heating_scale = None
     electro_max_conductivity_spread_ratio = None
+    electro_min_time_scale_mean = None
+    electro_max_time_scale_mean = None
     electro_joule_breach_rate = None
     electro_spread_breach_rate = None
+    electro_time_scale_breach_rate = None
     electro_joule_trend_ratio = None
     electro_spread_trend_ratio = None
+    electro_time_scale_trend_ratio = None
     plastic_max_nonlinear_severity = None
     plastic_load_realization_ratio_min = None
     plastic_load_realization_ratio_max = None
@@ -1885,12 +1959,35 @@ def evaluate_release_readiness(
                     )
                 )
 
+        clamp_values = []
+        for rec in thermo_records:
+            raw_value = rec.get("thermo_field_clamp_ratio")
+            if isinstance(raw_value, (int, float)):
+                value = float(raw_value)
+                if math.isfinite(value):
+                    clamp_values.append(value)
+        if clamp_values:
+            thermo_max_field_clamp_ratio = max(clamp_values)
+            if thermo_max_field_clamp_ratio > thermo_max_field_clamp_ratio_threshold:
+                reasons.append(
+                    Reason(
+                        code="THERMO_FIELD_CLAMP_RATIO_HIGH",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"max thermo field clamp ratio {thermo_max_field_clamp_ratio:.3f} exceeds "
+                            f"threshold {thermo_max_field_clamp_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
+
     electro_records = [
         rec
         for rec in report_records(latest)
         if isinstance(rec.get("electro_thermal_coupling_enabled"), bool)
         or isinstance(rec.get("electro_transient_severity"), (int, float))
         or isinstance(rec.get("electro_nonlinear_severity"), (int, float))
+        or isinstance(rec.get("electro_transient_time_scale_mean"), (int, float))
+        or isinstance(rec.get("electro_nonlinear_time_scale_mean"), (int, float))
     ]
     if not electro_records:
         if protected or electro_require_metrics:
@@ -2016,6 +2113,36 @@ def evaluate_release_readiness(
                             "max electro-thermal conductivity spread ratio "
                             f"{electro_max_conductivity_spread_ratio:.3f} exceeds "
                             f"threshold {electro_max_conductivity_spread_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
+
+        electro_time_scale_values = []
+        for rec in electro_records:
+            for key in (
+                "electro_transient_time_scale_mean",
+                "electro_nonlinear_time_scale_mean",
+            ):
+                raw_value = rec.get(key)
+                if isinstance(raw_value, (int, float)):
+                    value = float(raw_value)
+                    if math.isfinite(value):
+                        electro_time_scale_values.append(value)
+        if electro_time_scale_values:
+            electro_min_time_scale_mean = min(electro_time_scale_values)
+            electro_max_time_scale_mean = max(electro_time_scale_values)
+            if (
+                electro_min_time_scale_mean < electro_min_time_scale_mean_threshold
+                or electro_max_time_scale_mean > electro_max_time_scale_mean_threshold
+            ):
+                reasons.append(
+                    Reason(
+                        code="ELECTRO_TIME_SCALE_MEAN_OUT_OF_RANGE",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            "electro-thermal time-scale mean outside threshold envelope: "
+                            f"min={electro_min_time_scale_mean:.3f} max={electro_max_time_scale_mean:.3f} "
+                            f"allowed=[{electro_min_time_scale_mean_threshold:.3f}, {electro_max_time_scale_mean_threshold:.3f}]"
                         ),
                     )
                 )
@@ -2229,6 +2356,7 @@ def evaluate_release_readiness(
 
     spread_breach_values = []
     heterogeneity_breach_values = []
+    clamp_breach_values = []
     for rec in trend_thermo_records:
         spread = rec.get("thermo_constitutive_material_spread_ratio")
         if isinstance(spread, (int, float)):
@@ -2242,6 +2370,11 @@ def evaluate_release_readiness(
                 heterogeneity_breach_values.append(
                     value > thermo_max_heterogeneity_index_threshold
                 )
+        clamp_ratio = rec.get("thermo_field_clamp_ratio")
+        if isinstance(clamp_ratio, (int, float)):
+            value = float(clamp_ratio)
+            if math.isfinite(value):
+                clamp_breach_values.append(value > thermo_max_field_clamp_ratio_threshold)
 
     if spread_breach_values:
         thermo_spread_breach_rate = (
@@ -2280,6 +2413,23 @@ def evaluate_release_readiness(
                     )
                 )
 
+    if clamp_breach_values:
+        thermo_field_clamp_breach_rate = (
+            sum(1 for breached in clamp_breach_values if breached)
+            / len(clamp_breach_values)
+        )
+        if thermo_field_clamp_breach_rate > thermo_max_field_clamp_breach_rate_threshold:
+            reasons.append(
+                Reason(
+                    code="THERMO_FIELD_CLAMP_BREACH_RATE_HIGH",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"thermo field clamp breach rate {thermo_field_clamp_breach_rate:.3f} exceeds "
+                        f"threshold {thermo_max_field_clamp_breach_rate_threshold:.3f}"
+                    ),
+                )
+            )
+
     trend_electro_records = []
     for report in trend_reports:
         for rec in report_records(report):
@@ -2287,11 +2437,14 @@ def evaluate_release_readiness(
                 continue
             if isinstance(rec.get("electro_joule_heating_scale"), (int, float)) or isinstance(
                 rec.get("electro_conductivity_spread_ratio"), (int, float)
+            ) or isinstance(rec.get("electro_transient_time_scale_mean"), (int, float)) or isinstance(
+                rec.get("electro_nonlinear_time_scale_mean"), (int, float)
             ):
                 trend_electro_records.append(rec)
 
     electro_joule_breach_values = []
     electro_spread_breach_values = []
+    electro_time_scale_breach_values = []
     for rec in trend_electro_records:
         joule = rec.get("electro_joule_heating_scale")
         if isinstance(joule, (int, float)):
@@ -2307,6 +2460,18 @@ def evaluate_release_readiness(
                 electro_spread_breach_values.append(
                     value > electro_max_conductivity_spread_ratio_threshold
                 )
+        for key in (
+            "electro_transient_time_scale_mean",
+            "electro_nonlinear_time_scale_mean",
+        ):
+            raw_time_scale = rec.get(key)
+            if isinstance(raw_time_scale, (int, float)):
+                value = float(raw_time_scale)
+                if math.isfinite(value):
+                    electro_time_scale_breach_values.append(
+                        value < electro_min_time_scale_mean_threshold
+                        or value > electro_max_time_scale_mean_threshold
+                    )
 
     if electro_joule_breach_values:
         electro_joule_breach_rate = (
@@ -2559,6 +2724,8 @@ def evaluate_release_readiness(
                     continue
                 if ratio_mode == "drop":
                     ratios.append(baseline_value / latest_value)
+                elif ratio_mode == "symmetric":
+                    ratios.append(max(latest_value / baseline_value, baseline_value / latest_value))
                 else:
                     ratios.append(latest_value / baseline_value)
             if not ratios:
@@ -2712,6 +2879,22 @@ def evaluate_release_readiness(
                     )
                 )
 
+        thermo_field_clamp_trend_ratio = fixture_trend_ratio("thermo_field_clamp_ratio")
+        if (
+            thermo_field_clamp_trend_ratio is not None
+            and thermo_field_clamp_trend_ratio > thermo_max_field_clamp_trend_ratio
+        ):
+            reasons.append(
+                Reason(
+                    code="THERMO_FIELD_CLAMP_TREND_WORSENING",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"thermo field clamp trend ratio {thermo_field_clamp_trend_ratio:.3f} exceeds "
+                        f"threshold {thermo_max_field_clamp_trend_ratio:.3f}"
+                    ),
+                )
+            )
+
         electro_joule_trend_ratio = fixture_trend_ratio("electro_joule_heating_scale")
         if (
             electro_joule_trend_ratio is not None
@@ -2743,6 +2926,27 @@ def evaluate_release_readiness(
                     ),
                 )
             )
+
+        electro_time_scale_trend_candidates = [
+            fixture_trend_ratio("electro_transient_time_scale_mean", ratio_mode="symmetric"),
+            fixture_trend_ratio("electro_nonlinear_time_scale_mean", ratio_mode="symmetric"),
+        ]
+        electro_time_scale_trend_candidates = [
+            value for value in electro_time_scale_trend_candidates if value is not None
+        ]
+        if electro_time_scale_trend_candidates:
+            electro_time_scale_trend_ratio = max(electro_time_scale_trend_candidates)
+            if electro_time_scale_trend_ratio > electro_max_time_scale_trend_ratio_threshold:
+                reasons.append(
+                    Reason(
+                        code="ELECTRO_TIME_SCALE_TREND_WORSENING",
+                        severity="fail" if protected else "warn",
+                        detail=(
+                            f"electro-thermal time-scale trend ratio {electro_time_scale_trend_ratio:.3f} exceeds "
+                            f"threshold {electro_max_time_scale_trend_ratio_threshold:.3f}"
+                        ),
+                    )
+                )
 
         plastic_trend_ratio = fixture_trend_ratio("plastic_nonlinear_severity")
         if (
@@ -2937,6 +3141,23 @@ def evaluate_release_readiness(
                             ),
                         )
                     )
+
+    if electro_time_scale_breach_values:
+        electro_time_scale_breach_rate = (
+            sum(1 for breached in electro_time_scale_breach_values if breached)
+            / len(electro_time_scale_breach_values)
+        )
+        if electro_time_scale_breach_rate > electro_max_time_scale_breach_rate_threshold:
+            reasons.append(
+                Reason(
+                    code="ELECTRO_TIME_SCALE_BREACH_RATE_HIGH",
+                    severity="fail" if protected else "warn",
+                    detail=(
+                        f"electro-thermal time-scale breach rate {electro_time_scale_breach_rate:.3f} exceeds "
+                        f"threshold {electro_max_time_scale_breach_rate_threshold:.3f}"
+                    ),
+                )
+            )
 
     plastic_reference_fixture_ids = {
         "nonlinear_plastic_hardening_reference_gpu_provider",
@@ -3177,13 +3398,17 @@ def evaluate_release_readiness(
         "thermo_max_heterogeneity_index": thermo_max_heterogeneity_index,
         "thermo_min_field_coverage_ratio": thermo_min_field_coverage_ratio,
         "thermo_max_field_extrapolation_ratio": thermo_max_field_extrapolation_ratio,
+        "thermo_max_field_clamp_ratio": thermo_max_field_clamp_ratio,
         "thermo_field_coverage_drop_trend_ratio": thermo_field_coverage_drop_trend_ratio,
         "thermo_field_extrapolation_trend_ratio": thermo_field_extrapolation_trend_ratio,
+        "thermo_field_clamp_trend_ratio": thermo_field_clamp_trend_ratio,
         "thermo_max_spread_ratio_threshold": thermo_max_spread_ratio_threshold,
         "thermo_min_field_coverage_ratio_threshold": thermo_min_field_coverage_ratio_threshold,
         "thermo_max_field_extrapolation_ratio_threshold": thermo_max_field_extrapolation_ratio_threshold,
+        "thermo_max_field_clamp_ratio_threshold": thermo_max_field_clamp_ratio_threshold,
         "thermo_max_field_coverage_drop_trend_ratio": thermo_max_field_coverage_drop_trend_ratio,
         "thermo_max_field_extrapolation_trend_ratio": thermo_max_field_extrapolation_trend_ratio,
+        "thermo_max_field_clamp_trend_ratio": thermo_max_field_clamp_trend_ratio,
         "thermo_require_artifact_backed": thermo_require_artifact_backed,
         "thermo_field_artifact_max_age_days": thermo_field_artifact_max_age_days,
         "thermo_signing_key_safe": bool(
@@ -3191,6 +3416,8 @@ def evaluate_release_readiness(
         ),
         "thermo_spread_breach_rate": thermo_spread_breach_rate,
         "thermo_heterogeneity_breach_rate": thermo_heterogeneity_breach_rate,
+        "thermo_field_clamp_breach_rate": thermo_field_clamp_breach_rate,
+        "thermo_max_field_clamp_breach_rate_threshold": thermo_max_field_clamp_breach_rate_threshold,
         "thermo_spread_trend_ratio": thermo_spread_trend_ratio,
         "thermo_heterogeneity_trend_ratio": thermo_heterogeneity_trend_ratio,
         "thermal_max_residual_norm": thermal_max_residual_norm,
@@ -3220,16 +3447,24 @@ def evaluate_release_readiness(
         "electro_max_nonlinear_severity": electro_max_nonlinear_severity,
         "electro_max_joule_heating_scale": electro_max_joule_heating_scale,
         "electro_max_conductivity_spread_ratio": electro_max_conductivity_spread_ratio,
+        "electro_min_time_scale_mean": electro_min_time_scale_mean,
+        "electro_max_time_scale_mean": electro_max_time_scale_mean,
         "electro_max_joule_heating_scale_threshold": electro_max_joule_heating_scale_threshold,
         "electro_max_conductivity_spread_ratio_threshold": electro_max_conductivity_spread_ratio_threshold,
+        "electro_min_time_scale_mean_threshold": electro_min_time_scale_mean_threshold,
+        "electro_max_time_scale_mean_threshold": electro_max_time_scale_mean_threshold,
         "electro_joule_breach_rate": electro_joule_breach_rate,
         "electro_spread_breach_rate": electro_spread_breach_rate,
+        "electro_time_scale_breach_rate": electro_time_scale_breach_rate,
         "electro_max_joule_breach_rate_threshold": electro_max_joule_breach_rate_threshold,
         "electro_max_spread_breach_rate_threshold": electro_max_spread_breach_rate_threshold,
+        "electro_max_time_scale_breach_rate_threshold": electro_max_time_scale_breach_rate_threshold,
         "electro_joule_trend_ratio": electro_joule_trend_ratio,
         "electro_spread_trend_ratio": electro_spread_trend_ratio,
+        "electro_time_scale_trend_ratio": electro_time_scale_trend_ratio,
         "electro_max_joule_trend_ratio_threshold": electro_max_joule_trend_ratio_threshold,
         "electro_max_spread_trend_ratio_threshold": electro_max_spread_trend_ratio_threshold,
+        "electro_max_time_scale_trend_ratio_threshold": electro_max_time_scale_trend_ratio_threshold,
         "plastic_max_nonlinear_severity": plastic_max_nonlinear_severity,
         "plastic_max_nonlinear_severity_threshold": plastic_max_nonlinear_severity_threshold,
         "plastic_load_realization_ratio_min": plastic_load_realization_ratio_min,
@@ -3374,6 +3609,14 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('thermo_max_field_extrapolation_ratio_threshold') if result.get('thermo_max_field_extrapolation_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- Max thermo field clamp ratio: "
+        f"`{result.get('thermo_max_field_clamp_ratio') if result.get('thermo_max_field_clamp_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermo field clamp threshold: "
+        f"`{result.get('thermo_max_field_clamp_ratio_threshold') if result.get('thermo_max_field_clamp_ratio_threshold') is not None else '-'}`"
+    )
+    lines.append(
         "- Thermo field coverage drop trend ratio: "
         f"`{result.get('thermo_field_coverage_drop_trend_ratio') if result.get('thermo_field_coverage_drop_trend_ratio') is not None else '-'}`"
     )
@@ -3388,6 +3631,14 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Thermo field extrapolation trend threshold: "
         f"`{result.get('thermo_max_field_extrapolation_trend_ratio') if result.get('thermo_max_field_extrapolation_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermo field clamp trend ratio: "
+        f"`{result.get('thermo_field_clamp_trend_ratio') if result.get('thermo_field_clamp_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermo field clamp trend threshold: "
+        f"`{result.get('thermo_max_field_clamp_trend_ratio') if result.get('thermo_max_field_clamp_trend_ratio') is not None else '-'}`"
     )
     lines.append(
         "- Thermo artifact-backed required: "
@@ -3408,6 +3659,10 @@ def markdown_summary(result: dict) -> str:
     lines.append(
         "- Thermo heterogeneity breach rate: "
         f"`{result.get('thermo_heterogeneity_breach_rate') if result.get('thermo_heterogeneity_breach_rate') is not None else '-'}`"
+    )
+    lines.append(
+        "- Thermo field clamp breach rate: "
+        f"`{result.get('thermo_field_clamp_breach_rate') if result.get('thermo_field_clamp_breach_rate') is not None else '-'}`"
     )
     lines.append(
         "- Thermo spread trend ratio: "
@@ -3538,6 +3793,14 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('electro_max_conductivity_spread_ratio_threshold') if result.get('electro_max_conductivity_spread_ratio_threshold') is not None else '-'}`"
     )
     lines.append(
+        "- Electro-thermal time-scale min/max: "
+        f"`{result.get('electro_min_time_scale_mean') if result.get('electro_min_time_scale_mean') is not None else '-'}`/`{result.get('electro_max_time_scale_mean') if result.get('electro_max_time_scale_mean') is not None else '-'}`"
+    )
+    lines.append(
+        "- Electro-thermal time-scale thresholds (min/max): "
+        f"`{result.get('electro_min_time_scale_mean_threshold') if result.get('electro_min_time_scale_mean_threshold') is not None else '-'}`/`{result.get('electro_max_time_scale_mean_threshold') if result.get('electro_max_time_scale_mean_threshold') is not None else '-'}`"
+    )
+    lines.append(
         "- Electro-thermal Joule breach rate: "
         f"`{result.get('electro_joule_breach_rate') if result.get('electro_joule_breach_rate') is not None else '-'}`"
     )
@@ -3546,12 +3809,20 @@ def markdown_summary(result: dict) -> str:
         f"`{result.get('electro_spread_breach_rate') if result.get('electro_spread_breach_rate') is not None else '-'}`"
     )
     lines.append(
+        "- Electro-thermal time-scale breach rate: "
+        f"`{result.get('electro_time_scale_breach_rate') if result.get('electro_time_scale_breach_rate') is not None else '-'}`"
+    )
+    lines.append(
         "- Electro-thermal Joule trend ratio: "
         f"`{result.get('electro_joule_trend_ratio') if result.get('electro_joule_trend_ratio') is not None else '-'}`"
     )
     lines.append(
         "- Electro-thermal spread trend ratio: "
         f"`{result.get('electro_spread_trend_ratio') if result.get('electro_spread_trend_ratio') is not None else '-'}`"
+    )
+    lines.append(
+        "- Electro-thermal time-scale trend ratio: "
+        f"`{result.get('electro_time_scale_trend_ratio') if result.get('electro_time_scale_trend_ratio') is not None else '-'}`"
     )
     lines.append("")
     lines.append("### Plasticity Posture")

@@ -1091,6 +1091,7 @@ pub(super) fn run_fixture(
     let mut thermo_region_delta_count = None;
     let mut thermo_spatial_coverage_ratio = None;
     let mut thermo_field_extrapolation_ratio = None;
+    let mut thermo_field_clamp_ratio = None;
     let thermo_field_artifact_id = model
         .thermo_mechanical
         .as_ref()
@@ -1110,11 +1111,15 @@ pub(super) fn run_fixture(
     let mut electro_joule_heating_scale = None;
     let mut electro_conductivity_spread_ratio = None;
     let mut electro_transient_severity = None;
+    let mut electro_transient_time_scale_mean = None;
     let mut electro_nonlinear_severity = None;
+    let mut electro_nonlinear_time_scale_mean = None;
     let mut plastic_nonlinear_severity = None;
+    let mut plastic_nonlinear_severity_mean = None;
     let mut plastic_load_realization_ratio = None;
     let mut plastic_load_amplification_ratio = None;
     let mut contact_nonlinear_severity = None;
+    let mut contact_nonlinear_severity_mean = None;
     let mut contact_load_realization_ratio = None;
     let mut contact_load_amplification_ratio = None;
     let mut thermal_max_residual_norm = None;
@@ -1175,6 +1180,7 @@ pub(super) fn run_fixture(
                     thermo_region_delta_count,
                     thermo_spatial_coverage_ratio,
                     thermo_field_extrapolation_ratio,
+                    thermo_field_clamp_ratio,
                     thermo_field_artifact_id,
                     thermo_field_artifact_approved,
                     thermo_field_artifact_age_days,
@@ -1186,11 +1192,15 @@ pub(super) fn run_fixture(
                     electro_joule_heating_scale,
                     electro_conductivity_spread_ratio,
                     electro_transient_severity,
+                    electro_transient_time_scale_mean,
                     electro_nonlinear_severity,
+                    electro_nonlinear_time_scale_mean,
                     plastic_nonlinear_severity,
+                    plastic_nonlinear_severity_mean,
                     plastic_load_realization_ratio,
                     plastic_load_amplification_ratio,
                     contact_nonlinear_severity,
+                    contact_nonlinear_severity_mean,
                     contact_load_realization_ratio,
                     contact_load_amplification_ratio,
                     thermal_max_residual_norm,
@@ -1928,6 +1938,20 @@ pub(super) fn run_fixture(
                             Some(0.0),
                             Some(0.02),
                         );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_ramp_smooth_field_clamp_ratio",
+                            "FEA_TM_TRANSIENT",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_TRANSIENT",
+                                "field_clamp_ratio",
+                            ),
+                            Some(0.0),
+                            Some(0.02),
+                        );
                     } else if spec.id == "thermo_shock_oscillatory_gpu_provider"
                         || spec.id == "thermo_shock_oscillatory_field_artifact_gpu_provider"
                     {
@@ -2011,6 +2035,20 @@ pub(super) fn run_fixture(
                                 &gpu_envelope.data,
                                 "FEA_TM_TRANSIENT",
                                 "field_extrapolation_ratio",
+                            ),
+                            Some(0.0),
+                            Some(0.2),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_shock_oscillatory_field_clamp_ratio",
+                            "FEA_TM_TRANSIENT",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_TRANSIENT",
+                                "field_clamp_ratio",
                             ),
                             Some(0.0),
                             Some(0.2),
@@ -2564,6 +2602,34 @@ pub(super) fn run_fixture(
                             spec.id,
                             &mut threshold_assertions,
                             &mut failures,
+                            "thermo_nonlinear_time_scale_mean",
+                            "FEA_TM_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_NONLINEAR",
+                                "time_scale_mean",
+                            ),
+                            Some(0.7),
+                            Some(1.25),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "thermo_nonlinear_field_clamp_ratio",
+                            "FEA_TM_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_TM_NONLINEAR",
+                                "field_clamp_ratio",
+                            ),
+                            Some(0.0),
+                            Some(0.15),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
                             "electro_nonlinear_joule_heating_scale",
                             "FEA_ET_COUPLING",
                             diagnostic_metric(
@@ -2615,6 +2681,34 @@ pub(super) fn run_fixture(
                             ),
                             Some(0.0),
                             Some(0.8),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_nonlinear_time_scale_mean",
+                            "FEA_ET_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_NONLINEAR",
+                                "time_scale_mean",
+                            ),
+                            Some(0.8),
+                            Some(1.2),
+                        );
+                        push_threshold_assertion(
+                            spec.id,
+                            &mut threshold_assertions,
+                            &mut failures,
+                            "electro_nonlinear_severity_mean",
+                            "FEA_ET_NONLINEAR",
+                            diagnostic_metric(
+                                &gpu_envelope.data,
+                                "FEA_ET_NONLINEAR",
+                                "severity_mean",
+                            ),
+                            Some(0.9),
+                            Some(1.05),
                         );
                     }
                     if spec.id == "nonlinear_plasticity_proxy_gpu_provider" {
@@ -3021,6 +3115,7 @@ pub(super) fn run_fixture(
                                 thermo_region_delta_count,
                                 thermo_spatial_coverage_ratio,
                                 thermo_field_extrapolation_ratio,
+                                thermo_field_clamp_ratio,
                                 thermo_field_artifact_id,
                                 thermo_field_artifact_approved,
                                 thermo_field_artifact_age_days,
@@ -3032,11 +3127,15 @@ pub(super) fn run_fixture(
                                 electro_joule_heating_scale,
                                 electro_conductivity_spread_ratio,
                                 electro_transient_severity,
+                                electro_transient_time_scale_mean,
                                 electro_nonlinear_severity,
+                                electro_nonlinear_time_scale_mean,
                                 plastic_nonlinear_severity,
+                                plastic_nonlinear_severity_mean,
                                 plastic_load_realization_ratio,
                                 plastic_load_amplification_ratio,
                                 contact_nonlinear_severity,
+                                contact_nonlinear_severity_mean,
                                 contact_load_realization_ratio,
                                 contact_load_amplification_ratio,
                                 thermal_max_residual_norm,
@@ -3090,6 +3189,7 @@ pub(super) fn run_fixture(
                         gpu_results.data.summary.thermo_spatial_coverage_ratio;
                     thermo_field_extrapolation_ratio =
                         gpu_results.data.summary.thermo_field_extrapolation_ratio;
+                    thermo_field_clamp_ratio = gpu_results.data.summary.thermo_field_clamp_ratio;
                     thermo_transient_severity = gpu_results.data.summary.thermo_transient_severity;
                     thermo_nonlinear_severity = gpu_results.data.summary.thermo_nonlinear_severity;
                     electro_thermal_coupling_enabled =
@@ -3104,16 +3204,24 @@ pub(super) fn run_fixture(
                         gpu_results.data.summary.electro_conductivity_spread_ratio;
                     electro_transient_severity =
                         gpu_results.data.summary.electro_transient_severity;
+                    electro_transient_time_scale_mean =
+                        gpu_results.data.summary.electro_transient_time_scale_mean;
                     electro_nonlinear_severity =
                         gpu_results.data.summary.electro_nonlinear_severity;
+                    electro_nonlinear_time_scale_mean =
+                        gpu_results.data.summary.electro_nonlinear_time_scale_mean;
                     plastic_nonlinear_severity =
                         gpu_results.data.summary.plastic_nonlinear_severity;
+                    plastic_nonlinear_severity_mean =
+                        gpu_results.data.summary.plastic_nonlinear_severity_mean;
                     plastic_load_realization_ratio =
                         gpu_results.data.summary.plastic_load_realization_ratio;
                     plastic_load_amplification_ratio =
                         gpu_results.data.summary.plastic_load_amplification_ratio;
                     contact_nonlinear_severity =
                         gpu_results.data.summary.contact_nonlinear_severity;
+                    contact_nonlinear_severity_mean =
+                        gpu_results.data.summary.contact_nonlinear_severity_mean;
                     contact_load_realization_ratio =
                         gpu_results.data.summary.contact_load_realization_ratio;
                     contact_load_amplification_ratio =
@@ -3278,6 +3386,7 @@ pub(super) fn run_fixture(
                                     thermo_region_delta_count,
                                     thermo_spatial_coverage_ratio,
                                     thermo_field_extrapolation_ratio,
+                                    thermo_field_clamp_ratio,
                                     thermo_field_artifact_id,
                                     thermo_field_artifact_approved,
                                     thermo_field_artifact_age_days,
@@ -3289,11 +3398,15 @@ pub(super) fn run_fixture(
                                     electro_joule_heating_scale,
                                     electro_conductivity_spread_ratio,
                                     electro_transient_severity,
+                                    electro_transient_time_scale_mean,
                                     electro_nonlinear_severity,
+                                    electro_nonlinear_time_scale_mean,
                                     plastic_nonlinear_severity,
+                                    plastic_nonlinear_severity_mean,
                                     plastic_load_realization_ratio,
                                     plastic_load_amplification_ratio,
                                     contact_nonlinear_severity,
+                                    contact_nonlinear_severity_mean,
                                     contact_load_realization_ratio,
                                     contact_load_amplification_ratio,
                                     thermal_max_residual_norm,
@@ -3403,6 +3516,7 @@ pub(super) fn run_fixture(
         thermo_region_delta_count,
         thermo_spatial_coverage_ratio,
         thermo_field_extrapolation_ratio,
+        thermo_field_clamp_ratio,
         thermo_field_artifact_id,
         thermo_field_artifact_approved,
         thermo_field_artifact_age_days,
@@ -3414,11 +3528,15 @@ pub(super) fn run_fixture(
         electro_joule_heating_scale,
         electro_conductivity_spread_ratio,
         electro_transient_severity,
+        electro_transient_time_scale_mean,
         electro_nonlinear_severity,
+        electro_nonlinear_time_scale_mean,
         plastic_nonlinear_severity,
+        plastic_nonlinear_severity_mean,
         plastic_load_realization_ratio,
         plastic_load_amplification_ratio,
         contact_nonlinear_severity,
+        contact_nonlinear_severity_mean,
         contact_load_realization_ratio,
         contact_load_amplification_ratio,
         thermal_max_residual_norm,

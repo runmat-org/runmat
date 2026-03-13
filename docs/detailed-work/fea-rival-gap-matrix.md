@@ -68,3 +68,19 @@ Treat a domain as parity-credible only when all are true:
 4. Domain-native diagnostics are present and surfaced through results/trends.
 5. Benchmark corpus includes external-reference checks with deterministic acceptance envelopes.
 6. Release-readiness governance has branch-profiled thresholds, breach rates, and trend non-regression controls.
+
+## In-Scope Deepening Closure (Thermal + Thermo/Electro + Plastic/Contact)
+
+The current in-scope deepening track (items 1-6) is closed at baseline with the following concrete outcomes:
+
+1. Constitutive-depth diagnostics were strengthened for in-scope domains using deterministic fields already emitted by transient/nonlinear thermal and coupling paths (including thermo field-clamp and electro time-scale indicators).
+2. Conformance thresholds were expanded to assert those additional constitutive indicators in thermo/electro nonlinear path fixtures.
+3. `analysis.results` summary now surfaces added posture signals used for in-scope governance:
+   - `thermo_field_clamp_ratio`,
+   - `electro_transient_time_scale_mean`, `electro_nonlinear_time_scale_mean`,
+   - `plastic_nonlinear_severity_mean`, `contact_nonlinear_severity_mean`.
+4. Runtime conformance report records and contract snapshots were updated to include the new summary fields.
+5. Release-readiness governance now includes threshold/breach/trend controls for new in-scope realism metrics:
+   - thermo field-clamp posture (`THERMO_FIELD_CLAMP_*`),
+   - electro time-scale posture (`ELECTRO_TIME_SCALE_*`).
+6. Documentation and work-log entries were synchronized with implementation and test evidence.

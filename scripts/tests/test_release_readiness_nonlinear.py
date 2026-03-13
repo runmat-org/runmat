@@ -21,13 +21,16 @@ def report(
     thermo_assignment_heterogeneity_index=None,
     thermo_spatial_coverage_ratio=None,
     thermo_field_extrapolation_ratio=None,
+    thermo_field_clamp_ratio=None,
     thermo_field_artifact_id=None,
     thermo_field_artifact_approved=None,
     thermo_field_artifact_age_days=None,
     thermo_field_artifact_provenance_valid=None,
     electro_thermal_coupling_enabled=None,
     electro_transient_severity=None,
+    electro_transient_time_scale_mean=None,
     electro_nonlinear_severity=None,
+    electro_nonlinear_time_scale_mean=None,
     electro_joule_heating_scale=None,
     electro_conductivity_spread_ratio=None,
     plastic_nonlinear_severity=None,
@@ -92,6 +95,9 @@ def report(
     if thermo_field_extrapolation_ratio is not None:
         for rec in records:
             rec["thermo_field_extrapolation_ratio"] = thermo_field_extrapolation_ratio
+    if thermo_field_clamp_ratio is not None:
+        for rec in records:
+            rec["thermo_field_clamp_ratio"] = thermo_field_clamp_ratio
     if thermo_field_artifact_id is not None:
         for rec in records:
             rec["thermo_field_artifact_id"] = thermo_field_artifact_id
@@ -112,9 +118,15 @@ def report(
     if electro_transient_severity is not None:
         for rec in records:
             rec["electro_transient_severity"] = electro_transient_severity
+    if electro_transient_time_scale_mean is not None:
+        for rec in records:
+            rec["electro_transient_time_scale_mean"] = electro_transient_time_scale_mean
     if electro_nonlinear_severity is not None:
         for rec in records:
             rec["electro_nonlinear_severity"] = electro_nonlinear_severity
+    if electro_nonlinear_time_scale_mean is not None:
+        for rec in records:
+            rec["electro_nonlinear_time_scale_mean"] = electro_nonlinear_time_scale_mean
     if electro_joule_heating_scale is not None:
         for rec in records:
             rec["electro_joule_heating_scale"] = electro_joule_heating_scale
@@ -203,8 +215,11 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_HETEROGENEITY_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_MIN_FIELD_COVERAGE_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_COVERAGE_DROP_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_EXTRAPOLATION_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_THERMO_REQUIRE_ARTIFACT_BACKED",
             "RUNMAT_RELEASE_READINESS_THERMO_FIELD_ARTIFACT_MAX_AGE_DAYS",
             "RUNMAT_RELEASE_READINESS_THERMAL_MAX_RESIDUAL_NORM",
@@ -229,6 +244,10 @@ class ReleaseReadinessTests(unittest.TestCase):
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_BREACH_RATE",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_JOULE_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_SPREAD_TREND_RATIO",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MIN_TIME_SCALE_MEAN",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_BREACH_RATE",
+            "RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_TREND_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_NONLINEAR_SEVERITY",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MIN_LOAD_REALIZATION_RATIO",
             "RUNMAT_RELEASE_READINESS_PLASTIC_MAX_LOAD_REALIZATION_RATIO",
@@ -1688,6 +1707,40 @@ class ReleaseReadinessTests(unittest.TestCase):
         codes = {reason["code"] for reason in result["reasons"]}
         self.assertIn("THERMO_FIELD_SIGNING_KEY_UNSAFE", codes)
 
+    def test_thermo_field_clamp_ratio_high_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            thermo_coupling_enabled=True,
+            thermo_field_clamp_ratio=0.18,
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_THERMO_MAX_FIELD_CLAMP_RATIO"] = "0.1"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("THERMO_FIELD_CLAMP_RATIO_HIGH", codes)
+
+    def test_electro_time_scale_mean_out_of_range_reason_is_emitted(self):
+        latest = report(
+            passed=True,
+            publishable=True,
+            gpu_ms=100.0,
+            electro_thermal_coupling_enabled=True,
+            electro_transient_time_scale_mean=1.45,
+        )
+        os.environ["RUNMAT_RELEASE_READINESS_ELECTRO_MAX_TIME_SCALE_MEAN"] = "1.3"
+        result = evaluate_release_readiness(
+            latest,
+            [report(passed=True, publishable=True, gpu_ms=95.0)],
+            protected=False,
+        )
+        codes = {reason["code"] for reason in result["reasons"]}
+        self.assertIn("ELECTRO_TIME_SCALE_MEAN_OUT_OF_RANGE", codes)
+
     def test_markdown_summary_prints_thermo_posture_section(self):
         latest = report(
             passed=True,
@@ -1723,15 +1776,20 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Thermo field coverage threshold", summary)
         self.assertIn("Max thermo field extrapolation ratio", summary)
         self.assertIn("Thermo field extrapolation threshold", summary)
+        self.assertIn("Max thermo field clamp ratio", summary)
+        self.assertIn("Thermo field clamp threshold", summary)
         self.assertIn("Thermo field coverage drop trend ratio", summary)
         self.assertIn("Thermo field coverage drop trend threshold", summary)
         self.assertIn("Thermo field extrapolation trend ratio", summary)
         self.assertIn("Thermo field extrapolation trend threshold", summary)
+        self.assertIn("Thermo field clamp trend ratio", summary)
+        self.assertIn("Thermo field clamp trend threshold", summary)
         self.assertIn("Thermo artifact-backed required", summary)
         self.assertIn("Thermo field artifact max age days", summary)
         self.assertIn("Thermo signing key safe", summary)
         self.assertIn("Thermo spread breach rate", summary)
         self.assertIn("Thermo heterogeneity breach rate", summary)
+        self.assertIn("Thermo field clamp breach rate", summary)
         self.assertIn("Thermo spread trend ratio", summary)
         self.assertIn("Thermo heterogeneity trend ratio", summary)
         self.assertIn("### Thermal Posture", summary)
@@ -1740,6 +1798,10 @@ class ReleaseReadinessTests(unittest.TestCase):
         self.assertIn("Max thermal spatial gradient index", summary)
         self.assertIn("Min thermal monotonic response fraction", summary)
         self.assertIn("Thermal spread trend ratio", summary)
+        self.assertIn("Electro-thermal time-scale min/max", summary)
+        self.assertIn("Electro-thermal time-scale thresholds (min/max)", summary)
+        self.assertIn("Electro-thermal time-scale breach rate", summary)
+        self.assertIn("Electro-thermal time-scale trend ratio", summary)
         self.assertIn("### Promotion Evidence Quality", summary)
         self.assertIn("Promotion calibration applied/required", summary)
         self.assertIn("Promotion calibration age/max days", summary)
