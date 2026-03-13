@@ -81,6 +81,10 @@
     "thermal_heat_capacity_spread_ratio": null,
     "thermal_spatial_gradient_index": null,
     "thermal_monotonic_response_fraction": null,
-    "thermal_response_realization_ratio": null
+    "thermal_response_realization_ratio": null,
+    "electromagnetic_enabled": null,
+    "electromagnetic_reference_frequency_hz": null,
+    "electromagnetic_applied_current_a": null,
+    "electromagnetic_placeholder_quality": null
   }
 }

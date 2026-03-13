@@ -154,6 +154,13 @@ Not required for this milestone:
   - runtime contract/options + operation shape live in runmat-runtime,
   - solver behavior remains explicitly placeholder until FEA EM assembly/solve kernels are implemented.
 
+### Maxwell EM Phase-2 Status (2026-03-13)
+
+- Added EM-specific runtime result payload surface and summary posture fields:
+  - `AnalysisRunResult.electromagnetic_results` now carries `electromagnetic_results/v1` payloads,
+  - `analysis.results` summary now exposes EM placeholder posture metrics (`electromagnetic_enabled`, `electromagnetic_reference_frequency_hz`, `electromagnetic_applied_current_a`, `electromagnetic_placeholder_quality`).
+- Wired EM run classification into `analysis.trends` (`AnalysisRunKind::Electromagnetic`) and added an EM placeholder warning-rate signal for governance skeleton consumption.
+
 ## Closeout Checklist for This Track
 
 - [x] Canonical physics ownership documented as model/material/interface-owned.

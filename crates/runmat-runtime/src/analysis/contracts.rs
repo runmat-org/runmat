@@ -644,6 +644,8 @@ pub struct AnalysisRunResult {
     pub thermal_results: Option<ThermalResultsData>,
     pub transient_results: Option<TransientResultsData>,
     pub nonlinear_results: Option<NonlinearResultsData>,
+    #[serde(default)]
+    pub electromagnetic_results: Option<ElectromagneticResultsData>,
     pub model_validity: QualityGate,
     pub solver_convergence: QualityGate,
     pub result_quality: QualityGate,
@@ -671,6 +673,7 @@ pub struct AnalysisResultsQuery {
     pub include_transient_results: bool,
     pub transient_snapshot_indices: Vec<usize>,
     pub include_nonlinear_results: bool,
+    pub include_electromagnetic_results: bool,
 }
 
 impl Default for AnalysisResultsQuery {
@@ -684,6 +687,7 @@ impl Default for AnalysisResultsQuery {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
+            include_electromagnetic_results: true,
         }
     }
 }
@@ -756,6 +760,10 @@ pub struct AnalysisResultsSummary {
     pub thermal_spatial_gradient_index: Option<f64>,
     pub thermal_monotonic_response_fraction: Option<f64>,
     pub thermal_response_realization_ratio: Option<f64>,
+    pub electromagnetic_enabled: Option<bool>,
+    pub electromagnetic_reference_frequency_hz: Option<f64>,
+    pub electromagnetic_applied_current_a: Option<f64>,
+    pub electromagnetic_placeholder_quality: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -766,6 +774,8 @@ pub struct AnalysisResultsData {
     pub thermal_results: Option<ThermalResultsData>,
     pub transient_results: Option<TransientResultsData>,
     pub nonlinear_results: Option<NonlinearResultsData>,
+    #[serde(default)]
+    pub electromagnetic_results: Option<ElectromagneticResultsData>,
     pub diagnostics: Option<Vec<FeaDiagnostic>>,
     pub run_status: RunStatus,
     pub publishable: bool,
@@ -843,6 +853,7 @@ pub struct AnalysisTrendKindSummary {
     pub thermal_stability_warn_rate: Option<f64>,
     pub thermal_constitutive_warn_rate: Option<f64>,
     pub thermal_spread_breach_rate: Option<f64>,
+    pub electromagnetic_placeholder_warn_rate: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -904,6 +915,16 @@ pub struct NonlinearResultsData {
     #[serde(default)]
     pub backtrack_burst_count: usize,
     pub method: NonlinearMethod,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ElectromagneticResultsData {
+    pub electromagnetic_payload_version: String,
+    pub reference_frequency_hz: f64,
+    pub applied_current_a: f64,
+    pub vector_potential_proxy: AnalysisField,
+    pub flux_density_proxy: AnalysisField,
+    pub placeholder_mode: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

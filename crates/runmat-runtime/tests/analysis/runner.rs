@@ -1130,6 +1130,10 @@ pub(super) fn run_fixture(
     let mut thermal_spatial_gradient_index = None;
     let mut thermal_monotonic_response_fraction = None;
     let mut thermal_response_realization_ratio = None;
+    let mut electromagnetic_enabled = None;
+    let mut electromagnetic_reference_frequency_hz = None;
+    let mut electromagnetic_applied_current_a = None;
+    let mut electromagnetic_placeholder_quality = None;
     let mut publishable = None;
     let mut parity = None;
     let mut threshold_assertions = Vec::new();
@@ -1211,6 +1215,10 @@ pub(super) fn run_fixture(
                     thermal_spatial_gradient_index,
                     thermal_monotonic_response_fraction,
                     thermal_response_realization_ratio,
+                    electromagnetic_enabled,
+                    electromagnetic_reference_frequency_hz,
+                    electromagnetic_applied_current_a,
+                    electromagnetic_placeholder_quality,
                     publishable,
                     parity,
                     threshold_assertions,
@@ -3071,6 +3079,7 @@ pub(super) fn run_fixture(
                             include_transient_results: false,
                             transient_snapshot_indices: Vec::new(),
                             include_nonlinear_results: false,
+                            include_electromagnetic_results: false,
                         },
                         OperationContext::new(Some(format!("trace-results-gpu-{}", spec.id)), None),
                     );
@@ -3146,6 +3155,10 @@ pub(super) fn run_fixture(
                                 thermal_spatial_gradient_index,
                                 thermal_monotonic_response_fraction,
                                 thermal_response_realization_ratio,
+                                electromagnetic_enabled,
+                                electromagnetic_reference_frequency_hz,
+                                electromagnetic_applied_current_a,
+                                electromagnetic_placeholder_quality,
                                 publishable,
                                 parity,
                                 threshold_assertions,
@@ -3239,6 +3252,15 @@ pub(super) fn run_fixture(
                         gpu_results.data.summary.thermal_monotonic_response_fraction;
                     thermal_response_realization_ratio =
                         gpu_results.data.summary.thermal_response_realization_ratio;
+                    electromagnetic_enabled = gpu_results.data.summary.electromagnetic_enabled;
+                    electromagnetic_reference_frequency_hz = gpu_results
+                        .data
+                        .summary
+                        .electromagnetic_reference_frequency_hz;
+                    electromagnetic_applied_current_a =
+                        gpu_results.data.summary.electromagnetic_applied_current_a;
+                    electromagnetic_placeholder_quality =
+                        gpu_results.data.summary.electromagnetic_placeholder_quality;
 
                     if let Some(root) = filesystem_root {
                         runmat_runtime::analysis::storage::configure_artifact_store(
@@ -3259,6 +3281,7 @@ pub(super) fn run_fixture(
                                 include_transient_results: false,
                                 transient_snapshot_indices: Vec::new(),
                                 include_nonlinear_results: false,
+                                include_electromagnetic_results: false,
                             },
                             OperationContext::new(
                                 Some(format!("trace-results-gpu-by-id-{}", spec.id)),
@@ -3339,6 +3362,7 @@ pub(super) fn run_fixture(
                                 include_transient_results: false,
                                 transient_snapshot_indices: Vec::new(),
                                 include_nonlinear_results: false,
+                                include_electromagnetic_results: false,
                             },
                             OperationContext::new(
                                 Some(format!("trace-results-cpu-{}", spec.id)),
@@ -3417,6 +3441,10 @@ pub(super) fn run_fixture(
                                     thermal_spatial_gradient_index,
                                     thermal_monotonic_response_fraction,
                                     thermal_response_realization_ratio,
+                                    electromagnetic_enabled,
+                                    electromagnetic_reference_frequency_hz,
+                                    electromagnetic_applied_current_a,
+                                    electromagnetic_placeholder_quality,
                                     publishable,
                                     parity,
                                     threshold_assertions,
@@ -3547,6 +3575,10 @@ pub(super) fn run_fixture(
         thermal_spatial_gradient_index,
         thermal_monotonic_response_fraction,
         thermal_response_realization_ratio,
+        electromagnetic_enabled,
+        electromagnetic_reference_frequency_hz,
+        electromagnetic_applied_current_a,
+        electromagnetic_placeholder_quality,
         publishable,
         parity,
         threshold_assertions,

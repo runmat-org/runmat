@@ -87,6 +87,12 @@ This keeps contract/versioning discipline in place while solver/assembly impleme
 2. EM runtime operation now validates domain configuration and emits deterministic placeholder run payloads (`FEA_EM_PLACEHOLDER`) rather than failing unsupported, enabling end-to-end result/trend pipeline integration.
 3. EM solver fidelity is still pending; placeholder mode is explicit and non-publishable by default (`RunStatus::Degraded`).
 
+## Maxwell EM Bring-Up Status (Phase 2)
+
+1. EM placeholder runs now produce typed EM payloads (`electromagnetic_results/v1`) instead of relying only on generic fields.
+2. `analysis.results` summary now carries EM placeholder posture metrics to support downstream readiness/trend consumption.
+3. `analysis.trends` now includes an EM run kind and placeholder warning-rate signal as the initial governance skeleton for the EM domain.
+
 ## In-Scope Deepening Closure (Thermal + Thermo/Electro + Plastic/Contact)
 
 The current in-scope deepening track (items 1-6) is closed at baseline with the following concrete outcomes:

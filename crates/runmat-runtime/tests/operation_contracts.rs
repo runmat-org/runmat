@@ -826,6 +826,7 @@ fn analysis_results_can_filter_nonlinear_diagnostics_by_code() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
+            include_electromagnetic_results: true,
         },
         OperationContext::new(
             Some("trace-contract-nonlinear-diagnostics-2".to_string()),
@@ -1369,6 +1370,7 @@ fn analysis_results_contract_is_v1_and_filterable() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
+            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-contract-3b-results".to_string()), None),
     )
@@ -1402,6 +1404,7 @@ fn analysis_results_unknown_field_maps_typed_error_contract() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
+            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-contract-3c-results".to_string()), None),
     )
@@ -1448,6 +1451,7 @@ fn analysis_results_modal_query_controls_are_typed() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
+            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-contract-modal-results-4".to_string()), None),
     )
@@ -1479,6 +1483,7 @@ fn analysis_results_modal_query_controls_are_typed() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
+            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-contract-modal-results-5".to_string()), None),
     )
@@ -1513,6 +1518,7 @@ fn analysis_results_transient_query_controls_are_typed() {
             include_transient_results: false,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
+            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-contract-transient-results-2".to_string()), None),
     )
@@ -1535,6 +1541,7 @@ fn analysis_results_transient_query_controls_are_typed() {
             include_transient_results: true,
             transient_snapshot_indices: vec![999],
             include_nonlinear_results: true,
+            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-contract-transient-results-3".to_string()), None),
     )

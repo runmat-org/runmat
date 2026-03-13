@@ -761,6 +761,7 @@ fn analysis_results_returns_filtered_fields_and_metadata() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
+            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-results-2".to_string()), None),
     )
@@ -807,6 +808,7 @@ fn analysis_results_unknown_field_maps_typed_error() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
+            include_electromagnetic_results: true,
         },
         OperationContext::new(Some("trace-results-4".to_string()), None),
     )
@@ -2234,6 +2236,7 @@ fn analysis_results_query_can_exclude_nonlinear_payload() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: false,
+            include_electromagnetic_results: false,
         },
         OperationContext::new(None, None),
     )
@@ -3165,6 +3168,7 @@ fn analysis_results_query_can_exclude_modal_payload() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
+            include_electromagnetic_results: true,
         },
         OperationContext::new(None, None),
     )
@@ -3205,6 +3209,7 @@ fn analysis_results_query_rejects_unknown_modal_mode_index() {
             include_transient_results: true,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
+            include_electromagnetic_results: true,
         },
         OperationContext::new(None, None),
     )
@@ -3279,6 +3284,7 @@ fn analysis_results_query_can_exclude_transient_payload() {
             include_transient_results: false,
             transient_snapshot_indices: Vec::new(),
             include_nonlinear_results: true,
+            include_electromagnetic_results: true,
         },
         OperationContext::new(None, None),
     )
@@ -3318,6 +3324,7 @@ fn analysis_results_query_rejects_unknown_transient_snapshot_index() {
             include_transient_results: true,
             transient_snapshot_indices: vec![999],
             include_nonlinear_results: true,
+            include_electromagnetic_results: true,
         },
         OperationContext::new(None, None),
     )

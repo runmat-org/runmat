@@ -31,11 +31,13 @@ pub mod storage;
 
 pub use contracts::{
     AnalysisCreateModelIntentSpec, AnalysisCreateModelPrepContext, AnalysisCreateModelProfile,
-    AnalysisElectromagneticRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions, AnalysisResultsCompareData,
+    AnalysisElectromagneticRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions,
+    AnalysisResultsCompareData,
     AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunKind, AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult,
     AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendKindSummary,
     AnalysisTrendsData, AnalysisTrendsQuery, AnalysisValidateResult, ContactInterfaceOptions,
+    ElectromagneticResultsData,
     ElectroRegionConductivityScale, ElectroThermalCouplingOptions, ElectroTimeProfilePoint,
     ModalFrequencyBasis, ModalFrequencyUnits, ModalResultsData, NonlinearMethod,
     NonlinearResultsData, PlasticityConstitutiveOptions, PrecisionMode, PreconditionerMode,
@@ -753,6 +755,7 @@ pub fn analysis_run_modal_with_options_op(
         thermal_results: None,
         transient_results: None,
         nonlinear_results: None,
+        electromagnetic_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -1052,6 +1055,7 @@ pub fn analysis_run_thermal_with_options_op(
         }),
         transient_results: None,
         nonlinear_results: None,
+        electromagnetic_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -1498,6 +1502,7 @@ pub fn analysis_run_transient_with_options_op(
             integration_method: TransientIntegrationMethod::ImplicitEuler,
         }),
         nonlinear_results: None,
+        electromagnetic_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -2155,6 +2160,7 @@ pub fn analysis_run_nonlinear_with_options_op(
             backtrack_burst_count: nonlinear_run.backtrack_burst_count,
             method: NonlinearMethod::IncrementalNewtonRaphson,
         }),
+        electromagnetic_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -2403,6 +2409,7 @@ pub fn analysis_run_linear_static_with_options(
         thermal_results: None,
         transient_results: None,
         nonlinear_results: None,
+        electromagnetic_results: None,
         model_validity: QualityGate::Pass,
         solver_convergence,
         result_quality,
@@ -2564,8 +2571,11 @@ pub fn analysis_run_electromagnetic_with_options_op(
             code: "FEA_EM_PLACEHOLDER".to_string(),
             severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning,
             message: format!(
-                "reference_frequency_hz={} applied_current_a={} status=placeholder",
-                em_domain.reference_frequency_hz, em_domain.applied_current_a
+                "enabled={} reference_frequency_hz={} applied_current_a={} placeholder_quality={} status=placeholder",
+                em_domain.enabled,
+                em_domain.reference_frequency_hz,
+                em_domain.applied_current_a,
+                1.0_f64
             ),
         }],
         displacement_field: runmat_analysis_core::AnalysisField::host_f64(
@@ -2592,6 +2602,22 @@ pub fn analysis_run_electromagnetic_with_options_op(
         thermal_results: None,
         transient_results: None,
         nonlinear_results: None,
+        electromagnetic_results: Some(ElectromagneticResultsData {
+            electromagnetic_payload_version: "electromagnetic_results/v1".to_string(),
+            reference_frequency_hz: em_domain.reference_frequency_hz,
+            applied_current_a: em_domain.applied_current_a,
+            vector_potential_proxy: runmat_analysis_core::AnalysisField::host_f64(
+                "field_em_vector_potential_proxy",
+                vec![1],
+                vec![em_domain.applied_current_a],
+            ),
+            flux_density_proxy: runmat_analysis_core::AnalysisField::host_f64(
+                "field_em_flux_density_proxy",
+                vec![1],
+                vec![em_domain.reference_frequency_hz],
+            ),
+            placeholder_mode: true,
+        }),
         model_validity: QualityGate::Pass,
         solver_convergence: QualityGate::Warn,
         result_quality: QualityGate::Warn,
@@ -3024,6 +3050,23 @@ pub fn analysis_results_op(
         "FEA_THERMAL_OUTCOME",
         "thermal_response_realization_ratio",
     );
+    let electromagnetic_enabled =
+        diagnostic_metric_bool(&run_result.run.diagnostics, "FEA_EM_PLACEHOLDER", "enabled");
+    let electromagnetic_reference_frequency_hz = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_PLACEHOLDER",
+        "reference_frequency_hz",
+    );
+    let electromagnetic_applied_current_a = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_PLACEHOLDER",
+        "applied_current_a",
+    );
+    let electromagnetic_placeholder_quality = diagnostic_metric(
+        &run_result.run.diagnostics,
+        "FEA_EM_PLACEHOLDER",
+        "placeholder_quality",
+    );
 
     let summary = AnalysisResultsSummary {
         field_count: fields.len(),
@@ -3092,6 +3135,10 @@ pub fn analysis_results_op(
         thermal_spatial_gradient_index,
         thermal_monotonic_response_fraction,
         thermal_response_realization_ratio,
+        electromagnetic_enabled,
+        electromagnetic_reference_frequency_hz,
+        electromagnetic_applied_current_a,
+        electromagnetic_placeholder_quality,
     };
 
     let modal_results = if query.include_modal_results {
@@ -3306,6 +3353,11 @@ pub fn analysis_results_op(
     } else {
         None
     };
+    let electromagnetic_results = if query.include_electromagnetic_results {
+        run_result.electromagnetic_results.clone()
+    } else {
+        None
+    };
 
     let data = AnalysisResultsData {
         fields,
@@ -3313,6 +3365,7 @@ pub fn analysis_results_op(
         thermal_results,
         transient_results,
         nonlinear_results,
+        electromagnetic_results,
         diagnostics: if query.include_diagnostics {
             if query.diagnostic_codes.is_empty() {
                 Some(run_result.run.diagnostics.clone())
@@ -3753,6 +3806,11 @@ pub fn analysis_trends_op(
         } else {
             None
         };
+        let electromagnetic_placeholder_warn_rate = if kind == AnalysisRunKind::Electromagnetic {
+            diagnostic_warning_rate(&entries, "FEA_EM_PLACEHOLDER")
+        } else {
+            None
+        };
 
         summaries.push(AnalysisTrendKindSummary {
             run_kind: kind,
@@ -3780,6 +3838,7 @@ pub fn analysis_trends_op(
             thermal_stability_warn_rate,
             thermal_constitutive_warn_rate,
             thermal_spread_breach_rate,
+            electromagnetic_placeholder_warn_rate,
         });
     }
 
@@ -3795,7 +3854,8 @@ pub fn analysis_trends_op(
 }
 
 fn run_kind(run: &AnalysisRunResult) -> AnalysisRunKind {
-    if run
+    if run.electromagnetic_results.is_some()
+        || run
         .run
         .diagnostics
         .iter()
