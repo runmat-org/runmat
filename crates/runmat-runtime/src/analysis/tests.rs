@@ -10,7 +10,8 @@ use runmat_accelerate_api::{
 use runmat_analysis_core::{
     AnalysisFieldValues, AnalysisModel, AnalysisModelId, AnalysisStep, AnalysisStepKind,
     BoundaryCondition, BoundaryConditionKind, EvidenceConfidence, LoadCase, LoadKind,
-    MaterialAssignment, MaterialMechanicalModel, MaterialModel, MaterialThermalModel,
+    ElectromagneticDomain, MaterialAssignment, MaterialMechanicalModel, MaterialModel,
+    MaterialThermalModel,
     ReferenceFrame,
 };
 use runmat_analysis_fea::ComputeBackend;
@@ -53,6 +54,7 @@ fn sample_model() -> AnalysisModel {
         material_assignments: Vec::new(),
         thermo_mechanical: None,
         electro_thermal: None,
+        electromagnetic: None,
         interfaces: Vec::new(),
         boundary_conditions: vec![BoundaryCondition {
             bc_id: "bc_root".to_string(),
@@ -493,6 +495,26 @@ fn analysis_create_model_supports_modal_profile_template() {
     assert_eq!(envelope.data.model_id.0, "modal_model");
     assert_eq!(envelope.data.steps[0].kind, AnalysisStepKind::Modal);
     assert_eq!(envelope.data.loads[0].load_id, "load_default_modal_seed");
+}
+
+#[test]
+fn analysis_create_model_supports_electromagnetic_profile_template() {
+    let geometry = sample_geometry_asset();
+    let envelope = analysis_create_model_op(
+        &geometry,
+        AnalysisCreateModelIntentSpec {
+            model_id: "electromagnetic_profile_model".to_string(),
+            profile: AnalysisCreateModelProfile::ElectromagneticStatic,
+            prep_context: None,
+        },
+        OperationContext::new(Some("trace-create-em-profile".to_string()), None),
+    )
+    .expect("electromagnetic profile model creation should succeed");
+
+    assert_eq!(
+        envelope.data.steps[0].kind,
+        AnalysisStepKind::Electromagnetic
+    );
 }
 
 #[test]
@@ -1661,6 +1683,50 @@ fn analysis_run_thermal_rejects_models_without_thermal_step() {
     assert_eq!(err.operation, "analysis.run_thermal");
     assert_eq!(err.op_version, "analysis.run_thermal/v1");
     assert_eq!(err.error_code, "ANALYSIS_RUN_THERMAL_INVALID_MODEL");
+}
+
+#[test]
+fn analysis_run_electromagnetic_rejects_models_without_em_step() {
+    let model = sample_model();
+    let err = analysis_run_electromagnetic_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-em-run-missing-step".to_string()), None),
+    )
+    .expect_err("electromagnetic run should fail without electromagnetic step");
+    assert_eq!(err.operation, "analysis.run_electromagnetic");
+    assert_eq!(err.op_version, "analysis.run_electromagnetic/v1");
+    assert_eq!(
+        err.error_code,
+        "ANALYSIS_RUN_ELECTROMAGNETIC_REQUIRES_STEP"
+    );
+}
+
+#[test]
+fn analysis_run_electromagnetic_is_placeholder_contract() {
+    let mut model = sample_model();
+    model.steps[0].kind = AnalysisStepKind::Electromagnetic;
+    model.electromagnetic = Some(ElectromagneticDomain {
+        enabled: true,
+        reference_frequency_hz: 60.0,
+        applied_current_a: 120.0,
+    });
+    let envelope = analysis_run_electromagnetic_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-em-run-placeholder".to_string()), None),
+    )
+    .expect("electromagnetic run should return placeholder payload");
+    assert_eq!(envelope.operation, "analysis.run_electromagnetic");
+    assert_eq!(envelope.op_version, "analysis.run_electromagnetic/v1");
+    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
+    assert!(!envelope.data.publishable);
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_EM_PLACEHOLDER"));
 }
 
 #[test]

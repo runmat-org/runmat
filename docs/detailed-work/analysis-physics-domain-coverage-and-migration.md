@@ -136,6 +136,24 @@ Not required for this milestone:
   - legacy severity/spread trend checks were recalibrated to fixture-aligned rolling baselines (instead of mixed-fixture global medians) to suppress cross-fixture false positives while preserving drift sensitivity,
   - additional in-scope constitutive posture fields are now surfaced and governed (`thermo_field_clamp_ratio`, electro transient/nonlinear time-scale means, plastic/contact severity means) with conformance and readiness coverage.
 
+### Maxwell EM Phase-0 Status (2026-03-13)
+
+- Added EM contract scaffolding to start next-domain bring-up while preserving contract/versioning discipline:
+  - core analysis step schema now includes `electromagnetic`,
+  - create-model profile now supports `electromagnetic_static` templates,
+  - runtime operation contract placeholder is available at `analysis.run_electromagnetic` (`v1`) and now emits deterministic placeholder run payloads (`FEA_EM_PLACEHOLDER`) rather than hard-failing unsupported, so `analysis.results`/`analysis.trends` can carry EM runs end-to-end.
+
+### Maxwell EM Phase-1 Status (2026-03-13)
+
+- Added model-owned EM domain primitive in analysis-core (`AnalysisModel.electromagnetic`) and wired runtime validation on EM run entry:
+  - requires EM step presence,
+  - requires configured `model.electromagnetic`,
+  - validates finite positive `reference_frequency_hz` and `applied_current_a`.
+- Kept domain-logic ownership pattern consistent with existing thermo/electro paths:
+  - model/domain definition lives in analysis-core,
+  - runtime contract/options + operation shape live in runmat-runtime,
+  - solver behavior remains explicitly placeholder until FEA EM assembly/solve kernels are implemented.
+
 ## Closeout Checklist for This Track
 
 - [x] Canonical physics ownership documented as model/material/interface-owned.

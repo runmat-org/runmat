@@ -100,6 +100,7 @@ fn cantilever_linear_static() -> AnalysisModel {
         }],
         thermo_mechanical: None,
         electro_thermal: None,
+        electromagnetic: None,
         interfaces: Vec::new(),
         boundary_conditions: vec![BoundaryCondition {
             bc_id: "bc_root".to_string(),

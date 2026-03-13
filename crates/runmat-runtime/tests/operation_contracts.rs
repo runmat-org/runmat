@@ -1,4 +1,4 @@
-use runmat_analysis_core::{AnalysisFieldValues, ReferenceFrame};
+use runmat_analysis_core::{AnalysisFieldValues, ElectromagneticDomain, ReferenceFrame};
 use runmat_analysis_fea::fixtures::{fixture_model, FixtureId};
 use runmat_analysis_fea::ComputeBackend;
 use runmat_geometry_core::EntityKind;
@@ -6,8 +6,8 @@ use runmat_geometry_core::UnitSystem;
 use runmat_runtime::analysis::{
     analysis_create_model_op, analysis_results_by_run_id_op, analysis_results_compare_op,
     analysis_results_op, analysis_run_linear_static_op, analysis_run_linear_static_with_options,
-    analysis_run_modal_op, analysis_run_modal_with_options_op, analysis_run_nonlinear_op,
-    analysis_run_nonlinear_with_options_op, analysis_run_transient_op,
+    analysis_run_electromagnetic_op, analysis_run_modal_op, analysis_run_modal_with_options_op,
+    analysis_run_nonlinear_op, analysis_run_nonlinear_with_options_op, analysis_run_transient_op,
     analysis_run_transient_with_options_op, analysis_trends_op, analysis_validate,
     AnalysisCreateModelIntentSpec, AnalysisCreateModelProfile, AnalysisModalRunOptions,
     AnalysisNonlinearRunOptions, AnalysisResultsCompareQuery, AnalysisResultsQuery,
@@ -285,6 +285,23 @@ fn analysis_create_model_contract_is_v1_and_maps_codes() {
     assert_eq!(
         nonlinear.data.steps[0].kind,
         runmat_analysis_core::AnalysisStepKind::Nonlinear
+    );
+
+    let electromagnetic = analysis_create_model_op(
+        &geometry.data,
+        AnalysisCreateModelIntentSpec {
+            model_id: "contract_electromagnetic_model".to_string(),
+            profile: AnalysisCreateModelProfile::ElectromagneticStatic,
+            prep_context: None,
+        },
+        OperationContext::new(Some("trace-contract-create-4-electromagnetic".to_string()), None),
+    )
+    .expect("electromagnetic profile should be supported");
+    assert_eq!(electromagnetic.operation, "analysis.create_model");
+    assert_eq!(electromagnetic.op_version, "analysis.create_model/v1");
+    assert_eq!(
+        electromagnetic.data.steps[0].kind,
+        runmat_analysis_core::AnalysisStepKind::Electromagnetic
     );
 }
 
@@ -752,6 +769,34 @@ fn analysis_run_nonlinear_contract_is_v1_and_typed() {
     assert_eq!(invalid.operation, "analysis.run_nonlinear");
     assert_eq!(invalid.op_version, "analysis.run_nonlinear/v1");
     assert_eq!(invalid.error_code, "ANALYSIS_RUN_NONLINEAR_INVALID_MODEL");
+}
+
+#[test]
+fn analysis_run_electromagnetic_contract_is_v1_placeholder() {
+    let mut model = fixture_model(FixtureId::CantileverLinearStatic);
+    model.steps[0].kind = runmat_analysis_core::AnalysisStepKind::Electromagnetic;
+    model.electromagnetic = Some(ElectromagneticDomain {
+        enabled: true,
+        reference_frequency_hz: 60.0,
+        applied_current_a: 120.0,
+    });
+
+    let envelope = analysis_run_electromagnetic_op(
+        &model,
+        ComputeBackend::Cpu,
+        OperationContext::new(Some("trace-contract-run-em-1".to_string()), None),
+    )
+    .expect("electromagnetic run should return placeholder payload");
+    assert_eq!(envelope.operation, "analysis.run_electromagnetic");
+    assert_eq!(envelope.op_version, "analysis.run_electromagnetic/v1");
+    assert_eq!(envelope.data.run_status, RunStatus::Degraded);
+    assert!(!envelope.data.publishable);
+    assert!(envelope
+        .data
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_EM_PLACEHOLDER"));
 }
 
 #[test]

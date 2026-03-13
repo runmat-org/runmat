@@ -17,7 +17,7 @@ pub use field::{AnalysisField, AnalysisFieldValues, DeviceFieldRef};
 pub use problem::bc::{BoundaryCondition, BoundaryConditionKind};
 pub use problem::domains::{
     ElectroRegionConductivityScale, ElectroThermalDomain, ElectroTimeProfilePoint,
-    ThermoFieldInterpolationMode, ThermoFieldSource, ThermoMechanicalDomain,
+    ElectromagneticDomain, ThermoFieldInterpolationMode, ThermoFieldSource, ThermoMechanicalDomain,
     ThermoRegionTemperatureDelta, ThermoTimeProfilePoint,
 };
 pub use problem::interfaces::{AnalysisInterface, AnalysisInterfaceKind, ContactInterfaceModel};
@@ -58,6 +58,7 @@ mod tests {
             material_assignments: Vec::new(),
             thermo_mechanical: None,
             electro_thermal: None,
+            electromagnetic: None,
             interfaces: Vec::new(),
             boundary_conditions: vec![BoundaryCondition {
                 bc_id: "bc_fixed_root".to_string(),

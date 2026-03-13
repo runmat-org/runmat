@@ -61,6 +61,7 @@ pub enum AnalysisCreateModelProfile {
     ModalStructural,
     TransientStructural,
     NonlinearStructural,
+    ElectromagneticStatic,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -206,6 +207,7 @@ pub enum QualityReasonCode {
     ThermoMechanicalFieldExtrapolationHigh,
     ElectroThermalTransientStress,
     ElectroThermalNonlinearStress,
+    ElectromagneticPlaceholder,
     PlasticityNonlinearStress,
     ContactNonlinearStress,
     NonlinearResidualExceeded,
@@ -233,6 +235,32 @@ pub struct AnalysisRunOptions {
     pub prep_artifact_id: Option<String>,
     #[serde(default)]
     pub prep_calibration_profile: Option<PrepCalibrationProfile>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AnalysisElectromagneticRunOptions {
+    pub deterministic_mode: bool,
+    pub precision_mode: PrecisionMode,
+    pub quality_policy: QualityPolicy,
+    #[serde(default)]
+    pub prep_context: Option<AnalysisRunPrepContext>,
+    #[serde(default)]
+    pub prep_artifact_id: Option<String>,
+    #[serde(default)]
+    pub prep_calibration_profile: Option<PrepCalibrationProfile>,
+}
+
+impl Default for AnalysisElectromagneticRunOptions {
+    fn default() -> Self {
+        Self {
+            deterministic_mode: false,
+            precision_mode: PrecisionMode::Fp64,
+            quality_policy: QualityPolicy::Balanced,
+            prep_context: None,
+            prep_artifact_id: None,
+            prep_calibration_profile: None,
+        }
+    }
 }
 
 impl Default for AnalysisRunOptions {
@@ -785,6 +813,7 @@ pub enum AnalysisRunKind {
     Thermal,
     Transient,
     Nonlinear,
+    Electromagnetic,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

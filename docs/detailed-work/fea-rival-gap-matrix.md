@@ -69,6 +69,24 @@ Treat a domain as parity-credible only when all are true:
 5. Benchmark corpus includes external-reference checks with deterministic acceptance envelopes.
 6. Release-readiness governance has branch-profiled thresholds, breach rates, and trend non-regression controls.
 
+## Maxwell EM Bring-Up Status (Phase 0)
+
+Initial EM contract scaffolding is now in place:
+
+1. Analysis schema now includes an EM step kind (`electromagnetic`) and create-model profile template (`electromagnetic_static`).
+2. Runtime operation contract placeholders exist for EM execution:
+   - `analysis.run_electromagnetic`
+   - `analysis.run_electromagnetic/v1`
+3. Current EM execution path is intentionally a contract placeholder and returns deterministic unsupported errors (`ANALYSIS_RUN_ELECTROMAGNETIC_UNSUPPORTED`) after step-shape validation, until solver kernels are implemented.
+
+This keeps contract/versioning discipline in place while solver/assembly implementation remains explicitly pending.
+
+## Maxwell EM Bring-Up Status (Phase 1)
+
+1. EM model schema now has a model-owned domain primitive (`electromagnetic`) in analysis-core, matching existing domain ownership patterns.
+2. EM runtime operation now validates domain configuration and emits deterministic placeholder run payloads (`FEA_EM_PLACEHOLDER`) rather than failing unsupported, enabling end-to-end result/trend pipeline integration.
+3. EM solver fidelity is still pending; placeholder mode is explicit and non-publishable by default (`RunStatus::Degraded`).
+
 ## In-Scope Deepening Closure (Thermal + Thermo/Electro + Plastic/Contact)
 
 The current in-scope deepening track (items 1-6) is closed at baseline with the following concrete outcomes:

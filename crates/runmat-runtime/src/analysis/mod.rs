@@ -31,7 +31,7 @@ pub mod storage;
 
 pub use contracts::{
     AnalysisCreateModelIntentSpec, AnalysisCreateModelPrepContext, AnalysisCreateModelProfile,
-    AnalysisModalRunOptions, AnalysisNonlinearRunOptions, AnalysisResultsCompareData,
+    AnalysisElectromagneticRunOptions, AnalysisModalRunOptions, AnalysisNonlinearRunOptions, AnalysisResultsCompareData,
     AnalysisResultsCompareQuery, AnalysisResultsData, AnalysisResultsQuery, AnalysisResultsSummary,
     AnalysisRunKind, AnalysisRunOptions, AnalysisRunPrepContext, AnalysisRunResult,
     AnalysisThermalRunOptions, AnalysisTransientRunOptions, AnalysisTrendKindSummary,
@@ -59,6 +59,8 @@ const ANALYSIS_RUN_THERMAL_OPERATION: &str = "analysis.run_thermal";
 const ANALYSIS_RUN_THERMAL_OP_VERSION: &str = "analysis.run_thermal/v1";
 const ANALYSIS_RUN_NONLINEAR_OPERATION: &str = "analysis.run_nonlinear";
 const ANALYSIS_RUN_NONLINEAR_OP_VERSION: &str = "analysis.run_nonlinear/v1";
+const ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION: &str = "analysis.run_electromagnetic";
+const ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION: &str = "analysis.run_electromagnetic/v1";
 const ANALYSIS_RESULTS_OPERATION: &str = "analysis.results";
 const ANALYSIS_RESULTS_OP_VERSION: &str = "analysis.results/v1";
 const ANALYSIS_RESULTS_COMPARE_OPERATION: &str = "analysis.results_compare";
@@ -376,6 +378,26 @@ pub fn analysis_create_model_op(
                 kind: AnalysisStepKind::Nonlinear,
             },
         ),
+        AnalysisCreateModelProfile::ElectromagneticStatic => (
+            BoundaryCondition {
+                bc_id: "bc_default_fixed".to_string(),
+                region_id: fixed_region_id,
+                kind: BoundaryConditionKind::Fixed,
+            },
+            LoadCase {
+                load_id: "load_default_em_seed".to_string(),
+                region_id: load_region_id,
+                kind: LoadKind::BodyForce {
+                    gx: 0.0,
+                    gy: 0.0,
+                    gz: 0.0,
+                },
+            },
+            AnalysisStep {
+                step_id: "step_default_electromagnetic".to_string(),
+                kind: AnalysisStepKind::Electromagnetic,
+            },
+        ),
     };
 
     let model = AnalysisModel {
@@ -388,6 +410,7 @@ pub fn analysis_create_model_op(
         material_assignments: inferred_assignments,
         thermo_mechanical: None,
         electro_thermal: None,
+        electromagnetic: None,
         interfaces: Vec::new(),
         boundary_conditions: vec![default_bc],
         loads: vec![default_load],
@@ -2424,6 +2447,198 @@ pub fn analysis_run_linear_static_with_options(
     ))
 }
 
+pub fn analysis_run_electromagnetic_op(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    analysis_run_electromagnetic_with_options_op(
+        model,
+        backend,
+        AnalysisElectromagneticRunOptions::default(),
+        context,
+    )
+}
+
+pub fn analysis_run_electromagnetic_with_options_op(
+    model: &AnalysisModel,
+    backend: ComputeBackend,
+    options: AnalysisElectromagneticRunOptions,
+    context: OperationContext,
+) -> Result<OperationEnvelope<AnalysisRunResult>, OperationErrorEnvelope> {
+    let has_electromagnetic_step = model
+        .steps
+        .iter()
+        .any(|step| step.kind == AnalysisStepKind::Electromagnetic);
+    if !has_electromagnetic_step {
+        return Err(operation_error(
+            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_ELECTROMAGNETIC_REQUIRES_STEP",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis model must include at least one electromagnetic step for analysis.run_electromagnetic",
+            BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
+        ));
+    }
+
+    let Some(em_domain) = model.electromagnetic.as_ref() else {
+        return Err(operation_error(
+            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_MODEL",
+                error_type: OperationErrorType::Validation,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_electromagnetic requires model.electromagnetic to be configured",
+            BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
+        ));
+    };
+    if !em_domain.enabled {
+        return Err(operation_error(
+            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_electromagnetic requires electromagnetic domain enabled=true",
+            BTreeMap::from([("analysis_model_id".to_string(), model.model_id.0.clone())]),
+        ));
+    }
+    if !em_domain.reference_frequency_hz.is_finite() || em_domain.reference_frequency_hz <= 0.0 {
+        return Err(operation_error(
+            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_electromagnetic requires finite positive reference_frequency_hz",
+            BTreeMap::from([(
+                "reference_frequency_hz".to_string(),
+                em_domain.reference_frequency_hz.to_string(),
+            )]),
+        ));
+    }
+    if !em_domain.applied_current_a.is_finite() || em_domain.applied_current_a <= 0.0 {
+        return Err(operation_error(
+            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_RUN_ELECTROMAGNETIC_INVALID_OPTIONS",
+                error_type: OperationErrorType::Input,
+                retryable: false,
+                severity: OperationErrorSeverity::Error,
+            },
+            "analysis.run_electromagnetic requires finite positive applied_current_a",
+            BTreeMap::from([(
+                "applied_current_a".to_string(),
+                em_domain.applied_current_a.to_string(),
+            )]),
+        ));
+    }
+
+    let run = runmat_analysis_fea::FeaRunResult {
+        backend,
+        solver_backend: "contract_placeholder".to_string(),
+        solver_device_apply_k_ratio: 0.0,
+        solver_method: "electromagnetic_placeholder_static_map".to_string(),
+        preconditioner: "none".to_string(),
+        solver_host_sync_count: 0,
+        diagnostics: vec![runmat_analysis_fea::diagnostics::FeaDiagnostic {
+            code: "FEA_EM_PLACEHOLDER".to_string(),
+            severity: runmat_analysis_fea::diagnostics::FeaDiagnosticSeverity::Warning,
+            message: format!(
+                "reference_frequency_hz={} applied_current_a={} status=placeholder",
+                em_domain.reference_frequency_hz, em_domain.applied_current_a
+            ),
+        }],
+        displacement_field: runmat_analysis_core::AnalysisField::host_f64(
+            "field_em_vector_potential_proxy",
+            vec![1],
+            vec![em_domain.applied_current_a],
+        ),
+        von_mises_field: runmat_analysis_core::AnalysisField::host_f64(
+            "field_em_flux_density_proxy",
+            vec![1],
+            vec![em_domain.reference_frequency_hz],
+        ),
+    };
+
+    let quality_reasons = vec![QualityReason {
+        code: QualityReasonCode::ElectromagneticPlaceholder,
+        detail: "electromagnetic execution currently returns deterministic placeholder payload".to_string(),
+    }];
+
+    let result = AnalysisRunResult {
+        run_id: storage::next_run_id(),
+        run,
+        modal_results: None,
+        thermal_results: None,
+        transient_results: None,
+        nonlinear_results: None,
+        model_validity: QualityGate::Pass,
+        solver_convergence: QualityGate::Warn,
+        result_quality: QualityGate::Warn,
+        run_status: RunStatus::Degraded,
+        publishable: false,
+        quality_reasons,
+        provenance: RunProvenance {
+            backend,
+            solver_backend: "contract_placeholder".to_string(),
+            solver_device_apply_k_ratio: 0.0,
+            solver_host_sync_count: 0,
+            precision_mode: contracts::format_precision_mode(options.precision_mode),
+            deterministic_mode: options.deterministic_mode,
+            solver_method: "electromagnetic_placeholder_static_map".to_string(),
+            preconditioner: "none".to_string(),
+            quality_policy: contracts::format_quality_policy(options.quality_policy),
+            fallback_events: vec![
+                "EM_PLACEHOLDER_BACKEND:requested=maxwell_solver:using=contract_placeholder"
+                    .to_string(),
+            ],
+        },
+    };
+
+    storage::persist_run_result(&result).map_err(|err| {
+        operation_error(
+            ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+            ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+            &context,
+            OperationErrorSpec {
+                error_code: "ANALYSIS_ARTIFACT_STORE_FAILED",
+                error_type: OperationErrorType::Internal,
+                retryable: true,
+                severity: OperationErrorSeverity::Error,
+            },
+            format!("failed to persist analysis run artifact: {err}"),
+            BTreeMap::from([("run_id".to_string(), result.run_id.clone())]),
+        )
+    })?;
+
+    Ok(OperationEnvelope::new(
+        ANALYSIS_RUN_ELECTROMAGNETIC_OPERATION,
+        ANALYSIS_RUN_ELECTROMAGNETIC_OP_VERSION,
+        &context,
+        result,
+    ))
+}
+
 pub fn analysis_results_op(
     run_result: &AnalysisRunResult,
     query: AnalysisResultsQuery,
@@ -3336,6 +3551,7 @@ pub fn analysis_trends_op(
         AnalysisRunKind::Thermal,
         AnalysisRunKind::Transient,
         AnalysisRunKind::Nonlinear,
+        AnalysisRunKind::Electromagnetic,
     ] {
         let Some(mut entries) = grouped.remove(&kind) else {
             continue;
@@ -3579,7 +3795,14 @@ pub fn analysis_trends_op(
 }
 
 fn run_kind(run: &AnalysisRunResult) -> AnalysisRunKind {
-    if run.nonlinear_results.is_some() {
+    if run
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_EM_PLACEHOLDER")
+    {
+        AnalysisRunKind::Electromagnetic
+    } else if run.nonlinear_results.is_some() {
         AnalysisRunKind::Nonlinear
     } else if run.thermal_results.is_some() {
         AnalysisRunKind::Thermal

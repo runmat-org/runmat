@@ -171,7 +171,14 @@ impl AnalysisArtifactStore for FilesystemAnalysisArtifactStore {
 }
 
 fn run_operation_version(run: &AnalysisRunResult) -> String {
-    if run.nonlinear_results.is_some() {
+    if run
+        .run
+        .diagnostics
+        .iter()
+        .any(|diag| diag.code == "FEA_EM_PLACEHOLDER")
+    {
+        "analysis.run_electromagnetic/v1".to_string()
+    } else if run.nonlinear_results.is_some() {
         "analysis.run_nonlinear/v1".to_string()
     } else if run.transient_results.is_some() {
         "analysis.run_transient/v1".to_string()

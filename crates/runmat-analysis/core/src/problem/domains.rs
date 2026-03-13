@@ -66,3 +66,10 @@ pub struct ElectroThermalDomain {
     #[serde(default)]
     pub time_profile: Vec<ElectroTimeProfilePoint>,
 }
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ElectromagneticDomain {
+    pub enabled: bool,
+    pub reference_frequency_hz: f64,
+    pub applied_current_a: f64,
+}
