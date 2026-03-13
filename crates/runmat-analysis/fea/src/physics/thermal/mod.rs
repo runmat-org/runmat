@@ -72,3 +72,19 @@ pub fn constitutive_stats(model: &AnalysisModel) -> ThermalConstitutiveStats {
         response_rate,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::fixtures::{fixture_model, FixtureId};
+
+    #[test]
+    fn constitutive_stats_are_finite_for_fixture_model() {
+        let model = fixture_model(FixtureId::ThermoRampSmooth);
+        let stats = constitutive_stats(&model);
+        assert!(stats.conductivity_mean.is_finite());
+        assert!(stats.heat_capacity_mean.is_finite());
+        assert!(stats.diffusivity_proxy.is_finite());
+        assert!(stats.response_rate >= 0.02 && stats.response_rate <= 2.0);
+    }
+}

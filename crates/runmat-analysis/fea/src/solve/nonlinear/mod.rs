@@ -4,6 +4,10 @@ use std::time::Instant;
 use crate::{
     assembly::AssemblySummary,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
+    physics::{
+        coupling::{electro_thermal, nonlinear as coupling_nonlinear, thermo_mechanical},
+        structural,
+    },
     solve::transient::{solve_transient_system, TransientSolveOptions},
     thermo::{sample_time_profile_scale, temporal_profile_variation},
     ComputeBackend, FeaContactInterfaceContext, FeaElectroThermalContext,
@@ -140,17 +144,19 @@ pub fn solve_nonlinear_system(
         .map(|idx| idx as f64 / options.increment_count as f64)
         .collect::<Vec<_>>();
     let thermo_severity_base =
-        thermo_mechanical_severity(options.thermo_mechanical_context.clone());
+        thermo_mechanical::severity(options.thermo_mechanical_context.clone());
     let thermo_temporal_variation = options
         .thermo_mechanical_context
         .as_ref()
         .map(temporal_profile_variation)
         .unwrap_or(0.0);
-    let electro_severity_base = electro_thermal_severity(options.electro_thermal_context.clone());
+    let electro_severity_base = electro_thermal::severity(options.electro_thermal_context.clone());
     let electro_temporal_variation =
-        electro_temporal_profile_variation(options.electro_thermal_context.clone());
-    let plasticity_severity_base = plasticity_severity(options.plasticity_context.clone());
-    let contact_severity_base = contact_severity(options.contact_context.clone());
+        electro_thermal::temporal_profile_variation(options.electro_thermal_context.clone());
+    let plasticity_severity_base =
+        coupling_nonlinear::plasticity_severity(options.plasticity_context.clone());
+    let contact_severity_base =
+        coupling_nonlinear::contact_severity(options.contact_context.clone());
     let line_search_reduction = options.line_search_reduction.clamp(0.05, 0.95);
     let tangent_refresh_interval = options.tangent_refresh_interval.max(1);
 
@@ -201,7 +207,7 @@ pub fn solve_nonlinear_system(
             }
         }
         let electro_time_scale =
-            electro_time_scale(options.electro_thermal_context.clone(), load_factor);
+            electro_thermal::time_scale(options.electro_thermal_context.clone(), load_factor);
         let thermo_severity = (thermo_severity_base * thermo_time_scale).clamp(0.0, 1.0);
         let electro_severity = (electro_severity_base * electro_time_scale).clamp(0.0, 1.0);
         let plasticity_severity =
@@ -231,7 +237,7 @@ pub fn solve_nonlinear_system(
             .get(index)
             .cloned()
             .unwrap_or_else(|| previous.clone());
-        let mut increment_norm = l2_norm_delta(&candidate, &previous);
+        let mut increment_norm = structural::displacement_increment_norm(&candidate, &previous);
         let mut residual = transient
             .residual_norms
             .get(index)
@@ -519,15 +525,6 @@ pub fn solve_nonlinear_system(
     }
 }
 
-fn l2_norm_delta(a: &[f64], b: &[f64]) -> f64 {
-    let mut sum = 0.0_f64;
-    for (av, bv) in a.iter().zip(b.iter()) {
-        let d = av - bv;
-        sum += d * d;
-    }
-    sum.sqrt()
-}
-
 fn transient_cost_metric(diagnostics: &[FeaDiagnostic], key: &str) -> Option<f64> {
     diagnostics
         .iter()
@@ -538,106 +535,4 @@ fn transient_cost_metric(diagnostics: &[FeaDiagnostic], key: &str) -> Option<f64
                 .find_map(|token| token.strip_prefix(&format!("{key}=")))
         })
         .and_then(|value| value.parse::<f64>().ok())
-}
-
-fn thermo_mechanical_severity(context: Option<FeaThermoMechanicalContext>) -> f64 {
-    let Some(context) = context else {
-        return 0.0;
-    };
-    if !context.enabled {
-        return 0.0;
-    }
-    let thermal_strain = (context.thermal_expansion_coefficient
-        * context.applied_temperature_delta_k.abs())
-    .clamp(0.0, 0.05);
-    (thermal_strain / 0.05).clamp(0.0, 1.0)
-}
-
-fn electro_thermal_severity(context: Option<FeaElectroThermalContext>) -> f64 {
-    let Some(context) = context else {
-        return 0.0;
-    };
-    if !context.enabled {
-        return 0.0;
-    }
-    (context.applied_voltage_v.powi(2)
-        * context.base_electrical_conductivity_s_per_m.max(1.0e-9)
-        * context.resistive_heating_coefficient.max(0.0)
-        / 1.0e7)
-        .clamp(0.0, 1.0)
-}
-
-fn electro_time_scale(context: Option<FeaElectroThermalContext>, normalized_time: f64) -> f64 {
-    let Some(context) = context else {
-        return 1.0;
-    };
-    if context.time_profile.is_empty() {
-        return 1.0;
-    }
-    let t = normalized_time.clamp(0.0, 1.0);
-    let mut points = context.time_profile;
-    points.sort_by(|a, b| a.normalized_time.total_cmp(&b.normalized_time));
-    if t <= points[0].normalized_time {
-        return points[0].current_scale.clamp(0.2, 2.0);
-    }
-    for pair in points.windows(2) {
-        let a = &pair[0];
-        let b = &pair[1];
-        if t >= a.normalized_time && t <= b.normalized_time {
-            let span = (b.normalized_time - a.normalized_time).abs().max(1.0e-9);
-            let alpha = (t - a.normalized_time) / span;
-            return (a.current_scale + (b.current_scale - a.current_scale) * alpha).clamp(0.2, 2.0);
-        }
-    }
-    points
-        .last()
-        .map(|p| p.current_scale.clamp(0.2, 2.0))
-        .unwrap_or(1.0)
-}
-
-fn electro_temporal_profile_variation(context: Option<FeaElectroThermalContext>) -> f64 {
-    let Some(context) = context else {
-        return 0.0;
-    };
-    if context.time_profile.len() < 2 {
-        return 0.0;
-    }
-    let mut min_scale = f64::INFINITY;
-    let mut max_scale = -f64::INFINITY;
-    for point in &context.time_profile {
-        min_scale = min_scale.min(point.current_scale);
-        max_scale = max_scale.max(point.current_scale);
-    }
-    if !min_scale.is_finite() || !max_scale.is_finite() {
-        return 0.0;
-    }
-    ((max_scale - min_scale).abs() / 2.0).clamp(0.0, 1.0)
-}
-
-fn plasticity_severity(context: Option<FeaPlasticityConstitutiveContext>) -> f64 {
-    let Some(ctx) = context else {
-        return 0.0;
-    };
-    if !ctx.enabled {
-        return 0.0;
-    }
-    let yield_component = (0.012 / ctx.yield_strain.max(1.0e-6)).clamp(0.0, 1.5) / 1.5;
-    let hardening_component = (ctx.hardening_modulus_ratio / 0.2).clamp(0.0, 1.5) / 1.5;
-    let saturation_component = (ctx.saturation_exponent / 4.0).clamp(0.0, 1.5) / 1.5;
-    (0.55 * yield_component + 0.35 * hardening_component + 0.10 * saturation_component)
-        .clamp(0.0, 1.0)
-}
-
-fn contact_severity(context: Option<FeaContactInterfaceContext>) -> f64 {
-    let Some(ctx) = context else {
-        return 0.0;
-    };
-    if !ctx.enabled {
-        return 0.0;
-    }
-    let penetration_component = (ctx.max_penetration_ratio / 0.02).clamp(0.0, 1.5) / 1.5;
-    let penalty_component = (1.0 / ctx.penalty_stiffness_scale.max(1.0e-6)).clamp(0.0, 1.5) / 1.5;
-    let friction_component = (ctx.friction_coefficient / 0.8).clamp(0.0, 1.5) / 1.5;
-    (0.5 * penetration_component + 0.3 * penalty_component + 0.2 * friction_component)
-        .clamp(0.0, 1.0)
 }

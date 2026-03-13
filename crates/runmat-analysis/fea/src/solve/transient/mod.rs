@@ -5,6 +5,7 @@ use std::time::Instant;
 use crate::{
     assembly::AssemblySummary,
     diagnostics::{FeaDiagnostic, FeaDiagnosticSeverity},
+    physics::coupling::{electro_thermal, thermo_mechanical},
     solve::runtime_tensor_solver::RuntimeTensorPreparedLinearSystem,
     thermo::{sample_time_profile_scale, temporal_profile_variation},
     ComputeBackend, FeaElectroThermalContext, FeaPrepContext, FeaThermoMechanicalContext,
@@ -110,15 +111,15 @@ pub fn solve_transient_system(
 
     let use_runtime_tensor = backend == ComputeBackend::Gpu;
     let thermo_severity_base =
-        thermo_mechanical_severity(options.thermo_mechanical_context.clone());
+        thermo_mechanical::severity(options.thermo_mechanical_context.clone());
     let thermo_temporal_variation = options
         .thermo_mechanical_context
         .as_ref()
         .map(temporal_profile_variation)
         .unwrap_or(0.0);
-    let electro_severity_base = electro_thermal_severity(options.electro_thermal_context.clone());
+    let electro_severity_base = electro_thermal::severity(options.electro_thermal_context.clone());
     let electro_temporal_variation =
-        electro_temporal_profile_variation(options.electro_thermal_context.clone());
+        electro_thermal::temporal_profile_variation(options.electro_thermal_context.clone());
     let mut thermo_severity_sum = 0.0_f64;
     let mut thermo_time_scale_sum = 0.0_f64;
     let mut thermo_time_extrapolated = 0usize;
@@ -183,7 +184,7 @@ pub fn solve_transient_system(
             }
         }
         let electro_time_scale =
-            electro_time_scale(options.electro_thermal_context.clone(), step_progress);
+            electro_thermal::time_scale(options.electro_thermal_context.clone(), step_progress);
         let thermo_severity = (thermo_severity_base * thermo_time_scale).clamp(0.0, 1.0);
         let electro_severity = (electro_severity_base * electro_time_scale).clamp(0.0, 1.0);
         thermo_severity_sum += thermo_severity;
@@ -461,79 +462,4 @@ fn recommend_next_time_step(
     }
     factor = factor.min(thermo_growth_limit.max(0.5));
     (step_dt * factor).clamp(min_dt, max_dt)
-}
-
-fn thermo_mechanical_severity(context: Option<FeaThermoMechanicalContext>) -> f64 {
-    let Some(context) = context else {
-        return 0.0;
-    };
-    if !context.enabled {
-        return 0.0;
-    }
-    let thermal_strain = (context.thermal_expansion_coefficient
-        * context.applied_temperature_delta_k.abs())
-    .clamp(0.0, 0.05);
-    (thermal_strain / 0.05).clamp(0.0, 1.0)
-}
-
-fn electro_thermal_severity(context: Option<FeaElectroThermalContext>) -> f64 {
-    let Some(context) = context else {
-        return 0.0;
-    };
-    if !context.enabled {
-        return 0.0;
-    }
-    let joule_proxy = (context.applied_voltage_v.powi(2)
-        * context.base_electrical_conductivity_s_per_m.max(1.0e-9)
-        * context.resistive_heating_coefficient.max(0.0)
-        / 1.0e7)
-        .clamp(0.0, 1.0);
-    joule_proxy
-}
-
-fn electro_time_scale(context: Option<FeaElectroThermalContext>, normalized_time: f64) -> f64 {
-    let Some(context) = context else {
-        return 1.0;
-    };
-    if context.time_profile.is_empty() {
-        return 1.0;
-    }
-    let t = normalized_time.clamp(0.0, 1.0);
-    let mut points = context.time_profile;
-    points.sort_by(|a, b| a.normalized_time.total_cmp(&b.normalized_time));
-    if t <= points[0].normalized_time {
-        return points[0].current_scale.clamp(0.2, 2.0);
-    }
-    for pair in points.windows(2) {
-        let a = &pair[0];
-        let b = &pair[1];
-        if t >= a.normalized_time && t <= b.normalized_time {
-            let span = (b.normalized_time - a.normalized_time).abs().max(1.0e-9);
-            let alpha = (t - a.normalized_time) / span;
-            return (a.current_scale + (b.current_scale - a.current_scale) * alpha).clamp(0.2, 2.0);
-        }
-    }
-    points
-        .last()
-        .map(|p| p.current_scale.clamp(0.2, 2.0))
-        .unwrap_or(1.0)
-}
-
-fn electro_temporal_profile_variation(context: Option<FeaElectroThermalContext>) -> f64 {
-    let Some(context) = context else {
-        return 0.0;
-    };
-    if context.time_profile.len() < 2 {
-        return 0.0;
-    }
-    let mut min_scale = f64::INFINITY;
-    let mut max_scale = -f64::INFINITY;
-    for point in &context.time_profile {
-        min_scale = min_scale.min(point.current_scale);
-        max_scale = max_scale.max(point.current_scale);
-    }
-    if !min_scale.is_finite() || !max_scale.is_finite() {
-        return 0.0;
-    }
-    ((max_scale - min_scale).abs() / 2.0).clamp(0.0, 1.0)
 }
