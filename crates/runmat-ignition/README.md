@@ -54,7 +54,7 @@ Sibling docs for deep dives:
 ## Error model (mex)
 - All interpreter errors are normalized: `mex(id, message)` stores the identifier on `RuntimeError` and keeps `message` as the human-readable diagnostic.
 - CLI/REPL formatting renders the identifier as a separate labeled line; tests assert `err.identifier()` to prevent drift.
-- Identifiers include: `MATLAB:UndefinedFunction`, `MATLAB:UndefinedVariable`, `MATLAB:NotEnoughInputs`, `MATLAB:TooManyInputs`, `MATLAB:TooManyOutputs`, `MATLAB:VarargoutMismatch`, `MATLAB:SliceNonTensor`, `MATLAB:IndexOutOfBounds`, `MATLAB:CellIndexType`, `MATLAB:CellSubscriptOutOfBounds`, `MATLAB:ExpandError`, `MATLAB:MissingSubsref`, `MATLAB:MissingSubsasgn`.
+- Identifiers include: `RunMat:UndefinedFunction`, `RunMat:UndefinedVariable`, `RunMat:NotEnoughInputs`, `RunMat:TooManyInputs`, `RunMat:TooManyOutputs`, `RunMat:VarargoutMismatch`, `RunMat:SliceNonTensor`, `RunMat:IndexOutOfBounds`, `RunMat:CellIndexType`, `RunMat:CellSubscriptOutOfBounds`, `RunMat:ExpandError`, `RunMat:MissingSubsref`, `RunMat:MissingSubsasgn`.
 
 ## OOP semantics (summary)
 - Instance: `LoadMember`/`StoreMember`, `LoadMethod`/`CallMethod` with access checks.
@@ -76,7 +76,7 @@ Sibling docs for deep dives:
 ## Remaining edges
 
 - Error model sweep: confirm all remaining failure paths surface normalized mex identifiers (indexing, arity, OOP dispatch). Most paths covered; add a couple more targeted tests.
-- OOP negative strictness: once the runtime registry guarantees absence of subsref/subsasgn, tighten tests to expect `MATLAB:MissingSubsref`/`MATLAB:MissingSubsasgn` only.
+- OOP negative strictness: once the runtime registry guarantees absence of subsref/subsasgn, tighten tests to expect `RunMat:MissingSubsref`/`RunMat:MissingSubsasgn` only.
 - Expansion into slice targets: core implemented; add a few degenerate/empty seeds when encountered.
 
 ## Contributing

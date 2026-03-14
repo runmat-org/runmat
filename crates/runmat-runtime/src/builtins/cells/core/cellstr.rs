@@ -44,8 +44,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
         "Terminates fusion because the result is a host-resident cell array of character vectors.",
 };
 
-const IDENT_INVALID_INPUT: &str = "MATLAB:cellstr:InvalidInput";
-const IDENT_INVALID_CONTENTS: &str = "MATLAB:cellstr:InvalidContents";
+const IDENT_INVALID_INPUT: &str = "RunMat:cellstr:InvalidInput";
+const IDENT_INVALID_CONTENTS: &str = "RunMat:cellstr:InvalidContents";
 
 fn cellstr_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("cellstr").build()

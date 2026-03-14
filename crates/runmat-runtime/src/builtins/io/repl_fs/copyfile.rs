@@ -15,15 +15,15 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const MESSAGE_ID_OS_ERROR: &str = "MATLAB:COPYFILE:OSError";
-const MESSAGE_ID_SOURCE_NOT_FOUND: &str = "MATLAB:COPYFILE:FileDoesNotExist";
-const MESSAGE_ID_DEST_EXISTS: &str = "MATLAB:COPYFILE:DestinationExists";
-const MESSAGE_ID_DEST_MISSING: &str = "MATLAB:COPYFILE:DestinationNotFound";
-const MESSAGE_ID_DEST_NOT_DIR: &str = "MATLAB:COPYFILE:DestinationNotDirectory";
-const MESSAGE_ID_EMPTY_SOURCE: &str = "MATLAB:COPYFILE:EmptySource";
-const MESSAGE_ID_EMPTY_DEST: &str = "MATLAB:COPYFILE:EmptyDestination";
-const MESSAGE_ID_PATTERN_ERROR: &str = "MATLAB:COPYFILE:InvalidPattern";
-const MESSAGE_ID_SAME_PATH: &str = "MATLAB:COPYFILE:SourceEqualsDestination";
+const MESSAGE_ID_OS_ERROR: &str = "RunMat:copyfile:OSError";
+const MESSAGE_ID_SOURCE_NOT_FOUND: &str = "RunMat:copyfile:FileDoesNotExist";
+const MESSAGE_ID_DEST_EXISTS: &str = "RunMat:copyfile:DestinationExists";
+const MESSAGE_ID_DEST_MISSING: &str = "RunMat:copyfile:DestinationNotFound";
+const MESSAGE_ID_DEST_NOT_DIR: &str = "RunMat:copyfile:DestinationNotDirectory";
+const MESSAGE_ID_EMPTY_SOURCE: &str = "RunMat:copyfile:EmptySource";
+const MESSAGE_ID_EMPTY_DEST: &str = "RunMat:copyfile:EmptyDestination";
+const MESSAGE_ID_PATTERN_ERROR: &str = "RunMat:copyfile:InvalidPattern";
+const MESSAGE_ID_SAME_PATH: &str = "RunMat:copyfile:SourceEqualsDestination";
 
 const ERR_SOURCE_ARG: &str = "copyfile: source must be a character vector or string scalar";
 const ERR_DEST_ARG: &str = "copyfile: destination must be a character vector or string scalar";

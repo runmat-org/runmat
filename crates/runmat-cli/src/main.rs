@@ -45,8 +45,19 @@ use telemetry_sink::{
 
 fn parser_compat(mode: config::LanguageCompatMode) -> runmat_parser::CompatMode {
     match mode {
-        config::LanguageCompatMode::Matlab => runmat_parser::CompatMode::Matlab,
+        config::LanguageCompatMode::RunMat | config::LanguageCompatMode::Matlab => {
+            runmat_parser::CompatMode::Matlab
+        }
         config::LanguageCompatMode::Strict => runmat_parser::CompatMode::Strict,
+    }
+}
+
+fn resolved_error_namespace(cfg: &RunMatConfig) -> String {
+    let configured = cfg.runtime.error_namespace.trim();
+    if configured.is_empty() {
+        config::error_namespace_for_language_compat(cfg.language.compat).to_string()
+    } else {
+        configured.to_string()
     }
 }
 
@@ -172,7 +183,7 @@ Environment Variables:
   RUNMAT_KERNEL_KEY=<key>     Kernel authentication key
   RUNMAT_TIMEOUT=300          Execution timeout in seconds
   RUNMAT_CALLSTACK_LIMIT=200  Maximum call stack frames to record
-  RUNMAT_ERROR_NAMESPACE=RunMat Error identifier namespace prefix
+  RUNMAT_ERROR_NAMESPACE=RunMat Error identifier namespace prefix override
   RUNMAT_CONFIG=<path>        Path to configuration file
   RUNMAT_SNAPSHOT_PATH=<path> Snapshot file to preload standard library
   
@@ -212,8 +223,8 @@ struct Cli {
     emit_bytecode: Option<PathBuf>,
 
     /// Error identifier namespace prefix
-    #[arg(long, env = "RUNMAT_ERROR_NAMESPACE", default_value = "RunMat")]
-    error_namespace: String,
+    #[arg(long, env = "RUNMAT_ERROR_NAMESPACE")]
+    error_namespace: Option<String>,
 
     /// Configuration file path
     #[arg(long, env = "RUNMAT_CONFIG")]
@@ -1199,10 +1210,16 @@ fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli) {
     // Runtime settings
     config.runtime.timeout = cli.timeout;
     config.runtime.callstack_limit = cli.callstack_limit;
-    config.runtime.error_namespace = cli.error_namespace.clone();
+    if let Some(error_namespace) = &cli.error_namespace {
+        config.runtime.error_namespace = error_namespace.clone();
+    }
     config.runtime.verbose = cli.verbose;
     if let Some(snapshot) = &cli.snapshot {
         config.runtime.snapshot_path = Some(snapshot.clone());
+    }
+    if config.runtime.error_namespace.trim().is_empty() {
+        config.runtime.error_namespace =
+            config::error_namespace_for_language_compat(config.language.compat).to_string();
     }
 
     // GC settings
@@ -1437,7 +1454,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     engine.set_telemetry_sink(telemetry_sink());
     engine.set_compat_mode(parser_compat(config.language.compat));
     engine.set_callstack_limit(config.runtime.callstack_limit);
-    engine.set_error_namespace(config.runtime.error_namespace.clone());
+    engine.set_error_namespace(resolved_error_namespace(config));
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }
@@ -1809,7 +1826,7 @@ async fn execute_script_with_args(
     engine.set_telemetry_sink(telemetry_sink());
     engine.set_compat_mode(parser_compat(config.language.compat));
     engine.set_callstack_limit(config.runtime.callstack_limit);
-    engine.set_error_namespace(config.runtime.error_namespace.clone());
+    engine.set_error_namespace(resolved_error_namespace(config));
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }
@@ -2195,7 +2212,7 @@ async fn execute_benchmark(
     engine.set_telemetry_sink(telemetry_sink());
     engine.set_compat_mode(parser_compat(config.language.compat));
     engine.set_callstack_limit(config.runtime.callstack_limit);
-    engine.set_error_namespace(config.runtime.error_namespace.clone());
+    engine.set_error_namespace(resolved_error_namespace(config));
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }

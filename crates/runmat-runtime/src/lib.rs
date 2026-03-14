@@ -209,7 +209,7 @@ async fn rethrow_builtin(e: Value) -> crate::BuiltinResult<Value> {
             .with_identifier(me.identifier)
             .build()),
         Value::String(s) => Err(build_runtime_error(s).build()),
-        other => Err(build_runtime_error(format!("MATLAB:error: {other:?}")).build()),
+        other => Err(build_runtime_error(format!("RunMat:error: {other:?}")).build()),
     }
 }
 

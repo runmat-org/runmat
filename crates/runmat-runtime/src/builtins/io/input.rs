@@ -48,7 +48,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.len() > 2 {
-        return Err(build_runtime_error("MATLAB:input:TooManyInputs").build());
+        return Err(build_runtime_error("RunMat:input:TooManyInputs").build());
     }
 
     let mut prompt_index = if args.is_empty() { None } else { Some(0usize) };
@@ -100,7 +100,7 @@ async fn parse_prompt(value: &Value) -> Result<String, RuntimeError> {
     match gathered {
         Value::CharArray(ca) => {
             if ca.rows != 1 {
-                Err(build_runtime_error("MATLAB:input:PromptMustBeRowVector").build())
+                Err(build_runtime_error("RunMat:input:PromptMustBeRowVector").build())
             } else {
                 Ok(ca.data.iter().collect())
             }
@@ -110,11 +110,11 @@ async fn parse_prompt(value: &Value) -> Result<String, RuntimeError> {
             if sa.data.len() == 1 {
                 Ok(sa.data[0].clone())
             } else {
-                Err(build_runtime_error("MATLAB:input:PromptMustBeScalarString").build())
+                Err(build_runtime_error("RunMat:input:PromptMustBeScalarString").build())
             }
         }
         other => {
-            Err(build_runtime_error(format!("MATLAB:input:InvalidPromptType ({other:?})")).build())
+            Err(build_runtime_error(format!("RunMat:input:InvalidPromptType ({other:?})")).build())
         }
     }
 }
@@ -127,7 +127,7 @@ async fn parse_string_flag(value: &Value) -> Result<bool, RuntimeError> {
         Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
         other => {
             return Err(
-                build_runtime_error(format!("MATLAB:input:InvalidStringFlag ({other:?})")).build(),
+                build_runtime_error(format!("RunMat:input:InvalidStringFlag ({other:?})")).build(),
             )
         }
     };
@@ -135,7 +135,7 @@ async fn parse_string_flag(value: &Value) -> Result<bool, RuntimeError> {
     if trimmed.eq_ignore_ascii_case("s") {
         Ok(true)
     } else {
-        Err(build_runtime_error(format!("MATLAB:input:InvalidStringFlag ({trimmed})")).build())
+        Err(build_runtime_error(format!("RunMat:input:InvalidStringFlag ({trimmed})")).build())
     }
 }
 
@@ -148,7 +148,7 @@ async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
         .await
         .map_err(|err| {
             let message = err.message().to_string();
-            build_runtime_error(format!("MATLAB:input:InvalidNumericExpression ({message})"))
+            build_runtime_error(format!("RunMat:input:InvalidNumericExpression ({message})"))
                 .with_source(err)
                 .build()
         })

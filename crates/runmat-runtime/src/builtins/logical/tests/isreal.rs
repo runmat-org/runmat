@@ -221,7 +221,7 @@ pub(crate) mod tests {
         let class_ref_flag =
             run_isreal(Value::ClassRef("pkg.Class".into())).expect("isreal classref");
         let mex_flag = run_isreal(Value::MException(MException::new(
-            "MATLAB:mock".into(),
+            "RunMat:mock".into(),
             "message".into(),
         )))
         .expect("isreal mexception");

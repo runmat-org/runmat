@@ -32,7 +32,7 @@
   "description": "`plot(x, y)` creates a 2-D line plot with MATLAB-compatible styling. Inputs may be real row/column vectors or single-precision gpuArray vectors when a shared WebGPU context is available.",
   "behaviors": [
     "Both `x` and `y` must contain the same number of elements; mismatched lengths raise errors.",
-    "Default styling mirrors MATLAB: blue solid line with circular markers disabled. Line width matches MATLAB's default (approx. 1 pt) but can be adjusted once the interactive window is open.",
+    "Default styling: blue solid line with circular markers disabled. Line width defaults to 1 pt but can be adjusted.",
     "Multiple calls to `plot` append to the current figure when users call `hold on` (future work).",
     "Single-precision gpuArray vectors stay on the device and feed a zero-copy line packer. Double-precision data or dashed/marker-heavy styles fall back to the CPU path automatically."
   ],

@@ -35,7 +35,7 @@
     "`write(t, data)` converts `data` to unsigned 8-bit integers (the MATLAB default) and sends the bytes to the peer. The return value is the number of elements written when the caller requests an output argument.",
     "`write(t, data, datatype)` encodes the payload using the supplied MATLAB datatype token. Supported values mirror MATLAB: `\"uint8\"` (default), `\"int8\"`, `\"uint16\"`, `\"int16\"`, `\"uint32\"`, `\"int32\"`, `\"uint64\"`, `\"int64\"`, `\"single\"`, `\"double\"`, `\"char\"`, and `\"string\"`. Numeric conversions saturate to the destination range just like MATLAB cast operations. `\"char\"` treats values as single-byte character codes and `\"string\"` encodes UTF-8 text.",
     "The client’s `ByteOrder` property controls how multi-byte numeric values are serialised. `\"little-endian\"` is the default, while `\"big-endian\"` matches the traditional network byte order.",
-    "When the socket cannot send the entire payload before the timeout expires, `write` raises `MATLAB:write:Timeout`. If the peer closes the connection before or during the transfer the builtin raises `MATLAB:write:ConnectionClosed` and marks the client as disconnected.",
+    "When the socket cannot send the entire payload before the timeout expires, `write` raises `RunMat:write:Timeout`. If the peer closes the connection before or during the transfer the builtin raises `RunMat:write:ConnectionClosed` and marks the client as disconnected.",
     "Inputs that originate on the GPU are gathered back to the host automatically before any bytes are written."
   ],
   "examples": [
@@ -59,7 +59,7 @@
     {
       "description": "Handling connection closures",
       "input": "client = tcpclient(\"example.com\", 12345, \"Timeout\", 0.25);\ntry\n    write(client, uint8([1 2 3 4]));\ncatch err\n    disp(err.identifier)\nend",
-      "output": "MATLAB:write:ConnectionClosed"
+      "output": "RunMat:write:ConnectionClosed"
     }
   ],
   "faqs": [

@@ -244,7 +244,7 @@ pub(crate) mod tests {
             run_isnumeric(Value::ClassRef("pkg.Class".into())).unwrap(),
             Value::Bool(false)
         );
-        let mex = MException::new("MATLAB:mock".into(), "message".into());
+        let mex = MException::new("RunMat:mock".into(), "message".into());
         assert_eq!(
             run_isnumeric(Value::MException(mex)).unwrap(),
             Value::Bool(false)

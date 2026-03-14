@@ -14,11 +14,11 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const MESSAGE_ID_OS_ERROR: &str = "MATLAB:RMDIR:OSError";
-const MESSAGE_ID_DIRECTORY_NOT_FOUND: &str = "MATLAB:RMDIR:DirectoryNotFound";
-const MESSAGE_ID_NOT_A_DIRECTORY: &str = "MATLAB:RMDIR:NotADirectory";
-const MESSAGE_ID_DIRECTORY_NOT_EMPTY: &str = "MATLAB:RMDIR:DirectoryNotEmpty";
-const MESSAGE_ID_EMPTY_NAME: &str = "MATLAB:RMDIR:InvalidFolderName";
+const MESSAGE_ID_OS_ERROR: &str = "RunMat:rmdir:OSError";
+const MESSAGE_ID_DIRECTORY_NOT_FOUND: &str = "RunMat:rmdir:DirectoryNotFound";
+const MESSAGE_ID_NOT_A_DIRECTORY: &str = "RunMat:rmdir:NotADirectory";
+const MESSAGE_ID_DIRECTORY_NOT_EMPTY: &str = "RunMat:rmdir:DirectoryNotEmpty";
+const MESSAGE_ID_EMPTY_NAME: &str = "RunMat:rmdir:InvalidFolderName";
 
 const ERR_FOLDER_ARG: &str = "rmdir: folder name must be a character vector or string scalar";
 const ERR_FLAG_ARG: &str =

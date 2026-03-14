@@ -58,8 +58,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "ne";
-const IDENT_INVALID_INPUT: &str = "MATLAB:ne:InvalidInput";
-const IDENT_SIZE_MISMATCH: &str = "MATLAB:ne:SizeMismatch";
+const IDENT_INVALID_INPUT: &str = "RunMat:ne:InvalidInput";
+const IDENT_SIZE_MISMATCH: &str = "RunMat:ne:SizeMismatch";
 
 fn ne_error(message: impl Into<String>, identifier: &'static str) -> RuntimeError {
     build_runtime_error(message)

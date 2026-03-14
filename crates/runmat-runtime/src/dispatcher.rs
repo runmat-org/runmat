@@ -153,7 +153,7 @@ async fn call_builtin_async_impl(
             return new_object_builtin(name.to_string()).await;
         }
         return Err(build_runtime_error(format!("Undefined function: {name}"))
-            .with_identifier("MATLAB:UndefinedFunction")
+            .with_identifier("RunMat:UndefinedFunction")
             .build());
     }
 

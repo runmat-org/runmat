@@ -40,7 +40,7 @@
     "`[B, I] = sortrows(A, ...)` also returns `I`, the 1-based row permutation indices.",
     "`sortrows` is stable: rows that compare equal keep their original order.",
     "For complex inputs, `'ComparisonMethod'` accepts `'auto'`, `'real'`, or `'abs'`, matching MATLAB semantics.",
-    "NaN handling mirrors MATLAB: in ascending sorts rows containing NaN values move to the end; in descending sorts they move to the beginning.",
+    "NaN handling mirrors RunMat: in ascending sorts rows containing NaN values move to the end; in descending sorts they move to the beginning.",
     "`'MissingPlacement'` lets you choose whether NaN (and other missing) rows appear `'first'`, `'last'`, or follow MATLAB's `'auto'` default.",
     "Character arrays are sorted lexicographically using their character codes."
   ],

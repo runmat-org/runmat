@@ -500,7 +500,7 @@ fn oop_negative_missing_subsref_mex() {
     let out = execute(&hir);
     if let Err(err) = out {
         assert!(
-            err.identifier() == Some("MATLAB:MissingSubsref") || err.message().contains("subsref")
+            err.identifier() == Some("RunMat:MissingSubsref") || err.message().contains("subsref")
         );
     }
 }
@@ -520,7 +520,7 @@ fn oop_negative_missing_subsasgn_mex() {
     let out = execute(&hir);
     if let Err(err) = out {
         assert!(
-            err.identifier() == Some("MATLAB:MissingSubsasgn")
+            err.identifier() == Some("RunMat:MissingSubsasgn")
                 || err.message().contains("subsasgn")
         );
     }

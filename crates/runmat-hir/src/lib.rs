@@ -10,7 +10,7 @@ pub use runmat_builtins::Type;
 
 pub type Span = runmat_parser::Span;
 
-const DEFAULT_ERROR_NAMESPACE: &str = "MATLAB";
+const DEFAULT_ERROR_NAMESPACE: &str = "RunMat";
 static ERROR_NAMESPACE: OnceLock<RwLock<String>> = OnceLock::new();
 static CONST_NUM_LOOKUP: OnceLock<HashMap<String, f64>> = OnceLock::new();
 

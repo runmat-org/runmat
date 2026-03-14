@@ -8,7 +8,7 @@ use test_helpers::lower;
 fn error_identifier_and_catch() {
     // Emit the message; ensure id/message are captured correctly
     let ast = parse(
-        "try; error(\"MATLAB:domainError\", \"bad\"); catch e; msg = getfield(e, 'message'); end",
+        "try; error(\"RunMat:domainError\", \"bad\"); catch e; msg = getfield(e, 'message'); end",
     )
     .unwrap();
     let hir = lower(&ast).unwrap();
@@ -23,7 +23,7 @@ fn error_identifier_and_catch() {
 #[test]
 fn nested_try_catch_rethrow() {
     let ast =
-        parse("try; try; error('MATLAB:oops','x'); catch e; rethrow(e); end; catch f; g=1; end")
+        parse("try; try; error('RunMat:oops','x'); catch e; rethrow(e); end; catch f; g=1; end")
             .unwrap();
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();

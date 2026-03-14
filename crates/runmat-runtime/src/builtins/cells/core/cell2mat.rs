@@ -45,9 +45,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Acts as a fusion sink; fusion planner stops GPU fusion before calling cell2mat.",
 };
 
-const IDENT_INVALID_INPUT: &str = "MATLAB:cell2mat:InvalidInput";
-const IDENT_INVALID_CONTENTS: &str = "MATLAB:cell2mat:InvalidContents";
-const IDENT_SIZE_LIMIT: &str = "MATLAB:cell2mat:SizeExceeded";
+const IDENT_INVALID_INPUT: &str = "RunMat:cell2mat:InvalidInput";
+const IDENT_INVALID_CONTENTS: &str = "RunMat:cell2mat:InvalidContents";
+const IDENT_SIZE_LIMIT: &str = "RunMat:cell2mat:SizeExceeded";
 
 fn cell2mat_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)

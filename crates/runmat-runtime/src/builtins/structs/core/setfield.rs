@@ -71,8 +71,8 @@ fn remap_setfield_flow(err: RuntimeError, prefix: Option<&str>) -> RuntimeError 
 }
 
 fn is_undefined_function(err: &RuntimeError) -> bool {
-    err.identifier() == Some("MATLAB:UndefinedFunction")
-        || err.message().contains("MATLAB:UndefinedFunction")
+    err.identifier() == Some("RunMat:UndefinedFunction")
+        || err.message().contains("RunMat:UndefinedFunction")
 }
 
 #[runtime_builtin(

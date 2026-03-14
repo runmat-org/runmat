@@ -18,7 +18,7 @@ use crate::warning_store;
 use crate::{build_runtime_error, RuntimeError};
 use tracing;
 
-const DEFAULT_IDENTIFIER: &str = "MATLAB:warning";
+const DEFAULT_IDENTIFIER: &str = "RunMat:warning";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::diagnostics::warning")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -850,7 +850,7 @@ fn normalize_identifier(raw: &str) -> String {
     } else if trimmed.contains(':') {
         trimmed.to_string()
     } else {
-        format!("MATLAB:{trimmed}")
+        format!("RunMat:{trimmed}")
     }
 }
 

@@ -58,9 +58,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "gt";
-const IDENT_INVALID_INPUT: &str = "MATLAB:gt:InvalidInput";
-const IDENT_SIZE_MISMATCH: &str = "MATLAB:gt:SizeMismatch";
-const IDENT_COMPLEX_UNSUPPORTED: &str = "MATLAB:gt:ComplexNotSupported";
+const IDENT_INVALID_INPUT: &str = "RunMat:gt:InvalidInput";
+const IDENT_SIZE_MISMATCH: &str = "RunMat:gt:SizeMismatch";
+const IDENT_COMPLEX_UNSUPPORTED: &str = "RunMat:gt:ComplexNotSupported";
 
 fn gt_error(message: impl Into<String>, identifier: &'static str) -> RuntimeError {
     build_runtime_error(message)

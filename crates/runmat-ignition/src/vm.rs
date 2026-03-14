@@ -452,7 +452,7 @@ fn log_fusion_span_window(
 }
 
 // Namespace used for error identifiers (e.g., "RunMat:..." or custom override)
-pub const DEFAULT_ERROR_NAMESPACE: &str = "MATLAB";
+pub const DEFAULT_ERROR_NAMESPACE: &str = "RunMat";
 
 type VmResult<T> = Result<T, RuntimeError>;
 

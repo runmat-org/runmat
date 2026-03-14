@@ -69,10 +69,10 @@ This document tracks current coverage and compares it to GNU Octave where helpfu
  
 ## Notes on semantics parity
  
-- N-D indexing/slicing: RunMat implements gather/scatter with broadcast rules, logical masks, colon, and `end` arithmetic across dimensions; 2-D fast paths for entire rows/columns are included. Error identifiers match MATLAB (`MATLAB:SliceNonTensor`, `MATLAB:IndexStepZero`, etc.). The implicit two-argument colon uses a `+1` increment and yields an empty selection when `stop < start`, mirroring MATLAB.
+- N-D indexing/slicing: RunMat implements gather/scatter with broadcast rules, logical masks, colon, and `end` arithmetic across dimensions; 2-D fast paths for entire rows/columns are included. Error identifiers match MATLAB (`MATLAB:SliceNonTensor`, `MATLAB:IndexStepZero`, etc.) when LanguageCompatMode is `matlab` (default is `RunMat:SliceNonTensor` and `RunMat:IndexStepZero`). The implicit two-argument colon uses a `+1` increment and yields an empty selection when `stop < start`, mirroring MATLAB.
 - Multi-LHS and expansion: `[a,b]=f()` and `[~,b]=f()` are supported; function and cell expansions into slice targets are handled with dynamic packing (`PackToRow/PackToCol`).
 - Varargs and counts: `varargin`/`varargout` with strict count checks and `nargin`/`nargout` report per-call counts consistently across single and multi-output call sites.
-- OOP: Static/instance members, operator overloading (`plus`, `mtimes`, relational/logical) and `subsref`/`subsasgn` dispatch ordering with standardized negative errors (`MATLAB:MissingSubsref`, `MATLAB:MissingSubsasgn`).
+- OOP: Static/instance members, operator overloading (`plus`, `mtimes`, relational/logical) and `subsref`/`subsasgn` dispatch ordering with standardized negative errors (`MATLAB:MissingSubsref`, `MATLAB:MissingSubsasgn`) when LanguageCompatMode is `matlab` (default is `RunMat:MissingSubsref` and `RunMat:MissingSubsasgn`).
 - Imports and precedence: Specific imports shadow wildcard; locals and user functions take precedence; `Class.*` static resolution participates last; ambiguities are surfaced with clear diagnostics.
 - Metaclass: `?pkg.Class` produces a class reference enabling static property/method access and works with import resolution.
 
@@ -82,7 +82,7 @@ This document tracks current coverage and compares it to GNU Octave where helpfu
 ```matlab
 function [a, b, varargout] = head_tail(varargin)
   if nargin < 1
-    error('MATLAB:NotEnoughInputs', 'Need at least one input');
+    error('RunMat:NotEnoughInputs', 'Need at least one input');
   end
   a = varargin{1};
   if nargin >= 2, b = varargin{2}; else, b = 0; end
@@ -147,7 +147,7 @@ try
   A = zeros(2,2);
   A(:, 0) = 1;  % invalid subscript
 catch e
-  assert(strcmp(e.identifier, 'MATLAB:IndexOutOfBounds'));
+  assert(strcmp(e.identifier, 'RunMat:IndexOutOfBounds'));
   rethrow(e);   % rethrow preserves identifier/message
 end
 ```

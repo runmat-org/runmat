@@ -142,12 +142,12 @@ fn register_make_handle_fallback() {
         Box::pin(async move {
             if args.len() != 1 {
                 return Err(build_runtime_error("make_handle: expected 1 input")
-                    .with_identifier("MATLAB:make_handle:InvalidInput")
+                    .with_identifier("RunMat:make_handle:InvalidInput")
                     .build());
             }
             let name: String = std::convert::TryInto::try_into(&args[0]).map_err(|err| {
                 build_runtime_error(format!("make_handle: {err}"))
-                    .with_identifier("MATLAB:make_handle:InvalidInput")
+                    .with_identifier("RunMat:make_handle:InvalidInput")
                     .build()
             })?;
             Ok(Value::FunctionHandle(name))
@@ -180,17 +180,17 @@ fn register_make_anon_fallback() {
         Box::pin(async move {
             if args.len() != 2 {
                 return Err(build_runtime_error("make_anon: expected 2 inputs")
-                    .with_identifier("MATLAB:make_anon:InvalidInput")
+                    .with_identifier("RunMat:make_anon:InvalidInput")
                     .build());
             }
             let params: String = std::convert::TryInto::try_into(&args[0]).map_err(|err| {
                 build_runtime_error(format!("make_anon: {err}"))
-                    .with_identifier("MATLAB:make_anon:InvalidInput")
+                    .with_identifier("RunMat:make_anon:InvalidInput")
                     .build()
             })?;
             let body: String = std::convert::TryInto::try_into(&args[1]).map_err(|err| {
                 build_runtime_error(format!("make_anon: {err}"))
-                    .with_identifier("MATLAB:make_anon:InvalidInput")
+                    .with_identifier("RunMat:make_anon:InvalidInput")
                     .build()
             })?;
             Ok(Value::String(format!("@anon({params}) {body}")))
@@ -1793,7 +1793,7 @@ fn parse_telemetry_run_kind(value: Option<&str>) -> TelemetryRunKind {
 fn parse_language_compat_from_str(value: &str) -> Option<CompatMode> {
     if value.eq_ignore_ascii_case("strict") {
         Some(CompatMode::Strict)
-    } else if value.eq_ignore_ascii_case("matlab") {
+    } else if value.eq_ignore_ascii_case("matlab") || value.eq_ignore_ascii_case("runmat") {
         Some(CompatMode::Matlab)
     } else {
         None

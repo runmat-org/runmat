@@ -113,7 +113,7 @@ pub(crate) fn decode_handle(handle: f64, builtin: &str) -> Result<Instant, crate
     if !handle.is_finite() || handle.is_sign_negative() {
         return Err(crate::build_runtime_error("toc: invalid timer handle")
             .with_builtin(builtin)
-            .with_identifier("MATLAB:toc:InvalidTimerHandle")
+            .with_identifier("RunMat:toc:InvalidTimerHandle")
             .build());
     }
     let duration = Duration::from_secs_f64(handle);
