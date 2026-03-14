@@ -6,6 +6,26 @@ export const revalidate = 0;
 
 const HUBSPOT_PORTAL_ID = process.env.HUBSPOT_PORTAL_ID;
 const HUBSPOT_CONTACT_FORM_ID = process.env.HUBSPOT_CONTACT_FORM_ID;
+const RUNMAT_SERVER_API_BASE_URL = process.env.RUNMAT_SERVER_API_BASE_URL || "https://api.runmat.com";
+
+type AttributionPayload = {
+  utmSource?: string;
+  utmMedium?: string;
+  utmCampaign?: string;
+  utmTerm?: string;
+  utmContent?: string;
+  gclid?: string;
+  gbraid?: string;
+  wbraid?: string;
+  msclkid?: string;
+  fbclid?: string;
+  ttclid?: string;
+  liFatId?: string;
+  landingPageUrl?: string;
+  pageReferrer?: string;
+  capturedAt?: string;
+  gaClientId?: string;
+};
 
 function isValidEmail(email: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -13,7 +33,7 @@ function isValidEmail(email: string): boolean {
 
 export async function POST(req: NextRequest) {
   try {
-    const { firstname, lastname, email, company, message, source, pageUri, pageName } =
+    const { firstname, lastname, email, company, message, source, pageUri, pageName, attribution } =
       (await req.json()) as {
         firstname?: string;
         lastname?: string;
@@ -23,6 +43,7 @@ export async function POST(req: NextRequest) {
         source?: string;
         pageUri?: string;
         pageName?: string;
+        attribution?: AttributionPayload;
       };
 
     if (!firstname || !firstname.trim()) {
@@ -76,6 +97,38 @@ export async function POST(req: NextRequest) {
     }
 
     if (resp.ok) {
+      const campaign = attribution?.utmCampaign?.trim() || undefined;
+      const intakePayload = {
+        kind: "contact",
+        email: email.trim().toLowerCase(),
+        source: source?.trim() || "website_contact_page",
+        campaign,
+        attribution: attribution
+          ? {
+              utmSource: attribution.utmSource,
+              utmMedium: attribution.utmMedium,
+              utmCampaign: attribution.utmCampaign,
+              utmTerm: attribution.utmTerm,
+              utmContent: attribution.utmContent,
+              gclid: attribution.gclid,
+              gbraid: attribution.gbraid,
+              wbraid: attribution.wbraid,
+              msclkid: attribution.msclkid,
+              fbclid: attribution.fbclid,
+              ttclid: attribution.ttclid,
+              liFatId: attribution.liFatId,
+              landingPageUrl: attribution.landingPageUrl,
+              pageReferrer: attribution.pageReferrer,
+              capturedAt: attribution.capturedAt,
+              gaClientId: attribution.gaClientId,
+            }
+          : undefined,
+      };
+      void fetch(`${RUNMAT_SERVER_API_BASE_URL.replace(/\/$/, "")}/v1/lifecycle/intake`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(intakePayload),
+      }).catch(() => undefined);
       return NextResponse.json({ ok: true }, { status: 200 });
     }
 

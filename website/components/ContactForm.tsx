@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import { trackEvent } from "@/components/GoogleAnalytics";
+import { getCurrentAttribution } from "@/lib/attribution-client";
 
 const inputClass =
   "w-full h-11 rounded-lg border border-border bg-muted/20 px-4 text-base text-foreground placeholder:text-muted-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring/40 sm:h-10 sm:text-sm disabled:opacity-60";
@@ -47,6 +48,7 @@ export default function ContactForm() {
               source: inquiryType === "enterprise" ? "pricing_contact_sales" : "website_contact_page",
               pageUri: window.location.href,
               pageName: document.title,
+              attribution: getCurrentAttribution(),
             }),
           }).catch(() => undefined);
 
