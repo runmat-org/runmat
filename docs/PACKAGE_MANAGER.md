@@ -143,7 +143,7 @@ awesome_signals/
 ```matlab:runnable
 function w = hann(n)
   if nargin < 1
-    error('MATLAB:narginchk','hann requires n');
+    error('RunMat:narginchk','hann requires n');
   end
   i = (0:n-1)';
   w = 0.5 - 0.5*cos(2*pi*i/(n-1));

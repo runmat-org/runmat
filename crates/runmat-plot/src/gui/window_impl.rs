@@ -761,6 +761,34 @@ impl<'window> PlotWindow<'window> {
             // Scissor rectangle is specified in physical pixels as u32
             let scissor = (cvx as u32, cvy as u32, cvw as u32, cvh as u32);
 
+            {
+                let bg = self
+                    .plot_renderer
+                    .theme
+                    .build_theme()
+                    .get_background_color();
+                let clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("runmat-window-overlay-clear"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color {
+                                r: bg.x as f64,
+                                g: bg.y as f64,
+                                b: bg.z as f64,
+                                a: bg.w as f64,
+                            }),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    occlusion_query_set: None,
+                    timestamp_writes: None,
+                });
+                drop(clear_pass);
+            }
+
             // If this figure has a subplot grid > 1, split into axes rectangles and render each
             let (rows, cols) = self.plot_renderer.figure_axes_grid();
             if rows * cols > 1 {
@@ -803,15 +831,42 @@ impl<'window> PlotWindow<'window> {
                     }
                 }
                 // Do not overwrite per-axes cameras; keep their independent state for interaction
-                let _ =
-                    self.plot_renderer
-                        .render_axes_to_viewports(&mut encoder, &view, &viewports, 4);
+                let subplot_cfg = crate::core::plot_renderer::PlotRenderConfig {
+                    width: self.plot_renderer.wgpu_renderer.surface_config.width.max(1),
+                    height: self
+                        .plot_renderer
+                        .wgpu_renderer
+                        .surface_config
+                        .height
+                        .max(1),
+                    msaa_samples: 4,
+                    theme: self.plot_renderer.theme.clone(),
+                    background_color: self
+                        .plot_renderer
+                        .theme
+                        .build_theme()
+                        .get_background_color(),
+                    ..Default::default()
+                };
+                let _ = self.plot_renderer.render_axes_to_viewports(
+                    &mut encoder,
+                    &view,
+                    &viewports,
+                    4,
+                    &subplot_cfg,
+                );
             } else {
                 // Single axes fallback: Render into the scissored viewport using camera path
                 let cfg = crate::core::plot_renderer::PlotRenderConfig {
                     width: scissor.2,
                     height: scissor.3,
                     msaa_samples: 4,
+                    theme: self.plot_renderer.theme.clone(),
+                    background_color: self
+                        .plot_renderer
+                        .theme
+                        .build_theme()
+                        .get_background_color(),
                     ..Default::default()
                 };
                 let cam = self.plot_renderer.camera().clone();

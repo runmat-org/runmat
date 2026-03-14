@@ -58,9 +58,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "le";
-const IDENT_INVALID_INPUT: &str = "MATLAB:le:InvalidInput";
-const IDENT_SIZE_MISMATCH: &str = "MATLAB:le:SizeMismatch";
-const IDENT_COMPLEX_UNSUPPORTED: &str = "MATLAB:le:ComplexNotSupported";
+const IDENT_INVALID_INPUT: &str = "RunMat:le:InvalidInput";
+const IDENT_SIZE_MISMATCH: &str = "RunMat:le:SizeMismatch";
+const IDENT_COMPLEX_UNSUPPORTED: &str = "RunMat:le:ComplexNotSupported";
 
 fn le_error(message: impl Into<String>, identifier: &'static str) -> RuntimeError {
     build_runtime_error(message)

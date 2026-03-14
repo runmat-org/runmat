@@ -57,8 +57,10 @@ fn telemetry_http_events_fire_for_script_execution() {
         .recv_timeout(Duration::from_secs(5))
         .expect("value payload");
 
-    assert!(contains_event(&first, "runtime_started"));
-    assert!(contains_event(&second, "runtime_finished"));
+    assert!(contains_event(&first, "runtime.run.started"));
+    assert!(contains_event(&second, "runtime.run.finished"));
+    assert!(contains_uuid(&first));
+    assert!(contains_uuid(&second));
 }
 
 #[test]
@@ -130,5 +132,13 @@ fn contains_event(body: &str, expected: &str) -> bool {
         .ok()
         .and_then(|value| value.get("event_label").cloned())
         .and_then(|label| label.as_str().map(|s| s == expected))
+        .unwrap_or(false)
+}
+
+fn contains_uuid(body: &str) -> bool {
+    serde_json::from_str::<Value>(body)
+        .ok()
+        .and_then(|value| value.get("uuid").cloned())
+        .and_then(|value| value.as_str().map(|s| !s.trim().is_empty()))
         .unwrap_or(false)
 }

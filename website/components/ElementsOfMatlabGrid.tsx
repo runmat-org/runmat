@@ -24,7 +24,7 @@ type GroupedBuiltins = {
 
 export default function ElementsOfMatlabGrid({ builtins }: { builtins: Builtin[] }) {
   const [searchQuery, setSearchQuery] = useState('');
-  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'tags'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'list' | 'tags'>('tags');
   const [expandedCategories, setExpandedCategories] = useState<Set<DisplayCategory>>(new Set());
 
   // Filter out internal functions

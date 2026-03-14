@@ -16,9 +16,9 @@ We separate installer events from runtime events and keep the schemas intentiona
 
 ### Installers
 
-Each run emits at most one of each event: `install_start`, `install_complete`, `install_failed`. Fields:
+Each run emits at most one of each event: `install.start`, `install.completed`, `install.failed`. Fields:
 
-- `event_label` (one of the above)
+- `event_label` (canonical install event name)
 - `os`, `arch`, `platform` (e.g. `darwin`, `arm64`, `macos-aarch64`)
 - `release` (RunMat version being installed)
 - `method` (`powershell` or `shell`)
@@ -28,14 +28,23 @@ Each run emits at most one of each event: `install_start`, `install_complete`, `
 
 At most two events per process:
 
-- `runtime_started`: `session_id`, `cid`, `run_kind` (`script`, `repl`, `benchmark`, `kernel`), `os`, `arch`, CLI version, whether acceleration/JIT are enabled.
-- `runtime_finished`: everything above plus `duration_us`, `success`, stringified error class (never source code), JIT usage flag, execution counters, provider metadata (device name/vendor/backend only), and GPU telemetry (dispatch counts, wall time, bytes moved, cache hits/misses, fusion stats).
+- `runtime.run.started`: `session_id`, `cid`, `run_kind` (`script`, `repl`, `benchmark`, `install`), `os`, `arch`, CLI version, whether acceleration/JIT are enabled.
+- `runtime.run.finished`: everything above plus `duration_us`, `success`, stringified error class (never source code), JIT usage flag, execution counters, provider metadata (device name/vendor/backend only), and GPU telemetry (dispatch counts, wall time, bytes moved, cache hits/misses, fusion stats).
+
+For failed runs, producers also include bounded error-monitoring fields:
+
+- `runtime.failure.stage` (`parser|hir|compile|runtime|unknown`)
+- `runtime.failure.code` (stable identifier, no free-form source text)
+- `runtime.failure.has_span` (boolean)
+- `runtime.failure.host` (`cli|wasm|kernel|desktop`)
+- `runtime.failure.component` (optional bounded bucket)
 
 Example runtime payload:
 
 ```json
 {
-  "event_label": "runtime_finished",
+  "event_label": "runtime.run.finished",
+  "uuid": "63b4b9a8-5f2b-4cef-95c1-c6e2b8f6c04c",
   "cid": "eac98648-3b42-41c7-a887-7452dd08cbf0",
   "session_id": "9e2a9d9f-4e37-4090-a1fb-96cb2c6f9f3a",
   "run_kind": "script",
@@ -97,10 +106,14 @@ Only aggregated counts and metadata listed above are sent. For broader privacy q
 
 ## Where does telemetry go?
 
-Clients send UDP (best effort) to `udp.telemetry.runmat.com:7846` (legacy `udp.telemetry.runmat.org:7846` still supported) or HTTPS POSTs to `https://telemetry.runmat.com/ingest` (legacy `https://telemetry.runmat.org/ingest`).
+Clients send HTTPS telemetry to `https://api.runmat.com/v1/t` (or environment override via `RUNMAT_TELEMETRY_ENDPOINT`).
 
-- HTTPS traffic lands on a Cloud Run service listening at `https://telemetry.runmat.com/ingest` (the source code is available at `infra/worker/` in the GitHub repo for transparency), normalizes payloads, and forwards to an analytics service (PostHog and Google Analytics [GA4] are used by the RunMat team for analytics).
-- The UDP path flows through a lightweight Google Cloud UDP load balancer into a managed instance group running the forwarder container (code under `infra/udp-forwarder/` in the repo). Each forwarder replays datagrams to the Cloud Run endpoint asynchronously so the CLI never blocks.
+Compatibility ingress is still available at `https://telemetry.runmat.com/ingest` for older CLI builds and UDP-forwarded traffic.
+
+- HTTPS traffic lands on runmat-server (`/v1/t`), which performs canonical validation/classification for usage volume measurement and error reporting.
+- The UDP path flows through a lightweight Google Cloud UDP load balancer into a managed instance group running the forwarder container (code under `infra/udp-forwarder/` in the repo). Each forwarder replays datagrams to the collector endpoint asynchronously so the CLI never blocks.
+
+Legacy compatibility scope is intentionally narrow: for old `runtime_started` / `runtime_finished` payloads, the compatibility worker only preserves event occurrence, `arch`, and stable user id (`cid` -> `distinctId`). Other legacy envelope details are not preserved.
 
 No payloads are stored server-side beyond transient buffers; failures are logged and the CLI continues immediately.
 
@@ -108,7 +121,7 @@ Note: Official RunMat binaries bake the ingestion key into the executable at bui
 
 ### Delivery guarantees
 
-The CLI keeps telemetry off the hot path via a background worker. By default it waits up to 50 ms for the `runtime_started` event to flush before exiting so extremely short scripts still count. This may add some wall time for sub-50 ms programs but is unnoticeable for longer runs. If you need faster exit times, set `RUNMAT_TELEMETRY_DRAIN=none` to prevent the worker from waiting for the `runtime_started` event to flush at all.
+The CLI keeps telemetry off the hot path via a background worker. By default it waits up to 50 ms for the `runtime.run.started` event to flush before exiting so extremely short scripts still count. This may add some wall time for sub-50 ms programs but is unnoticeable for longer runs. If you need faster exit times, set `RUNMAT_TELEMETRY_DRAIN=none` to prevent the worker from waiting for the `runtime.run.started` event to flush at all.
 
 ## How do I opt out of RunMat telemetry?
 

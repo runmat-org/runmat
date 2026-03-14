@@ -47,3 +47,6 @@ runmat-telemetry = { workspace = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 runmat-runtime = { workspace = true, features = ["plot-web"] }
 runmat-plot = { workspace = true, features = ["web", "egui-overlay"] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = "0.3"

@@ -52,7 +52,7 @@ struct AnalyzerState {
 
 fn parser_compat(mode: LanguageCompatMode) -> CompatMode {
     match mode {
-        LanguageCompatMode::Matlab => CompatMode::Matlab,
+        LanguageCompatMode::RunMat | LanguageCompatMode::Matlab => CompatMode::Matlab,
         LanguageCompatMode::Strict => CompatMode::Strict,
     }
 }
@@ -463,6 +463,7 @@ fn parse_compat_mode(opts: &serde_json::Value) -> Option<LanguageCompatMode> {
     let lang = opts.get("language")?;
     let compat = lang.get("compat")?.as_str()?;
     match compat.trim().to_ascii_lowercase().as_str() {
+        "runmat" => Some(LanguageCompatMode::RunMat),
         "matlab" => Some(LanguageCompatMode::Matlab),
         "strict" => Some(LanguageCompatMode::Strict),
         _ => None,

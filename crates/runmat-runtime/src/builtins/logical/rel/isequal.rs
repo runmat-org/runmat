@@ -11,7 +11,7 @@ use crate::builtins::common::gpu_helpers;
 use crate::{build_runtime_error, RuntimeError};
 
 const BUILTIN_NAME: &str = "isequal";
-const IDENT_NOT_ENOUGH_INPUTS: &str = "MATLAB:isequal:NotEnoughInputs";
+const IDENT_NOT_ENOUGH_INPUTS: &str = "RunMat:isequal:NotEnoughInputs";
 
 fn isequal_error(message: impl Into<String>, identifier: &'static str) -> RuntimeError {
     build_runtime_error(message)

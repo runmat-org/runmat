@@ -90,7 +90,7 @@
     },
     {
       "question": "What happens if the file is read-only?",
-      "answer": "`savepath` returns `status = 1` together with the diagnostic message and message ID `MATLAB:savepath:cannotWriteFile`. The existing file is left untouched."
+      "answer": "`savepath` returns `status = 1` together with the diagnostic message and message ID `RunMat:savepath:cannotWriteFile`. The existing file is left untouched."
     },
     {
       "question": "Does `savepath` modify the current path?",

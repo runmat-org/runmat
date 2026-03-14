@@ -54,7 +54,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "isfinite";
-const IDENTIFIER_INVALID_INPUT: &str = "MATLAB:isfinite:InvalidInput";
+const IDENTIFIER_INVALID_INPUT: &str = "RunMat:isfinite:InvalidInput";
 const IDENTIFIER_INTERNAL: &str = "RunMat:isfinite:InternalError";
 
 #[runtime_builtin(

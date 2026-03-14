@@ -25,14 +25,19 @@ enum PlottingBackendError {
 }
 
 fn engine_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).build()
+    build_runtime_error(message)
+        .with_identifier("RunMat:plot:EngineError")
+        .build()
 }
 
 fn engine_error_with_source(
     message: impl Into<String>,
     source: impl std::error::Error + Send + Sync + 'static,
 ) -> RuntimeError {
-    build_runtime_error(message).with_source(source).build()
+    build_runtime_error(message)
+        .with_identifier("RunMat:plot:EngineError")
+        .with_source(source)
+        .build()
 }
 
 #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
@@ -83,6 +88,41 @@ pub async fn render_figure_png_bytes(
 }
 
 #[cfg(feature = "plot-core")]
+pub async fn render_figure_rgba_bytes(
+    mut figure: Figure,
+    width: u32,
+    height: u32,
+) -> BuiltinResult<Vec<u8>> {
+    use runmat_plot::export::image::{ImageExportSettings, ImageExporter};
+
+    let mut settings = ImageExportSettings::default();
+    if width > 0 {
+        settings.width = width;
+    }
+    if height > 0 {
+        settings.height = height;
+    }
+
+    let exporter = ImageExporter::with_settings(settings)
+        .await
+        .map_err(|err| {
+            engine_error_with_source(
+                "Plot export initialization failed.",
+                PlottingBackendError::ImageExportInit(err),
+            )
+        })?;
+    exporter
+        .render_rgba_bytes(&mut figure)
+        .await
+        .map_err(|err| {
+            engine_error_with_source(
+                "Plot export failed.",
+                PlottingBackendError::ImageExport(err),
+            )
+        })
+}
+
+#[cfg(feature = "plot-core")]
 pub async fn render_figure_png_bytes_with_camera(
     mut figure: Figure,
     width: u32,
@@ -119,6 +159,42 @@ pub async fn render_figure_png_bytes_with_camera(
 }
 
 #[cfg(feature = "plot-core")]
+pub async fn render_figure_rgba_bytes_with_camera(
+    mut figure: Figure,
+    width: u32,
+    height: u32,
+    camera: &runmat_plot::core::Camera,
+) -> BuiltinResult<Vec<u8>> {
+    use runmat_plot::export::image::{ImageExportSettings, ImageExporter};
+
+    let mut settings = ImageExportSettings::default();
+    if width > 0 {
+        settings.width = width;
+    }
+    if height > 0 {
+        settings.height = height;
+    }
+
+    let exporter = ImageExporter::with_settings(settings)
+        .await
+        .map_err(|err| {
+            engine_error_with_source(
+                "Plot export initialization failed.",
+                PlottingBackendError::ImageExportInit(err),
+            )
+        })?;
+    exporter
+        .render_rgba_bytes_with_camera(&mut figure, camera)
+        .await
+        .map_err(|err| {
+            engine_error_with_source(
+                "Plot export failed.",
+                PlottingBackendError::ImageExport(err),
+            )
+        })
+}
+
+#[cfg(feature = "plot-core")]
 pub async fn render_figure_png_bytes_with_axes_cameras(
     mut figure: Figure,
     width: u32,
@@ -145,6 +221,42 @@ pub async fn render_figure_png_bytes_with_axes_cameras(
         })?;
     exporter
         .render_png_bytes_with_axes_cameras(&mut figure, axes_cameras)
+        .await
+        .map_err(|err| {
+            engine_error_with_source(
+                "Plot export failed.",
+                PlottingBackendError::ImageExport(err),
+            )
+        })
+}
+
+#[cfg(feature = "plot-core")]
+pub async fn render_figure_rgba_bytes_with_axes_cameras(
+    mut figure: Figure,
+    width: u32,
+    height: u32,
+    axes_cameras: &[runmat_plot::core::Camera],
+) -> BuiltinResult<Vec<u8>> {
+    use runmat_plot::export::image::{ImageExportSettings, ImageExporter};
+
+    let mut settings = ImageExportSettings::default();
+    if width > 0 {
+        settings.width = width;
+    }
+    if height > 0 {
+        settings.height = height;
+    }
+
+    let exporter = ImageExporter::with_settings(settings)
+        .await
+        .map_err(|err| {
+            engine_error_with_source(
+                "Plot export initialization failed.",
+                PlottingBackendError::ImageExportInit(err),
+            )
+        })?;
+    exporter
+        .render_rgba_bytes_with_axes_cameras(&mut figure, axes_cameras)
         .await
         .map_err(|err| {
             engine_error_with_source(

@@ -76,7 +76,9 @@ pub fn ensure_context_from_provider() -> BuiltinResult<WgpuContextHandle> {
 }
 
 fn context_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).build()
+    build_runtime_error(message)
+        .with_identifier("RunMat:plot:ContextUnavailable")
+        .build()
 }
 
 fn propagate_to_plot_crate(context: &WgpuContextHandle) {

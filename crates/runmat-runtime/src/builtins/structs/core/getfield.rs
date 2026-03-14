@@ -67,8 +67,8 @@ fn remap_getfield_flow(err: RuntimeError, prefix: Option<&str>) -> RuntimeError 
 }
 
 fn is_undefined_function(err: &RuntimeError) -> bool {
-    err.identifier() == Some("MATLAB:UndefinedFunction")
-        || err.message().contains("MATLAB:UndefinedFunction")
+    err.identifier() == Some("RunMat:UndefinedFunction")
+        || err.message().contains("RunMat:UndefinedFunction")
 }
 
 #[runtime_builtin(
@@ -882,19 +882,19 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_exception_fields() {
-        let ex = MException::new("MATLAB:Test".to_string(), "failure".to_string());
+        let ex = MException::new("RunMat:Test".to_string(), "failure".to_string());
         let msg = run_getfield(Value::MException(ex.clone()), vec![Value::from("message")])
             .expect("message");
         assert_eq!(msg, Value::String("failure".to_string()));
         let ident = run_getfield(Value::MException(ex), vec![Value::from("identifier")])
             .expect("identifier");
-        assert_eq!(ident, Value::String("MATLAB:Test".to_string()));
+        assert_eq!(ident, Value::String("RunMat:Test".to_string()));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn getfield_exception_stack_cell() {
-        let mut ex = MException::new("MATLAB:Test".to_string(), "failure".to_string());
+        let mut ex = MException::new("RunMat:Test".to_string(), "failure".to_string());
         ex.stack.push("demo.m:5".to_string());
         ex.stack.push("main.m:1".to_string());
         let stack = run_getfield(Value::MException(ex), vec![Value::from("stack")]).expect("stack");

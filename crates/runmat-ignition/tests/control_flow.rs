@@ -140,7 +140,7 @@ fn undefined_variable_raises_mex() {
     let ast = parse("y = x + 1;").unwrap();
     let hir = lower(&ast);
     let err = hir.err().unwrap();
-    assert_eq!(err.identifier.as_deref(), Some("MATLAB:UndefinedVariable"));
+    assert_eq!(err.identifier.as_deref(), Some("RunMat:UndefinedVariable"));
 }
 
 #[test]
@@ -228,7 +228,7 @@ fn too_many_inputs_mex() {
     "#;
     let hir = lower(&parse(src).unwrap()).unwrap();
     let err = execute(&hir).err().unwrap();
-    assert_eq!(err.identifier(), Some("MATLAB:TooManyInputs"));
+    assert_eq!(err.identifier(), Some("RunMat:TooManyInputs"));
 }
 
 #[test]
@@ -241,7 +241,7 @@ fn too_many_outputs_mex() {
     "#;
     let hir = lower(&parse(src).unwrap()).unwrap();
     let err = execute(&hir).err().unwrap();
-    assert_eq!(err.identifier(), Some("MATLAB:TooManyOutputs"));
+    assert_eq!(err.identifier(), Some("RunMat:TooManyOutputs"));
 }
 
 #[test]
@@ -254,7 +254,7 @@ fn varargout_mismatch_mex() {
     "#;
     let hir = lower(&parse(src).unwrap()).unwrap();
     let err = execute(&hir).err().unwrap();
-    assert_eq!(err.identifier(), Some("MATLAB:VarargoutMismatch"));
+    assert_eq!(err.identifier(), Some("RunMat:VarargoutMismatch"));
 }
 
 #[test]
@@ -262,7 +262,7 @@ fn slice_non_tensor_mex() {
     let src = "x = 5; y = x(1,1);";
     let hir = lower(&parse(src).unwrap()).unwrap();
     let err = execute(&hir).err().unwrap();
-    assert_eq!(err.identifier(), Some("MATLAB:SliceNonTensor"));
+    assert_eq!(err.identifier(), Some("RunMat:SliceNonTensor"));
 }
 
 #[test]
@@ -271,7 +271,7 @@ fn index_step_zero_mex() {
     let hir = lower(&parse(src).unwrap()).unwrap();
     let err = execute(&hir).err().unwrap();
     assert!(
-        err.identifier() == Some("MATLAB:IndexStepZero")
+        err.identifier() == Some("RunMat:IndexStepZero")
             || err.message().contains("Range step cannot be zero")
             || err.message().contains("dimension must be >= 1")
             || err.message().contains("increment must be nonzero")
@@ -287,7 +287,7 @@ fn unsupported_cell_index_type_mex() {
     let err2 = execute(&hir2).err().unwrap();
     // Current runtime path attempts numeric coercion and reports conversion failure
     assert!(
-        err2.identifier() == Some("MATLAB:CellIndexType")
+        err2.identifier() == Some("RunMat:CellIndexType")
             || err2.message().contains("cannot convert CharArray")
     );
 }

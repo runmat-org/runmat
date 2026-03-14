@@ -19,8 +19,8 @@ use std::path::{Path, PathBuf};
 const DEFAULT_FILENAME: &str = "pathdef.m";
 const ERROR_ARG_TYPE: &str = "savepath: filename must be a character vector or string scalar";
 const ERROR_EMPTY_FILENAME: &str = "savepath: filename must not be empty";
-const MESSAGE_ID_CANNOT_WRITE: &str = "MATLAB:savepath:cannotWriteFile";
-const MESSAGE_ID_CANNOT_RESOLVE: &str = "MATLAB:savepath:cannotResolveFile";
+const MESSAGE_ID_CANNOT_WRITE: &str = "RunMat:savepath:cannotWriteFile";
+const MESSAGE_ID_CANNOT_RESOLVE: &str = "RunMat:savepath:cannotResolveFile";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::savepath")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

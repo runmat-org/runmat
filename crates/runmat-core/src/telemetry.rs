@@ -38,8 +38,37 @@ pub struct TelemetryRunFinish {
     pub jit_used: bool,
     /// A short, privacy-safe error class/identifier (no source snippets).
     pub error: Option<String>,
+    pub failure: Option<TelemetryFailureInfo>,
+    pub host: Option<TelemetryHost>,
     pub counters: Option<RuntimeExecutionCounters>,
     pub provider: Option<ProviderSnapshot>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TelemetryFailureInfo {
+    pub stage: String,
+    pub code: String,
+    pub has_span: bool,
+    pub component: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum TelemetryHost {
+    Cli,
+    Wasm,
+    Kernel,
+    Desktop,
+}
+
+impl TelemetryHost {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TelemetryHost::Cli => "cli",
+            TelemetryHost::Wasm => "wasm",
+            TelemetryHost::Kernel => "kernel",
+            TelemetryHost::Desktop => "desktop",
+        }
+    }
 }
 
 pub struct TelemetryRunGuard {
@@ -91,15 +120,25 @@ impl TelemetryRunGuard {
             _ => None,
         };
 
-        let error = finish.error.map(|mut e| {
+        let mut error = finish.error.map(|mut e| {
             if e.len() > 256 {
                 e.truncate(256);
             }
             e
         });
+        if error.is_none() {
+            error = finish.failure.as_ref().map(|f| f.code.clone());
+        }
+
+        let runtime_failure_stage = finish.failure.as_ref().map(|f| f.stage.clone());
+        let runtime_failure_code = finish.failure.as_ref().map(|f| f.code.clone());
+        let runtime_failure_has_span = finish.failure.as_ref().map(|f| f.has_span);
+        let runtime_failure_component = finish.failure.as_ref().and_then(|f| f.component.clone());
+        let runtime_failure_host = finish.host.map(|h| h.as_str().to_string());
 
         let envelope: RuntimeFinishedEnvelope = RuntimeFinishedEnvelope {
             event_label: EVENT_RUNTIME_FINISHED,
+            uuid: Uuid::new_v4().to_string(),
             cid: self.cid.clone(),
             session_id: self.session_id.clone(),
             os: self.platform.os.clone(),
@@ -114,6 +153,11 @@ impl TelemetryRunGuard {
                 accelerate_enabled: self.started_payload.accelerate_enabled,
                 timestamp_ms: Some(unix_timestamp_ms().min(u64::MAX as u128) as u64),
                 error,
+                runtime_failure_stage,
+                runtime_failure_code,
+                runtime_failure_has_span,
+                runtime_failure_host,
+                runtime_failure_component,
                 counters: finish.counters,
                 provider: finish.provider,
                 gpu_wall_ns,
@@ -181,6 +225,7 @@ impl RunMatSession {
         };
         let envelope: RuntimeStartedEnvelope = RuntimeStartedEnvelope {
             event_label: EVENT_RUNTIME_STARTED,
+            uuid: Uuid::new_v4().to_string(),
             cid: self.telemetry_client_id.clone(),
             session_id: session_id.clone(),
             os: platform.os.clone(),

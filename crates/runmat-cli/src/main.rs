@@ -18,8 +18,8 @@ use runmat_accelerate::AccelerateInitOptions;
 use runmat_builtins::Value;
 use runmat_config::{self as config, ConfigLoader, PlotBackend, PlotMode, RunMatConfig};
 use runmat_core::{
-    ExecutionStreamEntry, ExecutionStreamKind, RunError, RunMatSession, TelemetryRunConfig,
-    TelemetryRunFinish,
+    runtime_error_telemetry_failure_info, ExecutionStreamEntry, ExecutionStreamKind, RunError,
+    RunMatSession, TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
 };
 use runmat_gc::{
     gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats, GcConfig,
@@ -45,8 +45,47 @@ use telemetry_sink::{
 
 fn parser_compat(mode: config::LanguageCompatMode) -> runmat_parser::CompatMode {
     match mode {
-        config::LanguageCompatMode::Matlab => runmat_parser::CompatMode::Matlab,
+        config::LanguageCompatMode::RunMat | config::LanguageCompatMode::Matlab => {
+            runmat_parser::CompatMode::Matlab
+        }
         config::LanguageCompatMode::Strict => runmat_parser::CompatMode::Strict,
+    }
+}
+
+fn resolved_error_namespace(cfg: &RunMatConfig) -> String {
+    let configured = cfg.runtime.error_namespace.trim();
+    if configured.is_empty() {
+        config::error_namespace_for_language_compat(cfg.language.compat).to_string()
+    } else {
+        configured.to_string()
+    }
+}
+
+#[cfg(test)]
+mod compat_tests {
+    use super::*;
+
+    #[test]
+    fn resolved_error_namespace_defaults_from_language_compat() {
+        let mut cfg = RunMatConfig::default();
+        cfg.runtime.error_namespace.clear();
+
+        cfg.language.compat = config::LanguageCompatMode::RunMat;
+        assert_eq!(resolved_error_namespace(&cfg), "RunMat");
+
+        cfg.language.compat = config::LanguageCompatMode::Matlab;
+        assert_eq!(resolved_error_namespace(&cfg), "MATLAB");
+
+        cfg.language.compat = config::LanguageCompatMode::Strict;
+        assert_eq!(resolved_error_namespace(&cfg), "RunMat");
+    }
+
+    #[test]
+    fn resolved_error_namespace_honors_explicit_override() {
+        let mut cfg = RunMatConfig::default();
+        cfg.language.compat = config::LanguageCompatMode::Matlab;
+        cfg.runtime.error_namespace = "CustomNS".to_string();
+        assert_eq!(resolved_error_namespace(&cfg), "CustomNS");
     }
 }
 
@@ -172,7 +211,7 @@ Environment Variables:
   RUNMAT_KERNEL_KEY=<key>     Kernel authentication key
   RUNMAT_TIMEOUT=300          Execution timeout in seconds
   RUNMAT_CALLSTACK_LIMIT=200  Maximum call stack frames to record
-  RUNMAT_ERROR_NAMESPACE=RunMat Error identifier namespace prefix
+  RUNMAT_ERROR_NAMESPACE=RunMat Error identifier namespace prefix override
   RUNMAT_CONFIG=<path>        Path to configuration file
   RUNMAT_SNAPSHOT_PATH=<path> Snapshot file to preload standard library
   
@@ -212,8 +251,8 @@ struct Cli {
     emit_bytecode: Option<PathBuf>,
 
     /// Error identifier namespace prefix
-    #[arg(long, env = "RUNMAT_ERROR_NAMESPACE", default_value = "RunMat")]
-    error_namespace: String,
+    #[arg(long, env = "RUNMAT_ERROR_NAMESPACE")]
+    error_namespace: Option<String>,
 
     /// Configuration file path
     #[arg(long, env = "RUNMAT_CONFIG")]
@@ -1199,10 +1238,16 @@ fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli) {
     // Runtime settings
     config.runtime.timeout = cli.timeout;
     config.runtime.callstack_limit = cli.callstack_limit;
-    config.runtime.error_namespace = cli.error_namespace.clone();
+    if let Some(error_namespace) = &cli.error_namespace {
+        config.runtime.error_namespace = error_namespace.clone();
+    }
     config.runtime.verbose = cli.verbose;
     if let Some(snapshot) = &cli.snapshot {
         config.runtime.snapshot_path = Some(snapshot.clone());
+    }
+    if config.runtime.error_namespace.trim().is_empty() {
+        config.runtime.error_namespace =
+            config::error_namespace_for_language_compat(config.language.compat).to_string();
     }
 
     // GC settings
@@ -1437,7 +1482,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     engine.set_telemetry_sink(telemetry_sink());
     engine.set_compat_mode(parser_compat(config.language.compat));
     engine.set_callstack_limit(config.runtime.callstack_limit);
-    engine.set_error_namespace(config.runtime.error_namespace.clone());
+    engine.set_error_namespace(resolved_error_namespace(config));
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }
@@ -1646,6 +1691,8 @@ fn finalize_repl_session(
             success: true,
             jit_used: stats.jit_compiled > 0,
             error: None,
+            failure: None,
+            host: Some(TelemetryHost::Cli),
             counters: Some(counters),
             provider: capture_provider_snapshot(),
         });
@@ -1807,7 +1854,7 @@ async fn execute_script_with_args(
     engine.set_telemetry_sink(telemetry_sink());
     engine.set_compat_mode(parser_compat(config.language.compat));
     engine.set_callstack_limit(config.runtime.callstack_limit);
-    engine.set_error_namespace(config.runtime.error_namespace.clone());
+    engine.set_error_namespace(resolved_error_namespace(config));
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }
@@ -1821,12 +1868,15 @@ async fn execute_script_with_args(
     let result = match engine.execute(&content).await {
         Ok(result) => result,
         Err(err) => {
+            let failure = err.telemetry_failure_info();
             if let Some(run) = script_run.take() {
                 run.finish(TelemetryRunFinish {
                     duration: Some(start_time.elapsed()),
                     success: false,
                     jit_used: false,
-                    error: Some("runtime_error".to_string()),
+                    error: Some(failure.code.clone()),
+                    failure: Some(failure),
+                    host: Some(TelemetryHost::Cli),
                     counters: None,
                     provider: capture_provider_snapshot(),
                 });
@@ -1846,10 +1896,15 @@ async fn execute_script_with_args(
     emit_execution_streams(&result.streams);
 
     let provider_snapshot = capture_provider_snapshot();
+    let failure = result
+        .error
+        .as_ref()
+        .map(runtime_error_telemetry_failure_info);
     let error_payload = result
         .error
         .as_ref()
         .and_then(|err| err.identifier().map(|value| value.to_string()))
+        .or_else(|| failure.as_ref().map(|info| info.code.clone()))
         .or_else(|| result.error.as_ref().map(|_| "runtime_error".to_string()));
     let success = error_payload.is_none();
     if let Some(run) = script_run.take() {
@@ -1858,6 +1913,8 @@ async fn execute_script_with_args(
             success,
             jit_used: result.used_jit,
             error: error_payload.clone(),
+            failure,
+            host: Some(TelemetryHost::Cli),
             counters: None,
             provider: provider_snapshot,
         });
@@ -2183,7 +2240,7 @@ async fn execute_benchmark(
     engine.set_telemetry_sink(telemetry_sink());
     engine.set_compat_mode(parser_compat(config.language.compat));
     engine.set_callstack_limit(config.runtime.callstack_limit);
-    engine.set_error_namespace(config.runtime.error_namespace.clone());
+    engine.set_error_namespace(resolved_error_namespace(config));
     if let Some(cid) = telemetry_client_id() {
         engine.set_telemetry_client_id(Some(cid));
     }
@@ -2227,6 +2284,11 @@ async fn execute_benchmark(
                     success: false,
                     jit_used: result.used_jit,
                     error: Some(error.clone()),
+                    failure: result
+                        .error
+                        .as_ref()
+                        .map(runtime_error_telemetry_failure_info),
+                    host: Some(TelemetryHost::Cli),
                     counters: Some(counters),
                     provider: capture_provider_snapshot(),
                 });
@@ -2270,6 +2332,8 @@ async fn execute_benchmark(
             success: true,
             jit_used: jit_executions > 0,
             error: None,
+            failure: None,
+            host: Some(TelemetryHost::Cli),
             counters: Some(counters),
             provider: capture_provider_snapshot(),
         });

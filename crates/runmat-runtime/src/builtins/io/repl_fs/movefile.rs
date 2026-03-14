@@ -15,14 +15,14 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const MESSAGE_ID_OS_ERROR: &str = "MATLAB:MOVEFILE:OSError";
-const MESSAGE_ID_SOURCE_NOT_FOUND: &str = "MATLAB:MOVEFILE:FileDoesNotExist";
-const MESSAGE_ID_DEST_EXISTS: &str = "MATLAB:MOVEFILE:DestinationExists";
-const MESSAGE_ID_DEST_MISSING: &str = "MATLAB:MOVEFILE:DestinationNotFound";
-const MESSAGE_ID_DEST_NOT_DIR: &str = "MATLAB:MOVEFILE:DestinationNotDirectory";
-const MESSAGE_ID_EMPTY_SOURCE: &str = "MATLAB:MOVEFILE:EmptySource";
-const MESSAGE_ID_EMPTY_DEST: &str = "MATLAB:MOVEFILE:EmptyDestination";
-const MESSAGE_ID_PATTERN_ERROR: &str = "MATLAB:MOVEFILE:InvalidPattern";
+const MESSAGE_ID_OS_ERROR: &str = "RunMat:movefile:OSError";
+const MESSAGE_ID_SOURCE_NOT_FOUND: &str = "RunMat:movefile:FileDoesNotExist";
+const MESSAGE_ID_DEST_EXISTS: &str = "RunMat:movefile:DestinationExists";
+const MESSAGE_ID_DEST_MISSING: &str = "RunMat:movefile:DestinationNotFound";
+const MESSAGE_ID_DEST_NOT_DIR: &str = "RunMat:movefile:DestinationNotDirectory";
+const MESSAGE_ID_EMPTY_SOURCE: &str = "RunMat:movefile:EmptySource";
+const MESSAGE_ID_EMPTY_DEST: &str = "RunMat:movefile:EmptyDestination";
+const MESSAGE_ID_PATTERN_ERROR: &str = "RunMat:movefile:InvalidPattern";
 
 const ERR_SOURCE_ARG: &str = "movefile: source must be a character vector or string scalar";
 const ERR_DEST_ARG: &str = "movefile: destination must be a character vector or string scalar";

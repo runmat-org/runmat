@@ -15,6 +15,7 @@ import { BuiltinDocRenderer, type BuiltinDocBlock, type BuiltinDocInlineNode } f
 import { slugifyHeading } from '@/lib/utils';
 import { builtinMetadataForSlug, builtinJsonLD } from './meta';
 import { BuiltinMetadataChips } from '@/components/BuiltinMetadataChips';
+import { BuiltinsHeadingsNav } from '@/components/BuiltinsHeadingsNav';
 
 export const dynamic = 'force-static';
 
@@ -54,22 +55,11 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
         <BuiltinMetadataChips metadata={metadata} />
       </div>
       <div className="container mx-auto px-4 md:px-6 pb-8">
-      <div className="grid gap-8 lg:grid-cols-[1fr_280px]">
+      <div className="grid gap-8 lg:grid-cols-[1fr_220px]">
         <article className="prose dark:prose-invert max-w-none prose-headings:font-semibold prose-h2:mt-8 prose-h2:mb-3 prose-h3:mt-6 prose-h3:mb-2 prose-pre:bg-muted prose-pre:border prose-pre:rounded-md prose-code:bg-muted prose-code:border prose-code:rounded-sm">
           <BuiltinDocRenderer blocks={blocks} />
         </article>
-        {toc.length > 0 && (
-          <aside className="hidden lg:block sticky top-24 h-max text-sm">
-            <div className="mb-2 font-semibold text-foreground/80">On this page</div>
-            <ul className="space-y-1 text-muted-foreground">
-              {toc.map((t) => (
-                <li key={t.id} className={t.depth === 3 ? 'pl-3' : ''}>
-                  <a href={`#${t.id}`} className="hover:text-foreground">{t.text}</a>
-                </li>
-              ))}
-            </ul>
-          </aside>
-        )}
+        <BuiltinsHeadingsNav toc={toc} />
       </div>
     </div>
     </>

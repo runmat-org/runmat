@@ -28,7 +28,7 @@ All indexing is 1-based and column-major. Out-of-bounds and shape-mismatch condi
 
 Error cases:
 - Non-tensor/non-object with `n > 1`
-- Out-of-bounds → `MATLAB:IndexOutOfBounds` or `MATLAB:SubscriptOutOfBounds`
+- Out-of-bounds → `RunMat:IndexOutOfBounds` or `RunMat:SubscriptOutOfBounds`
 
 ## Gather: IndexSlice(dims, numeric_count, colon_mask, end_mask)
 
@@ -56,9 +56,9 @@ Fast 2-D paths (tensors):
 String arrays mirror tensor semantics, but return `Value::String` for scalar results and `Value::StringArray` for arrays.
 
 Errors:
-- Out-of-bounds → `MATLAB:IndexOutOfBounds`
-- Logical mask shape mismatch → `MATLAB:IndexShape`
-- Slicing non-tensors/strings → `MATLAB:SliceNonTensor`
+- Out-of-bounds → `RunMat:IndexOutOfBounds`
+- Logical mask shape mismatch → `RunMat:IndexShape`
+- Slicing non-tensors/strings → `RunMat:SliceNonTensor`
 
 ### 1-D specialization
 
@@ -82,7 +82,7 @@ Use when the end of a range depends on a dimension length: `i:j:end-k` per dimen
   - `range_has_step`: whether each range has a step
   - `end_offsets`: `k` for `end-k`
 - Stack order: base, then for each range in increasing dimension order push `start[, step]`, then numeric scalar indices
-- The VM computes concrete indices per dim, honoring sign of the step; step 0 → `MATLAB:IndexStepZero`
+- The VM computes concrete indices per dim, honoring sign of the step; step 0 → `RunMat:IndexStepZero`
 - `Index1DRangeEnd` is a compact form for the common 1-D case
 
 ## Scatter: StoreIndex / StoreSlice
@@ -98,9 +98,9 @@ String array writes:
 - RHS can be a `String`, `StringArray`, or numeric converted to string (for convenience)
 
 Errors:
-- Out-of-bounds → `MATLAB:IndexOutOfBounds`
-- Shape mismatch for broadcasting → `MATLAB:ShapeMismatch`
-- Non-tensor/strings → `MATLAB:SliceNonTensor`
+- Out-of-bounds → `RunMat:IndexOutOfBounds`
+- Shape mismatch for broadcasting → `RunMat:ShapeMismatch`
+- Non-tensor/strings → `RunMat:SliceNonTensor`
 
 ## Scatter with end arithmetic: StoreSliceEx / StoreRangeEnd / StoreSlice1DRangeEnd
 
@@ -120,8 +120,8 @@ Errors:
 `IndexCellExpand(n, out_count)` expands contents into a comma-list in column-major order. If indices are omitted with `expand_all`, all cell elements expand. This is used for argument expansion at call sites and for building vectors via `PackToRow/PackToCol` when assigning into slices.
 
 Errors:
-- Unsupported index type → `MATLAB:CellIndexType`
-- Out-of-bounds → `MATLAB:CellSubscriptOutOfBounds`
+- Unsupported index type → `RunMat:CellIndexType`
+- Out-of-bounds → `RunMat:CellSubscriptOutOfBounds`
 
 ## Interactions with function calls
 

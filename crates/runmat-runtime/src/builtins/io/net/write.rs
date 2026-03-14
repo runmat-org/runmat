@@ -13,13 +13,13 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 use super::accept::{client_handle, configure_stream, CLIENT_HANDLE_FIELD};
 
-const MESSAGE_ID_INVALID_CLIENT: &str = "MATLAB:write:InvalidTcpClient";
-const MESSAGE_ID_INVALID_DATA: &str = "MATLAB:write:InvalidData";
-const MESSAGE_ID_INVALID_DATATYPE: &str = "MATLAB:write:InvalidDataType";
-const MESSAGE_ID_NOT_CONNECTED: &str = "MATLAB:write:NotConnected";
-const MESSAGE_ID_TIMEOUT: &str = "MATLAB:write:Timeout";
-const MESSAGE_ID_CONNECTION_CLOSED: &str = "MATLAB:write:ConnectionClosed";
-const MESSAGE_ID_INTERNAL: &str = "MATLAB:write:InternalError";
+const MESSAGE_ID_INVALID_CLIENT: &str = "RunMat:write:InvalidTcpClient";
+const MESSAGE_ID_INVALID_DATA: &str = "RunMat:write:InvalidData";
+const MESSAGE_ID_INVALID_DATATYPE: &str = "RunMat:write:InvalidDataType";
+const MESSAGE_ID_NOT_CONNECTED: &str = "RunMat:write:NotConnected";
+const MESSAGE_ID_TIMEOUT: &str = "RunMat:write:Timeout";
+const MESSAGE_ID_CONNECTION_CLOSED: &str = "RunMat:write:ConnectionClosed";
+const MESSAGE_ID_INTERNAL: &str = "RunMat:write:InternalError";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::write")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

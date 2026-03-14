@@ -15,11 +15,11 @@ use std::collections::HashMap;
 use std::net::{SocketAddr, TcpListener};
 use std::sync::{Arc, Mutex};
 
-const MESSAGE_ID_INVALID_ADDRESS: &str = "MATLAB:tcpserver:InvalidAddress";
-const MESSAGE_ID_INVALID_PORT: &str = "MATLAB:tcpserver:InvalidPort";
-const MESSAGE_ID_INVALID_NAME_VALUE: &str = "MATLAB:tcpserver:InvalidNameValue";
-const MESSAGE_ID_BIND_FAILED: &str = "MATLAB:tcpserver:BindFailed";
-const MESSAGE_ID_INTERNAL: &str = "MATLAB:tcpserver:InternalError";
+const MESSAGE_ID_INVALID_ADDRESS: &str = "RunMat:tcpserver:InvalidAddress";
+const MESSAGE_ID_INVALID_PORT: &str = "RunMat:tcpserver:InvalidPort";
+const MESSAGE_ID_INVALID_NAME_VALUE: &str = "RunMat:tcpserver:InvalidNameValue";
+const MESSAGE_ID_BIND_FAILED: &str = "RunMat:tcpserver:BindFailed";
+const MESSAGE_ID_INTERNAL: &str = "RunMat:tcpserver:InternalError";
 
 pub(crate) const DEFAULT_TIMEOUT_SECONDS: f64 = 10.0;
 pub(crate) const HANDLE_ID_FIELD: &str = "__tcpserver_id";

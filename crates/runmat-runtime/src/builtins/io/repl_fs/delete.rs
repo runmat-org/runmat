@@ -15,13 +15,13 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const MESSAGE_ID_FILE_NOT_FOUND: &str = "MATLAB:DELETE:FileNotFound";
-const MESSAGE_ID_IS_DIRECTORY: &str = "MATLAB:DELETE:Directories";
-const MESSAGE_ID_OS_ERROR: &str = "MATLAB:DELETE:PermissionDenied";
-const MESSAGE_ID_INVALID_PATTERN: &str = "MATLAB:DELETE:InvalidPattern";
-const MESSAGE_ID_INVALID_INPUT: &str = "MATLAB:DELETE:InvalidInput";
-const MESSAGE_ID_EMPTY_FILENAME: &str = "MATLAB:DELETE:EmptyFilename";
-const MESSAGE_ID_INVALID_HANDLE: &str = "MATLAB:DELETE:InvalidHandle";
+const MESSAGE_ID_FILE_NOT_FOUND: &str = "RunMat:DELETE:FileNotFound";
+const MESSAGE_ID_IS_DIRECTORY: &str = "RunMat:delete:Directories";
+const MESSAGE_ID_OS_ERROR: &str = "RunMat:DELETE:PermissionDenied";
+const MESSAGE_ID_INVALID_PATTERN: &str = "RunMat:delete:InvalidPattern";
+const MESSAGE_ID_INVALID_INPUT: &str = "RunMat:delete:InvalidInput";
+const MESSAGE_ID_EMPTY_FILENAME: &str = "RunMat:delete:EmptyFilename";
+const MESSAGE_ID_INVALID_HANDLE: &str = "RunMat:delete:InvalidHandle";
 
 const ERR_FILENAME_ARG: &str =
     "delete: filename must be a character vector, string scalar, string array, or cell array of character vectors";

@@ -1,5 +1,13 @@
 #[cfg(not(target_arch = "wasm32"))]
+use crate::data_contract::{
+    DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
+};
+#[cfg(not(target_arch = "wasm32"))]
 use crate::{DirEntry, FsFileType, FsMetadata, FsProvider, OpenFlags};
+#[cfg(not(target_arch = "wasm32"))]
+use chrono::Utc;
+#[cfg(not(target_arch = "wasm32"))]
+use serde_json::Value as JsonValue;
 #[cfg(not(target_arch = "wasm32"))]
 use std::ffi::OsString;
 #[cfg(not(target_arch = "wasm32"))]
@@ -203,6 +211,103 @@ impl FsProvider for SandboxFsProvider {
         perms.set_readonly(readonly);
         fs::set_permissions(target, perms)
     }
+
+    fn data_manifest_descriptor(
+        &self,
+        request: &DataManifestRequest,
+    ) -> io::Result<DataManifestDescriptor> {
+        let manifest_path = if request.path.ends_with(".json") {
+            PathBuf::from(&request.path)
+        } else {
+            PathBuf::from(&request.path).join("manifest.json")
+        };
+        let bytes = self.read(&manifest_path)?;
+        let json: JsonValue = serde_json::from_slice(&bytes)
+            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
+        Ok(DataManifestDescriptor {
+            schema_version: json
+                .get("schema_version")
+                .or_else(|| json.get("schemaVersion"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(1) as u32,
+            format: json
+                .get("format")
+                .and_then(|v| v.as_str())
+                .unwrap_or("runmat-data")
+                .to_string(),
+            dataset_id: json
+                .get("dataset_id")
+                .or_else(|| json.get("datasetId"))
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string(),
+            updated_at: json
+                .get("updated_at")
+                .or_else(|| json.get("updatedAt"))
+                .and_then(|v| v.as_str())
+                .map(ToString::to_string)
+                .unwrap_or_else(|| Utc::now().to_rfc3339()),
+            txn_sequence: json
+                .get("txn_sequence")
+                .or_else(|| json.get("txnSequence"))
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0),
+        })
+    }
+
+    fn data_chunk_upload_targets(
+        &self,
+        request: &DataChunkUploadRequest,
+    ) -> io::Result<Vec<DataChunkUploadTarget>> {
+        let root = PathBuf::from(&request.dataset_path)
+            .join("arrays")
+            .join(sanitize_segment(&request.array))
+            .join("chunks");
+        self.create_dir_all(&root)?;
+        request
+            .chunks
+            .iter()
+            .map(|chunk| {
+                let path = root.join(format!("{}.bin", sanitize_segment(&chunk.object_id)));
+                Ok(DataChunkUploadTarget {
+                    key: chunk.key.clone(),
+                    method: "PUT".to_string(),
+                    upload_url: format!("sandbox://{}", path.to_string_lossy()),
+                    headers: std::collections::HashMap::new(),
+                })
+            })
+            .collect()
+    }
+
+    fn data_upload_chunk(&self, target: &DataChunkUploadTarget, data: &[u8]) -> io::Result<()> {
+        if !target.method.eq_ignore_ascii_case("PUT") {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("unsupported upload method '{}'", target.method),
+            ));
+        }
+        let path = target
+            .upload_url
+            .strip_prefix("sandbox://")
+            .ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "invalid sandbox upload url")
+            })?;
+        self.write(Path::new(path), data)
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn sanitize_segment(input: &str) -> String {
+    input
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 #[cfg(all(not(target_arch = "wasm32"), test))]

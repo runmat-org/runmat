@@ -43,9 +43,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Callback execution happens on the host; fusion planners should treat cellfun as a fusion barrier.",
 };
 
-const IDENT_INVALID_INPUT: &str = "MATLAB:cellfun:InvalidInput";
-const IDENT_UNIFORM_OUTPUT: &str = "MATLAB:cellfun:UniformOutput";
-const IDENT_FUNCTION_ERROR: &str = "MATLAB:cellfun:FunctionError";
+const IDENT_INVALID_INPUT: &str = "RunMat:cellfun:InvalidInput";
+const IDENT_UNIFORM_OUTPUT: &str = "RunMat:cellfun:UniformOutput";
+const IDENT_FUNCTION_ERROR: &str = "RunMat:cellfun:FunctionError";
 
 fn cellfun_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("cellfun").build()

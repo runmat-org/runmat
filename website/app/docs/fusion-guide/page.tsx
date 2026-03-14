@@ -60,7 +60,7 @@ export default function FusionGuidePage() {
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 md:px-0 py-16 md:py-4">
-        <div className="grid lg:grid-cols-[minmax(0,1fr)_260px] gap-12">
+        <div className="grid lg:grid-cols-[minmax(0,1fr)_220px] gap-12">
           <div className="space-y-12">
             <header className="space-y-6">
               <div>

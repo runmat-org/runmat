@@ -15,8 +15,8 @@ use runmat_builtins::{
 };
 use runmat_macros::runtime_builtin;
 
-const MESSAGE_ID_INVALID_INPUT: &str = "MATLAB:diag:InvalidInput";
-const MESSAGE_ID_INVALID_OFFSET: &str = "MATLAB:diag:InvalidOffset";
+const MESSAGE_ID_INVALID_INPUT: &str = "RunMat:diag:InvalidInput";
+const MESSAGE_ID_INVALID_OFFSET: &str = "RunMat:diag:InvalidOffset";
 
 fn diag_type(args: &[Type], context: &ResolveContext) -> Type {
     let input = match args.first() {

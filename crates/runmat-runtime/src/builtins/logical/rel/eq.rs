@@ -58,8 +58,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "eq";
-const IDENT_INVALID_INPUT: &str = "MATLAB:eq:InvalidInput";
-const IDENT_SIZE_MISMATCH: &str = "MATLAB:eq:SizeMismatch";
+const IDENT_INVALID_INPUT: &str = "RunMat:eq:InvalidInput";
+const IDENT_SIZE_MISMATCH: &str = "RunMat:eq:SizeMismatch";
 
 fn eq_error(message: impl Into<String>, identifier: &'static str) -> RuntimeError {
     build_runtime_error(message)

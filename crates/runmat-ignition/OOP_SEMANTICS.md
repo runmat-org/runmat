@@ -42,7 +42,7 @@ Ignition models MATLAB-style classes with properties, methods, static members, a
   1) `lookup_method(obj.class_name, name)` if present and not static
   2) Qualified builtin name `Class.method` with receiver as first arg
   3) Unqualified builtin `method` with receiver as first arg
-- Private methods produce `MATLAB:...` access errors
+- Private methods produce `RunMat:...` access errors
 - `LoadMethod(name)` returns a closure capturing the receiver: `Closure { function_name: "Class.method", captures: [obj] }`
 
 ### Static methods
@@ -64,7 +64,7 @@ The VM constructs selector representations to match MATLAB conventions:
 - For `{}`: a `CellArray` of indices
 - For `.`: a `String` field name
 
-Calls are performed through the `call_method` builtin with the receiver as the first argument and the kind + selectors following. If a class defines neither `subsref` nor `subsasgn`, the VM surfaces `MATLAB:MissingSubsref` / `MATLAB:MissingSubsasgn`.
+Calls are performed through the `call_method` builtin with the receiver as the first argument and the kind + selectors following. If a class defines neither `subsref` nor `subsasgn`, the VM surfaces `RunMat:MissingSubsref` / `RunMat:MissingSubsasgn`.
 
 ## Operator overloading
 
@@ -94,7 +94,7 @@ When a method is missing, the VM falls back to numeric semantics in `runmat_runt
 
 ## Error identifiers
 
-- Access control violations: private properties/methods → `MATLAB:...` identifiers with precise messages
-- Missing overloads: `MATLAB:MissingSubsref` / `MATLAB:MissingSubsasgn`
+- Access control violations: private properties/methods → `RunMat:...` identifiers with precise messages
+- Missing overloads: `RunMat:MissingSubsref` / `RunMat:MissingSubsasgn`
 
 See `INSTR_SET.md` for the exact instructions and `vm.rs` for enforcement details.

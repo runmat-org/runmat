@@ -14,8 +14,8 @@ use super::accept::{
 };
 use super::tcpserver::{close_all_servers, close_server, HANDLE_ID_FIELD};
 
-const MESSAGE_ID_INVALID_ARGUMENT: &str = "MATLAB:close:InvalidArgument";
-const MESSAGE_ID_INVALID_HANDLE: &str = "MATLAB:close:InvalidHandle";
+const MESSAGE_ID_INVALID_ARGUMENT: &str = "RunMat:close:InvalidArgument";
+const MESSAGE_ID_INVALID_HANDLE: &str = "RunMat:close:InvalidHandle";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::close")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

@@ -2,9 +2,48 @@
 use super::common::ERR_PLOTTING_UNAVAILABLE;
 
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlotSurfaceCameraState {
+    pub active_axes: usize,
+    pub axes: Vec<PlotCameraState>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlotCameraState {
+    pub position: [f32; 3],
+    pub target: [f32; 3],
+    pub up: [f32; 3],
+    pub zoom: f32,
+    pub aspect_ratio: f32,
+    pub projection: PlotCameraProjection,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PlotCameraProjection {
+    Perspective {
+        fov: f32,
+        near: f32,
+        far: f32,
+    },
+    Orthographic {
+        left: f32,
+        right: f32,
+        bottom: f32,
+        top: f32,
+        near: f32,
+        far: f32,
+    },
+}
 
 fn web_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).build()
+    build_runtime_error(message)
+        .with_identifier("RunMat:plot:WebError")
+        .build()
 }
 
 #[allow(dead_code)]
@@ -12,7 +51,10 @@ fn web_error_with_source(
     message: impl Into<String>,
     source: impl std::error::Error + Send + Sync + 'static,
 ) -> RuntimeError {
-    build_runtime_error(message).with_source(source).build()
+    build_runtime_error(message)
+        .with_identifier("RunMat:plot:WebError")
+        .with_source(source)
+        .build()
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
@@ -21,6 +63,7 @@ pub(crate) mod wasm {
     use crate::builtins::plotting::state::{clone_figure, current_figure_revision, FigureHandle};
     use log::debug;
     use runmat_plot::core::PlotEvent;
+    use runmat_plot::styling::PlotThemeConfig;
     use runmat_plot::web::WebRenderer;
     use runmat_thread_local::runmat_thread_local;
     use std::cell::RefCell;
@@ -28,6 +71,7 @@ pub(crate) mod wasm {
 
     runmat_thread_local! {
         static SURFACES: RefCell<HashMap<u32, SurfaceEntry>> = RefCell::new(HashMap::new());
+        static ACTIVE_THEME: RefCell<PlotThemeConfig> = RefCell::new(PlotThemeConfig::default());
     }
 
     struct SurfaceEntry {
@@ -38,8 +82,11 @@ pub(crate) mod wasm {
 
     pub(super) fn install_surface_impl(
         surface_id: u32,
-        renderer: WebRenderer,
+        mut renderer: WebRenderer,
     ) -> BuiltinResult<()> {
+        ACTIVE_THEME.with(|theme| {
+            renderer.set_theme_config(theme.borrow().clone());
+        });
         SURFACES.with(|slot| {
             slot.borrow_mut().insert(
                 surface_id,
@@ -106,6 +153,33 @@ pub(crate) mod wasm {
             entry.bound_handle = Some(handle);
             // Force a re-prime on next present.
             entry.last_revision = None;
+            Ok(())
+        })
+    }
+
+    pub(super) fn set_theme_config_impl(theme: PlotThemeConfig) -> BuiltinResult<()> {
+        debug!(
+            "plot-web: runtime set_theme_config_impl variant={:?} custom_colors={}",
+            theme.variant,
+            theme.custom_colors.is_some()
+        );
+        ACTIVE_THEME.with(|slot| {
+            *slot.borrow_mut() = theme.clone();
+        });
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            debug!("plot-web: applying theme to {} surfaces", map.len());
+            for entry in map.values_mut() {
+                entry.renderer.set_theme_config(theme.clone());
+                if let Some(handle) = entry.bound_handle {
+                    if let Some(figure) = clone_figure(FigureHandle::from(handle)) {
+                        entry
+                            .renderer
+                            .render_figure(figure)
+                            .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
+                    }
+                }
+            }
             Ok(())
         })
     }
@@ -229,6 +303,42 @@ pub(crate) mod wasm {
         })
     }
 
+    pub(super) fn get_surface_camera_state_impl(
+        surface_id: u32,
+    ) -> BuiltinResult<PlotSurfaceCameraState> {
+        SURFACES.with(|slot| {
+            let map = slot.borrow();
+            let entry = map.get(&surface_id).ok_or_else(|| {
+                web_error(format!(
+                    "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
+                ))
+            })?;
+            Ok(convert_camera_state(entry.renderer.camera_state()))
+        })
+    }
+
+    pub(super) fn set_surface_camera_state_impl(
+        surface_id: u32,
+        state: PlotSurfaceCameraState,
+    ) -> BuiltinResult<()> {
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            let entry = map.get_mut(&surface_id).ok_or_else(|| {
+                web_error(format!(
+                    "Plotting surface {surface_id} not registered. Call createPlotSurface() first."
+                ))
+            })?;
+            entry
+                .renderer
+                .set_camera_state(&convert_camera_state_back(state));
+            entry
+                .renderer
+                .render_current_scene()
+                .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
+            Ok(())
+        })
+    }
+
     pub fn render_current_scene(handle: u32) -> BuiltinResult<()> {
         debug!("plot-web: render_current_scene(handle={handle})");
         // If nothing is currently bound to this handle, try to claim the lowest-id unbound
@@ -341,6 +451,25 @@ pub(crate) mod wasm {
     pub(super) fn reset_surface_camera_impl(_surface_id: u32) -> BuiltinResult<()> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
+
+    pub(super) fn get_surface_camera_state_impl(
+        _surface_id: u32,
+    ) -> BuiltinResult<PlotSurfaceCameraState> {
+        Err(web_error(ERR_PLOTTING_UNAVAILABLE))
+    }
+
+    pub(super) fn set_surface_camera_state_impl(
+        _surface_id: u32,
+        _state: PlotSurfaceCameraState,
+    ) -> BuiltinResult<()> {
+        Err(web_error(ERR_PLOTTING_UNAVAILABLE))
+    }
+
+    pub(super) fn set_theme_config_impl(
+        _theme: runmat_plot::styling::PlotThemeConfig,
+    ) -> BuiltinResult<()> {
+        Err(web_error(ERR_PLOTTING_UNAVAILABLE))
+    }
 }
 
 pub use wasm::render_current_scene;
@@ -389,6 +518,99 @@ pub fn fit_surface_extents(surface_id: u32) -> BuiltinResult<()> {
 
 pub fn reset_surface_camera(surface_id: u32) -> BuiltinResult<()> {
     wasm::reset_surface_camera_impl(surface_id)
+}
+
+pub fn get_surface_camera_state(surface_id: u32) -> BuiltinResult<PlotSurfaceCameraState> {
+    wasm::get_surface_camera_state_impl(surface_id)
+}
+
+pub fn set_surface_camera_state(
+    surface_id: u32,
+    state: PlotSurfaceCameraState,
+) -> BuiltinResult<()> {
+    wasm::set_surface_camera_state_impl(surface_id, state)
+}
+
+pub fn set_plot_theme_config(theme: runmat_plot::styling::PlotThemeConfig) -> BuiltinResult<()> {
+    wasm::set_theme_config_impl(theme)
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+fn convert_camera_state(state: runmat_plot::web::PlotSurfaceCameraState) -> PlotSurfaceCameraState {
+    PlotSurfaceCameraState {
+        active_axes: state.active_axes,
+        axes: state
+            .axes
+            .into_iter()
+            .map(|camera| PlotCameraState {
+                position: camera.position,
+                target: camera.target,
+                up: camera.up,
+                zoom: camera.zoom,
+                aspect_ratio: camera.aspect_ratio,
+                projection: match camera.projection {
+                    runmat_plot::web::PlotCameraProjection::Perspective { fov, near, far } => {
+                        PlotCameraProjection::Perspective { fov, near, far }
+                    }
+                    runmat_plot::web::PlotCameraProjection::Orthographic {
+                        left,
+                        right,
+                        bottom,
+                        top,
+                        near,
+                        far,
+                    } => PlotCameraProjection::Orthographic {
+                        left,
+                        right,
+                        bottom,
+                        top,
+                        near,
+                        far,
+                    },
+                },
+            })
+            .collect(),
+    }
+}
+
+#[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
+fn convert_camera_state_back(
+    state: PlotSurfaceCameraState,
+) -> runmat_plot::web::PlotSurfaceCameraState {
+    runmat_plot::web::PlotSurfaceCameraState {
+        active_axes: state.active_axes,
+        axes: state
+            .axes
+            .into_iter()
+            .map(|camera| runmat_plot::web::PlotCameraState {
+                position: camera.position,
+                target: camera.target,
+                up: camera.up,
+                zoom: camera.zoom,
+                aspect_ratio: camera.aspect_ratio,
+                projection: match camera.projection {
+                    PlotCameraProjection::Perspective { fov, near, far } => {
+                        runmat_plot::web::PlotCameraProjection::Perspective { fov, near, far }
+                    }
+                    PlotCameraProjection::Orthographic {
+                        left,
+                        right,
+                        bottom,
+                        top,
+                        near,
+                        far,
+                    } => runmat_plot::web::PlotCameraProjection::Orthographic {
+                        left,
+                        right,
+                        bottom,
+                        top,
+                        near,
+                        far,
+                    },
+                },
+            })
+            .collect(),
+    }
 }
 
 // No render_web_canvas wrapper; web presentation is surface-driven.

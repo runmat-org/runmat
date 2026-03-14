@@ -21,10 +21,13 @@ use runmat_core::{
     ExecutionStreamEntry, ExecutionStreamKind, FusionPlanDecision, FusionPlanEdge, FusionPlanNode,
     FusionPlanShader, FusionPlanSnapshot, InputRequest, InputRequestKind, InputResponse,
     MaterializedVariable, RunError, RunMatSession, StdinEvent, StdinEventKind, WorkspaceEntry,
-    WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview,
+    WorkspaceExportMode, WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview,
     WorkspaceSliceOptions, WorkspaceSnapshot,
 };
-use runmat_core::{TelemetryPlatformInfo, TelemetryRunConfig, TelemetryRunFinish, TelemetrySink};
+use runmat_core::{
+    TelemetryFailureInfo, TelemetryHost, TelemetryPlatformInfo, TelemetryRunConfig,
+    TelemetryRunFinish, TelemetrySink,
+};
 use runmat_logging::{
     init_logging, set_runtime_log_hook, LoggingGuard, LoggingOptions, RuntimeLogRecord,
 };
@@ -47,6 +50,12 @@ use runmat_plot::{
     event::{
         FigureEvent as PlotFigureEvent, FigureEventKind as PlotFigureEventKind, FigureSnapshot,
     },
+    styling::{
+        config::{
+            CustomColorConfig, GridConfig, InteractionConfig, LayoutConfig, TypographyConfig,
+        },
+        PlotThemeConfig, ThemeVariant,
+    },
     web::{WebCanvas, WebRenderer, WebRendererOptions},
     SharedWgpuContext,
 };
@@ -58,6 +67,7 @@ use runmat_runtime::builtins::plotting::{
     current_figure_handle as runtime_current_figure_handle,
     detach_surface as runtime_detach_surface, figure_handles as runtime_figure_handles,
     fit_surface_extents as runtime_fit_surface_extents,
+    get_surface_camera_state as runtime_get_surface_camera_state,
     handle_plot_surface_event as runtime_handle_plot_surface_event,
     install_figure_observer as runtime_install_figure_observer,
     install_surface as runtime_install_surface, new_figure_handle as runtime_new_figure_handle,
@@ -68,8 +78,10 @@ use runmat_runtime::builtins::plotting::{
     reset_hold_state_for_run as runtime_reset_hold_state_for_run,
     reset_surface_camera as runtime_reset_surface_camera, resize_surface as runtime_resize_surface,
     select_figure as runtime_select_figure, set_hold as runtime_set_hold,
+    set_plot_theme_config as runtime_set_plot_theme_config,
+    set_surface_camera_state as runtime_set_surface_camera_state,
     web_renderer_ready as runtime_plot_renderer_ready, FigureAxesState, FigureError,
-    FigureEventKind, FigureEventView, FigureHandle, HoldMode,
+    FigureEventKind, FigureEventView, FigureHandle, HoldMode, PlotSurfaceCameraState,
 };
 #[cfg(target_arch = "wasm32")]
 use runmat_runtime::builtins::{
@@ -79,6 +91,10 @@ use runmat_runtime::builtins::{
 use runmat_runtime::warning_store::RuntimeWarning;
 #[cfg(target_arch = "wasm32")]
 use runmat_runtime::RuntimeError;
+#[cfg(target_arch = "wasm32")]
+use runmat_runtime::{
+    runtime_plot_export_figure_scene, runtime_plot_import_figure_scene, ReplayErrorKind,
+};
 use serde::{Deserialize, Serialize};
 
 const MAX_DATA_PREVIEW: usize = 4096;
@@ -126,12 +142,12 @@ fn register_make_handle_fallback() {
         Box::pin(async move {
             if args.len() != 1 {
                 return Err(build_runtime_error("make_handle: expected 1 input")
-                    .with_identifier("MATLAB:make_handle:InvalidInput")
+                    .with_identifier("RunMat:make_handle:InvalidInput")
                     .build());
             }
             let name: String = std::convert::TryInto::try_into(&args[0]).map_err(|err| {
                 build_runtime_error(format!("make_handle: {err}"))
-                    .with_identifier("MATLAB:make_handle:InvalidInput")
+                    .with_identifier("RunMat:make_handle:InvalidInput")
                     .build()
             })?;
             Ok(Value::FunctionHandle(name))
@@ -164,17 +180,17 @@ fn register_make_anon_fallback() {
         Box::pin(async move {
             if args.len() != 2 {
                 return Err(build_runtime_error("make_anon: expected 2 inputs")
-                    .with_identifier("MATLAB:make_anon:InvalidInput")
+                    .with_identifier("RunMat:make_anon:InvalidInput")
                     .build());
             }
             let params: String = std::convert::TryInto::try_into(&args[0]).map_err(|err| {
                 build_runtime_error(format!("make_anon: {err}"))
-                    .with_identifier("MATLAB:make_anon:InvalidInput")
+                    .with_identifier("RunMat:make_anon:InvalidInput")
                     .build()
             })?;
             let body: String = std::convert::TryInto::try_into(&args[1]).map_err(|err| {
                 build_runtime_error(format!("make_anon: {err}"))
-                    .with_identifier("MATLAB:make_anon:InvalidInput")
+                    .with_identifier("RunMat:make_anon:InvalidInput")
                     .build()
             })?;
             Ok(Value::String(format!("@anon({params}) {body}")))
@@ -366,6 +382,13 @@ pub struct RunMatWasm {
 
 #[wasm_bindgen]
 impl RunMatWasm {
+    fn ensure_not_disposed(&self) -> Result<(), JsValue> {
+        if self.disposed.get() {
+            return Err(js_error("RunMat session has been disposed"));
+        }
+        Ok(())
+    }
+
     #[wasm_bindgen(js_name = execute)]
     pub async fn execute(&self, source: String) -> Result<JsValue, JsValue> {
         init_logging_once();
@@ -489,11 +512,28 @@ impl RunMatWasm {
                         .or_else(|| Some("runtime_error".to_string())),
                 ),
             };
+            let failure = payload.error.as_ref().map(|err| TelemetryFailureInfo {
+                stage: match &err.kind {
+                    RunMatErrorKind::Syntax => "parser",
+                    RunMatErrorKind::Semantic => "hir",
+                    RunMatErrorKind::Compile => "compile",
+                    RunMatErrorKind::Runtime => "runtime",
+                }
+                .to_string(),
+                code: err
+                    .identifier
+                    .clone()
+                    .unwrap_or_else(|| "RunMat:RuntimeError".to_string()),
+                has_span: err.span.is_some(),
+                component: None,
+            });
             run.finish(TelemetryRunFinish {
                 duration: Some(duration),
                 success,
                 jit_used: payload.used_jit,
                 error,
+                failure,
+                host: Some(TelemetryHost::Wasm),
                 counters: None,
                 provider: None,
             });
@@ -678,6 +718,79 @@ impl RunMatWasm {
         self.session.borrow_mut().clear_variables();
     }
 
+    #[wasm_bindgen(js_name = exportWorkspaceState)]
+    pub async fn export_workspace_state(
+        &self,
+        include_variables: Option<String>,
+    ) -> Result<Option<Vec<u8>>, JsValue> {
+        self.ensure_not_disposed()?;
+        let mode = parse_workspace_export_mode(include_variables.as_deref());
+
+        let mut session = {
+            let mut slot = self.session.borrow_mut();
+            std::mem::take(&mut *slot)
+        };
+        let result = session.export_workspace_state(mode).await;
+        *self.session.borrow_mut() = session;
+
+        result.map_err(|err| js_error(&format!("Failed to export workspace state: {err}")))
+    }
+
+    #[wasm_bindgen(js_name = importWorkspaceState)]
+    pub fn import_workspace_state(&self, state: &[u8]) -> Result<bool, JsValue> {
+        self.ensure_not_disposed()?;
+        let mut session = self.session.borrow_mut();
+        match session.import_workspace_state(state) {
+            Ok(()) => Ok(true),
+            Err(err) => {
+                warn!("RunMat wasm: workspace import rejected: {err}");
+                Ok(false)
+            }
+        }
+    }
+
+    #[wasm_bindgen(js_name = exportFigureScene)]
+    pub fn export_figure_scene(&self, handle: u32) -> Result<Option<Vec<u8>>, JsValue> {
+        self.ensure_not_disposed()?;
+        match runtime_plot_export_figure_scene(FigureHandle::from(handle)) {
+            Ok(Some(payload)) => Ok(Some(payload)),
+            Ok(None) => {
+                let current = runtime_current_figure_handle();
+                if current.as_u32() == handle {
+                    return Ok(None);
+                }
+                match runtime_plot_export_figure_scene(current) {
+                    Ok(payload) => Ok(payload),
+                    Err(err) => {
+                        warn!("RunMat wasm: fallback figure scene export rejected: {err}");
+                        Ok(None)
+                    }
+                }
+            }
+            Err(err) => {
+                warn!("RunMat wasm: figure scene export rejected: {err}");
+                Ok(None)
+            }
+        }
+    }
+
+    #[wasm_bindgen(js_name = importFigureScene)]
+    pub fn import_figure_scene(&self, scene: &[u8]) -> Result<Option<u32>, JsValue> {
+        self.ensure_not_disposed()?;
+        match runtime_plot_import_figure_scene(scene) {
+            Ok(Some(handle)) => Ok(Some(handle.as_u32())),
+            Ok(None) => Ok(None),
+            Err(err) => {
+                if err.identifier() == Some(ReplayErrorKind::DecodeFailed.identifier()) {
+                    warn!("RunMat wasm: figure scene decode failed: {err}");
+                } else {
+                    warn!("RunMat wasm: figure scene import rejected: {err}");
+                }
+                Ok(None)
+            }
+        }
+    }
+
     #[wasm_bindgen(js_name = telemetryConsent)]
     pub fn telemetry_consent(&self) -> bool {
         self.session.borrow().telemetry_consent()
@@ -774,7 +887,7 @@ pub async fn register_figure_canvas(handle: u32, canvas: JsValue) -> Result<(), 
                 Some(err),
             )
         })?;
-    runtime_bind_surface_to_figure(surface_id, handle).map_err(|err| js_error(err.message()))?;
+    runtime_bind_surface_to_figure(surface_id, handle).map_err(|err| runtime_error_to_js(&err))?;
     LEGACY_FIGURE_SURFACES.with(|slot| {
         slot.borrow_mut().insert(handle, surface_id);
     });
@@ -810,13 +923,13 @@ pub fn resize_figure_canvas(handle: u32, width: u32, height: u32) -> Result<(), 
     };
     // Legacy API has no access to devicePixelRatio; assume 1.0.
     runtime_resize_surface(surface_id, width.max(1), height.max(1), 1.0)
-        .map_err(|err| js_error(err.message()))
+        .map_err(|err| runtime_error_to_js(&err))
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = renderCurrentFigureScene)]
 pub fn render_current_figure_scene(handle: u32) -> Result<(), JsValue> {
-    runtime_render_current_scene(handle).map_err(|err| js_error(err.message()))
+    runtime_render_current_scene(handle).map_err(|err| runtime_error_to_js(&err))
 }
 
 // New surface-id based API.
@@ -844,25 +957,25 @@ pub fn resize_plot_surface(
     pixels_per_point: f32,
 ) -> Result<(), JsValue> {
     runtime_resize_surface(surface_id, width.max(1), height.max(1), pixels_per_point)
-        .map_err(|err| js_error(err.message()))
+        .map_err(|err| runtime_error_to_js(&err))
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = bindSurfaceToFigure)]
 pub fn bind_surface_to_figure(surface_id: u32, handle: u32) -> Result<(), JsValue> {
-    runtime_bind_surface_to_figure(surface_id, handle).map_err(|err| js_error(err.message()))
+    runtime_bind_surface_to_figure(surface_id, handle).map_err(|err| runtime_error_to_js(&err))
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = presentSurface)]
 pub fn present_surface(surface_id: u32) -> Result<(), JsValue> {
-    runtime_present_surface(surface_id).map_err(|err| js_error(err.message()))
+    runtime_present_surface(surface_id).map_err(|err| runtime_error_to_js(&err))
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = presentFigureOnSurface)]
 pub fn present_figure_on_surface(surface_id: u32, handle: u32) -> Result<(), JsValue> {
-    runtime_present_figure_on_surface(surface_id, handle).map_err(|err| js_error(err.message()))
+    runtime_present_figure_on_surface(surface_id, handle).map_err(|err| runtime_error_to_js(&err))
 }
 
 #[derive(Debug, Deserialize)]
@@ -970,19 +1083,90 @@ pub fn handle_plot_surface_event(surface_id: u32, event: JsValue) -> Result<(), 
         }
     };
 
-    runtime_handle_plot_surface_event(surface_id, event).map_err(|err| js_error(err.message()))
+    runtime_handle_plot_surface_event(surface_id, event).map_err(|err| runtime_error_to_js(&err))
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = "fitPlotSurfaceExtents")]
 pub fn fit_plot_surface_extents(surface_id: u32) -> Result<(), JsValue> {
-    runtime_fit_surface_extents(surface_id).map_err(|err| js_error(err.message()))
+    runtime_fit_surface_extents(surface_id).map_err(|err| runtime_error_to_js(&err))
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = "resetPlotSurfaceCamera")]
 pub fn reset_plot_surface_camera(surface_id: u32) -> Result<(), JsValue> {
-    runtime_reset_surface_camera(surface_id).map_err(|err| js_error(err.message()))
+    runtime_reset_surface_camera(surface_id).map_err(|err| runtime_error_to_js(&err))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = "getPlotSurfaceCameraState")]
+pub fn get_plot_surface_camera_state(surface_id: u32) -> Result<JsValue, JsValue> {
+    let state =
+        runtime_get_surface_camera_state(surface_id).map_err(|err| runtime_error_to_js(&err))?;
+    serde_wasm_bindgen::to_value(&state).map_err(|err| js_error(&err.to_string()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = "setPlotSurfaceCameraState")]
+pub fn set_plot_surface_camera_state(surface_id: u32, state: JsValue) -> Result<(), JsValue> {
+    let parsed: PlotSurfaceCameraState =
+        serde_wasm_bindgen::from_value(state).map_err(|err| js_error(&err.to_string()))?;
+    runtime_set_surface_camera_state(surface_id, parsed).map_err(|err| runtime_error_to_js(&err))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[derive(Debug, Deserialize)]
+struct PlotThemeConfigPatch {
+    variant: Option<ThemeVariant>,
+    custom_colors: Option<CustomColorConfig>,
+    typography: Option<TypographyConfig>,
+    layout: Option<LayoutConfig>,
+    grid: Option<GridConfig>,
+    interaction: Option<InteractionConfig>,
+}
+
+#[cfg(target_arch = "wasm32")]
+fn normalize_plot_theme_config(value: JsValue) -> Result<PlotThemeConfig, JsValue> {
+    if let Ok(full) = serde_wasm_bindgen::from_value::<PlotThemeConfig>(value.clone()) {
+        return Ok(full);
+    }
+    let patch: PlotThemeConfigPatch = serde_wasm_bindgen::from_value(value)
+        .map_err(|err| js_error(&format!("Invalid plot theme config payload: {err}")))?;
+    let mut normalized = PlotThemeConfig::default();
+    if let Some(variant) = patch.variant {
+        normalized.variant = variant;
+    }
+    if let Some(custom_colors) = patch.custom_colors {
+        normalized.custom_colors = Some(custom_colors);
+    }
+    if let Some(typography) = patch.typography {
+        normalized.typography = typography;
+    }
+    if let Some(layout) = patch.layout {
+        normalized.layout = layout;
+    }
+    if let Some(grid) = patch.grid {
+        normalized.grid = grid;
+    }
+    if let Some(interaction) = patch.interaction {
+        normalized.interaction = interaction;
+    }
+    Ok(normalized)
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = "setPlotThemeConfig")]
+pub fn set_plot_theme_config(theme: JsValue) -> Result<(), JsValue> {
+    let normalized = normalize_plot_theme_config(theme)?;
+    log::info!(
+        "plot-web: setPlotThemeConfig variant={:?} custom_colors={}",
+        normalized.variant,
+        normalized.custom_colors.is_some()
+    );
+    normalized
+        .validate()
+        .map_err(|err| js_error(&format!("Invalid plot theme config: {err}")))?;
+    runtime_set_plot_theme_config(normalized).map_err(|err| runtime_error_to_js(&err))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1358,7 +1542,10 @@ fn extract_line_value(value: &JsValue) -> Option<String> {
 #[cfg(target_arch = "wasm32")]
 async fn install_surface_renderer(surface_id: u32, canvas: WebCanvas) -> Result<(), JsValue> {
     init_logging_once();
-    let options = WebRendererOptions::default();
+    let options = WebRendererOptions {
+        enable_overlay: true,
+        ..WebRendererOptions::default()
+    };
     let canvas_kind = match &canvas {
         WebCanvas::Html(_) => "html",
         WebCanvas::Offscreen(_) => "offscreen",
@@ -1606,10 +1793,18 @@ fn parse_telemetry_run_kind(value: Option<&str>) -> TelemetryRunKind {
 fn parse_language_compat_from_str(value: &str) -> Option<CompatMode> {
     if value.eq_ignore_ascii_case("strict") {
         Some(CompatMode::Strict)
-    } else if value.eq_ignore_ascii_case("matlab") {
+    } else if value.eq_ignore_ascii_case("matlab") || value.eq_ignore_ascii_case("runmat") {
         Some(CompatMode::Matlab)
     } else {
         None
+    }
+}
+
+fn parse_workspace_export_mode(value: Option<&str>) -> WorkspaceExportMode {
+    match value.unwrap_or("auto").trim().to_ascii_lowercase().as_str() {
+        "off" => WorkspaceExportMode::Off,
+        "force" => WorkspaceExportMode::Force,
+        _ => WorkspaceExportMode::Auto,
     }
 }
 
@@ -2169,6 +2364,14 @@ fn run_error_to_js(err: &RunError, source: &str) -> JsValue {
 
 fn js_error(message: &str) -> JsValue {
     JsValue::from_str(message)
+}
+
+fn runtime_error_to_js(err: &runmat_runtime::RuntimeError) -> JsValue {
+    if let Some(identifier) = err.identifier() {
+        js_error(&format!("{identifier}: {}", err.message()))
+    } else {
+        js_error(err.message())
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -2754,7 +2957,7 @@ fn parse_materialize_target(value: JsValue) -> Result<WorkspaceMaterializeTarget
         ));
     }
     if let Some(token) = value.as_string() {
-        return parse_materialize_token_str(&token);
+        return parse_materialize_selector_str(&token);
     }
     let payload: MaterializeSelectorPayload = serde_wasm_bindgen::from_value(value.clone())
         .map_err(|err| js_error(&format!("materializeVariable selector: {err}")))?;
@@ -2779,6 +2982,19 @@ fn parse_materialize_token_str(token: &str) -> Result<WorkspaceMaterializeTarget
     let parsed = Uuid::parse_str(token.trim())
         .map_err(|_| js_error("materializeVariable previewToken must be a UUID string"))?;
     Ok(WorkspaceMaterializeTarget::Token(parsed))
+}
+
+fn parse_materialize_selector_str(selector: &str) -> Result<WorkspaceMaterializeTarget, JsValue> {
+    let trimmed = selector.trim();
+    if trimmed.is_empty() {
+        return Err(js_error(
+            "materializeVariable selector string must not be empty",
+        ));
+    }
+    if let Ok(parsed) = Uuid::parse_str(trimmed) {
+        return Ok(WorkspaceMaterializeTarget::Token(parsed));
+    }
+    Ok(WorkspaceMaterializeTarget::Name(trimmed.to_string()))
 }
 
 fn parse_materialize_options(value: JsValue) -> Result<WorkspaceMaterializeOptions, JsValue> {
@@ -3081,5 +3297,37 @@ fn provider_precision_label(precision: ProviderPrecision) -> Option<&'static str
     match precision {
         ProviderPrecision::F32 => Some("single"),
         ProviderPrecision::F64 => Some("double"),
+    }
+}
+
+#[cfg(all(test, target_arch = "wasm32"))]
+mod replay_smoke_tests {
+    use wasm_bindgen::JsValue;
+    use wasm_bindgen_test::wasm_bindgen_test;
+
+    use super::init_runmat;
+
+    wasm_bindgen_test::wasm_bindgen_test_configure!(run_in_browser);
+
+    #[wasm_bindgen_test(async)]
+    async fn workspace_replay_import_rejects_invalid_payload() {
+        let runtime = init_runmat(JsValue::NULL)
+            .await
+            .expect("initialize wasm runtime");
+        let imported = runtime
+            .import_workspace_state(&[1, 2, 3, 4])
+            .expect("workspace import result");
+        assert!(!imported);
+    }
+
+    #[wasm_bindgen_test(async)]
+    async fn figure_scene_import_rejects_invalid_payload() {
+        let runtime = init_runmat(JsValue::NULL)
+            .await
+            .expect("initialize wasm runtime");
+        let handle = runtime
+            .import_figure_scene(br#"{"schemaVersion":99,"kind":"figure-scene"}"#)
+            .expect("figure scene import result");
+        assert!(handle.is_none());
     }
 }

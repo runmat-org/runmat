@@ -49,15 +49,13 @@ jsonLd:
         "@type": "Person"
         name: "Nabeel Allana"
         url: "https://x.com/nabeelallana"
-        sameAs: ["https://dystr.com/about"]
+        sameAs: ["https://runmat.com/about"]
       publisher:
         "@type": "Organization"
-        name: "Dystr Inc."
+        name: "RunMat by Dystr"
         logo:
           "@type": "ImageObject"
           url: "/runmat-logo.svg"
-          width: 600
-          height: 60
       about:
         - "@type": "SoftwareApplication"
           name: "RunMat"
@@ -333,7 +331,7 @@ This isn't a criticism of PyTorch—it's an excellent framework that makes GPU p
 
 ### Cross-ecosystem comparison at a glance
 
-A side-by-side of RunMat versus MATLAB+PCT, PyTorch, and Julia+CUDA.jl on six dimensions that matter for numerical computing: code surface, placement (CPU/GPU), fusion, residency, transfers, and learning curve. Scope: dense arrays and scripting—not full ML training stacks. For a guide to MATLAB's gpuArray and how RunMat fits in, see [MATLAB on NVIDIA GPUs](/blog/matlab-nvidia-gpu).
+A side-by-side of RunMat versus MATLAB+PCT, PyTorch, and Julia+CUDA.jl on six dimensions that matter for numerical computing: code surface, placement (CPU/GPU), fusion, residency, transfers, and learning curve. Scope: dense arrays and scripting—not full ML training stacks. For a guide to MATLAB's gpuArray and how RunMat fits in, see [How to Use GPUs in MATLAB](/blog/how-to-use-gpu-in-matlab).
 
 | Dimension                                                | RunMat Accelerate                                              | MATLAB \+ Parallel Computing Toolbox (gpuArray) | PyTorch (GPU)                                                | Julia \+ CUDA.jl                                                  |
 |----------------------------------------------------------|----------------------------------------------------------------|-------------------------------------------------|--------------------------------------------------------------|-------------------------------------------------------------------|

@@ -54,7 +54,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "isinf";
-const IDENTIFIER_INVALID_INPUT: &str = "MATLAB:isinf:InvalidInput";
+const IDENTIFIER_INVALID_INPUT: &str = "RunMat:isinf:InvalidInput";
 const IDENTIFIER_INTERNAL: &str = "RunMat:isinf:InternalError";
 
 #[runtime_builtin(

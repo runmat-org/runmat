@@ -99,7 +99,6 @@ impl From<CompileError> for RuntimeError {
 }
 
 pub async fn execute(program: &HirProgram) -> Result<Vec<Value>, RuntimeError> {
-    let bc = compile(program, &HashMap::new())
-        .map_err(|err| build_runtime_error(err.message).build())?;
+    let bc = compile(program, &HashMap::new()).map_err(RuntimeError::from)?;
     interpret(&bc).await
 }

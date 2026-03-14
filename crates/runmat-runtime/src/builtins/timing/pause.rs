@@ -63,8 +63,8 @@ impl Default for PauseState {
 }
 
 const BUILTIN_NAME: &str = "pause";
-const ERR_INVALID_ARG: &str = "MATLAB:pause:InvalidInputArgument";
-const ERR_TOO_MANY_INPUTS: &str = "MATLAB:pause:TooManyInputs";
+const ERR_INVALID_ARG: &str = "RunMat:pause:InvalidInputArgument";
+const ERR_TOO_MANY_INPUTS: &str = "RunMat:pause:TooManyInputs";
 const MSG_INVALID_ARG: &str = "pause: invalid input argument";
 const MSG_TOO_MANY_INPUTS: &str = "pause: too many input arguments";
 const MSG_STATE_LOCK: &str = "pause: failed to acquire pause state";

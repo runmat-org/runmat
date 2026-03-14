@@ -21,12 +21,12 @@ pub fn matrix_get_element(tensor: &Tensor, row: usize, col: usize) -> Result<f64
     if row == 0 || col == 0 {
         return Err(indexing_error_with_identifier(
             "MATLAB uses 1-based indexing",
-            "MATLAB:IndexOutOfBounds",
+            "RunMat:IndexOutOfBounds",
         ));
     }
     tensor
         .get2(row - 1, col - 1)
-        .map_err(|err| indexing_error_with_identifier(err, "MATLAB:IndexOutOfBounds"))
+        .map_err(|err| indexing_error_with_identifier(err, "RunMat:IndexOutOfBounds"))
 }
 
 /// Set a single element in a tensor (1-based indexing like language)
@@ -39,12 +39,12 @@ pub fn matrix_set_element(
     if row == 0 || col == 0 {
         return Err(indexing_error_with_identifier(
             "The MATLAB language uses 1-based indexing",
-            "MATLAB:IndexOutOfBounds",
+            "RunMat:IndexOutOfBounds",
         ));
     }
     tensor
         .set2(row - 1, col - 1, value)
-        .map_err(|err| indexing_error_with_identifier(err, "MATLAB:IndexOutOfBounds"))
+        .map_err(|err| indexing_error_with_identifier(err, "RunMat:IndexOutOfBounds"))
 }
 
 /// Get a row from a tensor
@@ -57,7 +57,7 @@ pub fn matrix_get_row(tensor: &Tensor, row: usize) -> Result<Tensor, RuntimeErro
                 tensor.rows(),
                 tensor.cols()
             ),
-            "MATLAB:IndexOutOfBounds",
+            "RunMat:IndexOutOfBounds",
         ));
     }
 
@@ -79,7 +79,7 @@ pub fn matrix_get_col(tensor: &Tensor, col: usize) -> Result<Tensor, RuntimeErro
                 tensor.rows(),
                 tensor.cols()
             ),
-            "MATLAB:IndexOutOfBounds",
+            "RunMat:IndexOutOfBounds",
         ));
     }
 
@@ -110,7 +110,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 if idx < 1 || idx > total {
                     return Err(indexing_error_with_identifier(
                         format!("Index {} out of bounds (1 to {})", idx, total),
-                        "MATLAB:IndexOutOfBounds",
+                        "RunMat:IndexOutOfBounds",
                     ));
                 }
                 let lin0 = idx - 1; // 0-based
@@ -124,7 +124,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 if row < 1 || row > rows || col < 1 || col > cols {
                     return Err(indexing_error_with_identifier(
                         format!("Index ({row}, {col}) out of bounds for {rows}x{cols} tensor"),
-                        "MATLAB:IndexOutOfBounds",
+                        "RunMat:IndexOutOfBounds",
                     ));
                 }
                 let lin0 = (row - 1) + (col - 1) * rows;
@@ -133,7 +133,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
             }
             Err(indexing_error_with_identifier(
                 format!("Cannot index value of type {base:?}"),
-                "MATLAB:SliceNonTensor",
+                "RunMat:SliceNonTensor",
             ))
         }
         Value::Tensor(tensor) => {
@@ -147,7 +147,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 if idx < 1 || idx > tensor.data.len() {
                     return Err(indexing_error_with_identifier(
                         format!("Index {} out of bounds (1 to {})", idx, tensor.data.len()),
-                        "MATLAB:IndexOutOfBounds",
+                        "RunMat:IndexOutOfBounds",
                     ));
                 }
                 Ok(Value::Num(tensor.data[idx - 1])) // Convert to 0-based
@@ -162,13 +162,13 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 if row < 1 || row > rows {
                     return Err(indexing_error_with_identifier(
                         format!("Row index {} out of bounds (1 to {})", row, rows),
-                        "MATLAB:IndexOutOfBounds",
+                        "RunMat:IndexOutOfBounds",
                     ));
                 }
                 if col < 1 || col > cols {
                     return Err(indexing_error_with_identifier(
                         format!("Column index {} out of bounds (1 to {})", col, cols),
-                        "MATLAB:IndexOutOfBounds",
+                        "RunMat:IndexOutOfBounds",
                     ));
                 }
 
@@ -191,7 +191,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 if idx < 1 || idx > total {
                     return Err(indexing_error_with_identifier(
                         format!("Index {idx} out of bounds (1 to {total})"),
-                        "MATLAB:IndexOutOfBounds",
+                        "RunMat:IndexOutOfBounds",
                     ));
                 }
                 Ok(Value::String(sa.data[idx - 1].clone()))
@@ -204,7 +204,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 if row < 1 || row > rows || col < 1 || col > cols {
                     return Err(indexing_error_with_identifier(
                         "StringArray subscript out of bounds",
-                        "MATLAB:IndexOutOfBounds",
+                        "RunMat:IndexOutOfBounds",
                     ));
                 }
                 let idx = (row - 1) + (col - 1) * rows;
@@ -223,7 +223,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
             } else {
                 Err(indexing_error_with_identifier(
                     "Slicing only supported on tensors",
-                    "MATLAB:SliceNonTensor",
+                    "RunMat:SliceNonTensor",
                 ))
             }
         }
@@ -236,7 +236,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 if idx < 1 || idx > ca.data.len() {
                     return Err(indexing_error_with_identifier(
                         format!("Cell index {} out of bounds (1 to {})", idx, ca.data.len()),
-                        "MATLAB:CellIndexOutOfBounds",
+                        "RunMat:CellIndexOutOfBounds",
                     ));
                 }
                 Ok((*ca.data[idx - 1]).clone())
@@ -246,7 +246,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 if row < 1 || row > ca.rows || col < 1 || col > ca.cols {
                     return Err(indexing_error_with_identifier(
                         "Cell subscript out of bounds",
-                        "MATLAB:CellSubscriptOutOfBounds",
+                        "RunMat:CellSubscriptOutOfBounds",
                     ));
                 }
                 Ok((*ca.data[(row - 1) * ca.cols + (col - 1)]).clone())
@@ -259,7 +259,7 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
         }
         _ => Err(indexing_error_with_identifier(
             format!("Cannot index value of type {base:?}"),
-            "MATLAB:SliceNonTensor",
+            "RunMat:SliceNonTensor",
         )),
     }
 }

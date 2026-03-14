@@ -20,12 +20,14 @@ export const metadata: Metadata = {
     default: "RunMat - Fast, Free, Modern MATLAB Runtime",
     template: "%s | RunMat"
   },
-  description: "RunMat is a pre-release MATLAB-style runtime for early adopters: the core runtime and GPU engine deliver our published speedups, while plotting presently covers simple 2D line/scatter views with richer charts still in progress.",
+  description: "RunMat is a high-performance, open-source runtime for MATLAB-syntax code with automatic GPU acceleration. Run .m files in the browser, on the desktop, or from the CLI. No license required.",
   keywords: [
-    "MATLAB", "Octave", "Rust", "JIT compiler", "scientific computing", 
+    "MATLAB", "Octave", "Rust", "JIT compiler", "scientific computing",
     "numerical computing", "open source", "high performance", "plotting",
-    "mathematics", "engineering", "simulation", "drop-in replacement", "dystr",
-    "jupyter kernel", "jupyter matlab", "blas", "lapack", "matlab jupyter"
+    "mathematics", "engineering", "simulation", "drop-in replacement",
+    "jupyter kernel", "jupyter matlab", "blas", "lapack", "matlab jupyter",
+    "GPU acceleration", "RunMat Cloud", "run matlab online", "free matlab runtime",
+    "matlab alternative"
   ],
   authors: [{ name: "RunMat", url: "https://runmat.com" }],
   creator: "RunMat",
@@ -40,13 +42,13 @@ export const metadata: Metadata = {
     locale: 'en_US',
     url: 'https://runmat.com',
     siteName: 'RunMat',
-    title: 'RunMat - High-Performance MATLAB/Octave Runtime',
-    description: 'Pre-release MATLAB-style runtime delivering benchmarked CPU/GPU speedups; plotting currently covers simple 2D line/scatter while 3D and richer chart types are still being built.',
+    title: 'RunMat: Free Runtime for MATLAB Code (Browser & Desktop)',
+    description: 'Execute .m files instantly with automatic GPU acceleration. An open-source runtime built on MATLAB semantics. No license or installation required.',
   },
   twitter: {
     card: 'summary_large_image',
-    title: 'RunMat - High-Performance MATLAB/Octave Runtime',
-    description: 'RunMat is in pre-release: fast MATLAB-style runtime with proven benchmarks today and plotting limited to simple 2D line/scatter until richer charts land.',
+    title: 'RunMat: Free Runtime for MATLAB Code (Browser & Desktop)',
+    description: 'Execute .m files instantly with automatic GPU acceleration. An open-source runtime built on MATLAB semantics. No license or installation required.',
   },
   robots: {
     index: true,
@@ -66,6 +68,8 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const isDevelopment = process.env.NODE_ENV === "development";
+
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -165,6 +169,14 @@ export default function RootLayout({
             })
           }}
         />
+        {isDevelopment ? (
+          <style>{`
+            nextjs-portal {
+              left: unset !important;
+              top: unset !important;
+            }
+          `}</style>
+        ) : null}
         <GoogleAnalytics />
       </head>
       <body className={`${inter.className} antialiased`} suppressHydrationWarning>

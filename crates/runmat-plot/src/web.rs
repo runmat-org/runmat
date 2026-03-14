@@ -11,7 +11,11 @@ use crate::context::SharedWgpuContext;
 use crate::core::plot_renderer::{PlotRenderConfig, PlotRenderer, RenderTarget};
 use crate::core::{camera::MouseButton as CameraMouseButton, CameraController, PlotEvent};
 use crate::plots::Figure;
+#[cfg(feature = "egui-overlay")]
+use crate::styling::ModernDarkTheme;
+use crate::styling::PlotThemeConfig;
 use log::{debug, warn};
+use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
 use web_sys::{HtmlCanvasElement, OffscreenCanvas};
@@ -71,6 +75,8 @@ pub struct WebRendererOptions {
     pub present_mode: wgpu::PresentMode,
     /// Requested MSAA sample count.
     pub msaa_samples: u32,
+    /// Whether to enable egui overlay composition when the feature is compiled.
+    pub enable_overlay: bool,
 }
 
 impl Default for WebRendererOptions {
@@ -81,6 +87,7 @@ impl Default for WebRendererOptions {
             power_preference: wgpu::PowerPreference::HighPerformance,
             present_mode: wgpu::PresentMode::AutoNoVsync,
             msaa_samples: 4,
+            enable_overlay: false,
         }
     }
 }
@@ -121,8 +128,51 @@ pub struct WebRenderer {
     pixels_per_point: f32,
     last_axes_viewports_px: Vec<(u32, u32, u32, u32)>,
     last_pointer_position: glam::Vec2,
+    background_policy: BackgroundPolicy,
     #[cfg(feature = "egui-overlay")]
     overlay: Option<WebOverlayState>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlotCameraState {
+    pub position: [f32; 3],
+    pub target: [f32; 3],
+    pub up: [f32; 3],
+    pub zoom: f32,
+    pub aspect_ratio: f32,
+    pub projection: PlotCameraProjection,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum PlotCameraProjection {
+    Perspective {
+        fov: f32,
+        near: f32,
+        far: f32,
+    },
+    Orthographic {
+        left: f32,
+        right: f32,
+        bottom: f32,
+        top: f32,
+        near: f32,
+        far: f32,
+    },
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlotSurfaceCameraState {
+    pub active_axes: usize,
+    pub axes: Vec<PlotCameraState>,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum BackgroundPolicy {
+    ThemeDriven,
+    Explicit(glam::Vec4),
 }
 
 #[cfg(feature = "egui-overlay")]
@@ -226,17 +276,17 @@ impl WebRenderer {
                 .map_err(|err| WebRendererError::PlotInit(err.to_string()))?;
 
         #[cfg(feature = "egui-overlay")]
-        let overlay = {
+        let overlay = if options.enable_overlay {
             let egui_ctx = egui::Context::default();
-            // Match native overlay: modern dark theme + transparent panels.
-            let theme = crate::styling::ModernDarkTheme::default();
-            theme.apply_to_egui(&egui_ctx);
+            ModernDarkTheme::default().apply_to_egui(&egui_ctx);
             let egui_renderer = egui_wgpu::Renderer::new(&device, surface_config.format, None, 1);
             Some(WebOverlayState {
                 egui_ctx,
                 egui_renderer,
                 plot_overlay: PlotOverlay::new(),
             })
+        } else {
+            None
         };
 
         let mut renderer = Self {
@@ -259,6 +309,7 @@ impl WebRenderer {
             pixels_per_point: 1.0,
             last_axes_viewports_px: vec![(0, 0, width.max(1), height.max(1))],
             last_pointer_position: glam::Vec2::ZERO,
+            background_policy: BackgroundPolicy::ThemeDriven,
             #[cfg(feature = "egui-overlay")]
             overlay,
         };
@@ -443,8 +494,21 @@ impl WebRenderer {
         }
     }
 
+    pub fn set_theme_config(&mut self, theme: PlotThemeConfig) {
+        self.plot_renderer.theme = theme.clone();
+        self.render_config.theme = theme;
+        self.apply_background_policy();
+    }
+
     /// Render a [`Figure`] directly into the canvas.
     pub fn render_figure(&mut self, figure: Figure) -> Result<(), WebRendererError> {
+        let bg = figure.background_color;
+        self.background_policy = if is_default_figure_bg(bg) {
+            BackgroundPolicy::ThemeDriven
+        } else {
+            BackgroundPolicy::Explicit(bg)
+        };
+        self.apply_background_policy();
         self.plot_renderer.set_figure(figure);
         self.render_current_scene()
     }
@@ -457,6 +521,34 @@ impl WebRenderer {
     /// Reset camera orientation/position (explicit user action).
     pub fn reset_camera_position(&mut self) {
         self.plot_renderer.reset_camera_position();
+    }
+
+    pub fn camera_state(&self) -> PlotSurfaceCameraState {
+        let mut axes: Vec<PlotCameraState> = Vec::new();
+        let mut idx = 0;
+        while let Some(camera) = self.plot_renderer.axes_camera(idx) {
+            axes.push(camera_to_state(camera));
+            idx += 1;
+        }
+        if axes.is_empty() {
+            axes.push(camera_to_state(self.plot_renderer.camera()));
+        }
+        let active_axes = self
+            .pick_axes_index(self.last_pointer_position)
+            .min(axes.len().saturating_sub(1));
+        PlotSurfaceCameraState { active_axes, axes }
+    }
+
+    pub fn set_camera_state(&mut self, state: &PlotSurfaceCameraState) {
+        if state.axes.is_empty() {
+            return;
+        }
+        for (idx, camera_state) in state.axes.iter().enumerate() {
+            if let Some(camera) = self.plot_renderer.axes_camera_mut(idx) {
+                apply_camera_state(camera, camera_state);
+            }
+        }
+        self.plot_renderer.note_camera_interaction();
     }
 
     /// Redraw the last figure that was provided.
@@ -528,14 +620,33 @@ impl WebRenderer {
                 }
             };
 
-            self.plot_renderer
-                .render(&mut encoder, render_target, &self.render_config)
-                .map_err(|err| WebRendererError::Render(err.to_string()))?;
+            if msaa_view_holder.is_some() {
+                // Keep explicit MSAA resolve target wiring in the non-overlay web fast path.
+                self.plot_renderer
+                    .render(&mut encoder, render_target, &self.render_config)
+                    .map_err(|err| WebRendererError::Render(err.to_string()))?;
+            } else {
+                self.plot_renderer
+                    .render_scene_to_target(&mut encoder, &frame_view, &self.render_config)
+                    .map_err(|err| WebRendererError::Render(err.to_string()))?;
+            }
         } else {
             #[cfg(feature = "egui-overlay")]
             {
                 // Clear background once per frame.
                 {
+                    debug!(
+                        target: "runmat_plot.theme",
+                        "plot-web clear pass bg=({:.3},{:.3},{:.3},{:.3}) policy={}",
+                        self.render_config.background_color.x,
+                        self.render_config.background_color.y,
+                        self.render_config.background_color.z,
+                        self.render_config.background_color.w,
+                        match self.background_policy {
+                            BackgroundPolicy::ThemeDriven => "theme",
+                            BackgroundPolicy::Explicit(_) => "explicit",
+                        }
+                    );
                     let _ = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("runmat-plot-web-clear"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -580,6 +691,10 @@ impl WebRenderer {
                 let scene_stats = self.plot_renderer.scene.statistics();
                 let mut plot_area_points: Option<egui::Rect> = None;
                 let full_output = overlay.egui_ctx.run(raw_input, |ctx| {
+                    overlay
+                        .plot_overlay
+                        .set_theme_config(self.plot_renderer.theme.clone());
+                    overlay.plot_overlay.apply_theme(ctx);
                     let overlay_config = OverlayConfig {
                         // Let the plot pipeline draw grid under data (more efficient).
                         show_grid: false,
@@ -718,16 +833,15 @@ impl WebRenderer {
                             &frame_view,
                             &viewports,
                             requested_samples,
+                            &self.render_config,
                         )
                         .map_err(|err| WebRendererError::Render(err.to_string()))?;
                 } else {
                     self.last_axes_viewports_px = vec![(vx, vy, vw.max(1), vh.max(1))];
-                    let cfg = PlotRenderConfig {
-                        width: vw.max(1),
-                        height: vh.max(1),
-                        msaa_samples: requested_samples,
-                        ..Default::default()
-                    };
+                    let mut cfg = self.render_config.clone();
+                    cfg.width = vw.max(1);
+                    cfg.height = vh.max(1);
+                    cfg.msaa_samples = requested_samples;
                     let cam = self.plot_renderer.camera().clone();
                     let _ = self
                         .plot_renderer
@@ -805,6 +919,30 @@ impl WebRenderer {
         let _ = self.ensure_msaa_texture();
     }
 
+    fn apply_background_policy(&mut self) {
+        self.render_config.background_color = match self.background_policy {
+            BackgroundPolicy::ThemeDriven => self
+                .plot_renderer
+                .theme
+                .build_theme()
+                .get_background_color(),
+            BackgroundPolicy::Explicit(color) => color,
+        };
+        debug!(
+            target: "runmat_plot.theme",
+            "plot-web apply_background policy={} bg=({:.3},{:.3},{:.3},{:.3}) variant={:?}",
+            match self.background_policy {
+                BackgroundPolicy::ThemeDriven => "theme",
+                BackgroundPolicy::Explicit(_) => "explicit",
+            },
+            self.render_config.background_color.x,
+            self.render_config.background_color.y,
+            self.render_config.background_color.z,
+            self.render_config.background_color.w,
+            self.plot_renderer.theme.variant
+        );
+    }
+
     fn ensure_msaa_texture(&mut self) -> Result<(), WebRendererError> {
         if self.render_config.msaa_samples <= 1 {
             self.msaa_texture = None;
@@ -836,6 +974,78 @@ impl WebRenderer {
         self.msaa_extent = (width, height);
         Ok(())
     }
+}
+
+fn camera_to_state(camera: &crate::core::Camera) -> PlotCameraState {
+    let projection = match camera.projection {
+        crate::core::camera::ProjectionType::Perspective { fov, near, far } => {
+            PlotCameraProjection::Perspective { fov, near, far }
+        }
+        crate::core::camera::ProjectionType::Orthographic {
+            left,
+            right,
+            bottom,
+            top,
+            near,
+            far,
+        } => PlotCameraProjection::Orthographic {
+            left,
+            right,
+            bottom,
+            top,
+            near,
+            far,
+        },
+    };
+    PlotCameraState {
+        position: [camera.position.x, camera.position.y, camera.position.z],
+        target: [camera.target.x, camera.target.y, camera.target.z],
+        up: [camera.up.x, camera.up.y, camera.up.z],
+        zoom: camera.zoom,
+        aspect_ratio: camera.aspect_ratio,
+        projection,
+    }
+}
+
+fn apply_camera_state(camera: &mut crate::core::Camera, state: &PlotCameraState) {
+    camera.position = glam::Vec3::new(state.position[0], state.position[1], state.position[2]);
+    camera.target = glam::Vec3::new(state.target[0], state.target[1], state.target[2]);
+    camera.up = glam::Vec3::new(state.up[0], state.up[1], state.up[2]);
+    camera.zoom = state.zoom;
+    camera.aspect_ratio = state.aspect_ratio.max(0.000_1);
+    camera.projection = match state.projection {
+        PlotCameraProjection::Perspective { fov, near, far } => {
+            crate::core::camera::ProjectionType::Perspective {
+                fov,
+                near: near.max(1.0e-6),
+                far: far.max(near + 1.0e-6),
+            }
+        }
+        PlotCameraProjection::Orthographic {
+            left,
+            right,
+            bottom,
+            top,
+            near,
+            far,
+        } => crate::core::camera::ProjectionType::Orthographic {
+            left,
+            right,
+            bottom,
+            top,
+            near,
+            far,
+        },
+    };
+    camera.mark_dirty();
+}
+
+fn is_default_figure_bg(bg: glam::Vec4) -> bool {
+    const EPS: f32 = 1e-3;
+    (bg.x - 1.0).abs() <= EPS
+        && (bg.y - 1.0).abs() <= EPS
+        && (bg.z - 1.0).abs() <= EPS
+        && (bg.w - 1.0).abs() <= EPS
 }
 
 fn map_mouse_button(button: crate::core::interaction::MouseButton) -> CameraMouseButton {

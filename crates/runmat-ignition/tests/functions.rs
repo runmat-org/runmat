@@ -51,7 +51,7 @@ fn not_enough_and_too_many_inputs_fixed_arity() {
     "#;
     let hir = lower(&parse(program).unwrap()).unwrap();
     let err = execute(&hir).err().unwrap();
-    assert_eq!(err.identifier(), Some("MATLAB:NotEnoughInputs"));
+    assert_eq!(err.identifier(), Some("RunMat:NotEnoughInputs"));
 
     // too many inputs
     let program2 = r#"
@@ -62,7 +62,7 @@ fn not_enough_and_too_many_inputs_fixed_arity() {
     "#;
     let hir2 = lower(&parse(program2).unwrap()).unwrap();
     let err2 = execute(&hir2).err().unwrap();
-    assert_eq!(err2.identifier(), Some("MATLAB:TooManyInputs"));
+    assert_eq!(err2.identifier(), Some("RunMat:TooManyInputs"));
 }
 
 #[test]
@@ -76,7 +76,7 @@ fn inputs_with_varargin_minimum_only() {
     "#;
     let hir_e = lower(&parse(program_err).unwrap()).unwrap();
     let err = execute(&hir_e).err().unwrap();
-    assert_eq!(err.identifier(), Some("MATLAB:NotEnoughInputs"));
+    assert_eq!(err.identifier(), Some("RunMat:NotEnoughInputs"));
 
     let program_ok = r#"
         function y = f(a,b,varargin)
@@ -104,7 +104,7 @@ fn too_many_outputs_and_varargout_mismatch() {
     "#;
     let hir_tmo = lower(&parse(program_tmo).unwrap()).unwrap();
     let err_tmo = execute(&hir_tmo).err().unwrap();
-    assert_eq!(err_tmo.identifier(), Some("MATLAB:TooManyOutputs"));
+    assert_eq!(err_tmo.identifier(), Some("RunMat:TooManyOutputs"));
 
     // Varargout requested more than provided
     let program_mis = r#"
@@ -115,7 +115,7 @@ fn too_many_outputs_and_varargout_mismatch() {
     "#;
     let hir_mis = lower(&parse(program_mis).unwrap()).unwrap();
     let err_mis = execute(&hir_mis).err().unwrap();
-    assert_eq!(err_mis.identifier(), Some("MATLAB:VarargoutMismatch"));
+    assert_eq!(err_mis.identifier(), Some("RunMat:VarargoutMismatch"));
 }
 #[allow(dead_code)]
 fn function_definition_and_calls() {
@@ -1156,7 +1156,7 @@ fn nested_try_catch_rethrow_unified_exception_ids() {
     // inner throws, caught and rethrown, outer catches; identifiers/messages preserved
     let program = r#"
         function y = inner()
-            error('MATLAB:inner:bad', 'inner fail')
+            error('RunMat:inner:bad', 'inner fail')
         end
         function z = middle()
             try
@@ -1179,14 +1179,14 @@ fn nested_try_catch_rethrow_unified_exception_ids() {
     // Look for the exception object with identifier/message
     let has_exc = vars.iter().any(|v| match v {
         runmat_builtins::Value::MException(me) => {
-            me.identifier == "MATLAB:inner:bad" && me.message == "inner fail"
+            me.identifier == "RunMat:inner:bad" && me.message == "inner fail"
         }
         _ => false,
     });
     // If out_exc wasn't preserved as MException, ensure at least identifier/message strings are present
     let has_id = vars
         .iter()
-        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s=="MATLAB:inner:bad"));
+        .any(|v| matches!(v, runmat_builtins::Value::String(s) if s=="RunMat:inner:bad"));
     let has_msg = vars
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::String(s) if s=="inner fail"));

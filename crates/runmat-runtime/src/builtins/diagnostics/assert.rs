@@ -12,11 +12,11 @@ use crate::builtins::common::spec::{
 use crate::builtins::diagnostics::type_resolvers::assert_type;
 use crate::{build_runtime_error, RuntimeError};
 
-const DEFAULT_IDENTIFIER: &str = "MATLAB:assertion:failed";
+const DEFAULT_IDENTIFIER: &str = "RunMat:assertion:failed";
 const DEFAULT_MESSAGE: &str = "Assertion failed.";
-const INVALID_CONDITION_IDENTIFIER: &str = "MATLAB:assertion:invalidCondition";
-const INVALID_INPUT_IDENTIFIER: &str = "MATLAB:assertion:invalidInput";
-const MIN_INPUT_IDENTIFIER: &str = "MATLAB:minrhs";
+const INVALID_CONDITION_IDENTIFIER: &str = "RunMat:assertion:invalidCondition";
+const INVALID_INPUT_IDENTIFIER: &str = "RunMat:assertion:invalidInput";
+const MIN_INPUT_IDENTIFIER: &str = "RunMat:minrhs";
 const MIN_INPUT_MESSAGE: &str = "Not enough input arguments.";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::diagnostics::assert")]
@@ -278,7 +278,7 @@ fn normalize_identifier(raw: &str) -> String {
     } else if trimmed.contains(':') {
         trimmed.to_string()
     } else {
-        format!("MATLAB:{trimmed}")
+        format!("RunMat:{trimmed}")
     }
 }
 
@@ -476,7 +476,7 @@ pub(crate) mod tests {
             ])
             .expect_err("assert should fail"),
         );
-        assert_eq!(err.identifier(), Some("MATLAB:customAssertionFailed"));
+        assert_eq!(err.identifier(), Some("RunMat:customAssertionFailed"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

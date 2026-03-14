@@ -68,7 +68,7 @@
     {
       "description": "Handle missing sources gracefully",
       "input": "[status, message, messageID] = movefile(\"missing.txt\", \"dest.txt\")",
-      "output": "status =\n     0\nmessage =\nSource \"missing.txt\" does not exist.\nmessageID =\nMATLAB:MOVEFILE:FileDoesNotExist"
+      "output": "status =\n     0\nmessage =\nSource \"missing.txt\" does not exist.\nmessageID =\nRunMat:movefile:FileDoesNotExist"
     },
     {
       "description": "Use gpuArray inputs for paths",

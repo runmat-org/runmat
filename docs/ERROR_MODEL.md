@@ -46,7 +46,7 @@ Example:
 
 ```rust
 let err = runtime_error("unsupported input type")
-    .with_identifier("MATLAB:array:invalidType")
+    .with_identifier("RunMat:array:invalidType")
     .with_builtin("flip")
     .with_call_stack(call_stack)
     .with_span(span)

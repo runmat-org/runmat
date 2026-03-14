@@ -48,6 +48,16 @@ const nextConfig: NextConfig = {
         destination: '/blog/rust-llm-training-distribution',
         permanent: true,
       },
+      {
+        source: '/blog/matlab-nvidia-gpu',
+        destination: '/blog/how-to-use-gpu-in-matlab',
+        permanent: true,
+      },
+      {
+        source: '/terms',
+        destination: '/docs/terms',
+        permanent: true,
+      },
     ];
   },
 };
