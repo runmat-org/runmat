@@ -1050,7 +1050,7 @@ async fn materialize_rhs_linear(rhs: &Value, count: usize) -> VmResult<Vec<f64>>
             } else if t.data.len() == 1 {
                 Ok(vec![t.data[0]; count])
             } else {
-                Err("shape mismatch for slice assign".to_string().into())
+                Err(mex("ShapeMismatch", "shape mismatch for slice assign"))
             }
         }
         Value::LogicalArray(la) => {
@@ -1065,10 +1065,13 @@ async fn materialize_rhs_linear(rhs: &Value, count: usize) -> VmResult<Vec<f64>>
                 let val = if la.data[0] != 0 { 1.0 } else { 0.0 };
                 Ok(vec![val; count])
             } else {
-                Err("shape mismatch for slice assign".to_string().into())
+                Err(mex("ShapeMismatch", "shape mismatch for slice assign"))
             }
         }
-        other => Err(format!("slice assign: unsupported RHS type {:?}", other).into()),
+        other => Err(mex(
+            "InvalidSliceAssignmentRhs",
+            &format!("slice assign: unsupported RHS type {:?}", other),
+        )),
     }
 }
 
@@ -1094,13 +1097,13 @@ async fn materialize_rhs_nd(rhs: &Value, selection_lengths: &[usize]) -> VmResul
             }
             if shape.len() > selection_lengths.len() {
                 if shape.iter().skip(selection_lengths.len()).any(|&s| s != 1) {
-                    return Err("shape mismatch for slice assign".to_string().into());
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
                 }
                 shape.truncate(selection_lengths.len());
             }
             for (dim_len, &sel_len) in shape.iter().zip(selection_lengths.iter()) {
                 if *dim_len != 1 && *dim_len != sel_len {
-                    return Err("shape mismatch for slice assign".to_string().into());
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
                 }
             }
             let mut strides = vec![1usize; selection_lengths.len()];
@@ -1113,7 +1116,7 @@ async fn materialize_rhs_nd(rhs: &Value, selection_lengths: &[usize]) -> VmResul
                     .copied()
                     .fold(1usize, |acc, len| acc.saturating_mul(len.max(1)))
             {
-                return Err("shape mismatch for slice assign".to_string().into());
+                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
             }
             RhsView::Tensor {
                 data: t.data,
@@ -1129,7 +1132,7 @@ async fn materialize_rhs_nd(rhs: &Value, selection_lengths: &[usize]) -> VmResul
                     .skip(selection_lengths.len())
                     .any(|&s| s != 1)
             {
-                return Err("shape mismatch for slice assign".to_string().into());
+                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
             }
             let mut shape = la.shape.clone();
             if shape.len() < selection_lengths.len() {
@@ -1139,7 +1142,7 @@ async fn materialize_rhs_nd(rhs: &Value, selection_lengths: &[usize]) -> VmResul
             }
             for (dim_len, &sel_len) in shape.iter().zip(selection_lengths.iter()) {
                 if *dim_len != 1 && *dim_len != sel_len {
-                    return Err("shape mismatch for slice assign".to_string().into());
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
                 }
             }
             let mut strides = vec![1usize; selection_lengths.len()];
@@ -1152,7 +1155,7 @@ async fn materialize_rhs_nd(rhs: &Value, selection_lengths: &[usize]) -> VmResul
                     .copied()
                     .fold(1usize, |acc, len| acc.saturating_mul(len.max(1)))
             {
-                return Err("shape mismatch for slice assign".to_string().into());
+                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
             }
             let data: Vec<f64> = la
                 .data
@@ -1165,7 +1168,12 @@ async fn materialize_rhs_nd(rhs: &Value, selection_lengths: &[usize]) -> VmResul
                 strides,
             }
         }
-        other => return Err(format!("slice assign: unsupported RHS type {:?}", other).into()),
+        other => {
+            return Err(mex(
+                "InvalidSliceAssignmentRhs",
+                &format!("slice assign: unsupported RHS type {:?}", other),
+            ))
+        }
     };
 
     let total = selection_lengths
@@ -1361,7 +1369,10 @@ fn set_workspace_variable(name: &str, value: Value, vars: &mut Vec<Value>) -> Vm
                 ws.assigned.insert(name.to_string());
             }
             None => {
-                result = Err("load: workspace state unavailable".to_string().into());
+                result = Err(mex(
+                    "WorkspaceUnavailable",
+                    "load: workspace state unavailable",
+                ));
             }
         }
     });
@@ -4027,7 +4038,12 @@ async fn run_interpreter_inner(
                                     ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
                                     match v { Value::Cell(ca) => ca.data.iter().map(|p| (*(*p)).clone()).collect::<Vec<Value>>(), other => vec![other] }
                                 }
-                                _ => return Err("CallFunctionExpandMulti requires cell or object for expand_all".to_string().into()),
+                                _ => {
+                                    return Err(mex(
+                                        "InvalidExpandAllTarget",
+                                        "CallFunctionExpandMulti requires cell or object for expand_all",
+                                    ))
+                                }
                             }
                         } else {
                             match (base, indices.len()) {
@@ -5469,8 +5485,12 @@ async fn run_interpreter_inner(
                         }
                     }
                     Value::GpuTensor(handle) => {
-                        let provider = runmat_accelerate_api::provider()
-                            .ok_or_else(|| "No acceleration provider registered".to_string())?;
+                        let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+                            mex(
+                                "AccelerationProviderUnavailable",
+                                "No acceleration provider registered",
+                            )
+                        })?;
                         let base_shape = handle.shape.clone();
                         let selectors = build_slice_selectors(
                             dims,
@@ -7273,8 +7293,12 @@ async fn run_interpreter_inner(
                             }
                         }
                         // Gather–mutate–reupload fallback for slice assignment on GPU bases
-                        let provider = runmat_accelerate_api::provider()
-                            .ok_or_else(|| "No acceleration provider registered".to_string())?;
+                        let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+                            mex(
+                                "AccelerationProviderUnavailable",
+                                "No acceleration provider registered",
+                            )
+                        })?;
                         debug!(
                             "StoreSlice: falling back to host tensor path base_shape={:?}",
                             handle.shape
@@ -7814,7 +7838,10 @@ async fn run_interpreter_inner(
                             .map_err(|e| format!("slice assign: {e}"))?;
                         base = Value::Tensor(tensor);
                     } else {
-                        return Err("No acceleration provider registered".to_string().into());
+                        return Err(mex(
+                            "AccelerationProviderUnavailable",
+                            "No acceleration provider registered",
+                        ));
                     }
                 }
                 match base {
@@ -8369,8 +8396,12 @@ async fn run_interpreter_inner(
                         }
                     }
                     Value::GpuTensor(h) => {
-                        let provider = runmat_accelerate_api::provider()
-                            .ok_or_else(|| "No acceleration provider registered".to_string())?;
+                        let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+                            mex(
+                                "AccelerationProviderUnavailable",
+                                "No acceleration provider registered",
+                            )
+                        })?;
                         let host = provider
                             .download(&h)
                             .await
@@ -8797,8 +8828,12 @@ async fn run_interpreter_inner(
                         stack.push(Value::Tensor(t));
                     }
                     Value::GpuTensor(handle) => {
-                        let provider = runmat_accelerate_api::provider()
-                            .ok_or_else(|| "No acceleration provider registered".to_string())?;
+                        let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+                            mex(
+                                "AccelerationProviderUnavailable",
+                                "No acceleration provider registered",
+                            )
+                        })?;
                         let attempt = (|| -> VmResult<Vec<u32>> {
                             let total = total_len_from_shape(&handle.shape) as i64;
                             let end_idx = total - offset;
@@ -9014,9 +9049,14 @@ async fn run_interpreter_inner(
                             }
                             stack.push((*ca.data[(r - 1) * ca.cols + (c - 1)]).clone());
                         }
-                        _ => return Err("Unsupported number of cell indices".to_string().into()),
+                        _ => {
+                            return Err(mex(
+                                "UnsupportedCellIndexCount",
+                                "Unsupported number of cell indices",
+                            ))
+                        }
                     },
-                    _ => return Err("Cell indexing on non-cell".to_string().into()),
+                    _ => return Err(mex("CellIndexingOnNonCell", "Cell indexing on non-cell")),
                 }
             }
             Instr::IndexCellExpand(num_indices, out_count) => {
@@ -9066,9 +9106,10 @@ async fn run_interpreter_inner(
                                     values.push((*ca.data[(r - 1) * ca.cols + (c - 1)]).clone());
                                 }
                                 _ => {
-                                    return Err("Unsupported number of cell indices"
-                                        .to_string()
-                                        .into())
+                                    return Err(mex(
+                                        "UnsupportedCellIndexCount",
+                                        "Unsupported number of cell indices",
+                                    ))
                                 }
                             }
                         }
@@ -9140,7 +9181,7 @@ async fn run_interpreter_inner(
                             stack.push(Value::Num(0.0));
                         }
                     }
-                    _ => return Err("Cell expansion on non-cell".to_string().into()),
+                    _ => return Err(mex("CellExpansionOnNonCell", "Cell expansion on non-cell")),
                 }
             }
             Instr::Pop => {
@@ -9231,7 +9272,10 @@ async fn run_interpreter_inner(
                 let base_pos = if let Some(j) = base_idx_opt {
                     j
                 } else {
-                    return Err("Index assignment only for tensors".to_string().into());
+                    return Err(mex(
+                        "IndexAssignmentUnsupportedBase",
+                        "Index assignment only for tensors",
+                    ));
                 };
                 let base = stack.remove(base_pos);
                 #[cfg(feature = "native-accel")]
@@ -9324,7 +9368,10 @@ async fn run_interpreter_inner(
                     }
                 }
                 if indices.is_empty() {
-                    return Err("Index assignment only for tensors".to_string().into());
+                    return Err(mex(
+                        "IndexAssignmentUnsupportedBase",
+                        "Index assignment only for tensors",
+                    ));
                 }
                 // TODO(GC): write barrier hook if base is in older generation and rhs/indices reference younger objects
                 match base {
@@ -9383,13 +9430,13 @@ async fn run_interpreter_inner(
                                     if t2.data.len() == 1 {
                                         Ok(t2.data[0])
                                     } else {
-                                        Err("RHS must be scalar".to_string().into())
+                                        Err(mex("ScalarRequired", "RHS must be scalar"))
                                     }
                                 }
                                 Value::GpuTensor(h2) => {
                                     let total = h2.shape.iter().copied().product::<usize>();
                                     if total != 1 {
-                                        return Err("RHS must be scalar".to_string().into());
+                                        return Err(mex("ScalarRequired", "RHS must be scalar"));
                                     }
                                     if let Some(p) = runmat_accelerate_api::provider() {
                                         let host = p
@@ -9398,14 +9445,15 @@ async fn run_interpreter_inner(
                                             .map_err(|e| format!("gather rhs: {e}"))?;
                                         Ok(host.data[0])
                                     } else {
-                                        Err("No acceleration provider registered"
-                                            .to_string()
-                                            .into())
+                                        Err(mex(
+                                            "AccelerationProviderUnavailable",
+                                            "No acceleration provider registered",
+                                        ))
                                     }
                                 }
                                 _ => rhs
                                     .try_into()
-                                    .map_err(|_| "RHS must be numeric".to_string().into()),
+                                    .map_err(|_| mex("NumericRequired", "RHS must be numeric")),
                             }
                         }
                         // 1D linear or 2D scalar assignment only for now
@@ -9448,15 +9496,20 @@ async fn run_interpreter_inner(
                             t.data[idx] = val;
                             stack.push(Value::Tensor(t));
                         } else {
-                            return Err("Only 1D/2D scalar assignment supported"
-                                .to_string()
-                                .into());
+                            return Err(mex(
+                                "UnsupportedAssignmentRank",
+                                "Only 1D/2D scalar assignment supported",
+                            ));
                         }
                     }
                     Value::GpuTensor(h) => {
                         // Stage F1: gather–mutate–reupload for simple 1D/2D scalar assignments
-                        let provider = runmat_accelerate_api::provider()
-                            .ok_or_else(|| "No acceleration provider registered".to_string())?;
+                        let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+                            mex(
+                                "AccelerationProviderUnavailable",
+                                "No acceleration provider registered",
+                            )
+                        })?;
                         let host = provider
                             .download(&h)
                             .await
@@ -9474,13 +9527,13 @@ async fn run_interpreter_inner(
                                     if t2.data.len() == 1 {
                                         Ok(t2.data[0])
                                     } else {
-                                        Err("RHS must be scalar".to_string().into())
+                                        Err(mex("ScalarRequired", "RHS must be scalar"))
                                     }
                                 }
                                 Value::GpuTensor(h2) => {
                                     let total = h2.shape.iter().copied().product::<usize>();
                                     if total != 1 {
-                                        return Err("RHS must be scalar".to_string().into());
+                                        return Err(mex("ScalarRequired", "RHS must be scalar"));
                                     }
                                     let host2 = provider
                                         .download(h2)
@@ -9490,7 +9543,7 @@ async fn run_interpreter_inner(
                                 }
                                 _ => rhs
                                     .try_into()
-                                    .map_err(|_| "RHS must be numeric".to_string().into()),
+                                    .map_err(|_| mex("NumericRequired", "RHS must be numeric")),
                             }
                         }
                         if indices.len() == 1 {
@@ -9536,9 +9589,10 @@ async fn run_interpreter_inner(
                                 t.data[k] = val;
                             }
                         } else {
-                            return Err("Only 1D/2D scalar assignment supported"
-                                .to_string()
-                                .into());
+                            return Err(mex(
+                                "UnsupportedAssignmentRank",
+                                "Only 1D/2D scalar assignment supported",
+                            ));
                         }
                         let view = runmat_accelerate_api::HostTensorView {
                             data: &t.data,
@@ -9567,7 +9621,10 @@ async fn run_interpreter_inner(
                                 "[vm] StoreIndex default branch"
                             );
                         }
-                        return Err("Index assignment only for tensors".to_string().into());
+                        return Err(mex(
+                            "IndexAssignmentUnsupportedBase",
+                            "Index assignment only for tensors",
+                        ));
                     }
                 }
             }
@@ -9667,9 +9724,19 @@ async fn run_interpreter_inner(
                             *ca.data[lin] = rhs;
                             stack.push(Value::Cell(ca));
                         }
-                        _ => return Err("Unsupported number of cell indices".to_string().into()),
+                        _ => {
+                            return Err(mex(
+                                "UnsupportedCellIndexCount",
+                                "Unsupported number of cell indices",
+                            ))
+                        }
                     },
-                    _ => return Err("Cell assignment on non-cell".to_string().into()),
+                    _ => {
+                        return Err(mex(
+                            "CellAssignmentOnNonCell",
+                            "Cell assignment on non-cell",
+                        ))
+                    }
                 }
             }
             Instr::LoadMember(field) => {
@@ -10495,9 +10562,10 @@ async fn scalar_from_value_scalar(value: &Value, label: &str) -> VmResult<f64> {
 async fn parse_steps_value(value: &Value) -> VmResult<u32> {
     let raw = scalar_from_value_scalar(value, "stochastic_evolution steps").await?;
     if !raw.is_finite() || raw < 0.0 {
-        return Err("stochastic_evolution: steps must be a non-negative scalar"
-            .to_string()
-            .into());
+        return Err(mex(
+            "InvalidSteps",
+            "stochastic_evolution: steps must be a non-negative scalar",
+        ));
     }
     Ok(raw.round() as u32)
 }
@@ -10544,7 +10612,9 @@ fn upload_tensor_view(
         data: &tensor.data,
         shape: &tensor.shape,
     };
-    provider.upload(&view).map_err(|e| e.to_string().into())
+    provider
+        .upload(&view)
+        .map_err(|e| mex("UploadFailed", &e.to_string()))
 }
 
 #[cfg(feature = "native-accel")]
@@ -10719,9 +10789,10 @@ async fn try_execute_fusion_group(
                 plan.stack_pattern
             );
         }
-        return Err("fusion: stack underflow gathering inputs"
-            .to_string()
-            .into());
+        return Err(mex(
+            "FusionStackUnderflow",
+            "fusion: stack underflow gathering inputs",
+        ));
     }
     let available = pattern_len;
     let slice_start = stack.len() - available;
@@ -11258,7 +11329,10 @@ async fn try_execute_fusion_group(
                             if total_from_operand { "runtime" } else { "output_shape" }
                         );
                     }
-                    return Err("fusion: reduction all extent unknown".to_string().into());
+                    return Err(mex(
+                        "FusionReductionExtentUnknown",
+                        "fusion: reduction all extent unknown",
+                    ));
                 }
                 let total = total_elems.unwrap();
                 if fusion_debug_enabled() {
@@ -11366,7 +11440,10 @@ async fn try_execute_fusion_group(
             log::debug!(
                 "fusion reduction: skipping fusion due to unresolved shape; falling back to provider path"
             );
-            return Err("fusion: reduction shape unresolved".to_string().into());
+            return Err(mex(
+                "FusionReductionShapeUnresolved",
+                "fusion: reduction shape unresolved",
+            ));
         }
 
         // Optional escape hatch: disable fused reductions to force provider path
@@ -11375,7 +11452,10 @@ async fn try_execute_fusion_group(
             .as_deref()
             == Some("1")
         {
-            return Err("fusion: fused reductions disabled".to_string().into());
+            return Err(mex(
+                "FusionReductionDisabled",
+                "fusion: fused reductions disabled",
+            ));
         }
         let workgroup_size = 256u32;
         if log::log_enabled!(log::Level::Debug) && fusion_debug_enabled() {
