@@ -48,19 +48,28 @@ fn gather_if_needed_async_impl<'a>(
                 }
                 let provider =
                     runmat_accelerate_api::provider_for_handle(handle).ok_or_else(|| {
-                        build_runtime_error("gather: no acceleration provider registered").build()
+                        build_runtime_error("gather: no acceleration provider registered")
+                            .with_identifier("RunMat:gather:ProviderUnavailable")
+                            .build()
                     })?;
                 let is_logical = runmat_accelerate_api::handle_is_logical(handle);
                 let host = download_handle_async(provider, handle)
                     .await
-                    .map_err(|err| build_runtime_error(format!("gather: {err}")).build())?;
+                    .map_err(|err| {
+                        build_runtime_error(format!("gather: {err}"))
+                            .with_identifier("RunMat:gather:DownloadFailed")
+                            .build()
+                    })?;
                 runmat_accelerate_api::clear_residency(handle);
                 let runmat_accelerate_api::HostTensorOwned { data, shape } = host;
                 if is_logical {
                     let bits: Vec<u8> =
                         data.iter().map(|&v| if v != 0.0 { 1 } else { 0 }).collect();
-                    let logical = LogicalArray::new(bits, shape)
-                        .map_err(|e| build_runtime_error(format!("gather: {e}")).build())?;
+                    let logical = LogicalArray::new(bits, shape).map_err(|e| {
+                        build_runtime_error(format!("gather: {e}"))
+                            .with_identifier("RunMat:gather:LogicalShapeError")
+                            .build()
+                    })?;
                     Ok(Value::LogicalArray(logical))
                 } else {
                     let mut data = data;
@@ -75,8 +84,11 @@ fn gather_if_needed_async_impl<'a>(
                         runmat_accelerate_api::ProviderPrecision::F32 => NumericDType::F32,
                         runmat_accelerate_api::ProviderPrecision::F64 => NumericDType::F64,
                     };
-                    let tensor = Tensor::new_with_dtype(data, shape, dtype)
-                        .map_err(|e| build_runtime_error(format!("gather: {e}")).build())?;
+                    let tensor = Tensor::new_with_dtype(data, shape, dtype).map_err(|e| {
+                        build_runtime_error(format!("gather: {e}"))
+                            .with_identifier("RunMat:gather:TensorShapeError")
+                            .build()
+                    })?;
                     Ok(Value::Tensor(tensor))
                 }
             }
@@ -85,8 +97,11 @@ fn gather_if_needed_async_impl<'a>(
                 for ptr in &ca.data {
                     gathered.push(gather_if_needed_async_impl(ptr).await?);
                 }
-                make_cell_with_shape(gathered, ca.shape.clone())
-                    .map_err(|err| build_runtime_error(format!("gather: {err}")).build())
+                make_cell_with_shape(gathered, ca.shape.clone()).map_err(|err| {
+                    build_runtime_error(format!("gather: {err}"))
+                        .with_identifier("RunMat:gather:CellShapeError")
+                        .build()
+                })
             }
             Value::Struct(sv) => {
                 let mut gathered = sv.clone();
@@ -115,7 +130,11 @@ pub fn gather_if_needed(value: &Value) -> Result<Value, RuntimeError> {
 
 #[cfg(target_arch = "wasm32")]
 pub fn gather_if_needed(_value: &Value) -> Result<Value, RuntimeError> {
-    Err(build_runtime_error("gather: synchronous gather is unavailable on wasm").build())
+    Err(
+        build_runtime_error("gather: synchronous gather is unavailable on wasm")
+            .with_identifier("RunMat:gather:UnavailableOnWasm")
+            .build(),
+    )
 }
 
 /// Call a registered language builtin by name.

@@ -63,6 +63,12 @@ fn async_handler_slot() -> &'static RwLock<Option<Arc<AsyncInteractionHandler>>>
     ASYNC_HANDLER.get_or_init(|| RwLock::new(None))
 }
 
+fn interaction_error(identifier: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_identifier(identifier.to_string())
+        .build()
+}
+
 pub struct AsyncHandlerGuard {
     previous: Option<Arc<AsyncInteractionHandler>>,
 }
@@ -86,11 +92,14 @@ pub fn replace_async_handler(handler: Option<Arc<AsyncInteractionHandler>>) -> A
 
 pub async fn request_line_async(prompt: &str, echo: bool) -> Result<String, RuntimeError> {
     if let Some(response) = QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take()) {
-        return match response.map_err(|err| build_runtime_error(err).build())? {
+        return match response
+            .map_err(|err| interaction_error("RunMat:interaction:QueuedResponseError", err))?
+        {
             InteractionResponse::Line(value) => Ok(value),
-            InteractionResponse::KeyPress => {
-                Err(build_runtime_error("queued keypress response used for line request").build())
-            }
+            InteractionResponse::KeyPress => Err(interaction_error(
+                "RunMat:interaction:UnexpectedQueuedKeypress",
+                "queued keypress response used for line request",
+            )),
         };
     }
 
@@ -105,25 +114,29 @@ pub async fn request_line_async(prompt: &str, echo: bool) -> Result<String, Runt
         };
         let value = handler(owned)
             .await
-            .map_err(|err| build_runtime_error(err).build())?;
+            .map_err(|err| interaction_error("RunMat:interaction:AsyncHandlerError", err))?;
         return match value {
             InteractionResponse::Line(line) => Ok(line),
-            InteractionResponse::KeyPress => Err(build_runtime_error(
+            InteractionResponse::KeyPress => Err(interaction_error(
+                "RunMat:interaction:UnexpectedAsyncKeypress",
                 "interaction async handler returned keypress for line request",
-            )
-            .build()),
+            )),
         };
     }
 
-    default_read_line(prompt, echo).map_err(|err| build_runtime_error(err).build())
+    default_read_line(prompt, echo)
+        .map_err(|err| interaction_error("RunMat:interaction:ReadLineFailed", err))
 }
 
 pub async fn wait_for_key_async(prompt: &str) -> Result<(), RuntimeError> {
     if let Some(response) = QUEUED_RESPONSE.with(|slot| slot.borrow_mut().take()) {
-        return match response.map_err(|err| build_runtime_error(err).build())? {
-            InteractionResponse::Line(_) => {
-                Err(build_runtime_error("queued line response used for keypress request").build())
-            }
+        return match response
+            .map_err(|err| interaction_error("RunMat:interaction:QueuedResponseError", err))?
+        {
+            InteractionResponse::Line(_) => Err(interaction_error(
+                "RunMat:interaction:UnexpectedQueuedLine",
+                "queued line response used for keypress request",
+            )),
             InteractionResponse::KeyPress => Ok(()),
         };
     }
@@ -139,17 +152,18 @@ pub async fn wait_for_key_async(prompt: &str) -> Result<(), RuntimeError> {
         };
         let value = handler(owned)
             .await
-            .map_err(|err| build_runtime_error(err).build())?;
+            .map_err(|err| interaction_error("RunMat:interaction:AsyncHandlerError", err))?;
         return match value {
-            InteractionResponse::Line(_) => Err(build_runtime_error(
+            InteractionResponse::Line(_) => Err(interaction_error(
+                "RunMat:interaction:UnexpectedAsyncLine",
                 "interaction async handler returned line value for keypress request",
-            )
-            .build()),
+            )),
             InteractionResponse::KeyPress => Ok(()),
         };
     }
 
-    default_wait_for_key(prompt).map_err(|err| build_runtime_error(err).build())
+    default_wait_for_key(prompt)
+        .map_err(|err| interaction_error("RunMat:interaction:WaitForKeyFailed", err))
 }
 
 pub fn default_read_line(prompt: &str, echo: bool) -> Result<String, String> {

@@ -1697,7 +1697,10 @@ async fn run_interpreter_inner(
     let mut interpreter_timing = InterpreterTiming::new();
     macro_rules! vm_bail {
         ($err:expr) => {{
-            let err: RuntimeError = $err.into();
+            let mut err: RuntimeError = $err.into();
+            if err.identifier.is_none() {
+                err.identifier = Some(format!("{}:RuntimeError", error_namespace()));
+            }
             let err = attach_span_at(&bytecode, pc, err);
             if let Some((catch_pc, catch_var)) = try_stack.pop() {
                 if let Some(var_idx) = catch_var {
@@ -6322,7 +6325,10 @@ async fn run_interpreter_inner(
                         base = Value::Tensor(tensor);
                         numeric_values = adjusted;
                     } else {
-                        return Err("No acceleration provider registered".to_string().into());
+                        return Err(mex(
+                            "AccelerationProviderUnavailable",
+                            "No acceleration provider registered",
+                        ));
                     }
                 }
                 match base {
@@ -6719,7 +6725,10 @@ async fn run_interpreter_inner(
                             .map_err(|e| format!("range slice: {e}"))?;
                         base = Value::Tensor(tensor);
                     } else {
-                        return Err("No acceleration provider registered".to_string().into());
+                        return Err(mex(
+                            "AccelerationProviderUnavailable",
+                            "No acceleration provider registered",
+                        ));
                     }
                 }
                 match base {
@@ -10449,8 +10458,7 @@ async fn stochastic_evolution_dispatch(
     };
     let drift_scalar = scalar_from_value_scalar(&drift, "stochastic_evolution drift").await?;
     let scale_scalar = scalar_from_value_scalar(&scale, "stochastic_evolution scale").await?;
-    stochastic_evolution_host(&mut tensor_value, drift_scalar, scale_scalar, steps_u32)
-        .map_err(|err| err.message().to_string())?;
+    stochastic_evolution_host(&mut tensor_value, drift_scalar, scale_scalar, steps_u32)?;
     Ok(Value::Tensor(tensor_value))
 }
 
@@ -10855,7 +10863,7 @@ async fn try_execute_fusion_group(
                 stack_guard.commit();
                 Ok(result)
             }
-            Err(err) => Err(err.to_string().into()),
+            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
         }
     } else if plan.group.kind.is_reduction() {
         // Determine reduction axis or 'all'. Prefer the builtin reduction op's dim argument (inputs[1]).
@@ -11403,7 +11411,7 @@ async fn try_execute_fusion_group(
                 stack_guard.commit();
                 Ok(result)
             }
-            Err(err) => Err(err.to_string().into()),
+            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
         }
     } else if plan.group.kind == FusionKind::CenteredGram {
         match execute_centered_gram(request).await {
@@ -11411,7 +11419,7 @@ async fn try_execute_fusion_group(
                 stack_guard.commit();
                 Ok(result)
             }
-            Err(err) => Err(err.to_string().into()),
+            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
         }
     } else if plan.group.kind == FusionKind::PowerStepNormalize {
         match execute_power_step_normalize(request).await {
@@ -11419,7 +11427,7 @@ async fn try_execute_fusion_group(
                 stack_guard.commit();
                 Ok(result)
             }
-            Err(err) => Err(err.to_string().into()),
+            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
         }
     } else if plan.group.kind == FusionKind::ExplainedVariance {
         log::debug!("explained variance plan inputs {:?}", plan.inputs);
