@@ -874,21 +874,23 @@ fn gather_string_slice(sa: &runmat_builtins::StringArray, plan: &SlicePlan) -> V
     }
     if plan.indices.len() == 1 {
         let lin = plan.indices[0] as usize;
-        let value = sa
-            .data
-            .get(lin)
-            .cloned()
-            .ok_or_else(|| "Slice error: string index out of bounds".to_string())?;
+        let value = sa.data.get(lin).cloned().ok_or_else(|| {
+            mex(
+                "IndexOutOfBounds",
+                "Slice error: string index out of bounds",
+            )
+        })?;
         return Ok(Value::String(value));
     }
     let mut out = Vec::with_capacity(plan.indices.len());
     for &lin in &plan.indices {
         let idx = lin as usize;
-        let value = sa
-            .data
-            .get(idx)
-            .cloned()
-            .ok_or_else(|| "Slice error: string index out of bounds".to_string())?;
+        let value = sa.data.get(idx).cloned().ok_or_else(|| {
+            mex(
+                "IndexOutOfBounds",
+                "Slice error: string index out of bounds",
+            )
+        })?;
         out.push(value);
     }
     let out_sa = runmat_builtins::StringArray::new(out, plan.output_shape.clone())
@@ -1638,8 +1640,9 @@ async fn run_interpreter_inner(
             Box::pin(async move {
                 let vars_ptr = USER_FUNCTION_VARS.with(|slot| *slot.borrow());
                 let Some(vars_ptr) = vars_ptr else {
-                    return Err(RuntimeError::new(
-                        "user function vars not installed".to_string(),
+                    return Err(mex(
+                        "InternalStateUnavailable",
+                        "user function vars not installed",
                     ));
                 };
                 let vars = unsafe { &mut *vars_ptr };
@@ -10909,7 +10912,7 @@ async fn try_execute_fusion_group(
 
     let inputs: Vec<Value> = inputs
         .into_iter()
-        .map(|opt| opt.ok_or_else(|| "fusion: missing input value".to_string()))
+        .map(|opt| opt.ok_or_else(|| mex("FusionMissingInput", "fusion: missing input value")))
         .collect::<Result<_, _>>()?;
 
     // Debug: summarize runtime input kinds/shapes
@@ -11689,7 +11692,7 @@ async fn invoke_user_function_value(
                 0
             },
         )
-        .map_err(|e| RuntimeError::new(format!("varargin: {e}")))?;
+        .map_err(|e| mex("VararginBuildError", &format!("varargin: {e}")))?;
         if fixed < func_vars.len() {
             func_vars[fixed] = Value::Cell(cell);
         }
@@ -11720,7 +11723,7 @@ async fn invoke_user_function_value(
             if let Some(local_id) = var_map.get(varargout_oid) {
                 if local_id.0 < func_vars.len() {
                     let empty = runmat_builtins::CellArray::new(vec![], 1, 0)
-                        .map_err(|e| RuntimeError::new(format!("varargout init: {e}")))?;
+                        .map_err(|e| mex("VarargoutInitError", &format!("varargout init: {e}")))?;
                     func_vars[local_id.0] = Value::Cell(empty);
                 }
             }
