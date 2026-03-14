@@ -19,7 +19,7 @@ WEBSITE_URL="https://runmat.com"
 
 # Optional: Telemetry relay (best-effort, anonymous)
 TELEMETRY_ID_FILE="$HOME/.runmat/telemetry_id"
-TELEMETRY_ENDPOINT="https://runmat.com/api/telemetry"
+TELEMETRY_ENDPOINT="https://api.runmat.com/v1/t"
 
 log() {
     printf "%b[INFO]%b %s\n" "$GREEN" "$NC" "$1"
@@ -82,14 +82,16 @@ _send_telemetry() {
     # usage: _send_telemetry event_name
     local EVENT_NAME="$1"
     local CID
+    local EVENT_UUID
     CID="$(_telemetry_client_id)"
+    EVENT_UUID="$(_telemetry_session_id)"
     curl -s -m 3 -o /dev/null -X POST -H "Content-Type: application/json" \
-      --data "{\"event_label\":\"$EVENT_NAME\",\"os\":\"$OS\",\"arch\":\"$ARCH\",\"platform\":\"$PLATFORM\",\"release\":\"${LATEST_RELEASE:-unknown}\",\"method\":\"shell\",\"cid\":\"$CID\",\"session_id\":\"$INSTALL_SESSION\",\"run_kind\":\"install\"}" \
+      --data "{\"event\":\"$EVENT_NAME\",\"eventLabel\":\"$EVENT_NAME\",\"distinctId\":\"$CID\",\"uuid\":\"$EVENT_UUID\",\"sessionId\":\"$INSTALL_SESSION\",\"runKind\":\"install\",\"os\":\"$OS\",\"arch\":\"$ARCH\",\"release\":\"${LATEST_RELEASE:-unknown}\",\"method\":\"shell\",\"source\":\"website-install-script\",\"payload\":{\"platform\":\"$PLATFORM\"},\"properties\":{},\"context\":{}}" \
       "$TELEMETRY_ENDPOINT" >/dev/null 2>&1 || true
 }
 
 # Trap failures so we can emit a failure event without interrupting output
-trap '_send_telemetry install_failed' ERR
+trap '_send_telemetry install.failed' ERR
 
 # Banner
 printf "%b" "$BLUE"
@@ -142,7 +144,7 @@ case $OS in
 esac
 
 # Emit start event now that we know OS/ARCH/PLATFORM
-_send_telemetry install_start
+_send_telemetry install.start
 
 log "Installing for platform: $PLATFORM"
 
@@ -296,7 +298,7 @@ else
 fi
 
 # Emit completion event
-_send_telemetry install_complete
+_send_telemetry install.completed
 
 log "Installation complete! 🎉"
 echo

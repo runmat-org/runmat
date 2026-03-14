@@ -18,8 +18,8 @@ use runmat_accelerate::AccelerateInitOptions;
 use runmat_builtins::Value;
 use runmat_config::{self as config, ConfigLoader, PlotBackend, PlotMode, RunMatConfig};
 use runmat_core::{
-    ExecutionStreamEntry, ExecutionStreamKind, RunError, RunMatSession, TelemetryRunConfig,
-    TelemetryRunFinish,
+    runtime_error_telemetry_failure_info, ExecutionStreamEntry, ExecutionStreamKind, RunError,
+    RunMatSession, TelemetryHost, TelemetryRunConfig, TelemetryRunFinish,
 };
 use runmat_gc::{
     gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats, GcConfig,
@@ -1646,6 +1646,8 @@ fn finalize_repl_session(
             success: true,
             jit_used: stats.jit_compiled > 0,
             error: None,
+            failure: None,
+            host: Some(TelemetryHost::Cli),
             counters: Some(counters),
             provider: capture_provider_snapshot(),
         });
@@ -1821,12 +1823,15 @@ async fn execute_script_with_args(
     let result = match engine.execute(&content).await {
         Ok(result) => result,
         Err(err) => {
+            let failure = err.telemetry_failure_info();
             if let Some(run) = script_run.take() {
                 run.finish(TelemetryRunFinish {
                     duration: Some(start_time.elapsed()),
                     success: false,
                     jit_used: false,
-                    error: Some("runtime_error".to_string()),
+                    error: Some(failure.code.clone()),
+                    failure: Some(failure),
+                    host: Some(TelemetryHost::Cli),
                     counters: None,
                     provider: capture_provider_snapshot(),
                 });
@@ -1846,10 +1851,15 @@ async fn execute_script_with_args(
     emit_execution_streams(&result.streams);
 
     let provider_snapshot = capture_provider_snapshot();
+    let failure = result
+        .error
+        .as_ref()
+        .map(runtime_error_telemetry_failure_info);
     let error_payload = result
         .error
         .as_ref()
         .and_then(|err| err.identifier().map(|value| value.to_string()))
+        .or_else(|| failure.as_ref().map(|info| info.code.clone()))
         .or_else(|| result.error.as_ref().map(|_| "runtime_error".to_string()));
     let success = error_payload.is_none();
     if let Some(run) = script_run.take() {
@@ -1858,6 +1868,8 @@ async fn execute_script_with_args(
             success,
             jit_used: result.used_jit,
             error: error_payload.clone(),
+            failure,
+            host: Some(TelemetryHost::Cli),
             counters: None,
             provider: provider_snapshot,
         });
@@ -2227,6 +2239,11 @@ async fn execute_benchmark(
                     success: false,
                     jit_used: result.used_jit,
                     error: Some(error.clone()),
+                    failure: result
+                        .error
+                        .as_ref()
+                        .map(runtime_error_telemetry_failure_info),
+                    host: Some(TelemetryHost::Cli),
                     counters: Some(counters),
                     provider: capture_provider_snapshot(),
                 });
@@ -2270,6 +2287,8 @@ async fn execute_benchmark(
             success: true,
             jit_used: jit_executions > 0,
             error: None,
+            failure: None,
+            host: Some(TelemetryHost::Cli),
             counters: Some(counters),
             provider: capture_provider_snapshot(),
         });

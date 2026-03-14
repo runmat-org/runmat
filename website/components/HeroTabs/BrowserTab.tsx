@@ -2,11 +2,14 @@
 
 import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { trackEvent } from "@/components/GoogleAnalytics";
+import { trackWebsiteEvent } from "@/components/GoogleAnalytics";
 
 export function BrowserTab() {
   const handleClick = () => {
-    trackEvent("hero_cta_click", "hero_tabs", "browser");
+    trackWebsiteEvent("website.hero.cta_clicked", {
+      category: "hero_tabs",
+      label: "browser",
+    });
     window.open("https://runmat.com/sandbox", "_blank", "noopener,noreferrer");
   };
 

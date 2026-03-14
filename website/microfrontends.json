@@ -8,9 +8,6 @@
           "paths": ["/sandbox"]
         },
         {
-          "paths": ["/a/:path*"]
-        },
-        {
           "paths": ["/o/:path*"]
         },
         {

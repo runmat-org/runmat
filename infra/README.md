@@ -5,7 +5,7 @@ This directory provisions the RunMat services on Google Cloud Platform.
 The following services are currently provisioned:
 
 - Cloud DNS zones for `telemetry.runmat.org` and `telemetry.runmat.com`
-- Cloud Run service that hosts the HTTP telemetry worker
+- Cloud Run service that hosts an HTTP telemetry ingress endpoint (forwards to collector in runmat-server)
 - UDP forwarder running on a regional Managed Instance Group + UDP load balancer
 
 ### Remote state
@@ -24,9 +24,9 @@ Set the following environment variables (or prefix `terraform plan/apply` with t
 - `GOOGLE_APPLICATION_CREDENTIALS`: path to a service-account JSON with DNS/Run/Compute access.
 - `TF_VAR_project_id`: GCP project hosting telemetry.
 - `TF_VAR_region`: region for Cloud Run + Compute (defaults to `us-central1`).
-- `TF_VAR_posthog_api_key`, `TF_VAR_posthog_host`
+- `TF_VAR_telemetry_collector_endpoint` (for example `https://api.runmat.com/v1/t`)
+- `TF_VAR_telemetry_collector_key` (optional key forwarded by compatibility ingress)
 - `TF_VAR_telemetry_ingestion_key`
-- `TF_VAR_ga_measurement_id`, `TF_VAR_ga_api_secret`
 - `TF_VAR_worker_image`: container image URI for the Cloud Run worker (e.g. `us-docker.pkg.dev/<project>/telemetry/worker:latest`).
 - `TF_VAR_udp_forwarder_image`: container image URI for the UDP forwarder.
 
@@ -48,6 +48,8 @@ docker push us-docker.pkg.dev/$PROJECT/telemetry/udp-forwarder:$TAG
 
 Supply the same image URIs to Terraform via `TF_VAR_worker_image` / `TF_VAR_udp_forwarder_image`.
 
+The compatibility worker intentionally does minimal legacy mapping for older runtime payloads: it preserves only event occurrence (`runtime_started`/`runtime_finished` -> canonical names), `arch`, and stable user id (`cid` -> `distinctId`). Other legacy envelope fields are not preserved.
+
 > The GitHub Actions workflow automatically builds/pushes both images for every commit and injects the resulting tags into Terraform (`worker:${{ github.sha }}` and `udp-forwarder:${{ github.sha }}`). The local bootstrap script mirrors that flow so `terraform plan` works outside CI.
 
 > **Release builds:** set `RUNMAT_TELEMETRY_KEY=$TELEMETRY_INGESTION_KEY` before invoking `cargo build` (the release workflow does this automatically) so the CLI bakes the header it must send to the ingestion service.
@@ -67,8 +69,8 @@ Repository secrets required by the workflow:
 | `GCP_PROJECT_ID` | Passed through to `TF_VAR_project_id` |
 | `GCP_REGION` | Default region for Cloud Run/Compute |
 | `GCS_TF_STATE_BUCKET` | Bucket that stores Terraform state |
-| `POSTHOG_API_KEY` / `POSTHOG_HOST` | Worker bindings |
+| `TELEMETRY_COLLECTOR_ENDPOINT` | Compatibility ingress forward target (usually `https://api.runmat.com/v1/t`) |
+| `TELEMETRY_COLLECTOR_KEY` | Optional key included when forwarding to collector |
 | `TELEMETRY_INGESTION_KEY` | Required shared secret (`x-telemetry-key`); also baked into release builds |
-| `GA_MEASUREMENT_ID` / `GA_API_SECRET` | Optional GA4 forwarding |
 
 Delegate `telemetry.runmat.org` and `telemetry.runmat.com` to the Cloud DNS name servers emitted by `terraform output telemetry_name_servers`. Once delegated, Cloud Run’s domain mapping automatically issues TLS for both HTTPS endpoints (e.g. `https://telemetry.runmat.com/ingest`), and the UDP forwarding rule is reachable at both `udp.telemetry.runmat.org:7846` and `udp.telemetry.runmat.com:7846`.

@@ -2,8 +2,8 @@ use serde::Serialize;
 
 use runmat_accelerate_api::{ApiDeviceInfo, ProviderTelemetry};
 
-pub const EVENT_RUNTIME_STARTED: &str = "runtime_started";
-pub const EVENT_RUNTIME_FINISHED: &str = "runtime_finished";
+pub const EVENT_RUNTIME_STARTED: &str = "runtime.run.started";
+pub const EVENT_RUNTIME_FINISHED: &str = "runtime.run.finished";
 
 #[derive(Debug, Clone, Copy)]
 pub enum TelemetryEventKind {
@@ -64,6 +64,7 @@ impl ProviderSnapshot {
 pub struct RuntimeTelemetryEnvelope<P: Serialize> {
     #[serde(rename = "event_label")]
     pub event_label: &'static str,
+    pub uuid: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cid: Option<String>,
     pub session_id: String,
@@ -106,6 +107,31 @@ pub struct RuntimeFinishedPayload {
     pub timestamp_ms: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(
+        rename = "runtime.failure.stage",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub runtime_failure_stage: Option<String>,
+    #[serde(
+        rename = "runtime.failure.code",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub runtime_failure_code: Option<String>,
+    #[serde(
+        rename = "runtime.failure.has_span",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub runtime_failure_has_span: Option<bool>,
+    #[serde(
+        rename = "runtime.failure.host",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub runtime_failure_host: Option<String>,
+    #[serde(
+        rename = "runtime.failure.component",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub runtime_failure_component: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub counters: Option<RuntimeExecutionCounters>,
     #[serde(skip_serializing_if = "Option::is_none")]

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Copy, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { trackEvent } from "@/components/GoogleAnalytics";
+import { trackWebsiteEvent } from "@/components/GoogleAnalytics";
 import { cn } from "@/lib/utils";
 
 type Platform = "macos" | "windows" | "linux";
@@ -48,7 +48,10 @@ export function CLITab({ detectedPlatform }: CLITabProps) {
       await navigator.clipboard.writeText(command);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-      trackEvent("copy_install_command", "installation", platform);
+      trackWebsiteEvent("website.install.command_copied", {
+        category: "installation",
+        label: platform,
+      });
     } catch {
       // Fallback for browsers that don't support clipboard API
       const textArea = document.createElement("textarea");
@@ -59,13 +62,19 @@ export function CLITab({ detectedPlatform }: CLITabProps) {
       document.body.removeChild(textArea);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
-      trackEvent("copy_install_command", "installation", platform);
+      trackWebsiteEvent("website.install.command_copied", {
+        category: "installation",
+        label: platform,
+      });
     }
   };
 
   const handlePlatformChange = (newPlatform: Platform) => {
     setPlatform(newPlatform);
-    trackEvent("select_os", "installation", newPlatform);
+    trackWebsiteEvent("website.install.os_selected", {
+      category: "installation",
+      label: newPlatform,
+    });
   };
 
   const handlePsVersionChange = (version: PowerShellVersion) => {

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
-import { trackEvent } from "@/components/GoogleAnalytics";
+import { trackWebsiteEvent } from "@/components/GoogleAnalytics";
 import { getCurrentAttribution } from "@/lib/attribution-client";
 
 const inputClass =
@@ -54,7 +54,10 @@ export default function ContactForm() {
 
           if (resp && resp.ok) {
             setStatus("success");
-            trackEvent("contact_form_submit", "contact", inquiryType || "general");
+            trackWebsiteEvent("website.lead.contact_submitted", {
+              category: "contact",
+              label: inquiryType || "general",
+            });
           } else {
             setStatus("error");
           }

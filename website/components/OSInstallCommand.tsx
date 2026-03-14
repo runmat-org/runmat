@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Terminal, Monitor, Copy, Check } from "lucide-react";
-import { trackEvent } from "@/components/GoogleAnalytics";
+import { trackWebsiteEvent } from "@/components/GoogleAnalytics";
 
 type OS = 'windows' | 'mac' | 'linux' | 'unknown';
 
@@ -17,7 +17,10 @@ function CopyableCommand({ command, bgColor }: { command: string; bgColor: strin
       setTimeout(() => setCopied(false), 2000);
 
       // Track the copy event
-      trackEvent('copy_install_command', 'installation', command.includes('curl') ? 'unix' : 'windows');
+      trackWebsiteEvent("website.install.command_copied", {
+        category: "installation",
+        label: command.includes("curl") ? "unix" : "windows",
+      });
     } catch {
       // Fallback for browsers that don't support clipboard API
       const textArea = document.createElement('textarea');
@@ -30,7 +33,10 @@ function CopyableCommand({ command, bgColor }: { command: string; bgColor: strin
       setTimeout(() => setCopied(false), 2000);
 
       // Track the copy event
-      trackEvent('copy_install_command', 'installation', command.includes('curl') ? 'unix' : 'windows');
+      trackWebsiteEvent("website.install.command_copied", {
+        category: "installation",
+        label: command.includes("curl") ? "unix" : "windows",
+      });
     }
   };
 
@@ -236,7 +242,10 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
                 <button
                   onClick={() => {
                     setSelectedOS('windows');
-                    trackEvent('select_os', 'installation', 'windows');
+                    trackWebsiteEvent("website.install.os_selected", {
+                      category: "installation",
+                      label: "windows",
+                    });
                   }}
                   className="px-3 py-1 text-xs bg-gray-200 hover:bg-gray-300 text-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 rounded-md transition-colors"
                 >
@@ -247,7 +256,10 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
                 <button
                   onClick={() => {
                     setSelectedOS('mac');
-                    trackEvent('select_os', 'installation', 'mac');
+                    trackWebsiteEvent("website.install.os_selected", {
+                      category: "installation",
+                      label: "mac",
+                    });
                   }}
                   className="px-3 py-1 text-xs bg-gray-200 hover:bg-gray-300 text-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 rounded-md transition-colors"
                 >
@@ -258,7 +270,10 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
                 <button
                   onClick={() => {
                     setSelectedOS('linux');
-                    trackEvent('select_os', 'installation', 'linux');
+                    trackWebsiteEvent("website.install.os_selected", {
+                      category: "installation",
+                      label: "linux",
+                    });
                   }}
                   className="px-3 py-1 text-xs bg-gray-200 hover:bg-gray-300 text-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 rounded-md transition-colors"
                 >

@@ -9,7 +9,7 @@ $BINARY_NAME = "runmat.exe"
 $INSTALL_DIR = "$env:USERPROFILE\.runmat\bin"
 $WEBSITE_URL = "https://runmat.com"
 
-$TELEMETRY_ENDPOINT = "https://runmat.com/api/telemetry"
+$TELEMETRY_ENDPOINT = "https://api.runmat.com/v1/t"
 $TELEMETRY_ID_FILE = "$env:USERPROFILE\.runmat\telemetry_id"
 $InstallSession = [guid]::NewGuid().ToString()
 
@@ -41,15 +41,20 @@ function Send-Telemetry {
     try {
         $cid = New-AnonymousClientId
         $payload = @{ 
-            event_label = $EventName
+            event = $EventName
+            eventLabel = $EventName
+            distinctId = $cid
+            uuid = [guid]::NewGuid().ToString()
+            sessionId = $script:InstallSession
+            runKind = "install"
             os = $OS
             arch = $ARCH
-            platform = $PLATFORM
             release = $Release
             method = "powershell"
-            cid = $cid
-            session_id = $script:InstallSession
-            run_kind = "install"
+            source = "website-install-script"
+            payload = @{ platform = $PLATFORM }
+            properties = @{}
+            context = @{}
         } | ConvertTo-Json -Compress
         Invoke-WebRequest -Method Post -Uri $TELEMETRY_ENDPOINT -Body $payload -ContentType "application/json" -TimeoutSec 3 -ErrorAction SilentlyContinue | Out-Null
     } catch {}
@@ -101,7 +106,7 @@ switch ($ARCH) {
 Write-Info "Installing for platform: $PLATFORM"
 
 # Send start event
-try { Send-Telemetry -EventName "install_start" -OS "windows" -ARCH $ARCH -PLATFORM $PLATFORM -Release "unknown" } catch {}
+try { Send-Telemetry -EventName "install.start" -OS "windows" -ARCH $ARCH -PLATFORM $PLATFORM -Release "unknown" } catch {}
 
 # Check PowerShell version
 if ($PSVersionTable.PSVersion.Major -lt 3) {
@@ -224,7 +229,7 @@ try {
 }
 
 # Completion event
-try { Send-Telemetry -EventName "install_complete" -OS "windows" -ARCH $ARCH -PLATFORM $PLATFORM -Release $LATEST_RELEASE } catch {}
+try { Send-Telemetry -EventName "install.completed" -OS "windows" -ARCH $ARCH -PLATFORM $PLATFORM -Release $LATEST_RELEASE } catch {}
 
 Write-Host ""
 Write-Info "Installation complete! 🎉"

@@ -24,7 +24,10 @@ use runmat_core::{
     WorkspaceExportMode, WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview,
     WorkspaceSliceOptions, WorkspaceSnapshot,
 };
-use runmat_core::{TelemetryPlatformInfo, TelemetryRunConfig, TelemetryRunFinish, TelemetrySink};
+use runmat_core::{
+    TelemetryFailureInfo, TelemetryHost, TelemetryPlatformInfo, TelemetryRunConfig,
+    TelemetryRunFinish, TelemetrySink,
+};
 use runmat_logging::{
     init_logging, set_runtime_log_hook, LoggingGuard, LoggingOptions, RuntimeLogRecord,
 };
@@ -509,11 +512,28 @@ impl RunMatWasm {
                         .or_else(|| Some("runtime_error".to_string())),
                 ),
             };
+            let failure = payload.error.as_ref().map(|err| TelemetryFailureInfo {
+                stage: match &err.kind {
+                    RunMatErrorKind::Syntax => "parser",
+                    RunMatErrorKind::Semantic => "hir",
+                    RunMatErrorKind::Compile => "compile",
+                    RunMatErrorKind::Runtime => "runtime",
+                }
+                .to_string(),
+                code: err
+                    .identifier
+                    .clone()
+                    .unwrap_or_else(|| "RunMat:RuntimeError".to_string()),
+                has_span: err.span.is_some(),
+                component: None,
+            });
             run.finish(TelemetryRunFinish {
                 duration: Some(duration),
                 success,
                 jit_used: payload.used_jit,
                 error,
+                failure,
+                host: Some(TelemetryHost::Wasm),
                 counters: None,
                 provider: None,
             });

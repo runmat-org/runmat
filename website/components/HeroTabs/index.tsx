@@ -7,7 +7,7 @@ import { BrowserTab } from "./BrowserTab";
 import { DesktopTab } from "./DesktopTab";
 import { CLITab } from "./CLITab";
 import { OtherTab } from "./OtherTab";
-import { trackEvent } from "@/components/GoogleAnalytics";
+import { trackWebsiteEvent } from "@/components/GoogleAnalytics";
 
 type TabOption = "browser" | "desktop" | "cli" | "other";
 type Platform = "macos" | "windows" | "linux";
@@ -37,7 +37,10 @@ export function HeroTabs() {
 
   const handleTabChange = (tab: TabOption) => {
     setActiveTab(tab);
-    trackEvent("hero_tab_select", "hero_tabs", tab);
+    trackWebsiteEvent("website.hero.tab_selected", {
+      category: "hero_tabs",
+      label: tab,
+    });
   };
 
   const tabId = (tab: TabOption) => `hero-tab-${tab}`;

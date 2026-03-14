@@ -19,13 +19,16 @@ import { SiGithub } from "react-icons/si";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { ThemeToggle } from "./ThemeToggle";
-import { trackEvent } from "@/components/GoogleAnalytics";
+import { trackWebsiteEvent } from "@/components/GoogleAnalytics";
 
 export default function Navigation() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const router = useRouter();
   const handleTryInBrowserClick = () => {
-    trackEvent("nav_cta_click", "navigation", "try_in_browser");
+    trackWebsiteEvent("website.nav.cta_clicked", {
+      category: "navigation",
+      label: "try_in_browser",
+    });
   };
   const handleDocsClick = () => {
     router.push("/docs");
