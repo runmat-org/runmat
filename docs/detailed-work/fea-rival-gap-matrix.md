@@ -99,6 +99,12 @@ This keeps contract/versioning discipline in place while solver/assembly impleme
 2. `analysis.run_electromagnetic/v1` now runs the FEA EM pipeline and returns typed EM payloads with `FEA_EM_STATIC` diagnostics.
 3. EM run posture remains deterministic and contract-governed while higher-fidelity Maxwell kernels are still pending.
 
+## Maxwell EM Bring-Up Status (Phase 4)
+
+1. Added first weak-form style EM static assembly/solve proxy terms in analysis-fea pipeline (`curl-curl` stiffness proxy + frequency-conductivity mass proxy).
+2. EM run now uses matrix-free PCG solve on the assembled EM operator and computes flux-density proxies from solved vector potential gradients.
+3. Contract interfaces remain stable while internal solver behavior is upgraded from purely synthetic/static mapping to first assembled EM solve posture.
+
 ## In-Scope Deepening Closure (Thermal + Thermo/Electro + Plastic/Contact)
 
 The current in-scope deepening track (items 1-6) is closed at baseline with the following concrete outcomes:

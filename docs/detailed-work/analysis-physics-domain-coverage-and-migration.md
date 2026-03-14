@@ -172,6 +172,14 @@ Not required for this milestone:
   - runtime remains contract/orchestration/results/governance surface.
 - EM diagnostics now emit `FEA_EM_STATIC` with structured solve posture metrics (`reference_frequency_hz`, `applied_current_a`, `conductivity_mean_s_per_m`, `max_residual_norm`, `solve_quality`).
 
+### Maxwell EM Phase-4 Status (2026-03-13)
+
+- Introduced first weak-form style EM static assembly pieces in analysis-fea pipeline:
+  - curl-curl style stiffness term proxy (`reluctivity / h^2`) and conductivity-frequency mass term (`omega * sigma`) assembled into operator coefficients,
+  - boundary-constrained line-domain solve with matrix-free PCG backend path,
+  - post-solve flux-density proxy derived from vector-potential gradient.
+- Runtime EM operation remains contract-stable and now consumes this FEA-backed static EM solve path end-to-end (typed payloads, summary metrics, trends/governance signals unchanged at interface level).
+
 ## Closeout Checklist for This Track
 
 - [x] Canonical physics ownership documented as model/material/interface-owned.
