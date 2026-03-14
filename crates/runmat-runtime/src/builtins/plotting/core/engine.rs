@@ -25,14 +25,19 @@ enum PlottingBackendError {
 }
 
 fn engine_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).build()
+    build_runtime_error(message)
+        .with_identifier("RunMat:plot:EngineError")
+        .build()
 }
 
 fn engine_error_with_source(
     message: impl Into<String>,
     source: impl std::error::Error + Send + Sync + 'static,
 ) -> RuntimeError {
-    build_runtime_error(message).with_source(source).build()
+    build_runtime_error(message)
+        .with_identifier("RunMat:plot:EngineError")
+        .with_source(source)
+        .build()
 }
 
 #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]

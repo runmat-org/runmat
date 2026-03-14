@@ -207,13 +207,19 @@ async fn call_builtin_async_impl(
     }
 
     // If none succeeded, return the last error
-    Err(build_runtime_error(format!(
+    let identifier = last_error
+        .identifier()
+        .unwrap_or("RunMat:NoMatchingOverload")
+        .to_string();
+    let mut builder = build_runtime_error(format!(
         "No matching overload for `{}` with {} args: {}",
         name,
         args.len(),
         last_error.message()
     ))
-    .build())
+    .with_source(last_error);
+    builder = builder.with_identifier(identifier);
+    Err(builder.build())
 }
 
 pub async fn call_builtin_async(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {

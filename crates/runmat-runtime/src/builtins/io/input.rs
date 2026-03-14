@@ -14,6 +14,13 @@ use crate::{
 
 const DEFAULT_PROMPT: &str = "Input: ";
 
+fn input_error(identifier: &str, message: impl Into<String>) -> RuntimeError {
+    build_runtime_error(message)
+        .with_identifier(identifier.to_string())
+        .with_builtin("input")
+        .build()
+}
+
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::input")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "input",
@@ -48,7 +55,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 async fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
     if args.len() > 2 {
-        return Err(build_runtime_error("RunMat:input:TooManyInputs").build());
+        return Err(input_error(
+            "RunMat:input:TooManyInputs",
+            "input: too many inputs",
+        ));
     }
 
     let mut prompt_index = if args.is_empty() { None } else { Some(0usize) };
@@ -86,7 +96,9 @@ async fn input_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
         .map_err(|err| {
             let message = err.message().to_string();
             build_runtime_error(format!("input: {message}"))
+                .with_identifier("RunMat:input:InteractionFailed")
                 .with_source(err)
+                .with_builtin("input")
                 .build()
         })?;
     if return_string {
@@ -100,7 +112,10 @@ async fn parse_prompt(value: &Value) -> Result<String, RuntimeError> {
     match gathered {
         Value::CharArray(ca) => {
             if ca.rows != 1 {
-                Err(build_runtime_error("RunMat:input:PromptMustBeRowVector").build())
+                Err(input_error(
+                    "RunMat:input:PromptMustBeRowVector",
+                    "input: prompt must be a row vector",
+                ))
             } else {
                 Ok(ca.data.iter().collect())
             }
@@ -110,12 +125,16 @@ async fn parse_prompt(value: &Value) -> Result<String, RuntimeError> {
             if sa.data.len() == 1 {
                 Ok(sa.data[0].clone())
             } else {
-                Err(build_runtime_error("RunMat:input:PromptMustBeScalarString").build())
+                Err(input_error(
+                    "RunMat:input:PromptMustBeScalarString",
+                    "input: prompt must be a scalar string",
+                ))
             }
         }
-        other => {
-            Err(build_runtime_error(format!("RunMat:input:InvalidPromptType ({other:?})")).build())
-        }
+        other => Err(input_error(
+            "RunMat:input:InvalidPromptType",
+            format!("input: invalid prompt type ({other:?})"),
+        )),
     }
 }
 
@@ -126,16 +145,20 @@ async fn parse_string_flag(value: &Value) -> Result<bool, RuntimeError> {
         Value::String(s) => s,
         Value::StringArray(sa) if sa.data.len() == 1 => sa.data[0].clone(),
         other => {
-            return Err(
-                build_runtime_error(format!("RunMat:input:InvalidStringFlag ({other:?})")).build(),
-            )
+            return Err(input_error(
+                "RunMat:input:InvalidStringFlag",
+                format!("input: invalid string flag ({other:?})"),
+            ))
         }
     };
     let trimmed = text.trim();
     if trimmed.eq_ignore_ascii_case("s") {
         Ok(true)
     } else {
-        Err(build_runtime_error(format!("RunMat:input:InvalidStringFlag ({trimmed})")).build())
+        Err(input_error(
+            "RunMat:input:InvalidStringFlag",
+            format!("input: invalid string flag ({trimmed})"),
+        ))
     }
 }
 
@@ -148,8 +171,10 @@ async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
         .await
         .map_err(|err| {
             let message = err.message().to_string();
-            build_runtime_error(format!("RunMat:input:InvalidNumericExpression ({message})"))
+            build_runtime_error(format!("input: invalid numeric expression ({message})"))
+                .with_identifier("RunMat:input:InvalidNumericExpression")
                 .with_source(err)
+                .with_builtin("input")
                 .build()
         })
 }
@@ -195,6 +220,6 @@ pub(crate) mod tests {
         let prompt = Value::String("Ready?".to_string());
         let bad_flag = Value::String("not-string-mode".to_string());
         let err = futures::executor::block_on(input_builtin(vec![prompt, bad_flag])).unwrap_err();
-        assert!(err.message().contains("InvalidStringFlag"));
+        assert_eq!(err.identifier(), Some("RunMat:input:InvalidStringFlag"));
     }
 }

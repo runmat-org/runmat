@@ -917,13 +917,13 @@ fn build_string_rhs_view(rhs: &Value, selection_lengths: &[usize]) -> VmResult<S
                 shape.resize(dims, 1);
             } else if shape.len() > dims {
                 if shape.iter().skip(dims).any(|&s| s != 1) {
-                    return Err("shape mismatch for slice assign".to_string().into());
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
                 }
                 shape.truncate(dims);
             }
             for (rhs_len, sel_len) in shape.iter().zip(selection_lengths.iter()) {
                 if !(*rhs_len == 1 || *rhs_len == *sel_len) {
-                    return Err("shape mismatch for slice assign".to_string().into());
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
                 }
             }
             let mut strides = vec![1usize; dims];
@@ -943,13 +943,13 @@ fn build_string_rhs_view(rhs: &Value, selection_lengths: &[usize]) -> VmResult<S
                 shape.resize(dims, 1);
             } else if shape.len() > dims {
                 if shape.iter().skip(dims).any(|&s| s != 1) {
-                    return Err("shape mismatch for slice assign".to_string().into());
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
                 }
                 shape.truncate(dims);
             }
             for (rhs_len, sel_len) in shape.iter().zip(selection_lengths.iter()) {
                 if !(*rhs_len == 1 || *rhs_len == *sel_len) {
-                    return Err("shape mismatch for slice assign".to_string().into());
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
                 }
             }
             let mut strides = vec![1usize; dims];
@@ -962,7 +962,10 @@ fn build_string_rhs_view(rhs: &Value, selection_lengths: &[usize]) -> VmResult<S
                 strides,
             })
         }
-        _ => Err("rhs must be string or string array".to_string().into()),
+        _ => Err(mex(
+            "InvalidSliceAssignmentRhs",
+            "rhs must be string or string array",
+        )),
     }
 }
 
@@ -3549,7 +3552,7 @@ async fn run_interpreter_inner(
                                     pc = catch_pc;
                                     continue;
                                 } else {
-                                    return Err(e.to_string().into());
+                                    return Err(e);
                                 }
                             }
                         }
@@ -6044,7 +6047,10 @@ async fn run_interpreter_inner(
                             .map_err(|e| format!("slice: {e}"))?;
                         base = Value::Tensor(tensor);
                     } else {
-                        return Err("No acceleration provider registered".to_string().into());
+                        return Err(mex(
+                            "AccelerationProviderUnavailable",
+                            "No acceleration provider registered",
+                        ));
                     }
                 }
                 match base {
@@ -11424,7 +11430,7 @@ async fn try_execute_fusion_group(
             }
             Err(err) => {
                 log::debug!("explained variance fusion fallback: {}", err);
-                Err(err.to_string().into())
+                Err(mex("FusionExecutionFailed", &err.to_string()))
             }
         }
     } else if plan.group.kind == FusionKind::MatmulEpilogue {
@@ -11433,7 +11439,7 @@ async fn try_execute_fusion_group(
                 stack_guard.commit();
                 Ok(result)
             }
-            Err(err) => Err(err.to_string().into()),
+            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
         }
     } else if plan.group.kind == FusionKind::ImageNormalize {
         match execute_image_normalize(request).await {
@@ -11441,11 +11447,14 @@ async fn try_execute_fusion_group(
                 stack_guard.commit();
                 Ok(result)
             }
-            Err(err) => Err(err.to_string().into()),
+            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
         }
     } else {
         // Unknown fusion kind; restore stack and report
-        Err("fusion: unsupported fusion kind".to_string().into())
+        Err(mex(
+            "FusionUnsupportedKind",
+            "fusion: unsupported fusion kind",
+        ))
     }
 }
 

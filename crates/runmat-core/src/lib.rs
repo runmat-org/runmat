@@ -1140,8 +1140,13 @@ impl RunMatSession {
 
     /// Parse, lower, compile, and execute input.
     pub async fn run(&mut self, input: &str) -> std::result::Result<ExecutionResult, RunError> {
-        let _active = ActiveExecutionGuard::new(self)
-            .map_err(|err| RunError::Runtime(build_runtime_error(err.to_string()).build()))?;
+        let _active = ActiveExecutionGuard::new(self).map_err(|err| {
+            RunError::Runtime(
+                build_runtime_error(err.to_string())
+                    .with_identifier("RunMat:ExecutionAlreadyActive")
+                    .build(),
+            )
+        })?;
         runmat_ignition::set_call_stack_limit(self.callstack_limit);
         runmat_ignition::set_error_namespace(&self.error_namespace);
         runmat_hir::set_error_namespace(&self.error_namespace);

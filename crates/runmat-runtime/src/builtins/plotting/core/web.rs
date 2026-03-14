@@ -41,7 +41,9 @@ pub enum PlotCameraProjection {
 }
 
 fn web_error(message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).build()
+    build_runtime_error(message)
+        .with_identifier("RunMat:plot:WebError")
+        .build()
 }
 
 #[allow(dead_code)]
@@ -49,7 +51,10 @@ fn web_error_with_source(
     message: impl Into<String>,
     source: impl std::error::Error + Send + Sync + 'static,
 ) -> RuntimeError {
-    build_runtime_error(message).with_source(source).build()
+    build_runtime_error(message)
+        .with_identifier("RunMat:plot:WebError")
+        .with_source(source)
+        .build()
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]

@@ -61,6 +61,34 @@ fn resolved_error_namespace(cfg: &RunMatConfig) -> String {
     }
 }
 
+#[cfg(test)]
+mod compat_tests {
+    use super::*;
+
+    #[test]
+    fn resolved_error_namespace_defaults_from_language_compat() {
+        let mut cfg = RunMatConfig::default();
+        cfg.runtime.error_namespace.clear();
+
+        cfg.language.compat = config::LanguageCompatMode::RunMat;
+        assert_eq!(resolved_error_namespace(&cfg), "RunMat");
+
+        cfg.language.compat = config::LanguageCompatMode::Matlab;
+        assert_eq!(resolved_error_namespace(&cfg), "MATLAB");
+
+        cfg.language.compat = config::LanguageCompatMode::Strict;
+        assert_eq!(resolved_error_namespace(&cfg), "RunMat");
+    }
+
+    #[test]
+    fn resolved_error_namespace_honors_explicit_override() {
+        let mut cfg = RunMatConfig::default();
+        cfg.language.compat = config::LanguageCompatMode::Matlab;
+        cfg.runtime.error_namespace = "CustomNS".to_string();
+        assert_eq!(resolved_error_namespace(&cfg), "CustomNS");
+    }
+}
+
 fn format_frontend_error(err: &RunError, source_name: &str, source: &str) -> Option<String> {
     match err {
         RunError::Syntax(err) => {

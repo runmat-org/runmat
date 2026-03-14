@@ -57,6 +57,8 @@ pub enum ExecutionStatus {
 pub struct ExecutionError {
     /// Error type/name
     pub error_type: String,
+    /// Stable identifier code when available
+    pub identifier: Option<String>,
     /// Error message
     pub message: String,
     /// Error traceback/stack trace
@@ -137,6 +139,7 @@ impl ExecutionEngine {
                 let execution_time_ms = start_time.elapsed().as_millis() as u64;
 
                 if let Some(error) = repl_result.error {
+                    let identifier = error.identifier().map(ToString::to_string);
                     let error_message = error.format_diagnostic();
                     let traceback = if error.context.call_stack.is_empty() {
                         vec!["Error during code execution".to_string()]
@@ -151,7 +154,10 @@ impl ExecutionEngine {
                         result: None,
                         execution_time_ms,
                         error: Some(ExecutionError {
-                            error_type: "RuntimeError".to_string(),
+                            error_type: identifier
+                                .clone()
+                                .unwrap_or_else(|| "RuntimeError".to_string()),
+                            identifier,
                             message: error_message,
                             traceback,
                         }),
@@ -169,11 +175,38 @@ impl ExecutionEngine {
             }
             Err(e) => {
                 let execution_time_ms = start_time.elapsed().as_millis() as u64;
-                let (error_type, message) = match e {
-                    RunError::Syntax(err) => ("SyntaxError", err.to_string()),
-                    RunError::Semantic(err) => ("SemanticError", err.to_string()),
-                    RunError::Compile(err) => ("CompileError", err.to_string()),
-                    RunError::Runtime(err) => ("RuntimeError", err.format_diagnostic()),
+                let (error_type, identifier, message) = match e {
+                    RunError::Syntax(err) => ("SyntaxError".to_string(), None, err.to_string()),
+                    RunError::Semantic(err) => {
+                        let identifier = err.identifier.clone();
+                        (
+                            identifier
+                                .clone()
+                                .unwrap_or_else(|| "SemanticError".to_string()),
+                            identifier,
+                            err.to_string(),
+                        )
+                    }
+                    RunError::Compile(err) => {
+                        let identifier = err.identifier.clone();
+                        (
+                            identifier
+                                .clone()
+                                .unwrap_or_else(|| "CompileError".to_string()),
+                            identifier,
+                            err.to_string(),
+                        )
+                    }
+                    RunError::Runtime(err) => {
+                        let identifier = err.identifier().map(ToString::to_string);
+                        (
+                            identifier
+                                .clone()
+                                .unwrap_or_else(|| "RuntimeError".to_string()),
+                            identifier,
+                            err.format_diagnostic(),
+                        )
+                    }
                 };
 
                 Ok(ExecutionResult {
@@ -183,7 +216,8 @@ impl ExecutionEngine {
                     result: None,
                     execution_time_ms,
                     error: Some(ExecutionError {
-                        error_type: error_type.to_string(),
+                        error_type,
+                        identifier,
                         message,
                         traceback: vec!["Error during code execution".to_string()],
                     }),
@@ -336,6 +370,7 @@ mod tests {
                 || error.error_type == "CompileError"
                 || error.error_type == "UndefinedVariable"
                 || error.error_type == "SemanticError"
+                || error.error_type.contains(':')
         );
     }
 

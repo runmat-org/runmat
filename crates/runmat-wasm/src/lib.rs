@@ -887,7 +887,7 @@ pub async fn register_figure_canvas(handle: u32, canvas: JsValue) -> Result<(), 
                 Some(err),
             )
         })?;
-    runtime_bind_surface_to_figure(surface_id, handle).map_err(|err| js_error(err.message()))?;
+    runtime_bind_surface_to_figure(surface_id, handle).map_err(|err| runtime_error_to_js(&err))?;
     LEGACY_FIGURE_SURFACES.with(|slot| {
         slot.borrow_mut().insert(handle, surface_id);
     });
@@ -923,13 +923,13 @@ pub fn resize_figure_canvas(handle: u32, width: u32, height: u32) -> Result<(), 
     };
     // Legacy API has no access to devicePixelRatio; assume 1.0.
     runtime_resize_surface(surface_id, width.max(1), height.max(1), 1.0)
-        .map_err(|err| js_error(err.message()))
+        .map_err(|err| runtime_error_to_js(&err))
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = renderCurrentFigureScene)]
 pub fn render_current_figure_scene(handle: u32) -> Result<(), JsValue> {
-    runtime_render_current_scene(handle).map_err(|err| js_error(err.message()))
+    runtime_render_current_scene(handle).map_err(|err| runtime_error_to_js(&err))
 }
 
 // New surface-id based API.
@@ -957,25 +957,25 @@ pub fn resize_plot_surface(
     pixels_per_point: f32,
 ) -> Result<(), JsValue> {
     runtime_resize_surface(surface_id, width.max(1), height.max(1), pixels_per_point)
-        .map_err(|err| js_error(err.message()))
+        .map_err(|err| runtime_error_to_js(&err))
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = bindSurfaceToFigure)]
 pub fn bind_surface_to_figure(surface_id: u32, handle: u32) -> Result<(), JsValue> {
-    runtime_bind_surface_to_figure(surface_id, handle).map_err(|err| js_error(err.message()))
+    runtime_bind_surface_to_figure(surface_id, handle).map_err(|err| runtime_error_to_js(&err))
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = presentSurface)]
 pub fn present_surface(surface_id: u32) -> Result<(), JsValue> {
-    runtime_present_surface(surface_id).map_err(|err| js_error(err.message()))
+    runtime_present_surface(surface_id).map_err(|err| runtime_error_to_js(&err))
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = presentFigureOnSurface)]
 pub fn present_figure_on_surface(surface_id: u32, handle: u32) -> Result<(), JsValue> {
-    runtime_present_figure_on_surface(surface_id, handle).map_err(|err| js_error(err.message()))
+    runtime_present_figure_on_surface(surface_id, handle).map_err(|err| runtime_error_to_js(&err))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1083,26 +1083,26 @@ pub fn handle_plot_surface_event(surface_id: u32, event: JsValue) -> Result<(), 
         }
     };
 
-    runtime_handle_plot_surface_event(surface_id, event).map_err(|err| js_error(err.message()))
+    runtime_handle_plot_surface_event(surface_id, event).map_err(|err| runtime_error_to_js(&err))
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = "fitPlotSurfaceExtents")]
 pub fn fit_plot_surface_extents(surface_id: u32) -> Result<(), JsValue> {
-    runtime_fit_surface_extents(surface_id).map_err(|err| js_error(err.message()))
+    runtime_fit_surface_extents(surface_id).map_err(|err| runtime_error_to_js(&err))
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = "resetPlotSurfaceCamera")]
 pub fn reset_plot_surface_camera(surface_id: u32) -> Result<(), JsValue> {
-    runtime_reset_surface_camera(surface_id).map_err(|err| js_error(err.message()))
+    runtime_reset_surface_camera(surface_id).map_err(|err| runtime_error_to_js(&err))
 }
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen(js_name = "getPlotSurfaceCameraState")]
 pub fn get_plot_surface_camera_state(surface_id: u32) -> Result<JsValue, JsValue> {
     let state =
-        runtime_get_surface_camera_state(surface_id).map_err(|err| js_error(err.message()))?;
+        runtime_get_surface_camera_state(surface_id).map_err(|err| runtime_error_to_js(&err))?;
     serde_wasm_bindgen::to_value(&state).map_err(|err| js_error(&err.to_string()))
 }
 
@@ -1111,7 +1111,7 @@ pub fn get_plot_surface_camera_state(surface_id: u32) -> Result<JsValue, JsValue
 pub fn set_plot_surface_camera_state(surface_id: u32, state: JsValue) -> Result<(), JsValue> {
     let parsed: PlotSurfaceCameraState =
         serde_wasm_bindgen::from_value(state).map_err(|err| js_error(&err.to_string()))?;
-    runtime_set_surface_camera_state(surface_id, parsed).map_err(|err| js_error(err.message()))
+    runtime_set_surface_camera_state(surface_id, parsed).map_err(|err| runtime_error_to_js(&err))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1166,7 +1166,7 @@ pub fn set_plot_theme_config(theme: JsValue) -> Result<(), JsValue> {
     normalized
         .validate()
         .map_err(|err| js_error(&format!("Invalid plot theme config: {err}")))?;
-    runtime_set_plot_theme_config(normalized).map_err(|err| js_error(err.message()))
+    runtime_set_plot_theme_config(normalized).map_err(|err| runtime_error_to_js(&err))
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -2364,6 +2364,14 @@ fn run_error_to_js(err: &RunError, source: &str) -> JsValue {
 
 fn js_error(message: &str) -> JsValue {
     JsValue::from_str(message)
+}
+
+fn runtime_error_to_js(err: &runmat_runtime::RuntimeError) -> JsValue {
+    if let Some(identifier) = err.identifier() {
+        js_error(&format!("{identifier}: {}", err.message()))
+    } else {
+        js_error(err.message())
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
