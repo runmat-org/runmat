@@ -107,7 +107,7 @@ impl RemoteFsProvider {
         let xhr = self.prepare_xhr(method, &url, XmlHttpRequestResponseType::Text)?;
         self.apply_headers(&xhr, content_type)?;
         self.dispatch(&xhr, body)?;
-        self.read_text(&xhr)
+        self.read_text(&xhr, method, &url)
     }
 
     fn send_bytes(
@@ -122,7 +122,7 @@ impl RemoteFsProvider {
         let xhr = self.prepare_xhr(method, &url, XmlHttpRequestResponseType::Arraybuffer)?;
         self.apply_headers(&xhr, content_type)?;
         self.dispatch(&xhr, body)?;
-        self.read_bytes(&xhr)
+        self.read_bytes(&xhr, method, &url)
     }
 
     fn fetch_download_url(&self, path: &str) -> io::Result<DownloadUrlResponse> {
@@ -147,7 +147,7 @@ impl RemoteFsProvider {
             .map_err(|err| map_js_error("set_request_header", err))?;
         self.apply_headers(&xhr, None)?;
         self.dispatch(&xhr, None)?;
-        self.read_bytes(&xhr)
+        self.read_bytes(&xhr, "GET", url)
     }
 
     fn send_empty(&self, method: &str, route: &str, query: &[(&str, String)]) -> io::Result<()> {
@@ -202,12 +202,12 @@ impl RemoteFsProvider {
         Ok(())
     }
 
-    fn read_text(&self, xhr: &XmlHttpRequest) -> io::Result<String> {
+    fn read_text(&self, xhr: &XmlHttpRequest, method: &str, url: &str) -> io::Result<String> {
         let status = xhr
             .status()
             .map_err(|err| map_js_error("XmlHttpRequest::status", err))?;
         if status < 200 || status >= 300 {
-            return Err(self.status_error(xhr, status));
+            return Err(self.status_error(xhr, status, method, url));
         }
         xhr.response_text()
             .map_err(|err| map_js_error("XmlHttpRequest::response_text", err))?
@@ -219,12 +219,12 @@ impl RemoteFsProvider {
             })
     }
 
-    fn read_bytes(&self, xhr: &XmlHttpRequest) -> io::Result<Vec<u8>> {
+    fn read_bytes(&self, xhr: &XmlHttpRequest, method: &str, url: &str) -> io::Result<Vec<u8>> {
         let status = xhr
             .status()
             .map_err(|err| map_js_error("XmlHttpRequest::status", err))?;
         if status < 200 || status >= 300 {
-            return Err(self.status_error(xhr, status));
+            return Err(self.status_error(xhr, status, method, url));
         }
         let value = xhr
             .response()
@@ -241,7 +241,13 @@ impl RemoteFsProvider {
         Ok(out)
     }
 
-    fn status_error(&self, xhr: &XmlHttpRequest, status: u16) -> io::Error {
+    fn status_error(
+        &self,
+        xhr: &XmlHttpRequest,
+        status: u16,
+        method: &str,
+        url: &str,
+    ) -> io::Error {
         let message = xhr
             .response_text()
             .ok()
@@ -255,7 +261,10 @@ impl RemoteFsProvider {
             400 => ErrorKind::InvalidInput,
             _ => ErrorKind::Other,
         };
-        io::Error::new(kind, format!("remote fs http error ({status}): {message}"))
+        io::Error::new(
+            kind,
+            format!("remote fs http error ({status}) method={method} url={url}: {message}"),
+        )
     }
 
     fn fetch_metadata(&self, path: &str) -> io::Result<MetadataResponse> {
@@ -419,7 +428,7 @@ impl RemoteFsProvider {
             .status()
             .map_err(|err| map_js_error("XmlHttpRequest::status", err))?;
         if status < 200 || status >= 300 {
-            return Err(self.status_error(&xhr, status));
+            return Err(self.status_error(&xhr, status, "PUT", &url));
         }
         Ok(())
     }

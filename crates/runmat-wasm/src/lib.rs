@@ -822,6 +822,16 @@ impl RunMatWasm {
             .map_err(|err| js_error(&format!("Failed to serialize memory stats: {err}")))
     }
 
+    #[wasm_bindgen(js_name = setFsProvider)]
+    pub fn set_fs_provider(&self, bindings: JsValue) -> Result<(), JsValue> {
+        install_fs_provider_value(bindings).map_err(|err| {
+            js_error(&format!(
+                "Failed to install filesystem provider: {}",
+                js_value_to_string(err)
+            ))
+        })
+    }
+
     #[wasm_bindgen(js_name = dispose)]
     pub fn dispose(&self) {
         if self.disposed.replace(true) {

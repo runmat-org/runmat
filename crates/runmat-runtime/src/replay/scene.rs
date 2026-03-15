@@ -337,6 +337,9 @@ fn read_scene_chunk_bytes(
     );
 
     let mut errors = Vec::new();
+    let mut not_found = 0usize;
+    let mut permission_denied = 0usize;
+    let mut other_errors = 0usize;
     for candidate in candidates {
         match runmat_filesystem::read(&candidate) {
             Ok(bytes) => {
@@ -350,6 +353,22 @@ fn read_scene_chunk_bytes(
                 return Ok(bytes);
             }
             Err(err) => {
+                match err.kind() {
+                    std::io::ErrorKind::NotFound => not_found += 1,
+                    std::io::ErrorKind::PermissionDenied => permission_denied += 1,
+                    _ => other_errors += 1,
+                }
+                tracing::debug!(
+                    target: "runmat.replay",
+                    requested_ref = ?chunk,
+                    candidate = candidate,
+                    error_kind = ?err.kind(),
+                    error = %err,
+                    "scene chunk read candidate failed: candidate='{}' kind='{:?}' error='{}'",
+                    candidate,
+                    err.kind(),
+                    err
+                );
                 errors.push(format!("{}: {}", candidate, err));
             }
         }
@@ -360,19 +379,40 @@ fn read_scene_chunk_bytes(
         requested_ref = ?chunk,
         base_paths = ?base_paths,
         cwd = ?cwd,
+        not_found,
+        permission_denied,
+        other_errors,
         attempts = ?errors,
         "scene chunk read failed for all candidates"
+    );
+
+    tracing::warn!(
+        target: "runmat.replay",
+        "scene chunk read classification: requested='{}' not_found={} permission_denied={} other_errors={} attempts={}",
+        chunk
+            .src
+            .as_deref()
+            .or(chunk.artifact_id.as_deref())
+            .unwrap_or("<unknown>"),
+        not_found,
+        permission_denied,
+        other_errors,
+        errors.len()
     );
 
     Err(std::io::Error::new(
         std::io::ErrorKind::NotFound,
         format!(
-            "scene chunk not found: {}",
+            "scene chunk not found: {} (classification: not_found={} permission_denied={} other_errors={} attempts={})",
             chunk
                 .src
                 .as_deref()
                 .or(chunk.artifact_id.as_deref())
-                .unwrap_or("<unknown>")
+                .unwrap_or("<unknown>"),
+            not_found,
+            permission_denied,
+            other_errors,
+            errors.len()
         ),
     ))
 }

@@ -513,6 +513,7 @@ export interface RunMatSessionHandle {
   setFusionPlanEnabled(enabled: boolean): void;
   setLanguageCompat(mode: LanguageCompatMode): void;
   fusionPlanForSource?(source: string): Promise<FusionPlanSnapshot | null>;
+  setFsProvider?(provider: RunMatFilesystemProvider): Promise<void>;
 }
 
 interface NativeInitOptions {
@@ -563,6 +564,7 @@ interface RunMatNativeSession {
   setFusionPlanEnabled?: (enabled: boolean) => void;
   setLanguageCompat?: (mode: LanguageCompatMode) => void;
   fusionPlanForSource?: (source: string) => FusionPlanSnapshot | null;
+  setFsProvider?: (provider: RunMatFilesystemProvider) => void;
 }
 
 type WorkspaceMaterializeSelectorWire =
@@ -1255,6 +1257,14 @@ class WebRunMatSession implements RunMatSessionHandle {
     } catch (error) {
       throw coerceRunMatError(error);
     }
+  }
+
+  async setFsProvider(provider: RunMatFilesystemProvider): Promise<void> {
+    this.ensureActive();
+    if (typeof this.native.setFsProvider !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose setFsProvider yet.");
+    }
+    this.native.setFsProvider(provider);
   }
 }
 
