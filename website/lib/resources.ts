@@ -17,6 +17,12 @@ export type ResourceType =
 
 export type ResourceSource = 'resource' | 'blog' | 'doc' | 'benchmark'
 
+function sanitizeSlug(input: string): string {
+  const lower = input.toLowerCase().trim()
+  const normalized = lower.replace(/[^a-z0-9]+/g, '-')
+  return normalized.replace(/^-+|-+$/g, '')
+}
+
 export interface ResourceItem {
   id: string
   slug: string
@@ -155,7 +161,12 @@ function loadNativeResources(): ResourceItem[] {
           continue
         }
 
-        const slug = slugFromFileName(file)
+        const rawSlug = slugFromFileName(file)
+        const slug = sanitizeSlug(rawSlug)
+        if (!slug) {
+          warn(`Skipping resource with invalid slug`, { file: filePath, slug: rawSlug })
+          continue
+        }
         const title = fm.title || slug.replace(/-/g, ' ')
         const description = fm.description || fm.excerpt || content.trim().slice(0, 200) || ''
         const date =
@@ -168,12 +179,23 @@ function loadNativeResources(): ResourceItem[] {
             }
           })()
 
+        let href = fm.link || `/resources/${resolvedType}/${slug}`
+        // Only allow relative URLs from frontmatter to avoid unsafe schemes
+        if (fm.link) {
+          const trimmed = fm.link.trim()
+          if (!trimmed.startsWith('/') && !trimmed.startsWith('./') && !trimmed.startsWith('../')) {
+            href = `/resources/${resolvedType}/${slug}`
+          } else {
+            href = trimmed
+          }
+        }
+
         items.push({
           id: `resource:${resolvedType}:${slug}`,
           slug,
           title,
           description,
-          href: fm.link || `/resources/${resolvedType}/${slug}`,
+          href,
           type: resolvedType,
           source: 'resource',
           date,
