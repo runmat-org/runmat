@@ -28,7 +28,40 @@ type AttributionPayload = {
 };
 
 function isValidEmail(email: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  const trimmed = email.trim();
+  if (!trimmed || trimmed.length > 320) {
+    return false;
+  }
+
+  let atIndex = -1;
+  for (let i = 0; i < trimmed.length; i += 1) {
+    const code = trimmed.charCodeAt(i);
+    if (code <= 32 || code === 127) {
+      return false;
+    }
+    if (trimmed[i] === "@") {
+      if (atIndex !== -1) {
+        return false;
+      }
+      atIndex = i;
+    }
+  }
+
+  if (atIndex <= 0 || atIndex === trimmed.length - 1) {
+    return false;
+  }
+
+  const localPartLength = atIndex;
+  const domain = trimmed.slice(atIndex + 1);
+  if (localPartLength > 64 || domain.length > 255) {
+    return false;
+  }
+  if (domain.startsWith(".") || domain.endsWith(".") || domain.includes("..")) {
+    return false;
+  }
+
+  const dotIndex = domain.indexOf(".");
+  return dotIndex > 0 && dotIndex < domain.length - 1;
 }
 
 export async function POST(req: NextRequest) {
