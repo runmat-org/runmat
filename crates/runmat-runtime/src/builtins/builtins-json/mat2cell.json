@@ -89,6 +89,22 @@
     {
       "question": "Does `mat2cell` copy the data?",
       "answer": "Yes. Each cell receives its own copy of the underlying block so that you can modify the cell contents without affecting other cells or the original array."
+    },
+    {
+      "question": "What does mat2cell do in MATLAB?",
+      "answer": "`mat2cell(X, rowSizes, colSizes)` divides matrix `X` into a cell array of sub-matrices. The partition vectors specify the row and column sizes of each block, and must sum to the dimension sizes of `X`."
+    },
+    {
+      "question": "How is mat2cell different from num2cell?",
+      "answer": "`num2cell` splits a matrix into individual scalar cells (one element per cell), while `mat2cell` splits into sub-matrices of specified sizes. Use `mat2cell` when you need contiguous blocks."
+    },
+    {
+      "question": "Can I use mat2cell on 3-D arrays?",
+      "answer": "Yes. Provide partition vectors for each dimension: `mat2cell(X, rowSizes, colSizes, pageSizes)`. Omitted trailing dimensions are treated as a single partition equal to the full size."
+    },
+    {
+      "question": "How do I convert a cell array back to a matrix?",
+      "answer": "Use `cell2mat(C)` to concatenate the cells back into a single matrix. Each cell must contain a numeric array, and the sizes must be consistent along concatenation dimensions."
     }
   ],
   "links": [
@@ -107,6 +123,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "cellfun",
+      "url": "./cellfun"
+    },
+    {
+      "label": "cellstr",
+      "url": "./cellstr"
     }
   ],
   "source": {

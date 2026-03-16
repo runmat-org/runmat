@@ -35,10 +35,10 @@
   "behaviors": [
     "`tcpserver(address, port)` binds to the requested interface; pass `\"0.0.0.0\"` or `\"::\"` to listen on every IPv4 or IPv6 adapter respectively.",
     "Ports must be in the range `0–65535`. Passing `0` requests an ephemeral OS-assigned port that RunMat reports in the returned struct.",
-    "Supported name-value pairs mirror MATLAB defaults: `Timeout` (non-negative seconds, default `10`), `UserData` (stored verbatim), `Name` (defaults to `\"tcpserver:<address>:<port>\"`), and `ByteOrder` (`\"little-endian\"` or `\"big-endian\"`). Unsupported options raise `RunMat:tcpserver:InvalidNameValue`.",
+    "Supported name-value pairs mirror MATLAB defaults: `Timeout` (non-negative seconds, default `10`), `UserData` (stored verbatim), `Name` (defaults to `\"tcpserver:<address>:<port>\"`), and `ByteOrder` (`\"little-endian\"` or `\"big-endian\"`). Unsupported options raise `MATLAB:tcpserver:InvalidNameValue`.",
     "The returned struct mirrors MATLAB properties, including connection state, callback metadata, and an internal `__tcpserver_id` identifier that future networking builtins use to locate the listener.",
     "GPU-resident scalars are gathered automatically before binding so that socket setup always executes on the host CPU.",
-    "Bind failures raise `RunMat:tcpserver:BindFailed` with the OS-provided error message, preserving MATLAB-style diagnostics."
+    "Bind failures raise `MATLAB:tcpserver:BindFailed` with the OS-provided error message, preserving MATLAB-style diagnostics."
   ],
   "examples": [
     {
@@ -69,7 +69,7 @@
     {
       "description": "Handling invalid ports with MATLAB-style diagnostics",
       "input": "try\n    srv = tcpserver(\"127.0.0.1\", 99999);\ncatch err\n    disp(err.identifier)\n    disp(err.message)\nend",
-      "output": "RunMat:tcpserver:InvalidPort\nRunMat:tcpserver:InvalidPort: tcpserver: port 99999 is outside the valid range 0–65535"
+      "output": "MATLAB:tcpserver:InvalidPort\nMATLAB:tcpserver:InvalidPort: tcpserver: port 99999 is outside the valid range 0–65535"
     }
   ],
   "faqs": [
@@ -103,7 +103,7 @@
     },
     {
       "question": "What happens if the port is already in use?",
-      "answer": "`tcpserver` raises `RunMat:tcpserver:BindFailed` with the OS error message."
+      "answer": "`tcpserver` raises `MATLAB:tcpserver:BindFailed` with the OS error message."
     },
     {
       "question": "How do I pass additional socket options?",
@@ -130,6 +130,30 @@
     {
       "label": "fprintf",
       "url": "./fprintf"
+    },
+    {
+      "label": "accept",
+      "url": "./accept"
+    },
+    {
+      "label": "close",
+      "url": "./close"
+    },
+    {
+      "label": "read",
+      "url": "./read"
+    },
+    {
+      "label": "readline",
+      "url": "./readline"
+    },
+    {
+      "label": "tcpclient",
+      "url": "./tcpclient"
+    },
+    {
+      "label": "write",
+      "url": "./write"
     }
   ],
   "source": {

@@ -111,6 +111,10 @@
     {
       "label": "toc",
       "url": "./toc"
+    },
+    {
+      "label": "pause",
+      "url": "./pause"
     }
   ],
   "source": {

@@ -98,6 +98,18 @@
     {
       "question": "Will `rem` stay on the GPU?",
       "answer": "It stays on-device when the provider implements `elem_div`, `unary_fix`, `elem_mul`, and `elem_sub`; fusion-aware planners can keep intermediates resident for downstream kernels. Otherwise the runtime gathers the operands, executes the CPU fallback, and returns a host tensor so correctness is unaffected."
+    },
+    {
+      "question": "What does rem do in MATLAB?",
+      "answer": "`rem(a, b)` returns the remainder after dividing `a` by `b`. The result has the same sign as the dividend `a`. For example, `rem(7, 3)` returns `1` and `rem(-7, 3)` returns `-1`."
+    },
+    {
+      "question": "What is the difference between rem and mod in MATLAB?",
+      "answer": "Both compute remainders, but `rem` preserves the sign of the dividend while `mod` preserves the sign of the divisor. `rem(-7, 3)` returns `-1`, but `mod(-7, 3)` returns `2`."
+    },
+    {
+      "question": "Does rem support GPU arrays in RunMat?",
+      "answer": "Yes. `rem` runs on the GPU with elementwise fusion support, allowing it to be combined with other operations for efficient computation."
     }
   ],
   "links": [
@@ -120,6 +132,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "ceil",
+      "url": "./ceil"
+    },
+    {
+      "label": "round",
+      "url": "./round"
     }
   ],
   "source": {

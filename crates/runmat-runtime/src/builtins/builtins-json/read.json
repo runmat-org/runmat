@@ -32,11 +32,11 @@
   "description": "`read(t)` consumes data waiting on the TCP/IP client returned by `tcpclient` (or `accept`). The builtin mimics MATLAB’s behaviour for `read` so existing code that exchanges bytes with remote services behaves identically. It honours the client’s configured `Timeout`, respects the `ByteOrder` property when materialising multi-byte numeric types, and interprets the optional `datatype` argument just like MATLAB.",
   "behaviors": [
     "`data = read(t)` waits until at least one byte becomes available (subject to the client timeout) and then drains the socket buffer, returning a **row vector of doubles** whose values come from the received bytes. If the peer closes the connection without sending data, the result is an empty row vector.",
-    "`data = read(t, count)` blocks until exactly `count` values are available (again honouring `Timeout`). When the peer closes the socket before satisfying the request the builtin raises `RunMat:read:ConnectionClosed`.",
+    "`data = read(t, count)` blocks until exactly `count` values are available (again honouring `Timeout`). When the peer closes the socket before satisfying the request the builtin raises `MATLAB:read:ConnectionClosed`.",
     "`data = read(t, count, datatype)` interprets the values using the requested MATLAB datatype. Supported tokens mirror MATLAB: `\"uint8\"` (default), `\"int8\"`, `\"uint16\"`, `\"int16\"`, `\"uint32\"`, `\"int32\"`, `\"uint64\"`, `\"int64\"`, `\"single\"`, `\"double\"`, `\"char\"`, and `\"string\"`. Numeric outputs are returned as doubles; `\"char\"` produces a MATLAB-style character row vector and `\"string\"` returns a scalar string.",
     "Every call honours the client’s `ByteOrder` property when decoding multi-byte numbers. Little-endian is the default, but `\"big-endian\"` is respected for data written in network byte order.",
     "The builtin gathers GPU-resident arguments automatically, executes the socket read on the CPU, and returns host values.",
-    "Errors are raised with identifiers: invalid client structs trigger `RunMat:read:InvalidTcpClient`, timeouts emit `RunMat:read:Timeout`, and connection closures before a requested count is met raise `RunMat:read:ConnectionClosed`."
+    "Errors are raised with MATLAB-compatible identifiers: invalid client structs trigger `MATLAB:read:InvalidTcpClient`, timeouts emit `MATLAB:read:Timeout`, and connection closures before a requested count is met raise `MATLAB:read:ConnectionClosed`."
   ],
   "examples": [
     {
@@ -62,7 +62,7 @@
     {
       "description": "Handling read timeouts gracefully",
       "input": "client = tcpclient(\"example.com\", 12345, \"Timeout\", 0.5);\ntry\n    data = read(client, 64);\ncatch err\n    disp(err.identifier)\nend",
-      "output": "RunMat:read:Timeout"
+      "output": "MATLAB:read:Timeout"
     }
   ],
   "faqs": [
@@ -72,7 +72,7 @@
     },
     {
       "question": "What happens when the remote host closes the connection?",
-      "answer": "If the peer closes the connection before the requested count is satisfied, `read` raises `RunMat:read:ConnectionClosed`. When no specific count is requested (`read(t)`), the builtin returns whatever data was available before the closure (possibly an empty vector)."
+      "answer": "If the peer closes the connection before the requested count is satisfied, `read` raises `MATLAB:read:ConnectionClosed`. When no specific count is requested (`read(t)`), the builtin returns whatever data was available before the closure (possibly an empty vector)."
     },
     {
       "question": "Does `read` support infinite timeouts?",
@@ -103,6 +103,14 @@
     {
       "label": "readline",
       "url": "./readline"
+    },
+    {
+      "label": "close",
+      "url": "./close"
+    },
+    {
+      "label": "tcpserver",
+      "url": "./tcpserver"
     }
   ],
   "source": {

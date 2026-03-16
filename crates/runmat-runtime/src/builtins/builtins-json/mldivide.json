@@ -112,6 +112,26 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "ctranspose",
+      "url": "./ctranspose"
+    },
+    {
+      "label": "dot",
+      "url": "./dot"
+    },
+    {
+      "label": "mpower",
+      "url": "./mpower"
+    },
+    {
+      "label": "trace",
+      "url": "./trace"
+    },
+    {
+      "label": "transpose",
+      "url": "./transpose"
     }
   ],
   "source": {

@@ -32,11 +32,11 @@
   },
   "description": "`accept(server)` waits for a pending TCP connection on the socket created by `tcpserver`. When a client connects, the builtin returns a MATLAB-compatible struct that mirrors the `tcpclient` object. The struct tracks connection metadata (remote address, port, byte order, and timeout settings) and holds an opaque identifier that other RunMat networking builtins use to operate on the live socket.",
   "behaviors": [
-    "The first argument must be the struct returned from `tcpserver`. RunMat validates that the struct contains a `__tcpserver_id` field and raises `RunMat:accept:InvalidTcpServer` when the identifier is missing or no longer points to an active listener.",
-    "By default, `accept` uses the timeout configured when the server was created (`Timeout` name-value pair on `tcpserver`). You can override it per call with `accept(server, \"Timeout\", seconds)`. The timeout must be non-negative; the builtin raises `RunMat:accept:InvalidNameValue` when the value is NaN, negative, or non-scalar.",
+    "The first argument must be the struct returned from `tcpserver`. RunMat validates that the struct contains a `__tcpserver_id` field and raises `MATLAB:accept:InvalidTcpServer` when the identifier is missing or no longer points to an active listener.",
+    "By default, `accept` uses the timeout configured when the server was created (`Timeout` name-value pair on `tcpserver`). You can override it per call with `accept(server, \"Timeout\", seconds)`. The timeout must be non-negative; the builtin raises `MATLAB:accept:InvalidNameValue` when the value is NaN, negative, or non-scalar.",
     "Successful calls return immediately with a struct whose fields mirror MATLAB’s `tcpclient` properties (`Address`, `Port`, `NumBytesAvailable`, `BytesAvailableFcn`, `ByteOrder`, `Timeout`, `UserData`, and `Connected`). The struct also contains hidden fields `__tcpserver_id` and `__tcpclient_id` so higher-level builtins can operate on the live socket.",
-    "If no client connects before the timeout expires, the builtin raises `RunMat:accept:Timeout`.",
-    "When the underlying OS reports an accept failure (for example, because the socket closed), the builtin raises `RunMat:accept:AcceptFailed` with the platform error message.",
+    "If no client connects before the timeout expires, the builtin raises `MATLAB:accept:Timeout`.",
+    "When the underlying OS reports an accept failure (for example, because the socket closed), the builtin raises `MATLAB:accept:AcceptFailed` with the platform error message.",
     "Networking occurs on the host CPU. If the server struct or timeout value lives on the GPU, RunMat gathers it to the host automatically before waiting for connections."
   ],
   "examples": [
@@ -48,7 +48,7 @@
     {
       "description": "Overriding the timeout for a single accept call",
       "input": "srv = tcpserver(\"0.0.0.0\", 0, \"Timeout\", 10);\ntry\n    client = accept(srv, \"Timeout\", 0.25);\ncatch err\n    disp(err.identifier)\nend",
-      "output": "RunMat:accept:Timeout"
+      "output": "MATLAB:accept:Timeout"
     },
     {
       "description": "Inspecting connection metadata after accepting a client",
@@ -69,7 +69,7 @@
   "faqs": [
     {
       "question": "What happens if the server struct is invalid or already closed?",
-      "answer": "RunMat reports `RunMat:accept:InvalidTcpServer`. Ensure you pass the struct returned by `tcpserver` and that the server is still active."
+      "answer": "RunMat reports `MATLAB:accept:InvalidTcpServer`. Ensure you pass the struct returned by `tcpserver` and that the server is still active."
     },
     {
       "question": "Can I accept multiple clients with the same server?",
@@ -108,6 +108,26 @@
     {
       "label": "tcpserver",
       "url": "./tcpserver"
+    },
+    {
+      "label": "close",
+      "url": "./close"
+    },
+    {
+      "label": "read",
+      "url": "./read"
+    },
+    {
+      "label": "readline",
+      "url": "./readline"
+    },
+    {
+      "label": "tcpclient",
+      "url": "./tcpclient"
+    },
+    {
+      "label": "write",
+      "url": "./write"
     }
   ],
   "source": {

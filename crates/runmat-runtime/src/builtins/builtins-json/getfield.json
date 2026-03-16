@@ -70,7 +70,7 @@
     },
     {
       "description": "Gathering the exception message from a try/catch block",
-      "input": "try\n    error(\"RunMat:domainError\", \"Bad input\");\ncatch e\n    msg = getfield(e, \"message\");\nend",
+      "input": "try\n    error(\"MATLAB:domainError\", \"Bad input\");\ncatch e\n    msg = getfield(e, \"message\");\nend",
       "output": "msg = 'Bad input'"
     }
   ],
@@ -120,6 +120,14 @@
     {
       "label": "class",
       "url": "./class"
+    },
+    {
+      "label": "orderfields",
+      "url": "./orderfields"
+    },
+    {
+      "label": "rmfield",
+      "url": "./rmfield"
     }
   ],
   "source": {

@@ -127,6 +127,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "bandwidth",
+      "url": "./bandwidth"
+    },
+    {
+      "label": "symrcm",
+      "url": "./symrcm"
     }
   ],
   "source": {

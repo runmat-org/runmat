@@ -116,10 +116,6 @@
     {
       "label": "fileread",
       "url": "./fileread"
-    },
-    {
-      "label": "matfile",
-      "url": "https://www.mathworks.com/help/matlab/ref/matfile.html"
     }
   ],
   "source": {

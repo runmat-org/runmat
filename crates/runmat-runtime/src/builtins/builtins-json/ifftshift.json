@@ -110,6 +110,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "fft2",
+      "url": "./fft2"
+    },
+    {
+      "label": "ifft2",
+      "url": "./ifft2"
     }
   ],
   "source": {

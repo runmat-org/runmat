@@ -110,6 +110,18 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "isfield",
+      "url": "./isfield"
+    },
+    {
+      "label": "orderfields",
+      "url": "./orderfields"
+    },
+    {
+      "label": "rmfield",
+      "url": "./rmfield"
     }
   ],
   "source": {

@@ -131,6 +131,14 @@
     {
       "label": "gpuArray",
       "url": "./gpuarray"
+    },
+    {
+      "label": "eig",
+      "url": "./eig"
+    },
+    {
+      "label": "svd",
+      "url": "./svd"
     }
   ],
   "source": {

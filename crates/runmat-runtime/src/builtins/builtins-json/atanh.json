@@ -131,6 +131,38 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "acos",
+      "url": "./acos"
+    },
+    {
+      "label": "asin",
+      "url": "./asin"
+    },
+    {
+      "label": "atan2",
+      "url": "./atan2"
+    },
+    {
+      "label": "cos",
+      "url": "./cos"
+    },
+    {
+      "label": "cosh",
+      "url": "./cosh"
+    },
+    {
+      "label": "sin",
+      "url": "./sin"
+    },
+    {
+      "label": "sinh",
+      "url": "./sinh"
+    },
+    {
+      "label": "tan",
+      "url": "./tan"
     }
   ],
   "source": {

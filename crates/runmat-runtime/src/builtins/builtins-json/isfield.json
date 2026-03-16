@@ -109,6 +109,14 @@
     {
       "label": "setfield",
       "url": "./setfield"
+    },
+    {
+      "label": "orderfields",
+      "url": "./orderfields"
+    },
+    {
+      "label": "rmfield",
+      "url": "./rmfield"
     }
   ],
   "source": {

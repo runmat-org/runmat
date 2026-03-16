@@ -114,6 +114,22 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "ismatrix",
+      "url": "./ismatrix"
+    },
+    {
+      "label": "isscalar",
+      "url": "./isscalar"
+    },
+    {
+      "label": "isvector",
+      "url": "./isvector"
+    },
+    {
+      "label": "ndims",
+      "url": "./ndims"
     }
   ],
   "source": {

@@ -140,6 +140,18 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "isempty",
+      "url": "./isempty"
+    },
+    {
+      "label": "length",
+      "url": "./length"
+    },
+    {
+      "label": "numel",
+      "url": "./numel"
     }
   ],
   "source": {

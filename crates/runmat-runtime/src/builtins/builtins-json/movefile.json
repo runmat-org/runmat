@@ -68,7 +68,7 @@
     {
       "description": "Handle missing sources gracefully",
       "input": "[status, message, messageID] = movefile(\"missing.txt\", \"dest.txt\")",
-      "output": "status =\n     0\nmessage =\nSource \"missing.txt\" does not exist.\nmessageID =\nRunMat:movefile:FileDoesNotExist"
+      "output": "status =\n     0\nmessage =\nSource \"missing.txt\" does not exist.\nmessageID =\nMATLAB:MOVEFILE:FileDoesNotExist"
     },
     {
       "description": "Use gpuArray inputs for paths",
@@ -138,6 +138,62 @@
     {
       "label": "pwd",
       "url": "./pwd"
+    },
+    {
+      "label": "addpath",
+      "url": "./addpath"
+    },
+    {
+      "label": "cd",
+      "url": "./cd"
+    },
+    {
+      "label": "delete",
+      "url": "./delete"
+    },
+    {
+      "label": "exist",
+      "url": "./exist"
+    },
+    {
+      "label": "fullfile",
+      "url": "./fullfile"
+    },
+    {
+      "label": "genpath",
+      "url": "./genpath"
+    },
+    {
+      "label": "getenv",
+      "url": "./getenv"
+    },
+    {
+      "label": "ls",
+      "url": "./ls"
+    },
+    {
+      "label": "path",
+      "url": "./path"
+    },
+    {
+      "label": "rmpath",
+      "url": "./rmpath"
+    },
+    {
+      "label": "savepath",
+      "url": "./savepath"
+    },
+    {
+      "label": "setenv",
+      "url": "./setenv"
+    },
+    {
+      "label": "tempdir",
+      "url": "./tempdir"
+    },
+    {
+      "label": "tempname",
+      "url": "./tempname"
     }
   ],
   "source": {

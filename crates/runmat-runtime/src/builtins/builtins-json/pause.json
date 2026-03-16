@@ -29,7 +29,7 @@
     "unit": "builtins::timing::pause::tests",
     "integration": "builtins::timing::pause::tests::pause_gpu_duration_gathered"
   },
-  "description": "`pause` suspends execution and mirrors MATLAB's timing semantics:\n\n- `pause` with no inputs waits for keyboard input (press any key) while pause mode is `on`. - `pause(t)` delays execution for `t` seconds (non-negative numeric scalar). `t = Inf` behaves like `pause` with no arguments. - `pause('on')` and `pause('off')` enable or disable pausing globally, returning the previous state (`'on'` or `'off'`). - `pause('query')` reports the current state (`'on'` or `'off'`). - `pause([])` is treated as `pause` with no arguments. - When pause mode is `off`, delays and key waits complete immediately.\n\nInvalid usages (negative times, non-scalar numeric inputs, or unknown strings) raise `RunMat:pause:InvalidInputArgument`, matching MATLAB diagnostics.",
+  "description": "`pause` suspends execution and mirrors MATLAB's timing semantics:\n\n- `pause` with no inputs waits for keyboard input (press any key) while pause mode is `on`. - `pause(t)` delays execution for `t` seconds (non-negative numeric scalar). `t = Inf` behaves like `pause` with no arguments. - `pause('on')` and `pause('off')` enable or disable pausing globally, returning the previous state (`'on'` or `'off'`). - `pause('query')` reports the current state (`'on'` or `'off'`). - `pause([])` is treated as `pause` with no arguments. - When pause mode is `off`, delays and key waits complete immediately.\n\nInvalid usages (negative times, non-scalar numeric inputs, or unknown strings) raise `MATLAB:pause:InvalidInputArgument`, matching MATLAB diagnostics.",
   "behaviors": [],
   "examples": [
     {
@@ -60,7 +60,7 @@
     },
     {
       "question": "What happens if I call `pause` with a negative duration?",
-      "answer": "RunMat raises `RunMat:pause:InvalidInputArgument`, matching MATLAB."
+      "answer": "RunMat raises `MATLAB:pause:InvalidInputArgument`, matching MATLAB."
     },
     {
       "question": "Does `pause` accept logical or integer values?",

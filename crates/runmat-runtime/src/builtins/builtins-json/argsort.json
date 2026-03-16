@@ -132,6 +132,30 @@
     {
       "label": "min",
       "url": "./min"
+    },
+    {
+      "label": "intersect",
+      "url": "./intersect"
+    },
+    {
+      "label": "ismember",
+      "url": "./ismember"
+    },
+    {
+      "label": "issorted",
+      "url": "./issorted"
+    },
+    {
+      "label": "setdiff",
+      "url": "./setdiff"
+    },
+    {
+      "label": "union",
+      "url": "./union"
+    },
+    {
+      "label": "unique",
+      "url": "./unique"
     }
   ],
   "source": {

@@ -96,14 +96,6 @@
   ],
   "links": [
     {
-      "label": "rcm",
-      "url": "https://www.mathworks.com/help/matlab/ref/rcm.html"
-    },
-    {
-      "label": "symamd",
-      "url": "https://www.mathworks.com/help/matlab/ref/symamd.html"
-    },
-    {
       "label": "bandwidth",
       "url": "./bandwidth"
     },
@@ -114,6 +106,10 @@
     {
       "label": "gpuArray",
       "url": "./gpuarray"
+    },
+    {
+      "label": "ishermitian",
+      "url": "./ishermitian"
     }
   ],
   "source": {

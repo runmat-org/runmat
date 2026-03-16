@@ -120,6 +120,10 @@
     {
       "label": "fopen",
       "url": "./fopen"
+    },
+    {
+      "label": "load",
+      "url": "./load"
     }
   ],
   "source": {

@@ -125,6 +125,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "cond",
+      "url": "./cond"
+    },
+    {
+      "label": "norm",
+      "url": "./norm"
     }
   ],
   "source": {

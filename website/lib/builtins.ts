@@ -168,6 +168,7 @@ export function formatCategoryLabel(category: string[]): string {
  */
 export type BuiltinMetadata = {
   category: string;
+  rawCategory: string;
   gpuSupport: boolean;
   badges: BuiltinBadge[];
 };
@@ -176,6 +177,7 @@ export function getBuiltinMetadata(builtin: Builtin): BuiltinMetadata {
   const badges = getBuiltinBadges(builtin);
   return {
     category: formatCategoryLabel(builtin.category),
+    rawCategory: builtin.category[0] ?? '',
     gpuSupport: builtinHasGpuSupport(builtin),
     badges,
   };

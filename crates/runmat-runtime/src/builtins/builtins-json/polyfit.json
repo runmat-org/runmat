@@ -115,6 +115,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "polyder",
+      "url": "./polyder"
+    },
+    {
+      "label": "polyint",
+      "url": "./polyint"
     }
   ],
   "source": {

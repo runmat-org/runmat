@@ -122,6 +122,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "dlmread",
+      "url": "./dlmread"
+    },
+    {
+      "label": "dlmwrite",
+      "url": "./dlmwrite"
     }
   ],
   "source": {

@@ -109,6 +109,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "mod",
+      "url": "./mod"
+    },
+    {
+      "label": "rem",
+      "url": "./rem"
     }
   ],
   "source": {

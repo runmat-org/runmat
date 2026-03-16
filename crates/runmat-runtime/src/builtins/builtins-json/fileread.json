@@ -114,6 +114,34 @@
     {
       "label": "strlength",
       "url": "./strlength"
+    },
+    {
+      "label": "fclose",
+      "url": "./fclose"
+    },
+    {
+      "label": "feof",
+      "url": "./feof"
+    },
+    {
+      "label": "fgets",
+      "url": "./fgets"
+    },
+    {
+      "label": "filewrite",
+      "url": "./filewrite"
+    },
+    {
+      "label": "fprintf",
+      "url": "./fprintf"
+    },
+    {
+      "label": "frewind",
+      "url": "./frewind"
+    },
+    {
+      "label": "fwrite",
+      "url": "./fwrite"
     }
   ],
   "source": {

@@ -114,6 +114,22 @@
     {
       "label": "ne",
       "url": "./ne"
+    },
+    {
+      "label": "ge",
+      "url": "./ge"
+    },
+    {
+      "label": "isequal",
+      "url": "./isequal"
+    },
+    {
+      "label": "le",
+      "url": "./le"
+    },
+    {
+      "label": "lt",
+      "url": "./lt"
     }
   ],
   "source": {

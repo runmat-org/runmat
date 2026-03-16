@@ -133,6 +133,54 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "colon",
+      "url": "./colon"
+    },
+    {
+      "label": "eye",
+      "url": "./eye"
+    },
+    {
+      "label": "false",
+      "url": "./false"
+    },
+    {
+      "label": "fill",
+      "url": "./fill"
+    },
+    {
+      "label": "logspace",
+      "url": "./logspace"
+    },
+    {
+      "label": "magic",
+      "url": "./magic"
+    },
+    {
+      "label": "rand",
+      "url": "./rand"
+    },
+    {
+      "label": "randi",
+      "url": "./randi"
+    },
+    {
+      "label": "randn",
+      "url": "./randn"
+    },
+    {
+      "label": "randperm",
+      "url": "./randperm"
+    },
+    {
+      "label": "range",
+      "url": "./range"
+    },
+    {
+      "label": "true",
+      "url": "./true"
     }
   ],
   "source": {

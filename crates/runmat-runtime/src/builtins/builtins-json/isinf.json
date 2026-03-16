@@ -116,6 +116,18 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "isgpuarray",
+      "url": "./isgpuarray"
+    },
+    {
+      "label": "islogical",
+      "url": "./islogical"
+    },
+    {
+      "label": "isnumeric",
+      "url": "./isnumeric"
     }
   ],
   "source": {

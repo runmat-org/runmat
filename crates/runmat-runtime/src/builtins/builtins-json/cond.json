@@ -121,6 +121,18 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "det",
+      "url": "./det"
+    },
+    {
+      "label": "norm",
+      "url": "./norm"
+    },
+    {
+      "label": "rank",
+      "url": "./rank"
     }
   ],
   "source": {

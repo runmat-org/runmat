@@ -123,6 +123,46 @@
     {
       "label": "string",
       "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    },
+    {
+      "label": "compose",
+      "url": "./compose"
+    },
+    {
+      "label": "num2str",
+      "url": "./num2str"
+    },
+    {
+      "label": "sprintf",
+      "url": "./sprintf"
+    },
+    {
+      "label": "strcmp",
+      "url": "./strcmp"
+    },
+    {
+      "label": "strcmpi",
+      "url": "./strcmpi"
+    },
+    {
+      "label": "string.empty",
+      "url": "./string.empty"
+    },
+    {
+      "label": "strings",
+      "url": "./strings"
+    },
+    {
+      "label": "strlength",
+      "url": "./strlength"
+    },
+    {
+      "label": "strncmp",
+      "url": "./strncmp"
     }
   ],
   "source": {

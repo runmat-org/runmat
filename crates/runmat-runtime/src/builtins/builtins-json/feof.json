@@ -105,6 +105,22 @@
     {
       "label": "fileread",
       "url": "./fileread"
+    },
+    {
+      "label": "fgets",
+      "url": "./fgets"
+    },
+    {
+      "label": "filewrite",
+      "url": "./filewrite"
+    },
+    {
+      "label": "fprintf",
+      "url": "./fprintf"
+    },
+    {
+      "label": "frewind",
+      "url": "./frewind"
     }
   ],
   "source": {

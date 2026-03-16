@@ -124,6 +124,10 @@
     {
       "label": "`regexpi`",
       "url": "./regexpi"
+    },
+    {
+      "label": "strfind",
+      "url": "./strfind"
     }
   ],
   "source": {

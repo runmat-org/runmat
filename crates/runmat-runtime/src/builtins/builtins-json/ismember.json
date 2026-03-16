@@ -126,6 +126,22 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "argsort",
+      "url": "./argsort"
+    },
+    {
+      "label": "issorted",
+      "url": "./issorted"
+    },
+    {
+      "label": "sort",
+      "url": "./sort"
+    },
+    {
+      "label": "sortrows",
+      "url": "./sortrows"
     }
   ],
   "source": {

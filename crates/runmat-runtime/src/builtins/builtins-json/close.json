@@ -31,13 +31,13 @@
     "unit": "builtins::io::net::close::tests",
     "integration": "builtins::io::net::close::tests::close_tcpclient_releases_handle"
   },
-  "description": "`close` releases TCP clients and servers that were created with `tcpclient`, `tcpserver`, or `accept`. It mirrors MATLAB semantics for network connections while adopting the familiar `status = close(obj)` pattern used elsewhere in RunMat: the function returns `1` when one or more handles are closed and `0` when nothing needed to be released.",
+  "description": "`close` releases TCP clients and servers that were created with `tcpclient`, `tcpserver`, or `accept`. It mirrors MATLAB semantics for network connections while adopting the familiar `status = close(obj)` pattern used elsewhere in MATLAB: the function returns `1` when one or more handles are closed and `0` when nothing needed to be released.",
   "behaviors": [
     "`close(t)` closes the TCP client struct `t` that was previously returned by `tcpclient` or `accept`. Subsequent socket operations on that client raise MATLAB-style “not connected” diagnostics.",
     "`close(s)` closes the TCP server struct `s` that was returned by `tcpserver`. Any clients that were accepted from that server are also disconnected to match MATLAB’s lifecycle rules.",
     "`close('clients')` closes every registered TCP client (including those produced by `accept`). Likewise, `close('servers')` closes every TCP server, and `close('all')` closes both clients and servers.",
     "Multiple inputs are processed from left to right. The return value is `1` when at least one handle was closed and `0` otherwise.",
-    "Invalid arguments raise `RunMat:close:InvalidArgument`. Structs that do not contain the hidden RunMat networking identifiers raise `RunMat:close:InvalidHandle`.",
+    "Invalid arguments raise `MATLAB:close:InvalidArgument`. Structs that do not contain the hidden RunMat networking identifiers raise `MATLAB:close:InvalidHandle`.",
     "Networking happens on the CPU. If the arguments live on the GPU, RunMat gathers them automatically before touching the host-side registries.",
     "Arguments wrapped in cell arrays (possibly nested) or scalar string arrays are supported. `close` walks each element in-order and applies the usual rules to every value it discovers."
   ],
@@ -88,7 +88,7 @@
     },
     {
       "question": "What happens if I pass a non-network struct?",
-      "answer": "The builtin raises `RunMat:close:InvalidHandle`. Only structs produced by the RunMat networking builtins (`tcpclient`, `tcpserver`, `accept`) carry the hidden identifiers that `close` recognises."
+      "answer": "The builtin raises `MATLAB:close:InvalidHandle`. Only structs produced by the RunMat networking builtins (`tcpclient`, `tcpserver`, `accept`) carry the hidden identifiers that `close` recognises."
     },
     {
       "question": "Do GPU arrays require special handling?",
@@ -119,6 +119,10 @@
     {
       "label": "write",
       "url": "./write"
+    },
+    {
+      "label": "readline",
+      "url": "./readline"
     }
   ],
   "source": {
