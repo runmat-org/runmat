@@ -83,9 +83,9 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 async fn dir_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered = gather_arguments(&args).await?;
     let records = match gathered.len() {
-        0 => list_current_directory()?,
-        1 => list_from_single_value(&gathered[0])?,
-        2 => list_with_folder_and_pattern(&gathered[0], &gathered[1])?,
+        0 => list_current_directory().await?,
+        1 => list_from_single_value(&gathered[0]).await?,
+        2 => list_with_folder_and_pattern(&gathered[0], &gathered[1]).await?,
         _ => return Err(dir_error("dir: too many input arguments")),
     };
     if should_emit_stdout() {
@@ -116,26 +116,26 @@ async fn gather_arguments(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     Ok(out)
 }
 
-fn list_current_directory() -> BuiltinResult<Vec<DirRecord>> {
+async fn list_current_directory() -> BuiltinResult<Vec<DirRecord>> {
     let cwd = vfs::current_dir().map_err(|err| {
         dir_error(format!(
             "dir: unable to determine current directory ({err})"
         ))
     })?;
-    let mut records = list_directory(&cwd, true)?;
+    let mut records = list_directory(&cwd, true).await?;
     sort_records(&mut records);
     Ok(records)
 }
 
-fn list_from_single_value(value: &Value) -> BuiltinResult<Vec<DirRecord>> {
+async fn list_from_single_value(value: &Value) -> BuiltinResult<Vec<DirRecord>> {
     let text = scalar_text(
         value,
         "dir: name must be a character vector or string scalar",
     )?;
-    list_from_text(&text)
+    list_from_text(&text).await
 }
 
-fn list_with_folder_and_pattern(
+async fn list_with_folder_and_pattern(
     folder_value: &Value,
     pattern_value: &Value,
 ) -> BuiltinResult<Vec<DirRecord>> {
@@ -158,7 +158,7 @@ fn list_with_folder_and_pattern(
     let base_path = PathBuf::from(&expanded_folder);
     let trimmed_pattern = pattern_text.trim();
     if trimmed_pattern.is_empty() {
-        let mut records = list_directory(&base_path, true)?;
+        let mut records = list_directory(&base_path, true).await?;
         sort_records(&mut records);
         return Ok(records);
     }
@@ -167,38 +167,38 @@ fn list_with_folder_and_pattern(
         let mut pattern_path = base_path.clone();
         pattern_path.push(trimmed_pattern);
         let pattern_str = path_to_string(&pattern_path);
-        let mut records = list_glob_pattern(&pattern_str, trimmed_pattern)?;
+        let mut records = list_glob_pattern(&pattern_str, trimmed_pattern).await?;
         sort_records(&mut records);
         Ok(records)
     } else {
         let mut target_path = base_path.clone();
         target_path.push(trimmed_pattern);
-        list_path(&path_to_string(&target_path), trimmed_pattern)
+        list_path(&path_to_string(&target_path), trimmed_pattern).await
     }
 }
 
-fn list_from_text(text: &str) -> BuiltinResult<Vec<DirRecord>> {
+async fn list_from_text(text: &str) -> BuiltinResult<Vec<DirRecord>> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
-        return list_current_directory();
+        return list_current_directory().await;
     }
 
     let expanded = expand_user_path(trimmed, "dir").map_err(dir_error)?;
     if contains_wildcards(&expanded) {
-        let mut records = list_glob_pattern(&expanded, trimmed)?;
+        let mut records = list_glob_pattern(&expanded, trimmed).await?;
         sort_records(&mut records);
         Ok(records)
     } else {
-        list_path(&expanded, trimmed)
+        list_path(&expanded, trimmed).await
     }
 }
 
-fn list_path(expanded: &str, original: &str) -> BuiltinResult<Vec<DirRecord>> {
+async fn list_path(expanded: &str, original: &str) -> BuiltinResult<Vec<DirRecord>> {
     let path = PathBuf::from(expanded);
-    match vfs::metadata(&path) {
+    match vfs::metadata_async(&path).await {
         Ok(metadata) => {
             if metadata.is_dir() {
-                let mut records = list_directory(&path, true)?;
+                let mut records = list_directory(&path, true).await?;
                 sort_records(&mut records);
                 Ok(records)
             } else {
@@ -206,7 +206,7 @@ fn list_path(expanded: &str, original: &str) -> BuiltinResult<Vec<DirRecord>> {
                     .parent()
                     .map(|p| p.to_path_buf())
                     .unwrap_or_else(|| PathBuf::from("."));
-                let folder = absolute_folder_string(&folder_path)?;
+                let folder = absolute_folder_string(&folder_path).await?;
                 let name = path
                     .file_name()
                     .map(|os| os.to_string_lossy().into_owned())
@@ -230,7 +230,7 @@ fn list_path(expanded: &str, original: &str) -> BuiltinResult<Vec<DirRecord>> {
     }
 }
 
-fn list_glob_pattern(expanded: &str, original: &str) -> BuiltinResult<Vec<DirRecord>> {
+async fn list_glob_pattern(expanded: &str, original: &str) -> BuiltinResult<Vec<DirRecord>> {
     let mut records = Vec::new();
 
     let matcher = glob(expanded)
@@ -238,13 +238,13 @@ fn list_glob_pattern(expanded: &str, original: &str) -> BuiltinResult<Vec<DirRec
     for item in matcher {
         match item {
             Ok(path) => {
-                let metadata = vfs::symlink_metadata(&path).ok();
+                let metadata = vfs::symlink_metadata_async(&path).await.ok();
                 let is_dir = metadata.as_ref().map(|m| m.is_dir()).unwrap_or(false);
                 let folder_path = path
                     .parent()
                     .map(|p| p.to_path_buf())
                     .unwrap_or_else(|| PathBuf::from("."));
-                let folder = absolute_folder_string(&folder_path)?;
+                let folder = absolute_folder_string(&folder_path).await?;
                 let name = path
                     .file_name()
                     .map(|os| os.to_string_lossy().into_owned())
@@ -276,9 +276,9 @@ fn list_glob_pattern(expanded: &str, original: &str) -> BuiltinResult<Vec<DirRec
     Ok(records)
 }
 
-fn list_directory(dir: &Path, include_special: bool) -> BuiltinResult<Vec<DirRecord>> {
-    let folder = absolute_folder_string(dir)?;
-    let dir_metadata = vfs::metadata(dir).ok();
+async fn list_directory(dir: &Path, include_special: bool) -> BuiltinResult<Vec<DirRecord>> {
+    let folder = absolute_folder_string(dir).await?;
+    let dir_metadata = vfs::metadata_async(dir).await.ok();
     let mut records = Vec::new();
 
     if include_special {
@@ -287,7 +287,8 @@ fn list_directory(dir: &Path, include_special: bool) -> BuiltinResult<Vec<DirRec
     }
 
     let dir_display = folder.clone();
-    let read_dir = vfs::read_dir(dir)
+    let read_dir = vfs::read_dir_async(dir)
+        .await
         .map_err(|err| dir_error(format!("dir: unable to access '{dir_display}' ({err})")))?;
     for entry in read_dir {
         let name_os: &OsString = entry.file_name();
@@ -297,14 +298,15 @@ fn list_directory(dir: &Path, include_special: bool) -> BuiltinResult<Vec<DirRec
         }
 
         let path = entry.path().to_path_buf();
-        let metadata = vfs::metadata(&path)
-            .or_else(|_| vfs::symlink_metadata(&path))
-            .map_err(|err| {
+        let metadata = match vfs::metadata_async(&path).await {
+            Ok(meta) => meta,
+            Err(_) => vfs::symlink_metadata_async(&path).await.map_err(|err| {
                 dir_error(format!(
                     "dir: unable to read metadata for '{}' ({err})",
                     name
                 ))
-            })?;
+            })?,
+        };
         records.push(record_from_metadata(&folder, name, &metadata));
     }
 
@@ -379,7 +381,7 @@ fn scalar_text(value: &Value, error: &str) -> BuiltinResult<String> {
     }
 }
 
-fn absolute_folder_string(path: &Path) -> BuiltinResult<String> {
+async fn absolute_folder_string(path: &Path) -> BuiltinResult<String> {
     let joined = if path.is_absolute() {
         path.to_path_buf()
     } else {
@@ -391,7 +393,7 @@ fn absolute_folder_string(path: &Path) -> BuiltinResult<String> {
             })?
             .join(path)
     };
-    let normalized = vfs::canonicalize(&joined).unwrap_or(joined);
+    let normalized = vfs::canonicalize_async(&joined).await.unwrap_or(joined);
     Ok(path_to_string(&normalized))
 }
 
@@ -460,7 +462,7 @@ pub(crate) mod tests {
     use super::super::REPL_FS_TEST_LOCK;
     use super::*;
     use runmat_builtins::{CharArray, StringArray, StructValue as TestStruct};
-    use runmat_filesystem::{self as fs, File};
+    use runmat_filesystem::File;
     use tempfile::tempdir;
 
     fn dir_builtin(args: Vec<Value>) -> BuiltinResult<Value> {
@@ -574,7 +576,7 @@ pub(crate) mod tests {
         env::set_current_dir(dir.path()).expect("switch temp dir");
 
         File::create("alpha.txt").expect("create file");
-        fs::create_dir("beta").expect("create dir");
+        futures::executor::block_on(vfs::create_dir_async("beta")).expect("create dir");
 
         let value = dir_builtin(Vec::new()).expect("dir");
         let entries = structs_from_value(value);
@@ -643,7 +645,8 @@ pub(crate) mod tests {
             .unwrap_or_else(|poison| poison.into_inner());
         let dir = tempdir().expect("tempdir");
         File::create(dir.path().join("data.csv")).expect("create file");
-        fs::create_dir(dir.path().join("nested")).expect("create dir");
+        futures::executor::block_on(vfs::create_dir_async(dir.path().join("nested")))
+            .expect("create dir");
 
         let value = dir_builtin(vec![Value::from(dir.path().to_string_lossy().to_string())])
             .expect("dir path");

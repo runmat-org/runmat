@@ -66,6 +66,18 @@ export function createRemoteFsProvider(options: RemoteProviderOptions): RunMatFi
       return buffer;
     },
 
+    async readMany(paths) {
+      return Promise.all(
+        paths.map(async (path) => {
+          try {
+            return await this.readFile(path);
+          } catch {
+            return null;
+          }
+        })
+      );
+    },
+
     writeFile(path, data) {
       const normalized = normalizePath(path);
       if (normalized === "/") {

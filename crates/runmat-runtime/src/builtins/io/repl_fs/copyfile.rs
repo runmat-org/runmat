@@ -107,10 +107,10 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<CopyfileResult> {
     let gathered = gather_arguments(args).await?;
     match gathered.len() {
         0 | 1 => Err(copyfile_error("copyfile: not enough input arguments")),
-        2 => copy_operation(&gathered[0], &gathered[1], false),
+        2 => copy_operation(&gathered[0], &gathered[1], false).await,
         3 => {
             let force = parse_force_flag(&gathered[2])?;
-            copy_operation(&gathered[0], &gathered[1], force)
+            copy_operation(&gathered[0], &gathered[1], force).await
         }
         _ => Err(copyfile_error("copyfile: too many input arguments")),
     }
@@ -237,7 +237,7 @@ impl CopyfileResult {
     }
 }
 
-fn copy_operation(
+async fn copy_operation(
     source: &Value,
     destination: &Value,
     force: bool,
@@ -257,34 +257,26 @@ fn copy_operation(
         expand_user_path(&destination_raw, "copyfile").map_err(copyfile_error)?;
 
     if contains_wildcards(&source_expanded) {
-        Ok(copy_with_pattern(
-            &source_expanded,
-            &destination_expanded,
-            force,
-        ))
+        Ok(copy_with_pattern(&source_expanded, &destination_expanded, force).await)
     } else {
-        Ok(copy_single_source(
-            &source_expanded,
-            &destination_expanded,
-            force,
-        ))
+        Ok(copy_single_source(&source_expanded, &destination_expanded, force).await)
     }
 }
 
-fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileResult {
+async fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileResult {
     let source_path = PathBuf::from(source);
-    let source_meta = match vfs::metadata(&source_path) {
+    let source_meta = match vfs::metadata_async(&source_path).await {
         Ok(meta) => meta,
         Err(_) => return CopyfileResult::source_not_found(source),
     };
     let source_display = path_to_display(&source_path);
 
     let destination_path = PathBuf::from(destination);
-    if same_physical_path(&source_path, &destination_path) {
+    if same_physical_path(&source_path, &destination_path).await {
         return CopyfileResult::same_path(&source_display);
     }
 
-    let destination_meta = vfs::metadata(&destination_path).ok();
+    let destination_meta = vfs::metadata_async(&destination_path).await.ok();
     let mut target_path = destination_path.clone();
     let mut remove_target = false;
     let mut remove_is_dir = false;
@@ -299,16 +291,16 @@ fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileR
                 );
             };
             target_path = destination_path.join(name);
-            if same_physical_path(&source_path, &target_path) {
+            if same_physical_path(&source_path, &target_path).await {
                 return CopyfileResult::same_path(&source_display);
             }
-            if source_meta.is_dir() && is_descendant(&source_path, &target_path) {
+            if source_meta.is_dir() && is_descendant(&source_path, &target_path).await {
                 return CopyfileResult::failure(
                     "Cannot copy a folder into one of its descendants.".to_string(),
                     MESSAGE_ID_OS_ERROR,
                 );
             }
-            match vfs::metadata(&target_path) {
+            match vfs::metadata_async(&target_path).await {
                 Ok(existing) => {
                     if !force {
                         return CopyfileResult::destination_exists(&path_to_display(&target_path));
@@ -338,7 +330,7 @@ fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileR
         }
     } else if source_meta.is_dir() {
         // When copying a directory to a new path, ensure we don't copy into a child of itself.
-        if is_descendant(&source_path, &destination_path) {
+        if is_descendant(&source_path, &destination_path).await {
             return CopyfileResult::failure(
                 "Cannot copy a folder into one of its descendants.".to_string(),
                 MESSAGE_ID_OS_ERROR,
@@ -357,13 +349,13 @@ fn copy_single_source(source: &str, destination: &str, force: bool) -> CopyfileR
         remove_is_dir,
     )];
 
-    match execute_plan(&plan) {
+    match execute_plan(&plan).await {
         Ok(()) => CopyfileResult::success(),
         Err(err) => CopyfileResult::os_error(&err.source_display, &err.target_display, &err.error),
     }
 }
 
-fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileResult {
+async fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileResult {
     let pattern_path = Path::new(pattern);
     let (base_dir, name_pattern) = match pattern_path.file_name() {
         Some(name) => (
@@ -380,7 +372,7 @@ fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileR
     };
 
     let mut matches = Vec::new();
-    let entries = match vfs::read_dir(base_dir) {
+    let entries = match vfs::read_dir_async(base_dir).await {
         Ok(entries) => entries,
         Err(err) => {
             let display = path_to_display(base_dir);
@@ -400,7 +392,7 @@ fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileR
     }
 
     let destination_path = PathBuf::from(destination);
-    let destination_meta = match vfs::metadata(&destination_path) {
+    let destination_meta = match vfs::metadata_async(&destination_path).await {
         Ok(meta) => meta,
         Err(_) => return CopyfileResult::destination_missing(destination),
     };
@@ -412,7 +404,7 @@ fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileR
     let mut plan = Vec::with_capacity(matches.len());
     for source_path in matches {
         let display_source = path_to_display(&source_path);
-        let meta = match vfs::metadata(&source_path) {
+        let meta = match vfs::metadata_async(&source_path).await {
             Ok(meta) => meta,
             Err(_) => return CopyfileResult::source_not_found(&display_source),
         };
@@ -424,11 +416,11 @@ fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileR
             );
         };
         let target_path = destination_path.join(name);
-        if same_physical_path(&source_path, &target_path) {
+        if same_physical_path(&source_path, &target_path).await {
             return CopyfileResult::same_path(&display_source);
         }
         let target_display = path_to_display(&target_path);
-        match vfs::metadata(&target_path) {
+        match vfs::metadata_async(&target_path).await {
             Ok(existing) => {
                 if !force {
                     return CopyfileResult::destination_exists(&target_display);
@@ -464,7 +456,7 @@ fn copy_with_pattern(pattern: &str, destination: &str, force: bool) -> CopyfileR
         return CopyfileResult::success();
     }
 
-    match execute_plan(&plan) {
+    match execute_plan(&plan).await {
         Ok(()) => CopyfileResult::success(),
         Err(err) => CopyfileResult::os_error(&err.source_display, &err.target_display, &err.error),
     }
@@ -509,13 +501,13 @@ struct CopyError {
     error: io::Error,
 }
 
-fn execute_plan(plan: &[CopyPlanEntry]) -> Result<(), CopyError> {
+async fn execute_plan(plan: &[CopyPlanEntry]) -> Result<(), CopyError> {
     for entry in plan {
         if entry.remove_target {
             let result = if entry.remove_is_dir {
-                vfs::remove_dir_all(&entry.target_path)
+                vfs::remove_dir_all_async(&entry.target_path).await
             } else {
-                vfs::remove_file(&entry.target_path)
+                vfs::remove_file_async(&entry.target_path).await
             };
             if let Err(err) = result {
                 if err.kind() != io::ErrorKind::NotFound {
@@ -528,7 +520,9 @@ fn execute_plan(plan: &[CopyPlanEntry]) -> Result<(), CopyError> {
             }
         }
 
-        if let Err(err) = copy_path(&entry.source_path, &entry.target_path, entry.source_is_dir) {
+        if let Err(err) =
+            copy_path(&entry.source_path, &entry.target_path, entry.source_is_dir).await
+        {
             return Err(CopyError {
                 source_display: entry.source_display.clone(),
                 target_display: entry.target_display.clone(),
@@ -540,18 +534,19 @@ fn execute_plan(plan: &[CopyPlanEntry]) -> Result<(), CopyError> {
     Ok(())
 }
 
-fn copy_path(source: &Path, destination: &Path, is_directory: bool) -> io::Result<()> {
+async fn copy_path(source: &Path, destination: &Path, is_directory: bool) -> io::Result<()> {
     if is_directory {
-        copy_directory_recursive(source, destination)
+        copy_directory_recursive(source, destination).await
     } else {
-        copy_file_to_path(source, destination)
+        copy_file_to_path(source, destination).await
     }
 }
 
-fn copy_directory_recursive(source: &Path, destination: &Path) -> io::Result<()> {
-    ensure_parent_exists(destination)?;
+#[async_recursion::async_recursion(?Send)]
+async fn copy_directory_recursive(source: &Path, destination: &Path) -> io::Result<()> {
+    ensure_parent_exists(destination).await?;
 
-    match vfs::metadata(destination) {
+    match vfs::metadata_async(destination).await {
         Ok(meta) => {
             if !meta.is_dir() {
                 return Err(io::Error::new(
@@ -564,46 +559,46 @@ fn copy_directory_recursive(source: &Path, destination: &Path) -> io::Result<()>
             if err.kind() != io::ErrorKind::NotFound {
                 return Err(err);
             }
-            vfs::create_dir_all(destination)?;
+            vfs::create_dir_all_async(destination).await?;
         }
     }
 
-    if let Ok(metadata) = vfs::metadata(source) {
-        let _ = vfs::set_readonly(destination, metadata.is_readonly());
+    if let Ok(metadata) = vfs::metadata_async(source).await {
+        let _ = vfs::set_readonly_async(destination, metadata.is_readonly()).await;
     }
 
-    for entry in vfs::read_dir(source)? {
+    for entry in vfs::read_dir_async(source).await? {
         let child_source = entry.path().to_path_buf();
         let child_dest = destination.join(PathBuf::from(entry.file_name()));
-        let child_meta = vfs::metadata(&child_source)?;
+        let child_meta = vfs::metadata_async(&child_source).await?;
         if child_meta.is_dir() {
-            copy_directory_recursive(&child_source, &child_dest)?;
+            copy_directory_recursive(&child_source, &child_dest).await?;
         } else {
-            copy_file_to_path(&child_source, &child_dest)?;
+            copy_file_to_path(&child_source, &child_dest).await?;
         }
     }
 
     Ok(())
 }
 
-fn copy_file_to_path(source: &Path, destination: &Path) -> io::Result<()> {
-    ensure_parent_exists(destination)?;
+async fn copy_file_to_path(source: &Path, destination: &Path) -> io::Result<()> {
+    ensure_parent_exists(destination).await?;
 
     vfs::copy_file(source, destination)?;
 
-    if let Ok(metadata) = vfs::metadata(source) {
-        let _ = vfs::set_readonly(destination, metadata.is_readonly());
+    if let Ok(metadata) = vfs::metadata_async(source).await {
+        let _ = vfs::set_readonly_async(destination, metadata.is_readonly()).await;
     }
 
     Ok(())
 }
 
-fn ensure_parent_exists(path: &Path) -> io::Result<()> {
+async fn ensure_parent_exists(path: &Path) -> io::Result<()> {
     if let Some(parent) = path.parent() {
         if parent.as_os_str().is_empty() || parent == Path::new(".") {
             return Ok(());
         }
-        if vfs::metadata(parent).is_err() {
+        if vfs::metadata_async(parent).await.is_err() {
             return Err(io::Error::new(
                 io::ErrorKind::NotFound,
                 format!("Destination parent \"{}\" does not exist", parent.display()),
@@ -613,21 +608,27 @@ fn ensure_parent_exists(path: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn same_physical_path(a: &Path, b: &Path) -> bool {
+async fn same_physical_path(a: &Path, b: &Path) -> bool {
     if a == b {
         return true;
     }
-    match (vfs::canonicalize(a), vfs::canonicalize(b)) {
+    match (
+        vfs::canonicalize_async(a).await,
+        vfs::canonicalize_async(b).await,
+    ) {
         (Ok(ca), Ok(cb)) => ca == cb,
         _ => false,
     }
 }
 
-fn is_descendant(parent: &Path, candidate: &Path) -> bool {
+async fn is_descendant(parent: &Path, candidate: &Path) -> bool {
     if candidate.starts_with(parent) && candidate != parent {
         return true;
     }
-    match (vfs::canonicalize(parent), vfs::canonicalize(candidate)) {
+    match (
+        vfs::canonicalize_async(parent).await,
+        vfs::canonicalize_async(candidate).await,
+    ) {
         (Ok(parent_canon), Ok(candidate_canon)) => {
             candidate_canon.starts_with(&parent_canon) && candidate_canon != parent_canon
         }

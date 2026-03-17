@@ -277,6 +277,7 @@ pub async fn execute_fs_command(command: FsCommand) -> Result<()> {
         return Ok(());
     }
 
+    let runtime = tokio::runtime::Handle::current();
     let task = tokio::task::spawn_blocking(move || -> Result<()> {
         let shard_threshold_bytes = read_u64_env("RUNMAT_FS_SHARD_THRESHOLD_BYTES");
         let shard_size_bytes = read_u64_env("RUNMAT_FS_SHARD_SIZE_BYTES");
@@ -293,8 +294,8 @@ pub async fn execute_fs_command(command: FsCommand) -> Result<()> {
 
         match command {
             FsCommand::Read { path, output, .. } => {
-                let bytes = provider
-                    .read(std::path::Path::new(&path))
+                let bytes = runtime
+                    .block_on(provider.read(std::path::Path::new(&path)))
                     .context("Failed to read remote file")?;
                 if let Some(output) = output {
                     fs::write(&output, bytes)
@@ -308,14 +309,14 @@ pub async fn execute_fs_command(command: FsCommand) -> Result<()> {
             FsCommand::Write { path, input, .. } => {
                 let bytes = fs::read(&input)
                     .with_context(|| format!("Failed to read {}", input.display()))?;
-                provider
-                    .write(std::path::Path::new(&path), &bytes)
+                runtime
+                    .block_on(provider.write(std::path::Path::new(&path), &bytes))
                     .context("Failed to write remote file")?;
                 Ok(())
             }
             FsCommand::Ls { path, .. } => {
-                let entries = provider
-                    .read_dir(std::path::Path::new(&path))
+                let entries = runtime
+                    .block_on(provider.read_dir(std::path::Path::new(&path)))
                     .context("Failed to list directory")?;
                 for entry in entries {
                     let kind = match entry.file_type() {
@@ -333,12 +334,12 @@ pub async fn execute_fs_command(command: FsCommand) -> Result<()> {
                 path, recursive, ..
             } => {
                 if recursive {
-                    provider
-                        .create_dir_all(std::path::Path::new(&path))
+                    runtime
+                        .block_on(provider.create_dir_all(std::path::Path::new(&path)))
                         .context("Failed to create directory")?;
                 } else {
-                    provider
-                        .create_dir(std::path::Path::new(&path))
+                    runtime
+                        .block_on(provider.create_dir(std::path::Path::new(&path)))
                         .context("Failed to create directory")?;
                 }
                 Ok(())
@@ -350,16 +351,16 @@ pub async fn execute_fs_command(command: FsCommand) -> Result<()> {
                 ..
             } => {
                 if recursive {
-                    provider
-                        .remove_dir_all(std::path::Path::new(&path))
+                    runtime
+                        .block_on(provider.remove_dir_all(std::path::Path::new(&path)))
                         .context("Failed to remove directory")?;
                 } else if dir {
-                    provider
-                        .remove_dir(std::path::Path::new(&path))
+                    runtime
+                        .block_on(provider.remove_dir(std::path::Path::new(&path)))
                         .context("Failed to remove directory")?;
                 } else {
-                    provider
-                        .remove_file(std::path::Path::new(&path))
+                    runtime
+                        .block_on(provider.remove_file(std::path::Path::new(&path)))
                         .context("Failed to remove file")?;
                 }
                 Ok(())

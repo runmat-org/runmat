@@ -112,6 +112,7 @@ wgpu = []
 interaction-test-hooks = []
 
 [dev-dependencies]
+async-trait = "0.1"
 runmat-macros = { workspace = true } 
 runmat-accelerate = { workspace = true, features = ["wgpu"] }
 matfile = "0.5.0"

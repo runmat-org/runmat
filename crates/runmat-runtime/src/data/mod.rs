@@ -1,5 +1,4 @@
 use std::collections::{BTreeMap, HashMap};
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
@@ -156,23 +155,17 @@ pub fn arrays_root(root: &Path) -> PathBuf {
     root.join("arrays")
 }
 
-pub fn write_manifest(root: &Path, manifest: &DataManifest) -> BuiltinResult<()> {
-    fs::create_dir_all(root).map_err(|err| {
+pub async fn write_manifest_async(root: &Path, manifest: &DataManifest) -> BuiltinResult<()> {
+    fs::create_dir_all_async(root).await.map_err(|err| {
         data_error(format!(
             "failed to create dataset root '{}': {err}",
             root.display()
         ))
     })?;
     let path = manifest_path(root);
-    let mut file = fs::File::create(&path).map_err(|err| {
-        data_error(format!(
-            "failed to create manifest '{}': {err}",
-            path.display()
-        ))
-    })?;
     let bytes = serde_json::to_vec_pretty(manifest)
         .map_err(|err| data_error(format!("failed to encode manifest json: {err}")))?;
-    file.write_all(&bytes).map_err(|err| {
+    fs::write_async(&path, &bytes).await.map_err(|err| {
         data_error(format!(
             "failed to write manifest '{}': {err}",
             path.display()
@@ -181,16 +174,9 @@ pub fn write_manifest(root: &Path, manifest: &DataManifest) -> BuiltinResult<()>
     Ok(())
 }
 
-pub fn read_manifest(root: &Path) -> BuiltinResult<DataManifest> {
+pub async fn read_manifest_async(root: &Path) -> BuiltinResult<DataManifest> {
     let path = manifest_path(root);
-    let mut file = fs::File::open(&path).map_err(|err| {
-        data_error(format!(
-            "failed to open manifest '{}': {err}",
-            path.display()
-        ))
-    })?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).map_err(|err| {
+    let bytes = fs::read_async(&path).await.map_err(|err| {
         data_error(format!(
             "failed to read manifest '{}': {err}",
             path.display()
@@ -205,37 +191,33 @@ pub fn read_manifest(root: &Path) -> BuiltinResult<DataManifest> {
     Ok(manifest)
 }
 
-pub fn write_array_payload(
+pub async fn write_array_payload_async(
     root: &Path,
     array: &str,
     payload: &DataArrayPayload,
     chunk_shape: &[usize],
 ) -> BuiltinResult<(PathBuf, PathBuf)> {
     let array_dir = arrays_root(root).join(array);
-    fs::create_dir_all(&array_dir).map_err(|err| {
+    fs::create_dir_all_async(&array_dir).await.map_err(|err| {
         data_error(format!(
             "failed to create array dir '{}': {err}",
             array_dir.display()
         ))
     })?;
     let payload_path = array_dir.join("data.f64.json");
-    let mut file = fs::File::create(&payload_path).map_err(|err| {
-        data_error(format!(
-            "failed to create payload '{}': {err}",
-            payload_path.display()
-        ))
-    })?;
     let bytes = serde_json::to_vec(payload)
         .map_err(|err| data_error(format!("failed to encode array payload json: {err}")))?;
-    file.write_all(&bytes).map_err(|err| {
-        data_error(format!(
-            "failed to write payload '{}': {err}",
-            payload_path.display()
-        ))
-    })?;
+    fs::write_async(&payload_path, &bytes)
+        .await
+        .map_err(|err| {
+            data_error(format!(
+                "failed to write payload '{}': {err}",
+                payload_path.display()
+            ))
+        })?;
 
     let chunk_dir = array_dir.join("chunks");
-    fs::create_dir_all(&chunk_dir).map_err(|err| {
+    fs::create_dir_all_async(&chunk_dir).await.map_err(|err| {
         data_error(format!(
             "failed to create chunk dir '{}': {err}",
             chunk_dir.display()
@@ -263,12 +245,14 @@ pub fn write_array_payload(
         let chunk_bytes = serde_json::to_vec(&chunk_payload)
             .map_err(|err| data_error(format!("failed to encode chunk payload: {err}")))?;
         let data_path = chunk_dir.join(format!("{object_id}.json"));
-        fs::write(&data_path, &chunk_bytes).map_err(|err| {
-            data_error(format!(
-                "failed to write chunk '{}': {err}",
-                data_path.display()
-            ))
-        })?;
+        fs::write_async(&data_path, &chunk_bytes)
+            .await
+            .map_err(|err| {
+                data_error(format!(
+                    "failed to write chunk '{}': {err}",
+                    data_path.display()
+                ))
+            })?;
         let hash = sha256_hex(&chunk_bytes);
         let rel_chunk_path = data_path
             .strip_prefix(root)
@@ -300,7 +284,7 @@ pub fn write_array_payload(
         }
     }
 
-    maybe_upload_chunks(root, array, upload_chunks)?;
+    maybe_upload_chunks_async(root, array, upload_chunks).await?;
 
     tracing::info!(
         target: "runmat.data",
@@ -314,31 +298,29 @@ pub fn write_array_payload(
     let chunk_index_path = chunk_dir.join("index.json");
     let chunk_index_bytes = serde_json::to_vec(&index)
         .map_err(|err| data_error(format!("failed to encode chunk index json: {err}")))?;
-    fs::write(&chunk_index_path, &chunk_index_bytes).map_err(|err| {
-        data_error(format!(
-            "failed to write chunk index '{}': {err}",
-            chunk_index_path.display()
-        ))
-    })?;
+    fs::write_async(&chunk_index_path, &chunk_index_bytes)
+        .await
+        .map_err(|err| {
+            data_error(format!(
+                "failed to write chunk index '{}': {err}",
+                chunk_index_path.display()
+            ))
+        })?;
     Ok((payload_path, chunk_index_path))
 }
 
-pub fn read_array_payload(root: &Path, meta: &DataArrayMeta) -> BuiltinResult<DataArrayPayload> {
+pub async fn read_array_payload_async(
+    root: &Path,
+    meta: &DataArrayMeta,
+) -> BuiltinResult<DataArrayPayload> {
     if let Some(index_path) = &meta.chunk_index_path {
         let path = root.join(index_path);
-        if fs::metadata(&path).is_ok() {
-            return read_array_payload_chunked(root, meta, &path);
+        if fs::metadata_async(&path).await.is_ok() {
+            return read_array_payload_chunked_async(root, meta, &path).await;
         }
     }
     let payload_path = root.join(&meta.data_path);
-    let mut file = fs::File::open(&payload_path).map_err(|err| {
-        data_error(format!(
-            "failed to open payload '{}': {err}",
-            payload_path.display()
-        ))
-    })?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes).map_err(|err| {
+    let bytes = fs::read_async(&payload_path).await.map_err(|err| {
         data_error(format!(
             "failed to read payload '{}': {err}",
             payload_path.display()
@@ -352,12 +334,12 @@ pub fn read_array_payload(root: &Path, meta: &DataArrayMeta) -> BuiltinResult<Da
     })
 }
 
-fn read_array_payload_chunked(
+async fn read_array_payload_chunked_async(
     root: &Path,
     meta: &DataArrayMeta,
     index_path: &Path,
 ) -> BuiltinResult<DataArrayPayload> {
-    let bytes = fs::read(index_path).map_err(|err| {
+    let bytes = fs::read_async(index_path).await.map_err(|err| {
         data_error(format!(
             "failed to read chunk index '{}': {err}",
             index_path.display()
@@ -372,7 +354,7 @@ fn read_array_payload_chunked(
     let mut values = vec![0.0; meta.shape.iter().copied().product::<usize>()];
     for chunk in index.chunks {
         let chunk_path = root.join(&chunk.data_path);
-        let bytes = fs::read(&chunk_path).map_err(|err| {
+        let bytes = fs::read_async(&chunk_path).await.map_err(|err| {
             data_error(format!(
                 "failed to read chunk payload '{}': {err}",
                 chunk_path.display()
@@ -418,7 +400,7 @@ fn read_array_payload_chunked(
     })
 }
 
-fn maybe_upload_chunks(
+async fn maybe_upload_chunks_async(
     root: &Path,
     array: &str,
     chunks: Vec<(DataChunkDescriptor, Vec<u8>)>,
@@ -431,7 +413,7 @@ fn maybe_upload_chunks(
         array: array.to_string(),
         chunks: chunks.iter().map(|(desc, _)| desc.clone()).collect(),
     };
-    let targets = match fs::data_chunk_upload_targets(&request) {
+    let targets = match fs::data_chunk_upload_targets_async(&request).await {
         Ok(targets) => targets,
         Err(err) if err.kind() == std::io::ErrorKind::Unsupported => return Ok(()),
         Err(err) => {
@@ -442,12 +424,14 @@ fn maybe_upload_chunks(
     };
     for (descriptor, bytes) in chunks {
         let target = find_chunk_target(&targets, &descriptor.key)?;
-        fs::data_upload_chunk(target, &bytes).map_err(|err| {
-            data_error(format!(
-                "failed to upload chunk '{}': {err}",
-                descriptor.key
-            ))
-        })?;
+        fs::data_upload_chunk_async(target, &bytes)
+            .await
+            .map_err(|err| {
+                data_error(format!(
+                    "failed to upload chunk '{}': {err}",
+                    descriptor.key
+                ))
+            })?;
         tracing::info!(
             target: "runmat.data",
             dataset = %root.display(),

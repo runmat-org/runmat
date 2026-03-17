@@ -98,8 +98,8 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<MkdirResult> {
     let gathered = gather_arguments(args).await?;
     match gathered.len() {
         0 => Err(mkdir_error("mkdir: not enough input arguments")),
-        1 => create_from_single(&gathered[0]),
-        2 => create_from_parent_child(&gathered[0], &gathered[1]),
+        1 => create_from_single(&gathered[0]).await,
+        2 => create_from_parent_child(&gathered[0], &gathered[1]).await,
         _ => Err(mkdir_error("mkdir: too many input arguments")),
     }
 }
@@ -164,7 +164,7 @@ impl MkdirResult {
     }
 }
 
-fn create_from_single(value: &Value) -> BuiltinResult<MkdirResult> {
+async fn create_from_single(value: &Value) -> BuiltinResult<MkdirResult> {
     let raw = extract_folder_name(value, ERR_FOLDER_ARG)?;
     if raw.is_empty() {
         return Ok(MkdirResult::failure(
@@ -174,10 +174,10 @@ fn create_from_single(value: &Value) -> BuiltinResult<MkdirResult> {
     }
     let expanded = expand_user_path(&raw, "mkdir").map_err(mkdir_error)?;
     let path = PathBuf::from(expanded);
-    Ok(create_directory(&path))
+    Ok(create_directory(&path).await)
 }
 
-fn create_from_parent_child(parent: &Value, child: &Value) -> BuiltinResult<MkdirResult> {
+async fn create_from_parent_child(parent: &Value, child: &Value) -> BuiltinResult<MkdirResult> {
     let parent_raw = extract_folder_name(parent, ERR_PARENT_ARG)?;
     let child_raw = extract_folder_name(child, ERR_FOLDER_ARG)?;
 
@@ -197,30 +197,30 @@ fn create_from_parent_child(parent: &Value, child: &Value) -> BuiltinResult<Mkdi
     let child_path = PathBuf::from(&child_expanded);
 
     if child_path.is_absolute() {
-        return Ok(create_directory(&child_path));
+        return Ok(create_directory(&child_path).await);
     }
 
     if let Some(parent_text) = parent_expanded {
         let parent_path = PathBuf::from(&parent_text);
-        if !path_exists(&parent_path) {
+        if !path_exists_async(&parent_path).await {
             let message = format!("Parent folder \"{}\" does not exist.", parent_text);
             return Ok(MkdirResult::failure(message, MESSAGE_ID_INVALID_PARENT));
         }
-        if !path_is_existing_directory(&parent_path) {
+        if !path_is_existing_directory_async(&parent_path).await {
             let message = format!("Parent folder \"{}\" is not a directory.", parent_text);
             return Ok(MkdirResult::failure(message, MESSAGE_ID_NOT_A_DIRECTORY));
         }
         let target = parent_path.join(&child_expanded);
-        return Ok(create_directory(&target));
+        return Ok(create_directory(&target).await);
     }
 
-    Ok(create_directory(&PathBuf::from(&child_expanded)))
+    Ok(create_directory(&PathBuf::from(&child_expanded)).await)
 }
 
-fn create_directory(path: &Path) -> MkdirResult {
+async fn create_directory(path: &Path) -> MkdirResult {
     let display = path.display().to_string();
-    if path_exists(path) {
-        if path_is_existing_directory(path) {
+    if path_exists_async(path).await {
+        if path_is_existing_directory_async(path).await {
             return MkdirResult::already_exists();
         }
         return MkdirResult::failure(
@@ -232,7 +232,7 @@ fn create_directory(path: &Path) -> MkdirResult {
         );
     }
 
-    match vfs::create_dir_all(path) {
+    match vfs::create_dir_all_async(path).await {
         Ok(_) => MkdirResult::success(),
         Err(err) => MkdirResult::failure(
             format!("Unable to create folder \"{}\": {}", display, err),
@@ -241,15 +241,25 @@ fn create_directory(path: &Path) -> MkdirResult {
     }
 }
 
-fn path_is_existing_directory(path: &Path) -> bool {
-    match vfs::metadata(path) {
+async fn path_is_existing_directory_async(path: &Path) -> bool {
+    match vfs::metadata_async(path).await {
         Ok(meta) => meta.is_dir(),
         Err(_) => false,
     }
 }
 
+async fn path_exists_async(path: &Path) -> bool {
+    vfs::metadata_async(path).await.is_ok()
+}
+
+#[cfg(test)]
+fn path_is_existing_directory(path: &Path) -> bool {
+    futures::executor::block_on(path_is_existing_directory_async(path))
+}
+
+#[cfg(test)]
 fn path_exists(path: &Path) -> bool {
-    vfs::metadata(path).is_ok()
+    futures::executor::block_on(path_exists_async(path))
 }
 
 fn extract_folder_name(value: &Value, error_message: &str) -> BuiltinResult<String> {
@@ -331,7 +341,7 @@ pub(crate) mod tests {
 
         let temp = tempdir().expect("temp dir");
         let target = temp.path().join("existing");
-        vfs::create_dir(&target).expect("seed dir");
+        futures::executor::block_on(vfs::create_dir_async(&target)).expect("seed dir");
 
         let eval = evaluate(&[Value::from(target.to_string_lossy().to_string())]).unwrap();
         assert_eq!(eval.status(), 1.0);

@@ -497,6 +497,7 @@ export interface RunMatSessionHandle {
   importWorkspaceState(state: Uint8Array): Promise<boolean>;
   exportFigureScene?(handle: number): Promise<Uint8Array | null>;
   importFigureScene?(scene: Uint8Array): Promise<number | null>;
+  importFigureSceneFromPath?(path: string): Promise<number | null>;
   currentFigureHandle?(): Promise<number>;
   dispose(): void;
   telemetryConsent(): boolean;
@@ -547,7 +548,8 @@ interface RunMatNativeSession {
   exportWorkspaceState?: (includeVariables?: string) => Promise<Uint8Array | null>;
   importWorkspaceState?: (state: Uint8Array) => boolean;
   exportFigureScene?: (handle: number) => Uint8Array | null;
-  importFigureScene?: (scene: Uint8Array) => number | null;
+  importFigureScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
+  importFigureSceneFromPath?: (path: string) => number | null | Promise<number | null>;
   currentFigureHandle?: () => number;
   dispose?: () => void;
   telemetryConsent(): boolean;
@@ -627,7 +629,8 @@ interface RunMatNativeModule {
   plotRendererReady?: () => boolean;
   renderCurrentFigureScene?: (handle: number) => void;
   exportFigureScene?: (handle: number) => Uint8Array | null;
-  importFigureScene?: (scene: Uint8Array) => number | null;
+  importFigureScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
+  importFigureSceneFromPath?: (path: string) => number | null | Promise<number | null>;
   exportWorkspaceState?: (includeVariables?: string) => Promise<Uint8Array | null>;
   importWorkspaceState?: (state: Uint8Array) => boolean;
   createPlotSurface?: (canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<number>;
@@ -1040,7 +1043,20 @@ export async function importFigureScene(scene: Uint8Array): Promise<number | nul
     return null;
   }
   try {
-    const handle = native.importFigureScene(scene);
+    const handle = await native.importFigureScene(scene);
+    return typeof handle === "number" ? handle : null;
+  } catch {
+    return null;
+  }
+}
+
+export async function importFigureSceneFromPath(path: string): Promise<number | null> {
+  const native = await loadNativeModule();
+  if (typeof native.importFigureSceneFromPath !== "function") {
+    return null;
+  }
+  try {
+    const handle = await native.importFigureSceneFromPath(path);
     return typeof handle === "number" ? handle : null;
   } catch {
     return null;
@@ -1146,7 +1162,20 @@ class WebRunMatSession implements RunMatSessionHandle {
       return null;
     }
     try {
-      const handle = this.native.importFigureScene(scene);
+      const handle = await this.native.importFigureScene(scene);
+      return typeof handle === "number" ? handle : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async importFigureSceneFromPath(path: string): Promise<number | null> {
+    this.ensureActive();
+    if (typeof this.native.importFigureSceneFromPath !== "function") {
+      return null;
+    }
+    try {
+      const handle = await this.native.importFigureSceneFromPath(path);
       return typeof handle === "number" ? handle : null;
     } catch {
       return null;

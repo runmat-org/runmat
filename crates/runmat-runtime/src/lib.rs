@@ -70,7 +70,8 @@ pub use dispatcher::{
 #[cfg(feature = "plot-core")]
 pub use builtins::plotting::{
     export_figure_scene as runtime_plot_export_figure_scene,
-    import_figure_scene as runtime_plot_import_figure_scene,
+    import_figure_scene_async as runtime_plot_import_figure_scene_async,
+    import_figure_scene_from_path_async as runtime_plot_import_figure_scene_from_path_async,
 };
 pub use replay::{
     runtime_export_workspace_state, runtime_import_workspace_state, WorkspaceReplayMode,

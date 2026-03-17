@@ -2,6 +2,7 @@ use crate::data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
 };
 use crate::{DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags};
+use async_trait::async_trait;
 use js_sys::{ArrayBuffer, Uint8Array};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -442,7 +443,14 @@ impl RemoteFsProvider {
 
     fn ensure_parent_exists(&self, path: &Path) -> io::Result<()> {
         if let Some(parent) = path.parent() {
-            self.create_dir_all(parent)?;
+            self.send_json(
+                "POST",
+                "/fs/mkdir",
+                &CreateDirRequest {
+                    path: self.normalize(parent),
+                    recursive: true,
+                },
+            )?;
         }
         Ok(())
     }
@@ -618,6 +626,7 @@ fn should_use_direct_read(length: u64, threshold: u64) -> bool {
     length >= threshold
 }
 
+#[async_trait(?Send)]
 impl FsProvider for RemoteFsProvider {
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         let mut data = Vec::new();
@@ -678,7 +687,7 @@ impl FsProvider for RemoteFsProvider {
         Ok(Box::new(handle))
     }
 
-    fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+    async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
         let normalized = self.normalize(path);
         let meta = self.fetch_metadata(&normalized)?;
         if meta.file_type != "file" {
@@ -690,28 +699,28 @@ impl FsProvider for RemoteFsProvider {
         self.download_raw_file(&normalized, meta.len)
     }
 
-    fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
+    async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
         let normalized = self.normalize(path);
         self.ensure_parent_exists(path)?;
         self.upload_entire_file(&normalized, data)
     }
 
-    fn remove_file(&self, path: &Path) -> io::Result<()> {
+    async fn remove_file(&self, path: &Path) -> io::Result<()> {
         let normalized = self.normalize(path);
         self.send_empty("DELETE", "/fs/file", &[("path", normalized)])
     }
 
-    fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+    async fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
         let normalized = self.normalize(path);
         let resp = self.fetch_metadata(&normalized)?;
         Ok(resp.into())
     }
 
-    fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata> {
-        self.metadata(path)
+    async fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+        self.metadata(path).await
     }
 
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
+    async fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
         let normalized = self.normalize(path);
         let resp = self.fetch_dir(&normalized)?;
         Ok(resp
@@ -724,13 +733,13 @@ impl FsProvider for RemoteFsProvider {
             .collect())
     }
 
-    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+    async fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
         let normalized = self.normalize(path);
         let canonical = self.fetch_canonical_path(&normalized)?;
         Ok(PathBuf::from(canonical))
     }
 
-    fn create_dir(&self, path: &Path) -> io::Result<()> {
+    async fn create_dir(&self, path: &Path) -> io::Result<()> {
         self.send_json(
             "POST",
             "/fs/mkdir",
@@ -741,7 +750,7 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
-    fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+    async fn create_dir_all(&self, path: &Path) -> io::Result<()> {
         self.send_json(
             "POST",
             "/fs/mkdir",
@@ -752,7 +761,7 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
-    fn remove_dir(&self, path: &Path) -> io::Result<()> {
+    async fn remove_dir(&self, path: &Path) -> io::Result<()> {
         self.send_empty(
             "DELETE",
             "/fs/dir",
@@ -763,7 +772,7 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
-    fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
+    async fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
         self.send_empty(
             "DELETE",
             "/fs/dir",
@@ -771,7 +780,7 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
-    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+    async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
         self.send_json(
             "POST",
             "/fs/rename",
@@ -782,7 +791,7 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
-    fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
+    async fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
         self.send_json(
             "POST",
             "/fs/set-readonly",
@@ -793,7 +802,7 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
-    fn data_manifest_descriptor(
+    async fn data_manifest_descriptor(
         &self,
         request: &DataManifestRequest,
     ) -> io::Result<DataManifestDescriptor> {
@@ -805,7 +814,7 @@ impl FsProvider for RemoteFsProvider {
         serde_json::from_str(&text).map_err(map_serde_err)
     }
 
-    fn data_chunk_upload_targets(
+    async fn data_chunk_upload_targets(
         &self,
         request: &DataChunkUploadRequest,
     ) -> io::Result<Vec<DataChunkUploadTarget>> {
@@ -827,7 +836,11 @@ impl FsProvider for RemoteFsProvider {
         Ok(response.targets)
     }
 
-    fn data_upload_chunk(&self, target: &DataChunkUploadTarget, data: &[u8]) -> io::Result<()> {
+    async fn data_upload_chunk(
+        &self,
+        target: &DataChunkUploadTarget,
+        data: &[u8],
+    ) -> io::Result<()> {
         self.upload_chunk_target(&target.method, &target.upload_url, &target.headers, data)
     }
 }

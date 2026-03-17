@@ -105,10 +105,10 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<MovefileResult> {
     let gathered = gather_arguments(args).await?;
     match gathered.len() {
         0 | 1 => Err(movefile_error("movefile: not enough input arguments")),
-        2 => move_operation(&gathered[0], &gathered[1], false),
+        2 => move_operation(&gathered[0], &gathered[1], false).await,
         3 => {
             let force = parse_force_flag(&gathered[2])?;
-            move_operation(&gathered[0], &gathered[1], force)
+            move_operation(&gathered[0], &gathered[1], force).await
         }
         _ => Err(movefile_error("movefile: too many input arguments")),
     }
@@ -228,7 +228,7 @@ impl MovefileResult {
     }
 }
 
-fn move_operation(
+async fn move_operation(
     source: &Value,
     destination: &Value,
     force: bool,
@@ -248,23 +248,15 @@ fn move_operation(
         expand_user_path(&destination_raw, "movefile").map_err(movefile_error)?;
 
     if contains_wildcards(&source_expanded) {
-        Ok(move_with_pattern(
-            &source_expanded,
-            &destination_expanded,
-            force,
-        ))
+        Ok(move_with_pattern(&source_expanded, &destination_expanded, force).await)
     } else {
-        Ok(move_single_source(
-            &source_expanded,
-            &destination_expanded,
-            force,
-        ))
+        Ok(move_single_source(&source_expanded, &destination_expanded, force).await)
     }
 }
 
-fn move_single_source(source: &str, destination: &str, force: bool) -> MovefileResult {
+async fn move_single_source(source: &str, destination: &str, force: bool) -> MovefileResult {
     let source_path = PathBuf::from(source);
-    if vfs::metadata(&source_path).is_err() {
+    if vfs::metadata_async(&source_path).await.is_err() {
         return MovefileResult::source_not_found(source);
     }
 
@@ -273,7 +265,7 @@ fn move_single_source(source: &str, destination: &str, force: bool) -> MovefileR
         return MovefileResult::success();
     }
 
-    let destination_meta = vfs::metadata(&destination_path).ok();
+    let destination_meta = vfs::metadata_async(&destination_path).await.ok();
     let mut target_path = destination_path.clone();
     let mut remove_target = false;
     let mut remove_is_dir = false;
@@ -291,7 +283,7 @@ fn move_single_source(source: &str, destination: &str, force: bool) -> MovefileR
             if target_path == source_path {
                 return MovefileResult::success();
             }
-            match vfs::metadata(&target_path) {
+            match vfs::metadata_async(&target_path).await {
                 Ok(existing) => {
                     if !force {
                         return MovefileResult::destination_exists(&path_to_display(&target_path));
@@ -331,13 +323,13 @@ fn move_single_source(source: &str, destination: &str, force: bool) -> MovefileR
         remove_is_dir,
     )];
 
-    match execute_plan(&plan) {
+    match execute_plan(&plan).await {
         Ok(()) => MovefileResult::success(),
         Err(err) => MovefileResult::os_error(&err.source_display, &err.target_display, &err.error),
     }
 }
 
-fn move_with_pattern(pattern: &str, destination: &str, force: bool) -> MovefileResult {
+async fn move_with_pattern(pattern: &str, destination: &str, force: bool) -> MovefileResult {
     let pattern_path = Path::new(pattern);
     let (base_dir, name_pattern) = match pattern_path.file_name() {
         Some(name) => (
@@ -354,7 +346,7 @@ fn move_with_pattern(pattern: &str, destination: &str, force: bool) -> MovefileR
     };
 
     let mut matches = Vec::new();
-    let entries = match vfs::read_dir(base_dir) {
+    let entries = match vfs::read_dir_async(base_dir).await {
         Ok(entries) => entries,
         Err(err) => {
             let display = path_to_display(base_dir);
@@ -374,7 +366,7 @@ fn move_with_pattern(pattern: &str, destination: &str, force: bool) -> MovefileR
     }
 
     let destination_path = PathBuf::from(destination);
-    let destination_meta = match vfs::metadata(&destination_path) {
+    let destination_meta = match vfs::metadata_async(&destination_path).await {
         Ok(meta) => meta,
         Err(_) => return MovefileResult::destination_missing(destination),
     };
@@ -386,7 +378,7 @@ fn move_with_pattern(pattern: &str, destination: &str, force: bool) -> MovefileR
     let mut plan = Vec::with_capacity(matches.len());
     for source_path in matches {
         let display_source = path_to_display(&source_path);
-        if vfs::metadata(&source_path).is_err() {
+        if vfs::metadata_async(&source_path).await.is_err() {
             return MovefileResult::source_not_found(&display_source);
         }
         let Some(name) = source_path.file_name() else {
@@ -401,7 +393,7 @@ fn move_with_pattern(pattern: &str, destination: &str, force: bool) -> MovefileR
             continue;
         }
         let target_display = path_to_display(&target_path);
-        match vfs::metadata(&target_path) {
+        match vfs::metadata_async(&target_path).await {
             Ok(existing) => {
                 if !force {
                     return MovefileResult::destination_exists(&target_display);
@@ -431,7 +423,7 @@ fn move_with_pattern(pattern: &str, destination: &str, force: bool) -> MovefileR
         }
     }
 
-    match execute_plan(&plan) {
+    match execute_plan(&plan).await {
         Ok(()) => MovefileResult::success(),
         Err(err) => MovefileResult::os_error(&err.source_display, &err.target_display, &err.error),
     }
@@ -473,13 +465,13 @@ struct MoveError {
     error: io::Error,
 }
 
-fn execute_plan(plan: &[MovePlanEntry]) -> Result<(), MoveError> {
+async fn execute_plan(plan: &[MovePlanEntry]) -> Result<(), MoveError> {
     for entry in plan {
         if entry.remove_target {
             let result = if entry.remove_is_dir {
-                vfs::remove_dir_all(&entry.target_path)
+                vfs::remove_dir_all_async(&entry.target_path).await
             } else {
-                vfs::remove_file(&entry.target_path)
+                vfs::remove_file_async(&entry.target_path).await
             };
             if let Err(err) = result {
                 if err.kind() != io::ErrorKind::NotFound {
@@ -492,7 +484,7 @@ fn execute_plan(plan: &[MovePlanEntry]) -> Result<(), MoveError> {
             }
         }
 
-        if let Err(err) = vfs::rename(&entry.source_path, &entry.target_path) {
+        if let Err(err) = vfs::rename_async(&entry.source_path, &entry.target_path).await {
             return Err(MoveError {
                 source_display: entry.source_display.clone(),
                 target_display: entry.target_display.clone(),

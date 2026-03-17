@@ -675,7 +675,7 @@ pub(crate) mod tests {
     use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::Tensor;
-    use runmat_filesystem::{self as fs, File};
+    use runmat_filesystem::File;
     use runmat_time::system_time_now;
     use std::io::Read;
     use std::path::PathBuf;
@@ -725,9 +725,9 @@ pub(crate) mod tests {
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
 
-        let bytes = fs::read(&path).expect("read");
+        let bytes = test_support::fs::read(&path).expect("read");
         assert_eq!(bytes, vec![1u8, 2, 255]);
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -751,14 +751,14 @@ pub(crate) mod tests {
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
 
-        let bytes = fs::read(&path).expect("read");
+        let bytes = test_support::fs::read(&path).expect("read");
         let expected: Vec<u8> = if cfg!(target_endian = "little") {
             [1.5f64.to_le_bytes(), (-2.25f64).to_le_bytes()].concat()
         } else {
             [1.5f64.to_be_bytes(), (-2.25f64).to_be_bytes()].concat()
         };
         assert_eq!(bytes, expected);
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -783,9 +783,9 @@ pub(crate) mod tests {
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
 
-        let bytes = fs::read(&path).expect("read");
+        let bytes = test_support::fs::read(&path).expect("read");
         assert_eq!(bytes, vec![0x01, 0x02, 0x03, 0x04]);
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -809,9 +809,9 @@ pub(crate) mod tests {
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
 
-        let bytes = fs::read(&path).expect("read");
+        let bytes = test_support::fs::read(&path).expect("read");
         assert_eq!(bytes, vec![10u8, 0, 20, 0, 30]);
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -858,7 +858,7 @@ pub(crate) mod tests {
             decoded.push(value);
         }
         assert_eq!(decoded, vec![1u16, 2, 3, 4]);
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -881,7 +881,7 @@ pub(crate) mod tests {
         );
         assert!(err.contains("unsupported precision"));
         let _ = run_fclose(&[Value::Num(fid as f64)]);
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -904,7 +904,7 @@ pub(crate) mod tests {
         );
         assert!(err.contains("skip value must be non-negative"));
         let _ = run_fclose(&[Value::Num(fid as f64)]);
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -957,7 +957,7 @@ pub(crate) mod tests {
                 expected_value
             );
         }
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

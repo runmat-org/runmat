@@ -271,9 +271,9 @@ fn matches_keyword(value: &Value, keyword: &str) -> bool {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::{fopen, registry};
     use runmat_builtins::{CellArray, LogicalArray, StringArray, Tensor};
-    use runmat_filesystem as fs;
     use runmat_time::system_time_now;
     use std::io::Write;
     use std::path::PathBuf;
@@ -307,7 +307,7 @@ pub(crate) mod tests {
     fn open_temp_file(prefix: &str) -> (f64, PathBuf) {
         let path = unique_path(prefix);
         {
-            let mut file = fs::File::create(&path).unwrap();
+            let mut file = runmat_filesystem::File::create(&path).unwrap();
             writeln!(&mut file, "data").unwrap();
         }
         let eval = run_fopen(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
@@ -326,7 +326,7 @@ pub(crate) mod tests {
         assert_eq!(eval.status(), 0.0);
         assert!(eval.message().is_empty());
         assert!(registry::info_for(fid as i32).is_none());
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -350,7 +350,7 @@ pub(crate) mod tests {
         assert!(registry::info_for(fid as i32).is_none());
         let infos = registry::list_infos();
         assert!(infos.iter().all(|info| info.id < 3));
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -362,7 +362,7 @@ pub(crate) mod tests {
         let eval = run_evaluate(&[]).expect("fclose");
         assert_eq!(eval.status(), 0.0);
         assert!(registry::info_for(fid as i32).is_none());
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -371,14 +371,14 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path1 = unique_path("fclose_vec1");
-        fs::write(&path1, "a").unwrap();
+        test_support::fs::write(&path1, "a").unwrap();
         let fid1 = run_fopen(&[Value::from(path1.to_string_lossy().to_string())])
             .expect("open 1")
             .as_open()
             .unwrap()
             .fid;
         let path2 = unique_path("fclose_vec2");
-        fs::write(&path2, "b").unwrap();
+        test_support::fs::write(&path2, "b").unwrap();
         let fid2 = run_fopen(&[Value::from(path2.to_string_lossy().to_string())])
             .expect("open 2")
             .as_open()
@@ -389,8 +389,8 @@ pub(crate) mod tests {
         assert_eq!(eval.status(), 0.0);
         assert!(registry::info_for(fid1 as i32).is_none());
         assert!(registry::info_for(fid2 as i32).is_none());
-        fs::remove_file(path1).unwrap();
-        fs::remove_file(path2).unwrap();
+        test_support::fs::remove_file(path1).unwrap();
+        test_support::fs::remove_file(path2).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -404,7 +404,7 @@ pub(crate) mod tests {
         let second = run_evaluate(&[Value::Num(fid)]).expect("fclose second");
         assert_eq!(second.status(), -1.0);
         assert_eq!(second.message(), INVALID_IDENTIFIER_MESSAGE);
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -443,8 +443,8 @@ pub(crate) mod tests {
         assert_eq!(eval.status(), 0.0);
         assert!(registry::info_for(fid1 as i32).is_none());
         assert!(registry::info_for(fid2 as i32).is_none());
-        fs::remove_file(path1).unwrap();
-        fs::remove_file(path2).unwrap();
+        test_support::fs::remove_file(path1).unwrap();
+        test_support::fs::remove_file(path2).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

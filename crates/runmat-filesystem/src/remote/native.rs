@@ -2,6 +2,7 @@ use crate::data_contract::{
     DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
 };
 use crate::{DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags};
+use async_trait::async_trait;
 use chrono::DateTime;
 use crossbeam_utils::thread;
 use once_cell::sync::Lazy;
@@ -515,7 +516,13 @@ impl RemoteFsProvider {
 
     fn ensure_parent_exists(&self, path: &Path) -> io::Result<()> {
         if let Some(parent) = path.parent() {
-            self.create_dir_all(parent)?;
+            self.inner.post_empty(
+                "/fs/mkdir",
+                &CreateDirRequest {
+                    path: self.normalize(parent),
+                    recursive: true,
+                },
+            )?;
         }
         Ok(())
     }
@@ -990,6 +997,7 @@ struct UploadTask {
     chunk_sha256: String,
 }
 
+#[async_trait(?Send)]
 impl FsProvider for RemoteFsProvider {
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         let normalized = self.normalize(path);
@@ -1022,7 +1030,7 @@ impl FsProvider for RemoteFsProvider {
         Ok(Box::new(handle))
     }
 
-    fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+    async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
         let normalized = self.normalize(path);
         let meta = self.inner.fetch_metadata(&normalized)?;
         if meta.file_type != "file" {
@@ -1035,30 +1043,30 @@ impl FsProvider for RemoteFsProvider {
         }
     }
 
-    fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
+    async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
         let normalized = self.normalize(path);
         self.ensure_parent_exists(path)?;
         self.upload_entire_file(&normalized, data)
     }
 
-    fn remove_file(&self, path: &Path) -> io::Result<()> {
+    async fn remove_file(&self, path: &Path) -> io::Result<()> {
         let normalized = self.normalize(path);
         self.inner
             .delete_empty("/fs/file", &[("path", normalized)])?;
         Ok(())
     }
 
-    fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+    async fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
         let normalized = self.normalize(path);
         let resp = self.inner.fetch_metadata(&normalized)?;
         Ok(resp.into())
     }
 
-    fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata> {
-        self.metadata(path)
+    async fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+        self.metadata(path).await
     }
 
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
+    async fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
         let normalized = self.normalize(path);
         let resp = self.inner.fetch_dir(&normalized)?;
         Ok(resp
@@ -1071,13 +1079,13 @@ impl FsProvider for RemoteFsProvider {
             .collect())
     }
 
-    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+    async fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
         let normalized = self.normalize(path);
         let canonical = self.inner.canonicalize_path(&normalized)?;
         Ok(PathBuf::from(canonical))
     }
 
-    fn create_dir(&self, path: &Path) -> io::Result<()> {
+    async fn create_dir(&self, path: &Path) -> io::Result<()> {
         let normalized = self.normalize(path);
         self.inner.post_empty(
             "/fs/mkdir",
@@ -1088,7 +1096,7 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
-    fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+    async fn create_dir_all(&self, path: &Path) -> io::Result<()> {
         let normalized = self.normalize(path);
         self.inner.post_empty(
             "/fs/mkdir",
@@ -1099,7 +1107,7 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
-    fn remove_dir(&self, path: &Path) -> io::Result<()> {
+    async fn remove_dir(&self, path: &Path) -> io::Result<()> {
         let normalized = self.normalize(path);
         self.inner.delete_empty(
             "/fs/dir",
@@ -1107,7 +1115,7 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
-    fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
+    async fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
         let normalized = self.normalize(path);
         self.inner.delete_empty(
             "/fs/dir",
@@ -1115,7 +1123,7 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
-    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+    async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
         self.inner.post_empty(
             "/fs/rename",
             &RenameRequest {
@@ -1125,7 +1133,7 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
-    fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
+    async fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
         self.inner.post_empty(
             "/fs/set-readonly",
             &SetReadonlyRequest {
@@ -1135,7 +1143,7 @@ impl FsProvider for RemoteFsProvider {
         )
     }
 
-    fn data_manifest_descriptor(
+    async fn data_manifest_descriptor(
         &self,
         request: &DataManifestRequest,
     ) -> io::Result<DataManifestDescriptor> {
@@ -1146,7 +1154,7 @@ impl FsProvider for RemoteFsProvider {
         self.inner.get_json("/data/manifest", &query)
     }
 
-    fn data_chunk_upload_targets(
+    async fn data_chunk_upload_targets(
         &self,
         request: &DataChunkUploadRequest,
     ) -> io::Result<Vec<DataChunkUploadTarget>> {
@@ -1160,7 +1168,11 @@ impl FsProvider for RemoteFsProvider {
         Ok(response.targets)
     }
 
-    fn data_upload_chunk(&self, target: &DataChunkUploadTarget, data: &[u8]) -> io::Result<()> {
+    async fn data_upload_chunk(
+        &self,
+        target: &DataChunkUploadTarget,
+        data: &[u8],
+    ) -> io::Result<()> {
         self.inner
             .put_upload_target(&target.method, &target.upload_url, &target.headers, data)
     }
@@ -1532,6 +1544,7 @@ mod tests {
     use axum::http::{HeaderMap, StatusCode};
     use axum::routing::{delete, get, post, put};
     use axum::{Json, Router};
+    use futures::executor;
     use serde::Deserialize;
     use std::collections::HashMap;
     use std::net::TcpListener as StdTcpListener;
@@ -2110,14 +2123,11 @@ mod tests {
         let data = (0..16_384u32)
             .flat_map(|v| v.to_le_bytes())
             .collect::<Vec<_>>();
-        provider
-            .write(Path::new("/reports/data.bin"), &data)
-            .expect("write");
-        let read_back = provider.read(Path::new("/reports/data.bin")).expect("read");
+        executor::block_on(provider.write(Path::new("/reports/data.bin"), &data)).expect("write");
+        let read_back =
+            executor::block_on(provider.read(Path::new("/reports/data.bin"))).expect("read");
         assert_eq!(data, read_back);
-        provider
-            .remove_file(Path::new("/reports/data.bin"))
-            .expect("remove");
+        executor::block_on(provider.remove_file(Path::new("/reports/data.bin"))).expect("remove");
         assert!(!harness.resolve("/reports/data.bin").exists());
     }
 
@@ -2141,7 +2151,8 @@ mod tests {
         std::fs::create_dir_all(harness.resolve("/reports")).expect("mkdir");
         std::fs::write(harness.resolve("/reports/data.bin"), &data).expect("write");
 
-        let read_back = provider.read(Path::new("/reports/data.bin")).expect("read");
+        let read_back =
+            executor::block_on(provider.read(Path::new("/reports/data.bin"))).expect("read");
         assert_eq!(data, read_back);
     }
 
@@ -2161,9 +2172,9 @@ mod tests {
         .expect("provider");
 
         let data = vec![7u8; 1024];
-        let err = provider
-            .write(Path::new("/reports/missing-target.bin"), &data)
-            .expect_err("write should fail when chunk target is missing");
+        let err =
+            executor::block_on(provider.write(Path::new("/reports/missing-target.bin"), &data))
+                .expect_err("write should fail when chunk target is missing");
         assert_eq!(err.kind(), io::ErrorKind::Other);
     }
 

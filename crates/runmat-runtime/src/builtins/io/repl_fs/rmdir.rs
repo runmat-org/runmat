@@ -100,10 +100,10 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<RmdirResult> {
     let gathered = gather_arguments(args).await?;
     match gathered.len() {
         0 => Err(rmdir_error("rmdir: not enough input arguments")),
-        1 => remove_folder(&gathered[0], RemoveMode::NonRecursive),
+        1 => remove_folder(&gathered[0], RemoveMode::NonRecursive).await,
         2 => {
             let mode = parse_remove_mode(&gathered[1])?;
-            remove_folder(&gathered[0], mode)
+            remove_folder(&gathered[0], mode).await
         }
         _ => Err(rmdir_error("rmdir: too many input arguments")),
     }
@@ -205,20 +205,20 @@ impl RmdirResult {
     }
 }
 
-fn remove_folder(value: &Value, mode: RemoveMode) -> BuiltinResult<RmdirResult> {
+async fn remove_folder(value: &Value, mode: RemoveMode) -> BuiltinResult<RmdirResult> {
     let raw = extract_folder_name(value)?;
     if raw.trim().is_empty() {
         return Ok(RmdirResult::empty_name());
     }
     let expanded = expand_user_path(&raw, "rmdir").map_err(rmdir_error)?;
     let path = PathBuf::from(&expanded);
-    Ok(remove_directory(&path, mode))
+    Ok(remove_directory(&path, mode).await)
 }
 
-fn remove_directory(path: &Path, mode: RemoveMode) -> RmdirResult {
+async fn remove_directory(path: &Path, mode: RemoveMode) -> RmdirResult {
     let display = path.display().to_string();
 
-    let metadata = match vfs::metadata(path) {
+    let metadata = match vfs::metadata_async(path).await {
         Ok(meta) => meta,
         Err(err) => {
             return if err.kind() == io::ErrorKind::NotFound {
@@ -234,7 +234,7 @@ fn remove_directory(path: &Path, mode: RemoveMode) -> RmdirResult {
     }
 
     match mode {
-        RemoveMode::Recursive => match vfs::remove_dir_all(path) {
+        RemoveMode::Recursive => match vfs::remove_dir_all_async(path).await {
             Ok(_) => RmdirResult::success(),
             Err(err) => {
                 if err.kind() == io::ErrorKind::NotFound {
@@ -244,7 +244,7 @@ fn remove_directory(path: &Path, mode: RemoveMode) -> RmdirResult {
                 }
             }
         },
-        RemoveMode::NonRecursive => match vfs::remove_dir(path) {
+        RemoveMode::NonRecursive => match vfs::remove_dir_async(path).await {
             Ok(_) => RmdirResult::success(),
             Err(err) => {
                 if err.kind() == io::ErrorKind::NotFound {
@@ -380,10 +380,10 @@ pub(crate) mod tests {
         let mut file = File::create(target.join("latest.log")).expect("create file");
         writeln!(file, "entry").expect("write");
 
-        let eval = remove_folder(
+        let eval = futures::executor::block_on(remove_folder(
             &Value::from(target.to_string_lossy().to_string()),
             RemoveMode::NonRecursive,
-        )
+        ))
         .unwrap();
         assert_eq!(eval.status(), 0.0);
         assert_eq!(eval.message_id(), MESSAGE_ID_DIRECTORY_NOT_EMPTY);

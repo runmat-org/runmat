@@ -149,7 +149,6 @@ pub(crate) fn list_infos() -> Vec<FileInfo> {
     infos
 }
 
-#[allow(dead_code)]
 pub(crate) fn take_handle(fid: i32) -> Option<Arc<StdMutex<File>>> {
     let guard = REGISTRY.lock().expect("file registry poisoned");
     guard
@@ -158,7 +157,6 @@ pub(crate) fn take_handle(fid: i32) -> Option<Arc<StdMutex<File>>> {
         .and_then(|entry| entry.file_handle())
 }
 
-#[allow(dead_code)]
 pub(crate) fn close(fid: i32) -> Option<FileInfo> {
     if fid < 3 {
         return None;

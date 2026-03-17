@@ -560,8 +560,8 @@ fn write_bytes(path: &Path, payload: &[u8], mode: WriteMode) -> BuiltinResult<us
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use crate::RuntimeError;
-    use runmat_filesystem as fs;
     use runmat_time::unix_timestamp_ms;
     use std::io::Read;
 
@@ -598,17 +598,17 @@ pub(crate) mod tests {
             other => panic!("expected numeric byte count, got {other:?}"),
         }
 
-        let written = fs::read_to_string(&path).expect("read filewrite output");
+        let written = test_support::fs::read_to_string(&path).expect("read filewrite output");
         assert_eq!(written, contents);
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn filewrite_appends_when_requested() {
         let path = unique_path("filewrite_append");
-        fs::write(&path, "first\n").expect("write baseline");
+        test_support::fs::write(&path, "first\n").expect("write baseline");
 
         run_filewrite(
             Value::from(path.to_string_lossy().to_string()),
@@ -617,10 +617,10 @@ pub(crate) mod tests {
         )
         .expect("filewrite append");
 
-        let written = fs::read_to_string(&path).expect("read appended file");
+        let written = test_support::fs::read_to_string(&path).expect("read appended file");
         assert_eq!(written, "first\nsecond\n");
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -655,13 +655,13 @@ pub(crate) mod tests {
         .expect("filewrite raw");
 
         let mut bytes = Vec::new();
-        fs::File::open(&path)
+        runmat_filesystem::File::open(&path)
             .expect("open raw file")
             .read_to_end(&mut bytes)
             .expect("read raw file");
         assert_eq!(bytes, vec![0u8, 127u8, 255u8]);
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -675,10 +675,10 @@ pub(crate) mod tests {
         )
         .expect("filewrite numeric scalar");
 
-        let bytes = fs::read(&path).expect("read numeric scalar file");
+        let bytes = test_support::fs::read(&path).expect("read numeric scalar file");
         assert_eq!(bytes, vec![65u8]);
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -692,10 +692,10 @@ pub(crate) mod tests {
         )
         .expect("filewrite bool scalar");
 
-        let bytes = fs::read(&path).expect("read bool scalar file");
+        let bytes = test_support::fs::read(&path).expect("read bool scalar file");
         assert_eq!(bytes, vec![1u8]);
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -710,10 +710,10 @@ pub(crate) mod tests {
         )
         .expect("filewrite logical array");
 
-        let bytes = fs::read(&path).expect("read logical array file");
+        let bytes = test_support::fs::read(&path).expect("read logical array file");
         assert_eq!(bytes, vec![0u8, 1u8, 1u8]);
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -785,10 +785,10 @@ pub(crate) mod tests {
         )
         .expect("filewrite positional encoding");
 
-        let bytes = fs::read(&path).expect("read latin1 file");
+        let bytes = test_support::fs::read(&path).expect("read latin1 file");
         assert_eq!(bytes, b"Espa\xF1a");
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -803,10 +803,10 @@ pub(crate) mod tests {
         )
         .expect("filewrite utf8 numeric");
 
-        let bytes = fs::read(&path).expect("read utf8 numeric file");
+        let bytes = test_support::fs::read(&path).expect("read utf8 numeric file");
         assert_eq!(bytes, vec![0u8, 255u8]);
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -928,10 +928,10 @@ pub(crate) mod tests {
         )
         .expect("filewrite char path");
 
-        let written = fs::read_to_string(&path).expect("read char path file");
+        let written = test_support::fs::read_to_string(&path).expect("read char path file");
         assert_eq!(written, "hello");
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -947,9 +947,9 @@ pub(crate) mod tests {
         )
         .expect("filewrite string array");
 
-        let written = fs::read_to_string(&path).expect("read string array file");
+        let written = test_support::fs::read_to_string(&path).expect("read string array file");
         assert_eq!(written, "a\nb\nc");
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 }

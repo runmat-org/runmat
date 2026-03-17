@@ -85,12 +85,12 @@ async fn tempname_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     match args.len() {
         0 => {
             let base = default_temp_directory()?;
-            Ok(path_to_value(&generate_unique_path(&base)?))
+            Ok(path_to_value(&generate_unique_path_async(&base).await?))
         }
         1 => {
             let gathered = gather_argument(&args[0]).await?;
             let folder = parse_folder_argument(&gathered)?;
-            Ok(path_to_value(&generate_unique_path(&folder)?))
+            Ok(path_to_value(&generate_unique_path_async(&folder).await?))
         }
         _ => Err(tempname_error(ERR_TOO_MANY_INPUTS)),
     }
@@ -150,7 +150,7 @@ fn parse_folder_argument(value: &Value) -> BuiltinResult<PathBuf> {
     }
 }
 
-fn generate_unique_path(base: &Path) -> BuiltinResult<PathBuf> {
+async fn generate_unique_path_async(base: &Path) -> BuiltinResult<PathBuf> {
     for _ in 0..MAX_ATTEMPTS {
         let token = unique_token();
         let candidate = if base.as_os_str().is_empty() {
@@ -158,7 +158,7 @@ fn generate_unique_path(base: &Path) -> BuiltinResult<PathBuf> {
         } else {
             base.join(&token)
         };
-        if !path_exists(&candidate) {
+        if !path_exists_async(&candidate).await {
             return Ok(candidate);
         }
     }
@@ -192,8 +192,13 @@ fn path_to_value(path: &Path) -> Value {
     Value::CharArray(CharArray::new_row(&text))
 }
 
+async fn path_exists_async(path: &Path) -> bool {
+    vfs::metadata_async(path).await.is_ok()
+}
+
+#[cfg(test)]
 fn path_exists(path: &Path) -> bool {
-    vfs::metadata(path).is_ok()
+    futures::executor::block_on(path_exists_async(path))
 }
 
 #[cfg(test)]

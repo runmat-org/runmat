@@ -175,11 +175,12 @@ fn parse_scalar_fid(value: f64) -> BuiltinResult<i32> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::{fclose, fopen, fread, registry};
     use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{Tensor, Value};
-    use runmat_filesystem::{self as fs, File};
+    use runmat_filesystem::File;
     use runmat_time::system_time_now;
     use std::io::Write;
     use std::path::PathBuf;
@@ -231,7 +232,7 @@ pub(crate) mod tests {
         assert!(!at_end);
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -259,7 +260,7 @@ pub(crate) mod tests {
         assert!(at_end);
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -281,7 +282,7 @@ pub(crate) mod tests {
         assert!(at_end);
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -352,7 +353,7 @@ pub(crate) mod tests {
         assert!(!at_end);
 
         run_fclose(&[Value::Num(fid)]).unwrap();
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -378,7 +379,7 @@ pub(crate) mod tests {
         let err = unwrap_error_message(run_evaluate(&Value::Num(fid)).unwrap_err());
         assert!(err.contains("Invalid file identifier"));
 
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -416,7 +417,7 @@ pub(crate) mod tests {
         });
 
         run_fclose(&[Value::Num(fid)]).unwrap();
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

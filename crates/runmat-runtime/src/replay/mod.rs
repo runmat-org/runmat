@@ -6,6 +6,7 @@ pub mod workspace;
 #[cfg(feature = "plot-core")]
 pub use scene::{
     decode_figure_scene_payload as import_figure_scene_payload,
+    decode_figure_scene_payload_async as import_figure_scene_payload_async,
     encode_figure_scene_payload as export_figure_scene_payload,
 };
 pub use workspace::{

@@ -8,6 +8,7 @@ import {
   renderFigureImage,
   exportFigureScene,
   importFigureScene,
+  importFigureSceneFromPath,
   exportWorkspaceState,
   importWorkspaceState,
   createWorkspaceHoverProvider,
@@ -598,6 +599,18 @@ describe("figure scene bindings", () => {
 
     await expect(importFigureScene(scene)).resolves.toBe(42);
     expect(spy).toHaveBeenCalledWith(scene);
+  });
+
+  it("imports figure scenes by artifact path", async () => {
+    const spy = vi.fn(() => 77);
+    const native: NativeModule = {
+      default: async () => {},
+      importFigureSceneFromPath: spy,
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    await expect(importFigureSceneFromPath("./.artifacts/objects/aa/scene.scene.json")).resolves.toBe(77);
+    expect(spy).toHaveBeenCalledWith("./.artifacts/objects/aa/scene.scene.json");
   });
 
   it("returns null when figure scene import throws", async () => {

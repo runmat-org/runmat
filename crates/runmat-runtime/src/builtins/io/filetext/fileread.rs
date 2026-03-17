@@ -103,7 +103,7 @@ async fn fileread_builtin(path: Value, rest: Vec<Value>) -> crate::BuiltinResult
     let gathered_rest = gather_values(&rest).await?;
     let encoding = parse_encoding_args(&gathered_rest)?;
     let resolved = resolve_path(&gathered_path)?;
-    let bytes = read_all(&resolved)?;
+    let bytes = read_all(&resolved).await?;
     let chars = decode_bytes(bytes, encoding)?;
     let cols = chars.len();
     let char_array =
@@ -222,8 +222,8 @@ fn normalize_path(raw: &str) -> BuiltinResult<PathBuf> {
     Ok(Path::new(raw).to_path_buf())
 }
 
-fn read_all(path: &Path) -> BuiltinResult<Vec<u8>> {
-    fs::read(path).map_err(|err| {
+async fn read_all(path: &Path) -> BuiltinResult<Vec<u8>> {
+    fs::read_async(path).await.map_err(|err| {
         build_runtime_error(format!(
             "fileread: unable to read '{}': {}",
             path.display(),
@@ -287,7 +287,7 @@ fn bytes_to_chars(bytes: Vec<u8>) -> Vec<char> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use runmat_filesystem as fs;
+    use crate::builtins::common::test_support;
     use runmat_time::unix_timestamp_ms;
     use std::io::Write;
 
@@ -311,7 +311,7 @@ pub(crate) mod tests {
     fn fileread_reads_text_file() {
         let path = unique_path("fileread_text");
         let contents = "RunMat fileread\nLine two\n";
-        fs::write(&path, contents).expect("write sample file");
+        test_support::fs::write(&path, contents).expect("write sample file");
 
         let value = Value::from(path.to_string_lossy().to_string());
         let result = run_fileread(value, Vec::new()).expect("fileread result");
@@ -326,14 +326,14 @@ pub(crate) mod tests {
             other => panic!("expected char array, got {other:?}"),
         }
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_accepts_char_array_input() {
         let path = unique_path("fileread_char_input");
-        fs::write(&path, "abc").expect("write sample file");
+        test_support::fs::write(&path, "abc").expect("write sample file");
 
         let path_str = path.to_string_lossy();
         let chars: Vec<char> = path_str.chars().collect();
@@ -350,14 +350,14 @@ pub(crate) mod tests {
             other => panic!("expected char array, got {other:?}"),
         }
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_accepts_string_array_scalar() {
         let path = unique_path("fileread_string_scalar");
-        fs::write(&path, "xyz").expect("write sample file");
+        test_support::fs::write(&path, "xyz").expect("write sample file");
 
         let path_str = path.to_string_lossy().to_string();
         let string_array = runmat_builtins::StringArray::new(vec![path_str.clone()], vec![1, 1])
@@ -373,7 +373,7 @@ pub(crate) mod tests {
             other => panic!("expected char array, got {other:?}"),
         }
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -393,7 +393,7 @@ pub(crate) mod tests {
             other => panic!("expected char array, got {other:?}"),
         }
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -427,7 +427,7 @@ pub(crate) mod tests {
             other => panic!("expected char array, got {other:?}"),
         }
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -435,7 +435,7 @@ pub(crate) mod tests {
     fn fileread_supports_encoding_keyword() {
         let path = unique_path("fileread_utf8_keyword");
         let contents = "UTF-8 ✓";
-        fs::write(&path, contents).expect("write sample file");
+        test_support::fs::write(&path, contents).expect("write sample file");
 
         let result = run_fileread(
             Value::from(path.to_string_lossy().to_string()),
@@ -450,7 +450,7 @@ pub(crate) mod tests {
             other => panic!("expected char array, got {other:?}"),
         }
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -458,7 +458,7 @@ pub(crate) mod tests {
     fn fileread_supports_single_encoding_argument() {
         let path = unique_path("fileread_latin1");
         let bytes = [0xC0u8, 0x20, 0x41];
-        fs::write(&path, bytes).expect("write latin1 data");
+        test_support::fs::write(&path, bytes).expect("write latin1 data");
 
         let result = run_fileread(
             Value::from(path.to_string_lossy().to_string()),
@@ -473,7 +473,7 @@ pub(crate) mod tests {
             other => panic!("expected char array, got {other:?}"),
         }
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -481,7 +481,7 @@ pub(crate) mod tests {
     fn fileread_raw_encoding_returns_bytes() {
         let path = unique_path("fileread_raw_encoding");
         let bytes = [0x01u8, 0xFF, 0x7F];
-        fs::write(&path, bytes).expect("write raw bytes");
+        test_support::fs::write(&path, bytes).expect("write raw bytes");
 
         let result = run_fileread(
             Value::from(path.to_string_lossy().to_string()),
@@ -496,14 +496,14 @@ pub(crate) mod tests {
             other => panic!("expected char array, got {other:?}"),
         }
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_ascii_encoding_errors_on_invalid_bytes() {
         let path = unique_path("fileread_ascii_error");
-        fs::write(&path, [0x41, 0x80]).expect("write bytes");
+        test_support::fs::write(&path, [0x41, 0x80]).expect("write bytes");
 
         let err = unwrap_error_message(
             run_fileread(
@@ -517,14 +517,14 @@ pub(crate) mod tests {
             "unexpected error message: {err}"
         );
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_encoding_keyword_missing_value_errors() {
         let path = unique_path("fileread_encoding_missing");
-        fs::write(&path, "abc").expect("write file");
+        test_support::fs::write(&path, "abc").expect("write file");
 
         let err = unwrap_error_message(
             run_fileread(
@@ -538,14 +538,14 @@ pub(crate) mod tests {
             "unexpected error message: {err}"
         );
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn fileread_too_many_arguments_errors() {
         let path = unique_path("fileread_too_many");
-        fs::write(&path, "abc").expect("write file");
+        test_support::fs::write(&path, "abc").expect("write file");
 
         let err = unwrap_error_message(
             run_fileread(
@@ -563,6 +563,6 @@ pub(crate) mod tests {
             "unexpected error message: {err}"
         );
 
-        let _ = fs::remove_file(&path);
+        let _ = test_support::fs::remove_file(&path);
     }
 }

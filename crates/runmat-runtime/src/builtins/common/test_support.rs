@@ -2,6 +2,35 @@ use crate::build_runtime_error;
 use futures::executor::block_on;
 use runmat_builtins::{LogicalArray, Tensor, Value};
 
+pub mod fs {
+    use std::io;
+    use std::path::Path;
+
+    pub fn write(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::Result<()> {
+        futures::executor::block_on(runmat_filesystem::write_async(path, data))
+    }
+
+    pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
+        futures::executor::block_on(runmat_filesystem::remove_file_async(path))
+    }
+
+    pub fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
+        futures::executor::block_on(runmat_filesystem::read_async(path))
+    }
+
+    pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
+        futures::executor::block_on(runmat_filesystem::read_to_string_async(path))
+    }
+
+    pub fn create_dir(path: impl AsRef<Path>) -> io::Result<()> {
+        futures::executor::block_on(runmat_filesystem::create_dir_async(path))
+    }
+
+    pub fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
+        futures::executor::block_on(runmat_filesystem::create_dir_all_async(path))
+    }
+}
+
 /// Ensure an in-process acceleration provider is registered for tests,
 /// invoking the supplied closure with the provider trait object.
 pub fn with_test_provider<F, R>(f: F) -> R

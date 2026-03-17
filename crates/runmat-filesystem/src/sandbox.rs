@@ -5,6 +5,8 @@ use crate::data_contract::{
 #[cfg(not(target_arch = "wasm32"))]
 use crate::{DirEntry, FsFileType, FsMetadata, FsProvider, OpenFlags};
 #[cfg(not(target_arch = "wasm32"))]
+use async_trait::async_trait;
+#[cfg(not(target_arch = "wasm32"))]
 use chrono::Utc;
 #[cfg(not(target_arch = "wasm32"))]
 use serde_json::Value as JsonValue;
@@ -108,6 +110,7 @@ impl SandboxFsProvider {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[async_trait(?Send)]
 impl FsProvider for SandboxFsProvider {
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn crate::FileHandle>> {
         let target = self.resolve(path);
@@ -125,12 +128,12 @@ impl FsProvider for SandboxFsProvider {
         Ok(Box::new(file))
     }
 
-    fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+    async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
         let target = self.resolve(path);
         fs::read(target)
     }
 
-    fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
+    async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
         let target = self.resolve(path);
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent)?;
@@ -138,7 +141,7 @@ impl FsProvider for SandboxFsProvider {
         fs::write(target, data)
     }
 
-    fn remove_file(&self, path: &Path) -> io::Result<()> {
+    async fn remove_file(&self, path: &Path) -> io::Result<()> {
         let target = self.resolve(path);
         if target.exists() {
             fs::remove_file(target)?;
@@ -146,17 +149,17 @@ impl FsProvider for SandboxFsProvider {
         Ok(())
     }
 
-    fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+    async fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
         let target = self.resolve(path);
         fs::metadata(target).map(FsMetadata::from)
     }
 
-    fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+    async fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata> {
         let target = self.resolve(path);
         fs::symlink_metadata(target).map(FsMetadata::from)
     }
 
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
+    async fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
         let target = self.resolve(path);
         let entries = fs::read_dir(&target)?;
         let mut out = Vec::new();
@@ -167,28 +170,28 @@ impl FsProvider for SandboxFsProvider {
         Ok(out)
     }
 
-    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+    async fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
         let target = self.resolve(path);
         let real = fs::canonicalize(target)?;
         Ok(self.virtualize(&real))
     }
 
-    fn create_dir(&self, path: &Path) -> io::Result<()> {
+    async fn create_dir(&self, path: &Path) -> io::Result<()> {
         let target = self.resolve(path);
         fs::create_dir(&target)
     }
 
-    fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+    async fn create_dir_all(&self, path: &Path) -> io::Result<()> {
         let target = self.resolve(path);
         fs::create_dir_all(&target)
     }
 
-    fn remove_dir(&self, path: &Path) -> io::Result<()> {
+    async fn remove_dir(&self, path: &Path) -> io::Result<()> {
         let target = self.resolve(path);
         fs::remove_dir(&target)
     }
 
-    fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
+    async fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
         let target = self.resolve(path);
         if target.exists() {
             fs::remove_dir_all(&target)?;
@@ -196,7 +199,7 @@ impl FsProvider for SandboxFsProvider {
         Ok(())
     }
 
-    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+    async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
         let src = self.resolve(from);
         let dst = self.resolve(to);
         if let Some(parent) = dst.parent() {
@@ -205,14 +208,14 @@ impl FsProvider for SandboxFsProvider {
         fs::rename(src, dst)
     }
 
-    fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
+    async fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
         let target = self.resolve(path);
         let mut perms = fs::metadata(&target)?.permissions();
         perms.set_readonly(readonly);
         fs::set_permissions(target, perms)
     }
 
-    fn data_manifest_descriptor(
+    async fn data_manifest_descriptor(
         &self,
         request: &DataManifestRequest,
     ) -> io::Result<DataManifestDescriptor> {
@@ -221,7 +224,7 @@ impl FsProvider for SandboxFsProvider {
         } else {
             PathBuf::from(&request.path).join("manifest.json")
         };
-        let bytes = self.read(&manifest_path)?;
+        let bytes = self.read(&manifest_path).await?;
         let json: JsonValue = serde_json::from_slice(&bytes)
             .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err.to_string()))?;
         Ok(DataManifestDescriptor {
@@ -255,7 +258,7 @@ impl FsProvider for SandboxFsProvider {
         })
     }
 
-    fn data_chunk_upload_targets(
+    async fn data_chunk_upload_targets(
         &self,
         request: &DataChunkUploadRequest,
     ) -> io::Result<Vec<DataChunkUploadTarget>> {
@@ -263,7 +266,7 @@ impl FsProvider for SandboxFsProvider {
             .join("arrays")
             .join(sanitize_segment(&request.array))
             .join("chunks");
-        self.create_dir_all(&root)?;
+        self.create_dir_all(&root).await?;
         request
             .chunks
             .iter()
@@ -279,7 +282,11 @@ impl FsProvider for SandboxFsProvider {
             .collect()
     }
 
-    fn data_upload_chunk(&self, target: &DataChunkUploadTarget, data: &[u8]) -> io::Result<()> {
+    async fn data_upload_chunk(
+        &self,
+        target: &DataChunkUploadTarget,
+        data: &[u8],
+    ) -> io::Result<()> {
         if !target.method.eq_ignore_ascii_case("PUT") {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -292,7 +299,7 @@ impl FsProvider for SandboxFsProvider {
             .ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidInput, "invalid sandbox upload url")
             })?;
-        self.write(Path::new(path), data)
+        self.write(Path::new(path), data).await
     }
 }
 
@@ -314,6 +321,7 @@ fn sanitize_segment(input: &str) -> String {
 mod tests {
     use super::SandboxFsProvider;
     use crate::FsProvider;
+    use futures::executor;
     use std::path::Path;
     use tempfile::tempdir;
 
@@ -321,28 +329,24 @@ mod tests {
     fn sandbox_prevents_root_escape_and_virtualizes_paths() {
         let temp = tempdir().expect("tempdir");
         let provider = SandboxFsProvider::new(temp.path().to_path_buf()).expect("sandbox");
-        provider
-            .create_dir_all(Path::new("nested/sub"))
-            .expect("create dir");
-        provider
-            .write(Path::new("nested/sub/file.txt"), b"hello")
+        executor::block_on(provider.create_dir_all(Path::new("nested/sub"))).expect("create dir");
+        executor::block_on(provider.write(Path::new("nested/sub/file.txt"), b"hello"))
             .expect("write");
 
         // Attempt to escape root should clamp to sandbox.
-        provider
-            .write(Path::new("../evil.txt"), b"nope")
+        executor::block_on(provider.write(Path::new("../evil.txt"), b"nope"))
             .expect("write outside clamped");
-        let entries = provider.read_dir(Path::new(".")).expect("read root");
+        let entries = executor::block_on(provider.read_dir(Path::new("."))).expect("read root");
         assert!(entries.iter().any(|entry| entry.file_name() == "evil.txt"));
 
-        let listing = provider.read_dir(Path::new("nested")).expect("list nested");
+        let listing =
+            executor::block_on(provider.read_dir(Path::new("nested"))).expect("list nested");
         assert!(listing
             .iter()
             .any(|entry| entry.path().ends_with(Path::new("nested/sub"))));
 
-        let sandbox_read = provider
-            .read(Path::new("/nested/sub/file.txt"))
-            .expect("vfs read");
+        let sandbox_read =
+            executor::block_on(provider.read(Path::new("/nested/sub/file.txt"))).expect("vfs read");
         assert_eq!(sandbox_read, b"hello");
     }
 
@@ -350,14 +354,9 @@ mod tests {
     fn canonicalize_returns_virtual_paths() {
         let temp = tempdir().expect("tempdir");
         let provider = SandboxFsProvider::new(temp.path().to_path_buf()).expect("sandbox");
-        provider
-            .create_dir_all(Path::new("data"))
-            .expect("create dir");
-        provider
-            .write(Path::new("data/file.bin"), b"bytes")
-            .expect("write");
-        let canonical = provider
-            .canonicalize(Path::new("./data/./file.bin"))
+        executor::block_on(provider.create_dir_all(Path::new("data"))).expect("create dir");
+        executor::block_on(provider.write(Path::new("data/file.bin"), b"bytes")).expect("write");
+        let canonical = executor::block_on(provider.canonicalize(Path::new("./data/./file.bin")))
             .expect("canonicalize");
         assert!(canonical.ends_with(Path::new("data/file.bin")));
         assert!(canonical.is_absolute());

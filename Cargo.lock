@@ -5584,9 +5584,11 @@ dependencies = [
 name = "runmat-filesystem"
 version = "0.2.8"
 dependencies = [
+ "async-trait",
  "axum 0.7.9",
  "chrono",
  "crossbeam-utils",
+ "futures",
  "js-sys",
  "once_cell",
  "reqwest 0.12.23",
@@ -5822,6 +5824,7 @@ dependencies = [
  "accelerate-src",
  "anyhow",
  "async-recursion",
+ "async-trait",
  "axum 0.7.9",
  "base64 0.22.1",
  "blas",
@@ -5899,6 +5902,7 @@ dependencies = [
  "crc32fast",
  "criterion",
  "env_logger 0.10.2",
+ "futures",
  "getrandom 0.2.16",
  "indicatif",
  "libc",
@@ -5990,6 +5994,7 @@ name = "runmat-wasm"
 version = "0.2.8"
 dependencies = [
  "anyhow",
+ "async-trait",
  "console_error_panic_hook",
  "getrandom 0.2.16",
  "glam",

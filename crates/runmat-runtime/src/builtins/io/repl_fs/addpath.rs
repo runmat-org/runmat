@@ -101,7 +101,7 @@ async fn addpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered = gather_arguments(&args).await?;
     let previous = current_path_string();
     let spec = parse_arguments(&gathered).await?;
-    apply_addpath(spec)?;
+    apply_addpath(spec).await?;
     Ok(char_array_value(&previous))
 }
 
@@ -190,13 +190,13 @@ fn parse_option(text: &str) -> Option<AddPathOption> {
     }
 }
 
-fn apply_addpath(spec: AddPathSpec) -> BuiltinResult<()> {
+async fn apply_addpath(spec: AddPathSpec) -> BuiltinResult<()> {
     let mut existing = current_path_segments();
     let mut seen = HashSet::new();
     let mut additions = Vec::new();
 
     for raw in spec.directories {
-        let normalized = normalize_directory(&raw)?;
+        let normalized = normalize_directory(&raw).await?;
         let key = path_identity(&normalized);
         if seen.insert(key.clone()) {
             existing.retain(|entry| path_identity(entry) != key);
@@ -291,7 +291,7 @@ fn split_path_list(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn normalize_directory(raw: &str) -> BuiltinResult<String> {
+async fn normalize_directory(raw: &str) -> BuiltinResult<String> {
     let trimmed = raw.trim();
     if trimmed.is_empty() {
         return Err(addpath_error(ERROR_ARG_TYPE));
@@ -314,7 +314,8 @@ fn normalize_directory(raw: &str) -> BuiltinResult<String> {
     };
     let normalized = normalize_pathbuf(&joined);
 
-    let metadata = vfs::metadata(&normalized)
+    let metadata = vfs::metadata_async(&normalized)
+        .await
         .map_err(|_| addpath_error(format!("addpath: folder '{trimmed}' not found")))?;
     if !metadata.is_dir() {
         return Err(addpath_error(format!(

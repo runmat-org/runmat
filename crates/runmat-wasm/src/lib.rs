@@ -93,7 +93,8 @@ use runmat_runtime::warning_store::RuntimeWarning;
 use runmat_runtime::RuntimeError;
 #[cfg(target_arch = "wasm32")]
 use runmat_runtime::{
-    runtime_plot_export_figure_scene, runtime_plot_import_figure_scene, ReplayErrorKind,
+    runtime_plot_export_figure_scene, runtime_plot_import_figure_scene_async,
+    runtime_plot_import_figure_scene_from_path_async, ReplayErrorKind,
 };
 use serde::{Deserialize, Serialize};
 
@@ -775,9 +776,9 @@ impl RunMatWasm {
     }
 
     #[wasm_bindgen(js_name = importFigureScene)]
-    pub fn import_figure_scene(&self, scene: &[u8]) -> Result<Option<u32>, JsValue> {
+    pub async fn import_figure_scene(&self, scene: &[u8]) -> Result<Option<u32>, JsValue> {
         self.ensure_not_disposed()?;
-        match runtime_plot_import_figure_scene(scene) {
+        match runtime_plot_import_figure_scene_async(scene).await {
             Ok(Some(handle)) => Ok(Some(handle.as_u32())),
             Ok(None) => Ok(None),
             Err(err) => {
@@ -786,6 +787,19 @@ impl RunMatWasm {
                 } else {
                     warn!("RunMat wasm: figure scene import rejected: {err}");
                 }
+                Ok(None)
+            }
+        }
+    }
+
+    #[wasm_bindgen(js_name = importFigureSceneFromPath)]
+    pub async fn import_figure_scene_from_path(&self, path: &str) -> Result<Option<u32>, JsValue> {
+        self.ensure_not_disposed()?;
+        match runtime_plot_import_figure_scene_from_path_async(path).await {
+            Ok(Some(handle)) => Ok(Some(handle.as_u32())),
+            Ok(None) => Ok(None),
+            Err(err) => {
+                warn!("RunMat wasm: figure scene import-from-path rejected: {err}");
                 Ok(None)
             }
         }

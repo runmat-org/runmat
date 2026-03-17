@@ -37,6 +37,7 @@ anyhow = { workspace = true }
 miette = { workspace = true }
 console_error_panic_hook = "0.1"
 thiserror = { workspace = true }
+async-trait = "0.1"
 getrandom = { version = "0.2", features = ["js"] }
 uuid = { version = "1", features = ["v4", "js"], default-features = false }
 runmat-logging = { path = "../runmat-logging", version = "0.1.0" }
