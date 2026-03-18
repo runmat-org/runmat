@@ -6,6 +6,7 @@ import { MermaidDiagram } from '@/components/MermaidDiagram';
 import { slugifyHeading } from '@/lib/utils';
 import { HeadingAnchor } from '@/components/HeadingAnchor';
 import { TryInBrowserButton } from './TryInBrowserButton';
+import { FFTVisualizerClient } from '@/components/guides/fft/FFTVisualizerClient';
 
 type MDXComponent = (props: { children?: React.ReactNode } & Record<string, unknown>) => React.ReactElement | null;
 type MarkdownRendererComponents = Record<string, MDXComponent | ((props: { children: React.ReactNode } & Record<string, unknown>) => React.ReactElement | null)>;
@@ -332,6 +333,11 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
         <div className="max-w-full overflow-x-auto">
           <MermaidDiagram chart={String(props.chart ?? '')} {...props} />
         </div>
+      </div>
+    ),
+    FFTVisualizer: () => (
+      <div className="my-12 -mx-4 sm:mx-0">
+        <FFTVisualizerClient />
       </div>
     ),
   } as const;

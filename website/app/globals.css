@@ -414,3 +414,55 @@ html:not(.dark) .token.variable,
 html:not(.dark) .token.selector {
   color: #be123c;
 }
+
+/* FFT Visualizer range slider styling */
+input[type="range"].fft-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  cursor: pointer;
+  height: 20px;
+}
+
+input[type="range"].fft-slider::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: hsl(var(--border));
+}
+
+input[type="range"].fft-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: hsl(var(--primary));
+  border: 2px solid hsl(var(--background));
+  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.3);
+  margin-top: -5px;
+  transition: box-shadow 0.15s;
+}
+
+input[type="range"].fft-slider::-webkit-slider-thumb:hover {
+  box-shadow: 0 0 0 3px hsl(var(--primary) / 0.2);
+}
+
+input[type="range"].fft-slider::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: hsl(var(--border));
+  border: none;
+}
+
+input[type="range"].fft-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: hsl(var(--primary));
+  border: 2px solid hsl(var(--background));
+  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.3);
+}
+
+input[type="range"].fft-slider::-moz-range-thumb:hover {
+  box-shadow: 0 0 0 3px hsl(var(--primary) / 0.2);
+}

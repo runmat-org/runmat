@@ -60,6 +60,7 @@ interface BlogPost {
     visibility?: string;
     jsonLd?: JsonLd;
     collections?: string[];
+    toc?: boolean;
   };
   content: string;
   authors: AuthorInfo[];
@@ -89,6 +90,7 @@ const FRONTMATTER_KEYS = new Set([
   'visibility',
   'jsonLd',
   'collections',
+  'toc',
 ]);
 
 function isJsonLdValue(value: unknown): value is JsonLdValue {
@@ -210,6 +212,10 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
 
   const jsonLd = validateJsonLd(raw.jsonLd, slug);
   const collections = raw.collections === undefined ? undefined : assertStringArray(raw.collections, 'collections', slug);
+  const toc = raw.toc === undefined ? true : raw.toc;
+  if (typeof toc !== 'boolean') {
+    throw new Error(`Frontmatter field "toc" must be a boolean in slug "${slug}".`);
+  }
 
   return {
     title,
@@ -235,6 +241,7 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
     visibility,
     jsonLd,
     collections,
+    toc,
   };
 }
 
@@ -417,7 +424,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
       readTime={post.frontmatter.readTime}
       authors={post.authors}
       tags={post.frontmatter.tags}
-      rightAside={<HeadingsNav source={post.content} />}
+      rightAside={post.frontmatter.toc !== false ? <HeadingsNav source={post.content} /> : undefined}
     >
       {jsonLdString && (
         <script

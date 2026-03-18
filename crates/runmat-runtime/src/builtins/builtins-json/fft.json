@@ -132,6 +132,10 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "Interactive FFT Visualizer",
+      "url": "/blog/fft-explained"
     }
   ],
   "source": {
