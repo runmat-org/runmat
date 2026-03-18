@@ -26,11 +26,11 @@ function ConditionalLayout({ children }: { children: React.ReactNode }) {
   
   // For other pages, render with sidebar grid layout
   return (
-    <div className="grid grid-cols-1 md:grid-cols-[260px_minmax(0,1fr)] gap-6">
-      <Suspense fallback={<div className="hidden md:block" />}> 
+    <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] gap-6">
+      <Suspense fallback={<div className="hidden lg:block" />}> 
         <Sidebar />
       </Suspense>
-      <main className="min-w-0 md:pl-6 md:border-l md:border-border/60 overflow-visible">{children}</main>
+      <main className="min-w-0 lg:pl-6 lg:border-l lg:border-border/60 overflow-visible">{children}</main>
     </div>
   );
 }
@@ -68,11 +68,11 @@ function Sidebar() {
     : [];
   return (
     <aside>
-      <button className="md:hidden flex items-center gap-2 text-sm mb-4" onClick={() => setOpen(!open)}>
+      <button className="lg:hidden flex items-center gap-2 text-sm mb-4" onClick={() => setOpen(!open)}>
         <Menu className="h-4 w-4" />
         Menu
       </button>
-      <nav className={`md:block ${open ? "block" : "hidden"}`}>
+      <nav className={`lg:block ${open ? "block" : "hidden"}`}>
         <div className="mb-5">
           <div className="relative">
             <input

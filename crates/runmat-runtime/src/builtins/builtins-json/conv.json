@@ -146,6 +146,18 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "conv2",
+      "url": "./conv2"
+    },
+    {
+      "label": "deconv",
+      "url": "./deconv"
+    },
+    {
+      "label": "filter",
+      "url": "./filter"
     }
   ],
   "source": {

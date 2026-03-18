@@ -87,6 +87,22 @@
     {
       "question": "What happens when only one input is a `gpuArray`?",
       "answer": "RunMat promotes the other input to the GPU before dispatch when the auto-offload planner decides it is profitable. If the provider lacks a device implementation, both operands gather to host automatically and the logical result executes on the CPU."
+    },
+    {
+      "question": "What does xor do in MATLAB?",
+      "answer": "`xor(A, B)` returns logical `true` where exactly one of `A` or `B` is nonzero, and `false` where both are zero or both are nonzero. The result is always a logical array."
+    },
+    {
+      "question": "How is xor different from or in MATLAB?",
+      "answer": "`or(A, B)` (i.e. `A | B`) returns `true` when either or both inputs are nonzero. `xor(A, B)` returns `true` only when exactly one input is nonzero — it is `false` when both are true."
+    },
+    {
+      "question": "Can I use xor with more than two inputs?",
+      "answer": "`xor` accepts exactly two inputs. To XOR multiple arrays, chain calls: `xor(xor(A, B), C)`. This computes the parity (true when an odd number of inputs are true)."
+    },
+    {
+      "question": "Does xor support GPU arrays in RunMat?",
+      "answer": "Yes. `xor` runs on the GPU with elementwise fusion and implicit expansion. Both inputs can be GPU arrays or one can be a scalar."
     }
   ],
   "links": [
@@ -105,6 +121,10 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "not",
+      "url": "./not"
     }
   ],
   "source": {

@@ -98,6 +98,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "arrayfun",
+      "url": "./arrayfun"
+    },
+    {
+      "label": "pagefun",
+      "url": "./pagefun"
     }
   ],
   "source": {

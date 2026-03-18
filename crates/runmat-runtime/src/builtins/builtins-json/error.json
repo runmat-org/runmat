@@ -94,7 +94,16 @@
       "answer": "Yes. `error` uses the same formatter as `sprintf`, including width/precision specifiers and numeric conversions, and will raise `RunMat:error` if the format string is invalid or under-specified. #"
     }
   ],
-  "links": [],
+  "links": [
+    {
+      "label": "assert",
+      "url": "./assert"
+    },
+    {
+      "label": "warning",
+      "url": "./warning"
+    }
+  ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/diagnostics/error.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/diagnostics/error.rs"

@@ -122,6 +122,18 @@
     {
       "question": "Can fusion keep `floor` on the GPU?",
       "answer": "Yes. `floor` participates in elementwise fusion, so fused graphs can stay resident on the device when supported."
+    },
+    {
+      "question": "What does floor do in MATLAB?",
+      "answer": "`floor(X)` rounds each element of `X` toward negative infinity. For example, `floor(2.7)` returns `2` and `floor(-2.3)` returns `-3`."
+    },
+    {
+      "question": "What is the difference between floor and fix in MATLAB?",
+      "answer": "`floor` rounds toward negative infinity, while `fix` rounds toward zero. For positive numbers the result is the same, but for negative numbers they differ: `floor(-2.7)` returns `-3`, while `fix(-2.7)` returns `-2`."
+    },
+    {
+      "question": "Does floor work with GPU arrays in RunMat?",
+      "answer": "Yes. RunMat automatically accelerates `floor` on the GPU with elementwise fusion support. Supported precisions include `f32` and `f64` with MATLAB-compatible broadcasting."
     }
   ],
   "links": [
@@ -144,6 +156,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "mod",
+      "url": "./mod"
+    },
+    {
+      "label": "rem",
+      "url": "./rem"
     }
   ],
   "source": {

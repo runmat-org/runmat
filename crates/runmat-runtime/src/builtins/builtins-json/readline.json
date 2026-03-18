@@ -121,6 +121,14 @@
     {
       "label": "write",
       "url": "./write"
+    },
+    {
+      "label": "close",
+      "url": "./close"
+    },
+    {
+      "label": "tcpserver",
+      "url": "./tcpserver"
     }
   ],
   "source": {

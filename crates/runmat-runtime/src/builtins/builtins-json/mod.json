@@ -124,6 +124,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "ceil",
+      "url": "./ceil"
+    },
+    {
+      "label": "round",
+      "url": "./round"
     }
   ],
   "source": {

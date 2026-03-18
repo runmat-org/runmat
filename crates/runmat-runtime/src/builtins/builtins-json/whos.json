@@ -133,6 +133,22 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "isa",
+      "url": "./isa"
+    },
+    {
+      "label": "ischar",
+      "url": "./ischar"
+    },
+    {
+      "label": "isstring",
+      "url": "./isstring"
+    },
+    {
+      "label": "which",
+      "url": "./which"
     }
   ],
   "source": {

@@ -124,6 +124,22 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "ismatrix",
+      "url": "./ismatrix"
+    },
+    {
+      "label": "isvector",
+      "url": "./isvector"
+    },
+    {
+      "label": "length",
+      "url": "./length"
+    },
+    {
+      "label": "ndims",
+      "url": "./ndims"
     }
   ],
   "source": {

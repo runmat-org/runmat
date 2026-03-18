@@ -126,6 +126,10 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "eig",
+      "url": "./eig"
     }
   ],
   "source": {

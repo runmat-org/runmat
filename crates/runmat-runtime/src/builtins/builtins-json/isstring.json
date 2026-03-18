@@ -119,6 +119,22 @@
     {
       "label": "gpuArray",
       "url": "./gpuarray"
+    },
+    {
+      "label": "class",
+      "url": "./class"
+    },
+    {
+      "label": "which",
+      "url": "./which"
+    },
+    {
+      "label": "who",
+      "url": "./who"
+    },
+    {
+      "label": "whos",
+      "url": "./whos"
     }
   ],
   "source": {

@@ -32,7 +32,7 @@
   "behaviors": [
     "`toc` without inputs pops the most recent `tic` from the stopwatch stack and returns the elapsed seconds.",
     "`toc(t)` accepts a handle previously produced by `tic` and measures the time since that handle without altering the stack.",
-    "Calling `toc` before `tic` raises the error identifier `RunMat:toc:NoMatchingTic`.",
+    "Calling `toc` before `tic` raises the MATLAB-compatible error identifier `RunMat:toc:NoMatchingTic`.",
     "Passing anything other than a finite, non-negative scalar handle raises `RunMat:toc:InvalidTimerHandle`.",
     "The stopwatch uses a monotonic host clock, so measurements are immune to wall-clock adjustments."
   ],
@@ -88,6 +88,14 @@
     {
       "label": "tic",
       "url": "./tic"
+    },
+    {
+      "label": "pause",
+      "url": "./pause"
+    },
+    {
+      "label": "timeit",
+      "url": "./timeit"
     }
   ],
   "source": {

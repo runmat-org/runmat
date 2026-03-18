@@ -115,6 +115,50 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "all",
+      "url": "./all"
+    },
+    {
+      "label": "any",
+      "url": "./any"
+    },
+    {
+      "label": "diff",
+      "url": "./diff"
+    },
+    {
+      "label": "mean",
+      "url": "./mean"
+    },
+    {
+      "label": "median",
+      "url": "./median"
+    },
+    {
+      "label": "min",
+      "url": "./min"
+    },
+    {
+      "label": "nnz",
+      "url": "./nnz"
+    },
+    {
+      "label": "prod",
+      "url": "./prod"
+    },
+    {
+      "label": "std",
+      "url": "./std"
+    },
+    {
+      "label": "sum",
+      "url": "./sum"
+    },
+    {
+      "label": "var",
+      "url": "./var"
     }
   ],
   "source": {

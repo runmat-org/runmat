@@ -125,6 +125,26 @@
     {
       "label": "sortrows",
       "url": "./sortrows"
+    },
+    {
+      "label": "argsort",
+      "url": "./argsort"
+    },
+    {
+      "label": "intersect",
+      "url": "./intersect"
+    },
+    {
+      "label": "ismember",
+      "url": "./ismember"
+    },
+    {
+      "label": "issorted",
+      "url": "./issorted"
+    },
+    {
+      "label": "setdiff",
+      "url": "./setdiff"
     }
   ],
   "source": {

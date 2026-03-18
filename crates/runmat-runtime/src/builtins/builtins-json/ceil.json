@@ -140,6 +140,18 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "fix",
+      "url": "./fix"
+    },
+    {
+      "label": "mod",
+      "url": "./mod"
+    },
+    {
+      "label": "rem",
+      "url": "./rem"
     }
   ],
   "source": {

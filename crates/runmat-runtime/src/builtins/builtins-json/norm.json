@@ -123,6 +123,26 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "det",
+      "url": "./det"
+    },
+    {
+      "label": "inv",
+      "url": "./inv"
+    },
+    {
+      "label": "linsolve",
+      "url": "./linsolve"
+    },
+    {
+      "label": "rank",
+      "url": "./rank"
+    },
+    {
+      "label": "rcond",
+      "url": "./rcond"
     }
   ],
   "source": {

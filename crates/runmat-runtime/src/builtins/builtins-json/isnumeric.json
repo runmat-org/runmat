@@ -122,6 +122,18 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "isgpuarray",
+      "url": "./isgpuarray"
+    },
+    {
+      "label": "isinf",
+      "url": "./isinf"
+    },
+    {
+      "label": "isnan",
+      "url": "./isnan"
     }
   ],
   "source": {

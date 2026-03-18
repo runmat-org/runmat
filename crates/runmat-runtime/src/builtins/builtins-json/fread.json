@@ -125,6 +125,22 @@
     {
       "label": "filewrite",
       "url": "./filewrite"
+    },
+    {
+      "label": "feof",
+      "url": "./feof"
+    },
+    {
+      "label": "fgets",
+      "url": "./fgets"
+    },
+    {
+      "label": "fprintf",
+      "url": "./fprintf"
+    },
+    {
+      "label": "frewind",
+      "url": "./frewind"
     }
   ],
   "source": {

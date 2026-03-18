@@ -132,6 +132,18 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "csvwrite",
+      "url": "./csvwrite"
+    },
+    {
+      "label": "dlmread",
+      "url": "./dlmread"
+    },
+    {
+      "label": "dlmwrite",
+      "url": "./dlmwrite"
     }
   ],
   "source": {

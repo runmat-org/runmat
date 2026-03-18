@@ -31,7 +31,7 @@
     "unit": "builtins::io::net::close::tests",
     "integration": "builtins::io::net::close::tests::close_tcpclient_releases_handle"
   },
-  "description": "`close` releases TCP clients and servers that were created with `tcpclient`, `tcpserver`, or `accept`. It mirrors MATLAB semantics for network connections while adopting the familiar `status = close(obj)` pattern used elsewhere in RunMat: the function returns `1` when one or more handles are closed and `0` when nothing needed to be released.",
+  "description": "`close` releases TCP clients and servers that were created with `tcpclient`, `tcpserver`, or `accept`. It mirrors MATLAB semantics for network connections while adopting the familiar `status = close(obj)` pattern used elsewhere in MATLAB: the function returns `1` when one or more handles are closed and `0` when nothing needed to be released.",
   "behaviors": [
     "`close(t)` closes the TCP client struct `t` that was previously returned by `tcpclient` or `accept`. Subsequent socket operations on that client raise MATLAB-style “not connected” diagnostics.",
     "`close(s)` closes the TCP server struct `s` that was returned by `tcpserver`. Any clients that were accepted from that server are also disconnected to match MATLAB’s lifecycle rules.",
@@ -119,6 +119,10 @@
     {
       "label": "write",
       "url": "./write"
+    },
+    {
+      "label": "readline",
+      "url": "./readline"
     }
   ],
   "source": {

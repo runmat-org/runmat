@@ -126,6 +126,18 @@
     {
       "label": "`gather`",
       "url": "./gather"
+    },
+    {
+      "label": "ge",
+      "url": "./ge"
+    },
+    {
+      "label": "isequal",
+      "url": "./isequal"
+    },
+    {
+      "label": "le",
+      "url": "./le"
     }
   ],
   "source": {

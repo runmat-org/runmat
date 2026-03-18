@@ -149,6 +149,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "ismatrix",
+      "url": "./ismatrix"
+    },
+    {
+      "label": "ndims",
+      "url": "./ndims"
     }
   ],
   "source": {

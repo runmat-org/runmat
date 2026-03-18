@@ -120,6 +120,14 @@
     {
       "label": "class",
       "url": "./class"
+    },
+    {
+      "label": "orderfields",
+      "url": "./orderfields"
+    },
+    {
+      "label": "rmfield",
+      "url": "./rmfield"
     }
   ],
   "source": {

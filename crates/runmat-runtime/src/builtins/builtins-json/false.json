@@ -92,6 +92,58 @@
     {
       "label": "zeros",
       "url": "./zeros"
+    },
+    {
+      "label": "colon",
+      "url": "./colon"
+    },
+    {
+      "label": "eye",
+      "url": "./eye"
+    },
+    {
+      "label": "fill",
+      "url": "./fill"
+    },
+    {
+      "label": "linspace",
+      "url": "./linspace"
+    },
+    {
+      "label": "logspace",
+      "url": "./logspace"
+    },
+    {
+      "label": "magic",
+      "url": "./magic"
+    },
+    {
+      "label": "meshgrid",
+      "url": "./meshgrid"
+    },
+    {
+      "label": "ones",
+      "url": "./ones"
+    },
+    {
+      "label": "rand",
+      "url": "./rand"
+    },
+    {
+      "label": "randi",
+      "url": "./randi"
+    },
+    {
+      "label": "randn",
+      "url": "./randn"
+    },
+    {
+      "label": "randperm",
+      "url": "./randperm"
+    },
+    {
+      "label": "range",
+      "url": "./range"
     }
   ],
   "source": {

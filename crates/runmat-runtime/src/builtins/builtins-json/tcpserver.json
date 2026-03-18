@@ -130,6 +130,30 @@
     {
       "label": "fprintf",
       "url": "./fprintf"
+    },
+    {
+      "label": "accept",
+      "url": "./accept"
+    },
+    {
+      "label": "close",
+      "url": "./close"
+    },
+    {
+      "label": "read",
+      "url": "./read"
+    },
+    {
+      "label": "readline",
+      "url": "./readline"
+    },
+    {
+      "label": "tcpclient",
+      "url": "./tcpclient"
+    },
+    {
+      "label": "write",
+      "url": "./write"
     }
   ],
   "source": {

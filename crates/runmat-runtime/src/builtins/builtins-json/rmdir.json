@@ -56,12 +56,12 @@
     {
       "description": "Handle A Missing Folder Gracefully",
       "input": "[status, message, messageID] = rmdir(\"not-here\")",
-      "output": "status =\n     0\nmessage =\nFolder \"not-here\" does not exist.\nmessageID =\nRunMat:rmdir:DirectoryNotFound"
+      "output": "status =\n     0\nmessage =\nFolder \"not-here\" does not exist.\nmessageID =\nRunMat:RMDIR:DirectoryNotFound"
     },
     {
       "description": "Detect That A Folder Is Not Empty Without The 's' Flag",
       "input": "mkdir(\"logs\");\nfid = fopen(fullfile(\"logs\", \"today.log\"), \"w\");\nfprintf(fid, \"Log entry\");\nfclose(fid);\n[status, message, messageID] = rmdir(\"logs\")",
-      "output": "status =\n     0\nmessage =\nCannot remove folder \"logs\": directory is not empty.\nmessageID =\nRunMat:rmdir:DirectoryNotEmpty"
+      "output": "status =\n     0\nmessage =\nCannot remove folder \"logs\": directory is not empty.\nmessageID =\nRunMat:RMDIR:DirectoryNotEmpty"
     },
     {
       "description": "Remove A Directory Specified As A String Scalar On The GPU",
@@ -93,7 +93,7 @@
     },
     {
       "question": "Can I target files instead of folders?",
-      "answer": "No. Passing a file path returns `status = 0` with the message ID `RunMat:rmdir:NotADirectory`."
+      "answer": "No. Passing a file path returns `status = 0` with the message ID `RunMat:RMDIR:NotADirectory`."
     },
     {
       "question": "How are paths resolved?",
@@ -105,7 +105,7 @@
     },
     {
       "question": "What happens if the folder is already missing when I pass `'s'`?",
-      "answer": "The function reports `status = 0` and the message ID `RunMat:rmdir:DirectoryNotFound`; it never creates folders."
+      "answer": "The function reports `status = 0` and the message ID `RunMat:RMDIR:DirectoryNotFound`; it never creates folders."
     },
     {
       "question": "Can I remove folders using UNC paths or drive letters on Windows?",
@@ -132,6 +132,66 @@
     {
       "label": "pwd",
       "url": "./pwd"
+    },
+    {
+      "label": "addpath",
+      "url": "./addpath"
+    },
+    {
+      "label": "cd",
+      "url": "./cd"
+    },
+    {
+      "label": "copyfile",
+      "url": "./copyfile"
+    },
+    {
+      "label": "delete",
+      "url": "./delete"
+    },
+    {
+      "label": "exist",
+      "url": "./exist"
+    },
+    {
+      "label": "fullfile",
+      "url": "./fullfile"
+    },
+    {
+      "label": "genpath",
+      "url": "./genpath"
+    },
+    {
+      "label": "getenv",
+      "url": "./getenv"
+    },
+    {
+      "label": "movefile",
+      "url": "./movefile"
+    },
+    {
+      "label": "path",
+      "url": "./path"
+    },
+    {
+      "label": "rmpath",
+      "url": "./rmpath"
+    },
+    {
+      "label": "savepath",
+      "url": "./savepath"
+    },
+    {
+      "label": "setenv",
+      "url": "./setenv"
+    },
+    {
+      "label": "tempdir",
+      "url": "./tempdir"
+    },
+    {
+      "label": "tempname",
+      "url": "./tempname"
     }
   ],
   "source": {

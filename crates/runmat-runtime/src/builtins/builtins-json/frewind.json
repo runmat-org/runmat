@@ -95,6 +95,22 @@
     {
       "label": "feof",
       "url": "./feof"
+    },
+    {
+      "label": "fgets",
+      "url": "./fgets"
+    },
+    {
+      "label": "fileread",
+      "url": "./fileread"
+    },
+    {
+      "label": "filewrite",
+      "url": "./filewrite"
+    },
+    {
+      "label": "fprintf",
+      "url": "./fprintf"
     }
   ],
   "source": {

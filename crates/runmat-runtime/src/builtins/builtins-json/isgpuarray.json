@@ -74,6 +74,26 @@
     {
       "label": "isa",
       "url": "./isa"
+    },
+    {
+      "label": "isfinite",
+      "url": "./isfinite"
+    },
+    {
+      "label": "isinf",
+      "url": "./isinf"
+    },
+    {
+      "label": "isnan",
+      "url": "./isnan"
+    },
+    {
+      "label": "isnumeric",
+      "url": "./isnumeric"
+    },
+    {
+      "label": "isreal",
+      "url": "./isreal"
     }
   ],
   "source": {

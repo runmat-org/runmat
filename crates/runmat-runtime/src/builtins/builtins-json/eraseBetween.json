@@ -123,6 +123,34 @@
     {
       "label": "join",
       "url": "./join"
+    },
+    {
+      "label": "lower",
+      "url": "./lower"
+    },
+    {
+      "label": "pad",
+      "url": "./pad"
+    },
+    {
+      "label": "strcat",
+      "url": "./strcat"
+    },
+    {
+      "label": "strip",
+      "url": "./strip"
+    },
+    {
+      "label": "strrep",
+      "url": "./strrep"
+    },
+    {
+      "label": "strtrim",
+      "url": "./strtrim"
+    },
+    {
+      "label": "upper",
+      "url": "./upper"
     }
   ],
   "source": {

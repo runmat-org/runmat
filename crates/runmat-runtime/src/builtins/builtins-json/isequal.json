@@ -111,6 +111,26 @@
     {
       "label": "strcmp",
       "url": "./strcmp"
+    },
+    {
+      "label": "ge",
+      "url": "./ge"
+    },
+    {
+      "label": "gt",
+      "url": "./gt"
+    },
+    {
+      "label": "le",
+      "url": "./le"
+    },
+    {
+      "label": "lt",
+      "url": "./lt"
+    },
+    {
+      "label": "ne",
+      "url": "./ne"
     }
   ],
   "source": {

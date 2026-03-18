@@ -95,6 +95,18 @@
     {
       "question": "How does `strtrim` differ from `strip`?",
       "answer": "`strtrim` always removes leading and trailing whitespace. `strip` is newer and adds options for custom characters and directional trimming; use it when you need finer control."
+    },
+    {
+      "question": "What does strtrim do in MATLAB?",
+      "answer": "`strtrim` removes leading and trailing whitespace from a string or character array. Interior whitespace is preserved."
+    },
+    {
+      "question": "How is strtrim different from strip in MATLAB?",
+      "answer": "Both remove leading and trailing whitespace, but `strip` additionally lets you specify which side to trim (`'left'`, `'right'`, or `'both'`) and which characters to remove."
+    },
+    {
+      "question": "Does strtrim work with string arrays?",
+      "answer": "Yes. `strtrim` operates element-wise on string arrays, removing whitespace from each element independently. Missing strings remain missing."
     }
   ],
   "links": [
@@ -109,6 +121,42 @@
     {
       "label": "lower",
       "url": "./lower"
+    },
+    {
+      "label": "erase",
+      "url": "./erase"
+    },
+    {
+      "label": "eraseBetween",
+      "url": "./erasebetween"
+    },
+    {
+      "label": "extractBetween",
+      "url": "./extractbetween"
+    },
+    {
+      "label": "join",
+      "url": "./join"
+    },
+    {
+      "label": "pad",
+      "url": "./pad"
+    },
+    {
+      "label": "replace",
+      "url": "./replace"
+    },
+    {
+      "label": "split",
+      "url": "./split"
+    },
+    {
+      "label": "strcat",
+      "url": "./strcat"
+    },
+    {
+      "label": "strrep",
+      "url": "./strrep"
     }
   ],
   "source": {

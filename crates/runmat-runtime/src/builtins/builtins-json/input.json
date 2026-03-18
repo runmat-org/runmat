@@ -58,9 +58,34 @@
     {
       "question": "Can I call `input` inside GPU workloads?",
       "answer": "Yes. Prompts always flow through the host console/UI. GPU-resident prompt arguments are gathered once before display, and the response itself is always a host value."
+    },
+    {
+      "question": "What does input do in MATLAB?",
+      "answer": "`input(prompt)` displays the prompt string and waits for the user to type a response. The response is evaluated as a MATLAB expression. Use `input(prompt, 's')` to return the raw text as a string without evaluation."
+    },
+    {
+      "question": "How do I get string input from the user in MATLAB?",
+      "answer": "Use `str = input('Enter text: ', 's')`. The `'s'` flag tells MATLAB to return the typed text as a character vector instead of evaluating it as an expression."
+    },
+    {
+      "question": "What is the difference between input and keyboard in MATLAB?",
+      "answer": "`input` pauses for a single value from the user and returns it, while `keyboard` drops into an interactive debugging session. RunMat supports `input` for scripted user interaction."
+    },
+    {
+      "question": "Can I validate user input in MATLAB?",
+      "answer": "Use a `while` loop: keep calling `input` until the value passes your validation check. For example, `while x < 0; x = input('Enter positive number: '); end`."
+    },
+    {
+      "question": "Does input work in RunMat's browser sandbox?",
+      "answer": "Yes. `input` prompts the user within the RunMat sandbox. In non-interactive contexts, it returns the default empty value."
     }
   ],
-  "links": [],
+  "links": [
+    {
+      "label": "disp",
+      "url": "./disp"
+    }
+  ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/io/input.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/input.rs"

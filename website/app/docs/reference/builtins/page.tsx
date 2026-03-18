@@ -6,7 +6,7 @@ import { buildPageMetadata } from '@/lib/seo';
 export const metadata = buildPageMetadata({
   title: 'Built-in Functions | Docs',
   description: 'Search and browse RunMat built-in functions by name, category, or keyword.',
-  canonicalPath: '/docs/reference/builtins',
+  canonicalPath: '/docs/matlab-function-reference',
   ogType: 'website',
   ogImagePath: '/docs/reference/builtins/opengraph-image',
 });

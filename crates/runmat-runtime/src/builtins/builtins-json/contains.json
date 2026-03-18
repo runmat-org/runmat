@@ -114,6 +114,18 @@
     {
       "label": "`regexpi`",
       "url": "./regexpi"
+    },
+    {
+      "label": "endsWith",
+      "url": "./endswith"
+    },
+    {
+      "label": "startsWith",
+      "url": "./startswith"
+    },
+    {
+      "label": "strfind",
+      "url": "./strfind"
     }
   ],
   "source": {

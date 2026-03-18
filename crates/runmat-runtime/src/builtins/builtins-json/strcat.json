@@ -113,6 +113,50 @@
     {
       "label": "cellstr",
       "url": "./cellstr"
+    },
+    {
+      "label": "erase",
+      "url": "./erase"
+    },
+    {
+      "label": "eraseBetween",
+      "url": "./erasebetween"
+    },
+    {
+      "label": "extractBetween",
+      "url": "./extractbetween"
+    },
+    {
+      "label": "lower",
+      "url": "./lower"
+    },
+    {
+      "label": "pad",
+      "url": "./pad"
+    },
+    {
+      "label": "replace",
+      "url": "./replace"
+    },
+    {
+      "label": "split",
+      "url": "./split"
+    },
+    {
+      "label": "strip",
+      "url": "./strip"
+    },
+    {
+      "label": "strrep",
+      "url": "./strrep"
+    },
+    {
+      "label": "strtrim",
+      "url": "./strtrim"
+    },
+    {
+      "label": "upper",
+      "url": "./upper"
     }
   ],
   "source": {

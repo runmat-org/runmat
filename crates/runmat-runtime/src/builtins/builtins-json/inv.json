@@ -124,6 +124,22 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "cond",
+      "url": "./cond"
+    },
+    {
+      "label": "norm",
+      "url": "./norm"
+    },
+    {
+      "label": "rank",
+      "url": "./rank"
+    },
+    {
+      "label": "rcond",
+      "url": "./rcond"
     }
   ],
   "source": {

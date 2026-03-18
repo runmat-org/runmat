@@ -96,6 +96,18 @@
     {
       "question": "Can I round logical or character arrays?",
       "answer": "Yes. Logical values are converted to doubles (`0` or `1`) and characters are rounded as their numeric code points, returning dense double tensors."
+    },
+    {
+      "question": "What does round do in MATLAB?",
+      "answer": "`round(X)` rounds each element of `X` to the nearest integer. `round(X, N)` rounds to `N` decimal places. Ties (e.g., 2.5) round away from zero."
+    },
+    {
+      "question": "What is the difference between round, floor, and ceil in MATLAB?",
+      "answer": "`round` rounds to the nearest integer, `floor` rounds toward negative infinity, and `ceil` rounds toward positive infinity. For 2.5: `round` returns 3, `floor` returns 2, `ceil` returns 3."
+    },
+    {
+      "question": "Does round support GPU acceleration in RunMat?",
+      "answer": "Yes. `round` runs on the GPU with elementwise fusion support. It accepts `f32` and `f64` precisions and supports MATLAB-compatible broadcasting."
     }
   ],
   "links": [
@@ -118,6 +130,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "mod",
+      "url": "./mod"
+    },
+    {
+      "label": "rem",
+      "url": "./rem"
     }
   ],
   "source": {

@@ -133,6 +133,10 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "input",
+      "url": "./input"
     }
   ],
   "source": {

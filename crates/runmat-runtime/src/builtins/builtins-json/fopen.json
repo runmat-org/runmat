@@ -104,6 +104,18 @@
     {
       "question": "Does `fopen` support network paths or UNC shares?",
       "answer": "RunMat relies on the operating system for path resolution, so UNC paths and mounted network shares are supported as long as the OS can open them."
+    },
+    {
+      "question": "What does fopen do in MATLAB?",
+      "answer": "`fopen` opens a file and returns a file identifier (fid) used by subsequent I/O functions like `fread`, `fwrite`, `fprintf`, and `fclose`. If the file cannot be opened, it returns `-1`."
+    },
+    {
+      "question": "How do I read a text file line by line in MATLAB?",
+      "answer": "Open the file with `fid = fopen('file.txt', 'r')`, then loop with `fgets(fid)` until `feof(fid)` returns true, and finally close with `fclose(fid)`. RunMat supports this same pattern."
+    },
+    {
+      "question": "What file modes does fopen support?",
+      "answer": "`fopen` supports `'r'` (read), `'w'` (write, creates or overwrites), `'a'` (append), `'r+'` (read and write), `'w+'` (read and write, truncates), and `'a+'` (read and append)."
     }
   ],
   "links": [
@@ -126,6 +138,22 @@
     {
       "label": "filewrite",
       "url": "./filewrite"
+    },
+    {
+      "label": "feof",
+      "url": "./feof"
+    },
+    {
+      "label": "fgets",
+      "url": "./fgets"
+    },
+    {
+      "label": "fprintf",
+      "url": "./fprintf"
+    },
+    {
+      "label": "frewind",
+      "url": "./frewind"
     }
   ],
   "source": {

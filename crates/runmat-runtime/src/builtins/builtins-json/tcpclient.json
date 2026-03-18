@@ -107,6 +107,22 @@
     {
       "label": "fwrite",
       "url": "./fwrite"
+    },
+    {
+      "label": "close",
+      "url": "./close"
+    },
+    {
+      "label": "read",
+      "url": "./read"
+    },
+    {
+      "label": "readline",
+      "url": "./readline"
+    },
+    {
+      "label": "write",
+      "url": "./write"
     }
   ],
   "source": {

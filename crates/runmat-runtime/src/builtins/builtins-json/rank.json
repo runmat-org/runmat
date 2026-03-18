@@ -141,6 +141,22 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "cond",
+      "url": "./cond"
+    },
+    {
+      "label": "linsolve",
+      "url": "./linsolve"
+    },
+    {
+      "label": "norm",
+      "url": "./norm"
+    },
+    {
+      "label": "rcond",
+      "url": "./rcond"
     }
   ],
   "source": {

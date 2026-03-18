@@ -34,7 +34,7 @@
     "Supports nested timers: each call pushes a new start time on an internal stack. `toc` without inputs always reads the most recent `tic` and removes it, leaving earlier timers intact so outer scopes continue measuring.",
     "Returns an opaque scalar handle (a `double`) that encodes the monotonic timestamp. The handle can be stored or passed explicitly to `toc`.",
     "Executes entirely on the CPU. There are no GPU variants because `tic` interacts with wall-clock state.",
-    "Calling `toc` before `tic` raises the error `RunMat:toc:NoMatchingTic`."
+    "Calling `toc` before `tic` raises the MATLAB-compatible error `RunMat:toc:NoMatchingTic`."
   ],
   "examples": [
     {
@@ -88,6 +88,10 @@
     {
       "label": "timeit",
       "url": "./timeit"
+    },
+    {
+      "label": "pause",
+      "url": "./pause"
     }
   ],
   "source": {

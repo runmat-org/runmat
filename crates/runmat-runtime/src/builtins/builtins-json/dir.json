@@ -112,6 +112,18 @@
     {
       "question": "How are errors reported?",
       "answer": "Error messages are prefixed with `dir:` and match MATLAB's argument diagnostics wherever possible."
+    },
+    {
+      "question": "What does dir do in MATLAB?",
+      "answer": "`dir` lists files and folders in the current directory. `dir(name)` lists items matching a file or folder name, which can include wildcards like `'*.m'`."
+    },
+    {
+      "question": "How do I list all files in a folder in MATLAB?",
+      "answer": "Use `files = dir('foldername')` to get a struct array. Each element has fields `name`, `folder`, `bytes`, `isdir`, `datenum`, and `date`. Filter with `files(~[files.isdir])` to exclude folders."
+    },
+    {
+      "question": "Does dir support recursive search?",
+      "answer": "Use `dir('**/*.m')` with the double-star wildcard to recursively find all `.m` files in subdirectories. This syntax works in RunMat."
     }
   ],
   "links": [
@@ -126,6 +138,70 @@
     {
       "label": "cd",
       "url": "./cd"
+    },
+    {
+      "label": "addpath",
+      "url": "./addpath"
+    },
+    {
+      "label": "copyfile",
+      "url": "./copyfile"
+    },
+    {
+      "label": "delete",
+      "url": "./delete"
+    },
+    {
+      "label": "exist",
+      "url": "./exist"
+    },
+    {
+      "label": "fullfile",
+      "url": "./fullfile"
+    },
+    {
+      "label": "genpath",
+      "url": "./genpath"
+    },
+    {
+      "label": "getenv",
+      "url": "./getenv"
+    },
+    {
+      "label": "mkdir",
+      "url": "./mkdir"
+    },
+    {
+      "label": "movefile",
+      "url": "./movefile"
+    },
+    {
+      "label": "path",
+      "url": "./path"
+    },
+    {
+      "label": "rmdir",
+      "url": "./rmdir"
+    },
+    {
+      "label": "rmpath",
+      "url": "./rmpath"
+    },
+    {
+      "label": "savepath",
+      "url": "./savepath"
+    },
+    {
+      "label": "setenv",
+      "url": "./setenv"
+    },
+    {
+      "label": "tempdir",
+      "url": "./tempdir"
+    },
+    {
+      "label": "tempname",
+      "url": "./tempname"
     }
   ],
   "source": {

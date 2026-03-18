@@ -116,6 +116,34 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "cond",
+      "url": "./cond"
+    },
+    {
+      "label": "det",
+      "url": "./det"
+    },
+    {
+      "label": "inv",
+      "url": "./inv"
+    },
+    {
+      "label": "norm",
+      "url": "./norm"
+    },
+    {
+      "label": "pinv",
+      "url": "./pinv"
+    },
+    {
+      "label": "rank",
+      "url": "./rank"
+    },
+    {
+      "label": "rcond",
+      "url": "./rcond"
     }
   ],
   "source": {

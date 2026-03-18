@@ -244,7 +244,7 @@ function GridView({
         
         return (
           <div key={group.category}>
-            <h2 className="text-2xl font-semibold mb-6 text-foreground sm:text-3xl">{formatCategoryName(group.category)}</h2>
+            <h2 id={categoryAnchorId(group.category)} className="scroll-mt-24 text-2xl font-semibold mb-6 text-foreground sm:text-3xl">{formatCategoryName(group.category)}</h2>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3">
               {itemsToShow.map((builtin) => (
                 <ElementTile key={builtin.slug} builtin={builtin} />
@@ -284,7 +284,7 @@ function ListView({ groupedBuiltins }: { groupedBuiltins: GroupedBuiltins[] }) {
       {groupedBuiltins.map((group) => (
         <div key={group.category}>
           <div className="flex items-center gap-3 mb-4">
-            <h2 className="text-2xl font-semibold text-foreground sm:text-3xl">{formatCategoryName(group.category)}</h2>
+            <h2 id={categoryAnchorId(group.category)} className="scroll-mt-24 text-2xl font-semibold text-foreground sm:text-3xl">{formatCategoryName(group.category)}</h2>
             <div 
               className="h-1 flex-1 rounded"
               style={{ backgroundColor: getCategoryColor(group.category) }}
@@ -526,7 +526,7 @@ function TagsView({ builtins, searchQuery, fuse }: { builtins: Builtin[], search
       {groupedBuiltins.map((group) => (
         <div key={group.category}>
           <div className="flex items-center gap-3 mb-3">
-            <h2 className="text-2xl font-semibold text-foreground sm:text-3xl">{formatCategoryName(group.category)}</h2>
+            <h2 id={categoryAnchorId(group.category)} className="scroll-mt-24 text-2xl font-semibold text-foreground sm:text-3xl">{formatCategoryName(group.category)}</h2>
             <div 
               className="h-1 flex-1 rounded"
               style={{ backgroundColor: getCategoryColor(group.category) }}
@@ -793,5 +793,9 @@ function CollapseTile({
       </Card>
     </button>
   );
+}
+
+function categoryAnchorId(category: DisplayCategory): string {
+  return category.split('/')[0];
 }
 

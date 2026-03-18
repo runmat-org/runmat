@@ -117,6 +117,26 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "ischar",
+      "url": "./ischar"
+    },
+    {
+      "label": "isstring",
+      "url": "./isstring"
+    },
+    {
+      "label": "which",
+      "url": "./which"
+    },
+    {
+      "label": "who",
+      "url": "./who"
+    },
+    {
+      "label": "whos",
+      "url": "./whos"
     }
   ],
   "source": {

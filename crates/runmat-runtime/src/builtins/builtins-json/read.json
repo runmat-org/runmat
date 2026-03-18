@@ -36,7 +36,7 @@
     "`data = read(t, count, datatype)` interprets the values using the requested MATLAB datatype. Supported tokens mirror MATLAB: `\"uint8\"` (default), `\"int8\"`, `\"uint16\"`, `\"int16\"`, `\"uint32\"`, `\"int32\"`, `\"uint64\"`, `\"int64\"`, `\"single\"`, `\"double\"`, `\"char\"`, and `\"string\"`. Numeric outputs are returned as doubles; `\"char\"` produces a MATLAB-style character row vector and `\"string\"` returns a scalar string.",
     "Every call honours the client’s `ByteOrder` property when decoding multi-byte numbers. Little-endian is the default, but `\"big-endian\"` is respected for data written in network byte order.",
     "The builtin gathers GPU-resident arguments automatically, executes the socket read on the CPU, and returns host values.",
-    "Errors are raised with identifiers: invalid client structs trigger `RunMat:read:InvalidTcpClient`, timeouts emit `RunMat:read:Timeout`, and connection closures before a requested count is met raise `RunMat:read:ConnectionClosed`."
+    "Errors are raised with MATLAB-compatible identifiers: invalid client structs trigger `RunMat:read:InvalidTcpClient`, timeouts emit `RunMat:read:Timeout`, and connection closures before a requested count is met raise `RunMat:read:ConnectionClosed`."
   ],
   "examples": [
     {
@@ -103,6 +103,14 @@
     {
       "label": "readline",
       "url": "./readline"
+    },
+    {
+      "label": "close",
+      "url": "./close"
+    },
+    {
+      "label": "tcpserver",
+      "url": "./tcpserver"
     }
   ],
   "source": {

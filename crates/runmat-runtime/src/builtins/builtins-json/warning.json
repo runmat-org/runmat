@@ -133,6 +133,10 @@
     {
       "label": "fprintf",
       "url": "./fprintf"
+    },
+    {
+      "label": "assert",
+      "url": "./assert"
     }
   ],
   "source": {

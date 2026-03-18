@@ -16,6 +16,8 @@ import { slugifyHeading } from '@/lib/utils';
 import { builtinMetadataForSlug, builtinJsonLD } from './meta';
 import { BuiltinMetadataChips } from '@/components/BuiltinMetadataChips';
 import { BuiltinsHeadingsNav } from '@/components/BuiltinsHeadingsNav';
+import { SandboxCta } from '@/components/SandboxCta';
+
 
 export const dynamic = 'force-static';
 
@@ -40,6 +42,7 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
   const toc = extractHeadingsFromBlocks(blocks);
   const metadata = getBuiltinMetadata(b);
 
+
   return (
     <>
     <script
@@ -47,19 +50,22 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
         dangerouslySetInnerHTML={{ __html: builtinJsonLD(slug) }}
     />
       <div className="container mx-auto px-4 md:px-6 pt-8">
-        <p className="mb-4 text-muted-foreground leading-relaxed break-words">
-          <Link href="/docs/matlab-function-reference" className="text-muted-foreground hover:text-foreground transition-colors">
-            View all functions
+        <p className="mb-4 text-sm text-muted-foreground leading-relaxed break-words">
+          <Link href="/docs/matlab-function-reference" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors">
+            <span aria-hidden="true">&larr;</span> All functions
           </Link>
         </p>
         <BuiltinMetadataChips metadata={metadata} />
       </div>
       <div className="container mx-auto px-4 md:px-6 pb-8">
-      <div className="grid gap-8 lg:grid-cols-[1fr_220px]">
-        <article className="prose dark:prose-invert max-w-none prose-headings:font-semibold prose-h2:mt-8 prose-h2:mb-3 prose-h3:mt-6 prose-h3:mb-2 prose-pre:bg-muted prose-pre:border prose-pre:rounded-md prose-code:bg-muted prose-code:border prose-code:rounded-sm">
+      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_220px]">
+        <article className="prose dark:prose-invert max-w-none min-w-0 prose-headings:font-semibold prose-h2:mt-8 prose-h2:mb-3 prose-h3:mt-6 prose-h3:mb-2 prose-pre:bg-muted prose-pre:border prose-pre:rounded-md prose-code:bg-muted prose-code:border prose-code:rounded-sm">
           <BuiltinDocRenderer blocks={blocks} />
         </article>
         <BuiltinsHeadingsNav toc={toc} />
+      </div>
+      <div className="mt-12 not-prose">
+        <SandboxCta source={`builtin-docs-${slug}`} />
       </div>
     </div>
     </>
@@ -79,10 +85,10 @@ function renderBuiltinDocBlocks(doc: BuiltinDocEntry): BuiltinDocBlock[] {
   const descriptionHeader = doc.summary?.trim()
     ? `\`${title}\` — ${doc.summary.trim()}`
     : `\`${title}\``;
-  const behaviorHeader = `How does the \`${title}\` function behave in MATLAB / RunMat?`;
+  const behaviorHeader = `How \`${title}\` works in RunMat`;
   const examplesHeader = doc.examples && doc.examples.length === 1
-    ? `Example of using \`${title}\` in MATLAB / RunMat`
-    : `Examples of using \`${title}\` in MATLAB / RunMat`;
+    ? 'Example'
+    : 'Examples';
 
   if (hasText(doc.description)) {
     blocks.push(createHeading(1, parseInline(descriptionHeader)));
@@ -114,13 +120,13 @@ function renderBuiltinDocBlocks(doc: BuiltinDocEntry): BuiltinDocBlock[] {
   }
 
   if (doc.gpu_behavior && doc.gpu_behavior.length > 0) {
-    blocks.push(createHeading(2, parseInline(toGPUCase('gpu_behavior'))));
-    blocks.push(...renderParagraphBlocks(doc.gpu_behavior));
+    blocks.push(createHeading(2, parseInline(`How \`${title}\` runs on the GPU`)));
+    blocks.push(...linkKnownTerms(renderParagraphBlocks(doc.gpu_behavior)));
   }
 
   if (hasText(doc.gpu_residency)) {
-    blocks.push(createHeading(2, parseInline(toGPUCase('gpu_residency'))));
-    blocks.push(...parseMarkdownBlocks(doc.gpu_residency));
+    blocks.push(createHeading(2, parseInline('GPU memory and residency')));
+    blocks.push(...linkKnownTerms(parseMarkdownBlocks(doc.gpu_residency)));
   }
 
   if (doc.examples && doc.examples.length > 0) {
@@ -136,16 +142,61 @@ function renderBuiltinDocBlocks(doc: BuiltinDocEntry): BuiltinDocBlock[] {
   if (doc.links && doc.links.length > 0) {
     const linkInline = renderSeeAlsoLinks(doc.links);
     if (linkInline.length > 0) {
-      blocks.push(createHeading(2, parseInline('See also')));
+      blocks.push(createHeading(2, parseInline('Related functions to explore')));
+      blocks.push({
+        type: 'paragraph',
+        content: parseInline(
+          `These functions work well alongside \`${title}\`. Each page has runnable examples you can try in the browser.`
+        ),
+      });
       blocks.push({ type: 'paragraph', content: linkInline });
     }
   }
 
   if (doc.source && hasText(doc.source.url)) {
-    blocks.push(createHeading(2, parseInline('Source & Feedback')));
-    const sourceList = renderSourceSection(doc.source);
+    blocks.push(createHeading(2, parseInline('Open-source implementation')));
+    blocks.push({
+      type: 'paragraph',
+      content: parseInline(
+        `Unlike proprietary runtimes, every RunMat function is open-source. Read exactly how \`${title}\` works, line by line, in Rust.`
+      ),
+    });
+    const sourceList = renderSourceSection(doc.source, title);
     if (sourceList) blocks.push(sourceList);
   }
+
+  blocks.push(createHeading(2, parseInline('About RunMat')));
+  blocks.push({
+    type: 'paragraph',
+    content: parseInline(
+      'RunMat is an open-source runtime that executes MATLAB-syntax code — faster, on any GPU, with no license required.'
+    ),
+  });
+  blocks.push({
+    type: 'list',
+    ordered: false,
+    items: [
+      parseInline(
+        'Simulations that took hours now take minutes. RunMat automatically optimizes your math for GPU execution on Apple, Nvidia, and AMD hardware. No code changes needed.'
+      ),
+      parseInline(
+        'Start running code in seconds. Open the browser sandbox or download a single binary. No license server, no IT ticket, no setup.'
+      ),
+      parseInline(
+        'A full development environment. GPU-accelerated 2D and 3D plotting, automatic versioning on every save, and a browser IDE you can share with a link.'
+      ),
+    ],
+  });
+  blocks.push({
+    type: 'paragraph',
+    content: [
+      { type: 'link', label: [textNode('Getting started')], href: '/docs/getting-started' },
+      textNode(' · '),
+      { type: 'link', label: [textNode('Benchmarks')], href: '/benchmarks' },
+      textNode(' · '),
+      { type: 'link', label: [textNode('Pricing')], href: '/pricing' },
+    ],
+  });
 
   return blocks;
 }
@@ -175,16 +226,18 @@ function renderFaqs(faqs: BuiltinDocFAQ[]): BuiltinDocBlock[] {
   return blocks;
 }
 
-function renderSourceSection(source: BuiltinDocLink): BuiltinDocBlock | null {
+function renderSourceSection(source: BuiltinDocLink, title?: string): BuiltinDocBlock | null {
   const url = resolveSourceUrl(source.url);
-  const label = source.label && source.label.trim() ? source.label.trim() : url;
+  const label = title ? `View ${title}.rs on GitHub` : (source.label?.trim() || url);
   const items: BuiltinDocInlineNode[][] = [];
   if (url) {
     items.push([
-      textNode('Source code: '),
       { type: 'link', label: [textNode(label)], href: url },
     ]);
   }
+  items.push([
+    { type: 'link', label: [textNode('Learn how the runtime works')], href: '/docs/architecture' },
+  ]);
   items.push([
     textNode('Found a bug? '),
     { type: 'link', label: [textNode('Open an issue')], href: 'https://github.com/runmat-org/runmat/issues/new' },
@@ -490,4 +543,58 @@ function inlineCodeOrText(value: string): BuiltinDocInlineNode {
   const trimmed = String(value ?? '').trim();
   if (!trimmed) return textNode('');
   return { type: 'code', value: trimmed };
+}
+
+const GPU_TERM_LINKS: { term: string; href: string }[] = [
+  { term: 'GPU acceleration', href: '/docs/accelerate/fusion-intro' },
+  { term: 'fusion',           href: '/docs/accelerate/fusion-intro' },
+  { term: 'residency',        href: '/docs/accelerate/gpu-behavior' },
+  { term: 'gpuArray',         href: '/docs/reference/builtins/gpuarray' },
+];
+
+function linkKnownTerms(blocks: BuiltinDocBlock[]): BuiltinDocBlock[] {
+  const linked = new Set<string>();
+  return blocks.map((block) => {
+    if (block.type !== 'paragraph') return block;
+    return { ...block, content: linkInlineNodes(block.content, linked) };
+  });
+}
+
+function linkInlineNodes(
+  nodes: BuiltinDocInlineNode[],
+  linked: Set<string>,
+): BuiltinDocInlineNode[] {
+  const result: BuiltinDocInlineNode[] = [];
+  for (const node of nodes) {
+    if (node.type !== 'text') {
+      result.push(node);
+      continue;
+    }
+    let remaining = node.value;
+    while (remaining) {
+      let earliest: { idx: number; term: string; href: string } | null = null;
+      for (const { term, href } of GPU_TERM_LINKS) {
+        if (linked.has(term)) continue;
+        const idx = remaining.indexOf(term);
+        if (idx !== -1 && (!earliest || idx < earliest.idx)) {
+          earliest = { idx, term, href };
+        }
+      }
+      if (!earliest) {
+        result.push(textNode(remaining));
+        break;
+      }
+      if (earliest.idx > 0) {
+        result.push(textNode(remaining.slice(0, earliest.idx)));
+      }
+      result.push({
+        type: 'link',
+        label: [textNode(earliest.term)],
+        href: earliest.href,
+      });
+      linked.add(earliest.term);
+      remaining = remaining.slice(earliest.idx + earliest.term.length);
+    }
+  }
+  return result;
 }

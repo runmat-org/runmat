@@ -3,6 +3,7 @@ import { useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import Fuse from "fuse.js";
 import { docsTree, flatten, type DocsNode } from "@/content/docs";
+import builtinsSearchIndex from "@/content/builtins-search-index.json";
 
 type DocItem = { title: string; href: string; summary: string; keywords: string[] };
 
@@ -12,12 +13,19 @@ export function DocsSearchResults({ source }: { source: string }) {
   const index: DocItem[] = useMemo(() => {
     const nodes: DocsNode[] = flatten(docsTree);
     const pages = nodes.filter((n) => n.externalHref || n.slug);
-    return pages.map((n) => ({
+    const docsItems: DocItem[] = pages.map((n) => ({
       title: n.title,
       href: n.externalHref ?? ["/docs", ...(n.slug || [])].join("/"),
       summary: n.seo?.description || "",
       keywords: n.seo?.keywords || [],
     }));
+    const builtinItems: DocItem[] = builtinsSearchIndex.map((b) => ({
+      title: b.title,
+      href: `/docs/reference/builtins/${b.slug}`,
+      summary: b.summary,
+      keywords: b.keywords,
+    }));
+    return [...docsItems, ...builtinItems];
   }, []);
 
   const results = useMemo(() => {

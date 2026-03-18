@@ -30,7 +30,7 @@
     "unit": "builtins::io::repl_fs::exist::tests",
     "integration": "builtins::io::repl_fs::exist::tests::exist_detects_workspace_variables"
   },
-  "description": "`exist(name)` returns an integer code that identifies which kind of item named `name` is currently available. The codes match RunMat:\n\n| Code | Meaning                                   | | ---- | ----------------------------------------- | | 0    | Item not found                            | | 1    | Variable in the active workspace          | | 2    | File (including scripts and most data files) | | 3    | MEX-file                                  | | 4    | Simulink® model (`.slx` / `.mdl`)         | | 5    | Built-in MATLAB function                  | | 6    | P-code (`.p` / `.pp`)                     | | 7    | Folder                                    | | 8    | Class definition                          |\n\nPass a second argument to restrict the lookup (for example, `'file'`, `'dir'`, `'builtin'`, `'class'`, `'mex'`, `'pcode'`, `'method'`, or `'handle'`). The builtin mirrors MATLAB semantics for string handling, search order, and numeric return values.",
+  "description": "`exist(name)` returns an integer code that identifies which kind of item named `name` is currently available. The codes match MATLAB:\n\n| Code | Meaning                                   | | ---- | ----------------------------------------- | | 0    | Item not found                            | | 1    | Variable in the active workspace          | | 2    | File (including scripts and most data files) | | 3    | MEX-file                                  | | 4    | Simulink® model (`.slx` / `.mdl`)         | | 5    | Built-in MATLAB function                  | | 6    | P-code (`.p` / `.pp`)                     | | 7    | Folder                                    | | 8    | Class definition                          |\n\nPass a second argument to restrict the lookup (for example, `'file'`, `'dir'`, `'builtin'`, `'class'`, `'mex'`, `'pcode'`, `'method'`, or `'handle'`). The builtin mirrors MATLAB semantics for string handling, search order, and numeric return values.",
   "behaviors": [
     "Searches follow MATLAB's precedence: variables first, then built-ins, classes, compiled code (MEX/P-code), standard files, and finally folders.",
     "When you omit the type, `exist` returns the first match respecting this precedence.",
@@ -100,6 +100,18 @@
     {
       "question": "Do handle queries work?",
       "answer": "When the first argument is a RunMat handle object, `exist(handle, \"handle\")` returns `1`. Numeric graphics handles are not yet supported and return `0`."
+    },
+    {
+      "question": "What does exist do in MATLAB?",
+      "answer": "`exist(name, type)` checks whether a variable, file, folder, or function named `name` exists and returns a numeric code indicating what kind of item was found. Zero means nothing was found."
+    },
+    {
+      "question": "How do I check if a file exists in MATLAB?",
+      "answer": "Use `exist('filename.m', 'file')`. It returns `2` if the file is found on the MATLAB path, or `0` if not found. In RunMat, the same syntax works."
+    },
+    {
+      "question": "What are the return codes for exist in MATLAB?",
+      "answer": "`exist` returns `0` (not found), `1` (variable in workspace), `2` (file on path), `3` (MEX file), `4` (Simulink model), `5` (built-in function), `7` (folder), or `8` (Java class). RunMat supports codes 0, 1, 2, 5, and 7."
     }
   ],
   "links": [
@@ -118,6 +130,66 @@
     {
       "label": "pwd",
       "url": "./pwd"
+    },
+    {
+      "label": "addpath",
+      "url": "./addpath"
+    },
+    {
+      "label": "cd",
+      "url": "./cd"
+    },
+    {
+      "label": "delete",
+      "url": "./delete"
+    },
+    {
+      "label": "fullfile",
+      "url": "./fullfile"
+    },
+    {
+      "label": "genpath",
+      "url": "./genpath"
+    },
+    {
+      "label": "getenv",
+      "url": "./getenv"
+    },
+    {
+      "label": "mkdir",
+      "url": "./mkdir"
+    },
+    {
+      "label": "movefile",
+      "url": "./movefile"
+    },
+    {
+      "label": "path",
+      "url": "./path"
+    },
+    {
+      "label": "rmdir",
+      "url": "./rmdir"
+    },
+    {
+      "label": "rmpath",
+      "url": "./rmpath"
+    },
+    {
+      "label": "savepath",
+      "url": "./savepath"
+    },
+    {
+      "label": "setenv",
+      "url": "./setenv"
+    },
+    {
+      "label": "tempdir",
+      "url": "./tempdir"
+    },
+    {
+      "label": "tempname",
+      "url": "./tempname"
     }
   ],
   "source": {
