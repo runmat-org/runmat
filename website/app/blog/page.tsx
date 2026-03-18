@@ -38,7 +38,7 @@ export default function BlogPage() {
               image={post.image}
               imageAlt={post.imageAlt}
               excerpt={post.description}
-              date={post.date}
+              date={post.dateModified || post.date}
               ctaLabel="Read"
             />
           ))}

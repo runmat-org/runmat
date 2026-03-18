@@ -158,7 +158,11 @@ export function getAllBlogPosts(): BlogPost[] {
       }
     })
 
-    return posts.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    return posts.sort((a, b) => {
+      const aDate = new Date(a.dateModified || a.date).getTime()
+      const bDate = new Date(b.dateModified || b.date).getTime()
+      return bDate - aDate
+    })
   } catch (error) {
     console.error('Error reading blog posts:', error)
     return []
