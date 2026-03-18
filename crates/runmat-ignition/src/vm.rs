@@ -451,6 +451,73 @@ fn log_fusion_span_window(
     );
 }
 
+#[cfg(feature = "native-accel")]
+fn fusion_required_stack_operands(
+    bytecode: &Bytecode,
+    start_pc: usize,
+    end_pc: usize,
+) -> Option<usize> {
+    if start_pc >= bytecode.instructions.len()
+        || end_pc >= bytecode.instructions.len()
+        || start_pc > end_pc
+    {
+        return None;
+    }
+
+    fn stack_effect(instr: &Instr) -> Option<(usize, usize)> {
+        match instr {
+            Instr::LoadConst(_)
+            | Instr::LoadComplex(_, _)
+            | Instr::LoadBool(_)
+            | Instr::LoadString(_)
+            | Instr::LoadCharRow(_)
+            | Instr::LoadVar(_)
+            | Instr::LoadLocal(_) => Some((0, 1)),
+            Instr::Add
+            | Instr::Sub
+            | Instr::Mul
+            | Instr::Div
+            | Instr::Pow
+            | Instr::ElemMul
+            | Instr::ElemDiv
+            | Instr::ElemPow
+            | Instr::ElemLeftDiv
+            | Instr::LessEqual
+            | Instr::Less
+            | Instr::Greater
+            | Instr::GreaterEqual
+            | Instr::Equal
+            | Instr::NotEqual
+            | Instr::Swap => Some((2, 1)),
+            Instr::StoreVar(_) | Instr::StoreLocal(_) | Instr::Pop => Some((1, 0)),
+            Instr::Neg | Instr::UPlus | Instr::Transpose | Instr::ConjugateTranspose => {
+                Some((1, 1))
+            }
+            Instr::CallBuiltin(_, argc)
+            | Instr::CallFunction(_, argc)
+            | Instr::CallFeval(argc)
+            | Instr::CallMethod(_, argc)
+            | Instr::CallStaticMethod(_, _, argc) => Some((*argc, 1)),
+            Instr::Index(argc) | Instr::IndexCell(argc) => Some((argc + 1, 1)),
+            Instr::StoreIndex(argc) | Instr::StoreIndexCell(argc) => Some((argc + 2, 1)),
+            Instr::StochasticEvolution => Some((4, 1)),
+            _ => None,
+        }
+    }
+
+    let mut current_depth = 0usize;
+    let mut required_depth = 0usize;
+    for instr in &bytecode.instructions[start_pc..=end_pc] {
+        let (pops, pushes) = stack_effect(instr)?;
+        if current_depth < pops {
+            required_depth += pops - current_depth;
+            current_depth = pops;
+        }
+        current_depth = current_depth - pops + pushes;
+    }
+    Some(required_depth)
+}
+
 // Namespace used for error identifiers (e.g., "RunMat:..." or custom override)
 pub const DEFAULT_ERROR_NAMESPACE: &str = "RunMat";
 
@@ -1824,8 +1891,18 @@ async fn run_interpreter_inner(
                 )
                 .entered();
                 if !has_barrier {
-                    match try_execute_fusion_group(&plan, graph, &mut stack, &mut vars, &context)
-                        .await
+                    let required_stack_operands =
+                        fusion_required_stack_operands(&bytecode, pc, plan.group.span.end)
+                            .unwrap_or_else(|| plan.stack_pattern.len());
+                    match try_execute_fusion_group(
+                        &plan,
+                        graph,
+                        &mut stack,
+                        &mut vars,
+                        &context,
+                        required_stack_operands,
+                    )
+                    .await
                     {
                         Ok(result) => {
                             stack.push(result);
@@ -2803,12 +2880,10 @@ async fn run_interpreter_inner(
                                 ];
                                 match call_builtin_vm!("call_method", &args2) {
                                     Ok(v) => {
-                                        let truth: f64 = (&v).try_into()?;
-                                        stack.push(Value::Num(if truth == 0.0 {
-                                            1.0
-                                        } else {
-                                            0.0
-                                        }));
+                                        let truth =
+                                            logical_truth_from_value(&v, "comparison result")
+                                                .await?;
+                                        stack.push(Value::Num(if !truth { 1.0 } else { 0.0 }));
                                     }
                                     Err(_) => {
                                         let aa: f64 = (&a).try_into()?;
@@ -2836,12 +2911,10 @@ async fn run_interpreter_inner(
                                 ];
                                 match call_builtin_vm!("call_method", &args2) {
                                     Ok(v) => {
-                                        let truth: f64 = (&v).try_into()?;
-                                        stack.push(Value::Num(if truth == 0.0 {
-                                            1.0
-                                        } else {
-                                            0.0
-                                        }));
+                                        let truth =
+                                            logical_truth_from_value(&v, "comparison result")
+                                                .await?;
+                                        stack.push(Value::Num(if !truth { 1.0 } else { 0.0 }));
                                     }
                                     Err(_) => {
                                         let aa: f64 = (&a).try_into()?;
@@ -2895,12 +2968,10 @@ async fn run_interpreter_inner(
                                 ];
                                 match call_builtin_vm!("call_method", &args2) {
                                     Ok(v) => {
-                                        let truth: f64 = (&v).try_into()?;
-                                        stack.push(Value::Num(if truth == 0.0 {
-                                            1.0
-                                        } else {
-                                            0.0
-                                        }));
+                                        let truth =
+                                            logical_truth_from_value(&v, "comparison result")
+                                                .await?;
+                                        stack.push(Value::Num(if !truth { 1.0 } else { 0.0 }));
                                     }
                                     Err(_) => {
                                         let aa: f64 = (&a).try_into()?;
@@ -2928,12 +2999,10 @@ async fn run_interpreter_inner(
                                 ];
                                 match call_builtin_vm!("call_method", &args2) {
                                     Ok(v) => {
-                                        let truth: f64 = (&v).try_into()?;
-                                        stack.push(Value::Num(if truth == 0.0 {
-                                            1.0
-                                        } else {
-                                            0.0
-                                        }));
+                                        let truth =
+                                            logical_truth_from_value(&v, "comparison result")
+                                                .await?;
+                                        stack.push(Value::Num(if !truth { 1.0 } else { 0.0 }));
                                     }
                                     Err(_) => {
                                         let aa: f64 = (&a).try_into()?;
@@ -3203,12 +3272,10 @@ async fn run_interpreter_inner(
                                 ];
                                 match call_builtin_vm!("call_method", &args2) {
                                     Ok(v) => {
-                                        let truth: f64 = (&v).try_into()?;
-                                        stack.push(Value::Num(if truth == 0.0 {
-                                            1.0
-                                        } else {
-                                            0.0
-                                        }));
+                                        let truth =
+                                            logical_truth_from_value(&v, "comparison result")
+                                                .await?;
+                                        stack.push(Value::Num(if !truth { 1.0 } else { 0.0 }));
                                     }
                                     Err(_) => {
                                         let aa: f64 = (&a).try_into()?;
@@ -3236,12 +3303,10 @@ async fn run_interpreter_inner(
                                 ];
                                 match call_builtin_vm!("call_method", &args2) {
                                     Ok(v) => {
-                                        let truth: f64 = (&v).try_into()?;
-                                        stack.push(Value::Num(if truth == 0.0 {
-                                            1.0
-                                        } else {
-                                            0.0
-                                        }));
+                                        let truth =
+                                            logical_truth_from_value(&v, "comparison result")
+                                                .await?;
+                                        stack.push(Value::Num(if !truth { 1.0 } else { 0.0 }));
                                     }
                                     Err(_) => {
                                         let aa: f64 = (&a).try_into()?;
@@ -3355,11 +3420,10 @@ async fn run_interpreter_inner(
                 }
             }
             Instr::JumpIfFalse(target) => {
-                let cond: f64 = (&stack
+                let cond = stack
                     .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                    .try_into()?;
-                if cond == 0.0 {
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                if !logical_truth_from_value(&cond, "if condition").await? {
                     pc = target;
                     continue;
                 }
@@ -4965,7 +5029,12 @@ async fn run_interpreter_inner(
                     let index_val = match index_scalar_from_value(&index_value).await? {
                         Some(val) => val as f64,
                         None => {
-                            return Err(format!("cannot convert {original_value:?} to f64").into())
+                            return Err(mex(
+                                "UnsupportedIndexType",
+                                &format!(
+                                    "Unsupported index type: expected numeric scalar, got {original_value:?}"
+                                ),
+                            ))
                         }
                     };
                     indices.push(index_val);
@@ -10508,14 +10577,26 @@ async fn stochastic_evolution_dispatch(
                 scalar_from_value_scalar(&drift, "stochastic_evolution drift").await?;
             let scale_scalar =
                 scalar_from_value_scalar(&scale, "stochastic_evolution scale").await?;
-            let output = provider
-                .stochastic_evolution(&state_handle, drift_scalar, scale_scalar, steps_u32)
-                .map_err(|e| format!("stochastic_evolution: {e}"))?;
-            if let Some(temp) = state_owned {
-                let _ = provider.free(&temp);
+            match provider.stochastic_evolution(
+                &state_handle,
+                drift_scalar,
+                scale_scalar,
+                steps_u32,
+            ) {
+                Ok(output) => {
+                    if let Some(temp) = state_owned {
+                        let _ = provider.free(&temp);
+                    }
+                    fusion_residency::mark(&output);
+                    return Ok(Value::GpuTensor(output));
+                }
+                Err(err) => {
+                    log::debug!("stochastic_evolution provider fallback to host: {}", err);
+                    if let Some(temp) = state_owned {
+                        let _ = provider.free(&temp);
+                    }
+                }
             }
-            fusion_residency::mark(&output);
-            return Ok(Value::GpuTensor(output));
         }
     }
 
@@ -10559,6 +10640,42 @@ async fn scalar_from_value_scalar(value: &Value, label: &str) -> VmResult<f64> {
             }
         }
         other => Err(format!("{label}: expected numeric scalar, got {:?}", other).into()),
+    }
+}
+
+async fn logical_truth_from_value(value: &Value, label: &str) -> VmResult<bool> {
+    match value {
+        Value::Bool(flag) => Ok(*flag),
+        Value::Int(i) => Ok(!i.is_zero()),
+        Value::Num(n) => Ok(*n != 0.0),
+        Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
+        Value::LogicalArray(array) => Err(mex(
+            "InvalidConditionType",
+            &format!(
+                "{label}: expected scalar logical or numeric value, got logical array with {} elements",
+                array.data.len()
+            ),
+        )),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0] != 0.0),
+        Value::Tensor(tensor) => Err(mex(
+            "InvalidConditionType",
+            &format!(
+                "{label}: expected scalar logical or numeric value, got numeric array with {} elements",
+                tensor.data.len()
+            ),
+        )),
+        Value::GpuTensor(_) => {
+            let gathered = gather_if_needed_async(value)
+                .await
+                .map_err(|e| format!("{label}: {e}"))?;
+            Box::pin(logical_truth_from_value(&gathered, label)).await
+        }
+        other => Err(mex(
+            "InvalidConditionType",
+            &format!(
+                "{label}: expected scalar logical or numeric value, got {other:?}"
+            ),
+        )),
     }
 }
 
@@ -10705,6 +10822,7 @@ async fn try_execute_fusion_group(
     stack: &mut Vec<Value>,
     vars: &mut [Value],
     context: &ExecutionContext,
+    required_stack_operands: usize,
 ) -> VmResult<Value> {
     let mut inputs: Vec<Option<Value>> = vec![None; plan.inputs.len()];
 
@@ -10754,7 +10872,7 @@ async fn try_execute_fusion_group(
     }
 
     if log::log_enabled!(log::Level::Debug) && fusion_debug_enabled() {
-        let stack_needed_preview = plan.stack_pattern.len();
+        let stack_needed_preview = required_stack_operands;
         let stack_snapshot: Vec<&Value> = stack.iter().rev().take(stack_needed_preview).collect();
         let stack_kinds: Vec<&'static str> =
             stack_snapshot.iter().rev().map(|v| value_kind(v)).collect();
@@ -10782,12 +10900,12 @@ async fn try_execute_fusion_group(
     }
 
     let pattern_len = plan.stack_pattern.len();
-    if stack.len() < pattern_len {
+    if stack.len() < required_stack_operands {
         if fusion_debug_enabled() {
             log::debug!(
                 "fusion stack underflow: plan={} needed={} available={} pattern={:?}",
                 plan.index,
-                pattern_len,
+                required_stack_operands,
                 stack.len(),
                 plan.stack_pattern
             );
@@ -10797,7 +10915,7 @@ async fn try_execute_fusion_group(
             "fusion: stack underflow gathering inputs",
         ));
     }
-    let available = pattern_len;
+    let available = required_stack_operands;
     let slice_start = stack.len() - available;
     let stack_guard = StackSliceGuard::new(stack, slice_start);
     let slice = stack_guard.slice().to_vec();

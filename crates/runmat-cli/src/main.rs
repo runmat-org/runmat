@@ -1920,7 +1920,16 @@ async fn execute_script_with_args(
         });
     }
 
-    if let Some(error) = error_payload {
+    if let Some(error) = result.error.as_ref() {
+        eprintln!(
+            "{}",
+            error.format_diagnostic_with_source(
+                Some(script.to_string_lossy().as_ref()),
+                Some(&content),
+            )
+        );
+        std::process::exit(1);
+    } else if let Some(error) = error_payload {
         eprintln!("{error}");
         std::process::exit(1);
     } else {
@@ -2293,7 +2302,17 @@ async fn execute_benchmark(
                     provider: capture_provider_snapshot(),
                 });
             }
-            error!("Benchmark iteration {i} failed: {error}");
+            if let Some(runtime_error) = result.error.as_ref() {
+                eprintln!(
+                    "{}",
+                    runtime_error.format_diagnostic_with_source(
+                        Some(file.to_string_lossy().as_ref()),
+                        Some(&content),
+                    )
+                );
+            } else {
+                error!("Benchmark iteration {i} failed: {error}");
+            }
             std::process::exit(1);
         }
 
