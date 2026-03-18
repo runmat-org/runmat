@@ -1874,6 +1874,26 @@ impl RunMatSession {
         Ok(())
     }
 
+    pub fn workspace_snapshot(&mut self) -> WorkspaceSnapshot {
+        let source_map = if self.workspace_values.is_empty() {
+            &self.variables
+        } else {
+            &self.workspace_values
+        };
+
+        let mut entries: Vec<WorkspaceEntry> = source_map
+            .iter()
+            .map(|(name, value)| workspace_entry(name, value))
+            .collect();
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+
+        WorkspaceSnapshot {
+            full: true,
+            version: self.workspace_version,
+            values: self.attach_workspace_preview_tokens(entries),
+        }
+    }
+
     /// Control whether fusion plan snapshots are emitted in [`ExecutionResult`].
     pub fn set_emit_fusion_plan(&mut self, enabled: bool) {
         self.emit_fusion_plan = enabled;
@@ -2158,6 +2178,17 @@ impl RunMatSession {
     ) -> WorkspaceSnapshot {
         self.workspace_version = self.workspace_version.wrapping_add(1);
         let version = self.workspace_version;
+        WorkspaceSnapshot {
+            full,
+            version,
+            values: self.attach_workspace_preview_tokens(entries),
+        }
+    }
+
+    fn attach_workspace_preview_tokens(
+        &mut self,
+        entries: Vec<WorkspaceEntry>,
+    ) -> Vec<WorkspaceEntry> {
         self.workspace_preview_tokens.clear();
         let mut values = Vec::with_capacity(entries.len());
         for mut entry in entries {
@@ -2171,11 +2202,7 @@ impl RunMatSession {
             entry.preview_token = Some(token);
             values.push(entry);
         }
-        WorkspaceSnapshot {
-            full,
-            version,
-            values,
-        }
+        values
     }
 }
 

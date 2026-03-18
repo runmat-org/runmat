@@ -750,6 +750,17 @@ impl RunMatWasm {
         }
     }
 
+    #[wasm_bindgen(js_name = workspaceSnapshot)]
+    pub fn workspace_snapshot(&self) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let payload = {
+            let mut session = self.session.borrow_mut();
+            WorkspacePayload::from(session.workspace_snapshot())
+        };
+        serde_wasm_bindgen::to_value(&payload)
+            .map_err(|err| js_error(&format!("Failed to serialize workspace snapshot: {err}")))
+    }
+
     #[wasm_bindgen(js_name = exportFigureScene)]
     pub fn export_figure_scene(&self, handle: u32) -> Result<Option<Vec<u8>>, JsValue> {
         self.ensure_not_disposed()?;

@@ -495,6 +495,7 @@ export interface RunMatSessionHandle {
   clearWorkspace(): void;
   exportWorkspaceState(options?: { includeVariables?: "off" | "auto" | "force" }): Promise<Uint8Array | null>;
   importWorkspaceState(state: Uint8Array): Promise<boolean>;
+  workspaceSnapshot(): Promise<WorkspaceSnapshot>;
   exportFigureScene?(handle: number): Promise<Uint8Array | null>;
   importFigureScene?(scene: Uint8Array): Promise<number | null>;
   importFigureSceneFromPath?(path: string): Promise<number | null>;
@@ -547,6 +548,7 @@ interface RunMatNativeSession {
   clearWorkspace(): void;
   exportWorkspaceState?: (includeVariables?: string) => Promise<Uint8Array | null>;
   importWorkspaceState?: (state: Uint8Array) => boolean;
+  workspaceSnapshot?: () => WorkspaceSnapshot;
   exportFigureScene?: (handle: number) => Uint8Array | null;
   importFigureScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
   importFigureSceneFromPath?: (path: string) => number | null | Promise<number | null>;
@@ -633,6 +635,7 @@ interface RunMatNativeModule {
   importFigureSceneFromPath?: (path: string) => number | null | Promise<number | null>;
   exportWorkspaceState?: (includeVariables?: string) => Promise<Uint8Array | null>;
   importWorkspaceState?: (state: Uint8Array) => boolean;
+  workspaceSnapshot?: () => WorkspaceSnapshot;
   createPlotSurface?: (canvas: HTMLCanvasElement | OffscreenCanvas) => Promise<number>;
   destroyPlotSurface?: (surfaceId: number) => void;
   resizePlotSurface?: (
@@ -1142,6 +1145,12 @@ class WebRunMatSession implements RunMatSessionHandle {
     } catch {
       return false;
     }
+  }
+
+  async workspaceSnapshot(): Promise<WorkspaceSnapshot> {
+    this.ensureActive();
+    requireNativeFunction(this.native, "workspaceSnapshot");
+    return this.native.workspaceSnapshot();
   }
 
   async exportFigureScene(handle: number): Promise<Uint8Array | null> {

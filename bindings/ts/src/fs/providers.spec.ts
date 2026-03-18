@@ -99,24 +99,24 @@ describe("remote filesystem provider", () => {
     }
   });
 
-  it("streams multi-chunk payloads", () => {
+  it("streams multi-chunk payloads", async () => {
     const provider = createRemoteFsProvider({
       baseUrl: server.baseUrl,
       chunkBytes: 512,
       timeoutMs: 5_000
     });
 
-    provider.createDirAll?.("/reports");
+    await provider.createDirAll?.("/reports");
     const payload = new Uint8Array(5_000).map((_, idx) => (idx * 31) & 0xff);
-    provider.writeFile("/reports/data.bin", payload);
-    const metadata = provider.metadata("/reports/data.bin");
+    await provider.writeFile("/reports/data.bin", payload);
+    const metadata = await provider.metadata("/reports/data.bin");
     expect(metadata.len).toBe(payload.length);
 
-    const readBack = new Uint8Array(provider.readFile("/reports/data.bin"));
+    const readBack = new Uint8Array(await provider.readFile("/reports/data.bin"));
     expect(readBack).toEqual(payload);
 
-    provider.removeFile("/reports/data.bin");
-    expect(() => provider.metadata("/reports/data.bin")).toThrow();
+    await provider.removeFile("/reports/data.bin");
+    await expect(provider.metadata("/reports/data.bin")).rejects.toThrow();
   });
 
   it("respects auth tokens when provided", async () => {
@@ -128,20 +128,20 @@ describe("remote filesystem provider", () => {
       baseUrl: server.baseUrl,
       authToken: "secret"
     });
-    authed.writeFile("/secured/info.txt", encoder.encode("ok"));
-    expect(toText(authed.readFile("/secured/info.txt"))).toBe("ok");
+    await authed.writeFile("/secured/info.txt", encoder.encode("ok"));
+    expect(toText(await authed.readFile("/secured/info.txt"))).toBe("ok");
 
     const unauth = createRemoteFsProvider({ baseUrl: server.baseUrl });
-    expect(() => unauth.readDir("/")).toThrow(/unauthorized/i);
+    await expect(unauth.readDir("/")).rejects.toThrow(/unauthorized/i);
   });
 
-  it("propagates readonly flags", () => {
+  it("propagates readonly flags", async () => {
     const provider = createRemoteFsProvider({ baseUrl: server.baseUrl });
-    provider.writeFile("/reports/lock.txt", encoder.encode("locked"));
-    provider.setReadonly?.("/reports/lock.txt", true);
-    const meta = provider.metadata("/reports/lock.txt");
+    await provider.writeFile("/reports/lock.txt", encoder.encode("locked"));
+    await provider.setReadonly?.("/reports/lock.txt", true);
+    const meta = await provider.metadata("/reports/lock.txt");
     expect(meta.readonly).toBe(true);
-    expect(() => provider.writeFile("/reports/lock.txt", encoder.encode("fail"))).toThrow();
+    await expect(provider.writeFile("/reports/lock.txt", encoder.encode("fail"))).rejects.toThrow();
   });
 });
 
