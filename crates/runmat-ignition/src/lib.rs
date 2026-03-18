@@ -5,6 +5,8 @@ pub mod accel_graph;
 pub mod bytecode;
 pub mod compiler;
 pub mod functions;
+#[cfg(feature = "native-accel")]
+mod fusion_stack_layout;
 pub mod gc_roots;
 pub mod instr;
 pub mod vm;

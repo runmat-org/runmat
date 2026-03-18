@@ -2195,6 +2195,122 @@ fn fused_reduction_scalar_report_tail_matches_expected() {
 }
 
 #[test]
+fn fused_reduction_scalar_single_report_tail_matches_expected() {
+    gc_test_context(|| {
+        ensure_provider_registered();
+
+        let source = r#"
+        x = ones(1000000, 1, 'single');
+        y = max(x - single(0.5), 0);
+        z = mean(y, 'all') * exp(-single(0.1));
+        z1 = single(z);
+        s = char(num2str(double(z1)));
+        "#;
+
+        let ast = parse(source).expect("parse");
+        let hir = lower(&ast).expect("lower");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
+        let vars = interpret(&bytecode).expect("interpret");
+
+        let mut stores: Vec<usize> = bytecode
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::StoreVar(idx) => Some(*idx),
+                _ => None,
+            })
+            .collect();
+        assert!(stores.len() >= 5, "expected stores for x, y, z, z1, s");
+        let s_index = stores.pop().expect("store index for s");
+        let z1_index = stores.pop().expect("store index for z1");
+
+        let rendered = match vars.get(s_index).expect("value for s") {
+            Value::CharArray(chars) => chars.data.iter().collect::<String>(),
+            other => panic!("expected char array report, got {other:?}"),
+        };
+        let rendered_value: f64 = rendered.trim().parse().expect("parse rendered scalar");
+
+        let scalar_value =
+            match gather_if_needed(vars.get(z1_index).expect("value for z1")).expect("gather z1") {
+                Value::Num(n) => n,
+                Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
+                other => panic!("expected scalar z1 value, got {other:?}"),
+            };
+
+        let expected = (0.5f64 * (-0.1f64).exp()) as f32 as f64;
+        let tol = 1e-6;
+        assert!(
+            (rendered_value - expected).abs() <= tol,
+            "rendered report mismatch: got {rendered_value}, expected {expected}"
+        );
+        assert!(
+            (scalar_value - expected).abs() <= tol,
+            "stored scalar mismatch: got {scalar_value}, expected {expected}"
+        );
+    });
+}
+
+#[test]
+fn fused_reduction_scalar_branch_report_tail_matches_expected() {
+    gc_test_context(|| {
+        ensure_provider_registered();
+
+        let source = r#"
+        x = ones(1000000, 1, 'single');
+        y = max(x - single(0.5), 0);
+        z = mean(y, 'all') * exp(-single(0.1));
+        if z > single(0)
+            s = char(num2str(double(z)));
+        else
+            s = char('bad');
+        end
+        "#;
+
+        let ast = parse(source).expect("parse");
+        let hir = lower(&ast).expect("lower");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
+        let vars = interpret(&bytecode).expect("interpret");
+
+        let mut stores: Vec<usize> = bytecode
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::StoreVar(idx) => Some(*idx),
+                _ => None,
+            })
+            .collect();
+        assert!(stores.len() >= 4, "expected stores for x, y, z, s");
+        let s_index = stores.pop().expect("store index for s");
+
+        let rendered = match vars.get(s_index).expect("value for s") {
+            Value::CharArray(chars) => chars.data.iter().collect::<String>(),
+            other => panic!("expected char array report, got {other:?}"),
+        };
+        let rendered_value: f64 = rendered.trim().parse().expect("parse rendered scalar");
+
+        let expected = 0.5f64 * (-0.1f64).exp();
+        let scalar_value = vars
+            .iter()
+            .filter_map(|value| match gather_if_needed(value).ok()? {
+                Value::Num(n) => Some(n),
+                Value::Tensor(tensor) if tensor.data.len() == 1 => Some(tensor.data[0]),
+                _ => None,
+            })
+            .find(|value| (*value - expected).abs() <= 1e-6)
+            .expect("find scalar z value");
+        let tol = 1e-6;
+        assert!(
+            (rendered_value - expected).abs() <= tol,
+            "rendered report mismatch: got {rendered_value}, expected {expected}"
+        );
+        assert!(
+            (scalar_value - expected).abs() <= tol,
+            "stored scalar mismatch: got {scalar_value}, expected {expected}"
+        );
+    });
+}
+
+#[test]
 fn centered_gram_fusion_matches_cpu() {
     gc_test_context(|| {
         let rows = 5usize;

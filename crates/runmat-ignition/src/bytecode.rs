@@ -2,6 +2,8 @@
 use crate::accel_graph::build_accel_graph;
 use crate::compiler::Compiler;
 use crate::functions::{Bytecode, UserFunction};
+#[cfg(feature = "native-accel")]
+use crate::fusion_stack_layout::annotate_fusion_groups_with_stack_layout;
 use crate::CompileError;
 use runmat_hir::HirProgram;
 use std::collections::HashMap;
@@ -16,7 +18,9 @@ pub fn compile(
     #[cfg(feature = "native-accel")]
     let accel_graph = build_accel_graph(&c.instructions, &c.var_types);
     #[cfg(feature = "native-accel")]
-    let fusion_groups = accel_graph.detect_fusion_groups();
+    let mut fusion_groups = accel_graph.detect_fusion_groups();
+    #[cfg(feature = "native-accel")]
+    annotate_fusion_groups_with_stack_layout(&c.instructions, &accel_graph, &mut fusion_groups);
     Ok(Bytecode {
         instructions: c.instructions,
         instr_spans: c.instr_spans,

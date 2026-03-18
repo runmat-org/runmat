@@ -451,73 +451,6 @@ fn log_fusion_span_window(
     );
 }
 
-#[cfg(feature = "native-accel")]
-fn fusion_required_stack_operands(
-    bytecode: &Bytecode,
-    start_pc: usize,
-    end_pc: usize,
-) -> Option<usize> {
-    if start_pc >= bytecode.instructions.len()
-        || end_pc >= bytecode.instructions.len()
-        || start_pc > end_pc
-    {
-        return None;
-    }
-
-    fn stack_effect(instr: &Instr) -> Option<(usize, usize)> {
-        match instr {
-            Instr::LoadConst(_)
-            | Instr::LoadComplex(_, _)
-            | Instr::LoadBool(_)
-            | Instr::LoadString(_)
-            | Instr::LoadCharRow(_)
-            | Instr::LoadVar(_)
-            | Instr::LoadLocal(_) => Some((0, 1)),
-            Instr::Add
-            | Instr::Sub
-            | Instr::Mul
-            | Instr::Div
-            | Instr::Pow
-            | Instr::ElemMul
-            | Instr::ElemDiv
-            | Instr::ElemPow
-            | Instr::ElemLeftDiv
-            | Instr::LessEqual
-            | Instr::Less
-            | Instr::Greater
-            | Instr::GreaterEqual
-            | Instr::Equal
-            | Instr::NotEqual
-            | Instr::Swap => Some((2, 1)),
-            Instr::StoreVar(_) | Instr::StoreLocal(_) | Instr::Pop => Some((1, 0)),
-            Instr::Neg | Instr::UPlus | Instr::Transpose | Instr::ConjugateTranspose => {
-                Some((1, 1))
-            }
-            Instr::CallBuiltin(_, argc)
-            | Instr::CallFunction(_, argc)
-            | Instr::CallFeval(argc)
-            | Instr::CallMethod(_, argc)
-            | Instr::CallStaticMethod(_, _, argc) => Some((*argc, 1)),
-            Instr::Index(argc) | Instr::IndexCell(argc) => Some((argc + 1, 1)),
-            Instr::StoreIndex(argc) | Instr::StoreIndexCell(argc) => Some((argc + 2, 1)),
-            Instr::StochasticEvolution => Some((4, 1)),
-            _ => None,
-        }
-    }
-
-    let mut current_depth = 0usize;
-    let mut required_depth = 0usize;
-    for instr in &bytecode.instructions[start_pc..=end_pc] {
-        let (pops, pushes) = stack_effect(instr)?;
-        if current_depth < pops {
-            required_depth += pops - current_depth;
-            current_depth = pops;
-        }
-        current_depth = current_depth - pops + pushes;
-    }
-    Some(required_depth)
-}
-
 // Namespace used for error identifiers (e.g., "RunMat:..." or custom override)
 pub const DEFAULT_ERROR_NAMESPACE: &str = "RunMat";
 
@@ -1891,18 +1824,8 @@ async fn run_interpreter_inner(
                 )
                 .entered();
                 if !has_barrier {
-                    let required_stack_operands =
-                        fusion_required_stack_operands(&bytecode, pc, plan.group.span.end)
-                            .unwrap_or_else(|| plan.stack_pattern.len());
-                    match try_execute_fusion_group(
-                        &plan,
-                        graph,
-                        &mut stack,
-                        &mut vars,
-                        &context,
-                        required_stack_operands,
-                    )
-                    .await
+                    match try_execute_fusion_group(&plan, graph, &mut stack, &mut vars, &context)
+                        .await
                     {
                         Ok(result) => {
                             stack.push(result);
@@ -10822,8 +10745,19 @@ async fn try_execute_fusion_group(
     stack: &mut Vec<Value>,
     vars: &mut [Value],
     context: &ExecutionContext,
-    required_stack_operands: usize,
 ) -> VmResult<Value> {
+    if plan.group.stack_layout.is_none() && !plan.stack_pattern.is_empty() {
+        return Err(mex(
+            "FusionMissingStackLayout",
+            "fusion: missing compile-time stack layout metadata",
+        ));
+    }
+    let required_stack_operands = plan
+        .group
+        .stack_layout
+        .as_ref()
+        .map(|layout| layout.required_stack_operands)
+        .unwrap_or_else(|| plan.stack_pattern.len());
     let mut inputs: Vec<Option<Value>> = vec![None; plan.inputs.len()];
 
     for (idx, value) in &plan.constants {
@@ -10899,7 +10833,6 @@ async fn try_execute_fusion_group(
         );
     }
 
-    let pattern_len = plan.stack_pattern.len();
     if stack.len() < required_stack_operands {
         if fusion_debug_enabled() {
             log::debug!(
@@ -10919,27 +10852,42 @@ async fn try_execute_fusion_group(
     let slice_start = stack.len() - available;
     let stack_guard = StackSliceGuard::new(stack, slice_start);
     let slice = stack_guard.slice().to_vec();
-    let mut consumed: Vec<Option<Value>> = vec![None; pattern_len];
-    let skip = 0;
+    let mut consumed_inputs: Vec<Option<Value>> = vec![None; plan.inputs.len()];
+    let input_positions: HashMap<runmat_accelerate::graph::ValueId, usize> = plan
+        .inputs
+        .iter()
+        .enumerate()
+        .map(|(idx, value_id)| (*value_id, idx))
+        .collect();
 
-    for (offset, input_idx) in plan.stack_pattern.iter().enumerate() {
-        if offset < skip {
-            continue;
+    let allow_stack_value = |val: &Value| {
+        if plan.group.kind.is_reduction() {
+            matches!(val, Value::GpuTensor(_) | Value::Tensor(_))
+        } else {
+            true
         }
-        let slice_idx = offset - skip;
-        let Some(val) = slice.get(slice_idx).cloned() else {
-            continue;
-        };
-        consumed[offset] = Some(val.clone());
-        if inputs[*input_idx].is_none() {
-            // For reductions, only populate from stack if the value is a numeric tensor.
-            // This avoids accidentally binding non-tensor metadata (e.g., dim strings) into the fused kernel inputs.
-            let allow_stack_value = if plan.group.kind.is_reduction() {
-                matches!(val, Value::GpuTensor(_) | Value::Tensor(_))
-            } else {
-                true
+    };
+
+    if let Some(layout) = plan.group.stack_layout.as_ref() {
+        for binding in &layout.bindings {
+            let Some(input_idx) = input_positions.get(&binding.value_id).copied() else {
+                continue;
             };
-            if allow_stack_value {
+            let Some(val) = slice.get(binding.stack_offset).cloned() else {
+                continue;
+            };
+            consumed_inputs[input_idx] = Some(val.clone());
+            if inputs[input_idx].is_none() && allow_stack_value(&val) {
+                inputs[input_idx] = Some(val);
+            }
+        }
+    } else {
+        for (offset, input_idx) in plan.stack_pattern.iter().enumerate() {
+            let Some(val) = slice.get(offset).cloned() else {
+                continue;
+            };
+            consumed_inputs[*input_idx] = Some(val.clone());
+            if inputs[*input_idx].is_none() && allow_stack_value(&val) {
                 inputs[*input_idx] = Some(val);
             }
         }
@@ -11207,7 +11155,7 @@ async fn try_execute_fusion_group(
                 }
             }
             // Prefer immediately-consumed stack values (common for reductions over producer results)
-            for v in consumed.iter().filter_map(|v| v.as_ref()) {
+            for v in consumed_inputs.iter().filter_map(|v| v.as_ref()) {
                 match v {
                     Value::GpuTensor(h) => {
                         rows_cols = Some((
@@ -11231,26 +11179,19 @@ async fn try_execute_fusion_group(
             if let Some(data_id) = data_value_id {
                 // Map data_id to plan input index if external
                 if let Some(input_index) = plan.inputs.iter().position(|vid| *vid == data_id) {
-                    // If this input came from the stack, it will have an entry in stack_pattern; use consumed value
-                    if let Some(stack_offset) = plan
-                        .stack_pattern
-                        .iter()
-                        .position(|&idx| idx == input_index)
-                    {
-                        if let Some(val) = consumed.get(stack_offset).and_then(|v| v.as_ref()) {
-                            match val {
-                                Value::GpuTensor(h) => {
-                                    let r = h.shape.first().copied().unwrap_or(1).max(1);
-                                    let c = h.shape.get(1).copied().unwrap_or(1).max(1);
-                                    rows_cols = Some((r, c));
-                                }
-                                Value::Tensor(t) => {
-                                    let r = t.shape.first().copied().unwrap_or(1).max(1);
-                                    let c = t.shape.get(1).copied().unwrap_or(1).max(1);
-                                    rows_cols = Some((r, c));
-                                }
-                                _ => {}
+                    if let Some(val) = consumed_inputs.get(input_index).and_then(|v| v.as_ref()) {
+                        match val {
+                            Value::GpuTensor(h) => {
+                                let r = h.shape.first().copied().unwrap_or(1).max(1);
+                                let c = h.shape.get(1).copied().unwrap_or(1).max(1);
+                                rows_cols = Some((r, c));
                             }
+                            Value::Tensor(t) => {
+                                let r = t.shape.first().copied().unwrap_or(1).max(1);
+                                let c = t.shape.get(1).copied().unwrap_or(1).max(1);
+                                rows_cols = Some((r, c));
+                            }
+                            _ => {}
                         }
                     }
                     // Otherwise, it was a variable/constant; use request.inputs
@@ -11320,7 +11261,7 @@ async fn try_execute_fusion_group(
 
             // Fallback: any tensor input
             if rows_cols.is_none() {
-                for v in consumed.iter().filter_map(|v| v.as_ref()) {
+                for v in consumed_inputs.iter().filter_map(|v| v.as_ref()) {
                     match v {
                         Value::GpuTensor(h) => {
                             rows_cols = Some((
@@ -11420,7 +11361,7 @@ async fn try_execute_fusion_group(
                             _ => None,
                         }
                     };
-                    for value in consumed.iter().filter_map(|v| v.as_ref()) {
+                    for value in consumed_inputs.iter().filter_map(|v| v.as_ref()) {
                         if let Some(prod) = inspect_value(value) {
                             total_from_operand = true;
                             total_elems = Some(prod.max(1));
@@ -11549,7 +11490,7 @@ async fn try_execute_fusion_group(
                 }
                 _ => {}
             };
-            for v in consumed.iter().filter_map(|v| v.as_ref()) {
+            for v in consumed_inputs.iter().filter_map(|v| v.as_ref()) {
                 check_val(v);
             }
             for v in &request.inputs {

@@ -57,6 +57,7 @@ async fn fused_sum_square_dim0_matches_manual() {
         shape: ShapeInfo::Tensor(vec![Some(cols)]),
         span: InstrSpan { start: 0, end: 0 },
         pattern: None,
+        stack_layout: None,
     };
 
     let operations = vec![FusionOp::Primitive {

@@ -104,6 +104,7 @@ fn fused_single_pass_sum_mul_no_alias() {
         shape: ShapeInfo::Tensor(vec![Some(cols)]),
         span: InstrSpan { start: 0, end: 1 },
         pattern: None,
+        stack_layout: None,
     };
 
     let plan = FusionGroupPlan {

@@ -1,5 +1,11 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StackEffect {
+    pub pops: usize,
+    pub pushes: usize,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum EmitLabel {
     Ans,
@@ -186,4 +192,151 @@ pub struct ArgSpec {
     pub is_expand: bool,
     pub num_indices: usize,
     pub expand_all: bool,
+}
+
+impl Instr {
+    pub fn stack_effect(&self) -> Option<StackEffect> {
+        fn effect(pops: usize, pushes: usize) -> Option<StackEffect> {
+            Some(StackEffect { pops, pushes })
+        }
+
+        match self {
+            Instr::LoadConst(_)
+            | Instr::LoadComplex(_, _)
+            | Instr::LoadBool(_)
+            | Instr::LoadString(_)
+            | Instr::LoadCharRow(_)
+            | Instr::LoadVar(_)
+            | Instr::LoadLocal(_) => effect(0, 1),
+            Instr::StoreVar(_)
+            | Instr::StoreLocal(_)
+            | Instr::Pop
+            | Instr::JumpIfFalse(_)
+            | Instr::AndAnd(_)
+            | Instr::OrOr(_) => effect(1, 0),
+            Instr::Add
+            | Instr::Sub
+            | Instr::Mul
+            | Instr::Div
+            | Instr::Pow
+            | Instr::ElemMul
+            | Instr::ElemDiv
+            | Instr::ElemPow
+            | Instr::ElemLeftDiv
+            | Instr::LessEqual
+            | Instr::Less
+            | Instr::Greater
+            | Instr::GreaterEqual
+            | Instr::Equal
+            | Instr::NotEqual => effect(2, 1),
+            Instr::Swap => effect(2, 2),
+            Instr::Neg
+            | Instr::UPlus
+            | Instr::Transpose
+            | Instr::ConjugateTranspose
+            | Instr::LoadMember(_)
+            | Instr::LoadMethod(_) => effect(1, 1),
+            Instr::CallBuiltin(_, argc) | Instr::CallFunction(_, argc) => effect(*argc, 1),
+            Instr::CallFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
+            Instr::CallMethod(_, argc) => effect(argc + 1, 1),
+            Instr::CallStaticMethod(_, _, argc) => effect(*argc, 1),
+            Instr::CallFeval(argc) => effect(argc + 1, 1),
+            Instr::StochasticEvolution => effect(4, 1),
+            Instr::CreateMatrix(rows, cols) | Instr::CreateCell2D(rows, cols) => {
+                effect(rows * cols, 1)
+            }
+            Instr::CreateRange(has_step) => effect(if *has_step { 3 } else { 2 }, 1),
+            Instr::Index(num_indices) | Instr::IndexCell(num_indices) => effect(num_indices + 1, 1),
+            Instr::IndexCellExpand(num_indices, out_count) => effect(num_indices + 1, *out_count),
+            Instr::StoreIndex(num_indices) | Instr::StoreIndexCell(num_indices) => {
+                effect(num_indices + 2, 1)
+            }
+            Instr::IndexSlice(_, numeric_count, _, _)
+            | Instr::IndexSliceEx(_, numeric_count, _, _, _) => effect(numeric_count + 1, 1),
+            Instr::StoreSlice(_, numeric_count, _, _)
+            | Instr::StoreSliceEx(_, numeric_count, _, _, _) => effect(numeric_count + 2, 1),
+            Instr::Index1DRangeEnd { has_step, .. } => effect(if *has_step { 3 } else { 2 }, 1),
+            Instr::StoreSlice1DRangeEnd { has_step, .. } => {
+                effect(if *has_step { 4 } else { 3 }, 1)
+            }
+            Instr::IndexRangeEnd {
+                numeric_count,
+                range_has_step,
+                ..
+            } => {
+                let range_pops = range_has_step
+                    .iter()
+                    .map(|has_step| if *has_step { 2 } else { 1 })
+                    .sum::<usize>();
+                effect(1 + numeric_count + range_pops, 1)
+            }
+            Instr::StoreRangeEnd {
+                numeric_count,
+                range_has_step,
+                ..
+            } => {
+                let range_pops = range_has_step
+                    .iter()
+                    .map(|has_step| if *has_step { 2 } else { 1 })
+                    .sum::<usize>();
+                effect(2 + numeric_count + range_pops, 1)
+            }
+            Instr::LoadMemberDynamic => effect(2, 1),
+            Instr::StoreMember(_) => effect(2, 1),
+            Instr::StoreMemberDynamic => effect(3, 1),
+            Instr::CreateClosure(_, capture_count) => effect(*capture_count, 1),
+            Instr::CallBuiltinExpandLast(_, fixed_argc, num_indices) => {
+                effect(fixed_argc + num_indices + 1, 1)
+            }
+            Instr::CallBuiltinExpandAt(_, before_count, num_indices, after_count)
+            | Instr::CallFunctionExpandAt(_, before_count, num_indices, after_count) => {
+                effect(before_count + num_indices + after_count + 1, 1)
+            }
+            Instr::CallBuiltinExpandMulti(_, specs) | Instr::CallFunctionExpandMulti(_, specs) => {
+                let pops = specs
+                    .iter()
+                    .map(|spec| {
+                        if spec.is_expand {
+                            1 + spec.num_indices
+                        } else {
+                            1
+                        }
+                    })
+                    .sum::<usize>();
+                effect(pops, 1)
+            }
+            Instr::CallFevalExpandMulti(specs) => {
+                let pops = specs
+                    .iter()
+                    .map(|spec| {
+                        if spec.is_expand {
+                            1 + spec.num_indices
+                        } else {
+                            1
+                        }
+                    })
+                    .sum::<usize>();
+                effect(pops + 1, 1)
+            }
+            Instr::PackToRow(count) | Instr::PackToCol(count) => effect(*count, 1),
+            Instr::Unpack(count) => effect(1, *count),
+            Instr::EmitStackTop { .. }
+            | Instr::EmitVar { .. }
+            | Instr::Jump(_)
+            | Instr::EnterTry(_, _)
+            | Instr::PopTry
+            | Instr::Return
+            | Instr::EnterScope(_)
+            | Instr::ExitScope(_)
+            | Instr::RegisterImport { .. }
+            | Instr::DeclareGlobal(_)
+            | Instr::DeclarePersistent(_)
+            | Instr::DeclareGlobalNamed(_, _)
+            | Instr::DeclarePersistentNamed(_, _)
+            | Instr::RegisterClass { .. } => effect(0, 0),
+            Instr::LoadStaticProperty(_, _) => effect(0, 1),
+            Instr::ReturnValue => effect(1, 0),
+            Instr::CreateMatrixDynamic(_) => None,
+        }
+    }
 }

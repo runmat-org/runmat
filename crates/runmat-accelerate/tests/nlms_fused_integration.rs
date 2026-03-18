@@ -344,6 +344,7 @@ fn nlms_two_fused_reductions_integration() {
                 shape: ShapeInfo::Tensor(vec![Some(cols)]),
                 span: InstrSpan { start: 0, end: 0 },
                 pattern: None,
+                stack_layout: None,
             },
             operations: vec![FusionOp::Primitive {
                 op: PrimitiveOp::Sub,
