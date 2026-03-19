@@ -101,6 +101,18 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "and",
+      "url": "./and"
+    },
+    {
+      "label": "not",
+      "url": "./not"
+    },
+    {
+      "label": "xor",
+      "url": "./xor"
     }
   ],
   "source": {

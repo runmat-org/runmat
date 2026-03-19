@@ -141,6 +141,18 @@
     {
       "question": "Does `readmatrix` modify the current directory?",
       "answer": "No. Relative paths are resolved against the current working directory, exactly like MATLAB."
+    },
+    {
+      "question": "What does readmatrix do in MATLAB?",
+      "answer": "`readmatrix(filename)` reads numeric data from a text file (CSV, TSV, etc.) and returns it as a matrix. Non-numeric values are replaced with `NaN`."
+    },
+    {
+      "question": "How is readmatrix different from csvread?",
+      "answer": "`readmatrix` is the modern replacement for `csvread`. It auto-detects delimiters, handles headers, and supports more file formats. `csvread` only handles comma-separated files with numeric data."
+    },
+    {
+      "question": "Can readmatrix skip header rows?",
+      "answer": "Yes. Use the `'NumHeaderLines'` option: `readmatrix('file.csv', 'NumHeaderLines', 1)` skips the first row. RunMat supports this same option."
     }
   ],
   "links": [
@@ -159,6 +171,26 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "csvread",
+      "url": "./csvread"
+    },
+    {
+      "label": "csvwrite",
+      "url": "./csvwrite"
+    },
+    {
+      "label": "dlmread",
+      "url": "./dlmread"
+    },
+    {
+      "label": "dlmwrite",
+      "url": "./dlmwrite"
+    },
+    {
+      "label": "writematrix",
+      "url": "./writematrix"
     }
   ],
   "source": {

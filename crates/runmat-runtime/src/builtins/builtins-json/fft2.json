@@ -124,6 +124,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "ifft2",
+      "url": "./ifft2"
+    },
+    {
+      "label": "ifftshift",
+      "url": "./ifftshift"
     }
   ],
   "source": {

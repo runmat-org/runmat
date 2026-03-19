@@ -115,6 +115,10 @@
     {
       "label": "cellfun",
       "url": "./cellfun"
+    },
+    {
+      "label": "cellstr",
+      "url": "./cellstr"
     }
   ],
   "source": {

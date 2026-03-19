@@ -109,11 +109,11 @@
     },
     {
       "label": "filter2",
-      "url": "https://www.mathworks.com/help/matlab/ref/filter2.html"
+      "url": "./filter2"
     },
     {
       "label": "imfilter",
-      "url": "https://www.mathworks.com/help/images/ref/imfilter.html"
+      "url": "./imfilter"
     },
     {
       "label": "gpuArray",
@@ -122,6 +122,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "deconv",
+      "url": "./deconv"
+    },
+    {
+      "label": "filter",
+      "url": "./filter"
     }
   ],
   "source": {

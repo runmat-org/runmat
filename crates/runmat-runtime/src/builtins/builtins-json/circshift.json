@@ -114,6 +114,18 @@
     {
       "question": "Does the builtin allocate new GPU buffers?",
       "answer": "Providers may reuse buffers internally, but from the user’s perspective the result is a fresh gpuArray handle that preserves residency information."
+    },
+    {
+      "question": "What does circshift do in MATLAB?",
+      "answer": "`circshift(A, K)` circularly shifts the elements of array `A` by `K` positions. Elements shifted off one end wrap around to the other. Negative shifts move elements in the opposite direction."
+    },
+    {
+      "question": "How do I shift rows and columns separately with circshift?",
+      "answer": "Use `circshift(A, [rowShift, colShift])` to shift rows and columns independently. For example, `circshift(A, [1, -2])` shifts rows down by 1 and columns left by 2."
+    },
+    {
+      "question": "Does circshift support GPU arrays?",
+      "answer": "Yes. In RunMat, `circshift` works on GPU arrays and can fuse with other GPU kernels for efficient execution without extra memory allocations."
     }
   ],
   "links": [
@@ -136,6 +148,58 @@
     {
       "label": "`gather`",
       "url": "./gather"
+    },
+    {
+      "label": "cat",
+      "url": "./cat"
+    },
+    {
+      "label": "diag",
+      "url": "./diag"
+    },
+    {
+      "label": "fliplr",
+      "url": "./fliplr"
+    },
+    {
+      "label": "flipud",
+      "url": "./flipud"
+    },
+    {
+      "label": "horzcat",
+      "url": "./horzcat"
+    },
+    {
+      "label": "ipermute",
+      "url": "./ipermute"
+    },
+    {
+      "label": "kron",
+      "url": "./kron"
+    },
+    {
+      "label": "repmat",
+      "url": "./repmat"
+    },
+    {
+      "label": "reshape",
+      "url": "./reshape"
+    },
+    {
+      "label": "squeeze",
+      "url": "./squeeze"
+    },
+    {
+      "label": "tril",
+      "url": "./tril"
+    },
+    {
+      "label": "triu",
+      "url": "./triu"
+    },
+    {
+      "label": "vertcat",
+      "url": "./vertcat"
     }
   ],
   "source": {

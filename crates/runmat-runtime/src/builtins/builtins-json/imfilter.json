@@ -116,6 +116,10 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "filter2",
+      "url": "./filter2"
     }
   ],
   "source": {

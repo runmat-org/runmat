@@ -14,13 +14,13 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 use super::accept::{client_handle, configure_stream, CLIENT_HANDLE_FIELD};
 
-const MESSAGE_ID_INVALID_CLIENT: &str = "MATLAB:read:InvalidTcpClient";
-const MESSAGE_ID_NOT_CONNECTED: &str = "MATLAB:read:NotConnected";
-const MESSAGE_ID_TIMEOUT: &str = "MATLAB:read:Timeout";
-const MESSAGE_ID_CONNECTION_CLOSED: &str = "MATLAB:read:ConnectionClosed";
-const MESSAGE_ID_INVALID_COUNT: &str = "MATLAB:read:InvalidCount";
-const MESSAGE_ID_INVALID_DATATYPE: &str = "MATLAB:read:InvalidDataType";
-const MESSAGE_ID_INTERNAL: &str = "MATLAB:read:InternalError";
+const MESSAGE_ID_INVALID_CLIENT: &str = "RunMat:read:InvalidTcpClient";
+const MESSAGE_ID_NOT_CONNECTED: &str = "RunMat:read:NotConnected";
+const MESSAGE_ID_TIMEOUT: &str = "RunMat:read:Timeout";
+const MESSAGE_ID_CONNECTION_CLOSED: &str = "RunMat:read:ConnectionClosed";
+const MESSAGE_ID_INVALID_COUNT: &str = "RunMat:read:InvalidCount";
+const MESSAGE_ID_INVALID_DATATYPE: &str = "RunMat:read:InvalidDataType";
+const MESSAGE_ID_INTERNAL: &str = "RunMat:read:InternalError";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::read")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

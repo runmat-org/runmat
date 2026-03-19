@@ -15,13 +15,13 @@ use crate::builtins::common::spec::{
 };
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
-const MESSAGE_ID_FILE_NOT_FOUND: &str = "MATLAB:DELETE:FileNotFound";
-const MESSAGE_ID_IS_DIRECTORY: &str = "MATLAB:DELETE:Directories";
-const MESSAGE_ID_OS_ERROR: &str = "MATLAB:DELETE:PermissionDenied";
-const MESSAGE_ID_INVALID_PATTERN: &str = "MATLAB:DELETE:InvalidPattern";
-const MESSAGE_ID_INVALID_INPUT: &str = "MATLAB:DELETE:InvalidInput";
-const MESSAGE_ID_EMPTY_FILENAME: &str = "MATLAB:DELETE:EmptyFilename";
-const MESSAGE_ID_INVALID_HANDLE: &str = "MATLAB:DELETE:InvalidHandle";
+const MESSAGE_ID_FILE_NOT_FOUND: &str = "RunMat:DELETE:FileNotFound";
+const MESSAGE_ID_IS_DIRECTORY: &str = "RunMat:delete:Directories";
+const MESSAGE_ID_OS_ERROR: &str = "RunMat:DELETE:PermissionDenied";
+const MESSAGE_ID_INVALID_PATTERN: &str = "RunMat:delete:InvalidPattern";
+const MESSAGE_ID_INVALID_INPUT: &str = "RunMat:delete:InvalidInput";
+const MESSAGE_ID_EMPTY_FILENAME: &str = "RunMat:delete:EmptyFilename";
+const MESSAGE_ID_INVALID_HANDLE: &str = "RunMat:delete:InvalidHandle";
 
 const ERR_FILENAME_ARG: &str =
     "delete: filename must be a character vector, string scalar, string array, or cell array of character vectors";
@@ -116,13 +116,13 @@ async fn delete_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 
     for raw in raw_targets {
-        delete_target(&raw)?;
+        delete_target(&raw).await?;
     }
 
     Ok(Value::Num(0.0))
 }
 
-fn delete_target(raw: &str) -> BuiltinResult<()> {
+async fn delete_target(raw: &str) -> BuiltinResult<()> {
     let expanded = expand_user_path(raw, "delete")
         .map_err(|msg| delete_error(MESSAGE_ID_INVALID_INPUT, msg))?;
     if expanded.is_empty() {
@@ -133,13 +133,13 @@ fn delete_target(raw: &str) -> BuiltinResult<()> {
     }
 
     if contains_wildcards(&expanded) {
-        delete_with_pattern(&expanded, raw)
+        delete_with_pattern(&expanded, raw).await
     } else {
-        delete_single_path(&PathBuf::from(&expanded), raw)
+        delete_single_path_async(&PathBuf::from(&expanded), raw).await
     }
 }
 
-fn delete_with_pattern(pattern: &str, display: &str) -> BuiltinResult<()> {
+async fn delete_with_pattern(pattern: &str, display: &str) -> BuiltinResult<()> {
     validate_wildcard_pattern(pattern, display)?;
 
     if let Err(PatternError { msg, .. }) = Pattern::new(pattern) {
@@ -189,13 +189,13 @@ fn delete_with_pattern(pattern: &str, display: &str) -> BuiltinResult<()> {
 
     for path in matches {
         let display_path = path_to_string(&path);
-        delete_single_path(&path, &display_path)?;
+        delete_single_path_async(&path, &display_path).await?;
     }
     Ok(())
 }
 
-fn delete_single_path(path: &Path, display: &str) -> BuiltinResult<()> {
-    match vfs::metadata(path) {
+async fn delete_single_path_async(path: &Path, display: &str) -> BuiltinResult<()> {
+    match vfs::metadata_async(path).await {
         Ok(meta) => {
             if meta.is_dir() {
                 return Err(delete_error(
@@ -206,7 +206,7 @@ fn delete_single_path(path: &Path, display: &str) -> BuiltinResult<()> {
                     ),
                 ));
             }
-            vfs::remove_file(path).map_err(|err| {
+            vfs::remove_file_async(path).await.map_err(|err| {
                 delete_error(
                     MESSAGE_ID_OS_ERROR,
                     format!("delete: unable to delete '{}' ({})", display, err),
@@ -230,6 +230,11 @@ fn delete_single_path(path: &Path, display: &str) -> BuiltinResult<()> {
             }
         }
     }
+}
+
+#[cfg(test)]
+fn delete_single_path(path: &Path, display: &str) -> BuiltinResult<()> {
+    futures::executor::block_on(delete_single_path_async(path, display))
 }
 
 fn validate_wildcard_pattern(pattern: &str, display: &str) -> BuiltinResult<()> {
@@ -583,7 +588,8 @@ pub(crate) mod tests {
     #[test]
     fn delete_errors_on_invalid_pattern() {
         let pattern = "{invalid*";
-        let err = delete_target(pattern).expect_err("invalid pattern should error");
+        let err = futures::executor::block_on(delete_target(pattern))
+            .expect_err("invalid pattern should error");
         assert_eq!(err.identifier(), Some(MESSAGE_ID_INVALID_PATTERN));
     }
 
@@ -597,7 +603,7 @@ pub(crate) mod tests {
         let temp = tempdir().expect("temp dir");
         let missing = temp.path().join("missing.txt");
         let missing_str = missing.to_string_lossy().to_string();
-        let err = delete_target(&missing_str).expect_err("error");
+        let err = futures::executor::block_on(delete_target(&missing_str)).expect_err("error");
         assert_eq!(err.identifier(), Some(MESSAGE_ID_FILE_NOT_FOUND));
     }
 

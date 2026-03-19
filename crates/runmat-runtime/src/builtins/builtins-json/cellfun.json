@@ -110,6 +110,18 @@
     {
       "question": "Does `cellfun` support MATLAB's `'isclass'` short name?",
       "answer": "Yes. RunMat maps `'isclass'` to the `class` builtin internally so you can write `cellfun('isclass', C, 'double')` just like in MATLAB."
+    },
+    {
+      "question": "What does cellfun do in MATLAB?",
+      "answer": "`cellfun` applies a function to each cell of a cell array and returns the collected results. For example, `cellfun(@length, C)` returns the length of each cell's contents."
+    },
+    {
+      "question": "How is cellfun different from arrayfun?",
+      "answer": "`cellfun` operates on cell arrays, while `arrayfun` operates on numeric or logical arrays. Use `cellfun` when your data is stored in cells (e.g., variable-length strings), and `arrayfun` for uniform numeric data."
+    },
+    {
+      "question": "Can cellfun return non-uniform outputs?",
+      "answer": "Yes. Set `'UniformOutput'` to `false` to collect results into a cell array when the function returns different sizes or types across cells."
     }
   ],
   "links": [
@@ -132,6 +144,10 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "cellstr",
+      "url": "./cellstr"
     }
   ],
   "source": {

@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use crate::core::docs;
 use crate::core::position::{offset_to_position, position_to_offset};
 use lsp_types::{
@@ -67,10 +65,6 @@ impl TextRange {
             end: offset_to_position(text, self.end),
         }
     }
-}
-
-pub fn analyze_document(text: &str) -> DocumentAnalysis {
-    analyze_document_with_compat(text, CompatMode::default())
 }
 
 pub fn analyze_document_with_compat(text: &str, compat: CompatMode) -> DocumentAnalysis {
@@ -599,7 +593,6 @@ pub enum VariableKind {
     Global,
     Parameter,
     Output,
-    Local,
 }
 
 impl VariableKind {
@@ -608,7 +601,6 @@ impl VariableKind {
             VariableKind::Global => "global",
             VariableKind::Parameter => "parameter",
             VariableKind::Output => "output",
-            VariableKind::Local => "local",
         }
     }
 }
@@ -620,7 +612,6 @@ pub struct FunctionSemantic {
     pub range: TextRange,
     pub selection: TextRange,
     pub variables: HashMap<String, VariableSymbol>,
-    pub return_types: Vec<Type>,
 }
 
 #[derive(Clone)]
@@ -864,16 +855,6 @@ fn build_semantic_model(
             range: body_range,
             selection,
             variables,
-            return_types: lowering
-                .inferred_function_returns
-                .get(&func_name)
-                .cloned()
-                .unwrap_or_else(|| {
-                    outputs
-                        .iter()
-                        .filter_map(|o| lowering.var_types.get(o.0).cloned())
-                        .collect()
-                }),
         };
         functions.push(semantic);
     }
@@ -885,7 +866,8 @@ fn build_semantic_model(
             .push(idx);
     }
 
-    let diagnostics = runmat_hir::lint_shapes(&lowering);
+    let mut diagnostics = runmat_static_analysis::lint_shapes(&lowering);
+    diagnostics.extend(runmat_static_analysis::lint_data_api(&lowering));
 
     SemanticModel {
         globals,
@@ -903,7 +885,7 @@ mod tests {
     #[test]
     fn hover_returns_builtin_docs() {
         let text = "plot(1, 2);";
-        let analysis = analyze_document(text);
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
         if let Some(err) = &analysis.syntax_error {
             panic!(
                 "unexpected parse error at {}: {}",
@@ -962,7 +944,7 @@ mod tests {
     #[test]
     fn hover_includes_inferred_tensor_shape() {
         let text = "x = 0:1:100; y = sin(x);";
-        let analysis = analyze_document(text);
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
         let x_offset = text.find('x').expect("x offset");
         let y_offset = text.find('y').expect("y offset");
         let x_position = offset_to_position(text, x_offset);
@@ -987,7 +969,7 @@ mod tests {
     #[test]
     fn hover_includes_inferred_tensor_shape_for_negative_range() {
         let text = "XRange = -2:0.02:2;";
-        let analysis = analyze_document(text);
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
         let x_offset = text.find("XRange").expect("XRange offset");
         let x_position = offset_to_position(text, x_offset);
 
@@ -1028,7 +1010,7 @@ for t = 0:dT:T
 
 end
 "#;
-        let analysis = analyze_document(text);
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
         if let Some(err) = &analysis.syntax_error {
             eprintln!("syntax error: {} at {}", err.message, err.position);
         }
@@ -1069,7 +1051,7 @@ for t = 0:dT:T
 
 end
 "#;
-        let analysis = analyze_document(text);
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
         let x_offset = text.find("XRange").expect("XRange offset");
         let x_position = offset_to_position(text, x_offset);
         let hover = hover_at(text, &analysis, &x_position).expect("hover result");
@@ -1083,7 +1065,7 @@ end
     #[test]
     fn diagnostics_include_shape_lints() {
         let text = "a = ones(2,3); b = ones(4,2); c = a * b;";
-        let analysis = analyze_document(text);
+        let analysis = analyze_document_with_compat(text, CompatMode::default());
         let diags = diagnostics_for_document(text, &analysis);
         let diag = diags.iter().find(|d| match &d.code {
             Some(lsp_types::NumberOrString::String(code)) => code == "lint.shape.matmul",

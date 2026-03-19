@@ -129,6 +129,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "eig",
+      "url": "./eig"
+    },
+    {
+      "label": "svd",
+      "url": "./svd"
     }
   ],
   "source": {

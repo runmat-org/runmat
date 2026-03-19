@@ -1,5 +1,8 @@
-use js_sys::{Array, ArrayBuffer, Function, Reflect, Uint8Array};
-use runmat_filesystem::{DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags};
+use async_trait::async_trait;
+use js_sys::{Array, ArrayBuffer, Function, Promise, Reflect, Uint8Array};
+use runmat_filesystem::{
+    DirEntry, FileHandle, FsFileType, FsMetadata, FsProvider, OpenFlags, ReadManyEntry,
+};
 use std::ffi::OsString;
 use std::fmt;
 use std::io::{self, ErrorKind, Read, Seek, SeekFrom, Write};
@@ -7,11 +10,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::JsFuture;
 
 #[derive(Clone)]
 struct JsFsFuncs {
     bindings: JsValue,
     read_file: Option<Function>,
+    read_many: Option<Function>,
     write_file: Option<Function>,
     remove_file: Option<Function>,
     metadata: Option<Function>,
@@ -34,6 +39,7 @@ impl JsFsFuncs {
         Ok(Self {
             bindings: bindings.clone(),
             read_file: get_fn(bindings, "readFile")?,
+            read_many: get_fn(bindings, "readMany")?,
             write_file: get_fn(bindings, "writeFile")?,
             remove_file: get_fn(bindings, "removeFile")?,
             metadata: get_fn(bindings, "metadata")?,
@@ -59,6 +65,16 @@ impl JsFsFuncs {
         }
     }
 
+    async fn read_file_async(&self, path: &Path) -> io::Result<Vec<u8>> {
+        let func = self.require_fn(&self.read_file, "readFile")?;
+        let js_path = JsValue::from(path_to_string(path));
+        let value = func
+            .call1(&self.bindings, &js_path)
+            .map_err(|err| map_js_error("readFile", err))?;
+        let resolved = resolve_maybe_promise(value, "readFile").await?;
+        js_value_to_bytes(resolved, "readFile")
+    }
+
     fn write_file(&self, path: &Path, data: &[u8]) -> io::Result<()> {
         let func = self.require_fn(&self.write_file, "writeFile")?;
         let js_path = JsValue::from(path_to_string(path));
@@ -69,32 +85,72 @@ impl JsFsFuncs {
         Ok(())
     }
 
-    fn remove_file(&self, path: &Path) -> io::Result<()> {
-        let func = self.require_fn(&self.remove_file, "removeFile")?;
+    async fn write_file_async(&self, path: &Path, data: &[u8]) -> io::Result<()> {
+        let func = self.require_fn(&self.write_file, "writeFile")?;
         let js_path = JsValue::from(path_to_string(path));
-        func.call1(&self.bindings, &js_path)
-            .map_err(|err| map_js_error("removeFile", err))?;
+        let array = Uint8Array::new_with_length(data.len() as u32);
+        array.copy_from(data);
+        let value = func
+            .call2(&self.bindings, &js_path, &array.into())
+            .map_err(|err| map_js_error("writeFile", err))?;
+        let _ = resolve_maybe_promise(value, "writeFile").await?;
         Ok(())
     }
 
-    fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
-        let func = self.require_fn(&self.metadata, "metadata")?;
-        self.invoke_metadata(func, path)
-    }
-
-    fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata> {
-        if let Some(func) = &self.symlink_metadata {
-            self.invoke_metadata(func, path)
-        } else {
-            self.metadata(path)
+    async fn read_many(&self, paths: &[PathBuf]) -> io::Result<Vec<ReadManyEntry>> {
+        let Some(func) = &self.read_many else {
+            let mut entries = Vec::with_capacity(paths.len());
+            for path in paths {
+                let bytes = self.read_file_async(path).await.ok();
+                entries.push(ReadManyEntry::new(path.clone(), bytes));
+            }
+            return Ok(entries);
+        };
+        let js_paths = Array::new();
+        for path in paths {
+            js_paths.push(&JsValue::from(path_to_string(path)));
         }
+        let value = func
+            .call1(&self.bindings, &js_paths.into())
+            .map_err(|err| map_js_error("readMany", err))?;
+        let value = resolve_maybe_promise(value, "readMany").await?;
+        if !Array::is_array(&value) {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "readMany must return an array",
+            ));
+        }
+        let items = Array::from(&value);
+        let mut out = Vec::with_capacity(paths.len());
+        for (index, path) in paths.iter().enumerate() {
+            let item = items.get(index as u32);
+            if item.is_null() || item.is_undefined() {
+                out.push(ReadManyEntry::new(path.clone(), None));
+            } else {
+                let bytes = js_value_to_bytes(item, "readMany")?;
+                out.push(ReadManyEntry::new(path.clone(), Some(bytes)));
+            }
+        }
+        Ok(out)
     }
 
-    fn invoke_metadata(&self, func: &Function, path: &Path) -> io::Result<FsMetadata> {
+    async fn remove_file_async(&self, path: &Path) -> io::Result<()> {
+        let func = self.require_fn(&self.remove_file, "removeFile")?;
+        let js_path = JsValue::from(path_to_string(path));
+        let value = func
+            .call1(&self.bindings, &js_path)
+            .map_err(|err| map_js_error("removeFile", err))?;
+        let _ = resolve_maybe_promise(value, "removeFile").await?;
+        Ok(())
+    }
+
+    async fn metadata_async(&self, path: &Path) -> io::Result<FsMetadata> {
+        let func = self.require_fn(&self.metadata, "metadata")?;
         let js_path = JsValue::from(path_to_string(path));
         let value = func
             .call1(&self.bindings, &js_path)
             .map_err(|err| map_js_error("metadata", err))?;
+        let value = resolve_maybe_promise(value, "metadata").await?;
         parse_metadata(value).ok_or_else(|| {
             io::Error::new(
                 ErrorKind::InvalidData,
@@ -103,21 +159,41 @@ impl JsFsFuncs {
         })
     }
 
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
+    async fn symlink_metadata_async(&self, path: &Path) -> io::Result<FsMetadata> {
+        if let Some(func) = &self.symlink_metadata {
+            let js_path = JsValue::from(path_to_string(path));
+            let value = func
+                .call1(&self.bindings, &js_path)
+                .map_err(|err| map_js_error("symlinkMetadata", err))?;
+            let value = resolve_maybe_promise(value, "symlinkMetadata").await?;
+            parse_metadata(value).ok_or_else(|| {
+                io::Error::new(
+                    ErrorKind::InvalidData,
+                    "fsProvider.symlinkMetadata returned invalid payload",
+                )
+            })
+        } else {
+            self.metadata_async(path).await
+        }
+    }
+
+    async fn read_dir_async(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
         let func = self.require_fn(&self.read_dir, "readDir")?;
         let js_path = JsValue::from(path_to_string(path));
         let value = func
             .call1(&self.bindings, &js_path)
             .map_err(|err| map_js_error("readDir", err))?;
+        let value = resolve_maybe_promise(value, "readDir").await?;
         parse_dir_entries(value)
     }
 
-    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+    async fn canonicalize_async(&self, path: &Path) -> io::Result<PathBuf> {
         if let Some(func) = &self.canonicalize {
             let js_path = JsValue::from(path_to_string(path));
             let value = func
                 .call1(&self.bindings, &js_path)
                 .map_err(|err| map_js_error("canonicalize", err))?;
+            let value = resolve_maybe_promise(value, "canonicalize").await?;
             value.as_string().map(PathBuf::from).ok_or_else(|| {
                 io::Error::new(ErrorKind::InvalidData, "canonicalize must return a string")
             })
@@ -126,11 +202,13 @@ impl JsFsFuncs {
         }
     }
 
-    fn create_dir(&self, path: &Path) -> io::Result<()> {
+    async fn create_dir_async(&self, path: &Path) -> io::Result<()> {
         if let Some(func) = &self.create_dir {
             let js_path = JsValue::from(path_to_string(path));
-            func.call1(&self.bindings, &js_path)
+            let value = func
+                .call1(&self.bindings, &js_path)
                 .map_err(|err| map_js_error("createDir", err))?;
+            let _ = resolve_maybe_promise(value, "createDir").await?;
             Ok(())
         } else {
             Err(io::Error::new(
@@ -140,22 +218,26 @@ impl JsFsFuncs {
         }
     }
 
-    fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+    async fn create_dir_all_async(&self, path: &Path) -> io::Result<()> {
         if let Some(func) = &self.create_dir_all {
             let js_path = JsValue::from(path_to_string(path));
-            func.call1(&self.bindings, &js_path)
+            let value = func
+                .call1(&self.bindings, &js_path)
                 .map_err(|err| map_js_error("createDirAll", err))?;
+            let _ = resolve_maybe_promise(value, "createDirAll").await?;
             Ok(())
         } else {
-            self.create_dir(path)
+            self.create_dir_async(path).await
         }
     }
 
-    fn remove_dir(&self, path: &Path) -> io::Result<()> {
+    async fn remove_dir_async(&self, path: &Path) -> io::Result<()> {
         if let Some(func) = &self.remove_dir {
             let js_path = JsValue::from(path_to_string(path));
-            func.call1(&self.bindings, &js_path)
+            let value = func
+                .call1(&self.bindings, &js_path)
                 .map_err(|err| map_js_error("removeDir", err))?;
+            let _ = resolve_maybe_promise(value, "removeDir").await?;
             Ok(())
         } else {
             Err(io::Error::new(
@@ -165,23 +247,27 @@ impl JsFsFuncs {
         }
     }
 
-    fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
+    async fn remove_dir_all_async(&self, path: &Path) -> io::Result<()> {
         if let Some(func) = &self.remove_dir_all {
             let js_path = JsValue::from(path_to_string(path));
-            func.call1(&self.bindings, &js_path)
+            let value = func
+                .call1(&self.bindings, &js_path)
                 .map_err(|err| map_js_error("removeDirAll", err))?;
+            let _ = resolve_maybe_promise(value, "removeDirAll").await?;
             Ok(())
         } else {
-            self.remove_dir(path)
+            self.remove_dir_async(path).await
         }
     }
 
-    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+    async fn rename_async(&self, from: &Path, to: &Path) -> io::Result<()> {
         if let Some(func) = &self.rename {
             let js_from = JsValue::from(path_to_string(from));
             let js_to = JsValue::from(path_to_string(to));
-            func.call2(&self.bindings, &js_from, &js_to)
+            let value = func
+                .call2(&self.bindings, &js_from, &js_to)
                 .map_err(|err| map_js_error("rename", err))?;
+            let _ = resolve_maybe_promise(value, "rename").await?;
             Ok(())
         } else {
             Err(io::Error::new(
@@ -191,12 +277,14 @@ impl JsFsFuncs {
         }
     }
 
-    fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
+    async fn set_readonly_async(&self, path: &Path, readonly: bool) -> io::Result<()> {
         if let Some(func) = &self.set_readonly {
             let js_path = JsValue::from(path_to_string(path));
             let js_flag = JsValue::from(readonly);
-            func.call2(&self.bindings, &js_path, &js_flag)
+            let value = func
+                .call2(&self.bindings, &js_path, &js_flag)
                 .map_err(|err| map_js_error("setReadonly", err))?;
+            let _ = resolve_maybe_promise(value, "setReadonly").await?;
             Ok(())
         } else {
             Err(io::Error::new(
@@ -234,6 +322,7 @@ pub(crate) struct JsFsProvider {
 unsafe impl Send for JsFsProvider {}
 unsafe impl Sync for JsFsProvider {}
 
+#[async_trait(?Send)]
 impl FsProvider for JsFsProvider {
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
         let mut initial = Vec::new();
@@ -294,56 +383,71 @@ impl FsProvider for JsFsProvider {
         Ok(Box::new(JsFileHandle { inner }))
     }
 
-    fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
-        self.funcs.read_file(path)
+    async fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+        self.funcs.read_file_async(path).await
     }
 
-    fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
-        self.funcs.write_file(path, data)
+    async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()> {
+        self.funcs.write_file_async(path, data).await
     }
 
-    fn remove_file(&self, path: &Path) -> io::Result<()> {
-        self.funcs.remove_file(path)
+    async fn remove_file(&self, path: &Path) -> io::Result<()> {
+        self.funcs.remove_file_async(path).await
     }
 
-    fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
-        self.funcs.metadata(path)
+    async fn metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+        self.funcs.metadata_async(path).await
     }
 
-    fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata> {
-        self.funcs.symlink_metadata(path)
+    async fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata> {
+        self.funcs.symlink_metadata_async(path).await
     }
 
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
-        self.funcs.read_dir(path)
+    async fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
+        self.funcs.read_dir_async(path).await
     }
 
-    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
-        self.funcs.canonicalize(path)
+    async fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+        self.funcs.canonicalize_async(path).await
     }
 
-    fn create_dir(&self, path: &Path) -> io::Result<()> {
-        self.funcs.create_dir(path)
+    async fn create_dir(&self, path: &Path) -> io::Result<()> {
+        self.funcs.create_dir_async(path).await
     }
 
-    fn create_dir_all(&self, path: &Path) -> io::Result<()> {
-        self.funcs.create_dir_all(path)
+    async fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+        self.funcs.create_dir_all_async(path).await
     }
 
-    fn remove_dir(&self, path: &Path) -> io::Result<()> {
-        self.funcs.remove_dir(path)
+    async fn remove_dir(&self, path: &Path) -> io::Result<()> {
+        self.funcs.remove_dir_async(path).await
     }
 
-    fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
-        self.funcs.remove_dir_all(path)
+    async fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
+        self.funcs.remove_dir_all_async(path).await
     }
 
-    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
-        self.funcs.rename(from, to)
+    async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        self.funcs.rename_async(from, to).await
     }
 
-    fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
-        self.funcs.set_readonly(path, readonly)
+    async fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()> {
+        self.funcs.set_readonly_async(path, readonly).await
+    }
+
+    async fn read_many(&self, paths: &[PathBuf]) -> io::Result<Vec<ReadManyEntry>> {
+        self.funcs.read_many(paths).await
+    }
+}
+
+async fn resolve_maybe_promise(value: JsValue, op: &'static str) -> io::Result<JsValue> {
+    if value.is_instance_of::<Promise>() {
+        let promise: Promise = value.unchecked_into();
+        JsFuture::from(promise)
+            .await
+            .map_err(|err| map_js_error(op, err))
+    } else {
+        Ok(value)
     }
 }
 

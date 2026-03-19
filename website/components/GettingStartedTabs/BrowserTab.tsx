@@ -45,7 +45,7 @@ export function BrowserTabContent() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-muted-foreground text-sm">
-            When you open the sandbox, <code className="rounded bg-muted px-1 py-0.5">demo.m</code> is already loaded:
+            Try this example — paste it into a new file or run it directly:
           </p>
           <div className="relative group">
             <div className="absolute top-3 right-3 z-10">
@@ -76,10 +76,10 @@ export function BrowserTabContent() {
         </CardHeader>
         <CardContent className="space-y-4">
           <p className="text-muted-foreground text-sm">
-            Try adding a title to the plot in <code className="rounded bg-muted px-1 py-0.5">demo.m</code>:
+            Try changing the plot — for example, swap <code className="rounded bg-muted px-1 py-0.5">sin</code> for <code className="rounded bg-muted px-1 py-0.5">cos</code> and re-run:
           </p>
           <div className="rounded-md overflow-hidden">
-            <MatlabInlineCodeBlock code={'title("Sine Wave");'} preClassName="rounded-md p-4 !my-0 language-matlab" />
+            <MatlabInlineCodeBlock code={'b = cos(a);'} preClassName="rounded-md p-4 !my-0 language-matlab" />
           </div>
           <p className="text-muted-foreground text-sm">
             Use <strong>Ctrl+Enter</strong> (Windows/Linux) or <strong>Cmd+Enter</strong> (macOS) to run without clicking the button.
@@ -102,7 +102,7 @@ export function BrowserTabContent() {
       </Card>
 
       <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-muted-foreground">
-        <strong className="text-foreground">Sandbox storage:</strong> Files live in your browser tab. No account required; your code never leaves your machine. Files are cleared when you close or refresh the tab—copy code out or use the CLI for persistent work.
+        <strong className="text-foreground">Sandbox storage:</strong> Files live in your browser tab. No account required; your code never leaves your machine. Files are cleared when you close or refresh the tab. Sign in free for 100 MB cloud storage with automatic versioning, or use the CLI for local persistence.
       </div>
     </div>
   );

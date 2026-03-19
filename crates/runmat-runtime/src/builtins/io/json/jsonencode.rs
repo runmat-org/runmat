@@ -46,10 +46,11 @@ fn jsonencode_error(message: impl Into<String>) -> RuntimeError {
 }
 
 fn jsonencode_flow_with_context(err: RuntimeError) -> RuntimeError {
-    build_runtime_error(err.message().to_string())
-        .with_builtin("jsonencode")
-        .with_source(err)
-        .build()
+    let mut builder = build_runtime_error(err.message().to_string()).with_builtin("jsonencode");
+    if let Some(identifier) = err.identifier() {
+        builder = builder.with_identifier(identifier.to_string());
+    }
+    builder.with_source(err).build()
 }
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::io::json::jsonencode")]

@@ -133,6 +133,18 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "csvwrite",
+      "url": "./csvwrite"
+    },
+    {
+      "label": "dlmwrite",
+      "url": "./dlmwrite"
+    },
+    {
+      "label": "writematrix",
+      "url": "./writematrix"
     }
   ],
   "source": {

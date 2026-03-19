@@ -122,6 +122,14 @@
     {
       "label": "ge",
       "url": "./ge"
+    },
+    {
+      "label": "gt",
+      "url": "./gt"
+    },
+    {
+      "label": "isequal",
+      "url": "./isequal"
     }
   ],
   "source": {

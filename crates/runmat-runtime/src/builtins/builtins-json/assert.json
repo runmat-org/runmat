@@ -31,10 +31,10 @@
   "description": "`assert(cond, ...)` aborts execution with a MATLAB-compatible error when `cond` is false or contains any zero/NaN elements. When the condition is true (or an empty array), execution continues with no output. RunMat mirrors MATLAB’s identifier normalisation, message formatting, and argument validation rules.",
   "behaviors": [
     "The first argument must be logical or numeric (real or complex). Scalars must evaluate to true; arrays must contain only nonzero, non-NaN elements (complex values fail when both real and imaginary parts are zero or contain NaNs). Empty inputs pass automatically.",
-    "`assert(cond)` raises `MATLAB:assertion:failed` with message `Assertion failed.` when `cond` is false.",
+    "`assert(cond)` raises `RunMat:assertion:failed` with message `Assertion failed.` when `cond` is false.",
     "`assert(cond, msg, args...)` formats `msg` with `sprintf`-compatible conversions using any additional arguments.",
-    "`assert(cond, id, msg, args...)` uses a custom message identifier (normalised to `MATLAB:*` when missing a namespace) and the formatted message text.",
-    "Arguments are validated strictly: identifiers and message templates must be string scalars or character vectors, and malformed format strings raise `MATLAB:assertion:invalidInput`.",
+    "`assert(cond, id, msg, args...)` uses a custom message identifier (normalised to `RunMat:*` when missing a namespace) and the formatted message text.",
+    "Arguments are validated strictly: identifiers and message templates must be string scalars or character vectors, and malformed format strings raise `RunMat:assertion:invalidInput`.",
     "Conditions supplied as gpuArray values are gathered to host memory prior to evaluation so that MATLAB semantics continue to apply."
   ],
   "examples": [
@@ -74,7 +74,7 @@
   "faqs": [
     {
       "question": "What types can I pass as the condition?",
-      "answer": "Logical scalars/arrays and numeric scalars/arrays are accepted. Character arrays, strings, cells, structs, and complex values raise `MATLAB:assertion:invalidCondition`."
+      "answer": "Logical scalars/arrays and numeric scalars/arrays are accepted. Character arrays, strings, cells, structs, and complex values raise `RunMat:assertion:invalidCondition`."
     },
     {
       "question": "How are NaN values treated?",
@@ -86,11 +86,11 @@
     },
     {
       "question": "Can I omit the namespace in the message identifier?",
-      "answer": "Yes. RunMat prefixes unqualified identifiers with `MATLAB:` to match MATLAB behaviour."
+      "answer": "Yes. RunMat prefixes unqualified identifiers with `RunMat:` to match MATLAB behaviour."
     },
     {
       "question": "What happens if my format string is malformed?",
-      "answer": "The builtin raises `MATLAB:assertion:invalidInput` describing the formatting issue."
+      "answer": "The builtin raises `RunMat:assertion:invalidInput` describing the formatting issue."
     },
     {
       "question": "Does `assert` run on the GPU?",

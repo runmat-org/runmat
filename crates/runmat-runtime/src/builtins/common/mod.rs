@@ -29,5 +29,18 @@ pub(crate) fn map_control_flow_with_builtin(
     if err.context.builtin.is_none() {
         err.context = err.context.with_builtin(builtin);
     }
+    if err.identifier.is_none() {
+        let segment = builtin
+            .chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || ch == '_' {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect::<String>();
+        err.identifier = Some(format!("RunMat:{segment}:Error"));
+    }
     err
 }

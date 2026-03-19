@@ -19,6 +19,7 @@ pub mod dispatcher;
 
 pub mod callsite;
 pub mod console;
+pub mod data;
 pub mod interaction;
 pub mod interrupt;
 pub mod output_context;
@@ -33,6 +34,7 @@ pub mod elementwise;
 pub mod indexing;
 pub mod matrix;
 pub mod plotting_hooks;
+pub mod replay;
 pub mod runtime_error;
 pub mod user_functions;
 pub mod warning_store;
@@ -42,7 +44,8 @@ pub mod workspace;
 pub type BuiltinResult<T> = Result<T, RuntimeError>;
 
 pub use runtime_error::{
-    build_runtime_error, CallFrame, ErrorContext, RuntimeError, RuntimeErrorBuilder,
+    build_runtime_error, replay_error, replay_error_with_source, CallFrame, ErrorContext,
+    ReplayErrorKind, RuntimeError, RuntimeErrorBuilder,
 };
 
 #[cfg(feature = "blas-lapack")]
@@ -62,6 +65,16 @@ extern crate openblas_src;
 pub use dispatcher::{
     call_builtin, call_builtin_async, call_builtin_async_with_outputs, gather_if_needed,
     gather_if_needed_async, is_gpu_value, value_contains_gpu,
+};
+
+#[cfg(feature = "plot-core")]
+pub use builtins::plotting::{
+    export_figure_scene as runtime_plot_export_figure_scene,
+    import_figure_scene_async as runtime_plot_import_figure_scene_async,
+    import_figure_scene_from_path_async as runtime_plot_import_figure_scene_from_path_async,
+};
+pub use replay::{
+    runtime_export_workspace_state, runtime_import_workspace_state, WorkspaceReplayMode,
 };
 
 pub use runmat_macros::{register_fusion_spec, register_gpu_spec};
@@ -197,7 +210,7 @@ async fn rethrow_builtin(e: Value) -> crate::BuiltinResult<Value> {
             .with_identifier(me.identifier)
             .build()),
         Value::String(s) => Err(build_runtime_error(s).build()),
-        other => Err(build_runtime_error(format!("MATLAB:error: {other:?}")).build()),
+        other => Err(build_runtime_error(format!("RunMat:error: {other:?}")).build()),
     }
 }
 

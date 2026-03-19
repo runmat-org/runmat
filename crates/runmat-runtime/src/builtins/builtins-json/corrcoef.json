@@ -94,6 +94,22 @@
     {
       "question": "Can I call `corrcoef` on logical arrays?",
       "answer": "Yes. Logical inputs are promoted to double precision (`true -> 1.0`, `false -> 0.0`) before the correlation matrix is computed."
+    },
+    {
+      "question": "What does corrcoef do in MATLAB?",
+      "answer": "`corrcoef(X)` returns the matrix of correlation coefficients for the columns of `X`. Each entry `R(i,j)` is the Pearson linear correlation between columns `i` and `j`, ranging from -1 to 1."
+    },
+    {
+      "question": "How is corrcoef different from cov in MATLAB?",
+      "answer": "`corrcoef` returns normalized correlation coefficients (always between -1 and 1), while `cov` returns the covariance matrix (in the original units squared). `corrcoef(X)` equals `cov(X) ./ (std(X)' * std(X))`."
+    },
+    {
+      "question": "Can I compute the correlation between two vectors with corrcoef?",
+      "answer": "Yes. `corrcoef(x, y)` treats `x` and `y` as two columns and returns a 2×2 correlation matrix. The off-diagonal element is the correlation coefficient between `x` and `y`."
+    },
+    {
+      "question": "Does corrcoef handle missing data?",
+      "answer": "Use `corrcoef(X, 'rows', 'complete')` to exclude any row that contains a `NaN` in any column, or `'pairwise'` to exclude NaN rows separately for each pair of columns."
     }
   ],
   "links": [
@@ -116,6 +132,10 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "cov",
+      "url": "./cov"
     }
   ],
   "source": {

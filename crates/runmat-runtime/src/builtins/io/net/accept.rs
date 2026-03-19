@@ -19,11 +19,11 @@ use std::net::{Shutdown, SocketAddr, TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-const MESSAGE_ID_INVALID_SERVER: &str = "MATLAB:accept:InvalidTcpServer";
-const MESSAGE_ID_TIMEOUT: &str = "MATLAB:accept:Timeout";
-const MESSAGE_ID_INVALID_NAME_VALUE: &str = "MATLAB:accept:InvalidNameValue";
-const MESSAGE_ID_INTERNAL: &str = "MATLAB:accept:InternalError";
-const MESSAGE_ID_ACCEPT_FAILED: &str = "MATLAB:accept:AcceptFailed";
+const MESSAGE_ID_INVALID_SERVER: &str = "RunMat:accept:InvalidTcpServer";
+const MESSAGE_ID_TIMEOUT: &str = "RunMat:accept:Timeout";
+const MESSAGE_ID_INVALID_NAME_VALUE: &str = "RunMat:accept:InvalidNameValue";
+const MESSAGE_ID_INTERNAL: &str = "RunMat:accept:InternalError";
+const MESSAGE_ID_ACCEPT_FAILED: &str = "RunMat:accept:AcceptFailed";
 
 pub(crate) const CLIENT_HANDLE_FIELD: &str = "__tcpclient_id";
 

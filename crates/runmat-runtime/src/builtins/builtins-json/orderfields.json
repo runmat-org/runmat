@@ -129,6 +129,10 @@
     {
       "label": "rmfield",
       "url": "./rmfield"
+    },
+    {
+      "label": "isfield",
+      "url": "./isfield"
     }
   ],
   "source": {

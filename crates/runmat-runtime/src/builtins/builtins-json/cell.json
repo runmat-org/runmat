@@ -117,6 +117,18 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "cell2mat",
+      "url": "./cell2mat"
+    },
+    {
+      "label": "cellstr",
+      "url": "./cellstr"
+    },
+    {
+      "label": "mat2cell",
+      "url": "./mat2cell"
     }
   ],
   "source": {

@@ -19,8 +19,8 @@ use std::path::{Path, PathBuf};
 const DEFAULT_FILENAME: &str = "pathdef.m";
 const ERROR_ARG_TYPE: &str = "savepath: filename must be a character vector or string scalar";
 const ERROR_EMPTY_FILENAME: &str = "savepath: filename must not be empty";
-const MESSAGE_ID_CANNOT_WRITE: &str = "MATLAB:savepath:cannotWriteFile";
-const MESSAGE_ID_CANNOT_RESOLVE: &str = "MATLAB:savepath:cannotResolveFile";
+const MESSAGE_ID_CANNOT_WRITE: &str = "RunMat:savepath:cannotWriteFile";
+const MESSAGE_ID_CANNOT_RESOLVE: &str = "RunMat:savepath:cannotResolveFile";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::repl_fs::savepath")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -98,7 +98,7 @@ async fn savepath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 pub async fn evaluate(args: &[Value]) -> BuiltinResult<SavepathResult> {
     let gathered = gather_arguments(args).await?;
     let target = match gathered.len() {
-        0 => match default_target_path() {
+        0 => match default_target_path().await {
             Ok(path) => path,
             Err(err) => return Ok(SavepathResult::failure(err.message, err.message_id)),
         },
@@ -107,7 +107,7 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<SavepathResult> {
             if raw.is_empty() {
                 return Err(savepath_error(ERROR_EMPTY_FILENAME));
             }
-            match resolve_explicit_path(&raw) {
+            match resolve_explicit_path(&raw).await {
                 Ok(path) => path,
                 Err(err) => return Ok(SavepathResult::failure(err.message, err.message_id)),
             }
@@ -116,7 +116,7 @@ pub async fn evaluate(args: &[Value]) -> BuiltinResult<SavepathResult> {
     };
 
     let path_string = current_path_string();
-    match persist_path(&target, &path_string) {
+    match persist_path(&target, &path_string).await {
         Ok(()) => Ok(SavepathResult::success()),
         Err(err) => Ok(SavepathResult::failure(err.message, err.message_id)),
     }
@@ -199,19 +199,20 @@ impl SavepathFailure {
     }
 }
 
-fn persist_path(target: &Path, path_string: &str) -> Result<(), SavepathFailure> {
+async fn persist_path(target: &Path, path_string: &str) -> Result<(), SavepathFailure> {
     if let Some(parent) = target.parent() {
-        if let Err(err) = vfs::create_dir_all(parent) {
+        if let Err(err) = vfs::create_dir_all_async(parent).await {
             return Err(SavepathFailure::cannot_write(target, err));
         }
     }
 
     let contents = build_pathdef_contents(path_string);
-    vfs::write(target, contents.as_bytes())
+    vfs::write_async(target, contents.as_bytes())
+        .await
         .map_err(|err| SavepathFailure::cannot_write(target, err))
 }
 
-fn default_target_path() -> Result<PathBuf, SavepathFailure> {
+async fn default_target_path() -> Result<PathBuf, SavepathFailure> {
     if let Ok(override_path) = env::var("RUNMAT_PATHDEF") {
         if override_path.trim().is_empty() {
             return Err(SavepathFailure::new(
@@ -219,7 +220,7 @@ fn default_target_path() -> Result<PathBuf, SavepathFailure> {
                 MESSAGE_ID_CANNOT_RESOLVE,
             ));
         }
-        return resolve_explicit_path(&override_path);
+        return resolve_explicit_path(&override_path).await;
     }
 
     let home = home_directory().ok_or_else(|| {
@@ -231,26 +232,26 @@ fn default_target_path() -> Result<PathBuf, SavepathFailure> {
     Ok(home.join(".runmat").join(DEFAULT_FILENAME))
 }
 
-fn resolve_explicit_path(text: &str) -> Result<PathBuf, SavepathFailure> {
+async fn resolve_explicit_path(text: &str) -> Result<PathBuf, SavepathFailure> {
     let expanded = match expand_user_path(text, "savepath") {
         Ok(path) => path,
         Err(err) => return Err(SavepathFailure::new(err, MESSAGE_ID_CANNOT_RESOLVE)),
     };
     let mut path = PathBuf::from(&expanded);
-    if path_should_be_directory(&path, text) {
+    if path_should_be_directory(&path, text).await {
         path.push(DEFAULT_FILENAME);
     }
     Ok(path)
 }
 
-fn path_should_be_directory(path: &Path, original: &str) -> bool {
+async fn path_should_be_directory(path: &Path, original: &str) -> bool {
     if original.ends_with(std::path::MAIN_SEPARATOR) || original.ends_with('/') {
         return true;
     }
     if cfg!(windows) && original.ends_with('\\') {
         return true;
     }
-    match vfs::metadata(path) {
+    match vfs::metadata_async(path).await {
         Ok(metadata) => metadata.is_dir(),
         Err(_) => false,
     }

@@ -100,6 +100,18 @@
     {
       "question": "Do handle queries work?",
       "answer": "When the first argument is a RunMat handle object, `exist(handle, \"handle\")` returns `1`. Numeric graphics handles are not yet supported and return `0`."
+    },
+    {
+      "question": "What does exist do in MATLAB?",
+      "answer": "`exist(name, type)` checks whether a variable, file, folder, or function named `name` exists and returns a numeric code indicating what kind of item was found. Zero means nothing was found."
+    },
+    {
+      "question": "How do I check if a file exists in MATLAB?",
+      "answer": "Use `exist('filename.m', 'file')`. It returns `2` if the file is found on the MATLAB path, or `0` if not found. In RunMat, the same syntax works."
+    },
+    {
+      "question": "What are the return codes for exist in MATLAB?",
+      "answer": "`exist` returns `0` (not found), `1` (variable in workspace), `2` (file on path), `3` (MEX file), `4` (Simulink model), `5` (built-in function), `7` (folder), or `8` (Java class). RunMat supports codes 0, 1, 2, 5, and 7."
     }
   ],
   "links": [
@@ -118,6 +130,66 @@
     {
       "label": "pwd",
       "url": "./pwd"
+    },
+    {
+      "label": "addpath",
+      "url": "./addpath"
+    },
+    {
+      "label": "cd",
+      "url": "./cd"
+    },
+    {
+      "label": "delete",
+      "url": "./delete"
+    },
+    {
+      "label": "fullfile",
+      "url": "./fullfile"
+    },
+    {
+      "label": "genpath",
+      "url": "./genpath"
+    },
+    {
+      "label": "getenv",
+      "url": "./getenv"
+    },
+    {
+      "label": "mkdir",
+      "url": "./mkdir"
+    },
+    {
+      "label": "movefile",
+      "url": "./movefile"
+    },
+    {
+      "label": "path",
+      "url": "./path"
+    },
+    {
+      "label": "rmdir",
+      "url": "./rmdir"
+    },
+    {
+      "label": "rmpath",
+      "url": "./rmpath"
+    },
+    {
+      "label": "savepath",
+      "url": "./savepath"
+    },
+    {
+      "label": "setenv",
+      "url": "./setenv"
+    },
+    {
+      "label": "tempdir",
+      "url": "./tempdir"
+    },
+    {
+      "label": "tempname",
+      "url": "./tempname"
     }
   ],
   "source": {

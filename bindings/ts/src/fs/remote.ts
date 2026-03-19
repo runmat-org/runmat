@@ -45,28 +45,27 @@ export function createRemoteFsProvider(options: RemoteProviderOptions): RunMatFi
   const client = new RemoteHttpClient(options.baseUrl, timeout, options.authToken, options.headers);
 
   return {
-    readFile(path) {
+    async readFile(path) {
       const normalized = normalizePath(path);
       if (normalized === "/") {
         throw new Error("remote fs: cannot read '/'");
       }
-      const meta = client.fetchMetadata(normalized);
-      const length = meta.len ?? 0;
-      if (length === 0) {
-        return new Uint8Array();
-      }
-      const buffer = new Uint8Array(length);
-      let offset = 0;
-      while (offset < length) {
-        const size = Math.min(chunkBytes, length - offset);
-        const chunk = client.readChunk(normalized, offset, size);
-        buffer.set(chunk, offset);
-        offset += chunk.length;
-      }
-      return buffer;
+      return client.readFileAll(normalized);
     },
 
-    writeFile(path, data) {
+    async readMany(paths) {
+      return Promise.all(
+        paths.map(async (path) => {
+          try {
+            return await this.readFile(path);
+          } catch {
+            return null;
+          }
+        })
+      );
+    },
+
+    async writeFile(path, data) {
       const normalized = normalizePath(path);
       if (normalized === "/") {
         throw new Error("remote fs: cannot overwrite '/'");
@@ -78,64 +77,64 @@ export function createRemoteFsProvider(options: RemoteProviderOptions): RunMatFi
         const end = Math.min(offset + chunkBytes, bytes.length);
         const chunk = bytes.subarray(offset, end);
         const finalChunk = end === bytes.length;
-        client.writeChunk(normalized, offset, chunk, chunkIndex === 0, finalChunk);
+        await client.writeChunk(normalized, offset, chunk, chunkIndex === 0, finalChunk);
         offset = end;
         chunkIndex += 1;
       }
       if (bytes.length === 0) {
-        client.writeChunk(normalized, 0, new Uint8Array(), true, true);
+        await client.writeChunk(normalized, 0, new Uint8Array(), true, true);
       }
     },
 
-    removeFile(path) {
-      client.delete("/fs/file", { path: normalizePath(path) });
+    async removeFile(path) {
+      await client.delete("/fs/file", { path: normalizePath(path) });
     },
 
-    metadata(path) {
+    async metadata(path) {
       return client.fetchMetadata(normalizePath(path));
     },
 
-    symlinkMetadata(path) {
+    async symlinkMetadata(path) {
       return client.fetchMetadata(normalizePath(path));
     },
 
-    readDir(path) {
-      const payload = client.getJson<DirEntryPayload[]>("/fs/dir", { path: normalizePath(path) });
+    async readDir(path) {
+      const payload = await client.getJson<DirEntryPayload[]>("/fs/dir", { path: normalizePath(path) });
       return payload.map(mapDirEntry);
     },
 
-    canonicalize(path) {
-      const result = client.getJson<{ path: string }>("/fs/canonicalize", {
+    async canonicalize(path) {
+      const result = await client.getJson<{ path: string }>("/fs/canonicalize", {
         path: normalizePath(path)
       });
       return result.path;
     },
 
-    createDir(path) {
-      client.postJson("/fs/mkdir", { path: normalizePath(path), recursive: false });
+    async createDir(path) {
+      await client.postJson("/fs/mkdir", { path: normalizePath(path), recursive: false });
     },
 
-    createDirAll(path) {
-      client.postJson("/fs/mkdir", { path: normalizePath(path), recursive: true });
+    async createDirAll(path) {
+      await client.postJson("/fs/mkdir", { path: normalizePath(path), recursive: true });
     },
 
-    removeDir(path) {
-      client.delete("/fs/dir", { path: normalizePath(path), recursive: "false" });
+    async removeDir(path) {
+      await client.delete("/fs/dir", { path: normalizePath(path), recursive: "false" });
     },
 
-    removeDirAll(path) {
-      client.delete("/fs/dir", { path: normalizePath(path), recursive: "true" });
+    async removeDirAll(path) {
+      await client.delete("/fs/dir", { path: normalizePath(path), recursive: "true" });
     },
 
-    rename(from, to) {
-      client.postJson("/fs/rename", {
+    async rename(from, to) {
+      await client.postJson("/fs/rename", {
         from: normalizePath(from),
         to: normalizePath(to)
       });
     },
 
-    setReadonly(path, readonly) {
-      client.postJson("/fs/set-readonly", {
+    async setReadonly(path, readonly) {
+      await client.postJson("/fs/set-readonly", {
         path: normalizePath(path),
         readonly: Boolean(readonly)
       });
@@ -151,8 +150,8 @@ class RemoteHttpClient {
     private readonly extraHeaders: Record<string, string> = {}
   ) {}
 
-  fetchMetadata(path: string): RunMatFilesystemMetadata {
-    const payload = this.getJson<MetadataPayload>("/fs/metadata", { path });
+  async fetchMetadata(path: string): Promise<RunMatFilesystemMetadata> {
+    const payload = await this.getJson<MetadataPayload>("/fs/metadata", { path });
     const modifiedAt = payload.modifiedAt ? Date.parse(payload.modifiedAt) : undefined;
     const modified =
       modifiedAt !== undefined && !Number.isNaN(modifiedAt)
@@ -166,30 +165,40 @@ class RemoteHttpClient {
     };
   }
 
-  readChunk(path: string, offset: number, length: number): Uint8Array {
-    const xhr = this.sendRaw("GET", "/fs/read", {
+  async readChunk(path: string, offset: number, length: number): Promise<Uint8Array> {
+    const response = await this.send("GET", "/fs/read", {
       path,
       offset: String(offset),
       length: String(length)
-    }, "arraybuffer");
-    const contentType =
-      typeof (xhr as any).getResponseHeader === "function"
-        ? (xhr as any).getResponseHeader("Content-Type") ?? ""
-        : "";
+    });
+    const contentType = response.headers.get("Content-Type") ?? "";
     if (contentType.includes("application/json")) {
-      const payload = JSON.parse(arrayBufferToString(xhr.response as ArrayBuffer)) as DownloadUrlPayload;
+      const payload = (await response.json()) as DownloadUrlPayload;
       return this.downloadRange(payload.downloadUrl, offset, length);
     }
-    return new Uint8Array((xhr.response as ArrayBuffer) ?? []);
+    return toUint8Array(await response.arrayBuffer());
   }
 
-  writeChunk(
+  async readFileAll(path: string): Promise<Uint8Array> {
+    const response = await this.send("GET", "/fs/read", {
+      path,
+      offset: "0"
+    });
+    const contentType = response.headers.get("Content-Type") ?? "";
+    if (contentType.includes("application/json")) {
+      const payload = (await response.json()) as DownloadUrlPayload;
+      return this.downloadFile(payload.downloadUrl);
+    }
+    return toUint8Array(await response.arrayBuffer());
+  }
+
+  async writeChunk(
     path: string,
     offset: number,
     data: Uint8Array,
     truncate: boolean,
     finalChunk: boolean
-  ): void {
+  ): Promise<void> {
     const query: Record<string, string> = {
       path,
       offset: String(offset)
@@ -200,67 +209,56 @@ class RemoteHttpClient {
     if (finalChunk) {
       query.final = "true";
     }
-    this.send("PUT", "/fs/write", query, "arraybuffer", data);
+    await this.send("PUT", "/fs/write", query, data);
   }
 
-  delete(route: string, query: Record<string, string>): void {
-    this.send("DELETE", route, query, "json");
+  async delete(route: string, query: Record<string, string>): Promise<void> {
+    await this.send("DELETE", route, query);
   }
 
-  postJson(route: string, body: Record<string, unknown>): void {
-    this.send("POST", route, {}, "json", JSON.stringify(body), "application/json");
+  async postJson(route: string, body: Record<string, unknown>): Promise<void> {
+    await this.send("POST", route, {}, JSON.stringify(body), "application/json");
   }
 
-  getJson<T>(route: string, query: Record<string, string>): T {
-    return this.send("GET", route, query, "json") as T;
+  async getJson<T>(route: string, query: Record<string, string>): Promise<T> {
+    const response = await this.send("GET", route, query);
+    return (await response.json()) as T;
   }
 
-  private downloadRange(url: string, offset: number, length: number): Uint8Array {
+  private async downloadRange(url: string, offset: number, length: number): Promise<Uint8Array> {
     if (length === 0) {
       return new Uint8Array();
     }
     const end = offset + length - 1;
-    const xhr = this.sendRaw(
+    const response = await this.send(
       "GET",
       url,
       {},
-      "arraybuffer",
       undefined,
       undefined,
       { Range: `bytes=${offset}-${end}` },
       false,
       false
     );
-    return new Uint8Array((xhr.response as ArrayBuffer) ?? []);
+    return toUint8Array(await response.arrayBuffer());
   }
 
-  private send(
+  private async downloadFile(url: string): Promise<Uint8Array> {
+    const response = await this.send("GET", url, {}, undefined, undefined, {}, false, false);
+    return toUint8Array(await response.arrayBuffer());
+  }
+
+  private async send(
     method: string,
     route: string,
     query: Record<string, string>,
-    responseType: XMLHttpRequestResponseType,
-    body?: ArrayBufferView | ArrayBuffer | string,
-    contentType?: string
-  ): any {
-    return this.sendRaw(method, route, query, responseType, body, contentType).response;
-  }
-
-  private sendRaw(
-    method: string,
-    route: string,
-    query: Record<string, string>,
-    responseType: XMLHttpRequestResponseType,
     body?: ArrayBufferView | ArrayBuffer | string,
     contentType?: string,
     extraHeaders: Record<string, string> = {},
     includeAuth = true,
     includeClientHeaders = true
-  ): XMLHttpRequest {
-    const xhr = new XMLHttpRequest();
+  ): Promise<Response> {
     const url = route.startsWith("http") ? route : buildUrl(this.baseUrl, route, query);
-    xhr.open(method, url, false);
-    xhr.timeout = this.timeoutMs;
-    xhr.responseType = responseType;
     const headers: Record<string, string> = {
       ...(includeClientHeaders ? { "X-RunMat-Client": "remote-fs", ...this.extraHeaders } : {}),
       ...extraHeaders
@@ -271,25 +269,36 @@ class RemoteHttpClient {
     if (contentType) {
       headers["Content-Type"] = contentType;
     }
-    for (const [key, value] of Object.entries(headers)) {
-      xhr.setRequestHeader(key, value);
-    }
 
-    const sendBody: Document | XMLHttpRequestBodyInit | null =
-      body === undefined ? null : (body as XMLHttpRequestBodyInit);
-
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
+    let response: Response;
     try {
-      xhr.send(sendBody);
+      response = await fetch(url, {
+        method,
+        headers,
+        body: body === undefined ? undefined : toRequestBody(body),
+        signal: controller.signal
+      });
     } catch (error) {
-      throw new Error(`remote fs http error: ${String(error)}`);
+      const reason = error instanceof Error ? error.message : String(error);
+      throw new Error(`remote fs http error: ${reason}`);
+    } finally {
+      clearTimeout(timeout);
     }
 
-    if (xhr.status < 200 || xhr.status >= 300) {
+    if (response.status < 200 || response.status >= 300) {
+      let detail = response.statusText;
+      try {
+        detail = await response.text();
+      } catch {
+        // ignore body parse issues and keep status text
+      }
       throw new Error(
-        `remote fs request failed (${xhr.status}): ${xhr.responseText || xhr.statusText}`
+        `remote fs request failed (${response.status}): ${detail}`
       );
     }
-    return xhr;
+    return response;
   }
 }
 
@@ -327,7 +336,23 @@ function toUint8Array(data: Uint8Array | ArrayBuffer | ArrayBufferView): Uint8Ar
   );
 }
 
-function arrayBufferToString(buffer: ArrayBuffer): string {
-  const decoder = new TextDecoder("utf-8");
-  return decoder.decode(new Uint8Array(buffer));
+function toRequestBody(
+  data: Uint8Array | ArrayBuffer | ArrayBufferView | string
+): BodyInit {
+  if (typeof data === "string") {
+    return data;
+  }
+  if (data instanceof ArrayBuffer) {
+    return data;
+  }
+  return cloneViewToArrayBuffer(data);
+}
+
+function cloneViewToArrayBuffer(data: Uint8Array | ArrayBufferView): ArrayBuffer {
+  const view = data instanceof Uint8Array
+    ? data
+    : new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+  const copy = new Uint8Array(view.byteLength);
+  copy.set(view);
+  return copy.buffer;
 }

@@ -155,6 +155,70 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "cat",
+      "url": "./cat"
+    },
+    {
+      "label": "circshift",
+      "url": "./circshift"
+    },
+    {
+      "label": "flip",
+      "url": "./flip"
+    },
+    {
+      "label": "fliplr",
+      "url": "./fliplr"
+    },
+    {
+      "label": "flipud",
+      "url": "./flipud"
+    },
+    {
+      "label": "horzcat",
+      "url": "./horzcat"
+    },
+    {
+      "label": "ipermute",
+      "url": "./ipermute"
+    },
+    {
+      "label": "kron",
+      "url": "./kron"
+    },
+    {
+      "label": "permute",
+      "url": "./permute"
+    },
+    {
+      "label": "repmat",
+      "url": "./repmat"
+    },
+    {
+      "label": "reshape",
+      "url": "./reshape"
+    },
+    {
+      "label": "rot90",
+      "url": "./rot90"
+    },
+    {
+      "label": "squeeze",
+      "url": "./squeeze"
+    },
+    {
+      "label": "tril",
+      "url": "./tril"
+    },
+    {
+      "label": "triu",
+      "url": "./triu"
+    },
+    {
+      "label": "vertcat",
+      "url": "./vertcat"
     }
   ],
   "source": {

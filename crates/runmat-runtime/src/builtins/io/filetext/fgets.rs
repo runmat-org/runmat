@@ -503,7 +503,6 @@ pub(crate) mod tests {
     use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::IntValue;
-    use runmat_filesystem as fs;
     use runmat_time::system_time_now;
     use std::path::{Path, PathBuf};
     use std::time::UNIX_EPOCH;
@@ -557,7 +556,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_line");
-        fs::write(&path, "Hello world\nSecond line\n").unwrap();
+        test_support::fs::write(&path, "Hello world\nSecond line\n").unwrap();
 
         let handle = fopen_path(&path);
         let eval = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("fgets");
@@ -578,7 +577,7 @@ pub(crate) mod tests {
             other => panic!("expected numeric tensor, got {other:?}"),
         }
 
-        fs::remove_file(&path).unwrap();
+        test_support::fs::remove_file(&path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -587,7 +586,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_eof");
-        fs::write(&path, "line\n").unwrap();
+        test_support::fs::write(&path, "line\n").unwrap();
         let handle = fopen_path(&path);
 
         let _ = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("first read");
@@ -595,7 +594,7 @@ pub(crate) mod tests {
         assert_eq!(eval.first_output(), Value::Num(-1.0));
         assert_eq!(eval.outputs()[1], Value::Num(-1.0));
 
-        fs::remove_file(&path).unwrap();
+        test_support::fs::remove_file(&path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -604,7 +603,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_limit");
-        fs::write(&path, "abcdefghij\nrest\n").unwrap();
+        test_support::fs::write(&path, "abcdefghij\nrest\n").unwrap();
         let handle = fopen_path(&path);
 
         let eval =
@@ -623,7 +622,7 @@ pub(crate) mod tests {
             other => panic!("expected empty numeric tensor, got {other:?}"),
         }
 
-        fs::remove_file(&path).unwrap();
+        test_support::fs::remove_file(&path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -632,7 +631,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_write_only");
-        fs::write(&path, "payload").unwrap();
+        test_support::fs::write(&path, "payload").unwrap();
         let eval = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("w"),
@@ -642,7 +641,7 @@ pub(crate) mod tests {
         assert!(open.fid >= 3.0);
         let err = unwrap_error_message(run_evaluate(&Value::Num(open.fid), &[]).unwrap_err());
         assert_eq!(err, "fgets: file identifier is not open for reading");
-        fs::remove_file(&path).unwrap();
+        test_support::fs::remove_file(&path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -651,7 +650,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_limit_crlf");
-        fs::write(&path, b"ABCDE\r\nnext\n").unwrap();
+        test_support::fs::write(&path, b"ABCDE\r\nnext\n").unwrap();
         let handle = fopen_path(&path);
 
         let first =
@@ -690,7 +689,7 @@ pub(crate) mod tests {
             other => panic!("expected char array, got {other:?}"),
         }
 
-        fs::remove_file(&path).unwrap();
+        test_support::fs::remove_file(&path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -699,7 +698,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_crlf");
-        fs::write(&path, b"first line\r\nsecond\r\n").unwrap();
+        test_support::fs::write(&path, b"first line\r\nsecond\r\n").unwrap();
         let handle = fopen_path(&path);
 
         let eval = run_evaluate(&Value::Num(handle.fid as f64), &[]).expect("fgets");
@@ -718,7 +717,7 @@ pub(crate) mod tests {
             other => panic!("expected numeric tensor, got {other:?}"),
         }
 
-        fs::remove_file(&path).unwrap();
+        test_support::fs::remove_file(&path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -727,7 +726,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_latin1");
-        fs::write(&path, [0x48u8, 0x6f, 0x6c, 0x61, 0x20, 0xf1, b'\n']).unwrap();
+        test_support::fs::write(&path, [0x48u8, 0x6f, 0x6c, 0x61, 0x20, 0xf1, b'\n']).unwrap();
         let eval = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("r"),
@@ -748,7 +747,7 @@ pub(crate) mod tests {
         }
 
         let _ = registry::close(fid);
-        fs::remove_file(&path).unwrap();
+        test_support::fs::remove_file(&path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -757,7 +756,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_zero");
-        fs::write(&path, "hello\n").unwrap();
+        test_support::fs::write(&path, "hello\n").unwrap();
         let handle = fopen_path(&path);
 
         let eval = run_evaluate(
@@ -774,7 +773,7 @@ pub(crate) mod tests {
             other => panic!("expected empty char array, got {other:?}"),
         }
 
-        fs::remove_file(&path).unwrap();
+        test_support::fs::remove_file(&path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -783,7 +782,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_one");
-        fs::write(&path, "hello\n").unwrap();
+        test_support::fs::write(&path, "hello\n").unwrap();
         let handle = fopen_path(&path);
 
         let eval = run_evaluate(
@@ -800,7 +799,7 @@ pub(crate) mod tests {
             other => panic!("expected empty char array, got {other:?}"),
         }
 
-        fs::remove_file(&path).unwrap();
+        test_support::fs::remove_file(&path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -809,7 +808,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fgets_gpu_args");
-        fs::write(&path, b"abcdef\nextra").unwrap();
+        test_support::fs::write(&path, b"abcdef\nextra").unwrap();
         let handle = fopen_path(&path);
 
         test_support::with_test_provider(|provider| {
@@ -837,6 +836,6 @@ pub(crate) mod tests {
             }
         });
 
-        fs::remove_file(&path).unwrap();
+        test_support::fs::remove_file(&path).unwrap();
     }
 }

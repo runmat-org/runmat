@@ -98,6 +98,66 @@
     {
       "label": "dir",
       "url": "./dir"
+    },
+    {
+      "label": "addpath",
+      "url": "./addpath"
+    },
+    {
+      "label": "cd",
+      "url": "./cd"
+    },
+    {
+      "label": "copyfile",
+      "url": "./copyfile"
+    },
+    {
+      "label": "delete",
+      "url": "./delete"
+    },
+    {
+      "label": "exist",
+      "url": "./exist"
+    },
+    {
+      "label": "genpath",
+      "url": "./genpath"
+    },
+    {
+      "label": "getenv",
+      "url": "./getenv"
+    },
+    {
+      "label": "ls",
+      "url": "./ls"
+    },
+    {
+      "label": "movefile",
+      "url": "./movefile"
+    },
+    {
+      "label": "path",
+      "url": "./path"
+    },
+    {
+      "label": "rmdir",
+      "url": "./rmdir"
+    },
+    {
+      "label": "rmpath",
+      "url": "./rmpath"
+    },
+    {
+      "label": "savepath",
+      "url": "./savepath"
+    },
+    {
+      "label": "setenv",
+      "url": "./setenv"
+    },
+    {
+      "label": "tempname",
+      "url": "./tempname"
     }
   ],
   "source": {

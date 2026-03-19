@@ -123,6 +123,90 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "angle",
+      "url": "./angle"
+    },
+    {
+      "label": "conj",
+      "url": "./conj"
+    },
+    {
+      "label": "double",
+      "url": "./double"
+    },
+    {
+      "label": "expm1",
+      "url": "./expm1"
+    },
+    {
+      "label": "factorial",
+      "url": "./factorial"
+    },
+    {
+      "label": "gamma",
+      "url": "./gamma"
+    },
+    {
+      "label": "hypot",
+      "url": "./hypot"
+    },
+    {
+      "label": "imag",
+      "url": "./imag"
+    },
+    {
+      "label": "ldivide",
+      "url": "./ldivide"
+    },
+    {
+      "label": "log10",
+      "url": "./log10"
+    },
+    {
+      "label": "log1p",
+      "url": "./log1p"
+    },
+    {
+      "label": "log2",
+      "url": "./log2"
+    },
+    {
+      "label": "minus",
+      "url": "./minus"
+    },
+    {
+      "label": "plus",
+      "url": "./plus"
+    },
+    {
+      "label": "pow2",
+      "url": "./pow2"
+    },
+    {
+      "label": "power",
+      "url": "./power"
+    },
+    {
+      "label": "rdivide",
+      "url": "./rdivide"
+    },
+    {
+      "label": "real",
+      "url": "./real"
+    },
+    {
+      "label": "sign",
+      "url": "./sign"
+    },
+    {
+      "label": "single",
+      "url": "./single"
+    },
+    {
+      "label": "times",
+      "url": "./times"
     }
   ],
   "source": {

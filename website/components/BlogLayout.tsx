@@ -100,7 +100,7 @@ export function BlogLayout({
     <div className="min-h-screen bg-background">
       <div className="container px-4 py-8 md:px-6 md:py-16">
         {rightAside ? (
-          <div className="mx-auto lg:max-w-7xl grid gap-8 lg:grid-cols-[minmax(0,1fr)_260px]">
+          <div className="mx-auto lg:max-w-7xl grid gap-8 lg:grid-cols-[minmax(0,1fr)_220px]">
             <div className="min-w-0">
               {/* Back Link */}
               <Button variant="ghost" size="sm" className="mb-8 break-words" asChild>

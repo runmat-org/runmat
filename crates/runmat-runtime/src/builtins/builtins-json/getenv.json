@@ -126,6 +126,66 @@
     {
       "label": "path",
       "url": "./path"
+    },
+    {
+      "label": "addpath",
+      "url": "./addpath"
+    },
+    {
+      "label": "cd",
+      "url": "./cd"
+    },
+    {
+      "label": "copyfile",
+      "url": "./copyfile"
+    },
+    {
+      "label": "delete",
+      "url": "./delete"
+    },
+    {
+      "label": "dir",
+      "url": "./dir"
+    },
+    {
+      "label": "exist",
+      "url": "./exist"
+    },
+    {
+      "label": "fullfile",
+      "url": "./fullfile"
+    },
+    {
+      "label": "genpath",
+      "url": "./genpath"
+    },
+    {
+      "label": "ls",
+      "url": "./ls"
+    },
+    {
+      "label": "mkdir",
+      "url": "./mkdir"
+    },
+    {
+      "label": "movefile",
+      "url": "./movefile"
+    },
+    {
+      "label": "rmdir",
+      "url": "./rmdir"
+    },
+    {
+      "label": "rmpath",
+      "url": "./rmpath"
+    },
+    {
+      "label": "savepath",
+      "url": "./savepath"
+    },
+    {
+      "label": "setenv",
+      "url": "./setenv"
     }
   ],
   "source": {

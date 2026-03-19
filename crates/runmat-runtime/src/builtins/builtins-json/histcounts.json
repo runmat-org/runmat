@@ -128,6 +128,10 @@
     {
       "label": "rand",
       "url": "./rand"
+    },
+    {
+      "label": "histcounts2",
+      "url": "./histcounts2"
     }
   ],
   "source": {

@@ -137,8 +137,24 @@
       "url": "./unique"
     },
     {
-      "label": "issortedrows",
-      "url": "https://www.mathworks.com/help/matlab/ref/issortedrows.html"
+      "label": "argsort",
+      "url": "./argsort"
+    },
+    {
+      "label": "intersect",
+      "url": "./intersect"
+    },
+    {
+      "label": "ismember",
+      "url": "./ismember"
+    },
+    {
+      "label": "setdiff",
+      "url": "./setdiff"
+    },
+    {
+      "label": "union",
+      "url": "./union"
     }
   ],
   "source": {

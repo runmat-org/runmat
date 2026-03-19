@@ -642,8 +642,8 @@ fn make_cell_column(values: Vec<Value>) -> BuiltinResult<Value> {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use crate::builtins::io::filetext::registry;
-    use runmat_filesystem as fs;
     use runmat_time::system_time_now;
     use std::io::Write;
     use std::path::PathBuf;
@@ -671,7 +671,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fopen_read");
-        fs::write(&path, "hello world").unwrap();
+        test_support::fs::write(&path, "hello world").unwrap();
 
         let args = vec![Value::from(path.to_string_lossy().to_string())];
         let eval = run_evaluate(&args).expect("fopen");
@@ -682,7 +682,7 @@ pub(crate) mod tests {
         assert_eq!(open.encoding, "UTF-8");
 
         let _ = registry::close(open.fid as i32);
-        fs::remove_file(&path).unwrap();
+        test_support::fs::remove_file(&path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -707,7 +707,7 @@ pub(crate) mod tests {
         registry::reset_for_tests();
         let path = unique_path("fopen_query");
         {
-            let mut file = fs::File::create(&path).unwrap();
+            let mut file = runmat_filesystem::File::create(&path).unwrap();
             writeln!(&mut file, "data").unwrap();
         }
         let args = vec![Value::from(path.to_string_lossy().to_string())];
@@ -723,7 +723,7 @@ pub(crate) mod tests {
         assert_eq!(query.machinefmt, "native");
 
         let _ = registry::close(fid as i32);
-        fs::remove_file(&path).unwrap();
+        test_support::fs::remove_file(&path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -732,7 +732,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fopen_all");
-        fs::write(&path, "abc").unwrap();
+        test_support::fs::write(&path, "abc").unwrap();
         let eval_open =
             run_evaluate(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
         let fid = eval_open.as_open().unwrap().fid;
@@ -767,7 +767,7 @@ pub(crate) mod tests {
         }
 
         let _ = registry::close(fid as i32);
-        fs::remove_file(&path).unwrap();
+        test_support::fs::remove_file(&path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -777,8 +777,8 @@ pub(crate) mod tests {
         registry::reset_for_tests();
         let native_path = unique_path("fopen_native");
         let be_path = unique_path("fopen_ieee_be");
-        fs::write(&native_path, "native").unwrap();
-        fs::write(&be_path, "be").unwrap();
+        test_support::fs::write(&native_path, "native").unwrap();
+        test_support::fs::write(&be_path, "be").unwrap();
 
         let native_eval = run_evaluate(&[Value::from(native_path.to_string_lossy().to_string())])
             .expect("native");
@@ -800,8 +800,8 @@ pub(crate) mod tests {
 
         let _ = registry::close(native_fid as i32);
         let _ = registry::close(be_fid as i32);
-        fs::remove_file(&native_path).unwrap();
-        fs::remove_file(&be_path).unwrap();
+        test_support::fs::remove_file(&native_path).unwrap();
+        test_support::fs::remove_file(&be_path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -811,7 +811,7 @@ pub(crate) mod tests {
         registry::reset_for_tests();
         let path = unique_path("fopen_binary");
         {
-            let _ = fs::File::create(&path).unwrap();
+            let _ = runmat_filesystem::File::create(&path).unwrap();
         }
         let eval = run_evaluate(&[
             Value::from(path.to_string_lossy().to_string()),
@@ -821,7 +821,7 @@ pub(crate) mod tests {
         let open = eval.as_open().unwrap();
         assert_eq!(open.encoding, "binary");
         let _ = registry::close(open.fid as i32);
-        fs::remove_file(&path).unwrap();
+        test_support::fs::remove_file(&path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -842,7 +842,7 @@ pub(crate) mod tests {
         assert_eq!(open.encoding, "latin1");
         let _ = registry::close(open.fid as i32);
         if path.exists() {
-            fs::remove_file(&path).unwrap();
+            test_support::fs::remove_file(&path).unwrap();
         }
     }
 
@@ -852,7 +852,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fopen_perm_order");
-        fs::write(&path, "seed").unwrap();
+        test_support::fs::write(&path, "seed").unwrap();
         let eval = run_evaluate(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("r+b"),
@@ -865,7 +865,7 @@ pub(crate) mod tests {
         let info = query.as_query().unwrap();
         assert_eq!(info.permission, "rb+");
         let _ = registry::close(open.fid as i32);
-        fs::remove_file(&path).unwrap();
+        test_support::fs::remove_file(&path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -887,7 +887,7 @@ pub(crate) mod tests {
         assert_eq!(info.machinefmt, "ieee-be.l64");
         let _ = registry::close(open.fid as i32);
         if path.exists() {
-            fs::remove_file(&path).unwrap();
+            test_support::fs::remove_file(&path).unwrap();
         }
     }
 
@@ -910,7 +910,7 @@ pub(crate) mod tests {
         assert_eq!(info.machinefmt, "ieee-le");
         let _ = registry::close(open.fid as i32);
         if path.exists() {
-            fs::remove_file(&path).unwrap();
+            test_support::fs::remove_file(&path).unwrap();
         }
     }
 
@@ -920,14 +920,14 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fopen_outputs");
-        fs::write(&path, "check").unwrap();
+        test_support::fs::write(&path, "check").unwrap();
         let eval = run_evaluate(&[Value::from(path.to_string_lossy().to_string())]).expect("fopen");
         let outputs = eval.outputs();
         assert_eq!(outputs.len(), 4);
         assert!(matches!(outputs[0], Value::Num(_)));
         assert!(matches!(outputs[1], Value::CharArray(_)));
         let _ = registry::close(eval.as_open().unwrap().fid as i32);
-        fs::remove_file(&path).unwrap();
+        test_support::fs::remove_file(&path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

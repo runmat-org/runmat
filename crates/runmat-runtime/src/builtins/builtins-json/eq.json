@@ -107,7 +107,32 @@
       "answer": "Yes. The builtin registers element-wise fusion metadata so the planner can fuse comparisons with surrounding GPU-friendly operations."
     }
   ],
-  "links": [],
+  "links": [
+    {
+      "label": "ge",
+      "url": "./ge"
+    },
+    {
+      "label": "gt",
+      "url": "./gt"
+    },
+    {
+      "label": "isequal",
+      "url": "./isequal"
+    },
+    {
+      "label": "le",
+      "url": "./le"
+    },
+    {
+      "label": "lt",
+      "url": "./lt"
+    },
+    {
+      "label": "ne",
+      "url": "./ne"
+    }
+  ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/logical/rel/eq.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/logical/rel/eq.rs"

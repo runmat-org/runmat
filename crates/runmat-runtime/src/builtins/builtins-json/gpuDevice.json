@@ -99,6 +99,14 @@
     {
       "label": "gpuInfo",
       "url": "./gpuinfo"
+    },
+    {
+      "label": "arrayfun",
+      "url": "./arrayfun"
+    },
+    {
+      "label": "pagefun",
+      "url": "./pagefun"
     }
   ],
   "source": {

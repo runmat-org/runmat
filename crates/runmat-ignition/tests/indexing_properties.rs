@@ -178,7 +178,8 @@ fn negative_step_linear_index() {
     let hir = lower(&parse(src).unwrap()).unwrap();
     let vars = execute(&hir).unwrap();
     let b = find_last_tensor(&vars);
-    assert_eq!(b.shape, vec![5, 1]);
+    // MATLAB preserves numeric index array shape for linear indexing.
+    assert_eq!(b.shape, vec![1, 5]);
     assert_eq!(b.data, vec![10.0, 8.0, 6.0, 4.0, 2.0]);
 }
 
@@ -499,7 +500,7 @@ fn oop_negative_missing_subsref_mex() {
     let out = execute(&hir);
     if let Err(err) = out {
         assert!(
-            err.identifier() == Some("MATLAB:MissingSubsref") || err.message().contains("subsref")
+            err.identifier() == Some("RunMat:MissingSubsref") || err.message().contains("subsref")
         );
     }
 }
@@ -519,7 +520,7 @@ fn oop_negative_missing_subsasgn_mex() {
     let out = execute(&hir);
     if let Err(err) = out {
         assert!(
-            err.identifier() == Some("MATLAB:MissingSubsasgn")
+            err.identifier() == Some("RunMat:MissingSubsasgn")
                 || err.message().contains("subsasgn")
         );
     }

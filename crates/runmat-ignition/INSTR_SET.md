@@ -108,7 +108,7 @@ Notation:
 
 ## Error model
 
-All runtime failures are surfaced via mex identifiers (e.g., `MATLAB:IndexOutOfBounds`, `MATLAB:TooManyInputs`, `MATLAB:MissingSubsref`). See `ERROR_MODEL.md` for principles and `vm.rs` for exact messages.
+All runtime failures are surfaced via mex identifiers (e.g., `RunMat:IndexOutOfBounds`, `RunMat:TooManyInputs`, `RunMat:MissingSubsref`). See `ERROR_MODEL.md` for principles and `vm.rs` for exact messages.
 
 ## Lowering notes
 

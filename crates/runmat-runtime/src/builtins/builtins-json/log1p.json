@@ -122,6 +122,94 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "abs",
+      "url": "./abs"
+    },
+    {
+      "label": "angle",
+      "url": "./angle"
+    },
+    {
+      "label": "conj",
+      "url": "./conj"
+    },
+    {
+      "label": "double",
+      "url": "./double"
+    },
+    {
+      "label": "exp",
+      "url": "./exp"
+    },
+    {
+      "label": "factorial",
+      "url": "./factorial"
+    },
+    {
+      "label": "gamma",
+      "url": "./gamma"
+    },
+    {
+      "label": "hypot",
+      "url": "./hypot"
+    },
+    {
+      "label": "imag",
+      "url": "./imag"
+    },
+    {
+      "label": "ldivide",
+      "url": "./ldivide"
+    },
+    {
+      "label": "log10",
+      "url": "./log10"
+    },
+    {
+      "label": "log2",
+      "url": "./log2"
+    },
+    {
+      "label": "minus",
+      "url": "./minus"
+    },
+    {
+      "label": "plus",
+      "url": "./plus"
+    },
+    {
+      "label": "pow2",
+      "url": "./pow2"
+    },
+    {
+      "label": "power",
+      "url": "./power"
+    },
+    {
+      "label": "rdivide",
+      "url": "./rdivide"
+    },
+    {
+      "label": "real",
+      "url": "./real"
+    },
+    {
+      "label": "sign",
+      "url": "./sign"
+    },
+    {
+      "label": "single",
+      "url": "./single"
+    },
+    {
+      "label": "sqrt",
+      "url": "./sqrt"
+    },
+    {
+      "label": "times",
+      "url": "./times"
     }
   ],
   "source": {

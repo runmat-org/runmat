@@ -86,7 +86,7 @@ async fn rmpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let directories = parse_directories(&gathered).await?;
 
     let previous = current_path_string();
-    apply_rmpath(directories)?;
+    apply_rmpath(directories).await?;
     Ok(char_array_value(&previous))
 }
 
@@ -182,7 +182,7 @@ fn split_path_list(text: &str) -> Vec<String> {
         .collect()
 }
 
-fn apply_rmpath(directories: Vec<String>) -> BuiltinResult<()> {
+async fn apply_rmpath(directories: Vec<String>) -> BuiltinResult<()> {
     let mut segments = current_path_segments();
     let mut changed = false;
     let mut seen = HashSet::new();
@@ -198,7 +198,7 @@ fn apply_rmpath(directories: Vec<String>) -> BuiltinResult<()> {
             continue;
         }
 
-        if remove_directory(&mut segments, trimmed)? {
+        if remove_directory(&mut segments, trimmed).await? {
             changed = true;
         }
     }
@@ -215,7 +215,7 @@ fn apply_rmpath(directories: Vec<String>) -> BuiltinResult<()> {
     Ok(())
 }
 
-fn remove_directory(segments: &mut Vec<String>, raw: &str) -> BuiltinResult<bool> {
+async fn remove_directory(segments: &mut Vec<String>, raw: &str) -> BuiltinResult<bool> {
     let direct_identity = path_identity(raw);
     let before = segments.len();
     segments.retain(|entry| path_identity(entry) != direct_identity);
@@ -242,7 +242,7 @@ fn remove_directory(segments: &mut Vec<String>, raw: &str) -> BuiltinResult<bool
         return Ok(true);
     }
 
-    match vfs::metadata(&normalized) {
+    match vfs::metadata_async(&normalized).await {
         Ok(meta) => {
             if !meta.is_dir() {
                 Err(rmpath_error(format!("rmpath: '{raw}' is not a folder")))

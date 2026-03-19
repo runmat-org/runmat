@@ -33,10 +33,10 @@
   "description": "`tcpclient(host, port)` opens a TCP/IP connection to a remote server and returns a MATLAB-compatible struct that mirrors the `tcpclient` object. The struct tracks connection metadata (remote address and port, byte order, timeouts, and callback configuration) and carries an opaque identifier that other RunMat networking builtins use to operate on the live socket.",
   "behaviors": [
     "`tcpclient(host, port)` resolves the hostname (IPv4, IPv6, or DNS) and connects using the default 10 second `ConnectTimeout`. Ports must lie in the range `0–65535`.",
-    "Name-value pairs mirror MATLAB defaults: `Timeout` (non-negative seconds, determines read/write timeouts), `ConnectTimeout` (non-negative seconds, controls how long connection establishment waits), `ByteOrder` (`\"little-endian\"` or `\"big-endian\"`), `InputBufferSize`, `OutputBufferSize`, `UserData`, and `Name`. Unknown options raise `MATLAB:tcpclient:InvalidNameValue`.",
+    "Name-value pairs mirror MATLAB defaults: `Timeout` (non-negative seconds, determines read/write timeouts), `ConnectTimeout` (non-negative seconds, controls how long connection establishment waits), `ByteOrder` (`\"little-endian\"` or `\"big-endian\"`), `InputBufferSize`, `OutputBufferSize`, `UserData`, and `Name`. Unknown options raise `RunMat:tcpclient:InvalidNameValue`.",
     "Successful calls return a struct whose fields match MATLAB’s `tcpclient` object, including callback placeholders (`BytesAvailableFcn`, `BytesAvailableFcnMode`, `BytesAvailableFcnCount`), connection metadata (`Address`, `Port`, `ServerAddress`, `ServerPort`, `LocalAddress`, `LocalPort`), and configuration (`Timeout`, `ConnectTimeout`, buffer sizes, `ByteOrder`). Hidden fields `__tcpclient_id` and `__tcpserver_id` retain the live socket handle for companion networking builtins.",
     "Read and write timeouts are enforced using the `Timeout` value. Passing `inf` keeps operations blocking. The returned struct reports the configured timeout verbatim.",
-    "Connection failures raise `MATLAB:tcpclient:ConnectionFailed` with the OS error message. Invalid addresses, ports, or name-value arguments raise the corresponding MATLAB-style diagnostics."
+    "Connection failures raise `RunMat:tcpclient:ConnectionFailed` with the OS error message. Invalid addresses, ports, or name-value arguments raise the corresponding MATLAB-style diagnostics."
   ],
   "examples": [
     {
@@ -57,7 +57,7 @@
     {
       "description": "Detecting connection failures with a shorter connect timeout",
       "input": "try\n    client = tcpclient(\"192.0.2.20\", 65530, \"ConnectTimeout\", 0.2);\ncatch err\n    disp(err.identifier)\nend",
-      "output": "MATLAB:tcpclient:ConnectionFailed"
+      "output": "RunMat:tcpclient:ConnectionFailed"
     },
     {
       "description": "Keeping a streaming connection open with infinite timeouts",
@@ -68,7 +68,7 @@
   "faqs": [
     {
       "question": "Which byte orders are supported?",
-      "answer": "`\"little-endian\"` (default) and `\"big-endian\"`. Any other string raises `MATLAB:tcpclient:InvalidNameValue`."
+      "answer": "`\"little-endian\"` (default) and `\"big-endian\"`. Any other string raises `RunMat:tcpclient:InvalidNameValue`."
     },
     {
       "question": "Can I pass `inf` for `Timeout` or `ConnectTimeout`?",
@@ -88,7 +88,7 @@
     },
     {
       "question": "What happens when the server rejects the connection?",
-      "answer": "`tcpclient` raises `MATLAB:tcpclient:ConnectionFailed` with the OS error (such as “connection refused”)."
+      "answer": "`tcpclient` raises `RunMat:tcpclient:ConnectionFailed` with the OS error (such as “connection refused”)."
     }
   ],
   "links": [
@@ -107,6 +107,22 @@
     {
       "label": "fwrite",
       "url": "./fwrite"
+    },
+    {
+      "label": "close",
+      "url": "./close"
+    },
+    {
+      "label": "read",
+      "url": "./read"
+    },
+    {
+      "label": "readline",
+      "url": "./readline"
+    },
+    {
+      "label": "write",
+      "url": "./write"
     }
   ],
   "source": {

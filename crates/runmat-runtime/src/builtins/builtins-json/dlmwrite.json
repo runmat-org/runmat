@@ -149,6 +149,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "csvread",
+      "url": "./csvread"
+    },
+    {
+      "label": "readmatrix",
+      "url": "./readmatrix"
     }
   ],
   "source": {

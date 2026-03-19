@@ -121,6 +121,18 @@
     {
       "question": "Are string arrays supported?",
       "answer": "String arrays are not yet supported. Convert them to character matrices or use tables before sorting."
+    },
+    {
+      "question": "What does sortrows do in MATLAB?",
+      "answer": "`sortrows(A)` sorts the rows of matrix `A` in ascending order based on the elements in the first column. Rows with equal first-column values are sorted by subsequent columns."
+    },
+    {
+      "question": "How do I sort by a specific column in MATLAB?",
+      "answer": "Use `sortrows(A, col)` where `col` is the column index. Use negative values for descending order, e.g., `sortrows(A, -2)` sorts by the second column in descending order."
+    },
+    {
+      "question": "Is sortrows a stable sort?",
+      "answer": "Yes. `sortrows` uses a stable sorting algorithm, meaning rows with equal sort keys retain their original relative order."
     }
   ],
   "links": [
@@ -143,6 +155,30 @@
     {
       "label": "permute",
       "url": "./permute"
+    },
+    {
+      "label": "argsort",
+      "url": "./argsort"
+    },
+    {
+      "label": "intersect",
+      "url": "./intersect"
+    },
+    {
+      "label": "ismember",
+      "url": "./ismember"
+    },
+    {
+      "label": "issorted",
+      "url": "./issorted"
+    },
+    {
+      "label": "setdiff",
+      "url": "./setdiff"
+    },
+    {
+      "label": "union",
+      "url": "./union"
     }
   ],
   "source": {

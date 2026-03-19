@@ -102,6 +102,18 @@
     {
       "question": "How does `isnan` behave on empty arrays?",
       "answer": "It returns an empty logical array with the same size metadata as the input, matching MATLAB behavior."
+    },
+    {
+      "question": "What does isnan do in MATLAB?",
+      "answer": "`isnan(A)` returns a logical array the same size as `A`, with `true` where elements are `NaN` and `false` elsewhere. It works on real and complex arrays."
+    },
+    {
+      "question": "How do I remove NaN values from an array in MATLAB?",
+      "answer": "Use `A(isnan(A)) = []` to delete NaN elements from a vector, or `A(~isnan(A))` to select only non-NaN values. For matrices, use `any(isnan(A), 2)` to find rows containing NaN."
+    },
+    {
+      "question": "Does isnan support GPU acceleration in RunMat?",
+      "answer": "Yes. `isnan` runs on the GPU with elementwise fusion, meaning it can be combined with other operations without extra memory round-trips."
     }
   ],
   "links": [
@@ -124,6 +136,18 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "isgpuarray",
+      "url": "./isgpuarray"
+    },
+    {
+      "label": "islogical",
+      "url": "./islogical"
+    },
+    {
+      "label": "isnumeric",
+      "url": "./isnumeric"
     }
   ],
   "source": {

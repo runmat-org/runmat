@@ -14,6 +14,14 @@ export interface BenchmarkSummary {
   tags: string[]
 }
 
+function sanitizeSlug(input: string): string {
+  const lower = input.toLowerCase().trim()
+  // Replace any sequence of non-alphanumeric characters with a single dash
+  const normalized = lower.replace(/[^a-z0-9]+/g, '-')
+  // Trim leading/trailing dashes
+  return normalized.replace(/^-+|-+$/g, '')
+}
+
 function extractTitleFromMarkdown(content: string): string {
   const lines = content.split('\n')
   for (const line of lines) {
@@ -86,7 +94,10 @@ export function getAllBenchmarks(): BenchmarkSummary[] {
     const benchmarks = entries
       .filter(entry => entry.isDirectory() && entry.name !== '.harness' && entry.name !== 'wgpu_profile')
       .map((entry): BenchmarkSummary | null => {
-        const slug = entry.name
+        const slug = sanitizeSlug(entry.name)
+        if (!slug) {
+          return null
+        }
         const readmePath = join(benchmarksDir, slug, 'README.md')
 
         try {

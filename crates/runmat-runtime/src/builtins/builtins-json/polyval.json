@@ -135,6 +135,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "polyint",
+      "url": "./polyint"
+    },
+    {
+      "label": "roots",
+      "url": "./roots"
     }
   ],
   "source": {

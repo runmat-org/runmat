@@ -12,7 +12,7 @@ use std::thread;
 use std::time::Duration;
 use uuid::Uuid;
 
-const DEFAULT_HTTP_ENDPOINT: &str = "https://telemetry.runmat.com/ingest";
+const DEFAULT_HTTP_ENDPOINT: &str = "https://api.runmat.com/v1/t";
 const MIN_QUEUE_SIZE: usize = 8;
 const DEFAULT_DRAIN_TIMEOUT_MS: u64 = 50;
 

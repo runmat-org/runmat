@@ -111,6 +111,16 @@ export class MemoryVolume {
     return file.data.slice();
   }
 
+  readMany(paths: string[]): Array<Uint8Array | null> {
+    return paths.map((path) => {
+      try {
+        return this.readFile(path);
+      } catch {
+        return null;
+      }
+    });
+  }
+
   writeFile(path: string, data: Uint8Array, readonly = false, modified?: number): void {
     const normalized = normalizeAbsolute(path);
     if (readonly) {
@@ -395,6 +405,10 @@ class MemoryProvider implements RunMatFilesystemProvider {
 
   readFile(path: string): Uint8Array {
     return this.volume.readFile(path);
+  }
+
+  readMany(paths: string[]): Array<Uint8Array | null> {
+    return this.volume.readMany(paths);
   }
 
   writeFile(path: string, data: Uint8Array | ArrayBuffer | ArrayBufferView): void {

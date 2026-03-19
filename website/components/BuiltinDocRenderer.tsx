@@ -109,12 +109,12 @@ function renderHeading(block: Extract<BuiltinDocBlock, { type: 'heading' }>) {
   const text = inlineToPlainText(block.text).replace(/`/g, '');
   const id = block.id ?? slugifyHeading(text);
   const headingClasses: Record<number, string> = {
-    1: 'text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold mt-12 mb-6 text-foreground first:mt-0 break-words',
-    2: 'group scroll-mt-24 text-3xl sm:text-4xl md:text-5xl font-semibold mt-10 mb-5 text-foreground break-words',
-    3: 'group scroll-mt-24 text-2xl sm:text-3xl font-semibold mt-8 mb-4 text-foreground break-words',
-    4: 'group scroll-mt-24 text-xl sm:text-2xl font-semibold mt-6 mb-3 text-foreground break-words',
-    5: 'group scroll-mt-24 text-lg sm:text-xl font-semibold mt-5 mb-2 text-foreground break-words',
-    6: 'group scroll-mt-24 text-base sm:text-lg font-semibold mt-4 mb-2 text-foreground break-words',
+    1: 'text-3xl sm:text-4xl md:text-5xl font-bold mt-12 mb-6 text-foreground first:mt-0 break-words',
+    2: 'group scroll-mt-24 text-xl sm:text-2xl md:text-3xl font-semibold mt-10 mb-5 text-foreground break-words',
+    3: 'group scroll-mt-24 text-lg sm:text-xl md:text-2xl font-semibold mt-8 mb-4 text-foreground break-words',
+    4: 'group scroll-mt-24 text-base sm:text-lg md:text-xl font-semibold mt-6 mb-3 text-foreground break-words',
+    5: 'group scroll-mt-24 text-sm sm:text-base md:text-lg font-semibold mt-5 mb-2 text-foreground break-words',
+    6: 'group scroll-mt-24 text-sm sm:text-base font-semibold mt-4 mb-2 text-foreground break-words',
   };
 
   const Tag = (`h${block.level}` as React.ElementType);

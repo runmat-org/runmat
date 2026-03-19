@@ -138,6 +138,26 @@
     {
       "label": "fileread",
       "url": "./fileread"
+    },
+    {
+      "label": "feof",
+      "url": "./feof"
+    },
+    {
+      "label": "fgets",
+      "url": "./fgets"
+    },
+    {
+      "label": "filewrite",
+      "url": "./filewrite"
+    },
+    {
+      "label": "fread",
+      "url": "./fread"
+    },
+    {
+      "label": "frewind",
+      "url": "./frewind"
     }
   ],
   "source": {

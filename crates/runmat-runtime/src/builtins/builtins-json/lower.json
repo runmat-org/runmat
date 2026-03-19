@@ -112,6 +112,50 @@
     {
       "label": "strcmpi",
       "url": "./strcmpi"
+    },
+    {
+      "label": "erase",
+      "url": "./erase"
+    },
+    {
+      "label": "eraseBetween",
+      "url": "./erasebetween"
+    },
+    {
+      "label": "extractBetween",
+      "url": "./extractbetween"
+    },
+    {
+      "label": "join",
+      "url": "./join"
+    },
+    {
+      "label": "pad",
+      "url": "./pad"
+    },
+    {
+      "label": "replace",
+      "url": "./replace"
+    },
+    {
+      "label": "split",
+      "url": "./split"
+    },
+    {
+      "label": "strcat",
+      "url": "./strcat"
+    },
+    {
+      "label": "strip",
+      "url": "./strip"
+    },
+    {
+      "label": "strrep",
+      "url": "./strrep"
+    },
+    {
+      "label": "strtrim",
+      "url": "./strtrim"
     }
   ],
   "source": {

@@ -56,7 +56,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "isnan";
-const IDENTIFIER_INVALID_INPUT: &str = "MATLAB:isnan:InvalidInput";
+const IDENTIFIER_INVALID_INPUT: &str = "RunMat:isnan:InvalidInput";
 const IDENTIFIER_INTERNAL: &str = "RunMat:isnan:InternalError";
 
 #[runtime_builtin(

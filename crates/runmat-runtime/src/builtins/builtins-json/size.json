@@ -102,20 +102,48 @@
   ],
   "links": [
     {
-      "label": "length (MathWorks)",
-      "url": "https://www.mathworks.com/help/matlab/ref/length.html"
+      "label": "length",
+      "url": "./length"
     },
     {
-      "label": "ndims (MathWorks)",
-      "url": "https://www.mathworks.com/help/matlab/ref/ndims.html"
+      "label": "ndims",
+      "url": "./ndims"
     },
     {
-      "label": "numel (MathWorks)",
-      "url": "https://www.mathworks.com/help/matlab/ref/numel.html"
+      "label": "numel",
+      "url": "./numel"
     },
     {
-      "label": "MathWorks size reference",
-      "url": "https://www.mathworks.com/help/matlab/ref/size.html"
+      "label": "size",
+      "url": "./size"
+    },
+    {
+      "label": "isempty",
+      "url": "./isempty"
+    },
+    {
+      "label": "ismatrix",
+      "url": "./ismatrix"
+    },
+    {
+      "label": "isscalar",
+      "url": "./isscalar"
+    },
+    {
+      "label": "isvector",
+      "url": "./isvector"
+    },
+    {
+      "label": "length",
+      "url": "./length"
+    },
+    {
+      "label": "ndims",
+      "url": "./ndims"
+    },
+    {
+      "label": "numel",
+      "url": "./numel"
     }
   ],
   "source": {

@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::diagnostics::type_resolvers::error_type;
 use crate::{build_runtime_error, RuntimeError};
 
-const DEFAULT_IDENTIFIER: &str = "MATLAB:error";
+const DEFAULT_IDENTIFIER: &str = "RunMat:error";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::diagnostics::error")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -173,7 +173,7 @@ fn normalize_identifier(raw: &str) -> String {
     } else if trimmed.contains(':') {
         trimmed.to_string()
     } else {
-        format!("MATLAB:{trimmed}")
+        format!("RunMat:{trimmed}")
     }
 }
 
@@ -248,7 +248,7 @@ pub(crate) mod tests {
             ])
             .expect_err("should error"),
         );
-        assert_eq!(err.identifier(), Some("MATLAB:missingNamespace"));
+        assert_eq!(err.identifier(), Some("RunMat:missingNamespace"));
         assert_eq!(err.message(), "Message");
     }
 
@@ -269,17 +269,17 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn error_accepts_mexception() {
-        let mex = MException::new("MATLAB:demo:test".to_string(), "broken".to_string());
+        let mex = MException::new("RunMat:demo:test".to_string(), "broken".to_string());
         let err =
             unwrap_error(error_builtin(vec![Value::MException(mex)]).expect_err("should error"));
-        assert_eq!(err.identifier(), Some("MATLAB:demo:test"));
+        assert_eq!(err.identifier(), Some("RunMat:demo:test"));
         assert_eq!(err.message(), "broken");
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn error_rejects_extra_args_after_mexception() {
-        let mex = MException::new("MATLAB:demo:test".to_string(), "broken".to_string());
+        let mex = MException::new("RunMat:demo:test".to_string(), "broken".to_string());
         let err = unwrap_error(
             error_builtin(vec![Value::MException(mex), Value::from(1.0)])
                 .expect_err("should error"),

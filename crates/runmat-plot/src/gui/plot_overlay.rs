@@ -4,14 +4,13 @@
 //! plot content, providing controls, axis labels, grid lines, and titles.
 
 use crate::core::{plot_utils, PlotRenderer};
-use crate::styling::{ModernDarkTheme, PlotThemeConfig};
+use crate::styling::{ModernDarkTheme, PlotThemeConfig, ThemeVariant};
 use egui::{Align2, Color32, Context, FontId, Pos2, Rect, Stroke};
 use glam::{Vec3, Vec4};
 
 /// GUI overlay manager for plot annotations and controls
 pub struct PlotOverlay {
     /// Current theme
-    #[allow(dead_code)] // TODO: Use for theme customization
     theme: PlotThemeConfig,
 
     /// Cached plot area from last frame
@@ -146,16 +145,84 @@ impl PlotOverlay {
         }
     }
 
+    pub fn set_theme_config(&mut self, theme: PlotThemeConfig) {
+        self.theme = theme;
+    }
+
+    fn theme_text_color(&self) -> Color32 {
+        let text = self.theme.build_theme().get_text_color();
+        Color32::from_rgba_premultiplied(
+            (text.x.clamp(0.0, 1.0) * 255.0) as u8,
+            (text.y.clamp(0.0, 1.0) * 255.0) as u8,
+            (text.z.clamp(0.0, 1.0) * 255.0) as u8,
+            (text.w.clamp(0.0, 1.0) * 255.0) as u8,
+        )
+    }
+
+    fn theme_axis_color(&self) -> Color32 {
+        let axis = self.theme.build_theme().get_axis_color();
+        Color32::from_rgba_premultiplied(
+            (axis.x.clamp(0.0, 1.0) * 255.0) as u8,
+            (axis.y.clamp(0.0, 1.0) * 255.0) as u8,
+            (axis.z.clamp(0.0, 1.0) * 255.0) as u8,
+            (axis.w.clamp(0.0, 1.0) * 255.0) as u8,
+        )
+    }
+
+    fn themed_grid_colors(&self) -> (Color32, Color32) {
+        let grid = self.theme.build_theme().get_grid_color();
+        let major = Color32::from_rgba_premultiplied(
+            (grid.x.clamp(0.0, 1.0) * 255.0) as u8,
+            (grid.y.clamp(0.0, 1.0) * 255.0) as u8,
+            (grid.z.clamp(0.0, 1.0) * 255.0) as u8,
+            ((grid.w.clamp(0.15, 0.55)) * 255.0) as u8,
+        );
+        let minor = Color32::from_rgba_premultiplied(
+            (grid.x.clamp(0.0, 1.0) * 255.0) as u8,
+            (grid.y.clamp(0.0, 1.0) * 255.0) as u8,
+            (grid.z.clamp(0.0, 1.0) * 255.0) as u8,
+            ((grid.w * 0.6).clamp(0.10, 0.34) * 255.0) as u8,
+        );
+        (major, minor)
+    }
+
     /// Apply theme to egui context
     pub fn apply_theme(&self, ctx: &Context) {
-        // Apply the modern dark theme (using stored config for future customization)
-        let theme = ModernDarkTheme::default();
-        theme.apply_to_egui(ctx);
+        match self.theme.variant {
+            ThemeVariant::ModernDark => {
+                ModernDarkTheme::default().apply_to_egui(ctx);
+            }
+            ThemeVariant::ClassicLight => {
+                ctx.set_visuals(egui::Visuals::light());
+            }
+            ThemeVariant::HighContrast => {
+                let mut visuals = egui::Visuals::dark();
+                visuals.extreme_bg_color = egui::Color32::BLACK;
+                visuals.widgets.noninteractive.bg_fill = egui::Color32::BLACK;
+                visuals.widgets.noninteractive.fg_stroke.color = egui::Color32::WHITE;
+                ctx.set_visuals(visuals);
+            }
+            ThemeVariant::Custom => {
+                let mut visuals = egui::Visuals::light();
+                let bg = self.theme.build_theme().get_background_color();
+                if bg.x + bg.y + bg.z < 1.5 {
+                    visuals = egui::Visuals::dark();
+                }
+                ctx.set_visuals(visuals);
+            }
+        }
 
         // Make context transparent so WGPU content shows through
         let mut visuals = ctx.style().visuals.clone();
         visuals.window_fill = Color32::TRANSPARENT;
         visuals.panel_fill = Color32::TRANSPARENT;
+        visuals.extreme_bg_color = Color32::TRANSPARENT;
+        visuals.faint_bg_color = Color32::TRANSPARENT;
+        visuals.widgets.noninteractive.bg_fill = Color32::TRANSPARENT;
+        visuals.widgets.inactive.bg_fill = Color32::TRANSPARENT;
+        visuals.widgets.hovered.bg_fill = Color32::TRANSPARENT;
+        visuals.widgets.active.bg_fill = Color32::TRANSPARENT;
+        visuals.widgets.open.bg_fill = Color32::TRANSPARENT;
         ctx.set_visuals(visuals);
     }
 
@@ -331,7 +398,13 @@ impl PlotOverlay {
 
                 // Theme selection
                 ui.collapsing("🎨 Theme", |ui| {
-                    ui.label("Modern Dark (Active)");
+                    let label = match self.theme.variant {
+                        ThemeVariant::ModernDark => "Modern Dark",
+                        ThemeVariant::ClassicLight => "Classic Light",
+                        ThemeVariant::HighContrast => "High Contrast",
+                        ThemeVariant::Custom => "Custom",
+                    };
+                    ui.label(format!("{label} (Active)"));
                     ui.checkbox(&mut self.show_debug, "Show Debug Info");
                 });
 
@@ -409,8 +482,9 @@ impl PlotOverlay {
                 }
                 // Frame (2D only; 3D uses the axes cube instead)
                 if plot_renderer.overlay_show_box() {
+                    let axis_color = self.theme_axis_color();
                     ui.painter()
-                        .rect_stroke(*r, 0.0, Stroke::new(1.5, Color32::from_gray(180)));
+                        .rect_stroke(*r, 0.0, Stroke::new(1.5, axis_color));
                 }
 
                 // Grid (2D)
@@ -447,11 +521,9 @@ impl PlotOverlay {
             } else {
                 // Draw plot frame (2D only; 3D uses the axes cube instead)
                 if plot_renderer.overlay_show_box() {
-                    ui.painter().rect_stroke(
-                        centered_plot_rect,
-                        0.0,
-                        Stroke::new(1.5, Color32::from_gray(180)),
-                    );
+                    let axis_color = self.theme_axis_color();
+                    ui.painter()
+                        .rect_stroke(centered_plot_rect, 0.0, Stroke::new(1.5, axis_color));
                 }
                 // Draw grid if enabled
                 if config.show_grid {
@@ -466,7 +538,8 @@ impl PlotOverlay {
                         .view_bounds()
                         .or_else(|| plot_renderer.data_bounds())
                     {
-                        let zero_stroke = Stroke::new(1.5, Color32::from_gray(200));
+                        let axis_color = self.theme_axis_color();
+                        let zero_stroke = Stroke::new(1.5, axis_color);
                         if y_min < 0.0 && y_max > 0.0 {
                             let y_screen = centered_plot_rect.max.y
                                 - ((0.0 - y_min) / (y_max - y_min)) as f32
@@ -516,6 +589,25 @@ impl PlotOverlay {
 
         // Draw legend if enabled and entries available
         if plot_renderer.overlay_show_legend() {
+            let theme = plot_renderer.theme.build_theme();
+            let bg = theme.get_background_color();
+            let text = theme.get_text_color();
+            let bg_luma = 0.2126 * bg.x + 0.7152 * bg.y + 0.0722 * bg.z;
+            let legend_bg = if bg_luma > 0.62 {
+                Color32::from_rgba_premultiplied(255, 255, 255, 170)
+            } else {
+                Color32::from_rgba_premultiplied(0, 0, 0, 128)
+            };
+            let legend_text = Color32::from_rgb(
+                (text.x.clamp(0.0, 1.0) * 255.0) as u8,
+                (text.y.clamp(0.0, 1.0) * 255.0) as u8,
+                (text.z.clamp(0.0, 1.0) * 255.0) as u8,
+            );
+            let legend_stroke = if bg_luma > 0.62 {
+                Color32::from_rgb(55, 55, 55)
+            } else {
+                Color32::BLACK
+            };
             let entries = plot_renderer.overlay_legend_entries();
             if !entries.is_empty() {
                 let pad = 6.0;
@@ -529,11 +621,8 @@ impl PlotOverlay {
                         y + entries.len() as f32 * 18.0 + pad,
                     ),
                 );
-                ui.painter().rect_filled(
-                    legend_rect,
-                    4.0,
-                    Color32::from_rgba_premultiplied(0, 0, 0, 96),
-                );
+                ui.painter().rect_filled(legend_rect, 4.0, legend_bg);
+                y += 12.0;
                 // Entries
                 for e in entries {
                     let c = Color32::from_rgb(
@@ -565,7 +654,7 @@ impl PlotOverlay {
                             ui.painter().circle_stroke(
                                 center,
                                 3.5,
-                                Stroke::new(1.0, Color32::BLACK),
+                                Stroke::new(1.0, legend_stroke),
                             );
                         }
                         crate::plots::figure::PlotType::Bar
@@ -579,7 +668,7 @@ impl PlotOverlay {
                             ui.painter().rect_stroke(
                                 swatch_rect,
                                 2.0,
-                                Stroke::new(1.0, Color32::BLACK),
+                                Stroke::new(1.0, legend_stroke),
                             );
                         }
                         crate::plots::figure::PlotType::ErrorBar
@@ -609,7 +698,7 @@ impl PlotOverlay {
                         Align2::LEFT_CENTER,
                         &e.label,
                         FontId::proportional(12.0),
-                        Color32::WHITE,
+                        legend_text,
                     );
                     y += 18.0;
                 }
@@ -654,8 +743,15 @@ impl PlotOverlay {
                     col,
                 );
             }
+            let bg = plot_renderer.theme.build_theme().get_background_color();
+            let bg_luma = 0.2126 * bg.x + 0.7152 * bg.y + 0.0722 * bg.z;
+            let border = if bg_luma > 0.62 {
+                Color32::from_gray(60)
+            } else {
+                Color32::WHITE
+            };
             ui.painter()
-                .rect_stroke(bar_rect, 0.0, Stroke::new(1.0, Color32::WHITE));
+                .rect_stroke(bar_rect, 0.0, Stroke::new(1.0, border));
         }
 
         centered_plot_rect
@@ -702,8 +798,7 @@ impl PlotOverlay {
             .or_else(|| plot_renderer.view_bounds())
             .or_else(|| plot_renderer.data_bounds())
         {
-            let grid_color_major = Color32::from_gray(80);
-            let _grid_color_minor = Color32::from_gray(60);
+            let (grid_color_major, _grid_color_minor) = self.themed_grid_colors();
 
             let (x_min, x_max, y_min, y_max) = data_bounds;
             let x_range = x_max - x_min;
@@ -824,6 +919,8 @@ impl PlotOverlay {
             let tick_length = 6.0 * scale;
             let label_offset = 15.0 * scale;
             let tick_font = FontId::proportional(10.0 * scale);
+            let axis_color = self.theme_axis_color();
+            let label_color = self.theme_text_color();
 
             let x_log = plot_renderer.overlay_x_log();
             let y_log = plot_renderer.overlay_y_log();
@@ -851,7 +948,7 @@ impl PlotOverlay {
                                 Pos2::new(x_screen, plot_rect.max.y),
                                 Pos2::new(x_screen, plot_rect.max.y + tick_length),
                             ],
-                            Stroke::new(1.0, Color32::WHITE),
+                            Stroke::new(1.0, axis_color),
                         );
                         // Label
                         let text = truncate_label(label, 14);
@@ -860,7 +957,7 @@ impl PlotOverlay {
                             Align2::CENTER_CENTER,
                             text,
                             tick_font.clone(),
-                            Color32::from_gray(200),
+                            label_color,
                         );
                     }
                 } else {
@@ -878,7 +975,7 @@ impl PlotOverlay {
                                 Pos2::new(plot_rect.min.x - tick_length, y_screen),
                                 Pos2::new(plot_rect.min.x, y_screen),
                             ],
-                            Stroke::new(1.0, Color32::WHITE),
+                            Stroke::new(1.0, axis_color),
                         );
                         // Label
                         let text = truncate_label(label, 14);
@@ -887,7 +984,7 @@ impl PlotOverlay {
                             Align2::CENTER_CENTER,
                             text,
                             tick_font.clone(),
-                            Color32::from_gray(200),
+                            label_color,
                         );
                     }
                 }
@@ -909,7 +1006,7 @@ impl PlotOverlay {
                             Pos2::new(x_screen, plot_rect.max.y),
                             Pos2::new(x_screen, plot_rect.max.y + tick_length),
                         ],
-                        Stroke::new(1.0, Color32::WHITE),
+                        Stroke::new(1.0, axis_color),
                     );
                     // Label like 10^d
                     ui.painter().text(
@@ -917,7 +1014,7 @@ impl PlotOverlay {
                         Align2::CENTER_CENTER,
                         format!("10^{}", d),
                         tick_font.clone(),
-                        Color32::from_gray(200),
+                        label_color,
                     );
                 }
             } else if !cat_x {
@@ -931,14 +1028,14 @@ impl PlotOverlay {
                             Pos2::new(x_screen, plot_rect.max.y),
                             Pos2::new(x_screen, plot_rect.max.y + tick_length),
                         ],
-                        Stroke::new(1.0, Color32::WHITE),
+                        Stroke::new(1.0, axis_color),
                     );
                     ui.painter().text(
                         Pos2::new(x_screen, plot_rect.max.y + label_offset),
                         Align2::CENTER_CENTER,
                         plot_utils::format_tick_label(x_val),
                         tick_font.clone(),
-                        Color32::from_gray(200),
+                        label_color,
                     );
                     x_val += x_tick_interval;
                 }
@@ -959,14 +1056,14 @@ impl PlotOverlay {
                             Pos2::new(plot_rect.min.x - tick_length, y_screen),
                             Pos2::new(plot_rect.min.x, y_screen),
                         ],
-                        Stroke::new(1.0, Color32::WHITE),
+                        Stroke::new(1.0, axis_color),
                     );
                     ui.painter().text(
                         Pos2::new(plot_rect.min.x - label_offset, y_screen),
                         Align2::CENTER_CENTER,
                         format!("10^{}", d),
                         tick_font.clone(),
-                        Color32::from_gray(200),
+                        label_color,
                     );
                 }
             } else if !cat_y {
@@ -980,14 +1077,14 @@ impl PlotOverlay {
                             Pos2::new(plot_rect.min.x - tick_length, y_screen),
                             Pos2::new(plot_rect.min.x, y_screen),
                         ],
-                        Stroke::new(1.0, Color32::WHITE),
+                        Stroke::new(1.0, axis_color),
                     );
                     ui.painter().text(
                         Pos2::new(plot_rect.min.x - label_offset, y_screen),
                         Align2::CENTER_CENTER,
                         plot_utils::format_tick_label(y_val),
                         tick_font.clone(),
-                        Color32::from_gray(200),
+                        label_color,
                     );
                     y_val += y_tick_interval;
                 }
@@ -1027,7 +1124,7 @@ impl PlotOverlay {
         let scale = font_scale.max(0.75);
         let base = plot_rect.width().min(plot_rect.height()).max(1.0);
         let gizmo_size = (base * 0.16).clamp(44.0, 110.0) * scale;
-        let pad = (10.0 * scale).round();
+        let pad = (30.0 * scale).round();
         let origin = Pos2::new(plot_rect.min.x + pad, plot_rect.max.y - pad);
 
         struct AxisItem {
@@ -1074,16 +1171,6 @@ impl PlotOverlay {
         });
 
         let painter = ui.painter();
-        // Subtle background to keep gizmo readable over bright surfaces.
-        let bg_rect = Rect::from_min_size(
-            Pos2::new(origin.x - 4.0 * scale, origin.y - gizmo_size - 8.0 * scale),
-            egui::Vec2::new(gizmo_size + 12.0 * scale, gizmo_size + 12.0 * scale),
-        );
-        painter.rect_filled(
-            bg_rect,
-            6.0 * scale,
-            Color32::from_rgba_premultiplied(0, 0, 0, 70),
-        );
 
         painter.circle_filled(origin, 2.0 * scale, Color32::from_gray(210));
 
@@ -1221,36 +1308,39 @@ impl PlotOverlay {
     /// Draw plot title
     fn draw_title(&self, ui: &mut egui::Ui, plot_rect: Rect, title: &str, scale: f32) {
         let scale = scale.max(0.75);
+        let text_color = self.theme_text_color();
         ui.painter().text(
             Pos2::new(plot_rect.center().x, plot_rect.min.y - 20.0 * scale),
             Align2::CENTER_CENTER,
             title,
             FontId::proportional(16.0 * scale),
-            Color32::WHITE,
+            text_color,
         );
     }
 
     /// Draw X-axis label
     fn draw_x_label(&self, ui: &mut egui::Ui, plot_rect: Rect, label: &str, scale: f32) {
         let scale = scale.max(0.75);
+        let text_color = self.theme_text_color();
         ui.painter().text(
             Pos2::new(plot_rect.center().x, plot_rect.max.y + 40.0 * scale),
             Align2::CENTER_CENTER,
             label,
             FontId::proportional(14.0 * scale),
-            Color32::WHITE,
+            text_color,
         );
     }
 
     /// Draw Y-axis label
     fn draw_y_label(&self, ui: &mut egui::Ui, plot_rect: Rect, label: &str, scale: f32) {
         let scale = scale.max(0.75);
+        let text_color = self.theme_text_color();
         ui.painter().text(
             Pos2::new(plot_rect.min.x - 40.0 * scale, plot_rect.center().y),
             Align2::CENTER_CENTER,
             label,
             FontId::proportional(14.0 * scale),
-            Color32::WHITE,
+            text_color,
         );
     }
 

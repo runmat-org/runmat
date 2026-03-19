@@ -282,20 +282,31 @@ export default async function BenchmarkPage({ params }: { params: Promise<{ slug
       </div>
 
       <div className="mt-16 not-prose">
-        <Card>
-          <CardContent className="p-6 text-center">
-            <h3 className="text-2xl font-semibold mb-3 sm:text-3xl">
-              Ready to try RunMat?
+        <Card className="border border-purple-500/30 bg-gradient-to-r from-purple-500/10 to-blue-500/10 shadow-lg">
+          <CardContent className="py-8 space-y-4 text-center">
+            <h3 className="text-2xl md:text-3xl font-bold text-foreground">
+              Try RunMat — free, instant, no sign-up
             </h3>
-            <p className="text-muted-foreground mb-4">
-              Get started with the modern MATLAB runtime today.
+            <p className="text-muted-foreground text-lg">
+              Start running math immediately in your browser.
             </p>
-            <div className="flex flex-col sm:flex-row gap-3 justify-center">
-              <Button variant="outline" asChild>
-                <Link href="/download">Download RunMat</Link>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+              <Button
+                size="lg"
+                asChild
+                className="h-12 px-8 text-base font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200"
+              >
+                <Link
+                  href="/sandbox"
+                  data-ph-capture-attribute-destination="sandbox"
+                  data-ph-capture-attribute-source={`benchmark-${slug}`}
+                  data-ph-capture-attribute-cta="launch-sandbox"
+                >
+                  Launch the sandbox
+                </Link>
               </Button>
-              <Button variant="outline" asChild>
-                <Link href="/docs/getting-started">Get Started</Link>
+              <Button variant="outline" size="lg" asChild className="h-12 px-8 text-base">
+                <Link href="/download">Other download options</Link>
               </Button>
             </div>
           </CardContent>

@@ -14,10 +14,10 @@ use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeE
 
 use super::accept::{client_handle, configure_stream, CLIENT_HANDLE_FIELD};
 
-const MESSAGE_ID_INVALID_CLIENT: &str = "MATLAB:readline:InvalidTcpClient";
-const MESSAGE_ID_NOT_CONNECTED: &str = "MATLAB:readline:NotConnected";
-const MESSAGE_ID_INVALID_ARGUMENTS: &str = "MATLAB:readline:InvalidArguments";
-const MESSAGE_ID_INTERNAL: &str = "MATLAB:readline:InternalError";
+const MESSAGE_ID_INVALID_CLIENT: &str = "RunMat:readline:InvalidTcpClient";
+const MESSAGE_ID_NOT_CONNECTED: &str = "RunMat:readline:NotConnected";
+const MESSAGE_ID_INVALID_ARGUMENTS: &str = "RunMat:readline:InvalidArguments";
+const MESSAGE_ID_INTERNAL: &str = "RunMat:readline:InternalError";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::net::readline")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {

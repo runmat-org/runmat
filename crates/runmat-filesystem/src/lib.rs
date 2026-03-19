@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use once_cell::sync::OnceCell;
 use std::ffi::OsString;
 use std::fmt;
@@ -23,6 +24,12 @@ pub use remote::{RemoteFsConfig, RemoteFsProvider};
 pub use sandbox::SandboxFsProvider;
 #[cfg(target_arch = "wasm32")]
 pub use wasm::PlaceholderFsProvider;
+
+pub mod data_contract;
+
+use data_contract::{
+    DataChunkUploadRequest, DataChunkUploadTarget, DataManifestDescriptor, DataManifestRequest,
+};
 
 pub trait FileHandle: Read + Write + Seek + Send + Sync {}
 
@@ -190,6 +197,30 @@ pub struct DirEntry {
     file_type: FsFileType,
 }
 
+#[derive(Clone, Debug)]
+pub struct ReadManyEntry {
+    path: PathBuf,
+    bytes: Option<Vec<u8>>,
+}
+
+impl ReadManyEntry {
+    pub fn new(path: PathBuf, bytes: Option<Vec<u8>>) -> Self {
+        Self { path, bytes }
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub fn bytes(&self) -> Option<&[u8]> {
+        self.bytes.as_deref()
+    }
+
+    pub fn into_bytes(self) -> Option<Vec<u8>> {
+        self.bytes
+    }
+}
+
 impl DirEntry {
     pub fn new(path: PathBuf, file_name: OsString, file_type: FsFileType) -> Self {
         Self {
@@ -216,21 +247,62 @@ impl DirEntry {
     }
 }
 
+#[async_trait(?Send)]
 pub trait FsProvider: Send + Sync + 'static {
     fn open(&self, path: &Path, flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>>;
-    fn read(&self, path: &Path) -> io::Result<Vec<u8>>;
-    fn write(&self, path: &Path, data: &[u8]) -> io::Result<()>;
-    fn remove_file(&self, path: &Path) -> io::Result<()>;
-    fn metadata(&self, path: &Path) -> io::Result<FsMetadata>;
-    fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata>;
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>>;
-    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf>;
-    fn create_dir(&self, path: &Path) -> io::Result<()>;
-    fn create_dir_all(&self, path: &Path) -> io::Result<()>;
-    fn remove_dir(&self, path: &Path) -> io::Result<()>;
-    fn remove_dir_all(&self, path: &Path) -> io::Result<()>;
-    fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
-    fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()>;
+    async fn read(&self, path: &Path) -> io::Result<Vec<u8>>;
+    async fn write(&self, path: &Path, data: &[u8]) -> io::Result<()>;
+    async fn remove_file(&self, path: &Path) -> io::Result<()>;
+    async fn metadata(&self, path: &Path) -> io::Result<FsMetadata>;
+    async fn symlink_metadata(&self, path: &Path) -> io::Result<FsMetadata>;
+    async fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>>;
+    async fn canonicalize(&self, path: &Path) -> io::Result<PathBuf>;
+    async fn create_dir(&self, path: &Path) -> io::Result<()>;
+    async fn create_dir_all(&self, path: &Path) -> io::Result<()>;
+    async fn remove_dir(&self, path: &Path) -> io::Result<()>;
+    async fn remove_dir_all(&self, path: &Path) -> io::Result<()>;
+    async fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
+    async fn set_readonly(&self, path: &Path, readonly: bool) -> io::Result<()>;
+
+    async fn read_many(&self, paths: &[PathBuf]) -> io::Result<Vec<ReadManyEntry>> {
+        let mut entries = Vec::with_capacity(paths.len());
+        for path in paths {
+            let bytes = self.read(path).await.ok();
+            entries.push(ReadManyEntry::new(path.clone(), bytes));
+        }
+        Ok(entries)
+    }
+
+    async fn data_manifest_descriptor(
+        &self,
+        _request: &DataManifestRequest,
+    ) -> io::Result<DataManifestDescriptor> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "data manifest descriptor is unsupported by this provider",
+        ))
+    }
+
+    async fn data_chunk_upload_targets(
+        &self,
+        _request: &DataChunkUploadRequest,
+    ) -> io::Result<Vec<DataChunkUploadTarget>> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "data chunk upload targets are unsupported by this provider",
+        ))
+    }
+
+    async fn data_upload_chunk(
+        &self,
+        _target: &DataChunkUploadTarget,
+        _data: &[u8],
+    ) -> io::Result<()> {
+        Err(io::Error::new(
+            ErrorKind::Unsupported,
+            "data chunk upload is unsupported by this provider",
+        ))
+    }
 }
 
 pub struct File {
@@ -378,8 +450,9 @@ pub fn set_current_dir(path: impl AsRef<Path>) -> io::Result<()> {
             let base = current_dir()?;
             target = base.join(target);
         }
-        let canonical = canonicalize(&target).unwrap_or(target.clone());
-        let metadata = metadata(&canonical)?;
+        let canonical =
+            futures::executor::block_on(canonicalize_async(&target)).unwrap_or(target.clone());
+        let metadata = futures::executor::block_on(metadata_async(&canonical))?;
         if !metadata.is_dir() {
             return Err(io::Error::new(
                 ErrorKind::NotFound,
@@ -408,76 +481,119 @@ impl Drop for ProviderGuard {
     }
 }
 
-pub fn read(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
-    let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.read(&resolved))
+pub async fn read_many_async(paths: &[PathBuf]) -> io::Result<Vec<ReadManyEntry>> {
+    let resolved = paths
+        .iter()
+        .map(|path| resolve_path(path.as_path()))
+        .collect::<Vec<_>>();
+    let provider = current_provider();
+    provider.read_many(&resolved).await
 }
 
-pub fn read_to_string(path: impl AsRef<Path>) -> io::Result<String> {
-    let bytes = read(path)?;
+pub async fn read_async(path: impl AsRef<Path>) -> io::Result<Vec<u8>> {
+    let resolved = resolve_path(path.as_ref());
+    let provider = current_provider();
+    provider.read(&resolved).await
+}
+
+pub async fn read_to_string_async(path: impl AsRef<Path>) -> io::Result<String> {
+    let bytes = read_async(path).await?;
     String::from_utf8(bytes).map_err(|err| io::Error::new(ErrorKind::InvalidData, err.utf8_error()))
 }
 
-pub fn write(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::Result<()> {
+pub async fn write_async(path: impl AsRef<Path>, data: impl AsRef<[u8]>) -> io::Result<()> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.write(&resolved, data.as_ref()))
+    let provider = current_provider();
+    provider.write(&resolved, data.as_ref()).await
 }
 
-pub fn remove_file(path: impl AsRef<Path>) -> io::Result<()> {
+pub async fn remove_file_async(path: impl AsRef<Path>) -> io::Result<()> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.remove_file(&resolved))
+    let provider = current_provider();
+    provider.remove_file(&resolved).await
 }
 
-pub fn metadata(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
+pub async fn metadata_async(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.metadata(&resolved))
+    let provider = current_provider();
+    provider.metadata(&resolved).await
 }
 
-pub fn symlink_metadata(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
+pub async fn symlink_metadata_async(path: impl AsRef<Path>) -> io::Result<FsMetadata> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.symlink_metadata(&resolved))
+    let provider = current_provider();
+    provider.symlink_metadata(&resolved).await
 }
 
-pub fn read_dir(path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>> {
+pub async fn read_dir_async(path: impl AsRef<Path>) -> io::Result<Vec<DirEntry>> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.read_dir(&resolved))
+    let provider = current_provider();
+    provider.read_dir(&resolved).await
 }
 
-pub fn canonicalize(path: impl AsRef<Path>) -> io::Result<PathBuf> {
+pub async fn canonicalize_async(path: impl AsRef<Path>) -> io::Result<PathBuf> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.canonicalize(&resolved))
+    let provider = current_provider();
+    provider.canonicalize(&resolved).await
 }
 
-pub fn create_dir(path: impl AsRef<Path>) -> io::Result<()> {
+pub async fn create_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.create_dir(&resolved))
+    let provider = current_provider();
+    provider.create_dir(&resolved).await
 }
 
-pub fn create_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
+pub async fn create_dir_all_async(path: impl AsRef<Path>) -> io::Result<()> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.create_dir_all(&resolved))
+    let provider = current_provider();
+    provider.create_dir_all(&resolved).await
 }
 
-pub fn remove_dir(path: impl AsRef<Path>) -> io::Result<()> {
+pub async fn remove_dir_async(path: impl AsRef<Path>) -> io::Result<()> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.remove_dir(&resolved))
+    let provider = current_provider();
+    provider.remove_dir(&resolved).await
 }
 
-pub fn remove_dir_all(path: impl AsRef<Path>) -> io::Result<()> {
+pub async fn remove_dir_all_async(path: impl AsRef<Path>) -> io::Result<()> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.remove_dir_all(&resolved))
+    let provider = current_provider();
+    provider.remove_dir_all(&resolved).await
 }
 
-pub fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
+pub async fn rename_async(from: impl AsRef<Path>, to: impl AsRef<Path>) -> io::Result<()> {
     let resolved_from = resolve_path(from.as_ref());
     let resolved_to = resolve_path(to.as_ref());
-    with_provider(|provider| provider.rename(&resolved_from, &resolved_to))
+    let provider = current_provider();
+    provider.rename(&resolved_from, &resolved_to).await
 }
 
-/// Update the readonly flag for a file or directory if the provider supports it.
-pub fn set_readonly(path: impl AsRef<Path>, readonly: bool) -> io::Result<()> {
+pub async fn set_readonly_async(path: impl AsRef<Path>, readonly: bool) -> io::Result<()> {
     let resolved = resolve_path(path.as_ref());
-    with_provider(|provider| provider.set_readonly(&resolved, readonly))
+    let provider = current_provider();
+    provider.set_readonly(&resolved, readonly).await
+}
+
+pub async fn data_manifest_descriptor_async(
+    request: &DataManifestRequest,
+) -> io::Result<DataManifestDescriptor> {
+    let provider = current_provider();
+    provider.data_manifest_descriptor(request).await
+}
+
+pub async fn data_chunk_upload_targets_async(
+    request: &DataChunkUploadRequest,
+) -> io::Result<Vec<DataChunkUploadTarget>> {
+    let provider = current_provider();
+    provider.data_chunk_upload_targets(request).await
+}
+
+pub async fn data_upload_chunk_async(
+    target: &DataChunkUploadTarget,
+    data: &[u8],
+) -> io::Result<()> {
+    let provider = current_provider();
+    provider.data_upload_chunk(target, data).await
 }
 
 /// Copy a file from `from` to `to`, truncating the destination when it exists.
@@ -515,60 +631,83 @@ mod tests {
 
     struct UnsupportedProvider;
 
+    #[async_trait(?Send)]
     impl FsProvider for UnsupportedProvider {
         fn open(&self, _path: &Path, _flags: &OpenFlags) -> io::Result<Box<dyn FileHandle>> {
             Err(unsupported())
         }
 
-        fn read(&self, _path: &Path) -> io::Result<Vec<u8>> {
+        async fn read(&self, _path: &Path) -> io::Result<Vec<u8>> {
             Err(unsupported())
         }
 
-        fn write(&self, _path: &Path, _data: &[u8]) -> io::Result<()> {
+        async fn write(&self, _path: &Path, _data: &[u8]) -> io::Result<()> {
             Err(unsupported())
         }
 
-        fn remove_file(&self, _path: &Path) -> io::Result<()> {
+        async fn remove_file(&self, _path: &Path) -> io::Result<()> {
             Err(unsupported())
         }
 
-        fn metadata(&self, _path: &Path) -> io::Result<FsMetadata> {
+        async fn metadata(&self, _path: &Path) -> io::Result<FsMetadata> {
             Err(unsupported())
         }
 
-        fn symlink_metadata(&self, _path: &Path) -> io::Result<FsMetadata> {
+        async fn symlink_metadata(&self, _path: &Path) -> io::Result<FsMetadata> {
             Err(unsupported())
         }
 
-        fn read_dir(&self, _path: &Path) -> io::Result<Vec<DirEntry>> {
+        async fn read_dir(&self, _path: &Path) -> io::Result<Vec<DirEntry>> {
             Err(unsupported())
         }
 
-        fn canonicalize(&self, _path: &Path) -> io::Result<PathBuf> {
+        async fn canonicalize(&self, _path: &Path) -> io::Result<PathBuf> {
             Err(unsupported())
         }
 
-        fn create_dir(&self, _path: &Path) -> io::Result<()> {
+        async fn create_dir(&self, _path: &Path) -> io::Result<()> {
             Err(unsupported())
         }
 
-        fn create_dir_all(&self, _path: &Path) -> io::Result<()> {
+        async fn create_dir_all(&self, _path: &Path) -> io::Result<()> {
             Err(unsupported())
         }
 
-        fn remove_dir(&self, _path: &Path) -> io::Result<()> {
+        async fn remove_dir(&self, _path: &Path) -> io::Result<()> {
             Err(unsupported())
         }
 
-        fn remove_dir_all(&self, _path: &Path) -> io::Result<()> {
+        async fn remove_dir_all(&self, _path: &Path) -> io::Result<()> {
             Err(unsupported())
         }
 
-        fn rename(&self, _from: &Path, _to: &Path) -> io::Result<()> {
+        async fn rename(&self, _from: &Path, _to: &Path) -> io::Result<()> {
             Err(unsupported())
         }
 
-        fn set_readonly(&self, _path: &Path, _readonly: bool) -> io::Result<()> {
+        async fn set_readonly(&self, _path: &Path, _readonly: bool) -> io::Result<()> {
+            Err(unsupported())
+        }
+
+        async fn data_manifest_descriptor(
+            &self,
+            _request: &DataManifestRequest,
+        ) -> io::Result<DataManifestDescriptor> {
+            Err(unsupported())
+        }
+
+        async fn data_chunk_upload_targets(
+            &self,
+            _request: &DataChunkUploadRequest,
+        ) -> io::Result<Vec<DataChunkUploadTarget>> {
+            Err(unsupported())
+        }
+
+        async fn data_upload_chunk(
+            &self,
+            _target: &DataChunkUploadTarget,
+            _data: &[u8],
+        ) -> io::Result<()> {
             Err(unsupported())
         }
     }
@@ -602,14 +741,14 @@ mod tests {
         let _guard = TEST_LOCK.lock().unwrap();
         let dir = tempdir().expect("tempdir");
         let path = dir.path().join("flag.txt");
-        write(&path, b"flag").expect("write");
+        futures::executor::block_on(write_async(&path, b"flag")).expect("write");
 
-        set_readonly(&path, true).expect("set readonly");
-        let meta = metadata(&path).expect("metadata");
+        futures::executor::block_on(set_readonly_async(&path, true)).expect("set readonly");
+        let meta = futures::executor::block_on(metadata_async(&path)).expect("metadata");
         assert!(meta.is_readonly());
 
-        set_readonly(&path, false).expect("unset readonly");
-        let meta = metadata(&path).expect("metadata");
+        futures::executor::block_on(set_readonly_async(&path, false)).expect("unset readonly");
+        let meta = futures::executor::block_on(metadata_async(&path)).expect("metadata");
         assert!(!meta.is_readonly());
     }
 

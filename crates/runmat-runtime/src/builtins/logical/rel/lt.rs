@@ -59,9 +59,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "lt";
-const IDENT_INVALID_INPUT: &str = "MATLAB:lt:InvalidInput";
-const IDENT_SIZE_MISMATCH: &str = "MATLAB:lt:SizeMismatch";
-const IDENT_COMPLEX_UNSUPPORTED: &str = "MATLAB:lt:ComplexNotSupported";
+const IDENT_INVALID_INPUT: &str = "RunMat:lt:InvalidInput";
+const IDENT_SIZE_MISMATCH: &str = "RunMat:lt:SizeMismatch";
+const IDENT_COMPLEX_UNSUPPORTED: &str = "RunMat:lt:ComplexNotSupported";
 
 fn lt_error(message: impl Into<String>, identifier: &'static str) -> RuntimeError {
     build_runtime_error(message)

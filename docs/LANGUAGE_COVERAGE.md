@@ -1,6 +1,8 @@
 # RunMat Language Coverage
 
-RunMat's goal is to provide a high-performance, modern runtime to execute MATLAB code, with complete language grammar and semantics. This document tracks language coverage in RunMat and compares it to GNU Octave where helpful. It focuses on core language features (syntax and semantics), not breadth of numeric libraries or toolboxes.
+RunMat targets MATLAB's core language grammar and semantics so that engineers familiar with MATLAB can be productive immediately without learning a new language. The goal is high-fidelity coverage of MATLAB's syntax, operators, control flow, OOP, and indexing — not verbatim drop-in execution of every legacy script or toolbox function. Where RunMat intentionally diverges, it does so for performance, clarity, or safety, and those divergences are documented below.
+
+This document tracks current coverage and compares it to GNU Octave where helpful. It focuses on core language features (syntax and semantics), not breadth of numeric libraries or toolboxes.
 
 ## Language Feature Compatibility
 
@@ -67,10 +69,10 @@ RunMat's goal is to provide a high-performance, modern runtime to execute MATLAB
  
 ## Notes on semantics parity
  
-- N-D indexing/slicing: RunMat implements gather/scatter with broadcast rules, logical masks, colon, and `end` arithmetic across dimensions; 2-D fast paths for entire rows/columns are included. Error identifiers match MATLAB (`MATLAB:SliceNonTensor`, `MATLAB:IndexStepZero`, etc.). The implicit two-argument colon uses a `+1` increment and yields an empty selection when `stop < start`, mirroring MATLAB.
+- N-D indexing/slicing: RunMat implements gather/scatter with broadcast rules, logical masks, colon, and `end` arithmetic across dimensions; 2-D fast paths for entire rows/columns are included. Error identifiers match MATLAB (`MATLAB:SliceNonTensor`, `MATLAB:IndexStepZero`, etc.) when LanguageCompatMode is `matlab` (default is `RunMat:SliceNonTensor` and `RunMat:IndexStepZero`). The implicit two-argument colon uses a `+1` increment and yields an empty selection when `stop < start`, mirroring MATLAB.
 - Multi-LHS and expansion: `[a,b]=f()` and `[~,b]=f()` are supported; function and cell expansions into slice targets are handled with dynamic packing (`PackToRow/PackToCol`).
 - Varargs and counts: `varargin`/`varargout` with strict count checks and `nargin`/`nargout` report per-call counts consistently across single and multi-output call sites.
-- OOP: Static/instance members, operator overloading (`plus`, `mtimes`, relational/logical) and `subsref`/`subsasgn` dispatch ordering with standardized negative errors (`MATLAB:MissingSubsref`, `MATLAB:MissingSubsasgn`).
+- OOP: Static/instance members, operator overloading (`plus`, `mtimes`, relational/logical) and `subsref`/`subsasgn` dispatch ordering with standardized negative errors (`MATLAB:MissingSubsref`, `MATLAB:MissingSubsasgn`) when LanguageCompatMode is `matlab` (default is `RunMat:MissingSubsref` and `RunMat:MissingSubsasgn`).
 - Imports and precedence: Specific imports shadow wildcard; locals and user functions take precedence; `Class.*` static resolution participates last; ambiguities are surfaced with clear diagnostics.
 - Metaclass: `?pkg.Class` produces a class reference enabling static property/method access and works with import resolution.
 
@@ -80,7 +82,7 @@ RunMat's goal is to provide a high-performance, modern runtime to execute MATLAB
 ```matlab
 function [a, b, varargout] = head_tail(varargin)
   if nargin < 1
-    error('MATLAB:NotEnoughInputs', 'Need at least one input');
+    error('RunMat:NotEnoughInputs', 'Need at least one input');
   end
   a = varargin{1};
   if nargin >= 2, b = varargin{2}; else, b = 0; end
@@ -145,7 +147,7 @@ try
   A = zeros(2,2);
   A(:, 0) = 1;  % invalid subscript
 catch e
-  assert(strcmp(e.identifier, 'MATLAB:IndexOutOfBounds'));
+  assert(strcmp(e.identifier, 'RunMat:IndexOutOfBounds'));
   rethrow(e);   % rethrow preserves identifier/message
 end
 ```
@@ -175,7 +177,7 @@ end
 
 ## Where RunMat intentionally goes beyond Octave
 
-- 100% MATLAB language semantics coverage: Full parity for syntax, operators, control flow, indexing/slicing (incl. `end` arithmetic), OOP (`classdef`, properties/methods, operator overloading), events/handles, name resolution, and standardized `MException` identifiers. Practically, this means your existing MATLAB scripts run unchanged on RunMat. Octave remains partial or divergent in several of these areas (e.g., classdef/events/metaclass support and precedence nuances).
+- Broader MATLAB language semantics coverage than Octave: Full support for syntax, operators, control flow, indexing/slicing (incl. `end` arithmetic), OOP (`classdef`, properties/methods, operator overloading), events/handles, name resolution, and standardized `MException` identifiers. Octave remains partial or divergent in several of these areas (e.g., classdef/events/metaclass support and precedence nuances).
 - Metaclass operator `?Class` and static access through `Class.*` imports.
 - Consistent precedence for specific vs wildcard imports, including `Class.*` statics.
 - N-D `end` arithmetic across dimensions in both gather and scatter with broadcast-correct semantics and 2-D fast paths.

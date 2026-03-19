@@ -127,7 +127,7 @@ Let’s look at a concrete example. Imagine you are sketching a simple linear al
 **In MATLAB:**
 The code is almost a direct transcription of the board:
 
-```matlab:runnable
+```matlab
 X = [1, 2, 3];
 Y = [1, 2, 3; ...
      4, 5, 6; ...
@@ -232,3 +232,4 @@ Engineers working on the next generation of renewable energy grids, autonomous v
 The future doesn't need to copy the business models of the past. But it should absolutely keep the best part of the legacy: code that looks like the math on the board.
 
 Want to see how close RunMat stays to MATLAB semantics? Check the [Language Coverage guide](/docs/language-coverage).
+

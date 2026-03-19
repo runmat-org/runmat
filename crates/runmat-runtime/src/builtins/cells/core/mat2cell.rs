@@ -41,9 +41,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Partitioning into cells terminates fusion; blocks are produced on the host.",
 };
 
-const IDENT_INVALID_INPUT: &str = "MATLAB:mat2cell:InvalidInput";
-const IDENT_INVALID_PARTITION: &str = "MATLAB:mat2cell:InvalidPartition";
-const IDENT_SIZE_LIMIT: &str = "MATLAB:mat2cell:SizeExceeded";
+const IDENT_INVALID_INPUT: &str = "RunMat:mat2cell:InvalidInput";
+const IDENT_INVALID_PARTITION: &str = "RunMat:mat2cell:InvalidPartition";
+const IDENT_SIZE_LIMIT: &str = "RunMat:mat2cell:SizeExceeded";
 
 fn mat2cell_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)

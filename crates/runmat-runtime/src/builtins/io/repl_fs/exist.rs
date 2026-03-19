@@ -107,7 +107,7 @@ async fn exist_builtin(name: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         ExistQuery::Handle => exist_handle(&name_host),
         _ => {
             let text = value_to_string(&name_host).ok_or_else(|| exist_error(ERROR_NAME_ARG))?;
-            exist_for_query(&text, query)?
+            exist_for_query(&text, query).await?
         }
     };
 
@@ -182,13 +182,13 @@ fn parse_type_argument(value: &Value) -> BuiltinResult<ExistQuery> {
     }
 }
 
-fn exist_for_query(name: &str, query: ExistQuery) -> BuiltinResult<ExistResultKind> {
+async fn exist_for_query(name: &str, query: ExistQuery) -> BuiltinResult<ExistResultKind> {
     if contains_wildcards(name) {
         return Ok(ExistResultKind::NotFound);
     }
 
     match query {
-        ExistQuery::Any => evaluate_default(name),
+        ExistQuery::Any => evaluate_default(name).await,
         ExistQuery::Var => Ok(if variable_exists(name) {
             ExistResultKind::Variable
         } else {
@@ -199,19 +199,22 @@ fn exist_for_query(name: &str, query: ExistQuery) -> BuiltinResult<ExistResultKi
         } else {
             ExistResultKind::NotFound
         }),
-        ExistQuery::Class => Ok(if class_exists(name)? {
+        ExistQuery::Class => Ok(if class_exists(name).await? {
             ExistResultKind::Class
         } else {
             ExistResultKind::NotFound
         }),
-        ExistQuery::Dir => Ok(if directory_exists(name)? {
+        ExistQuery::Dir => Ok(if directory_exists(name).await? {
             ExistResultKind::Directory
         } else {
             ExistResultKind::NotFound
         }),
-        ExistQuery::File => Ok(detect_file_kind(name)?.unwrap_or(ExistResultKind::NotFound)),
+        ExistQuery::File => Ok(detect_file_kind(name)
+            .await?
+            .unwrap_or(ExistResultKind::NotFound)),
         ExistQuery::Mex => Ok(
             if path_find_file_with_extensions(name, MEX_EXTENSIONS, "exist")
+                .await
                 .map_err(exist_error)?
                 .is_some()
             {
@@ -222,6 +225,7 @@ fn exist_for_query(name: &str, query: ExistQuery) -> BuiltinResult<ExistResultKi
         ),
         ExistQuery::Pcode => Ok(
             if path_find_file_with_extensions(name, PCODE_EXTENSIONS, "exist")
+                .await
                 .map_err(exist_error)?
                 .is_some()
             {
@@ -237,6 +241,7 @@ fn exist_for_query(name: &str, query: ExistQuery) -> BuiltinResult<ExistResultKi
         }),
         ExistQuery::Simulink => Ok(
             if path_find_file_with_extensions(name, SIMULINK_EXTENSIONS, "exist")
+                .await
                 .map_err(exist_error)?
                 .is_some()
             {
@@ -247,6 +252,7 @@ fn exist_for_query(name: &str, query: ExistQuery) -> BuiltinResult<ExistResultKi
         ),
         ExistQuery::Thunk => Ok(
             if path_find_file_with_extensions(name, THUNK_EXTENSIONS, "exist")
+                .await
                 .map_err(exist_error)?
                 .is_some()
             {
@@ -257,6 +263,7 @@ fn exist_for_query(name: &str, query: ExistQuery) -> BuiltinResult<ExistResultKi
         ),
         ExistQuery::Lib => Ok(
             if path_find_file_with_extensions(name, LIB_EXTENSIONS, "exist")
+                .await
                 .map_err(exist_error)?
                 .is_some()
             {
@@ -270,20 +277,20 @@ fn exist_for_query(name: &str, query: ExistQuery) -> BuiltinResult<ExistResultKi
     }
 }
 
-fn evaluate_default(name: &str) -> BuiltinResult<ExistResultKind> {
+async fn evaluate_default(name: &str) -> BuiltinResult<ExistResultKind> {
     if variable_exists(name) {
         return Ok(ExistResultKind::Variable);
     }
     if builtin_exists(name) {
         return Ok(ExistResultKind::Builtin);
     }
-    if class_exists(name)? {
+    if class_exists(name).await? {
         return Ok(ExistResultKind::Class);
     }
-    if let Some(kind) = detect_file_kind(name)? {
+    if let Some(kind) = detect_file_kind(name).await? {
         return Ok(kind);
     }
-    if directory_exists(name)? {
+    if directory_exists(name).await? {
         return Ok(ExistResultKind::Directory);
     }
     Ok(ExistResultKind::NotFound)
@@ -320,28 +327,32 @@ fn builtin_exists(name: &str) -> bool {
         .any(|b| b.name.eq_ignore_ascii_case(&lowered))
 }
 
-fn class_exists(name: &str) -> BuiltinResult<bool> {
+async fn class_exists(name: &str) -> BuiltinResult<bool> {
     if runmat_builtins::get_class(name).is_some() {
         return Ok(true);
     }
-    if class_folder_exists(name)? {
+    if class_folder_exists(name).await? {
         return Ok(true);
     }
-    if class_file_exists(name)? {
+    if class_file_exists(name).await? {
         return Ok(true);
     }
     Ok(false)
 }
 
-fn class_folder_exists(name: &str) -> BuiltinResult<bool> {
-    Ok(path_class_folder_candidates(name, "exist")
-        .map_err(exist_error)?
-        .into_iter()
-        .any(|path| path_is_directory(&path)))
+async fn class_folder_exists(name: &str) -> BuiltinResult<bool> {
+    for path in path_class_folder_candidates(name, "exist").map_err(exist_error)? {
+        if path_is_directory(&path).await {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
-fn class_file_exists(name: &str) -> BuiltinResult<bool> {
-    path_class_file_exists(name, CLASS_M_FILE_EXTENSIONS, "classdef", "exist").map_err(exist_error)
+async fn class_file_exists(name: &str) -> BuiltinResult<bool> {
+    path_class_file_exists(name, CLASS_M_FILE_EXTENSIONS, "classdef", "exist")
+        .await
+        .map_err(exist_error)
 }
 
 fn method_exists(name: &str) -> bool {
@@ -352,33 +363,39 @@ fn method_exists(name: &str) -> bool {
     }
 }
 
-fn directory_exists(name: &str) -> BuiltinResult<bool> {
-    Ok(path_directory_candidates(name, "exist")
-        .map_err(exist_error)?
-        .into_iter()
-        .any(|path| path_is_directory(&path)))
+async fn directory_exists(name: &str) -> BuiltinResult<bool> {
+    for path in path_directory_candidates(name, "exist").map_err(exist_error)? {
+        if path_is_directory(&path).await {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
-fn detect_file_kind(name: &str) -> BuiltinResult<Option<ExistResultKind>> {
+async fn detect_file_kind(name: &str) -> BuiltinResult<Option<ExistResultKind>> {
     if path_find_file_with_extensions(name, MEX_EXTENSIONS, "exist")
+        .await
         .map_err(exist_error)?
         .is_some()
     {
         return Ok(Some(ExistResultKind::Mex));
     }
     if path_find_file_with_extensions(name, PCODE_EXTENSIONS, "exist")
+        .await
         .map_err(exist_error)?
         .is_some()
     {
         return Ok(Some(ExistResultKind::Pcode));
     }
     if path_find_file_with_extensions(name, SIMULINK_EXTENSIONS, "exist")
+        .await
         .map_err(exist_error)?
         .is_some()
     {
         return Ok(Some(ExistResultKind::Simulink));
     }
     if path_find_file_with_extensions(name, GENERAL_FILE_EXTENSIONS, "exist")
+        .await
         .map_err(exist_error)?
         .is_some()
     {
@@ -548,7 +565,7 @@ pub(crate) mod tests {
         let temp = tempdir().expect("tempdir");
         let _guard = DirGuard::new();
         env::set_current_dir(temp.path()).expect("set temp");
-        vfs::create_dir("data").expect("mkdir data");
+        futures::executor::block_on(vfs::create_dir_async("data")).expect("mkdir data");
 
         let dir = exist_builtin(Value::from("data"), vec![Value::from("dir")]).expect("exist");
         assert_eq!(dir, Value::Num(7.0));
@@ -573,7 +590,8 @@ pub(crate) mod tests {
         )
         .expect("write classdef");
 
-        vfs::create_dir_all("+pkg/@Gizmo").expect("create package class folder");
+        futures::executor::block_on(vfs::create_dir_all_async("+pkg/@Gizmo"))
+            .expect("create package class folder");
 
         let widget =
             exist_builtin(Value::from("Widget"), vec![Value::from("class")]).expect("exist");

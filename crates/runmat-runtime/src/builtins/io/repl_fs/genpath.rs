@@ -79,20 +79,21 @@ fn map_control_flow(err: RuntimeError) -> RuntimeError {
 async fn genpath_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     let gathered = gather_arguments(args).await?;
     match gathered.len() {
-        0 => generate_from_current_directory(),
-        1 => generate_from_root(&gathered[0], None),
-        2 => generate_from_root(&gathered[0], Some(&gathered[1])),
+        0 => generate_from_current_directory().await,
+        1 => generate_from_root(&gathered[0], None).await,
+        2 => generate_from_root(&gathered[0], Some(&gathered[1])).await,
         _ => Err(genpath_error("genpath: too many input arguments")),
     }
 }
 
-fn generate_from_current_directory() -> BuiltinResult<Value> {
+async fn generate_from_current_directory() -> BuiltinResult<Value> {
     let cwd = vfs::current_dir().map_err(|err| {
         genpath_error(format!(
             "genpath: unable to resolve current directory: {err}"
         ))
     })?;
-    let (canonical_path, canonical_str) = canonicalize_existing(&cwd, "current directory")?;
+    let (canonical_path, canonical_str) =
+        canonicalize_existing_async(&cwd, "current directory").await?;
     let excludes = ExcludeSet::default();
     let mut seen = HashSet::new();
     let mut segments = Vec::new();
@@ -102,17 +103,18 @@ fn generate_from_current_directory() -> BuiltinResult<Value> {
         &excludes,
         &mut seen,
         &mut segments,
-    )?;
+    )
+    .await?;
     Ok(char_array_value(&join_segments(&segments)))
 }
 
-fn generate_from_root(root: &Value, excludes: Option<&Value>) -> BuiltinResult<Value> {
+async fn generate_from_root(root: &Value, excludes: Option<&Value>) -> BuiltinResult<Value> {
     let root_text = extract_text(root, ERROR_FOLDER_TYPE)?;
-    let root_info = normalize_root(&root_text)?;
+    let root_info = normalize_root(&root_text).await?;
     let exclude_text = excludes
         .map(|value| extract_text(value, ERROR_EXCLUDES_TYPE))
         .transpose()?;
-    let exclude_set = build_exclude_set(exclude_text.as_deref(), &root_info)?;
+    let exclude_set = build_exclude_set(exclude_text.as_deref(), &root_info).await?;
     let mut seen = HashSet::new();
     let mut segments = Vec::new();
     traverse(
@@ -121,7 +123,8 @@ fn generate_from_root(root: &Value, excludes: Option<&Value>) -> BuiltinResult<V
         &exclude_set,
         &mut seen,
         &mut segments,
-    )?;
+    )
+    .await?;
     Ok(char_array_value(&join_segments(&segments)))
 }
 
@@ -141,7 +144,7 @@ struct RootInfo {
     canonical: String,
 }
 
-fn normalize_root(text: &str) -> BuiltinResult<RootInfo> {
+async fn normalize_root(text: &str) -> BuiltinResult<RootInfo> {
     if text.trim().is_empty() {
         return Err(genpath_error(format!("genpath: folder '{text}' not found")));
     }
@@ -159,7 +162,7 @@ fn normalize_root(text: &str) -> BuiltinResult<RootInfo> {
         cwd.join(raw_path)
     };
 
-    let (canonical_path, canonical_str) = canonicalize_existing(&absolute, text)?;
+    let (canonical_path, canonical_str) = canonicalize_existing_async(&absolute, text).await?;
 
     Ok(RootInfo {
         path: canonical_path,
@@ -167,11 +170,20 @@ fn normalize_root(text: &str) -> BuiltinResult<RootInfo> {
     })
 }
 
-fn canonicalize_existing(path: &Path, display: &str) -> BuiltinResult<(PathBuf, String)> {
-    let canonical = vfs::canonicalize(path)
+async fn canonicalize_existing_async(
+    path: &Path,
+    display: &str,
+) -> BuiltinResult<(PathBuf, String)> {
+    let canonical = vfs::canonicalize_async(path)
+        .await
         .map_err(|_| genpath_error(format!("genpath: folder '{display}' not found")))?;
     let canonical_str = canonical_string_from_path(&canonical);
     Ok((canonical, canonical_str))
+}
+
+#[cfg(test)]
+fn canonicalize_existing(path: &Path, display: &str) -> BuiltinResult<(PathBuf, String)> {
+    futures::executor::block_on(canonicalize_existing_async(path, display))
 }
 
 #[cfg(windows)]
@@ -202,7 +214,8 @@ fn join_segments(segments: &[String]) -> String {
     output
 }
 
-fn traverse(
+#[async_recursion::async_recursion(?Send)]
+async fn traverse(
     path: &Path,
     canonical: String,
     excludes: &ExcludeSet,
@@ -221,13 +234,13 @@ fn traverse(
     segments.push(canonical.clone());
 
     let mut children = Vec::new();
-    let entries = match vfs::read_dir(path) {
+    let entries = match vfs::read_dir_async(path).await {
         Ok(listing) => listing,
         Err(_) => return Ok(()),
     };
     for entry in entries {
         let source_path = entry.path().to_path_buf();
-        let metadata = match vfs::metadata(&source_path) {
+        let metadata = match vfs::metadata_async(&source_path).await {
             Ok(meta) => meta,
             Err(_) => continue,
         };
@@ -238,7 +251,7 @@ fn traverse(
         if is_matlab_reserved_folder(&name) {
             continue;
         }
-        let child_path = match vfs::canonicalize(&source_path) {
+        let child_path = match vfs::canonicalize_async(&source_path).await {
             Ok(path) => path,
             Err(_) => continue,
         };
@@ -260,7 +273,8 @@ fn traverse(
             excludes,
             seen,
             segments,
-        )?;
+        )
+        .await?;
     }
 
     Ok(())
@@ -331,7 +345,7 @@ struct ExcludeEntry {
     normalized_with_sep: String,
 }
 
-fn build_exclude_set(excludes: Option<&str>, root: &RootInfo) -> BuiltinResult<ExcludeSet> {
+async fn build_exclude_set(excludes: Option<&str>, root: &RootInfo) -> BuiltinResult<ExcludeSet> {
     let mut entries = Vec::new();
     if let Some(text) = excludes {
         for raw in text.split(crate::builtins::common::path_state::PATH_LIST_SEPARATOR) {
@@ -350,7 +364,7 @@ fn build_exclude_set(excludes: Option<&str>, root: &RootInfo) -> BuiltinResult<E
                 candidate = root.path.join(candidate);
             }
 
-            if let Ok((_, canonical_str)) = canonicalize_existing(&candidate, trimmed) {
+            if let Ok((_, canonical_str)) = canonicalize_existing_async(&candidate, trimmed).await {
                 entries.push(canonical_str);
                 continue;
             }
@@ -362,7 +376,7 @@ fn build_exclude_set(excludes: Option<&str>, root: &RootInfo) -> BuiltinResult<E
                 } else {
                     cwd.join(trimmed)
                 };
-                if let Ok((_, canonical_alt)) = canonicalize_existing(&alt, trimmed) {
+                if let Ok((_, canonical_alt)) = canonicalize_existing_async(&alt, trimmed).await {
                     entries.push(canonical_alt);
                 }
             }

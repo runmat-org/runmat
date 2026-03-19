@@ -126,6 +126,42 @@
     {
       "label": "join",
       "url": "./join"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    },
+    {
+      "label": "num2str",
+      "url": "./num2str"
+    },
+    {
+      "label": "str2double",
+      "url": "./str2double"
+    },
+    {
+      "label": "strcmp",
+      "url": "./strcmp"
+    },
+    {
+      "label": "strcmpi",
+      "url": "./strcmpi"
+    },
+    {
+      "label": "string.empty",
+      "url": "./string.empty"
+    },
+    {
+      "label": "strings",
+      "url": "./strings"
+    },
+    {
+      "label": "strlength",
+      "url": "./strlength"
+    },
+    {
+      "label": "strncmp",
+      "url": "./strncmp"
     }
   ],
   "source": {

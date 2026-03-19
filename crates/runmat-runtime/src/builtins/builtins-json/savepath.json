@@ -90,7 +90,7 @@
     },
     {
       "question": "What happens if the file is read-only?",
-      "answer": "`savepath` returns `status = 1` together with the diagnostic message and message ID `MATLAB:savepath:cannotWriteFile`. The existing file is left untouched."
+      "answer": "`savepath` returns `status = 1` together with the diagnostic message and message ID `RunMat:savepath:cannotWriteFile`. The existing file is left untouched."
     },
     {
       "question": "Does `savepath` modify the current path?",
@@ -137,6 +137,66 @@
     {
       "label": "genpath",
       "url": "./genpath"
+    },
+    {
+      "label": "cd",
+      "url": "./cd"
+    },
+    {
+      "label": "copyfile",
+      "url": "./copyfile"
+    },
+    {
+      "label": "delete",
+      "url": "./delete"
+    },
+    {
+      "label": "dir",
+      "url": "./dir"
+    },
+    {
+      "label": "exist",
+      "url": "./exist"
+    },
+    {
+      "label": "fullfile",
+      "url": "./fullfile"
+    },
+    {
+      "label": "getenv",
+      "url": "./getenv"
+    },
+    {
+      "label": "ls",
+      "url": "./ls"
+    },
+    {
+      "label": "mkdir",
+      "url": "./mkdir"
+    },
+    {
+      "label": "movefile",
+      "url": "./movefile"
+    },
+    {
+      "label": "pwd",
+      "url": "./pwd"
+    },
+    {
+      "label": "rmdir",
+      "url": "./rmdir"
+    },
+    {
+      "label": "setenv",
+      "url": "./setenv"
+    },
+    {
+      "label": "tempdir",
+      "url": "./tempdir"
+    },
+    {
+      "label": "tempname",
+      "url": "./tempname"
     }
   ],
   "source": {

@@ -114,7 +114,7 @@ async fn which_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 
     let name = name.ok_or_else(|| which_error(ERROR_NOT_ENOUGH_ARGS))?;
-    let matches = search_matches(&name, &options)?;
+    let matches = search_matches(&name, &options).await?;
     if matches.is_empty() {
         return Ok(Value::CharArray(CharArray::new_row(&format!(
             "'{name}' not found."
@@ -226,7 +226,7 @@ fn conflict_message(option: &str, conflicts: &[&str]) -> String {
     format!("conflicting option '{option}'; cannot combine with {joined}")
 }
 
-fn search_matches(name: &str, options: &WhichOptions) -> BuiltinResult<Vec<String>> {
+async fn search_matches(name: &str, options: &WhichOptions) -> BuiltinResult<Vec<String>> {
     if options.var_only {
         return Ok(variable_match(name).into_iter().collect());
     }
@@ -234,7 +234,7 @@ fn search_matches(name: &str, options: &WhichOptions) -> BuiltinResult<Vec<Strin
         return Ok(builtin_matches(name));
     }
     if options.file_only {
-        return search_file_like_matches(name, options.all);
+        return search_file_like_matches(name, options.all).await;
     }
 
     let mut seen = HashSet::new();
@@ -254,7 +254,7 @@ fn search_matches(name: &str, options: &WhichOptions) -> BuiltinResult<Vec<Strin
         }
     }
 
-    let mut class_entries = class_matches(name)?;
+    let mut class_entries = class_matches(name).await?;
     for entry in class_entries.drain(..) {
         push_unique(&mut results, &mut seen, entry.clone());
         if !options.all && !results.is_empty() {
@@ -262,7 +262,7 @@ fn search_matches(name: &str, options: &WhichOptions) -> BuiltinResult<Vec<Strin
         }
     }
 
-    let mut file_entries = file_matches(name)?;
+    let mut file_entries = file_matches(name).await?;
     for entry in file_entries.drain(..) {
         push_unique(&mut results, &mut seen, entry.clone());
         if !options.all && !results.is_empty() {
@@ -270,7 +270,7 @@ fn search_matches(name: &str, options: &WhichOptions) -> BuiltinResult<Vec<Strin
         }
     }
 
-    let mut directory_entries = directory_matches(name)?;
+    let mut directory_entries = directory_matches(name).await?;
     for entry in directory_entries.drain(..) {
         push_unique(&mut results, &mut seen, entry.clone());
         if !options.all && !results.is_empty() {
@@ -281,22 +281,22 @@ fn search_matches(name: &str, options: &WhichOptions) -> BuiltinResult<Vec<Strin
     Ok(results)
 }
 
-fn search_file_like_matches(name: &str, gather_all: bool) -> BuiltinResult<Vec<String>> {
+async fn search_file_like_matches(name: &str, gather_all: bool) -> BuiltinResult<Vec<String>> {
     let mut seen = HashSet::new();
     let mut results = Vec::new();
 
-    for entry in class_matches(name)? {
+    for entry in class_matches(name).await? {
         push_unique(&mut results, &mut seen, entry);
     }
 
-    for entry in file_matches(name)? {
+    for entry in file_matches(name).await? {
         push_unique(&mut results, &mut seen, entry);
         if !gather_all && !results.is_empty() {
             return Ok(results);
         }
     }
 
-    for entry in directory_matches(name)? {
+    for entry in directory_matches(name).await? {
         push_unique(&mut results, &mut seen, entry);
         if !gather_all && !results.is_empty() {
             return Ok(results);
@@ -319,64 +319,66 @@ fn builtin_matches(name: &str) -> Vec<String> {
         .collect()
 }
 
-fn class_matches(name: &str) -> BuiltinResult<Vec<String>> {
+async fn class_matches(name: &str) -> BuiltinResult<Vec<String>> {
     let mut results = Vec::new();
     let mut seen = HashSet::new();
 
     for folder in which_path(class_folder_candidates(name, "which"))? {
-        if folder.is_dir() {
-            let text = format!("class folder: {}", canonical_path(&folder));
+        if vfs::metadata_async(&folder)
+            .await
+            .map(|meta| meta.is_dir())
+            .unwrap_or(false)
+        {
+            let text = format!("class folder: {}", canonical_path(&folder).await);
             push_unique(&mut results, &mut seen, text);
         }
     }
 
-    for file in which_path(class_file_paths(
-        name,
-        CLASS_M_FILE_EXTENSIONS,
-        "classdef",
-        "which",
-    ))? {
-        let text = format!("classdef file: {}", canonical_path(&file));
+    for file in
+        which_path(class_file_paths(name, CLASS_M_FILE_EXTENSIONS, "classdef", "which").await)?
+    {
+        let text = format!("classdef file: {}", canonical_path(&file).await);
         push_unique(&mut results, &mut seen, text);
     }
 
     Ok(results)
 }
 
-fn file_matches(name: &str) -> BuiltinResult<Vec<String>> {
+async fn file_matches(name: &str) -> BuiltinResult<Vec<String>> {
     let mut results = Vec::new();
     let mut seen = HashSet::new();
-    for file in which_path(find_all_files_with_extensions(
-        name,
-        GENERAL_FILE_EXTENSIONS,
-        "which",
-    ))? {
-        if vfs::metadata(&file)
+    for file in
+        which_path(find_all_files_with_extensions(name, GENERAL_FILE_EXTENSIONS, "which").await)?
+    {
+        if vfs::metadata_async(&file)
+            .await
             .map(|meta| meta.is_file())
             .unwrap_or(false)
         {
-            push_unique(&mut results, &mut seen, canonical_path(&file));
+            push_unique(&mut results, &mut seen, canonical_path(&file).await);
         }
     }
     Ok(results)
 }
 
-fn directory_matches(name: &str) -> BuiltinResult<Vec<String>> {
+async fn directory_matches(name: &str) -> BuiltinResult<Vec<String>> {
     let mut results = Vec::new();
     let mut seen = HashSet::new();
     for dir in which_path(directory_candidates(name, "which"))? {
-        if vfs::metadata(&dir)
+        if vfs::metadata_async(&dir)
+            .await
             .map(|meta| meta.is_dir())
             .unwrap_or(false)
         {
-            push_unique(&mut results, &mut seen, canonical_path(&dir));
+            push_unique(&mut results, &mut seen, canonical_path(&dir).await);
         }
     }
     Ok(results)
 }
 
-fn canonical_path(path: &Path) -> String {
-    vfs::canonicalize(path)
+async fn canonical_path(path: &Path) -> String {
+    vfs::canonicalize_async(path)
+        .await
         .map(|p| path_to_string(&p))
         .unwrap_or_else(|_| path_to_string(path))
 }

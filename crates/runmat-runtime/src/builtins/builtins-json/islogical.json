@@ -118,6 +118,18 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "isgpuarray",
+      "url": "./isgpuarray"
+    },
+    {
+      "label": "isinf",
+      "url": "./isinf"
+    },
+    {
+      "label": "isnumeric",
+      "url": "./isnumeric"
     }
   ],
   "source": {

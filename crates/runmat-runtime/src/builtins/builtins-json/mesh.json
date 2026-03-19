@@ -38,7 +38,52 @@
   ],
   "examples": [],
   "faqs": [],
-  "links": [],
+  "links": [
+    {
+      "label": "bar",
+      "url": "./bar"
+    },
+    {
+      "label": "contour",
+      "url": "./contour"
+    },
+    {
+      "label": "contourf",
+      "url": "./contourf"
+    },
+    {
+      "label": "hist",
+      "url": "./hist"
+    },
+    {
+      "label": "meshc",
+      "url": "./meshc"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "scatter",
+      "url": "./scatter"
+    },
+    {
+      "label": "scatter3",
+      "url": "./scatter3"
+    },
+    {
+      "label": "stairs",
+      "url": "./stairs"
+    },
+    {
+      "label": "surf",
+      "url": "./surf"
+    },
+    {
+      "label": "surfc",
+      "url": "./surfc"
+    }
+  ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/mesh.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/mesh.rs"

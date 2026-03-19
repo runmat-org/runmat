@@ -127,6 +127,54 @@
     {
       "label": "`gather`",
       "url": "./gather"
+    },
+    {
+      "label": "cat",
+      "url": "./cat"
+    },
+    {
+      "label": "circshift",
+      "url": "./circshift"
+    },
+    {
+      "label": "diag",
+      "url": "./diag"
+    },
+    {
+      "label": "fliplr",
+      "url": "./fliplr"
+    },
+    {
+      "label": "flipud",
+      "url": "./flipud"
+    },
+    {
+      "label": "horzcat",
+      "url": "./horzcat"
+    },
+    {
+      "label": "ipermute",
+      "url": "./ipermute"
+    },
+    {
+      "label": "repmat",
+      "url": "./repmat"
+    },
+    {
+      "label": "squeeze",
+      "url": "./squeeze"
+    },
+    {
+      "label": "tril",
+      "url": "./tril"
+    },
+    {
+      "label": "triu",
+      "url": "./triu"
+    },
+    {
+      "label": "vertcat",
+      "url": "./vertcat"
     }
   ],
   "source": {

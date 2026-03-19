@@ -114,6 +114,46 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "acos",
+      "url": "./acos"
+    },
+    {
+      "label": "acosh",
+      "url": "./acosh"
+    },
+    {
+      "label": "asin",
+      "url": "./asin"
+    },
+    {
+      "label": "asinh",
+      "url": "./asinh"
+    },
+    {
+      "label": "atan",
+      "url": "./atan"
+    },
+    {
+      "label": "atan2",
+      "url": "./atan2"
+    },
+    {
+      "label": "atanh",
+      "url": "./atanh"
+    },
+    {
+      "label": "cosh",
+      "url": "./cosh"
+    },
+    {
+      "label": "sinh",
+      "url": "./sinh"
+    },
+    {
+      "label": "tanh",
+      "url": "./tanh"
     }
   ],
   "source": {

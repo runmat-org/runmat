@@ -121,6 +121,10 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "roots",
+      "url": "./roots"
     }
   ],
   "source": {

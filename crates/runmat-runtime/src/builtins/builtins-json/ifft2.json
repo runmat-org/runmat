@@ -131,6 +131,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "fftshift",
+      "url": "./fftshift"
+    },
+    {
+      "label": "ifftshift",
+      "url": "./ifftshift"
     }
   ],
   "source": {

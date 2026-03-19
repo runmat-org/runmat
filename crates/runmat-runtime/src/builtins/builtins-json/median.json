@@ -126,6 +126,54 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "all",
+      "url": "./all"
+    },
+    {
+      "label": "any",
+      "url": "./any"
+    },
+    {
+      "label": "cummax",
+      "url": "./cummax"
+    },
+    {
+      "label": "cummin",
+      "url": "./cummin"
+    },
+    {
+      "label": "cumprod",
+      "url": "./cumprod"
+    },
+    {
+      "label": "cumsum",
+      "url": "./cumsum"
+    },
+    {
+      "label": "diff",
+      "url": "./diff"
+    },
+    {
+      "label": "max",
+      "url": "./max"
+    },
+    {
+      "label": "min",
+      "url": "./min"
+    },
+    {
+      "label": "nnz",
+      "url": "./nnz"
+    },
+    {
+      "label": "std",
+      "url": "./std"
+    },
+    {
+      "label": "var",
+      "url": "./var"
     }
   ],
   "source": {

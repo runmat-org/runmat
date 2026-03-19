@@ -58,9 +58,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "ge";
-const IDENT_INVALID_INPUT: &str = "MATLAB:ge:InvalidInput";
-const IDENT_SIZE_MISMATCH: &str = "MATLAB:ge:SizeMismatch";
-const IDENT_COMPLEX_UNSUPPORTED: &str = "MATLAB:ge:ComplexNotSupported";
+const IDENT_INVALID_INPUT: &str = "RunMat:ge:InvalidInput";
+const IDENT_SIZE_MISMATCH: &str = "RunMat:ge:SizeMismatch";
+const IDENT_COMPLEX_UNSUPPORTED: &str = "RunMat:ge:ComplexNotSupported";
 
 fn ge_error(message: impl Into<String>, identifier: &'static str) -> RuntimeError {
     build_runtime_error(message)

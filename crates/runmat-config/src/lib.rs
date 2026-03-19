@@ -79,7 +79,7 @@ pub struct RuntimeConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct LanguageConfig {
     /// Compatibility mode for MATLAB command syntax and legacy behaviors.
-    /// Default: "matlab" (accept command syntax like `hold on`).
+    /// Default: "runmat" (RunMat identifiers with MATLAB-compatible command syntax).
     /// "strict" disables command syntax; require `hold(\"on\")` style.
     #[serde(default)]
     pub compat: LanguageCompatMode,
@@ -88,13 +88,23 @@ pub struct LanguageConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum)]
 #[serde(rename_all = "kebab-case")]
 pub enum LanguageCompatMode {
+    #[serde(rename = "runmat", alias = "run-mat")]
+    #[value(name = "runmat")]
+    RunMat,
     Matlab,
     Strict,
 }
 
 impl Default for LanguageCompatMode {
     fn default() -> Self {
-        Self::Matlab
+        Self::RunMat
+    }
+}
+
+pub fn error_namespace_for_language_compat(mode: LanguageCompatMode) -> &'static str {
+    match mode {
+        LanguageCompatMode::Matlab => "MATLAB",
+        LanguageCompatMode::RunMat | LanguageCompatMode::Strict => "RunMat",
     }
 }
 
@@ -585,7 +595,7 @@ fn default_callstack_limit() -> usize {
 }
 
 fn default_error_namespace() -> String {
-    "RunMat".to_string()
+    "".to_string()
 }
 fn default_true() -> bool {
     true
@@ -1334,7 +1344,8 @@ mod tests {
         assert!(config.jit.enabled);
         assert_eq!(config.jit.threshold, 10);
         assert_eq!(config.plotting.mode, PlotMode::Auto);
-        assert!(matches!(config.language.compat, LanguageCompatMode::Matlab));
+        assert!(matches!(config.language.compat, LanguageCompatMode::RunMat));
+        assert_eq!(config.runtime.error_namespace, "");
     }
 
     #[test]

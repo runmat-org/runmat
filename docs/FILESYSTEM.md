@@ -6,6 +6,10 @@ This guide explains how the RunMat filesystem works, how to choose a backend, an
 
 RunMat’s filesystem keeps scripts consistent across laptop, browser, desktop, and cloud without requiring runtime scripts to rewrite `load` or `save`. You can scale from a local sandbox to petabytes in the cloud without changing your code.
 
+Replay note: notebook replay artifacts (figure scene/workspace replay payloads) are host-managed
+files. The runtime only exports/imports opaque payload bytes; artifact naming, retention, and
+storage location are controlled by the host application.
+
 ```
            ┌────────────────────┐
            │ RunMat Runtime     │

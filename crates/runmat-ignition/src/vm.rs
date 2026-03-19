@@ -24,7 +24,7 @@ use runmat_runtime::{
     builtins::common::shape::is_scalar_shape,
     builtins::common::tensor,
     builtins::stats::random::stochastic_evolution::stochastic_evolution_host,
-    gather_if_needed,
+    gather_if_needed_async,
     output_context::push_output_count,
     user_functions,
     workspace::{self as runtime_workspace, WorkspaceResolver},
@@ -452,7 +452,7 @@ fn log_fusion_span_window(
 }
 
 // Namespace used for error identifiers (e.g., "RunMat:..." or custom override)
-pub const DEFAULT_ERROR_NAMESPACE: &str = "MATLAB";
+pub const DEFAULT_ERROR_NAMESPACE: &str = "RunMat";
 
 type VmResult<T> = Result<T, RuntimeError>;
 
@@ -474,6 +474,10 @@ enum SliceSelector {
     Colon,
     Scalar(usize),
     Indices(Vec<usize>),
+    LinearIndices {
+        values: Vec<usize>,
+        output_shape: Vec<usize>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -688,8 +692,24 @@ async fn build_slice_selectors(
                 "missing numeric index for linear slice",
             )
         })?;
-        let idxs = indices_from_value_linear(value, total_len).await?;
-        selectors.push(SliceSelector::Indices(idxs));
+        if let Value::Tensor(idx_t) = value {
+            let len = idx_t.shape.iter().product::<usize>();
+            let mut indices = Vec::with_capacity(len);
+            for &val in &idx_t.data {
+                let idx = val as isize;
+                if idx < 1 || (idx as usize) > total_len {
+                    return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+                }
+                indices.push(idx as usize);
+            }
+            selectors.push(SliceSelector::LinearIndices {
+                values: indices,
+                output_shape: idx_t.shape.clone(),
+            });
+        } else {
+            let idxs = indices_from_value_linear(value, total_len).await?;
+            selectors.push(SliceSelector::Indices(idxs));
+        }
         return Ok(selectors);
     }
 
@@ -726,20 +746,21 @@ fn build_slice_plan(
             .first()
             .cloned()
             .unwrap_or(SliceSelector::Indices(Vec::new()));
-        let indices = match list {
+        let indices = match &list {
             SliceSelector::Colon => (1..=total_len).collect::<Vec<usize>>(),
-            SliceSelector::Scalar(i) => vec![i],
-            SliceSelector::Indices(v) => v,
+            SliceSelector::Scalar(i) => vec![*i],
+            SliceSelector::Indices(v) => v.clone(),
+            SliceSelector::LinearIndices { values, .. } => values.clone(),
         };
         if indices.iter().any(|&i| i == 0 || i > total_len) {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
         }
         let zero_based: Vec<u32> = indices.iter().map(|&i| (i - 1) as u32).collect();
         let count = zero_based.len();
-        let shape = if count <= 1 {
-            vec![1, 1]
-        } else {
-            vec![count, 1]
+        let shape = match list {
+            SliceSelector::LinearIndices { output_shape, .. } => output_shape,
+            _ if count <= 1 => vec![1, 1],
+            _ => vec![count, 1],
         };
         return Ok(SlicePlan {
             indices: zero_based,
@@ -758,6 +779,7 @@ fn build_slice_plan(
             SliceSelector::Colon => (1..=dim_len).collect::<Vec<usize>>(),
             SliceSelector::Scalar(i) => vec![*i],
             SliceSelector::Indices(v) => v.clone(),
+            SliceSelector::LinearIndices { values: v, .. } => v.clone(),
         };
         if idxs.iter().any(|&i| i == 0 || i > dim_len) {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
@@ -852,21 +874,23 @@ fn gather_string_slice(sa: &runmat_builtins::StringArray, plan: &SlicePlan) -> V
     }
     if plan.indices.len() == 1 {
         let lin = plan.indices[0] as usize;
-        let value = sa
-            .data
-            .get(lin)
-            .cloned()
-            .ok_or_else(|| "Slice error: string index out of bounds".to_string())?;
+        let value = sa.data.get(lin).cloned().ok_or_else(|| {
+            mex(
+                "IndexOutOfBounds",
+                "Slice error: string index out of bounds",
+            )
+        })?;
         return Ok(Value::String(value));
     }
     let mut out = Vec::with_capacity(plan.indices.len());
     for &lin in &plan.indices {
         let idx = lin as usize;
-        let value = sa
-            .data
-            .get(idx)
-            .cloned()
-            .ok_or_else(|| "Slice error: string index out of bounds".to_string())?;
+        let value = sa.data.get(idx).cloned().ok_or_else(|| {
+            mex(
+                "IndexOutOfBounds",
+                "Slice error: string index out of bounds",
+            )
+        })?;
         out.push(value);
     }
     let out_sa = runmat_builtins::StringArray::new(out, plan.output_shape.clone())
@@ -895,13 +919,13 @@ fn build_string_rhs_view(rhs: &Value, selection_lengths: &[usize]) -> VmResult<S
                 shape.resize(dims, 1);
             } else if shape.len() > dims {
                 if shape.iter().skip(dims).any(|&s| s != 1) {
-                    return Err("shape mismatch for slice assign".to_string().into());
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
                 }
                 shape.truncate(dims);
             }
             for (rhs_len, sel_len) in shape.iter().zip(selection_lengths.iter()) {
                 if !(*rhs_len == 1 || *rhs_len == *sel_len) {
-                    return Err("shape mismatch for slice assign".to_string().into());
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
                 }
             }
             let mut strides = vec![1usize; dims];
@@ -921,13 +945,13 @@ fn build_string_rhs_view(rhs: &Value, selection_lengths: &[usize]) -> VmResult<S
                 shape.resize(dims, 1);
             } else if shape.len() > dims {
                 if shape.iter().skip(dims).any(|&s| s != 1) {
-                    return Err("shape mismatch for slice assign".to_string().into());
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
                 }
                 shape.truncate(dims);
             }
             for (rhs_len, sel_len) in shape.iter().zip(selection_lengths.iter()) {
                 if !(*rhs_len == 1 || *rhs_len == *sel_len) {
-                    return Err("shape mismatch for slice assign".to_string().into());
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
                 }
             }
             let mut strides = vec![1usize; dims];
@@ -940,7 +964,10 @@ fn build_string_rhs_view(rhs: &Value, selection_lengths: &[usize]) -> VmResult<S
                 strides,
             })
         }
-        _ => Err("rhs must be string or string array".to_string().into()),
+        _ => Err(mex(
+            "InvalidSliceAssignmentRhs",
+            "rhs must be string or string array",
+        )),
     }
 }
 
@@ -1025,7 +1052,7 @@ async fn materialize_rhs_linear(rhs: &Value, count: usize) -> VmResult<Vec<f64>>
             } else if t.data.len() == 1 {
                 Ok(vec![t.data[0]; count])
             } else {
-                Err("shape mismatch for slice assign".to_string().into())
+                Err(mex("ShapeMismatch", "shape mismatch for slice assign"))
             }
         }
         Value::LogicalArray(la) => {
@@ -1040,10 +1067,13 @@ async fn materialize_rhs_linear(rhs: &Value, count: usize) -> VmResult<Vec<f64>>
                 let val = if la.data[0] != 0 { 1.0 } else { 0.0 };
                 Ok(vec![val; count])
             } else {
-                Err("shape mismatch for slice assign".to_string().into())
+                Err(mex("ShapeMismatch", "shape mismatch for slice assign"))
             }
         }
-        other => Err(format!("slice assign: unsupported RHS type {:?}", other).into()),
+        other => Err(mex(
+            "InvalidSliceAssignmentRhs",
+            &format!("slice assign: unsupported RHS type {:?}", other),
+        )),
     }
 }
 
@@ -1069,13 +1099,13 @@ async fn materialize_rhs_nd(rhs: &Value, selection_lengths: &[usize]) -> VmResul
             }
             if shape.len() > selection_lengths.len() {
                 if shape.iter().skip(selection_lengths.len()).any(|&s| s != 1) {
-                    return Err("shape mismatch for slice assign".to_string().into());
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
                 }
                 shape.truncate(selection_lengths.len());
             }
             for (dim_len, &sel_len) in shape.iter().zip(selection_lengths.iter()) {
                 if *dim_len != 1 && *dim_len != sel_len {
-                    return Err("shape mismatch for slice assign".to_string().into());
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
                 }
             }
             let mut strides = vec![1usize; selection_lengths.len()];
@@ -1088,7 +1118,7 @@ async fn materialize_rhs_nd(rhs: &Value, selection_lengths: &[usize]) -> VmResul
                     .copied()
                     .fold(1usize, |acc, len| acc.saturating_mul(len.max(1)))
             {
-                return Err("shape mismatch for slice assign".to_string().into());
+                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
             }
             RhsView::Tensor {
                 data: t.data,
@@ -1104,7 +1134,7 @@ async fn materialize_rhs_nd(rhs: &Value, selection_lengths: &[usize]) -> VmResul
                     .skip(selection_lengths.len())
                     .any(|&s| s != 1)
             {
-                return Err("shape mismatch for slice assign".to_string().into());
+                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
             }
             let mut shape = la.shape.clone();
             if shape.len() < selection_lengths.len() {
@@ -1114,7 +1144,7 @@ async fn materialize_rhs_nd(rhs: &Value, selection_lengths: &[usize]) -> VmResul
             }
             for (dim_len, &sel_len) in shape.iter().zip(selection_lengths.iter()) {
                 if *dim_len != 1 && *dim_len != sel_len {
-                    return Err("shape mismatch for slice assign".to_string().into());
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
                 }
             }
             let mut strides = vec![1usize; selection_lengths.len()];
@@ -1127,7 +1157,7 @@ async fn materialize_rhs_nd(rhs: &Value, selection_lengths: &[usize]) -> VmResul
                     .copied()
                     .fold(1usize, |acc, len| acc.saturating_mul(len.max(1)))
             {
-                return Err("shape mismatch for slice assign".to_string().into());
+                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
             }
             let data: Vec<f64> = la
                 .data
@@ -1140,7 +1170,12 @@ async fn materialize_rhs_nd(rhs: &Value, selection_lengths: &[usize]) -> VmResul
                 strides,
             }
         }
-        other => return Err(format!("slice assign: unsupported RHS type {:?}", other).into()),
+        other => {
+            return Err(mex(
+                "InvalidSliceAssignmentRhs",
+                &format!("slice assign: unsupported RHS type {:?}", other),
+            ))
+        }
     };
 
     let total = selection_lengths
@@ -1336,7 +1371,10 @@ fn set_workspace_variable(name: &str, value: Value, vars: &mut Vec<Value>) -> Vm
                 ws.assigned.insert(name.to_string());
             }
             None => {
-                result = Err("load: workspace state unavailable".to_string().into());
+                result = Err(mex(
+                    "WorkspaceUnavailable",
+                    "load: workspace state unavailable",
+                ));
             }
         }
     });
@@ -1602,8 +1640,9 @@ async fn run_interpreter_inner(
             Box::pin(async move {
                 let vars_ptr = USER_FUNCTION_VARS.with(|slot| *slot.borrow());
                 let Some(vars_ptr) = vars_ptr else {
-                    return Err(RuntimeError::new(
-                        "user function vars not installed".to_string(),
+                    return Err(mex(
+                        "InternalStateUnavailable",
+                        "user function vars not installed",
                     ));
                 };
                 let vars = unsafe { &mut *vars_ptr };
@@ -1672,7 +1711,10 @@ async fn run_interpreter_inner(
     let mut interpreter_timing = InterpreterTiming::new();
     macro_rules! vm_bail {
         ($err:expr) => {{
-            let err: RuntimeError = $err.into();
+            let mut err: RuntimeError = $err.into();
+            if err.identifier.is_none() {
+                err.identifier = Some(format!("{}:RuntimeError", error_namespace()));
+            }
             let err = attach_span_at(&bytecode, pc, err);
             if let Some((catch_pc, catch_var)) = try_stack.pop() {
                 if let Some(var_idx) = catch_var {
@@ -2761,12 +2803,10 @@ async fn run_interpreter_inner(
                                 ];
                                 match call_builtin_vm!("call_method", &args2) {
                                     Ok(v) => {
-                                        let truth: f64 = (&v).try_into()?;
-                                        stack.push(Value::Num(if truth == 0.0 {
-                                            1.0
-                                        } else {
-                                            0.0
-                                        }));
+                                        let truth =
+                                            logical_truth_from_value(&v, "comparison result")
+                                                .await?;
+                                        stack.push(Value::Num(if !truth { 1.0 } else { 0.0 }));
                                     }
                                     Err(_) => {
                                         let aa: f64 = (&a).try_into()?;
@@ -2794,12 +2834,10 @@ async fn run_interpreter_inner(
                                 ];
                                 match call_builtin_vm!("call_method", &args2) {
                                     Ok(v) => {
-                                        let truth: f64 = (&v).try_into()?;
-                                        stack.push(Value::Num(if truth == 0.0 {
-                                            1.0
-                                        } else {
-                                            0.0
-                                        }));
+                                        let truth =
+                                            logical_truth_from_value(&v, "comparison result")
+                                                .await?;
+                                        stack.push(Value::Num(if !truth { 1.0 } else { 0.0 }));
                                     }
                                     Err(_) => {
                                         let aa: f64 = (&a).try_into()?;
@@ -2853,12 +2891,10 @@ async fn run_interpreter_inner(
                                 ];
                                 match call_builtin_vm!("call_method", &args2) {
                                     Ok(v) => {
-                                        let truth: f64 = (&v).try_into()?;
-                                        stack.push(Value::Num(if truth == 0.0 {
-                                            1.0
-                                        } else {
-                                            0.0
-                                        }));
+                                        let truth =
+                                            logical_truth_from_value(&v, "comparison result")
+                                                .await?;
+                                        stack.push(Value::Num(if !truth { 1.0 } else { 0.0 }));
                                     }
                                     Err(_) => {
                                         let aa: f64 = (&a).try_into()?;
@@ -2886,12 +2922,10 @@ async fn run_interpreter_inner(
                                 ];
                                 match call_builtin_vm!("call_method", &args2) {
                                     Ok(v) => {
-                                        let truth: f64 = (&v).try_into()?;
-                                        stack.push(Value::Num(if truth == 0.0 {
-                                            1.0
-                                        } else {
-                                            0.0
-                                        }));
+                                        let truth =
+                                            logical_truth_from_value(&v, "comparison result")
+                                                .await?;
+                                        stack.push(Value::Num(if !truth { 1.0 } else { 0.0 }));
                                     }
                                     Err(_) => {
                                         let aa: f64 = (&a).try_into()?;
@@ -3161,12 +3195,10 @@ async fn run_interpreter_inner(
                                 ];
                                 match call_builtin_vm!("call_method", &args2) {
                                     Ok(v) => {
-                                        let truth: f64 = (&v).try_into()?;
-                                        stack.push(Value::Num(if truth == 0.0 {
-                                            1.0
-                                        } else {
-                                            0.0
-                                        }));
+                                        let truth =
+                                            logical_truth_from_value(&v, "comparison result")
+                                                .await?;
+                                        stack.push(Value::Num(if !truth { 1.0 } else { 0.0 }));
                                     }
                                     Err(_) => {
                                         let aa: f64 = (&a).try_into()?;
@@ -3194,12 +3226,10 @@ async fn run_interpreter_inner(
                                 ];
                                 match call_builtin_vm!("call_method", &args2) {
                                     Ok(v) => {
-                                        let truth: f64 = (&v).try_into()?;
-                                        stack.push(Value::Num(if truth == 0.0 {
-                                            1.0
-                                        } else {
-                                            0.0
-                                        }));
+                                        let truth =
+                                            logical_truth_from_value(&v, "comparison result")
+                                                .await?;
+                                        stack.push(Value::Num(if !truth { 1.0 } else { 0.0 }));
                                     }
                                     Err(_) => {
                                         let aa: f64 = (&a).try_into()?;
@@ -3313,11 +3343,10 @@ async fn run_interpreter_inner(
                 }
             }
             Instr::JumpIfFalse(target) => {
-                let cond: f64 = (&stack
+                let cond = stack
                     .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                    .try_into()?;
-                if cond == 0.0 {
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                if !logical_truth_from_value(&cond, "if condition").await? {
                     pc = target;
                     continue;
                 }
@@ -3344,7 +3373,8 @@ async fn run_interpreter_inner(
                     drift_value,
                     scale_value,
                     steps_value,
-                )?;
+                )
+                .await?;
                 stack.push(evolved);
             }
             Instr::CallBuiltin(name, arg_count) => {
@@ -3526,7 +3556,7 @@ async fn run_interpreter_inner(
                                     pc = catch_pc;
                                     continue;
                                 } else {
-                                    return Err(e.to_string().into());
+                                    return Err(e);
                                 }
                             }
                         }
@@ -3998,7 +4028,12 @@ async fn run_interpreter_inner(
                                     ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
                                     match v { Value::Cell(ca) => ca.data.iter().map(|p| (*(*p)).clone()).collect::<Vec<Value>>(), other => vec![other] }
                                 }
-                                _ => return Err("CallFunctionExpandMulti requires cell or object for expand_all".to_string().into()),
+                                _ => {
+                                    return Err(mex(
+                                        "InvalidExpandAllTarget",
+                                        "CallFunctionExpandMulti requires cell or object for expand_all",
+                                    ))
+                                }
                             }
                         } else {
                             match (base, indices.len()) {
@@ -4917,7 +4952,12 @@ async fn run_interpreter_inner(
                     let index_val = match index_scalar_from_value(&index_value).await? {
                         Some(val) => val as f64,
                         None => {
-                            return Err(format!("cannot convert {original_value:?} to f64").into())
+                            return Err(mex(
+                                "UnsupportedIndexType",
+                                &format!(
+                                    "Unsupported index type: expected numeric scalar, got {original_value:?}"
+                                ),
+                            ))
                         }
                     };
                     indices.push(index_val);
@@ -5058,6 +5098,10 @@ async fn run_interpreter_inner(
                         if dims == 1 {
                             let total = t.data.len();
                             let mut idxs: Vec<usize> = Vec::new();
+                            // For tensor indices, mirror the index shape in the output so that
+                            // A([1 3 5]) (row index) → row result and A(1:0) (1×0 index) → 1×0.
+                            // None means no tensor index was used; fall back to defaults.
+                            let mut idx_shape: Option<Vec<usize>> = None;
                             let is_colon = (colon_mask & 1u32) != 0;
                             let is_end = (end_mask & 1u32) != 0;
                             if is_colon {
@@ -5077,6 +5121,7 @@ async fn run_interpreter_inner(
                                         idxs = vec![i as usize];
                                     }
                                     Value::Tensor(idx_t) => {
+                                        idx_shape = Some(idx_t.shape.clone());
                                         for &val in &idx_t.data {
                                             let i = val as isize;
                                             if i < 1 || (i as usize) > total {
@@ -5119,12 +5164,24 @@ async fn run_interpreter_inner(
                             }
                             if idxs.len() == 1 {
                                 stack.push(Value::Num(t.data[idxs[0] - 1]));
+                            } else if idxs.is_empty() {
+                                // For tensor indices (e.g. 1:0 → [1,0]) mirror the index shape.
+                                // For all other empty cases (colon on empty source, logical mask
+                                // with no true values) fall back to [0,1] — a 0×1 column vector,
+                                // matching MATLAB's A(:) on an empty source.
+                                let shape = idx_shape.unwrap_or_else(|| vec![0, 1]);
+                                let tens = runmat_builtins::Tensor::new(vec![], shape)
+                                    .map_err(|e| format!("Slice error: {e}"))?;
+                                stack.push(Value::Tensor(tens));
                             } else {
                                 let mut out = Vec::with_capacity(idxs.len());
                                 for &i in &idxs {
                                     out.push(t.data[i - 1]);
                                 }
-                                let tens = runmat_builtins::Tensor::new(out, vec![idxs.len(), 1])
+                                // Mirror the index tensor's shape so A([1 3 5]) (row index) gives
+                                // a row result, and A([1;3;5]) (column index) gives a column.
+                                let shape = idx_shape.unwrap_or_else(|| vec![idxs.len(), 1]);
+                                let tens = runmat_builtins::Tensor::new(out, shape)
                                     .map_err(|e| format!("Slice error: {e}"))?;
                                 stack.push(Value::Tensor(tens));
                             }
@@ -5423,8 +5480,12 @@ async fn run_interpreter_inner(
                         }
                     }
                     Value::GpuTensor(handle) => {
-                        let provider = runmat_accelerate_api::provider()
-                            .ok_or_else(|| "No acceleration provider registered".to_string())?;
+                        let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+                            mex(
+                                "AccelerationProviderUnavailable",
+                                "No acceleration provider registered",
+                            )
+                        })?;
                         let base_shape = handle.shape.clone();
                         let selectors = build_slice_selectors(
                             dims,
@@ -6004,7 +6065,10 @@ async fn run_interpreter_inner(
                             .map_err(|e| format!("slice: {e}"))?;
                         base = Value::Tensor(tensor);
                     } else {
-                        return Err("No acceleration provider registered".to_string().into());
+                        return Err(mex(
+                            "AccelerationProviderUnavailable",
+                            "No acceleration provider registered",
+                        ));
                     }
                 }
                 match base {
@@ -6276,7 +6340,10 @@ async fn run_interpreter_inner(
                         base = Value::Tensor(tensor);
                         numeric_values = adjusted;
                     } else {
-                        return Err("No acceleration provider registered".to_string().into());
+                        return Err(mex(
+                            "AccelerationProviderUnavailable",
+                            "No acceleration provider registered",
+                        ));
                     }
                 }
                 match base {
@@ -6673,7 +6740,10 @@ async fn run_interpreter_inner(
                             .map_err(|e| format!("range slice: {e}"))?;
                         base = Value::Tensor(tensor);
                     } else {
-                        return Err("No acceleration provider registered".to_string().into());
+                        return Err(mex(
+                            "AccelerationProviderUnavailable",
+                            "No acceleration provider registered",
+                        ));
                     }
                 }
                 match base {
@@ -6989,6 +7059,7 @@ async fn run_interpreter_inner(
                                     SliceSelector::Colon => (1..=dim_len).collect(),
                                     SliceSelector::Scalar(i) => vec![*i],
                                     SliceSelector::Indices(v) => v.clone(),
+                                    SliceSelector::LinearIndices { values: v, .. } => v.clone(),
                                 };
                                 if idxs.iter().any(|&i| i == 0 || i > dim_len) {
                                     vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
@@ -7217,8 +7288,12 @@ async fn run_interpreter_inner(
                             }
                         }
                         // Gather–mutate–reupload fallback for slice assignment on GPU bases
-                        let provider = runmat_accelerate_api::provider()
-                            .ok_or_else(|| "No acceleration provider registered".to_string())?;
+                        let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+                            mex(
+                                "AccelerationProviderUnavailable",
+                                "No acceleration provider registered",
+                            )
+                        })?;
                         debug!(
                             "StoreSlice: falling back to host tensor path base_shape={:?}",
                             handle.shape
@@ -7758,7 +7833,10 @@ async fn run_interpreter_inner(
                             .map_err(|e| format!("slice assign: {e}"))?;
                         base = Value::Tensor(tensor);
                     } else {
-                        return Err("No acceleration provider registered".to_string().into());
+                        return Err(mex(
+                            "AccelerationProviderUnavailable",
+                            "No acceleration provider registered",
+                        ));
                     }
                 }
                 match base {
@@ -7847,6 +7925,7 @@ async fn run_interpreter_inner(
                                         }
                                         SliceSelector::Scalar(i) => vec![*i],
                                         SliceSelector::Indices(v) => v.clone(),
+                                        SliceSelector::LinearIndices { values: v, .. } => v.clone(),
                                     };
                                     per_dim_indices.push(idxs);
                                 }
@@ -8312,8 +8391,12 @@ async fn run_interpreter_inner(
                         }
                     }
                     Value::GpuTensor(h) => {
-                        let provider = runmat_accelerate_api::provider()
-                            .ok_or_else(|| "No acceleration provider registered".to_string())?;
+                        let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+                            mex(
+                                "AccelerationProviderUnavailable",
+                                "No acceleration provider registered",
+                            )
+                        })?;
                         let host = provider
                             .download(&h)
                             .await
@@ -8740,8 +8823,12 @@ async fn run_interpreter_inner(
                         stack.push(Value::Tensor(t));
                     }
                     Value::GpuTensor(handle) => {
-                        let provider = runmat_accelerate_api::provider()
-                            .ok_or_else(|| "No acceleration provider registered".to_string())?;
+                        let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+                            mex(
+                                "AccelerationProviderUnavailable",
+                                "No acceleration provider registered",
+                            )
+                        })?;
                         let attempt = (|| -> VmResult<Vec<u32>> {
                             let total = total_len_from_shape(&handle.shape) as i64;
                             let end_idx = total - offset;
@@ -8957,9 +9044,14 @@ async fn run_interpreter_inner(
                             }
                             stack.push((*ca.data[(r - 1) * ca.cols + (c - 1)]).clone());
                         }
-                        _ => return Err("Unsupported number of cell indices".to_string().into()),
+                        _ => {
+                            return Err(mex(
+                                "UnsupportedCellIndexCount",
+                                "Unsupported number of cell indices",
+                            ))
+                        }
                     },
-                    _ => return Err("Cell indexing on non-cell".to_string().into()),
+                    _ => return Err(mex("CellIndexingOnNonCell", "Cell indexing on non-cell")),
                 }
             }
             Instr::IndexCellExpand(num_indices, out_count) => {
@@ -9009,9 +9101,10 @@ async fn run_interpreter_inner(
                                     values.push((*ca.data[(r - 1) * ca.cols + (c - 1)]).clone());
                                 }
                                 _ => {
-                                    return Err("Unsupported number of cell indices"
-                                        .to_string()
-                                        .into())
+                                    return Err(mex(
+                                        "UnsupportedCellIndexCount",
+                                        "Unsupported number of cell indices",
+                                    ))
                                 }
                             }
                         }
@@ -9083,7 +9176,7 @@ async fn run_interpreter_inner(
                             stack.push(Value::Num(0.0));
                         }
                     }
-                    _ => return Err("Cell expansion on non-cell".to_string().into()),
+                    _ => return Err(mex("CellExpansionOnNonCell", "Cell expansion on non-cell")),
                 }
             }
             Instr::Pop => {
@@ -9174,7 +9267,10 @@ async fn run_interpreter_inner(
                 let base_pos = if let Some(j) = base_idx_opt {
                     j
                 } else {
-                    return Err("Index assignment only for tensors".to_string().into());
+                    return Err(mex(
+                        "IndexAssignmentUnsupportedBase",
+                        "Index assignment only for tensors",
+                    ));
                 };
                 let base = stack.remove(base_pos);
                 #[cfg(feature = "native-accel")]
@@ -9267,7 +9363,10 @@ async fn run_interpreter_inner(
                     }
                 }
                 if indices.is_empty() {
-                    return Err("Index assignment only for tensors".to_string().into());
+                    return Err(mex(
+                        "IndexAssignmentUnsupportedBase",
+                        "Index assignment only for tensors",
+                    ));
                 }
                 // TODO(GC): write barrier hook if base is in older generation and rhs/indices reference younger objects
                 match base {
@@ -9326,13 +9425,13 @@ async fn run_interpreter_inner(
                                     if t2.data.len() == 1 {
                                         Ok(t2.data[0])
                                     } else {
-                                        Err("RHS must be scalar".to_string().into())
+                                        Err(mex("ScalarRequired", "RHS must be scalar"))
                                     }
                                 }
                                 Value::GpuTensor(h2) => {
                                     let total = h2.shape.iter().copied().product::<usize>();
                                     if total != 1 {
-                                        return Err("RHS must be scalar".to_string().into());
+                                        return Err(mex("ScalarRequired", "RHS must be scalar"));
                                     }
                                     if let Some(p) = runmat_accelerate_api::provider() {
                                         let host = p
@@ -9341,14 +9440,15 @@ async fn run_interpreter_inner(
                                             .map_err(|e| format!("gather rhs: {e}"))?;
                                         Ok(host.data[0])
                                     } else {
-                                        Err("No acceleration provider registered"
-                                            .to_string()
-                                            .into())
+                                        Err(mex(
+                                            "AccelerationProviderUnavailable",
+                                            "No acceleration provider registered",
+                                        ))
                                     }
                                 }
                                 _ => rhs
                                     .try_into()
-                                    .map_err(|_| "RHS must be numeric".to_string().into()),
+                                    .map_err(|_| mex("NumericRequired", "RHS must be numeric")),
                             }
                         }
                         // 1D linear or 2D scalar assignment only for now
@@ -9391,15 +9491,20 @@ async fn run_interpreter_inner(
                             t.data[idx] = val;
                             stack.push(Value::Tensor(t));
                         } else {
-                            return Err("Only 1D/2D scalar assignment supported"
-                                .to_string()
-                                .into());
+                            return Err(mex(
+                                "UnsupportedAssignmentRank",
+                                "Only 1D/2D scalar assignment supported",
+                            ));
                         }
                     }
                     Value::GpuTensor(h) => {
                         // Stage F1: gather–mutate–reupload for simple 1D/2D scalar assignments
-                        let provider = runmat_accelerate_api::provider()
-                            .ok_or_else(|| "No acceleration provider registered".to_string())?;
+                        let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+                            mex(
+                                "AccelerationProviderUnavailable",
+                                "No acceleration provider registered",
+                            )
+                        })?;
                         let host = provider
                             .download(&h)
                             .await
@@ -9417,13 +9522,13 @@ async fn run_interpreter_inner(
                                     if t2.data.len() == 1 {
                                         Ok(t2.data[0])
                                     } else {
-                                        Err("RHS must be scalar".to_string().into())
+                                        Err(mex("ScalarRequired", "RHS must be scalar"))
                                     }
                                 }
                                 Value::GpuTensor(h2) => {
                                     let total = h2.shape.iter().copied().product::<usize>();
                                     if total != 1 {
-                                        return Err("RHS must be scalar".to_string().into());
+                                        return Err(mex("ScalarRequired", "RHS must be scalar"));
                                     }
                                     let host2 = provider
                                         .download(h2)
@@ -9433,7 +9538,7 @@ async fn run_interpreter_inner(
                                 }
                                 _ => rhs
                                     .try_into()
-                                    .map_err(|_| "RHS must be numeric".to_string().into()),
+                                    .map_err(|_| mex("NumericRequired", "RHS must be numeric")),
                             }
                         }
                         if indices.len() == 1 {
@@ -9479,9 +9584,10 @@ async fn run_interpreter_inner(
                                 t.data[k] = val;
                             }
                         } else {
-                            return Err("Only 1D/2D scalar assignment supported"
-                                .to_string()
-                                .into());
+                            return Err(mex(
+                                "UnsupportedAssignmentRank",
+                                "Only 1D/2D scalar assignment supported",
+                            ));
                         }
                         let view = runmat_accelerate_api::HostTensorView {
                             data: &t.data,
@@ -9510,7 +9616,10 @@ async fn run_interpreter_inner(
                                 "[vm] StoreIndex default branch"
                             );
                         }
-                        return Err("Index assignment only for tensors".to_string().into());
+                        return Err(mex(
+                            "IndexAssignmentUnsupportedBase",
+                            "Index assignment only for tensors",
+                        ));
                     }
                 }
             }
@@ -9610,9 +9719,19 @@ async fn run_interpreter_inner(
                             *ca.data[lin] = rhs;
                             stack.push(Value::Cell(ca));
                         }
-                        _ => return Err("Unsupported number of cell indices".to_string().into()),
+                        _ => {
+                            return Err(mex(
+                                "UnsupportedCellIndexCount",
+                                "Unsupported number of cell indices",
+                            ))
+                        }
                     },
-                    _ => return Err("Cell assignment on non-cell".to_string().into()),
+                    _ => {
+                        return Err(mex(
+                            "CellAssignmentOnNonCell",
+                            "Cell assignment on non-cell",
+                        ))
+                    }
                 }
             }
             Instr::LoadMember(field) => {
@@ -10361,13 +10480,13 @@ async fn run_interpreter_inner(
     Ok(InterpreterOutcome::Completed(vars))
 }
 
-fn stochastic_evolution_dispatch(
+async fn stochastic_evolution_dispatch(
     state: Value,
     drift: Value,
     scale: Value,
     steps: Value,
 ) -> VmResult<Value> {
-    let steps_u32 = parse_steps_value(&steps)?;
+    let steps_u32 = parse_steps_value(&steps).await?;
     if steps_u32 == 0 {
         return Ok(state);
     }
@@ -10375,34 +10494,49 @@ fn stochastic_evolution_dispatch(
     #[cfg(feature = "native-accel")]
     {
         if let Some(provider) = runmat_accelerate_api::provider() {
-            let (state_handle, state_owned) = ensure_gpu_tensor_for_stochastic(provider, &state)?;
-            let drift_scalar = scalar_from_value_scalar(&drift, "stochastic_evolution drift")?;
-            let scale_scalar = scalar_from_value_scalar(&scale, "stochastic_evolution scale")?;
-            let output = provider
-                .stochastic_evolution(&state_handle, drift_scalar, scale_scalar, steps_u32)
-                .map_err(|e| format!("stochastic_evolution: {e}"))?;
-            if let Some(temp) = state_owned {
-                let _ = provider.free(&temp);
+            let (state_handle, state_owned) =
+                ensure_gpu_tensor_for_stochastic(provider, &state).await?;
+            let drift_scalar =
+                scalar_from_value_scalar(&drift, "stochastic_evolution drift").await?;
+            let scale_scalar =
+                scalar_from_value_scalar(&scale, "stochastic_evolution scale").await?;
+            match provider.stochastic_evolution(
+                &state_handle,
+                drift_scalar,
+                scale_scalar,
+                steps_u32,
+            ) {
+                Ok(output) => {
+                    if let Some(temp) = state_owned {
+                        let _ = provider.free(&temp);
+                    }
+                    fusion_residency::mark(&output);
+                    return Ok(Value::GpuTensor(output));
+                }
+                Err(err) => {
+                    log::debug!("stochastic_evolution provider fallback to host: {}", err);
+                    if let Some(temp) = state_owned {
+                        let _ = provider.free(&temp);
+                    }
+                }
             }
-            fusion_residency::mark(&output);
-            return Ok(Value::GpuTensor(output));
         }
     }
 
-    let gathered_state =
-        gather_if_needed(&state).map_err(|e| format!("stochastic_evolution: {e}"))?;
+    let gathered_state = gather_if_needed_async(&state)
+        .await
+        .map_err(|e| format!("stochastic_evolution: {e}"))?;
     let mut tensor_value = match gathered_state {
         Value::Tensor(t) => t,
         other => tensor::value_into_tensor_for("stochastic_evolution", other)?,
     };
-    let drift_scalar = scalar_from_value_scalar(&drift, "stochastic_evolution drift")?;
-    let scale_scalar = scalar_from_value_scalar(&scale, "stochastic_evolution scale")?;
-    stochastic_evolution_host(&mut tensor_value, drift_scalar, scale_scalar, steps_u32)
-        .map_err(|err| err.message().to_string())?;
+    let drift_scalar = scalar_from_value_scalar(&drift, "stochastic_evolution drift").await?;
+    let scale_scalar = scalar_from_value_scalar(&scale, "stochastic_evolution scale").await?;
+    stochastic_evolution_host(&mut tensor_value, drift_scalar, scale_scalar, steps_u32)?;
     Ok(Value::Tensor(tensor_value))
 }
 
-fn scalar_from_value_scalar(value: &Value, label: &str) -> VmResult<f64> {
+async fn scalar_from_value_scalar(value: &Value, label: &str) -> VmResult<f64> {
     match value {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
@@ -10413,25 +10547,74 @@ fn scalar_from_value_scalar(value: &Value, label: &str) -> VmResult<f64> {
         )
         .into()),
         Value::GpuTensor(_) => {
-            let gathered = gather_if_needed(value).map_err(|e| format!("{label}: {e}"))?;
-            scalar_from_value_scalar(&gathered, label)
+            let gathered = gather_if_needed_async(value)
+                .await
+                .map_err(|e| format!("{label}: {e}"))?;
+            match gathered {
+                Value::Num(n) => Ok(n),
+                Value::Int(i) => Ok(i.to_f64()),
+                Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+                Value::Tensor(t) => Err(format!(
+                    "{label}: expected scalar tensor, got {} elements",
+                    t.data.len()
+                )
+                .into()),
+                other => Err(format!("{label}: expected numeric scalar, got {:?}", other).into()),
+            }
         }
         other => Err(format!("{label}: expected numeric scalar, got {:?}", other).into()),
     }
 }
 
-fn parse_steps_value(value: &Value) -> VmResult<u32> {
-    let raw = scalar_from_value_scalar(value, "stochastic_evolution steps")?;
+async fn logical_truth_from_value(value: &Value, label: &str) -> VmResult<bool> {
+    match value {
+        Value::Bool(flag) => Ok(*flag),
+        Value::Int(i) => Ok(!i.is_zero()),
+        Value::Num(n) => Ok(*n != 0.0),
+        Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
+        Value::LogicalArray(array) => Err(mex(
+            "InvalidConditionType",
+            &format!(
+                "{label}: expected scalar logical or numeric value, got logical array with {} elements",
+                array.data.len()
+            ),
+        )),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0] != 0.0),
+        Value::Tensor(tensor) => Err(mex(
+            "InvalidConditionType",
+            &format!(
+                "{label}: expected scalar logical or numeric value, got numeric array with {} elements",
+                tensor.data.len()
+            ),
+        )),
+        Value::GpuTensor(_) => {
+            let gathered = gather_if_needed_async(value)
+                .await
+                .map_err(|e| format!("{label}: {e}"))?;
+            Box::pin(logical_truth_from_value(&gathered, label)).await
+        }
+        other => Err(mex(
+            "InvalidConditionType",
+            &format!(
+                "{label}: expected scalar logical or numeric value, got {other:?}"
+            ),
+        )),
+    }
+}
+
+async fn parse_steps_value(value: &Value) -> VmResult<u32> {
+    let raw = scalar_from_value_scalar(value, "stochastic_evolution steps").await?;
     if !raw.is_finite() || raw < 0.0 {
-        return Err("stochastic_evolution: steps must be a non-negative scalar"
-            .to_string()
-            .into());
+        return Err(mex(
+            "InvalidSteps",
+            "stochastic_evolution: steps must be a non-negative scalar",
+        ));
     }
     Ok(raw.round() as u32)
 }
 
 #[cfg(feature = "native-accel")]
-fn ensure_gpu_tensor_for_stochastic(
+async fn ensure_gpu_tensor_for_stochastic(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     value: &Value,
 ) -> VmResult<(
@@ -10445,8 +10628,9 @@ fn ensure_gpu_tensor_for_stochastic(
             Ok((handle.clone(), Some(handle)))
         }
         _ => {
-            let gathered =
-                gather_if_needed(value).map_err(|e| format!("stochastic_evolution: {e}"))?;
+            let gathered = gather_if_needed_async(value)
+                .await
+                .map_err(|e| format!("stochastic_evolution: {e}"))?;
             match gathered {
                 Value::Tensor(t) => {
                     let handle = upload_tensor_view(provider, &t)?;
@@ -10471,7 +10655,9 @@ fn upload_tensor_view(
         data: &tensor.data,
         shape: &tensor.shape,
     };
-    provider.upload(&view).map_err(|e| e.to_string().into())
+    provider
+        .upload(&view)
+        .map_err(|e| mex("UploadFailed", &e.to_string()))
 }
 
 #[cfg(feature = "native-accel")]
@@ -10560,6 +10746,18 @@ async fn try_execute_fusion_group(
     vars: &mut [Value],
     context: &ExecutionContext,
 ) -> VmResult<Value> {
+    if plan.group.stack_layout.is_none() && !plan.stack_pattern.is_empty() {
+        return Err(mex(
+            "FusionMissingStackLayout",
+            "fusion: missing compile-time stack layout metadata",
+        ));
+    }
+    let required_stack_operands = plan
+        .group
+        .stack_layout
+        .as_ref()
+        .map(|layout| layout.required_stack_operands)
+        .unwrap_or_else(|| plan.stack_pattern.len());
     let mut inputs: Vec<Option<Value>> = vec![None; plan.inputs.len()];
 
     for (idx, value) in &plan.constants {
@@ -10608,7 +10806,7 @@ async fn try_execute_fusion_group(
     }
 
     if log::log_enabled!(log::Level::Debug) && fusion_debug_enabled() {
-        let stack_needed_preview = plan.stack_pattern.len();
+        let stack_needed_preview = required_stack_operands;
         let stack_snapshot: Vec<&Value> = stack.iter().rev().take(stack_needed_preview).collect();
         let stack_kinds: Vec<&'static str> =
             stack_snapshot.iter().rev().map(|v| value_kind(v)).collect();
@@ -10635,46 +10833,61 @@ async fn try_execute_fusion_group(
         );
     }
 
-    let pattern_len = plan.stack_pattern.len();
-    if stack.len() < pattern_len {
+    if stack.len() < required_stack_operands {
         if fusion_debug_enabled() {
             log::debug!(
                 "fusion stack underflow: plan={} needed={} available={} pattern={:?}",
                 plan.index,
-                pattern_len,
+                required_stack_operands,
                 stack.len(),
                 plan.stack_pattern
             );
         }
-        return Err("fusion: stack underflow gathering inputs"
-            .to_string()
-            .into());
+        return Err(mex(
+            "FusionStackUnderflow",
+            "fusion: stack underflow gathering inputs",
+        ));
     }
-    let available = pattern_len;
+    let available = required_stack_operands;
     let slice_start = stack.len() - available;
     let stack_guard = StackSliceGuard::new(stack, slice_start);
     let slice = stack_guard.slice().to_vec();
-    let mut consumed: Vec<Option<Value>> = vec![None; pattern_len];
-    let skip = 0;
+    let mut consumed_inputs: Vec<Option<Value>> = vec![None; plan.inputs.len()];
+    let input_positions: HashMap<runmat_accelerate::graph::ValueId, usize> = plan
+        .inputs
+        .iter()
+        .enumerate()
+        .map(|(idx, value_id)| (*value_id, idx))
+        .collect();
 
-    for (offset, input_idx) in plan.stack_pattern.iter().enumerate() {
-        if offset < skip {
-            continue;
+    let allow_stack_value = |val: &Value| {
+        if plan.group.kind.is_reduction() {
+            matches!(val, Value::GpuTensor(_) | Value::Tensor(_))
+        } else {
+            true
         }
-        let slice_idx = offset - skip;
-        let Some(val) = slice.get(slice_idx).cloned() else {
-            continue;
-        };
-        consumed[offset] = Some(val.clone());
-        if inputs[*input_idx].is_none() {
-            // For reductions, only populate from stack if the value is a numeric tensor.
-            // This avoids accidentally binding non-tensor metadata (e.g., dim strings) into the fused kernel inputs.
-            let allow_stack_value = if plan.group.kind.is_reduction() {
-                matches!(val, Value::GpuTensor(_) | Value::Tensor(_))
-            } else {
-                true
+    };
+
+    if let Some(layout) = plan.group.stack_layout.as_ref() {
+        for binding in &layout.bindings {
+            let Some(input_idx) = input_positions.get(&binding.value_id).copied() else {
+                continue;
             };
-            if allow_stack_value {
+            let Some(val) = slice.get(binding.stack_offset).cloned() else {
+                continue;
+            };
+            consumed_inputs[input_idx] = Some(val.clone());
+            if inputs[input_idx].is_none() && allow_stack_value(&val) {
+                inputs[input_idx] = Some(val);
+            }
+        }
+    } else {
+        for (offset, input_idx) in plan.stack_pattern.iter().enumerate() {
+            let Some(val) = slice.get(offset).cloned() else {
+                continue;
+            };
+            consumed_inputs[*input_idx] = Some(val.clone());
+            if inputs[*input_idx].is_none() && allow_stack_value(&val) {
                 inputs[*input_idx] = Some(val);
             }
         }
@@ -10765,7 +10978,7 @@ async fn try_execute_fusion_group(
 
     let inputs: Vec<Value> = inputs
         .into_iter()
-        .map(|opt| opt.ok_or_else(|| "fusion: missing input value".to_string()))
+        .map(|opt| opt.ok_or_else(|| mex("FusionMissingInput", "fusion: missing input value")))
         .collect::<Result<_, _>>()?;
 
     // Debug: summarize runtime input kinds/shapes
@@ -10790,7 +11003,7 @@ async fn try_execute_fusion_group(
                 stack_guard.commit();
                 Ok(result)
             }
-            Err(err) => Err(err.to_string().into()),
+            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
         }
     } else if plan.group.kind.is_reduction() {
         // Determine reduction axis or 'all'. Prefer the builtin reduction op's dim argument (inputs[1]).
@@ -10942,7 +11155,7 @@ async fn try_execute_fusion_group(
                 }
             }
             // Prefer immediately-consumed stack values (common for reductions over producer results)
-            for v in consumed.iter().filter_map(|v| v.as_ref()) {
+            for v in consumed_inputs.iter().filter_map(|v| v.as_ref()) {
                 match v {
                     Value::GpuTensor(h) => {
                         rows_cols = Some((
@@ -10966,26 +11179,19 @@ async fn try_execute_fusion_group(
             if let Some(data_id) = data_value_id {
                 // Map data_id to plan input index if external
                 if let Some(input_index) = plan.inputs.iter().position(|vid| *vid == data_id) {
-                    // If this input came from the stack, it will have an entry in stack_pattern; use consumed value
-                    if let Some(stack_offset) = plan
-                        .stack_pattern
-                        .iter()
-                        .position(|&idx| idx == input_index)
-                    {
-                        if let Some(val) = consumed.get(stack_offset).and_then(|v| v.as_ref()) {
-                            match val {
-                                Value::GpuTensor(h) => {
-                                    let r = h.shape.first().copied().unwrap_or(1).max(1);
-                                    let c = h.shape.get(1).copied().unwrap_or(1).max(1);
-                                    rows_cols = Some((r, c));
-                                }
-                                Value::Tensor(t) => {
-                                    let r = t.shape.first().copied().unwrap_or(1).max(1);
-                                    let c = t.shape.get(1).copied().unwrap_or(1).max(1);
-                                    rows_cols = Some((r, c));
-                                }
-                                _ => {}
+                    if let Some(val) = consumed_inputs.get(input_index).and_then(|v| v.as_ref()) {
+                        match val {
+                            Value::GpuTensor(h) => {
+                                let r = h.shape.first().copied().unwrap_or(1).max(1);
+                                let c = h.shape.get(1).copied().unwrap_or(1).max(1);
+                                rows_cols = Some((r, c));
                             }
+                            Value::Tensor(t) => {
+                                let r = t.shape.first().copied().unwrap_or(1).max(1);
+                                let c = t.shape.get(1).copied().unwrap_or(1).max(1);
+                                rows_cols = Some((r, c));
+                            }
+                            _ => {}
                         }
                     }
                     // Otherwise, it was a variable/constant; use request.inputs
@@ -11055,7 +11261,7 @@ async fn try_execute_fusion_group(
 
             // Fallback: any tensor input
             if rows_cols.is_none() {
-                for v in consumed.iter().filter_map(|v| v.as_ref()) {
+                for v in consumed_inputs.iter().filter_map(|v| v.as_ref()) {
                     match v {
                         Value::GpuTensor(h) => {
                             rows_cols = Some((
@@ -11155,7 +11361,7 @@ async fn try_execute_fusion_group(
                             _ => None,
                         }
                     };
-                    for value in consumed.iter().filter_map(|v| v.as_ref()) {
+                    for value in consumed_inputs.iter().filter_map(|v| v.as_ref()) {
                         if let Some(prod) = inspect_value(value) {
                             total_from_operand = true;
                             total_elems = Some(prod.max(1));
@@ -11185,7 +11391,10 @@ async fn try_execute_fusion_group(
                             if total_from_operand { "runtime" } else { "output_shape" }
                         );
                     }
-                    return Err("fusion: reduction all extent unknown".to_string().into());
+                    return Err(mex(
+                        "FusionReductionExtentUnknown",
+                        "fusion: reduction all extent unknown",
+                    ));
                 }
                 let total = total_elems.unwrap();
                 if fusion_debug_enabled() {
@@ -11281,7 +11490,7 @@ async fn try_execute_fusion_group(
                 }
                 _ => {}
             };
-            for v in consumed.iter().filter_map(|v| v.as_ref()) {
+            for v in consumed_inputs.iter().filter_map(|v| v.as_ref()) {
                 check_val(v);
             }
             for v in &request.inputs {
@@ -11293,7 +11502,10 @@ async fn try_execute_fusion_group(
             log::debug!(
                 "fusion reduction: skipping fusion due to unresolved shape; falling back to provider path"
             );
-            return Err("fusion: reduction shape unresolved".to_string().into());
+            return Err(mex(
+                "FusionReductionShapeUnresolved",
+                "fusion: reduction shape unresolved",
+            ));
         }
 
         // Optional escape hatch: disable fused reductions to force provider path
@@ -11302,7 +11514,10 @@ async fn try_execute_fusion_group(
             .as_deref()
             == Some("1")
         {
-            return Err("fusion: fused reductions disabled".to_string().into());
+            return Err(mex(
+                "FusionReductionDisabled",
+                "fusion: fused reductions disabled",
+            ));
         }
         let workgroup_size = 256u32;
         if log::log_enabled!(log::Level::Debug) && fusion_debug_enabled() {
@@ -11338,7 +11553,7 @@ async fn try_execute_fusion_group(
                 stack_guard.commit();
                 Ok(result)
             }
-            Err(err) => Err(err.to_string().into()),
+            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
         }
     } else if plan.group.kind == FusionKind::CenteredGram {
         match execute_centered_gram(request).await {
@@ -11346,7 +11561,7 @@ async fn try_execute_fusion_group(
                 stack_guard.commit();
                 Ok(result)
             }
-            Err(err) => Err(err.to_string().into()),
+            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
         }
     } else if plan.group.kind == FusionKind::PowerStepNormalize {
         match execute_power_step_normalize(request).await {
@@ -11354,7 +11569,7 @@ async fn try_execute_fusion_group(
                 stack_guard.commit();
                 Ok(result)
             }
-            Err(err) => Err(err.to_string().into()),
+            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
         }
     } else if plan.group.kind == FusionKind::ExplainedVariance {
         log::debug!("explained variance plan inputs {:?}", plan.inputs);
@@ -11365,7 +11580,7 @@ async fn try_execute_fusion_group(
             }
             Err(err) => {
                 log::debug!("explained variance fusion fallback: {}", err);
-                Err(err.to_string().into())
+                Err(mex("FusionExecutionFailed", &err.to_string()))
             }
         }
     } else if plan.group.kind == FusionKind::MatmulEpilogue {
@@ -11374,7 +11589,7 @@ async fn try_execute_fusion_group(
                 stack_guard.commit();
                 Ok(result)
             }
-            Err(err) => Err(err.to_string().into()),
+            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
         }
     } else if plan.group.kind == FusionKind::ImageNormalize {
         match execute_image_normalize(request).await {
@@ -11382,11 +11597,14 @@ async fn try_execute_fusion_group(
                 stack_guard.commit();
                 Ok(result)
             }
-            Err(err) => Err(err.to_string().into()),
+            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
         }
     } else {
         // Unknown fusion kind; restore stack and report
-        Err("fusion: unsupported fusion kind".to_string().into())
+        Err(mex(
+            "FusionUnsupportedKind",
+            "fusion: unsupported fusion kind",
+        ))
     }
 }
 
@@ -11533,7 +11751,7 @@ async fn invoke_user_function_value(
                 0
             },
         )
-        .map_err(|e| RuntimeError::new(format!("varargin: {e}")))?;
+        .map_err(|e| mex("VararginBuildError", &format!("varargin: {e}")))?;
         if fixed < func_vars.len() {
             func_vars[fixed] = Value::Cell(cell);
         }
@@ -11564,7 +11782,7 @@ async fn invoke_user_function_value(
             if let Some(local_id) = var_map.get(varargout_oid) {
                 if local_id.0 < func_vars.len() {
                     let empty = runmat_builtins::CellArray::new(vec![], 1, 0)
-                        .map_err(|e| RuntimeError::new(format!("varargout init: {e}")))?;
+                        .map_err(|e| mex("VarargoutInitError", &format!("varargout init: {e}")))?;
                     func_vars[local_id.0] = Value::Cell(empty);
                 }
             }

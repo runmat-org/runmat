@@ -977,14 +977,16 @@ pub(crate) mod tests {
     #[test]
     fn fspecial_average_default() {
         let result = block_on(fspecial_builtin(Value::from("average"), Vec::new())).unwrap();
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![3, 3]);
-                for value in t.data {
-                    assert_close(value, 1.0 / 9.0, 1e-12);
-                }
+        let tensor = match result {
+            Value::Tensor(t) => t,
+            Value::GpuTensor(h) => {
+                crate::builtins::common::test_support::gather(Value::GpuTensor(h)).expect("gather")
             }
             other => panic!("expected tensor, got {other:?}"),
+        };
+        assert_eq!(tensor.shape, vec![3, 3]);
+        for value in tensor.data {
+            assert_close(value, 1.0 / 9.0, 1e-12);
         }
     }
 
@@ -993,14 +995,16 @@ pub(crate) mod tests {
     fn fspecial_average_scalar_size() {
         let args = vec![Value::from(5)];
         let result = block_on(fspecial_builtin(Value::from("average"), args)).unwrap();
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![5, 5]);
-                let sum: f64 = t.data.iter().sum();
-                assert_close(sum, 1.0, 1e-12);
+        let tensor = match result {
+            Value::Tensor(t) => t,
+            Value::GpuTensor(h) => {
+                crate::builtins::common::test_support::gather(Value::GpuTensor(h)).expect("gather")
             }
             other => panic!("expected tensor, got {other:?}"),
-        }
+        };
+        assert_eq!(tensor.shape, vec![5, 5]);
+        let sum: f64 = tensor.data.iter().sum();
+        assert_close(sum, 1.0, 1e-12);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1010,15 +1014,17 @@ pub(crate) mod tests {
             Tensor::new(vec![4.0, 6.0], vec![1, 2]).unwrap(),
         )];
         let result = block_on(fspecial_builtin(Value::from("average"), args)).unwrap();
-        match result {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![4, 6]);
-                let expected = 1.0 / (4.0 * 6.0);
-                for value in t.data {
-                    assert_close(value, expected, 1e-12);
-                }
+        let tensor = match result {
+            Value::Tensor(t) => t,
+            Value::GpuTensor(h) => {
+                crate::builtins::common::test_support::gather(Value::GpuTensor(h)).expect("gather")
             }
             other => panic!("expected tensor, got {other:?}"),
+        };
+        assert_eq!(tensor.shape, vec![4, 6]);
+        let expected = 1.0 / (4.0 * 6.0);
+        for value in tensor.data {
+            assert_close(value, expected, 1e-12);
         }
     }
 

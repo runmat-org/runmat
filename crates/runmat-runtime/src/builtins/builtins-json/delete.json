@@ -35,11 +35,11 @@
   "behaviors": [
     "Accepts individual paths, string arrays, cell arrays of character vectors, and char matrices. Each element targets one file.",
     "Accepts handle objects (`handle`) and event listeners, marking them invalid (`isvalid` returns `false`) without touching the filesystem when invoked with non-string inputs.",
-    "Expands shell-style wildcards (`*` and `?`) using MATLAB-compatible rules. Patterns must resolve to existing files; otherwise, the builtin throws `MATLAB:DELETE:FileNotFound`.",
-    "Rejects folders. When a target is a directory, RunMat raises `MATLAB:DELETE:Directories`, matching MATLAB’s “Use rmdir to remove directories” diagnostic.",
-    "Propagates operating-system failures (for example, permission errors or read-only files) through `MATLAB:DELETE:PermissionDenied`.",
+    "Expands shell-style wildcards (`*` and `?`) using MATLAB-compatible rules. Patterns must resolve to existing files; otherwise, the builtin throws `RunMat:DELETE:FileNotFound`.",
+    "Rejects folders. When a target is a directory, RunMat raises `RunMat:DELETE:Directories`, matching MATLAB’s “Use rmdir to remove directories” diagnostic.",
+    "Propagates operating-system failures (for example, permission errors or read-only files) through `RunMat:DELETE:PermissionDenied`.",
     "Expands `~` to the user’s home directory and resolves relative paths against the current working folder (`pwd`).",
-    "Treats empty character vectors or empty string scalars as invalid inputs and raises `MATLAB:DELETE:EmptyFilename`.",
+    "Treats empty character vectors or empty string scalars as invalid inputs and raises `RunMat:DELETE:EmptyFilename`.",
     "When passed an empty string array or empty cell array, the builtin performs no action and returns without error, just like MATLAB."
   ],
   "examples": [
@@ -76,11 +76,11 @@
   "faqs": [
     {
       "question": "What message IDs does `delete` produce?",
-      "answer": "Missing files raise `MATLAB:DELETE:FileNotFound`, directories raise `MATLAB:DELETE:Directories`, wildcard syntax issues raise `MATLAB:DELETE:InvalidPattern`, operating-system failures raise `MATLAB:DELETE:PermissionDenied`, and invalid handle inputs raise `MATLAB:DELETE:InvalidHandle`."
+      "answer": "Missing files raise `RunMat:DELETE:FileNotFound`, directories raise `RunMat:DELETE:Directories`, wildcard syntax issues raise `RunMat:DELETE:InvalidPattern`, operating-system failures raise `RunMat:DELETE:PermissionDenied`, and invalid handle inputs raise `RunMat:DELETE:InvalidHandle`."
     },
     {
       "question": "Can I delete folders with `delete`?",
-      "answer": "No. MATLAB reserves folder deletion for `rmdir`. RunMat follows suit and throws `MATLAB:DELETE:Directories` when a target is a directory."
+      "answer": "No. MATLAB reserves folder deletion for `rmdir`. RunMat follows suit and throws `RunMat:DELETE:Directories` when a target is a directory."
     },
     {
       "question": "Does `delete` support multiple filenames at once?",
@@ -92,11 +92,11 @@
     },
     {
       "question": "What happens when a wildcard matches nothing?",
-      "answer": "The builtin raises `MATLAB:DELETE:FileNotFound` (just like MATLAB) and leaves the filesystem unchanged."
+      "answer": "The builtin raises `RunMat:DELETE:FileNotFound` (just like MATLAB) and leaves the filesystem unchanged."
     },
     {
       "question": "Do empty arrays raise errors?",
-      "answer": "Empty string arrays or empty cell arrays simply result in no deletions. Empty strings, however, are invalid and trigger `MATLAB:DELETE:EmptyFilename`."
+      "answer": "Empty string arrays or empty cell arrays simply result in no deletions. Empty strings, however, are invalid and trigger `RunMat:DELETE:EmptyFilename`."
     },
     {
       "question": "How do GPU inputs behave?",
@@ -135,6 +135,62 @@
     {
       "label": "pwd",
       "url": "./pwd"
+    },
+    {
+      "label": "addpath",
+      "url": "./addpath"
+    },
+    {
+      "label": "cd",
+      "url": "./cd"
+    },
+    {
+      "label": "exist",
+      "url": "./exist"
+    },
+    {
+      "label": "fullfile",
+      "url": "./fullfile"
+    },
+    {
+      "label": "genpath",
+      "url": "./genpath"
+    },
+    {
+      "label": "getenv",
+      "url": "./getenv"
+    },
+    {
+      "label": "ls",
+      "url": "./ls"
+    },
+    {
+      "label": "mkdir",
+      "url": "./mkdir"
+    },
+    {
+      "label": "path",
+      "url": "./path"
+    },
+    {
+      "label": "rmpath",
+      "url": "./rmpath"
+    },
+    {
+      "label": "savepath",
+      "url": "./savepath"
+    },
+    {
+      "label": "setenv",
+      "url": "./setenv"
+    },
+    {
+      "label": "tempdir",
+      "url": "./tempdir"
+    },
+    {
+      "label": "tempname",
+      "url": "./tempname"
     }
   ],
   "source": {

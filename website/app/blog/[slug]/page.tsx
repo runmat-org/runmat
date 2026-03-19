@@ -1,4 +1,4 @@
-import React, { use } from 'react';
+import React from 'react';
 
 import { readFileSync, existsSync } from 'fs';
 import { join } from 'path';
@@ -9,8 +9,8 @@ import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import Image from 'next/image';
 
-import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
+
+import { SandboxCta } from '@/components/SandboxCta';
 import { Badge } from '@/components/ui/badge';
 import { BlogLayout } from '@/components/BlogLayout';
 import NewsletterCta from '@/components/NewsletterCta';
@@ -30,6 +30,9 @@ export type JsonLdObject = {
   [key: string]: JsonLdValue | undefined;
 };
 type JsonLd = JsonLdObject | { "@graph": JsonLdObject[] };
+
+type TwitterCardType = 'summary' | 'summary_large_image' | 'app' | 'player';
+const VALID_TWITTER_CARDS = new Set<TwitterCardType>(['summary', 'summary_large_image', 'app', 'player']);
 
 interface BlogPost {
   slug: string;
@@ -51,11 +54,12 @@ interface BlogPost {
     ogType?: string;
     ogTitle?: string;
     ogDescription?: string;
-    twitterCard?: string;
+    twitterCard?: TwitterCardType;
     twitterTitle?: string;
     twitterDescription?: string;
     visibility?: string;
     jsonLd?: JsonLd;
+    collections?: string[];
   };
   content: string;
   authors: AuthorInfo[];
@@ -84,6 +88,7 @@ const FRONTMATTER_KEYS = new Set([
   'twitterDescription',
   'visibility',
   'jsonLd',
+  'collections',
 ]);
 
 function isJsonLdValue(value: unknown): value is JsonLdValue {
@@ -166,7 +171,13 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
   const ogType = raw.ogType === undefined ? undefined : assertString(raw.ogType, 'ogType', slug);
   const ogTitle = raw.ogTitle === undefined ? undefined : assertString(raw.ogTitle, 'ogTitle', slug);
   const ogDescription = raw.ogDescription === undefined ? undefined : assertString(raw.ogDescription, 'ogDescription', slug);
-  const twitterCard = raw.twitterCard === undefined ? undefined : assertString(raw.twitterCard, 'twitterCard', slug);
+  const twitterCardRaw = raw.twitterCard === undefined ? undefined : assertString(raw.twitterCard, 'twitterCard', slug);
+  if (twitterCardRaw !== undefined && !VALID_TWITTER_CARDS.has(twitterCardRaw as TwitterCardType)) {
+    throw new Error(
+      `Frontmatter field "twitterCard" must be one of ${[...VALID_TWITTER_CARDS].join(', ')} in slug "${slug}", got "${twitterCardRaw}".`
+    );
+  }
+  const twitterCard = twitterCardRaw as TwitterCardType | undefined;
   const twitterTitle = raw.twitterTitle === undefined ? undefined : assertString(raw.twitterTitle, 'twitterTitle', slug);
   const twitterDescription =
     raw.twitterDescription === undefined ? undefined : assertString(raw.twitterDescription, 'twitterDescription', slug);
@@ -198,6 +209,7 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
   }
 
   const jsonLd = validateJsonLd(raw.jsonLd, slug);
+  const collections = raw.collections === undefined ? undefined : assertStringArray(raw.collections, 'collections', slug);
 
   return {
     title,
@@ -222,6 +234,7 @@ function validateFrontmatter(raw: Record<string, unknown>, slug: string): BlogPo
     twitterDescription,
     visibility,
     jsonLd,
+    collections,
   };
 }
 
@@ -303,8 +316,8 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     description: post.frontmatter.description,
     alternates: post.frontmatter.canonical ? { canonical: post.frontmatter.canonical } : undefined,
     openGraph: {
-      title: post.frontmatter.title,
-      description: post.frontmatter.description,
+      title: post.frontmatter.ogTitle || post.frontmatter.title,
+      description: post.frontmatter.ogDescription || post.frontmatter.description,
       type: 'article',
       publishedTime: post.frontmatter.date,
       modifiedTime: post.frontmatter.dateModified || post.frontmatter.date,
@@ -312,9 +325,9 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
       images: imageUrl ? [imageUrl] : undefined,
     },
     twitter: {
-      card: 'summary_large_image',
-      title: post.frontmatter.title,
-      description: post.frontmatter.description,
+      card: post.frontmatter.twitterCard ?? 'summary_large_image',
+      title: post.frontmatter.twitterTitle || post.frontmatter.title,
+      description: post.frontmatter.twitterDescription || post.frontmatter.description,
       images: imageUrl ? [imageUrl] : undefined,
     },
   };
@@ -325,8 +338,8 @@ export async function generateStaticParams() {
   return getAllBlogPosts().map(post => ({ slug: post.slug }));
 }
 
-export default function BlogPostPage({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = use(params);
+export default async function BlogPostPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
   const post = getBlogPost(slug);
   
   if (!post) {
@@ -461,24 +474,7 @@ export default function BlogPostPage({ params }: { params: Promise<{ slug: strin
       </div>
 
       <div className="mt-16 not-prose">
-        <Card>
-          <CardContent className="p-6 text-center">
-            <h3 className="text-lg font-semibold mb-3">
-              Ready to try RunMat?
-            </h3>
-            <p className="text-muted-foreground mb-4">
-              Get started with the modern MATLAB runtime today.
-            </p>
-            <div className="flex flex-col sm:flex-row gap-3 justify-center">
-              <Button variant="outline" asChild>
-                <Link href="/download">Download RunMat</Link>
-              </Button>
-              <Button variant="outline" asChild>
-                <Link href="/docs/getting-started">Get Started</Link>
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
+        <SandboxCta source={`blog-${post.slug}`} />
       </div>
     </BlogLayout>
   );

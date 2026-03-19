@@ -103,8 +103,16 @@
       "url": "./polyfit"
     },
     {
-      "label": "roots documentation (MathWorks)",
-      "url": "https://www.mathworks.com/help/matlab/ref/roots.html"
+      "label": "roots",
+      "url": "./roots"
+    },
+    {
+      "label": "polyder",
+      "url": "./polyder"
+    },
+    {
+      "label": "polyint",
+      "url": "./polyint"
     }
   ],
   "source": {

@@ -2,11 +2,14 @@
 
 import { ExternalLink } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { trackEvent } from "@/components/GoogleAnalytics";
+import { trackWebsiteEvent } from "@/components/GoogleAnalytics";
 
 export function OtherTab() {
   const handleClick = () => {
-    trackEvent("hero_cta_click", "hero_tabs", "other");
+    trackWebsiteEvent("website.hero.cta_clicked", {
+      category: "hero_tabs",
+      label: "other",
+    });
     window.open("https://runmat.com/download", "_blank", "noopener,noreferrer");
   };
 

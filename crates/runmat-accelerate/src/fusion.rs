@@ -36,6 +36,20 @@ pub struct FusionGroup {
     pub shape: ShapeInfo,
     pub span: InstrSpan,
     pub pattern: Option<FusionPattern>,
+    #[serde(default)]
+    pub stack_layout: Option<FusionStackLayout>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FusionStackLayout {
+    pub required_stack_operands: usize,
+    pub bindings: Vec<FusionStackValueBinding>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FusionStackValueBinding {
+    pub value_id: ValueId,
+    pub stack_offset: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -148,6 +162,7 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
                 shape: current_shape.clone(),
                 span,
                 pattern: None,
+                stack_layout: None,
             });
             group_id += 1;
         }
@@ -172,6 +187,7 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
             shape: node_output_shape(graph, node),
             span,
             pattern: None,
+            stack_layout: None,
         });
         group_id += 1;
     }
@@ -234,6 +250,7 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
                 shape: node_output_shape(graph, node),
                 span,
                 pattern: None,
+                stack_layout: None,
             });
             group_id += 1;
         }
@@ -545,6 +562,40 @@ fn group_span(graph: &AccelGraph, nodes: &[NodeId]) -> InstrSpan {
         start = 0;
     }
     InstrSpan { start, end }
+}
+
+fn merge_stack_layout_with_stack_pattern(
+    existing: Option<&FusionStackLayout>,
+    inputs: &[ValueId],
+    stack_pattern: &[usize],
+) -> Option<FusionStackLayout> {
+    if existing.is_none() && stack_pattern.is_empty() {
+        return None;
+    }
+
+    let mut bindings = existing
+        .map(|layout| layout.bindings.clone())
+        .unwrap_or_default();
+    for (stack_offset, &input_idx) in stack_pattern.iter().enumerate() {
+        let &value_id = inputs.get(input_idx)?;
+        if bindings.iter().any(|binding| binding.value_id == value_id) {
+            continue;
+        }
+        bindings.push(FusionStackValueBinding {
+            value_id,
+            stack_offset,
+        });
+    }
+
+    let required_stack_operands = existing
+        .map(|layout| layout.required_stack_operands)
+        .unwrap_or(0)
+        .max(stack_pattern.len());
+
+    Some(FusionStackLayout {
+        required_stack_operands,
+        bindings,
+    })
 }
 
 #[derive(Debug, Clone)]
@@ -1285,6 +1336,14 @@ impl FusionGroupPlan {
             plan.stack_pattern = centered_stack_idxs;
         }
 
+        if !plan.stack_pattern.is_empty() || plan.group.stack_layout.is_some() {
+            plan.group.stack_layout = merge_stack_layout_with_stack_pattern(
+                plan.group.stack_layout.as_ref(),
+                &plan.inputs,
+                &plan.stack_pattern,
+            );
+        }
+
         log_plan_stack_pattern("final", &plan, graph);
 
         // If the plan requires any unsupported operations, mark kernel as unsupported
@@ -1953,6 +2012,7 @@ fn detect_centered_gram(
                 matrix: matrix_val_id,
                 normalization,
             }),
+            stack_layout: None,
         });
         *next_group_id += 1;
         for id in nodes {
@@ -1998,6 +2058,7 @@ fn detect_image_normalize(
             shape,
             span: span.clone(),
             pattern: Some(FusionPattern::ImageNormalize(pattern)),
+            stack_layout: None,
         });
         if fusion_debug_enabled() {
             log::debug!(
@@ -2113,6 +2174,7 @@ fn detect_power_step_normalize(
                 rhs: matmul_node.inputs[1],
                 epsilon: denom_info.epsilon,
             }),
+            stack_layout: None,
         });
         *next_group_id += 1;
         for id in nodes {
@@ -2215,6 +2277,7 @@ fn detect_explained_variance(
             shape,
             span,
             pattern: Some(FusionPattern::ExplainedVariance { q: q_vid, g: g_vid }),
+            stack_layout: None,
         });
         *next_group_id += 1;
         for id in nodes {

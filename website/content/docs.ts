@@ -24,14 +24,36 @@ export const docsTree: DocsNode[] = [
     children: [
       { title: "Getting Started", externalHref: "/docs/getting-started" },
       {
-        title: "Desktop & Browser Guide",
+        title: "Browser Guide",
         slug: ["desktop-browser-guide"],
         file: "docs/DESKTOP_BROWSER_GUIDE.md",
         seo: {
-          description: "Get started with RunMat Desktop, a browser-based IDE for writing and running MATLAB-style code with GPU acceleration.",
-          keywords: ["RunMat Desktop", "browser IDE", "sandbox", "WebAssembly", "GPU acceleration", "MATLAB online"],
-          ogTitle: "Desktop & Browser Guide",
-          ogDescription: "Learn how to use RunMat Desktop—a browser-based development environment for MATLAB-style code with automatic GPU acceleration.",
+          description: "Use the RunMat sandbox, a browser-based IDE for writing and running MATLAB-style code with GPU acceleration, cloud storage, and file versioning.",
+          keywords: ["RunMat sandbox", "RunMat browser", "browser IDE", "sandbox", "WebAssembly", "GPU acceleration", "MATLAB online", "cloud storage", "file versioning"],
+          ogTitle: "Browser Guide",
+          ogDescription: "Use the RunMat sandbox—a browser-based development environment for MATLAB-style code with automatic GPU acceleration and cloud storage.",
+        },
+      },
+      {
+        title: "Versioning & History",
+        slug: ["versioning"],
+        file: "docs/VERSIONING.md",
+        seo: {
+          description: "How RunMat's automatic versioning and snapshots work.",
+          keywords: ["version control", "git export", "snapshots", "history", "RunMat versioning"],
+          ogTitle: "Versioning & History",
+          ogDescription: "RunMat versions your work automatically. Learn about snapshots, history, and git export.",
+        },
+      },
+      {
+        title: "Collaboration & Teams",
+        slug: ["collaboration"],
+        file: "docs/COLLABORATION.md",
+        seo: {
+          description: "How to collaborate with teams in RunMat: organizations, projects, roles, real-time sync, and enterprise SSO.",
+          keywords: ["collaboration", "teams", "organizations", "sharing", "real-time", "SSO", "RunMat Cloud"],
+          ogTitle: "Collaboration & Teams",
+          ogDescription: "Share projects, manage teams, and collaborate in real time with RunMat Cloud.",
         },
       },
       {
@@ -67,6 +89,7 @@ export const docsTree: DocsNode[] = [
       },
       { title: "CLI Reference", slug: ["cli"], file: "docs/CLI.md", seo: { description: "RunMat CLI commands, flags, environment variables, and examples.", keywords: ["RunMat CLI", "command line", "flags"] } },
       { title: "Configuration", slug: ["configuration"], file: "docs/CONFIG.md", seo: { description: "Configure RunMat: files, environment overrides, and precedence.", keywords: ["RunMat config", "configuration", "YAML", "TOML", "JSON"] } },
+      { title: "Plotting", slug: ["plotting"], file: "docs/PLOTTING.md", seo: { description: "How RunMat plotting works: MATLAB-familiar API, GPU-first rendering, drawnow/pause semantics.", keywords: ["plotting", "GPU plotting", "MATLAB plot", "3D visualization", "drawnow"] } },
     ],
   },
   {
@@ -88,6 +111,17 @@ export const docsTree: DocsNode[] = [
           keywords: ["RunMat", "MATLAB alternative", "Octave alternative", "JIT", "interpreter", "GC", "scientific computing"],
           ogTitle: "RunMat Architecture",
           ogDescription: "Deep dive into RunMat's V8-inspired execution model, GC, runtime, and plotting subsystems.",
+        },
+      },
+      {
+        title: "Large Dataset Persistence",
+        slug: ["large-dataset-persistence"],
+        file: "docs/LARGE_DATASET_PERSISTENCE.md",
+        seo: {
+          description: "How RunMat stores and operates on large numerical datasets using chunked, content-addressed objects with the data.* API.",
+          keywords: ["large datasets", "chunked storage", "content-addressed", "data API", "multi-terabyte arrays", "scientific data", "RunMat data"],
+          ogTitle: "Large Dataset Persistence",
+          ogDescription: "Read and write subregions of multi-terabyte arrays without loading the full file. Same API on local and cloud projects.",
         },
       },
       {
@@ -116,6 +150,7 @@ export const docsTree: DocsNode[] = [
     title: "Accelerate (GPU)",
     children: [
       { title: "Introduction to RunMat Fusion", slug: ["accelerate", "fusion-intro"], file: "docs/INTRODUCTION_TO_RUNMAT_GPU.md", seo: { description: "How RunMat manages GPU data residency: keeping arrays on device, minimizing transfers.", keywords: ["GPU", "residency", "data residency", "device memory"] } },
+      { title: "GPU Residency & Precision", slug: ["accelerate", "gpu-behavior"], file: "docs/GPU_BEHAVIOR_NOTES.md", seo: { description: "GPU residency rules and precision guarantees: when data moves to/from device.", keywords: ["GPU residency", "precision", "f32", "f64", "device memory"] } },
       {
         title: "Fusion Guide",
         externalHref: "/docs/fusion-guide",
@@ -136,7 +171,9 @@ export const docsTree: DocsNode[] = [
     title: "Meta",
     children: [
       { title: "License", slug: ["license"], file: "LICENSE.md", seo: { description: "RunMat software license." } },
+      { title: "Terms and Conditions", slug: ["terms"], file: "docs/TERMS.md", seo: { description: "Dystr Terms and Conditions governing the use of the RunMat platform and related services.", keywords: ["terms and conditions", "terms of service", "legal", "RunMat", "Dystr"] } },
       { title: "Telemetry", slug: ["telemetry"], file: "docs/TELEMETRY.md", seo: { description: "RunMat telemetry: what information is collected and how it is used." } },
+      { title: "Contributing", slug: ["contributing"], file: "docs/CONTRIBUTING.md", seo: { description: "How to contribute to RunMat: branch workflow, PR scope, and coding style." } },
     ],
   },
 ];

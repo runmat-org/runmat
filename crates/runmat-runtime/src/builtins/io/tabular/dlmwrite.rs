@@ -116,7 +116,7 @@ async fn dlmwrite_builtin(
         tensor::value_into_tensor_for("dlmwrite", gathered_data).map_err(dlmwrite_error)?;
     ensure_matrix_shape(&tensor)?;
 
-    let bytes = write_dlm(&path, &tensor, &options)?;
+    let bytes = write_dlm(&path, &tensor, &options).await?;
     Ok(Value::Num(bytes as f64))
 }
 
@@ -510,15 +510,19 @@ fn ensure_matrix_shape(tensor: &Tensor) -> BuiltinResult<()> {
     ))
 }
 
-fn write_dlm(path: &Path, tensor: &Tensor, options: &DlmWriteOptions) -> BuiltinResult<usize> {
+async fn write_dlm(
+    path: &Path,
+    tensor: &Tensor,
+    options: &DlmWriteOptions,
+) -> BuiltinResult<usize> {
     let rows = tensor.rows();
     let cols = tensor.cols();
     let newline = options.newline.as_str();
 
     let (existing_nonempty, ends_with_newline) = if options.append {
-        match vfs::metadata(path) {
+        match vfs::metadata_async(path).await {
             Ok(meta) if !meta.is_empty() => {
-                let ends = file_ends_with_newline(path).map_err(|err| {
+                let ends = file_ends_with_newline(path).await.map_err(|err| {
                     dlmwrite_error_with_source(
                         format!(
                             "dlmwrite: failed to inspect existing file \"{}\" ({err})",
@@ -662,8 +666,8 @@ fn write_blank_row(
     Ok(bytes)
 }
 
-fn file_ends_with_newline(path: &Path) -> io::Result<bool> {
-    let metadata = vfs::metadata(path)?;
+async fn file_ends_with_newline(path: &Path) -> io::Result<bool> {
+    let metadata = vfs::metadata_async(path).await?;
     let len = metadata.len();
     if len == 0 {
         return Ok(false);

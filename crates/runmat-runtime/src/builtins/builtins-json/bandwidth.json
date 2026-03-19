@@ -143,6 +143,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "ishermitian",
+      "url": "./ishermitian"
+    },
+    {
+      "label": "symrcm",
+      "url": "./symrcm"
     }
   ],
   "source": {

@@ -30,7 +30,7 @@
   },
   "description": "`warning` emits diagnostic messages without aborting execution. It also provides a central interface for enabling, disabling, promoting, or querying warnings by identifier.\n\nRunMat mirrors MATLAB semantics with per-identifier modes (`'on'`, `'off'`, `'once'`, `'error'`), backtrace control, structured state restoration, and formatted message support. When an identifier is promoted to `'error'`, future uses of that warning raise an error instead of printing.",
   "behaviors": [
-    "`warning(message)` prints the message using the default identifier `MATLAB:warning`.",
+    "`warning(message)` prints the message using the default identifier `RunMat:warning`.",
     "`warning(id, fmt, args...)` associates the warning with the identifier `id`, formats the message using MATLAB's `sprintf` rules, and honours per-identifier state.",
     "`warning(MException_obj)` reissues an existing exception as a warning.",
     "`warning(struct)` restores warning state previously captured with `warning('query', ...)`.",
@@ -110,7 +110,7 @@
     },
     {
       "question": "Is whitespace in identifiers allowed?",
-      "answer": "Identifiers follow MATLAB rules: they must contain at least one colon and no whitespace. RunMat normalises bare names by prefixing `MATLAB:`."
+      "answer": "Identifiers follow MATLAB rules: they must contain at least one colon and no whitespace. RunMat normalises bare names by prefixing `RunMat:`."
     },
     {
       "question": "What if I call `warning` with unsupported arguments?",
@@ -133,6 +133,10 @@
     {
       "label": "fprintf",
       "url": "./fprintf"
+    },
+    {
+      "label": "assert",
+      "url": "./assert"
     }
   ],
   "source": {

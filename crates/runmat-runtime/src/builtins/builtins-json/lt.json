@@ -122,6 +122,14 @@
     {
       "label": "ne",
       "url": "./ne"
+    },
+    {
+      "label": "isequal",
+      "url": "./isequal"
+    },
+    {
+      "label": "le",
+      "url": "./le"
     }
   ],
   "source": {

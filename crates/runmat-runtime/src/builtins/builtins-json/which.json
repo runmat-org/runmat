@@ -125,6 +125,30 @@
     {
       "label": "copyfile",
       "url": "./copyfile"
+    },
+    {
+      "label": "class",
+      "url": "./class"
+    },
+    {
+      "label": "isa",
+      "url": "./isa"
+    },
+    {
+      "label": "ischar",
+      "url": "./ischar"
+    },
+    {
+      "label": "isstring",
+      "url": "./isstring"
+    },
+    {
+      "label": "who",
+      "url": "./who"
+    },
+    {
+      "label": "whos",
+      "url": "./whos"
     }
   ],
   "source": {

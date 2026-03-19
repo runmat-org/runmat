@@ -70,14 +70,19 @@ pub(crate) mod surfc;
 pub use perf::{set_scatter_target_points, set_surface_vertex_budget};
 pub use state::{
     clear_figure, clone_figure, close_figure, configure_subplot, current_axes_state,
-    current_figure_handle, figure_handles, install_figure_observer, new_figure_handle,
-    reset_hold_state_for_run, reset_recent_figures, select_figure, set_hold, take_recent_figures,
-    FigureAxesState, FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
+    current_figure_handle, figure_handles, import_figure, install_figure_observer,
+    new_figure_handle, reset_hold_state_for_run, reset_recent_figures, select_figure, set_hold,
+    take_recent_figures, FigureAxesState, FigureError, FigureEventKind, FigureEventView,
+    FigureHandle, HoldMode,
 };
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
+use web::present_figure_on_surface as web_present_figure_on_surface;
 pub use web::{
-    bind_surface_to_figure, detach_surface, fit_surface_extents, install_surface,
-    present_figure_on_surface, present_surface, render_current_scene, reset_surface_camera,
-    resize_surface, web_renderer_ready,
+    bind_surface_to_figure, detach_surface, fit_surface_extents, get_surface_camera_state,
+    install_surface, present_surface, render_current_scene, reset_surface_camera, resize_surface,
+    set_plot_theme_config, set_surface_camera_state, web_renderer_ready, PlotCameraProjection,
+    PlotCameraState, PlotSurfaceCameraState,
 };
 
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
@@ -101,9 +106,93 @@ pub(crate) fn plotting_error_with_source(
 }
 
 #[cfg(feature = "plot-core")]
+pub fn export_figure_scene(handle: FigureHandle) -> crate::BuiltinResult<Option<Vec<u8>>> {
+    let Some(figure) = clone_figure(handle) else {
+        return Ok(None);
+    };
+    let scene = runmat_plot::event::FigureScene::capture(&figure);
+    crate::replay::export_figure_scene_payload(&scene).map(Some)
+}
+
+#[cfg(feature = "plot-core")]
+pub fn import_figure_scene(bytes: &[u8]) -> crate::BuiltinResult<Option<FigureHandle>> {
+    let scene = crate::replay::import_figure_scene_payload(bytes)?;
+    let figure = scene.into_figure().map_err(|err| {
+        crate::replay_error_with_source(
+            crate::ReplayErrorKind::ImportRejected,
+            "invalid figure scene content",
+            std::io::Error::new(std::io::ErrorKind::InvalidData, err),
+        )
+    })?;
+    let handle = import_figure(figure);
+    register_imported_figure(handle.as_u32());
+    Ok(Some(handle))
+}
+
+#[cfg(feature = "plot-core")]
+pub async fn import_figure_scene_async(bytes: &[u8]) -> crate::BuiltinResult<Option<FigureHandle>> {
+    let scene = crate::replay::import_figure_scene_payload_async(bytes).await?;
+    let figure = scene.into_figure().map_err(|err| {
+        crate::replay_error_with_source(
+            crate::ReplayErrorKind::ImportRejected,
+            "invalid figure scene content",
+            std::io::Error::new(std::io::ErrorKind::InvalidData, err),
+        )
+    })?;
+    let handle = import_figure(figure);
+    register_imported_figure(handle.as_u32());
+    Ok(Some(handle))
+}
+
+#[cfg(feature = "plot-core")]
+pub async fn import_figure_scene_from_path_async(
+    path: &str,
+) -> crate::BuiltinResult<Option<FigureHandle>> {
+    let bytes = runmat_filesystem::read_async(path).await.map_err(|err| {
+        crate::replay_error_with_source(
+            crate::ReplayErrorKind::ImportRejected,
+            format!("failed to read figure scene payload '{path}'"),
+            err,
+        )
+    })?;
+    import_figure_scene_async(&bytes).await
+}
+
+pub fn present_figure_on_surface(surface_id: u32, handle: u32) -> crate::BuiltinResult<()> {
+    web_present_figure_on_surface(surface_id, handle)?;
+    if take_imported_figure(handle) {
+        let _ = reset_surface_camera(surface_id);
+    }
+    Ok(())
+}
+
+type ImportedFigureRegistry = Mutex<HashMap<u32, ()>>;
+
+fn imported_figure_registry() -> &'static ImportedFigureRegistry {
+    static REGISTRY: OnceLock<ImportedFigureRegistry> = OnceLock::new();
+    REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn register_imported_figure(handle: u32) {
+    if let Ok(mut map) = imported_figure_registry().lock() {
+        map.insert(handle, ());
+    }
+}
+
+fn take_imported_figure(handle: u32) -> bool {
+    imported_figure_registry()
+        .lock()
+        .ok()
+        .and_then(|mut map| map.remove(&handle))
+        .is_some()
+}
+
+#[cfg(feature = "plot-core")]
 pub use engine::{
     render_figure_png_bytes, render_figure_png_bytes_with_axes_cameras,
-    render_figure_png_bytes_with_camera, render_figure_snapshot,
+    render_figure_png_bytes_with_camera, render_figure_rgba_bytes,
+    render_figure_rgba_bytes_with_axes_cameras, render_figure_rgba_bytes_with_camera,
+    render_figure_snapshot,
 };
 
 pub mod ops {

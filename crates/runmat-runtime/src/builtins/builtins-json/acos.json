@@ -118,6 +118,42 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "acosh",
+      "url": "./acosh"
+    },
+    {
+      "label": "asinh",
+      "url": "./asinh"
+    },
+    {
+      "label": "atan",
+      "url": "./atan"
+    },
+    {
+      "label": "atan2",
+      "url": "./atan2"
+    },
+    {
+      "label": "atanh",
+      "url": "./atanh"
+    },
+    {
+      "label": "cosh",
+      "url": "./cosh"
+    },
+    {
+      "label": "sinh",
+      "url": "./sinh"
+    },
+    {
+      "label": "tan",
+      "url": "./tan"
+    },
+    {
+      "label": "tanh",
+      "url": "./tanh"
     }
   ],
   "source": {

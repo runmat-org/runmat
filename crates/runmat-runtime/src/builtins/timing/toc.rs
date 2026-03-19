@@ -40,9 +40,9 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 };
 
 const BUILTIN_NAME: &str = "toc";
-const ERR_NO_MATCHING_TIC: &str = "MATLAB:toc:NoMatchingTic";
-const ERR_INVALID_HANDLE: &str = "MATLAB:toc:InvalidTimerHandle";
-const ERR_TOO_MANY_INPUTS: &str = "MATLAB:toc:TooManyInputs";
+const ERR_NO_MATCHING_TIC: &str = "RunMat:toc:NoMatchingTic";
+const ERR_INVALID_HANDLE: &str = "RunMat:toc:InvalidTimerHandle";
+const ERR_TOO_MANY_INPUTS: &str = "RunMat:toc:TooManyInputs";
 
 fn toc_error_with_identifier(message: impl Into<String>, identifier: &str) -> crate::RuntimeError {
     crate::build_runtime_error(message)

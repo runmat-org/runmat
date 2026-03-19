@@ -131,6 +131,10 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "filter",
+      "url": "./filter"
     }
   ],
   "source": {

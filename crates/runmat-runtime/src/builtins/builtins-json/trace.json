@@ -136,6 +136,30 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "ctranspose",
+      "url": "./ctranspose"
+    },
+    {
+      "label": "dot",
+      "url": "./dot"
+    },
+    {
+      "label": "mldivide",
+      "url": "./mldivide"
+    },
+    {
+      "label": "mpower",
+      "url": "./mpower"
+    },
+    {
+      "label": "mrdivide",
+      "url": "./mrdivide"
+    },
+    {
+      "label": "transpose",
+      "url": "./transpose"
     }
   ],
   "source": {

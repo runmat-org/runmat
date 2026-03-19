@@ -153,7 +153,7 @@ try
     A = [1, 2; 3, 4];
     value = A(10, 10);  % Index out of bounds
 catch ME
-    if strcmp(ME.identifier, 'MATLAB:badsubscript')
+    if strcmp(ME.identifier, 'RunMat:badsubscript')
         fprintf('Index out of bounds error\n');
     else
         fprintf('Other error: %s\n', ME.message);

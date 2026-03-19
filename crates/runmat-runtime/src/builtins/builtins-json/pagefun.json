@@ -94,6 +94,14 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "gpuDevice",
+      "url": "./gpudevice"
+    },
+    {
+      "label": "gpuInfo",
+      "url": "./gpuinfo"
     }
   ],
   "source": {

@@ -5,7 +5,7 @@ use runmat_parser::parse;
 fn lower_various_valid_seeds() {
     let seeds = [
         "A=[1 2;3 4]; B=A(:,2);",
-        "try; error('MATLAB:foo','msg'); catch e; id=getfield(e,'identifier'); end",
+        "try; error('RunMat:foo','msg'); catch e; id=getfield(e,'identifier'); end",
         "function y = f(x); y = x + 1; end; a = f(2);",
         "classdef C\nend",
         "import pkg.*; x=1;",

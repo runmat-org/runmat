@@ -92,6 +92,18 @@
     {
       "question": "Does `numel` accept non-integer dimensions?",
       "answer": "No. Dimension arguments must be positive integers. Fractional, negative, or non-numeric values raise an error that mirrors MATLAB."
+    },
+    {
+      "question": "What does numel do in MATLAB?",
+      "answer": "`numel(A)` returns the total number of elements in array `A`. It is equivalent to `prod(size(A))`. In RunMat, `numel` works identically and supports GPU arrays."
+    },
+    {
+      "question": "Is numel the same as length in MATLAB?",
+      "answer": "No. `numel` returns the total element count across all dimensions, while `length` returns the size of the largest dimension. For a 3×4 matrix, `numel` returns 12 but `length` returns 4."
+    },
+    {
+      "question": "Can I use numel with cell arrays and structs?",
+      "answer": "Yes. `numel` counts the number of cells in a cell array or the number of elements in a struct array. It does not recurse into cell contents or struct fields."
     }
   ],
   "links": [
@@ -104,12 +116,32 @@
       "url": "./length"
     },
     {
-      "label": "MathWorks numel reference",
-      "url": "https://www.mathworks.com/help/matlab/ref/numel.html"
+      "label": "numel",
+      "url": "./numel"
     },
     {
-      "label": "MathWorks size reference",
-      "url": "https://www.mathworks.com/help/matlab/ref/size.html"
+      "label": "size",
+      "url": "./size"
+    },
+    {
+      "label": "isempty",
+      "url": "./isempty"
+    },
+    {
+      "label": "ismatrix",
+      "url": "./ismatrix"
+    },
+    {
+      "label": "isscalar",
+      "url": "./isscalar"
+    },
+    {
+      "label": "isvector",
+      "url": "./isvector"
+    },
+    {
+      "label": "ndims",
+      "url": "./ndims"
     }
   ],
   "source": {

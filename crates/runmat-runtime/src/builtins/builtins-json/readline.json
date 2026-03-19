@@ -37,7 +37,7 @@
     "When the terminator is not encountered before the client’s `Timeout` expires, the builtin returns a 0-by-0 double (`[]`). Any bytes that arrived remain buffered internally so the next `readline` call continues assembling the same logical line.",
     "If the remote host closes the connection before a terminator is observed, the builtin returns the buffered characters (which might be empty) and marks the underlying client as disconnected so subsequent network calls can react accordingly.",
     "Inputs passed from the GPU are gathered automatically. Networking always runs on the CPU and the returned string is CPU-resident.",
-    "Invalid structs, missing handles, or disconnected clients raise MATLAB-style diagnostics (for example, `MATLAB:readline:InvalidTcpClient`)."
+    "Invalid structs, missing handles, or disconnected clients raise MATLAB-style diagnostics (for example, `RunMat:readline:InvalidTcpClient`)."
   ],
   "examples": [
     {
@@ -56,7 +56,7 @@
     },
     {
       "description": "Detecting closed connections without losing buffered text",
-      "input": "client = tcpclient(\"sensor.example.com\", 7000);\ntry\n    line = readline(client);        % returns partial line if peer closed without LF\n    disp(line)\n    readline(client);               % second call raises MATLAB:readline:NotConnected\ncatch err\n    if err.identifier == \"MATLAB:readline:NotConnected\"\n        disp(\"Sensor disconnected\")\n    else\n        rethrow(err)\n    end\nend"
+      "input": "client = tcpclient(\"sensor.example.com\", 7000);\ntry\n    line = readline(client);        % returns partial line if peer closed without LF\n    disp(line)\n    readline(client);               % second call raises RunMat:readline:NotConnected\ncatch err\n    if err.identifier == \"RunMat:readline:NotConnected\"\n        disp(\"Sensor disconnected\")\n    else\n        rethrow(err)\n    end\nend"
     },
     {
       "description": "Responding gracefully to quiet periods with finite timeouts",
@@ -90,7 +90,7 @@
     },
     {
       "question": "What if the connection closes mid-line?",
-      "answer": "Any buffered text is returned and subsequent calls raise `MATLAB:readline:NotConnected`, signalling that the socket closed."
+      "answer": "Any buffered text is returned and subsequent calls raise `RunMat:readline:NotConnected`, signalling that the socket closed."
     },
     {
       "question": "Does the builtin perform Unicode validation?",
@@ -121,6 +121,14 @@
     {
       "label": "write",
       "url": "./write"
+    },
+    {
+      "label": "close",
+      "url": "./close"
+    },
+    {
+      "label": "tcpserver",
+      "url": "./tcpserver"
     }
   ],
   "source": {

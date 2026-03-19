@@ -42,8 +42,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     notes: "Cell creation acts as a fusion sink and terminates GPU fusion plans.",
 };
 
-const IDENT_INVALID_INPUT: &str = "MATLAB:cell:InvalidInput";
-const IDENT_INVALID_SIZE: &str = "MATLAB:cell:InvalidSize";
+const IDENT_INVALID_INPUT: &str = "RunMat:cell:InvalidInput";
+const IDENT_INVALID_SIZE: &str = "RunMat:cell:InvalidSize";
 
 fn cell_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin("cell").build()

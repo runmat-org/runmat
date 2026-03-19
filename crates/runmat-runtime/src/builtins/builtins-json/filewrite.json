@@ -115,6 +115,30 @@
     {
       "label": "string",
       "url": "./string"
+    },
+    {
+      "label": "fclose",
+      "url": "./fclose"
+    },
+    {
+      "label": "feof",
+      "url": "./feof"
+    },
+    {
+      "label": "fgets",
+      "url": "./fgets"
+    },
+    {
+      "label": "fopen",
+      "url": "./fopen"
+    },
+    {
+      "label": "fread",
+      "url": "./fread"
+    },
+    {
+      "label": "frewind",
+      "url": "./frewind"
     }
   ],
   "source": {

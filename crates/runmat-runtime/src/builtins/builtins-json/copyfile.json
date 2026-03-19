@@ -73,7 +73,7 @@
     {
       "description": "Handle missing sources gracefully",
       "input": "[status, message, messageID] = copyfile(\"missing.txt\", \"dest.txt\");\nstatus\nmessage\nmessageID",
-      "output": "status =\n     0\nmessage =\nSource \"missing.txt\" does not exist.\nmessageID =\nMATLAB:COPYFILE:FileDoesNotExist"
+      "output": "status =\n     0\nmessage =\nSource \"missing.txt\" does not exist.\nmessageID =\nRunMat:COPYFILE:FileDoesNotExist"
     }
   ],
   "faqs": [
@@ -95,7 +95,7 @@
     },
     {
       "question": "What happens when the source and destination are the same?",
-      "answer": "The builtin reports a failure with `messageID = MATLAB:COPYFILE:SourceEqualsDestination`, mirroring MATLAB's diagnostics."
+      "answer": "The builtin reports a failure with `messageID = RunMat:COPYFILE:SourceEqualsDestination`, mirroring MATLAB's diagnostics."
     },
     {
       "question": "Does `copyfile` preserve timestamps and permissions?",
@@ -134,6 +134,62 @@
     {
       "label": "pwd",
       "url": "./pwd"
+    },
+    {
+      "label": "addpath",
+      "url": "./addpath"
+    },
+    {
+      "label": "cd",
+      "url": "./cd"
+    },
+    {
+      "label": "delete",
+      "url": "./delete"
+    },
+    {
+      "label": "exist",
+      "url": "./exist"
+    },
+    {
+      "label": "fullfile",
+      "url": "./fullfile"
+    },
+    {
+      "label": "genpath",
+      "url": "./genpath"
+    },
+    {
+      "label": "getenv",
+      "url": "./getenv"
+    },
+    {
+      "label": "ls",
+      "url": "./ls"
+    },
+    {
+      "label": "path",
+      "url": "./path"
+    },
+    {
+      "label": "rmpath",
+      "url": "./rmpath"
+    },
+    {
+      "label": "savepath",
+      "url": "./savepath"
+    },
+    {
+      "label": "setenv",
+      "url": "./setenv"
+    },
+    {
+      "label": "tempdir",
+      "url": "./tempdir"
+    },
+    {
+      "label": "tempname",
+      "url": "./tempname"
     }
   ],
   "source": {

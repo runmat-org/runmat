@@ -18,11 +18,11 @@ use std::io::{self, ErrorKind};
 use std::net::{SocketAddr, TcpStream, ToSocketAddrs};
 use std::time::Duration;
 
-const MESSAGE_ID_INVALID_ADDRESS: &str = "MATLAB:tcpclient:InvalidAddress";
-const MESSAGE_ID_INVALID_PORT: &str = "MATLAB:tcpclient:InvalidPort";
-const MESSAGE_ID_INVALID_NAME_VALUE: &str = "MATLAB:tcpclient:InvalidNameValue";
-const MESSAGE_ID_CONNECT_FAILED: &str = "MATLAB:tcpclient:ConnectionFailed";
-const MESSAGE_ID_INTERNAL: &str = "MATLAB:tcpclient:InternalError";
+const MESSAGE_ID_INVALID_ADDRESS: &str = "RunMat:tcpclient:InvalidAddress";
+const MESSAGE_ID_INVALID_PORT: &str = "RunMat:tcpclient:InvalidPort";
+const MESSAGE_ID_INVALID_NAME_VALUE: &str = "RunMat:tcpclient:InvalidNameValue";
+const MESSAGE_ID_CONNECT_FAILED: &str = "RunMat:tcpclient:ConnectionFailed";
+const MESSAGE_ID_INTERNAL: &str = "RunMat:tcpclient:InternalError";
 
 const DEFAULT_BUFFER_SIZE: usize = 8192;
 

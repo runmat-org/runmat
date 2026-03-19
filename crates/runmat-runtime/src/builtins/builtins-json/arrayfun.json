@@ -103,6 +103,18 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "gpuDevice",
+      "url": "./gpudevice"
+    },
+    {
+      "label": "gpuInfo",
+      "url": "./gpuinfo"
+    },
+    {
+      "label": "pagefun",
+      "url": "./pagefun"
     }
   ],
   "source": {

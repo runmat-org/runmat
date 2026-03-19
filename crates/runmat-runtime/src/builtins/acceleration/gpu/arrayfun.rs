@@ -986,7 +986,7 @@ fn split_error_message(raw: &str) -> (String, String) {
         }
     }
     (
-        "MATLAB:arrayfun:FunctionError".to_string(),
+        "RunMat:arrayfun:FunctionError".to_string(),
         trimmed.to_string(),
     )
 }
@@ -1179,7 +1179,7 @@ pub(crate) mod tests {
         .expect_err("expected unresolved function error");
         assert_eq!(
             err.identifier(),
-            Some("MATLAB:UndefinedFunction"),
+            Some("RunMat:UndefinedFunction"),
             "unexpected error: {}",
             err.message()
         );

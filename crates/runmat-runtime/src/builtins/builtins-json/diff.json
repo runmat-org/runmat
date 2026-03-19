@@ -95,6 +95,26 @@
     {
       "question": "Will the GPU path produce the same results as the CPU path?",
       "answer": "Yes. When a provider lacks a finite-difference kernel, RunMat gathers the data and computes on the CPU to preserve MATLAB semantics exactly. Otherwise, the WGPU backend produces identical results on the GPU."
+    },
+    {
+      "question": "What does diff do in MATLAB?",
+      "answer": "`diff(X)` computes differences between adjacent elements. For a vector, it returns `X(2:end) - X(1:end-1)`, producing an output one element shorter than the input."
+    },
+    {
+      "question": "How do I compute second differences with diff?",
+      "answer": "Use `diff(X, 2)` to compute the second-order difference, equivalent to `diff(diff(X))`. The output is two elements shorter than the input."
+    },
+    {
+      "question": "How do I compute differences along columns vs rows?",
+      "answer": "Use `diff(X, 1, 1)` for differences along columns (default for matrices) and `diff(X, 1, 2)` for differences along rows. The third argument specifies the dimension."
+    },
+    {
+      "question": "Can I use diff to compute numerical derivatives?",
+      "answer": "Yes. For evenly spaced data with step `h`, the numerical derivative is approximately `diff(y) / h`. For non-uniform spacing, use `diff(y) ./ diff(x)`."
+    },
+    {
+      "question": "Does diff support GPU acceleration in RunMat?",
+      "answer": "Yes. `diff` runs on GPU arrays in RunMat. The GPU path produces the same results as the CPU path for both real and complex inputs."
     }
   ],
   "links": [
@@ -117,6 +137,54 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "all",
+      "url": "./all"
+    },
+    {
+      "label": "any",
+      "url": "./any"
+    },
+    {
+      "label": "cummax",
+      "url": "./cummax"
+    },
+    {
+      "label": "cummin",
+      "url": "./cummin"
+    },
+    {
+      "label": "max",
+      "url": "./max"
+    },
+    {
+      "label": "mean",
+      "url": "./mean"
+    },
+    {
+      "label": "median",
+      "url": "./median"
+    },
+    {
+      "label": "min",
+      "url": "./min"
+    },
+    {
+      "label": "nnz",
+      "url": "./nnz"
+    },
+    {
+      "label": "prod",
+      "url": "./prod"
+    },
+    {
+      "label": "std",
+      "url": "./std"
+    },
+    {
+      "label": "var",
+      "url": "./var"
     }
   ],
   "source": {

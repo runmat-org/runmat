@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { getCurrentAttribution } from "@/lib/attribution-client";
+import { trackWebsiteEvent } from "@/components/GoogleAnalytics";
 
 export default function SubscribeForm() {
   const [email, setEmail] = useState("");
@@ -17,10 +19,19 @@ export default function SubscribeForm() {
           const resp = await fetch("/api/subscribe", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email, pageUri: window.location.href, pageName: document.title }),
+            body: JSON.stringify({
+              email,
+              pageUri: window.location.href,
+              pageName: document.title,
+              attribution: getCurrentAttribution(),
+            }),
           }).catch(() => undefined);
           if (resp && resp.ok) {
             setStatus("success");
+            trackWebsiteEvent("website.lead.newsletter_submitted", {
+              source: "newsletter",
+              page: document.title,
+            });
             setEmail("");
           } else {
             setStatus("error");
@@ -59,4 +70,3 @@ export default function SubscribeForm() {
     </div>
   );
 }
-

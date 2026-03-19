@@ -24,6 +24,7 @@ end
 In RunMat, the compiler detects that recurrent structure (deterministic loop bounds, a randn draw, multiplicative update with constants) and replaces it with Instr::StochasticEvolution instruction.
 
 The provider hook for this instruction is then responsible for generating the GPU kernel that implements the stochastic evolution, with a fallback to a host-based implementation when one is not available.
+VM dispatch gathers scalar/tensor operands through the async gather path, so wasm targets can execute this opcode without relying on synchronous gather.
 
 This lets the runtime encode the semantics of common stateful math idioms in single instructions that can be dispatched to single-dispatch kernels when a provider is available, with a fallback to a host-based implementation when one is not available.
 

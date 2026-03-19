@@ -104,7 +104,24 @@
       "answer": "Yes. The builtin returns a fresh cell array where each element is normalised to a character vector. Elements that are already character vectors are cloned so that downstream code can modify the result without mutating the source cell."
     }
   ],
-  "links": [],
+  "links": [
+    {
+      "label": "cell",
+      "url": "./cell"
+    },
+    {
+      "label": "cell2mat",
+      "url": "./cell2mat"
+    },
+    {
+      "label": "cellfun",
+      "url": "./cellfun"
+    },
+    {
+      "label": "mat2cell",
+      "url": "./mat2cell"
+    }
+  ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/cells/core/cellstr.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/cells/core/cellstr.rs"

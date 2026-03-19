@@ -102,6 +102,30 @@
     {
       "label": "gather",
       "url": "./gather"
+    },
+    {
+      "label": "fieldnames",
+      "url": "./fieldnames"
+    },
+    {
+      "label": "getfield",
+      "url": "./getfield"
+    },
+    {
+      "label": "isfield",
+      "url": "./isfield"
+    },
+    {
+      "label": "orderfields",
+      "url": "./orderfields"
+    },
+    {
+      "label": "rmfield",
+      "url": "./rmfield"
+    },
+    {
+      "label": "setfield",
+      "url": "./setfield"
     }
   ],
   "source": {

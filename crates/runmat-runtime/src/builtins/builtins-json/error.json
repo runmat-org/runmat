@@ -30,13 +30,13 @@
   },
   "description": "`error` throws an exception immediately, unwinding the current execution frame and transferring control to the nearest `catch` block (or aborting the program if none exists). RunMat mirrors MATLAB's behaviour, including support for message identifiers, formatted messages, `MException` objects, and legacy message structs.",
   "behaviors": [
-    "`error(message)` throws using the default identifier `MATLAB:error`.",
-    "`error(id, message)` uses a custom identifier. Identifiers are normalised to `MATLAB:*` when they do not already contain a namespace.",
+    "`error(message)` throws using the default identifier `RunMat:error`.",
+    "`error(id, message)` uses a custom identifier. Identifiers are normalised to `RunMat:*` when they do not already contain a namespace.",
     "`error(fmt, arg1, ...)` formats the message with MATLAB's `sprintf` rules before throwing.",
     "`error(id, fmt, arg1, ...)` combines both a custom identifier and formatted message text.",
     "`error(MException_obj)` rethrows an existing exception without altering its identifier or message.",
     "`error(struct('identifier', id, 'message', msg))` honours the legacy structure form.",
-    "Invalid invocations (missing message, extra arguments after an `MException`, malformed structs, etc.) themselves raise `MATLAB:error` diagnostics so the caller can correct usage.\n\nThe thrown exception is observed in MATLAB-compatible `try`/`catch` constructs or by the embedding runtime, which converts the string back into an `MException` object."
+    "Invalid invocations (missing message, extra arguments after an `MException`, malformed structs, etc.) themselves raise `RunMat:error` diagnostics so the caller can correct usage.\n\nThe thrown exception is observed in MATLAB-compatible `try`/`catch` constructs or by the embedding runtime, which converts the string back into an `MException` object."
   ],
   "examples": [
     {
@@ -49,11 +49,11 @@
     },
     {
       "description": "Formatting values inside the error message",
-      "input": "value = 42;\ntry\n    error(\"MATLAB:demo:badValue\", \"Value %d is outside [%d, %d].\", value, 0, 10);\ncatch err\n    disp(err.message);\nend"
+      "input": "value = 42;\ntry\n    error(\"RunMat:demo:badValue\", \"Value %d is outside [%d, %d].\", value, 0, 10);\ncatch err\n    disp(err.message);\nend"
     },
     {
       "description": "Rethrowing an existing MException",
-      "input": "try\n    try\n        error(\"MATLAB:inner:failure\", \"Inner failure.\");\n    catch inner\n        error(inner); % propagate with original identifier/message\n    end\ncatch err\n    fprintf(\"%s\\n\", err.identifier);\nend"
+      "input": "try\n    try\n        error(\"RunMat:inner:failure\", \"Inner failure.\");\n    catch inner\n        error(inner); % propagate with original identifier/message\n    end\ncatch err\n    fprintf(\"%s\\n\", err.identifier);\nend"
     },
     {
       "description": "Using a legacy message struct",
@@ -63,7 +63,7 @@
   "faqs": [
     {
       "question": "How do I choose a custom identifier?",
-      "answer": "Use `component:mnemonic` style strings such as `\"MATLAB:io:fileNotFound\"` or `\"runmat:tools:badInput\"`. If you omit a namespace (`:`), RunMat prefixes the identifier with `MATLAB:` automatically."
+      "answer": "Use `component:mnemonic` style strings such as `\"RunMat:io:fileNotFound\"` or `\"runmat:tools:badInput\"`. If you omit a namespace (`:`), RunMat prefixes the identifier with `RunMat:` automatically."
     },
     {
       "question": "Can I rethrow an existing `MException`?",
@@ -71,7 +71,7 @@
     },
     {
       "question": "What happens if I pass extra arguments after an `MException` or struct?",
-      "answer": "RunMat treats that as invalid usage and raises `MATLAB:error` explaining that no additional arguments are allowed in those forms."
+      "answer": "RunMat treats that as invalid usage and raises `RunMat:error` explaining that no additional arguments are allowed in those forms."
     },
     {
       "question": "Does `error` run on the GPU?",
@@ -79,10 +79,10 @@
     },
     {
       "question": "What if I call `error` without arguments?",
-      "answer": "RunMat raises `MATLAB:error` indicating that a message is required, matching MATLAB's behaviour."
+      "answer": "RunMat raises `RunMat:error` indicating that a message is required, matching MATLAB's behaviour."
     },
     {
-      "question": "Why was my identifier normalised to `MATLAB:...`?",
+      "question": "Why was my identifier normalised to `RunMat:...`?",
       "answer": "MATLAB requires message identifiers to contain at least one namespace separator (`:`). RunMat enforces this rule so diagnostics integrate cleanly with tooling that expects fully-qualified identifiers."
     },
     {
@@ -91,10 +91,19 @@
     },
     {
       "question": "Does formatting follow MATLAB rules?",
-      "answer": "Yes. `error` uses the same formatter as `sprintf`, including width/precision specifiers and numeric conversions, and will raise `MATLAB:error` if the format string is invalid or under-specified. #"
+      "answer": "Yes. `error` uses the same formatter as `sprintf`, including width/precision specifiers and numeric conversions, and will raise `RunMat:error` if the format string is invalid or under-specified. #"
     }
   ],
-  "links": [],
+  "links": [
+    {
+      "label": "assert",
+      "url": "./assert"
+    },
+    {
+      "label": "warning",
+      "url": "./warning"
+    }
+  ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/diagnostics/error.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/diagnostics/error.rs"

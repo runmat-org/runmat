@@ -99,6 +99,18 @@
     {
       "question": "How do I request integer-aligned bins?",
       "answer": "Use `'BinMethod', 'integers'` or `'XBinMethod'/'YBinMethod'` with the value `'integers'`. RunMat ensures the resulting edges align with integer boundaries, respecting any supplied bin limits."
+    },
+    {
+      "question": "What does histcounts2 do in MATLAB?",
+      "answer": "`histcounts2` bins paired observations into a two-dimensional histogram. It accepts two vectors `X` and `Y` of equal length and returns a matrix of bin counts plus the bin edges for each axis."
+    },
+    {
+      "question": "How is histcounts2 different from histcounts?",
+      "answer": "`histcounts` bins data along a single dimension, while `histcounts2` bins paired data along two dimensions simultaneously, producing a 2-D count matrix."
+    },
+    {
+      "question": "Can I use histcounts2 on GPU arrays in RunMat?",
+      "answer": "Yes. RunMat supports `histcounts2` on GPU arrays with `f32` and `f64` precision. GPU providers can attach a device kernel for full hardware acceleration."
     }
   ],
   "links": [

@@ -60,6 +60,7 @@ fn fused_single_pass_reduce_len_1_no_alias() {
         shape: ShapeInfo::Tensor(vec![Some(cols)]),
         span: InstrSpan { start: 0, end: 0 },
         pattern: None,
+        stack_layout: None,
     };
 
     let plan = FusionGroupPlan {

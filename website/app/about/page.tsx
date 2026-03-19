@@ -528,7 +528,11 @@ export default function AboutPage() {
         {/* Contact */}
         <section className="pb-8 md:pb-12 lg:pb-16 text-center">
           <p className="text-sm text-muted-foreground">
-            We&apos;re based in Seattle, WA and San Francisco, CA. Reach us at{" "}
+            We&apos;re based in Seattle, WA and San Francisco, CA.{" "}
+            <Link href="/contact" className="underline hover:text-foreground">
+              Get in touch
+            </Link>{" "}
+            or email us at{" "}
             <a href="mailto:team@runmat.com" className="underline hover:text-foreground">
               team@runmat.com
             </a>

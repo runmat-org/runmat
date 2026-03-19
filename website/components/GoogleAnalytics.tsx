@@ -1,6 +1,7 @@
 "use client";
 
 import Script from 'next/script';
+import posthog from 'posthog-js';
 
 // Google Analytics Measurement ID
 // You'll need to replace this with your actual GA4 Measurement ID
@@ -40,14 +41,30 @@ export function GoogleAnalytics() {
   );
 }
 
-// Helper function to track custom events
-export const trackEvent = (action: string, category: string, label?: string, value?: number) => {
+function toCanonicalWebsiteEvent(name: string): string {
+  const trimmed = name.trim();
+  return trimmed.startsWith('website.') ? trimmed : `website.${trimmed}`;
+}
+
+export type WebsiteEventProperties = {
+  category?: string;
+  label?: string;
+  value?: number;
+  [key: string]: unknown;
+};
+
+export const trackWebsiteEvent = (event: string, properties: WebsiteEventProperties = {}) => {
+  const canonicalEvent = toCanonicalWebsiteEvent(event);
+  const payload = {
+    ...properties,
+    event_category: properties.category,
+    event_label: properties.label,
+  };
   if (typeof window !== 'undefined' && window.gtag) {
-    window.gtag('event', action, {
-      event_category: category,
-      event_label: label,
-      value: value,
-    });
+    window.gtag('event', canonicalEvent, payload);
+  }
+  if (typeof window !== 'undefined') {
+    posthog.capture(canonicalEvent, payload);
   }
 };
 

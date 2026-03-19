@@ -309,77 +309,6 @@ async fn gather_value(value: &Value) -> BuiltinResult<Value> {
         .map_err(map_control_flow)
 }
 
-#[allow(dead_code)]
-fn resolve_target<'a>(
-    first: &'a Value,
-    rest: &'a [Value],
-) -> Result<(OutputTarget, &'a Value, &'a [Value]), String> {
-    if let Some(stream) = match_stream_label(first) {
-        if rest.is_empty() {
-            return Err(MISSING_FORMAT_MESSAGE.to_string());
-        }
-        let target = match stream {
-            SpecialStream::Stdout => OutputTarget::Stdout,
-            SpecialStream::Stderr => OutputTarget::Stderr,
-        };
-        return Ok((target, &rest[0], &rest[1..]));
-    }
-
-    match first {
-        Value::Num(_) | Value::Int(_) => {
-            let fid = parse_fid(first)?;
-            resolve_fid_target(fid, rest)
-        }
-        Value::Tensor(t) => {
-            // If this looks like a 1xN row of character codes, treat it as a format string to stdout
-            if t.shape.len() == 2 && t.shape[0] == 1 && t.data.len() == t.shape[1] {
-                return Ok((OutputTarget::Stdout, first, rest));
-            }
-            // Otherwise only scalar numeric tensors are valid as fids
-            let fid = parse_fid(first)?;
-            resolve_fid_target(fid, rest)
-        }
-        Value::String(_) | Value::CharArray(_) | Value::StringArray(_) => {
-            let target = OutputTarget::Stdout;
-            Ok((target, first, rest))
-        }
-        // Be permissive: if it's not a numeric fid or stream label, interpret as format string to stdout
-        _ => Ok((OutputTarget::Stdout, first, rest)),
-    }
-}
-
-fn resolve_fid_target(
-    fid: i32,
-    rest: &[Value],
-) -> Result<(OutputTarget, &Value, &[Value]), String> {
-    if rest.is_empty() {
-        return Err(MISSING_FORMAT_MESSAGE.to_string());
-    }
-    if fid < 0 {
-        return Err("fprintf: file identifier must be non-negative".to_string());
-    }
-    match fid {
-        0 => Err("fprintf: file identifier 0 (stdin) is not writable".to_string()),
-        1 => Ok((OutputTarget::Stdout, &rest[0], &rest[1..])),
-        2 => Ok((OutputTarget::Stderr, &rest[0], &rest[1..])),
-        _ => {
-            let info =
-                registry::info_for(fid).ok_or_else(|| INVALID_IDENTIFIER_MESSAGE.to_string())?;
-            ensure_writable(&info)?;
-            let handle =
-                registry::take_handle(fid).ok_or_else(|| INVALID_IDENTIFIER_MESSAGE.to_string())?;
-            Ok((
-                OutputTarget::File {
-                    handle,
-                    encoding: info.encoding.clone(),
-                },
-                &rest[0],
-                &rest[1..],
-            ))
-        }
-    }
-}
-
 fn target_from_fid(fid: i32) -> Result<OutputTarget, String> {
     if fid < 0 {
         return Err("fprintf: file identifier must be non-negative".to_string());
@@ -544,7 +473,7 @@ pub(crate) mod tests {
     use crate::RuntimeError;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, Tensor};
-    use runmat_filesystem::{self as fs, File};
+    use runmat_filesystem::File;
     use runmat_time::system_time_now;
     use std::io::Read;
     use std::path::PathBuf;
@@ -594,9 +523,9 @@ pub(crate) mod tests {
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
 
-        let contents = fs::read_to_string(&path).expect("read");
+        let contents = test_support::fs::read_to_string(&path).expect("read");
         assert_eq!(contents, "1 4\n2 5\n3 6\n");
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -623,7 +552,7 @@ pub(crate) mod tests {
         assert!(err.contains("cannot be encoded as ASCII"), "{err}");
 
         run_fclose(&[Value::Num(fid as f64)]).unwrap();
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -663,7 +592,7 @@ pub(crate) mod tests {
         let mut contents = String::new();
         file.read_to_string(&mut contents).expect("read");
         assert_eq!(contents, "1.0,2.0,3.0,");
-        fs::remove_file(path).unwrap();
+        test_support::fs::remove_file(path).unwrap();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -701,7 +630,7 @@ pub(crate) mod tests {
         let _guard = registry_guard();
         registry::reset_for_tests();
         let path = unique_path("fprintf_read_only");
-        fs::write(&path, b"readonly").unwrap();
+        test_support::fs::write(&path, b"readonly").unwrap();
         let open = run_fopen(&[
             Value::from(path.to_string_lossy().to_string()),
             Value::from("r"),
