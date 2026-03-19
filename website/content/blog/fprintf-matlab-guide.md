@@ -11,6 +11,7 @@ tags: ["MATLAB", "fprintf", "debugging", "RunMat", "scientific computing"]
 collections: ["guides"]
 keywords: "fprintf MATLAB, MATLAB fprintf format specifiers, MATLAB print to file, MATLAB fprintf examples, MATLAB debugging, MATLAB fprintf vs disp, MATLAB vs Python debugging, MATLAB fprintf newline, MATLAB fprintf repeats array, MATLAB fprintf column major, MATLAB fprintf no loop"
 excerpt: "fprintf is a formatting function that got conscripted into debugging because MATLAB never shipped anything better. Here's what it's actually for, and what to use instead."
+image: "https://web.runmatstatic.com/blog-images/matlab-fprintf.png"
 ogType: "article"
 ogTitle: "The Worst Debugging Tool in MATLAB Is the One You Use Every Day"
 ogDescription: "fprintf is a formatting function that got conscripted into debugging because MATLAB never shipped anything better. Here's what it's actually for, and what to use instead."
@@ -41,6 +42,7 @@ jsonLd:
       headline: "The Worst Debugging Tool in MATLAB Is the One You Use Every Day"
       alternativeHeadline: "fprintf in MATLAB: format specifiers, file I/O, and why it fails as a debugger"
       description: "fprintf is a formatting function that got conscripted into debugging because MATLAB never shipped anything better. Here's what it's actually for, what it costs you as a debugger, and what to use instead."
+      image: "https://web.runmatstatic.com/blog-images/matlab-fprintf.png"
       datePublished: "2026-03-18T00:00:00Z"
       author:
         "@type": "Person"
@@ -125,6 +127,8 @@ jsonLd:
 You know the workflow. A thermal simulation diverges somewhere in a 5,000-iteration convergence loop. You add `fprintf('iter %d: T_max = %.4f\n', k, max(T(:)))` inside the loop, run the script, scroll through thousands of lines of output, and find the NaN at iteration 3,847. You remove the fprintf. Then you realize you also need to check the boundary condition array. You add another fprintf. You run again. You scroll again. You remove it again.
 
 fprintf is a formatting function. It writes formatted text to files and to stdout. The fact that it became MATLAB's de facto debugger says more about MATLAB's tooling than it does about fprintf. If you just need the syntax and format specifiers, [skip to the reference](#fprintf-syntax-and-reference).
+
+![The endless fprintf debugging loop](https://web.runmatstatic.com/blog-images/matlab-fprintf.png)
 
 ## Why fprintf fails as a debugger
 
