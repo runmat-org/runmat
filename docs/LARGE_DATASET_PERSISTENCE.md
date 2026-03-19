@@ -163,13 +163,13 @@ And explicit method calls:
 ### Creating a dataset from scratch
 
 ```matlab
-schema = data.schema(struct(
+schema = struct(
   "arrays", struct(
     "temperature", struct("dtype", "f32", "shape", [4096, 4096, 365], "chunk", [256, 256, 1]),
     "pressure", struct("dtype", "f32", "shape", [4096, 4096, 365], "chunk", [256, 256, 1])
   ),
   "attrs", struct("owner", "string", "stage", "string")
-));
+);
 
 ds = data.create("/datasets/weather.data", schema);
 ```

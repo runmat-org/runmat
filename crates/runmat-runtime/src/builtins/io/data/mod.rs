@@ -1074,6 +1074,27 @@ async fn data_tx_commit_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<
 }
 
 #[runtime_builtin(
+    name = "commit",
+    category = "io/data",
+    sink = true,
+    type_resolver(crate::builtins::io::type_resolvers::data_bool_type),
+    builtin_path = "crate::builtins::io::data"
+)]
+async fn data_tx_commit_alias_builtin(base: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
+    match &base {
+        Value::Object(obj) if obj.class_name == "DataTransaction" => {
+            data_tx_commit_builtin(base, rest).await
+        }
+        Value::HandleObject(handle) if handle.class_name == "DataTransaction" => {
+            data_tx_commit_builtin(base, rest).await
+        }
+        _ => Err(data_error(
+            "commit: receiver must be a DataTransaction (use tx = ds.begin())",
+        )),
+    }
+}
+
+#[runtime_builtin(
     name = "DataTransaction.abort",
     category = "io/data",
     sink = true,

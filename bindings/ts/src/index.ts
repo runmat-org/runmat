@@ -496,6 +496,12 @@ export interface RunMatSessionHandle {
   exportWorkspaceState(options?: { includeVariables?: "off" | "auto" | "force" }): Promise<Uint8Array | null>;
   importWorkspaceState(state: Uint8Array): Promise<boolean>;
   workspaceSnapshot(): Promise<WorkspaceSnapshot>;
+  inspectDataFile(path: string): Promise<WorkspaceEntry[]>;
+  materializeDataFileVariable(
+    path: string,
+    selector: WorkspaceMaterializeSelector,
+    options?: MaterializeVariableOptions
+  ): Promise<MaterializedVariable>;
   exportFigureScene?(handle: number): Promise<Uint8Array | null>;
   importFigureScene?(scene: Uint8Array): Promise<number | null>;
   importFigureSceneFromPath?(path: string): Promise<number | null>;
@@ -549,6 +555,12 @@ interface RunMatNativeSession {
   exportWorkspaceState?: (includeVariables?: string) => Promise<Uint8Array | null>;
   importWorkspaceState?: (state: Uint8Array) => boolean;
   workspaceSnapshot?: () => WorkspaceSnapshot;
+  inspectDataFile?: (path: string) => WorkspaceEntry[] | Promise<WorkspaceEntry[]>;
+  materializeDataFileVariable?: (
+    path: string,
+    array: string,
+    options?: MaterializeVariableOptionsWire
+  ) => MaterializedVariable | Promise<MaterializedVariable>;
   exportFigureScene?: (handle: number) => Uint8Array | null;
   importFigureScene?: (scene: Uint8Array) => number | null | Promise<number | null>;
   importFigureSceneFromPath?: (path: string) => number | null | Promise<number | null>;
@@ -1151,6 +1163,38 @@ class WebRunMatSession implements RunMatSessionHandle {
     this.ensureActive();
     requireNativeFunction(this.native, "workspaceSnapshot");
     return this.native.workspaceSnapshot();
+  }
+
+  async inspectDataFile(path: string): Promise<WorkspaceEntry[]> {
+    this.ensureActive();
+    if (typeof this.native.inspectDataFile !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose inspectDataFile yet.");
+    }
+    const entries = await this.native.inspectDataFile(path);
+    return Array.isArray(entries) ? entries : [];
+  }
+
+  async materializeDataFileVariable(
+    path: string,
+    selector: WorkspaceMaterializeSelector,
+    options?: MaterializeVariableOptions
+  ): Promise<MaterializedVariable> {
+    this.ensureActive();
+    if (typeof this.native.materializeDataFileVariable !== "function") {
+      throw new Error("The loaded runmat-wasm module does not expose materializeDataFileVariable yet.");
+    }
+    const normalized = normalizeMaterializeSelector(selector);
+    const arrayName =
+      typeof normalized === "string" ? normalized : normalized.name ?? normalized.previewToken;
+    if (!arrayName) {
+      throw new Error("materializeDataFileVariable selector requires name");
+    }
+    const wireOptions = normalizeMaterializeOptions(options);
+    return this.native.materializeDataFileVariable(
+      path,
+      arrayName,
+      wireOptions as MaterializeVariableOptionsWire | undefined
+    );
   }
 
   async exportFigureScene(handle: number): Promise<Uint8Array | null> {

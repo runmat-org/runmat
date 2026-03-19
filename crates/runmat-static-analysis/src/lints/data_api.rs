@@ -5,7 +5,7 @@ use runmat_hir::{
     HirClassMember, HirDiagnostic, HirDiagnosticSeverity, HirExpr, HirExprKind, HirLValue, HirStmt,
     LoweringResult, VarId,
 };
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 #[derive(Clone)]
 struct DatasetBinding {
@@ -29,8 +29,10 @@ pub fn lint_data_api_with_provider(
 ) -> Vec<HirDiagnostic> {
     let mut diags = Vec::new();
     let mut non_tx_write_count = 0usize;
+    let mut tx_vars = HashSet::<VarId>::new();
+    collect_tx_bindings_from_stmts(&result.hir.body, &mut tx_vars);
     for stmt in &result.hir.body {
-        walk_stmt_general(stmt, &mut diags, &mut non_tx_write_count);
+        walk_stmt_general(stmt, &mut diags, &mut non_tx_write_count, &tx_vars);
     }
 
     let mut datasets = HashMap::<VarId, DatasetBinding>::new();
@@ -47,6 +49,86 @@ pub fn lint_data_api_with_provider(
     }
 
     diags
+}
+
+fn collect_tx_bindings_from_stmts(stmts: &[HirStmt], tx_vars: &mut HashSet<VarId>) {
+    for stmt in stmts {
+        match stmt {
+            HirStmt::Assign(var_id, expr, _, _)
+            | HirStmt::AssignLValue(HirLValue::Var(var_id), expr, _, _) => {
+                if expr_is_begin_call(expr) {
+                    tx_vars.insert(*var_id);
+                }
+            }
+            HirStmt::MultiAssign(var_ids, expr, _, _) => {
+                if expr_is_begin_call(expr) {
+                    for var_id in var_ids.iter().flatten() {
+                        tx_vars.insert(*var_id);
+                    }
+                }
+            }
+            HirStmt::If {
+                then_body,
+                elseif_blocks,
+                else_body,
+                ..
+            } => {
+                collect_tx_bindings_from_stmts(then_body, tx_vars);
+                for (_, body) in elseif_blocks {
+                    collect_tx_bindings_from_stmts(body, tx_vars);
+                }
+                if let Some(body) = else_body {
+                    collect_tx_bindings_from_stmts(body, tx_vars);
+                }
+            }
+            HirStmt::While { body, .. }
+            | HirStmt::For { body, .. }
+            | HirStmt::Function { body, .. } => {
+                collect_tx_bindings_from_stmts(body, tx_vars);
+            }
+            HirStmt::Switch {
+                cases, otherwise, ..
+            } => {
+                for (_, body) in cases {
+                    collect_tx_bindings_from_stmts(body, tx_vars);
+                }
+                if let Some(body) = otherwise {
+                    collect_tx_bindings_from_stmts(body, tx_vars);
+                }
+            }
+            HirStmt::TryCatch {
+                try_body,
+                catch_body,
+                ..
+            } => {
+                collect_tx_bindings_from_stmts(try_body, tx_vars);
+                collect_tx_bindings_from_stmts(catch_body, tx_vars);
+            }
+            HirStmt::ClassDef { members, .. } => {
+                for member in members {
+                    if let HirClassMember::Methods { body, .. } = member {
+                        collect_tx_bindings_from_stmts(body, tx_vars);
+                    }
+                }
+            }
+            HirStmt::ExprStmt(_, _, _)
+            | HirStmt::Break(_)
+            | HirStmt::Continue(_)
+            | HirStmt::Return(_)
+            | HirStmt::Global(_, _)
+            | HirStmt::Persistent(_, _)
+            | HirStmt::Import { .. }
+            | HirStmt::AssignLValue(_, _, _, _) => {}
+        }
+    }
+}
+
+fn expr_is_begin_call(expr: &HirExpr) -> bool {
+    match &expr.kind {
+        HirExprKind::MethodCall(_, method, _) => method == "begin",
+        HirExprKind::FuncCall(name, _) => name == "Dataset.begin",
+        _ => false,
+    }
 }
 
 fn literal_string(expr: &HirExpr) -> Option<String> {
@@ -445,6 +527,7 @@ fn walk_expr_general(
     expr: &HirExpr,
     diags: &mut Vec<HirDiagnostic>,
     non_tx_write_count: &mut usize,
+    tx_vars: &HashSet<VarId>,
 ) {
     match &expr.kind {
         HirExprKind::FuncCall(name, args) => {
@@ -464,68 +547,65 @@ fn walk_expr_general(
                 }
             }
             for arg in args {
-                walk_expr_general(arg, diags, non_tx_write_count);
+                walk_expr_general(arg, diags, non_tx_write_count, tx_vars);
             }
         }
         HirExprKind::MethodCall(base, method, args) => {
-            if method == "commit" && matches!(base.kind, HirExprKind::Var(_)) {
-                diags.push(HirDiagnostic {
-                    message: "consider checking transaction commit outcomes in shared workflows"
-                        .to_string(),
-                    span: expr.span,
-                    code: "lint.data.ignore_commit_result",
-                    severity: HirDiagnosticSeverity::Information,
-                });
-            }
             if method == "write" {
-                *non_tx_write_count += 1;
-                if *non_tx_write_count > 1 {
-                    diags.push(HirDiagnostic {
-                        message:
-                            "multiple data writes detected outside explicit transaction; consider ds.begin() + tx.commit()"
-                                .to_string(),
-                        span: expr.span,
-                        code: "lint.data.no_multiwrite_outside_tx",
-                        severity: HirDiagnosticSeverity::Warning,
-                    });
+                let in_tx =
+                    matches!(base.kind, HirExprKind::Var(var_id) if tx_vars.contains(&var_id));
+                if !in_tx {
+                    *non_tx_write_count += 1;
+                    if *non_tx_write_count > 1 {
+                        diags.push(HirDiagnostic {
+                            message:
+                                "multiple data writes detected outside explicit transaction; consider ds.begin() + tx.commit()"
+                                    .to_string(),
+                            span: expr.span,
+                            code: "lint.data.no_multiwrite_outside_tx",
+                            severity: HirDiagnosticSeverity::Warning,
+                        });
+                    }
                 }
             }
-            walk_expr_general(base, diags, non_tx_write_count);
+            walk_expr_general(base, diags, non_tx_write_count, tx_vars);
             for arg in args {
-                walk_expr_general(arg, diags, non_tx_write_count);
+                walk_expr_general(arg, diags, non_tx_write_count, tx_vars);
             }
         }
-        HirExprKind::Unary(_, inner) => walk_expr_general(inner, diags, non_tx_write_count),
+        HirExprKind::Unary(_, inner) => {
+            walk_expr_general(inner, diags, non_tx_write_count, tx_vars)
+        }
         HirExprKind::Binary(lhs, _, rhs) => {
-            walk_expr_general(lhs, diags, non_tx_write_count);
-            walk_expr_general(rhs, diags, non_tx_write_count);
+            walk_expr_general(lhs, diags, non_tx_write_count, tx_vars);
+            walk_expr_general(rhs, diags, non_tx_write_count, tx_vars);
         }
         HirExprKind::Tensor(rows) | HirExprKind::Cell(rows) => {
             for row in rows {
                 for value in row {
-                    walk_expr_general(value, diags, non_tx_write_count);
+                    walk_expr_general(value, diags, non_tx_write_count, tx_vars);
                 }
             }
         }
         HirExprKind::Index(base, args) | HirExprKind::IndexCell(base, args) => {
-            walk_expr_general(base, diags, non_tx_write_count);
+            walk_expr_general(base, diags, non_tx_write_count, tx_vars);
             for arg in args {
-                walk_expr_general(arg, diags, non_tx_write_count);
+                walk_expr_general(arg, diags, non_tx_write_count, tx_vars);
             }
         }
         HirExprKind::Range(start, step, end) => {
-            walk_expr_general(start, diags, non_tx_write_count);
+            walk_expr_general(start, diags, non_tx_write_count, tx_vars);
             if let Some(step) = step {
-                walk_expr_general(step, diags, non_tx_write_count);
+                walk_expr_general(step, diags, non_tx_write_count, tx_vars);
             }
-            walk_expr_general(end, diags, non_tx_write_count);
+            walk_expr_general(end, diags, non_tx_write_count, tx_vars);
         }
         HirExprKind::Member(base, _) | HirExprKind::AnonFunc { body: base, .. } => {
-            walk_expr_general(base, diags, non_tx_write_count)
+            walk_expr_general(base, diags, non_tx_write_count, tx_vars)
         }
         HirExprKind::MemberDynamic(base, field) => {
-            walk_expr_general(base, diags, non_tx_write_count);
-            walk_expr_general(field, diags, non_tx_write_count);
+            walk_expr_general(base, diags, non_tx_write_count, tx_vars);
+            walk_expr_general(field, diags, non_tx_write_count, tx_vars);
         }
         HirExprKind::FuncHandle(_)
         | HirExprKind::MetaClass(_)
@@ -542,28 +622,45 @@ fn walk_stmt_general(
     stmt: &HirStmt,
     diags: &mut Vec<HirDiagnostic>,
     non_tx_write_count: &mut usize,
+    tx_vars: &HashSet<VarId>,
 ) {
     match stmt {
-        HirStmt::ExprStmt(expr, _, _) | HirStmt::Assign(_, expr, _, _) => {
-            walk_expr_general(expr, diags, non_tx_write_count)
+        HirStmt::ExprStmt(expr, _, _) => {
+            if matches!(&expr.kind, HirExprKind::MethodCall(_, method, _) if method == "commit") {
+                diags.push(HirDiagnostic {
+                    message: "consider checking transaction commit outcomes in shared workflows"
+                        .to_string(),
+                    span: expr.span,
+                    code: "lint.data.ignore_commit_result",
+                    severity: HirDiagnosticSeverity::Information,
+                });
+            }
+            walk_expr_general(expr, diags, non_tx_write_count, tx_vars)
         }
-        HirStmt::MultiAssign(_, expr, _, _) => walk_expr_general(expr, diags, non_tx_write_count),
+        HirStmt::Assign(_, expr, _, _) => {
+            walk_expr_general(expr, diags, non_tx_write_count, tx_vars)
+        }
+        HirStmt::MultiAssign(_, expr, _, _) => {
+            walk_expr_general(expr, diags, non_tx_write_count, tx_vars)
+        }
         HirStmt::AssignLValue(lv, expr, _, _) => {
             match lv {
                 HirLValue::Var(_) => {}
                 HirLValue::Index(base, args) | HirLValue::IndexCell(base, args) => {
-                    walk_expr_general(base, diags, non_tx_write_count);
+                    walk_expr_general(base, diags, non_tx_write_count, tx_vars);
                     for arg in args {
-                        walk_expr_general(arg, diags, non_tx_write_count);
+                        walk_expr_general(arg, diags, non_tx_write_count, tx_vars);
                     }
                 }
-                HirLValue::Member(base, _) => walk_expr_general(base, diags, non_tx_write_count),
+                HirLValue::Member(base, _) => {
+                    walk_expr_general(base, diags, non_tx_write_count, tx_vars)
+                }
                 HirLValue::MemberDynamic(base, field) => {
-                    walk_expr_general(base, diags, non_tx_write_count);
-                    walk_expr_general(field, diags, non_tx_write_count);
+                    walk_expr_general(base, diags, non_tx_write_count, tx_vars);
+                    walk_expr_general(field, diags, non_tx_write_count, tx_vars);
                 }
             }
-            walk_expr_general(expr, diags, non_tx_write_count);
+            walk_expr_general(expr, diags, non_tx_write_count, tx_vars);
         }
         HirStmt::If {
             cond,
@@ -572,32 +669,32 @@ fn walk_stmt_general(
             else_body,
             ..
         } => {
-            walk_expr_general(cond, diags, non_tx_write_count);
+            walk_expr_general(cond, diags, non_tx_write_count, tx_vars);
             for stmt in then_body {
-                walk_stmt_general(stmt, diags, non_tx_write_count);
+                walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
             }
             for (cond, body) in elseif_blocks {
-                walk_expr_general(cond, diags, non_tx_write_count);
+                walk_expr_general(cond, diags, non_tx_write_count, tx_vars);
                 for stmt in body {
-                    walk_stmt_general(stmt, diags, non_tx_write_count);
+                    walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
                 }
             }
             if let Some(body) = else_body {
                 for stmt in body {
-                    walk_stmt_general(stmt, diags, non_tx_write_count);
+                    walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
                 }
             }
         }
         HirStmt::While { cond, body, .. } => {
-            walk_expr_general(cond, diags, non_tx_write_count);
+            walk_expr_general(cond, diags, non_tx_write_count, tx_vars);
             for stmt in body {
-                walk_stmt_general(stmt, diags, non_tx_write_count);
+                walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
             }
         }
         HirStmt::For { expr, body, .. } => {
-            walk_expr_general(expr, diags, non_tx_write_count);
+            walk_expr_general(expr, diags, non_tx_write_count, tx_vars);
             for stmt in body {
-                walk_stmt_general(stmt, diags, non_tx_write_count);
+                walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
             }
         }
         HirStmt::Switch {
@@ -606,16 +703,16 @@ fn walk_stmt_general(
             otherwise,
             ..
         } => {
-            walk_expr_general(expr, diags, non_tx_write_count);
+            walk_expr_general(expr, diags, non_tx_write_count, tx_vars);
             for (case_expr, body) in cases {
-                walk_expr_general(case_expr, diags, non_tx_write_count);
+                walk_expr_general(case_expr, diags, non_tx_write_count, tx_vars);
                 for stmt in body {
-                    walk_stmt_general(stmt, diags, non_tx_write_count);
+                    walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
                 }
             }
             if let Some(body) = otherwise {
                 for stmt in body {
-                    walk_stmt_general(stmt, diags, non_tx_write_count);
+                    walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
                 }
             }
         }
@@ -625,22 +722,22 @@ fn walk_stmt_general(
             ..
         } => {
             for stmt in try_body {
-                walk_stmt_general(stmt, diags, non_tx_write_count);
+                walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
             }
             for stmt in catch_body {
-                walk_stmt_general(stmt, diags, non_tx_write_count);
+                walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
             }
         }
         HirStmt::Function { body, .. } => {
             for stmt in body {
-                walk_stmt_general(stmt, diags, non_tx_write_count);
+                walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
             }
         }
         HirStmt::ClassDef { members, .. } => {
             for member in members {
                 if let HirClassMember::Methods { body, .. } = member {
                     for stmt in body {
-                        walk_stmt_general(stmt, diags, non_tx_write_count);
+                        walk_stmt_general(stmt, diags, non_tx_write_count, tx_vars);
                     }
                 }
             }

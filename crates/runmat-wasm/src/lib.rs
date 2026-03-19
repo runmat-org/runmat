@@ -22,7 +22,7 @@ use runmat_core::{
     FusionPlanShader, FusionPlanSnapshot, InputRequest, InputRequestKind, InputResponse,
     MaterializedVariable, RunError, RunMatSession, StdinEvent, StdinEventKind, WorkspaceEntry,
     WorkspaceExportMode, WorkspaceMaterializeOptions, WorkspaceMaterializeTarget, WorkspacePreview,
-    WorkspaceSliceOptions, WorkspaceSnapshot,
+    WorkspaceResidency, WorkspaceSliceOptions, WorkspaceSnapshot,
 };
 use runmat_core::{
     TelemetryFailureInfo, TelemetryHost, TelemetryPlatformInfo, TelemetryRunConfig,
@@ -93,6 +93,9 @@ use runmat_runtime::warning_store::RuntimeWarning;
 use runmat_runtime::RuntimeError;
 #[cfg(target_arch = "wasm32")]
 use runmat_runtime::{
+    data::{
+        dataset_root, read_array_payload_async, read_array_slice_payload_async, read_manifest_async,
+    },
     runtime_plot_export_figure_scene, runtime_plot_import_figure_scene_async,
     runtime_plot_import_figure_scene_from_path_async, ReplayErrorKind,
 };
@@ -759,6 +762,93 @@ impl RunMatWasm {
         };
         serde_wasm_bindgen::to_value(&payload)
             .map_err(|err| js_error(&format!("Failed to serialize workspace snapshot: {err}")))
+    }
+
+    #[wasm_bindgen(js_name = inspectDataFile)]
+    pub async fn inspect_data_file(&self, path: &str) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let root = dataset_root(path);
+        let manifest = read_manifest_async(&root)
+            .await
+            .map_err(|err| js_error(&format!("inspectDataFile failed: {err}")))?;
+        let entries: Vec<WorkspaceEntryPayload> = manifest
+            .arrays
+            .iter()
+            .map(|(name, meta)| {
+                WorkspaceEntryPayload::from(WorkspaceEntry {
+                    name: name.clone(),
+                    class_name: infer_dataset_class_name(meta.shape.len()).to_string(),
+                    dtype: Some(meta.dtype.clone()),
+                    shape: meta.shape.clone(),
+                    is_gpu: false,
+                    size_bytes: Some(estimate_data_array_bytes(&meta.shape, &meta.dtype)),
+                    preview: None,
+                    residency: WorkspaceResidency::Cpu,
+                    preview_token: None,
+                })
+            })
+            .collect();
+        serde_wasm_bindgen::to_value(&entries)
+            .map_err(|err| js_error(&format!("Failed to serialize data entries: {err}")))
+    }
+
+    #[wasm_bindgen(js_name = materializeDataFileVariable)]
+    pub async fn materialize_data_file_variable(
+        &self,
+        path: &str,
+        array: &str,
+        options: JsValue,
+    ) -> Result<JsValue, JsValue> {
+        self.ensure_not_disposed()?;
+        let wire = parse_data_materialize_options_wire(options)?;
+        let root = dataset_root(path);
+        let manifest = read_manifest_async(&root).await.map_err(|err| {
+            js_error(&format!(
+                "materializeDataFileVariable manifest read failed: {err}"
+            ))
+        })?;
+        let meta = manifest
+            .arrays
+            .get(array)
+            .ok_or_else(|| js_error(&format!("Array not found in dataset: {array}")))?;
+        let total_elements = meta.shape.iter().copied().product::<usize>().max(1);
+        let limit = wire.limit.unwrap_or(MAX_DATA_PREVIEW).max(1);
+        let (slice_start, slice_shape) =
+            compute_data_preview_slice(&meta.shape, wire.slice.as_ref(), limit);
+        let payload =
+            match read_array_slice_payload_async(&root, meta, &slice_start, &slice_shape).await {
+                Ok(payload) => payload,
+                Err(_) => read_array_payload_async(&root, meta).await.map_err(|err| {
+                    js_error(&format!(
+                        "materializeDataFileVariable payload read failed: {err}"
+                    ))
+                })?,
+            };
+        let values: Vec<f64> = payload.values.into_iter().take(limit).collect();
+        let response = DataMaterializedVariablePayload {
+            name: array.to_string(),
+            class_name: infer_dataset_class_name(meta.shape.len()).to_string(),
+            dtype: Some(meta.dtype.clone()),
+            shape: meta.shape.clone(),
+            is_gpu: false,
+            residency: WorkspaceResidency::Cpu.as_str(),
+            size_bytes: Some(estimate_data_array_bytes(&meta.shape, &meta.dtype)),
+            preview: Some(WorkspacePreviewPayload {
+                values: values.clone(),
+                truncated: values.len() < total_elements,
+            }),
+            value_text: values
+                .iter()
+                .map(|value| value.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+            value_json: JsonValue::Array(values.into_iter().map(JsonValue::from).collect()),
+        };
+        serde_wasm_bindgen::to_value(&response).map_err(|err| {
+            js_error(&format!(
+                "Failed to serialize data materialized value: {err}"
+            ))
+        })
     }
 
     #[wasm_bindgen(js_name = exportFigureScene)]
@@ -2792,6 +2882,122 @@ impl From<WorkspacePreview> for WorkspacePreviewPayload {
             values: preview.values,
             truncated: preview.truncated,
         }
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DataMaterializedVariablePayload {
+    name: String,
+    class_name: String,
+    dtype: Option<String>,
+    shape: Vec<usize>,
+    is_gpu: bool,
+    residency: &'static str,
+    size_bytes: Option<u64>,
+    preview: Option<WorkspacePreviewPayload>,
+    value_text: String,
+    value_json: JsonValue,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct DataMaterializeOptionsWire {
+    limit: Option<usize>,
+    slice: Option<DataSliceOptionsWire>,
+}
+
+#[derive(Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+struct DataSliceOptionsWire {
+    start: Vec<usize>,
+    shape: Vec<usize>,
+}
+
+fn parse_data_materialize_options_wire(
+    value: JsValue,
+) -> Result<DataMaterializeOptionsWire, JsValue> {
+    if value.is_undefined() || value.is_null() {
+        return Ok(DataMaterializeOptionsWire::default());
+    }
+    serde_wasm_bindgen::from_value::<DataMaterializeOptionsWire>(value)
+        .map_err(|err| js_error(&format!("Invalid data materialize options: {err}")))
+}
+
+fn compute_data_preview_slice(
+    full_shape: &[usize],
+    explicit_slice: Option<&DataSliceOptionsWire>,
+    limit: usize,
+) -> (Vec<usize>, Vec<usize>) {
+    if full_shape.is_empty() {
+        return (Vec::new(), Vec::new());
+    }
+    if let Some(slice) = explicit_slice {
+        let mut start = Vec::with_capacity(full_shape.len());
+        let mut shape = Vec::with_capacity(full_shape.len());
+        for (axis, axis_len) in full_shape.iter().copied().enumerate() {
+            let axis_len = axis_len.max(1);
+            let axis_start = slice
+                .start
+                .get(axis)
+                .copied()
+                .unwrap_or(0)
+                .min(axis_len - 1);
+            let axis_shape = slice
+                .shape
+                .get(axis)
+                .copied()
+                .unwrap_or(axis_len)
+                .max(1)
+                .min(axis_len - axis_start);
+            start.push(axis_start);
+            shape.push(axis_shape);
+        }
+        return (start, shape);
+    }
+
+    if full_shape.len() == 1 {
+        let span = full_shape[0].max(1).min(limit.max(1));
+        return (vec![0], vec![span]);
+    }
+
+    let rows = full_shape[0].max(1);
+    let cols = full_shape[1].max(1);
+    let preview_rows = rows.min((limit as f64).sqrt().floor() as usize).max(1);
+    let preview_cols = cols.min((limit / preview_rows).max(1));
+    let mut shape = vec![preview_rows, preview_cols];
+    shape.extend(full_shape.iter().skip(2).map(|_| 1usize));
+    let start = vec![0usize; full_shape.len()];
+    (start, shape)
+}
+
+fn infer_dataset_class_name(rank: usize) -> &'static str {
+    match rank {
+        0 => "Scalar",
+        1 => "Vector",
+        _ => "Tensor",
+    }
+}
+
+fn estimate_data_array_bytes(shape: &[usize], dtype: &str) -> u64 {
+    let elements = shape
+        .iter()
+        .copied()
+        .map(|dim| dim.max(1) as u64)
+        .fold(1u64, |acc, dim| acc.saturating_mul(dim));
+    elements.saturating_mul(bytes_per_data_element(dtype) as u64)
+}
+
+fn bytes_per_data_element(dtype: &str) -> usize {
+    let normalized = dtype.to_ascii_lowercase();
+    if normalized.contains("64") {
+        8
+    } else if normalized.contains("32") {
+        4
+    } else if normalized.contains("16") {
+        2
+    } else {
+        8
     }
 }
 

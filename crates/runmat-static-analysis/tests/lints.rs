@@ -149,3 +149,16 @@ fn data_lint_reports_ignore_commit_result_guidance() {
         .iter()
         .any(|d| d.code == "lint.data.ignore_commit_result"));
 }
+
+#[test]
+fn data_lint_allows_multiwrite_inside_transaction_with_commit_check() {
+    let source = "ds = data.open('/datasets/weather.data'); tx = ds.begin(); tx.write('a',{1:2},rand(2,1)); tx.write('b',{1:2},rand(2,1)); ok = tx.commit(); if ~ok; error('failed'); end";
+    let result = lower_result(source);
+    let diags = runmat_static_analysis::lint_data_api(&result);
+    assert!(!diags
+        .iter()
+        .any(|d| d.code == "lint.data.no_multiwrite_outside_tx"));
+    assert!(!diags
+        .iter()
+        .any(|d| d.code == "lint.data.ignore_commit_result"));
+}

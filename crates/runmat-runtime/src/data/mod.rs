@@ -334,6 +334,111 @@ pub async fn read_array_payload_async(
     })
 }
 
+pub async fn read_array_slice_payload_async(
+    root: &Path,
+    meta: &DataArrayMeta,
+    start: &[usize],
+    shape: &[usize],
+) -> BuiltinResult<DataArrayPayload> {
+    let (slice_start, slice_shape) = normalize_slice_bounds(&meta.shape, start, shape)?;
+    if let Some(index_path) = &meta.chunk_index_path {
+        let path = root.join(index_path);
+        if fs::metadata_async(&path).await.is_ok() {
+            return read_array_payload_chunked_slice_async(
+                root,
+                meta,
+                &path,
+                &slice_start,
+                &slice_shape,
+            )
+            .await;
+        }
+    }
+    let full = read_array_payload_async(root, meta).await?;
+    extract_slice_payload(&full, &slice_start, &slice_shape)
+}
+
+async fn read_array_payload_chunked_slice_async(
+    root: &Path,
+    meta: &DataArrayMeta,
+    index_path: &Path,
+    slice_start: &[usize],
+    slice_shape: &[usize],
+) -> BuiltinResult<DataArrayPayload> {
+    let bytes = fs::read_async(index_path).await.map_err(|err| {
+        data_error(format!(
+            "failed to read chunk index '{}': {err}",
+            index_path.display()
+        ))
+    })?;
+    let index: DataChunkIndex = serde_json::from_slice(&bytes).map_err(|err| {
+        data_error(format!(
+            "failed to parse chunk index '{}': {err}",
+            index_path.display()
+        ))
+    })?;
+
+    let mut values = vec![0.0; slice_shape.iter().copied().product::<usize>()];
+    for chunk in index.chunks {
+        let coords = chunk_coords_from_entry(&chunk, meta.shape.len())?;
+        let chunk_start = chunk_start_for_coords(&coords, &meta.chunk_shape);
+        let chunk_extent = if chunk.shape.is_empty() {
+            chunk_extent_for_start(&chunk_start, &meta.chunk_shape, &meta.shape)
+        } else {
+            chunk.shape.clone()
+        };
+        if !chunk_intersects_slice(&chunk_start, &chunk_extent, slice_start, slice_shape) {
+            continue;
+        }
+
+        let chunk_path = root.join(&chunk.data_path);
+        let bytes = fs::read_async(&chunk_path).await.map_err(|err| {
+            data_error(format!(
+                "failed to read chunk payload '{}': {err}",
+                chunk_path.display()
+            ))
+        })?;
+        let payload: DataArrayPayload = serde_json::from_slice(&bytes).map_err(|err| {
+            data_error(format!(
+                "failed to parse chunk payload '{}': {err}",
+                chunk_path.display()
+            ))
+        })?;
+        if payload.shape != chunk_extent {
+            return Err(data_error(format!(
+                "chunk payload shape mismatch for key '{}': {:?} != {:?}",
+                chunk.key, payload.shape, chunk_extent
+            )));
+        }
+
+        let mut local = vec![0usize; chunk_extent.len()];
+        loop {
+            let mut global = Vec::with_capacity(chunk_extent.len());
+            for dim in 0..chunk_extent.len() {
+                global.push(chunk_start[dim] + local[dim]);
+            }
+            if coordinate_in_slice(&global, slice_start, slice_shape) {
+                let src_linear = linear_index_column_major(&local, &chunk_extent)?;
+                let mut dst = Vec::with_capacity(slice_shape.len());
+                for dim in 0..slice_shape.len() {
+                    dst.push(global[dim].saturating_sub(slice_start[dim]));
+                }
+                let dst_linear = linear_index_column_major(&dst, slice_shape)?;
+                values[dst_linear] = payload.values[src_linear];
+            }
+            if !advance_index(&mut local, &chunk_extent) {
+                break;
+            }
+        }
+    }
+
+    Ok(DataArrayPayload {
+        dtype: meta.dtype.clone(),
+        shape: slice_shape.to_vec(),
+        values,
+    })
+}
+
 async fn read_array_payload_chunked_async(
     root: &Path,
     meta: &DataArrayMeta,
@@ -552,6 +657,94 @@ fn chunk_coords_from_entry(entry: &DataChunkIndexEntry, rank: usize) -> BuiltinR
         )));
     }
     Ok(coords)
+}
+
+fn normalize_slice_bounds(
+    full_shape: &[usize],
+    start: &[usize],
+    shape: &[usize],
+) -> BuiltinResult<(Vec<usize>, Vec<usize>)> {
+    if full_shape.is_empty() {
+        return Ok((Vec::new(), Vec::new()));
+    }
+    let mut normalized_start = Vec::with_capacity(full_shape.len());
+    let mut normalized_shape = Vec::with_capacity(full_shape.len());
+    for (axis, axis_len) in full_shape.iter().copied().enumerate() {
+        if axis_len == 0 {
+            return Err(data_error("slice axis length must be greater than zero"));
+        }
+        let requested_start = start.get(axis).copied().unwrap_or(0);
+        let clamped_start = requested_start.min(axis_len.saturating_sub(1));
+        let requested_span = shape.get(axis).copied().unwrap_or(axis_len);
+        let clamped_span = requested_span
+            .max(1)
+            .min(axis_len.saturating_sub(clamped_start));
+        normalized_start.push(clamped_start);
+        normalized_shape.push(clamped_span);
+    }
+    Ok((normalized_start, normalized_shape))
+}
+
+fn coordinate_in_slice(global: &[usize], slice_start: &[usize], slice_shape: &[usize]) -> bool {
+    for dim in 0..slice_shape.len() {
+        let start = slice_start[dim];
+        let end = start.saturating_add(slice_shape[dim]);
+        let value = global[dim];
+        if value < start || value >= end {
+            return false;
+        }
+    }
+    true
+}
+
+fn chunk_intersects_slice(
+    chunk_start: &[usize],
+    chunk_extent: &[usize],
+    slice_start: &[usize],
+    slice_shape: &[usize],
+) -> bool {
+    for dim in 0..slice_shape.len() {
+        let chunk_lo = chunk_start[dim];
+        let chunk_hi = chunk_lo.saturating_add(chunk_extent[dim]);
+        let slice_lo = slice_start[dim];
+        let slice_hi = slice_lo.saturating_add(slice_shape[dim]);
+        if chunk_hi <= slice_lo || slice_hi <= chunk_lo {
+            return false;
+        }
+    }
+    true
+}
+
+fn extract_slice_payload(
+    payload: &DataArrayPayload,
+    start: &[usize],
+    shape: &[usize],
+) -> BuiltinResult<DataArrayPayload> {
+    let mut values = Vec::with_capacity(shape.iter().copied().product());
+    if shape.is_empty() {
+        return Ok(DataArrayPayload {
+            dtype: payload.dtype.clone(),
+            shape: Vec::new(),
+            values,
+        });
+    }
+    let mut local = vec![0usize; shape.len()];
+    loop {
+        let mut global = Vec::with_capacity(shape.len());
+        for dim in 0..shape.len() {
+            global.push(start[dim] + local[dim]);
+        }
+        let linear = linear_index_column_major(&global, &payload.shape)?;
+        values.push(payload.values[linear]);
+        if !advance_index(&mut local, shape) {
+            break;
+        }
+    }
+    Ok(DataArrayPayload {
+        dtype: payload.dtype.clone(),
+        shape: shape.to_vec(),
+        values,
+    })
 }
 
 fn linear_index_column_major(index: &[usize], shape: &[usize]) -> BuiltinResult<usize> {
