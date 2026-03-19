@@ -20,6 +20,9 @@
           "paths": ["/login/:path*"]
         },
         {
+          "paths": ["/invite/accept"]
+        },
+        {
           "paths": ["/_p/:path*"]
         },
         {
