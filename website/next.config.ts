@@ -58,6 +58,11 @@ const nextConfig: NextConfig = {
         destination: '/docs/terms',
         permanent: true,
       },
+      {
+        source: '/docs/elements-of-matlab',
+        destination: '/docs/matlab-function-reference',
+        permanent: true,
+      },
     ];
   },
 };

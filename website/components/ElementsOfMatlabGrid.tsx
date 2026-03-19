@@ -796,6 +796,6 @@ function CollapseTile({
 }
 
 function categoryAnchorId(category: DisplayCategory): string {
-  return category.split('/')[0];
+  return category.replace(/[\/\s]+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
 }
 

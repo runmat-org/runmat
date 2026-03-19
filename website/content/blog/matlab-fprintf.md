@@ -6,7 +6,7 @@ authors:
   - name: "Fin Watterson"
     url: "https://www.linkedin.com/in/finbarrwatterson/"
 readTime: "14 min read"
-slug: "fprintf-matlab-guide"
+slug: "matlab-fprintf"
 tags: ["MATLAB", "fprintf", "debugging", "RunMat", "scientific computing"]
 collections: ["guides"]
 keywords: "fprintf MATLAB, MATLAB fprintf format specifiers, MATLAB print to file, MATLAB fprintf examples, MATLAB debugging, MATLAB fprintf vs disp, MATLAB vs Python debugging, MATLAB fprintf newline, MATLAB fprintf repeats array, MATLAB fprintf column major, MATLAB fprintf no loop"
@@ -18,7 +18,7 @@ ogDescription: "fprintf is a formatting function that got conscripted into debug
 twitterCard: "summary_large_image"
 twitterTitle: "The Worst Debugging Tool in MATLAB Is the One You Use Every Day"
 twitterDescription: "fprintf is a formatting function that got conscripted into debugging. Here's what it's actually for, and what to use instead."
-canonical: "https://runmat.com/blog/fprintf-matlab-guide"
+canonical: "https://runmat.com/blog/matlab-fprintf"
 jsonLd:
   "@context": "https://schema.org"
   "@graph":
@@ -35,10 +35,10 @@ jsonLd:
         - "@type": "ListItem"
           position: 3
           name: "The Worst Debugging Tool in MATLAB"
-          item: "https://runmat.com/blog/fprintf-matlab-guide"
+          item: "https://runmat.com/blog/matlab-fprintf"
 
     - "@type": "TechArticle"
-      "@id": "https://runmat.com/blog/fprintf-matlab-guide#article"
+      "@id": "https://runmat.com/blog/matlab-fprintf#article"
       headline: "The Worst Debugging Tool in MATLAB Is the One You Use Every Day"
       alternativeHeadline: "fprintf in MATLAB: format specifiers, file I/O, and why it fails as a debugger"
       description: "fprintf is a formatting function that got conscripted into debugging because MATLAB never shipped anything better. Here's what it's actually for, what it costs you as a debugger, and what to use instead."
@@ -73,7 +73,7 @@ jsonLd:
         cssSelector: ["h1"]
 
     - "@type": "FAQPage"
-      "@id": "https://runmat.com/blog/fprintf-matlab-guide#faq"
+      "@id": "https://runmat.com/blog/matlab-fprintf#faq"
       mainEntity:
         - "@type": "Question"
           name: "Does fprintf return the number of characters or bytes?"
@@ -89,7 +89,7 @@ jsonLd:
           name: "Can I use fprintf with GPU arrays?"
           acceptedAnswer:
             "@type": "Answer"
-            text: "Yes, but fprintf forces an implicit gather — data transfers from GPU to CPU before formatting. In a loop, this serializes asynchronous GPU work and can make your code 10-50x slower than removing the fprintf call entirely."
+            text: "Not directly. MATLAB has no implicit gather mechanism — you must explicitly call gather() to bring gpuArray data to the CPU before fprintf can format it. In a loop, each gather call is a synchronous transfer that serializes GPU work and can make your code 10-50x slower."
         - "@type": "Question"
           name: "What is the difference between fprintf and sprintf?"
           acceptedAnswer:
@@ -104,7 +104,7 @@ jsonLd:
           name: "Why is fprintf slow in a loop?"
           acceptedAnswer:
             "@type": "Answer"
-            text: "Two reasons. First, each fprintf call flushes output to the Command Window, which involves I/O overhead. Second, if any argument is a gpuArray, fprintf forces a synchronous gather on every iteration, serializing GPU work that would otherwise run asynchronously."
+            text: "Two reasons. First, each fprintf call flushes output to the Command Window, which involves I/O overhead. Second, GPU debugging with fprintf requires explicit gather() calls to bring data to the CPU, and each gather is a synchronous transfer that serializes GPU work."
         - "@type": "Question"
           name: "Why does fprintf print my entire array without a loop?"
           acceptedAnswer:
@@ -140,17 +140,17 @@ The debugging work is also disposable. You delete your fprintf calls when you cl
 
 Worse, `fprintf('x = %f\n', x)` shows you one scalar view of one variable. You cannot see dimensions, type, sparsity, or the other 47 workspace variables that might be relevant. You have to decide what to print before you know which variable is causing the problem.
 
-And if you are working with [GPU arrays](/blog/how-to-use-gpu-in-matlab), fprintf on a gpuArray forces an implicit `gather`, transferring data from GPU to CPU just to print a number. Inside a loop, this serializes asynchronous GPU work and destroys the throughput you were trying to measure:
+And if you are working with [GPU arrays](/blog/how-to-use-gpu-in-matlab), MATLAB has no implicit gather mechanism. You have to call `gather` yourself to bring data from GPU to CPU before fprintf can format it. Every debugging fprintf inside a GPU loop means an extra `gather` call -- a synchronous transfer that blocks until the GPU finishes all pending work:
 
-```matlab:runnable
-x = gpuArray.rand(1e7, 1, 'single');
+```matlab
+x = gpuArray(rand(1e7, 1, 'single'));
 for k = 1:20
     x = sin(x) .* x + 0.5;
-    fprintf('step %d: mean = %.6f\n', k, mean(x, 'all'));
+    fprintf('step %d: mean = %.6f\n', k, gather(mean(x, 'all')));
 end
 ```
 
-Those 20 fprintf calls force 20 synchronous gather operations. Remove them and the loop runs 10-50x faster.
+Those 20 `gather` calls force 20 synchronous GPU-to-CPU transfers. Remove them (and the fprintf calls) and the loop runs without serialization.
 
 ### The fprintf debugging loop
 
@@ -279,7 +279,7 @@ The script stays clean. The diagnostic information is in the tool, not in the co
 
 ### What RunMat ships
 
-[RunMat](/blog/introducing-runmat) is a modern runtime for MATLAB syntax -- a from-scratch engine built in Rust that runs your `.m` files with over 300 compatible functions, [automatic GPU acceleration](/blog/how-to-use-gpu-in-matlab), structured logging, and built-in tooling that MATLAB never provided. Your existing fprintf calls run unchanged -- same syntax, same column-major behavior, same file I/O, same GPU gather semantics. The difference is what else ships alongside it.
+[RunMat](/blog/introducing-runmat) is a modern runtime for MATLAB syntax -- a from-scratch engine built in Rust that runs your `.m` files with over 300 compatible functions, [automatic GPU acceleration](/blog/how-to-use-gpu-in-matlab), structured logging, and built-in tooling that MATLAB never provided. Your existing fprintf calls run unchanged -- same syntax, same column-major behavior, same file I/O. The difference is what else ships alongside it.
 
 The variable explorer lets you click any variable and see its full state: type, dimensions, values. No code required, no format string to write, no cleanup afterward.
 
@@ -380,6 +380,10 @@ Use `'w'` to overwrite, `'a'` to append. One encoding edge case worth knowing: i
 
 `sprintf` returns the formatted string instead of writing it. Same format specifiers, same column-major traversal. Use sprintf when you need the string as a variable (for titles, labels, or further processing), fprintf when you want to write directly to a stream or file.
 
+### fprintf vs disp
+
+`disp` prints a value with an automatic newline and no format control. `fprintf` gives you full control over formatting but requires explicit `\n` characters and a format string. Use `disp` for quick console output during development. Use `fprintf` for structured output to files, reports, or anywhere you need column alignment and specific number formatting. For debugging, neither is the right tool -- a variable explorer shows you every variable's state without modifying your code.
+
 ## Frequently asked questions
 
 **Does fprintf return the number of characters or bytes?**
@@ -389,7 +393,7 @@ Bytes. The return value is the number of bytes written, which may differ from th
 It flattens them in column-major order and substitutes elements into the format string one at a time. The format string repeats until every element has been consumed. See the [column-major section](#column-major-traversal) above for examples.
 
 **Can I use fprintf with GPU arrays?**
-Yes, but fprintf forces an implicit `gather` on every gpuArray argument, transferring data from GPU to CPU. In a loop, this serializes asynchronous GPU work and can cost you a 10-50x slowdown. Use fprintf for final output after computation, not for mid-loop observation.
+Not directly. MATLAB has no implicit gather mechanism -- you must explicitly call `gather()` to bring gpuArray data to the CPU before fprintf can format it. In a loop, each gather call is a synchronous transfer that serializes GPU work and can cost you a 10-50x slowdown. Use fprintf for final output after computation, not for mid-loop observation.
 
 **What is the difference between fprintf and sprintf?**
 fprintf writes formatted text to a file or stdout. sprintf returns the formatted text as a character vector without writing it anywhere. Same format specifiers, same column-major traversal, different destination.
@@ -398,7 +402,7 @@ fprintf writes formatted text to a file or stdout. sprintf returns the formatted
 Use `fprintf(2, formatSpec, ...)` or `fprintf('stderr', formatSpec, ...)`. File identifier 2 and the string `'stderr'` both route output to the standard error stream.
 
 **Why is fprintf slow in a loop?**
-Two factors. Each call involves I/O overhead from flushing output to the Command Window or file buffer. If any argument is a gpuArray, fprintf also forces a synchronous gather on every iteration, which is the bigger cost by far.
+Two factors. Each call involves I/O overhead from flushing output to the Command Window or file buffer. If you are debugging GPU code, each fprintf also requires an explicit `gather()` call to bring data to the CPU -- a synchronous transfer that serializes GPU work and is the bigger cost by far.
 
 **Why does fprintf print my entire array without a loop?**
 The format string repeats automatically until every element has been consumed. `fprintf('%d\n', [1 2 3])` prints three lines because fprintf cycles the format string three times. This is unique to MATLAB -- C's printf and Python's print do not repeat. See [the format string repeat section](#the-format-string-repeats-silently) for details.
@@ -408,3 +412,21 @@ Unlike `disp`, fprintf writes exactly what you specify. If you want a newline, i
 
 **Is there a better alternative to fprintf for debugging MATLAB code?**
 Yes. A variable explorer lets you inspect any variable's type, dimensions, and values without modifying code. Structured logging with severity levels and timestamps gives you filterable, persistent diagnostic records. [RunMat](/blog/introducing-runmat) ships both alongside a fully compatible fprintf for formatted output. [Try it in the browser](https://runmat.com/sandbox).
+
+## Sources
+
+1. Kernighan, B.W. & Ritchie, D.M. [*The C Programming Language*](https://en.wikipedia.org/wiki/The_C_Programming_Language), 1st ed. (Prentice Hall, 1978). The original specification of `printf` and its format string syntax, which MATLAB's `fprintf` inherits directly.
+
+2. MathWorks. ["fprintf — Write data to text file."](https://www.mathworks.com/help/matlab/ref/fprintf.html) MATLAB Documentation. Covers format specifiers, column-major traversal, and file I/O behavior.
+
+3. MathWorks. ["GPU Computing in MATLAB."](https://www.mathworks.com/help/parallel-computing/gpu-computing-in-matlab.html) Parallel Computing Toolbox Documentation. Documents the explicit `gpuArray`/`gather` workflow and the absence of implicit GPU-to-CPU transfers.
+
+4. Van Rossum, G. ["PEP 282 — A Logging System."](https://peps.python.org/pep-0282/) Python Enhancement Proposal, 2002. The proposal that added `logging` to Python's standard library, establishing leveled, filterable log output as a language-level primitive.
+
+5. Cannon, B. ["PEP 553 — Built-in breakpoint()."](https://peps.python.org/pep-0553/) Python Enhancement Proposal, 2017. Added `breakpoint()` as a built-in, making interactive debugging a first-class workflow rather than a library import.
+
+6. Bezanson, J., Edelman, A., Karpinski, S., & Shah, V.B. ["Julia: A Fresh Approach to Numerical Computing."](https://julialang.org/research/julia-fresh-approach-BEKS.pdf) *SIAM Review* 59(1), 65–98, 2017. The language design paper for Julia, which ships `@show` and structured `Logging` as part of its stance that scientific computing needs better introspection than print statements.
+
+7. Kernighan, B.W. & Pike, R. [*The Practice of Programming*](https://en.wikipedia.org/wiki/The_Practice_of_Programming) (Addison-Wesley, 1999), Ch. 5: "Debugging." Argues that print-based debugging is a reasonable starting point but insufficient for complex systems, and that good tools eliminate the need for most manual instrumentation.
+
+8. Google. ["Trace Event Format."](https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview) Chrome DevTools documentation. The trace format specification used by RunMat's performance profiling output.
