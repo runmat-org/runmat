@@ -9,25 +9,6 @@ const HUBSPOT_PORTAL_ID = process.env.HUBSPOT_PORTAL_ID;
 const HUBSPOT_NEWSLETTER_FORM_ID = process.env.HUBSPOT_NEWSLETTER_FORM_ID;
 const HUBSPOT_DESKTOP_FORM_ID = process.env.HUBSPOT_DESKTOP_FORM_ID;
 
-type AttributionPayload = {
-  utmSource?: string;
-  utmMedium?: string;
-  utmCampaign?: string;
-  utmTerm?: string;
-  utmContent?: string;
-  gclid?: string;
-  gbraid?: string;
-  wbraid?: string;
-  msclkid?: string;
-  fbclid?: string;
-  ttclid?: string;
-  liFatId?: string;
-  landingPageUrl?: string;
-  pageReferrer?: string;
-  capturedAt?: string;
-  gaClientId?: string;
-};
-
 function isValidEmail(email: string): boolean {
   const trimmed = email.trim();
   if (!trimmed || trimmed.length > 320) {
@@ -67,12 +48,11 @@ function isValidEmail(email: string): boolean {
 
 export async function POST(req: NextRequest) {
   try {
-    const { email, pageUri, pageName, source, attribution } = (await req.json()) as {
+    const { email, pageUri, pageName, source } = (await req.json()) as {
       email?: string;
       pageUri?: string;
       pageName?: string;
       source?: string;
-      attribution?: AttributionPayload;
     };
 
     if (!email || !isValidEmail(email)) {
