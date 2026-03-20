@@ -43,7 +43,7 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
   const blocks = renderBuiltinDocBlocks(doc);
   const toc = extractHeadingsFromBlocks(blocks);
   const metadata = getBuiltinMetadata(b);
-  const allDisplayCategories = builtins.map(x => getDisplayCategory(x));
+  const allDisplayCategories = [...new Set(builtins.map(x => getDisplayCategory(x)))];
   const categoryAnchor = categoryAnchorIdForRaw(b.category[0] ?? '', allDisplayCategories);
 
   return (
