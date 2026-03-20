@@ -300,7 +300,7 @@ end
 
 ## What RunMat does differently
 
-[RunMat](/blog/introducing-runmat) is a MATLAB-syntax runtime built in Rust. It supports [300+ functions](/docs/elements-of-matlab) across linear algebra, statistics, signal processing, and file I/O. Locally, hot code paths get JIT-compiled to native machine code via Cranelift. In the browser, the runtime runs as compiled WebAssembly.
+[RunMat](/blog/introducing-runmat) is a MATLAB-syntax runtime built in Rust. It supports [300+ functions](/docs/matlab-function-reference) across linear algebra, statistics, signal processing, and file I/O. Locally, hot code paths get JIT-compiled to native machine code via Cranelift. In the browser, the runtime runs as compiled WebAssembly.
 
 The key difference from MATLAB isn't implementation language — MATLAB is also written in a compiled language (C/C++). The difference is in how user code is executed. In MATLAB, `.m` code passes through an interpreter that adds per-iteration overhead. In RunMat, user code operations map directly to compiled implementations. The 10-60x gap between loops and vectorized builtins in MATLAB narrows because that interpreter layer is absent.
 
@@ -471,5 +471,5 @@ MATLAB's `gpuArray` supports element-wise operations on GPU arrays, but doesn't 
 9. Julia Documentation, [Performance Tips](https://docs.julialang.org/en/v1/manual/performance-tips/) -- Julia's approach to loop compilation and type-stable code.
 10. NumPy Documentation, [What is NumPy?](https://numpy.org/doc/stable/user/whatisnumpy.html) -- Python's vectorization model and why CPython loops are slow.
 11. Wikipedia, [LAPACK](https://en.wikipedia.org/wiki/LAPACK) -- the optimized Fortran library that MATLAB's vectorized matrix operations dispatch to.
-12. RunMat, [MATLAB Function Reference](/docs/elements-of-matlab) -- searchable list of 300+ MATLAB-compatible builtins implemented in RunMat.
+12. RunMat, [MATLAB Function Reference](/docs/matlab-function-reference) -- searchable list of 300+ MATLAB-compatible builtins implemented in RunMat.
 13. RunMat, [Introducing RunMat](/blog/introducing-runmat) -- architecture overview of the Rust-based MATLAB-syntax runtime.
