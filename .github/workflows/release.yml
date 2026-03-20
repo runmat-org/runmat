@@ -497,6 +497,7 @@ jobs:
           node-version: 24
           registry-url: 'https://registry.npmjs.org'
           cache: npm
+          cache-dependency-path: bindings/ts/package-lock.json
 
       - name: Install Rust toolchain
         uses: actions-rs/toolchain@v1
@@ -530,6 +531,7 @@ jobs:
         uses: nanasess/setup-chromedriver@v2
 
       - name: Install npm dependencies
+        working-directory: bindings/ts
         run: npm ci
 
       - name: Build wasm32 target
@@ -542,12 +544,13 @@ jobs:
         run: scripts/test-wasm-headless.sh
 
       - name: Build bindings package
-        run: npm run build --workspace bindings/ts
+        working-directory: bindings/ts
+        run: npm run build
 
       - name: Lint bindings package
-        run: npm run lint --workspace bindings/ts
+        working-directory: bindings/ts
+        run: npm run lint
 
       - name: Publish bindings package to npm
-        run: |
-          cd bindings/ts
-          npm publish --access public
+        working-directory: bindings/ts
+        run: npm publish --access public
