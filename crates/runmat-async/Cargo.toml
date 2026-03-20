@@ -2,6 +2,7 @@
 name = "runmat-async"
 version = "0.3.0"
 edition = "2021"
+description = "Shared async runtime error types and host I/O interaction primitives for RunMat"
 
 [dependencies]
 thiserror = { workspace = true }
