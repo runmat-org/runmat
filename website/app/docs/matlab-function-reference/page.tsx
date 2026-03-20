@@ -3,9 +3,9 @@ import ElementsOfMatlabGrid from '@/components/ElementsOfMatlabGrid';
 import { buildPageMetadata } from '@/lib/seo';
 
 export const metadata = buildPageMetadata({
-  title: 'MATLAB Function Reference | Docs',
+  title: 'Built-in Function Reference: MATLAB-Compatible & Beyond | Docs',
   description:
-    'Browse 310+ MATLAB-compatible functions implemented in RunMat — free, open-source, and GPU-accelerated. Search by name, category, or keyword.',
+    'Browse 310+ built-in functions in RunMat. MATLAB-compatible math, linear algebra, I/O, and GPU-accelerated extensions. Free, open-source, no license required.',
   canonicalPath: '/docs/matlab-function-reference',
   ogType: 'website',
   ogImagePath: '/docs/opengraph-image',
@@ -20,8 +20,8 @@ function buildJsonLd(builtins: { name: string; slug: string; summary: string }[]
         '@type': 'CollectionPage',
         '@id': 'https://runmat.com/docs/matlab-function-reference',
         url: 'https://runmat.com/docs/matlab-function-reference',
-        name: 'MATLAB Function Reference — RunMat',
-        description: `Browse ${publicBuiltins.length}+ MATLAB-compatible functions implemented in RunMat — free, open-source, and GPU-accelerated.`,
+        name: 'Built-in Function Reference | RunMat',
+        description: `Browse ${publicBuiltins.length}+ built-in functions in RunMat. MATLAB-compatible and beyond. Free, open-source, GPU-accelerated.`,
         isPartOf: { '@id': 'https://runmat.com/#website' },
         publisher: { '@id': 'https://runmat.com/#organization' },
         mainEntity: { '@id': '#function-list' },
@@ -31,13 +31,13 @@ function buildJsonLd(builtins: { name: string; slug: string; summary: string }[]
         '@id': 'https://runmat.com/docs/matlab-function-reference#breadcrumbs',
         itemListElement: [
           { '@type': 'ListItem', position: 1, name: 'Docs', item: 'https://runmat.com/docs' },
-          { '@type': 'ListItem', position: 2, name: 'MATLAB Function Reference', item: 'https://runmat.com/docs/matlab-function-reference' },
+          { '@type': 'ListItem', position: 2, name: 'Built-in Function Reference', item: 'https://runmat.com/docs/matlab-function-reference' },
         ],
       },
       {
         '@type': 'ItemList',
         '@id': '#function-list',
-        name: 'RunMat MATLAB-Compatible Functions',
+        name: 'RunMat Built-in Functions',
         numberOfItems: publicBuiltins.length,
         itemListElement: publicBuiltins.map((b, i) => ({
           '@type': 'ListItem',
@@ -60,16 +60,12 @@ export default async function ElementsOfMatlabPage() {
         dangerouslySetInnerHTML={{ __html: buildJsonLd(builtins) }}
       />
       <div className="mb-8">
-        <h1 className="text-3xl md:text-4xl font-bold mb-2">MATLAB Function Reference</h1>
+        <h1 className="text-3xl md:text-4xl font-bold mb-2">Built-in Function Reference</h1>
         <p className="text-muted-foreground max-w-3xl">
-          RunMat implements {builtins.filter(b => !(b as Record<string, unknown>).internal).length}+ MATLAB-compatible
-          functions spanning math, linear algebra, statistics, string processing, file I/O, and
-          more. Every function is free, open-source, and runs with automatic GPU acceleration on
-          Apple, Nvidia, and AMD hardware — no license required.
-        </p>
-        <p className="text-muted-foreground mt-2 max-w-3xl">
-          Search by name, category, or keyword, or browse the categories below. Each function page
-          includes runnable examples you can try in the browser.
+          {builtins.filter(b => !(b as Record<string, unknown>).internal).length}+ built-in functions
+          covering math, linear algebra, statistics, string processing, file I/O, and more.
+          Most are MATLAB-compatible. The library keeps growing with RunMat-native additions.
+          Free, open-source, GPU-accelerated on Apple, Nvidia, and AMD hardware.
         </p>
       </div>
       <ElementsOfMatlabGrid builtins={builtins} />

@@ -1,15 +1,15 @@
 ---
 title: "The Worst Debugging Tool in MATLAB Is the One You Use Every Day"
 description: "fprintf is a formatting function that got conscripted into debugging because MATLAB never shipped anything better. Here's what it's actually for, what it costs you as a debugger, and what to use instead."
-date: "2026-03-18"
+date: "2026-03-20"
 authors:
   - name: "Fin Watterson"
     url: "https://www.linkedin.com/in/finbarrwatterson/"
-readTime: "14 min read"
+readTime: "16 min read"
 slug: "matlab-fprintf"
 tags: ["MATLAB", "fprintf", "debugging", "RunMat", "scientific computing"]
 collections: ["guides"]
-keywords: "fprintf MATLAB, MATLAB fprintf format specifiers, MATLAB print to file, MATLAB fprintf examples, MATLAB debugging, MATLAB fprintf vs disp, MATLAB vs Python debugging, MATLAB fprintf newline, MATLAB fprintf repeats array, MATLAB fprintf column major, MATLAB fprintf no loop"
+keywords: "fprintf MATLAB, MATLAB fprintf format specifiers, MATLAB print to file, MATLAB fprintf examples, MATLAB debugging, MATLAB fprintf vs disp, fprintf vs disp MATLAB, MATLAB vs Python debugging, MATLAB fprintf newline, MATLAB fprintf repeats array, MATLAB fprintf column major, MATLAB fprintf no loop, MATLAB fprintf GPU"
 excerpt: "fprintf is a formatting function that got conscripted into debugging because MATLAB never shipped anything better. Here's what it's actually for, and what to use instead."
 image: "https://web.runmatstatic.com/blog-images/matlab-fprintf.png"
 ogType: "article"
@@ -43,7 +43,7 @@ jsonLd:
       alternativeHeadline: "fprintf in MATLAB: format specifiers, file I/O, and why it fails as a debugger"
       description: "fprintf is a formatting function that got conscripted into debugging because MATLAB never shipped anything better. Here's what it's actually for, what it costs you as a debugger, and what to use instead."
       image: "https://web.runmatstatic.com/blog-images/matlab-fprintf.png"
-      datePublished: "2026-03-18T00:00:00Z"
+      datePublished: "2026-03-20T00:00:00Z"
       author:
         "@type": "Person"
         name: "Fin Watterson"
@@ -186,7 +186,7 @@ The first diagram has a cycle. The second does not. That is the entire argument.
 
 Python shipped a [`logging`](https://docs.python.org/3/library/logging.html) module in its standard library in 2002 and added [`breakpoint()`](https://docs.python.org/3/library/functions.html#breakpoint) as a built-in in 2018. The community consensus shifted years ago: print debugging is a last resort, not a first instinct. Julia, which targets the same scientific computing audience as MATLAB, built [`@show`](https://docs.julialang.org/en/v1/stdlib/InteractiveUtils/#Base.@show) into the language as an explicit admission that print debugging will happen but should at least show the expression alongside the value (`@show x` prints `x = 5` without a manual format string). Julia also ships a [`Logging`](https://docs.julialang.org/en/v1/stdlib/Logging/) stdlib with `@info`, `@warn`, and `@debug` that produce timestamped, leveled, filterable records.
 
-Both communities moved on from print-as-debugger. MATLAB's tooling never forced that shift because MATLAB never shipped the alternatives.
+Both communities moved on from print-as-debugger. MATLAB has a built-in debugger and a workspace browser, but the community default stayed with fprintf because those tools never became the path of least resistance the way `logging` and `breakpoint()` did in Python.
 
 ## fprintf gotchas
 
@@ -271,7 +271,11 @@ You run again. Now you have 5,000 lines with four columns each. You scroll to it
 
 You run the same script, unmodified. No fprintf calls added.
 
-{/* TODO: Replace with variable explorer video/screenshot showing T at iteration 3847 */}
+<a href="/sandbox" data-ph-capture-attribute-destination="sandbox" data-ph-capture-attribute-source="blog-matlab-fprintf" data-ph-capture-attribute-cta="debugging-video">
+  <video autoPlay loop muted playsInline className="my-6 w-full rounded-lg cursor-pointer">
+    <source src="https://web.runmatstatic.com/video/runmat-debugging.mp4" type="video/mp4" />
+  </video>
+</a>
 
 In the workspace panel, you click `T` and see its full state at the current iteration: 200x200 double, min -4.2e3, max Inf. You click `BC` and see it went negative. You click the execution trace and see the exact iteration where the values diverged. You found the same bug without editing the script, without re-running, and without scrolling through any output.
 
@@ -283,7 +287,7 @@ The script stays clean. The diagnostic information is in the tool, not in the co
 
 The variable explorer lets you click any variable and see its full state: type, dimensions, values. No code required, no format string to write, no cleanup afterward.
 
-The runtime also emits structured log records with nanosecond timestamps, severity levels (TRACE, DEBUG, INFO, WARN, ERROR), module targets, and structured fields. These records are filterable, searchable, and persistent across sessions. A debug log stays in the codebase as a permanent diagnostic, not a temporary fprintf that gets deleted during cleanup.
+The runtime also emits structured log records with timestamps and severity levels. These records are filterable, searchable, and persistent across sessions. A debug log stays in the codebase as a permanent diagnostic, not a temporary fprintf that gets deleted during cleanup.
 
 For performance work, [Chrome Trace-format](https://docs.google.com/document/d/1CvAClvFfyA5R-PhYUmn5OOQtYMH4h6I0nSsKchNAySU/preview) events with span durations show execution flow and per-operation timing. You can see which functions ran, how long they took, and where GPU dispatches happened, without wrapping sections in `tic`/`toc` calls or inserting fprintf timestamps by hand.
 
@@ -298,10 +302,12 @@ fs = 48000;
 t = 0:1/fs:0.1-1/fs;
 x = sin(2*pi*847*t) + 0.3*sin(2*pi*840*t);
 N = length(x);
-w = hann(N)';
+n = 0:N-1;
+w = 0.5 * (1 - cos(2*pi*n / (N-1)));
 Y = fft(x .* w);
+mag = abs(Y);
 f = (0:N-1) * (fs / N);
-[peak_mag, peak_idx] = max(abs(Y(1:N/2)));
+[peak_mag, peak_idx] = max(mag);
 fprintf('Peak frequency: %.1f Hz (magnitude: %.1f dB)\n', f(peak_idx), 20*log10(peak_mag));
 ```
 
