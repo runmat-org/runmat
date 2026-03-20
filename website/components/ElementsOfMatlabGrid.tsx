@@ -8,7 +8,7 @@ import { Grid3x3, List, Tags } from 'lucide-react';
 import type { Builtin } from '@/lib/builtins';
 import { getBuiltinBadges, getDisplayCategory } from '@/lib/builtin-utils';
 import type { DisplayCategory } from '@/lib/builtin-utils';
-import { formatCategoryName, getCategoryDisplayOrder, groupCategoriesByPrefix } from '@/lib/display-categories';
+import { formatCategoryName, getCategoryDisplayOrder, groupCategoriesByPrefix, categoryAnchorId } from '@/lib/display-categories';
 import { POPULAR_FUNCTIONS_BY_CATEGORY, getJsonCategoriesForDisplayCategory } from '@/lib/builtin-popularity';
 import { getCategoryColor } from '@/lib/category-colors';
 import { Badge } from '@/components/ui/badge';
@@ -793,9 +793,5 @@ function CollapseTile({
       </Card>
     </button>
   );
-}
-
-function categoryAnchorId(category: DisplayCategory): string {
-  return category.replace(/[\/\s]+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
 }
 
