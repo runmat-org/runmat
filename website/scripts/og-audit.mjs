@@ -6,7 +6,6 @@ const DEFAULT_URLS = [
   "/docs/getting-started",
   "/docs/how-it-works",
   "/docs/fusion-guide",
-  "/docs/elements-of-matlab",
   "/docs/matlab-function-reference",
   "/docs/search?q=sin",
   "/docs/cli",

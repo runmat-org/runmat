@@ -5,13 +5,11 @@ import { Layers, Zap } from 'lucide-react';
 
 interface BuiltinMetadataChipsProps {
   metadata: BuiltinMetadata;
+  categoryAnchor?: string;
 }
 
-export function BuiltinMetadataChips({ metadata }: BuiltinMetadataChipsProps) {
+export function BuiltinMetadataChips({ metadata, categoryAnchor }: BuiltinMetadataChipsProps) {
   const otherBadges = metadata.badges.filter((badge) => badge !== 'GPU');
-  const categoryAnchor = metadata.rawCategory
-    ? metadata.rawCategory.split('/')[0]
-    : '';
   const categoryHref = categoryAnchor
     ? `/docs/matlab-function-reference#${categoryAnchor}`
     : '/docs/matlab-function-reference';

@@ -1,10 +1,16 @@
 import { MetadataRoute } from 'next'
-import { getAllBlogPosts } from '@/lib/blog'
+import { getPublicBlogPosts } from '@/lib/blog'
 import { getAllBenchmarks } from '@/lib/benchmarks'
 import { loadBuiltins } from '@/lib/builtins'
 import { flatten } from '@/content/docs'
 
 export const dynamic = 'force-static'
+
+function toDate(value: string | undefined, fallback: Date): Date {
+  if (!value) return fallback
+  const d = new Date(value)
+  return Number.isNaN(d.getTime()) ? fallback : d
+}
 
 export default function sitemap(): MetadataRoute.Sitemap {
   const baseUrl = 'https://runmat.com'
@@ -39,7 +45,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       url: `${baseUrl}/blog`,
       lastModified: currentDate,
       changeFrequency: 'daily',
-      priority: 0.5,
+      priority: 0.7,
     },
     {
       url: `${baseUrl}/benchmarks`,
@@ -54,22 +60,52 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.8,
     },
     {
-      url: `${baseUrl}/contact`,
+      url: `${baseUrl}/about`,
       lastModified: currentDate,
       changeFrequency: 'monthly',
+      priority: 0.6,
+    },
+    {
+      url: `${baseUrl}/contact`,
+      lastModified: currentDate,
+      changeFrequency: 'yearly',
       priority: 0.5,
     },
     {
       url: `${baseUrl}/license`,
       lastModified: currentDate,
-      changeFrequency: 'daily',
+      changeFrequency: 'yearly',
       priority: 0.3,
+    },
+    {
+      url: `${baseUrl}/resources`,
+      lastModified: currentDate,
+      changeFrequency: 'weekly',
+      priority: 0.6,
+    },
+    {
+      url: `${baseUrl}/resources/guides`,
+      lastModified: currentDate,
+      changeFrequency: 'weekly',
+      priority: 0.5,
+    },
+    {
+      url: `${baseUrl}/resources/guides/what-is-matlab`,
+      lastModified: currentDate,
+      changeFrequency: 'monthly',
+      priority: 0.6,
     },
     {
       url: `${baseUrl}/docs/reference/builtins`,
       lastModified: currentDate,
       changeFrequency: 'daily',
       priority: 0.6,
+    },
+    {
+      url: `${baseUrl}/docs/matlab-function-reference`,
+      lastModified: currentDate,
+      changeFrequency: 'daily',
+      priority: 0.8,
     },
     {
       url: `${baseUrl}/sandbox`,
@@ -97,19 +133,17 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.6,
     }))
 
-  const blogPostRoutes: MetadataRoute.Sitemap = getAllBlogPosts().map(post => ({
+  const blogPostRoutes: MetadataRoute.Sitemap = getPublicBlogPosts().map(post => ({
     url: `${baseUrl}/blog/${post.slug}`,
-    lastModified: currentDate,
-    changeFrequency: 'weekly',
-    priority: 0.4,
+    lastModified: toDate(post.dateModified || post.date, currentDate),
+    changeFrequency: 'monthly',
+    priority: 0.6,
   }))
 
   const benchmarkRoutes: MetadataRoute.Sitemap = getAllBenchmarks().map(benchmark => {
-    const parsedDate = benchmark.date ? new Date(benchmark.date) : null
-    const lastModified = parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : currentDate
     return {
       url: `${baseUrl}/benchmarks/${benchmark.slug}`,
-      lastModified,
+      lastModified: toDate(benchmark.date, currentDate),
       changeFrequency: 'monthly',
       priority: 0.5,
     }
