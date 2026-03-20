@@ -2,7 +2,6 @@
 "use client";
 
 import posthog from 'posthog-js'
-import { captureAttributionFromLocation, setAttributionGaClientId } from '@/lib/attribution-client'
 
 const POSTHOG_KEY = process.env.NEXT_PUBLIC_POSTHOG_KEY || '';
 const POSTHOG_HOST = process.env.NEXT_PUBLIC_POSTHOG_HOST || 'https://us.i.posthog.com';
@@ -54,7 +53,6 @@ function getGaClientIdFromGtag(): Promise<string | undefined> {
 }
 
 if (typeof window !== 'undefined') {
-    captureAttributionFromLocation();
     let completed = false;
     const tryAlias = (gaClientId?: string) => {
         if (completed) return;
@@ -67,7 +65,6 @@ if (typeof window !== 'undefined') {
             posthog.identify(gaClientId);
         }
         posthog.register({ ga_client_id: gaClientId });
-        setAttributionGaClientId(gaClientId);
         completed = true;
     };
 
