@@ -15,6 +15,8 @@ import { BuiltinDocRenderer, type BuiltinDocBlock, type BuiltinDocInlineNode } f
 import { slugifyHeading } from '@/lib/utils';
 import { builtinMetadataForSlug, builtinJsonLD } from './meta';
 import { BuiltinMetadataChips } from '@/components/BuiltinMetadataChips';
+import { getDisplayCategory } from '@/lib/builtin-utils';
+import { categoryAnchorIdForRaw } from '@/lib/display-categories';
 import { BuiltinsHeadingsNav } from '@/components/BuiltinsHeadingsNav';
 import { SandboxCta } from '@/components/SandboxCta';
 
@@ -41,7 +43,8 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
   const blocks = renderBuiltinDocBlocks(doc);
   const toc = extractHeadingsFromBlocks(blocks);
   const metadata = getBuiltinMetadata(b);
-
+  const allDisplayCategories = [...new Set(builtins.map(x => getDisplayCategory(x)))];
+  const categoryAnchor = categoryAnchorIdForRaw(b.category[0] ?? '', allDisplayCategories);
 
   return (
     <>
@@ -55,7 +58,7 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
             <span aria-hidden="true">&larr;</span> All functions
           </Link>
         </p>
-        <BuiltinMetadataChips metadata={metadata} />
+        <BuiltinMetadataChips metadata={metadata} categoryAnchor={categoryAnchor} />
       </div>
       <div className="container mx-auto px-4 md:px-6 pb-8">
       <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_220px]">

@@ -58,6 +58,28 @@ export function groupCategoriesByPrefix(categories: DisplayCategory[]): Map<Disp
   return result;
 }
 
+// Stable anchor id for a display category heading on the function-reference page.
+export function categoryAnchorId(category: DisplayCategory): string {
+  return category.replace(/[\/\s]+/g, '-').replace(/[^a-zA-Z0-9_-]/g, '').toLowerCase();
+}
+
+// Resolve the anchor id for a raw JSON category (e.g. "io/filetext") on the
+// function-reference page, accounting for prefix grouping.  When the prefix has
+// multiple subcategories the anchor is just the prefix; when it has only one the
+// anchor includes the full path.
+export function categoryAnchorIdForRaw(
+  rawCategory: string,
+  allCategories: DisplayCategory[],
+): string {
+  const grouping = groupCategoriesByPrefix([...new Set(allCategories)]);
+  for (const [displayCat, subcats] of grouping.entries()) {
+    if (subcats.includes(rawCategory)) {
+      return categoryAnchorId(displayCat);
+    }
+  }
+  return categoryAnchorId(rawCategory);
+}
+
 // Get display order for categories (grouped by prefix)
 export function getCategoryDisplayOrder(categories: DisplayCategory[]): DisplayCategory[] {
   const sorted = [...new Set(categories)].sort((a, b) => {

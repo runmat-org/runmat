@@ -273,8 +273,48 @@ export default function Navigation() {
           <div className="border-b border-border py-4">
             <div className="grid gap-2">
               <Link
-                href="/resources"
+                href="/docs"
                 className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <BookOpen className="mr-2 h-4 w-4" />
+                Docs
+              </Link>
+              <Link
+                href="/docs/getting-started"
+                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <Minus className="mr-2 h-3 w-3 text-muted-foreground" />
+                Getting Started
+              </Link>
+              <Link
+                href="/docs/matlab-function-reference"
+                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <Minus className="mr-2 h-3 w-3 text-muted-foreground" />
+                Function Reference
+              </Link>
+              <Link
+                href="/docs/architecture"
+                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <Minus className="mr-2 h-3 w-3 text-muted-foreground" />
+                Architecture
+              </Link>
+              <Link
+                href="/docs/cli"
+                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                <Minus className="mr-2 h-3 w-3 text-muted-foreground" />
+                CLI Reference
+              </Link>
+              <Link
+                href="/resources"
+                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent mt-2"
                 onClick={() => setMobileMenuOpen(false)}
               >
                 <FileText className="mr-2 h-4 w-4" />
@@ -311,46 +351,6 @@ export default function Navigation() {
               >
                 <Minus className="mr-2 h-3 w-3 text-muted-foreground" />
                 About RunMat
-              </Link>
-              <Link
-                href="/docs"
-                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                <BookOpen className="mr-2 h-4 w-4" />
-                Documentation
-              </Link>
-              <Link
-                href="/docs/getting-started"
-                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                <Minus className="mr-2 h-3 w-3 text-muted-foreground" />
-                Getting Started
-              </Link>
-              <Link
-                href="/docs/architecture"
-                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                <Minus className="mr-2 h-3 w-3 text-muted-foreground" />
-                Architecture
-              </Link>
-              <Link
-                href="/docs/cli"
-                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                <Minus className="mr-2 h-3 w-3 text-muted-foreground" />
-                CLI Reference
-              </Link>
-              <Link
-                href="/docs/configuration"
-                className="flex w-full items-center rounded-md p-2 text-sm font-medium hover:bg-accent pl-6"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                <Minus className="mr-2 h-3 w-3 text-muted-foreground" />
-                Configuration
               </Link>
               <Link
                 href="/pricing"
