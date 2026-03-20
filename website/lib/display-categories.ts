@@ -71,7 +71,7 @@ export function categoryAnchorIdForRaw(
   rawCategory: string,
   allCategories: DisplayCategory[],
 ): string {
-  const grouping = groupCategoriesByPrefix(allCategories);
+  const grouping = groupCategoriesByPrefix([...new Set(allCategories)]);
   for (const [displayCat, subcats] of grouping.entries()) {
     if (subcats.includes(rawCategory)) {
       return categoryAnchorId(displayCat);
