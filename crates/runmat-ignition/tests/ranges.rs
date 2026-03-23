@@ -43,3 +43,15 @@ fn descending_range() {
         panic!("expected tensor");
     }
 }
+
+#[test]
+fn leading_dot_step_range_executes() {
+    let ast = parse("x = 0:.1:.3").unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    if let Value::Tensor(t) = &vars[0] {
+        assert_eq!(t.data, vec![0.0, 0.1, 0.2, 0.3]);
+    } else {
+        panic!("expected tensor");
+    }
+}

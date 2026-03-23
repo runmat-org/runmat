@@ -211,12 +211,30 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
     while let Some(res) = lex.next() {
         match res {
             Ok(tok) => {
+                let span = lex.span();
+
+                if matches!(tok, Token::Dot) && can_start_leading_dot_float(out.last(), span.start)
+                {
+                    if let Some(float_suffix_len) = leading_dot_float_suffix_len(lex.remainder()) {
+                        let float_lexeme = format!(".{}", &lex.remainder()[..float_suffix_len]);
+                        lex.bump(float_suffix_len);
+                        lex.extras.last_was_value = true;
+                        lex.extras.line_start = false;
+                        out.push(SpannedToken {
+                            token: Token::Float,
+                            lexeme: float_lexeme.replace('_', ""),
+                            start: span.start,
+                            end: span.end + float_suffix_len,
+                        });
+                        continue;
+                    }
+                }
+
                 let mut s = lex.slice().to_string();
                 // Normalize numeric literals: remove underscores in integers/floats
                 if matches!(tok, Token::Float | Token::Integer) {
                     s.retain(|c| c != '_');
                 }
-                let span = lex.span();
 
                 // Handle contextual apostrophe before normal push logic
                 if matches!(tok, Token::Apostrophe) {
@@ -542,6 +560,60 @@ fn last_is_value_token(tok: &Token) -> bool {
             | Token::RBrace
             | Token::Str
     )
+}
+
+fn can_start_leading_dot_float(prev: Option<&SpannedToken>, dot_start: usize) -> bool {
+    match prev {
+        Some(token)
+            if token.end == dot_start
+                && (matches!(token.token, Token::Transpose | Token::Dot)
+                    || last_is_value_token(&token.token)) =>
+        {
+            false
+        }
+        _ => true,
+    }
+}
+
+fn leading_dot_float_suffix_len(remainder: &str) -> Option<usize> {
+    let bytes = remainder.as_bytes();
+    let mut idx = scan_decimal_digits(bytes, 0)?;
+
+    if let Some(exp_idx) = scan_float_exponent(bytes, idx) {
+        idx = exp_idx;
+    }
+
+    Some(idx)
+}
+
+fn scan_decimal_digits(bytes: &[u8], start: usize) -> Option<usize> {
+    if start >= bytes.len() || !bytes[start].is_ascii_digit() {
+        return None;
+    }
+
+    let mut idx = start + 1;
+    while idx < bytes.len() {
+        match bytes[idx] {
+            b'0'..=b'9' => idx += 1,
+            b'_' if idx + 1 < bytes.len() && bytes[idx + 1].is_ascii_digit() => idx += 2,
+            _ => break,
+        }
+    }
+
+    Some(idx)
+}
+
+fn scan_float_exponent(bytes: &[u8], start: usize) -> Option<usize> {
+    if start >= bytes.len() || !matches!(bytes[start], b'e' | b'E') {
+        return None;
+    }
+
+    let mut idx = start + 1;
+    if idx < bytes.len() && matches!(bytes[idx], b'+' | b'-') {
+        idx += 1;
+    }
+
+    scan_decimal_digits(bytes, idx)
 }
 
 fn double_quoted_string_emit(lexer: &mut Lexer<Token>) -> Filter<()> {

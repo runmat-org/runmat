@@ -32,6 +32,36 @@ fn identifiers_and_numbers() {
 }
 
 #[test]
+fn leading_dot_float_literals_tokenize_as_float() {
+    let src = ".1 .25e-2 .3_5";
+    let tokens = tokenize(src);
+    assert_eq!(tokens, vec![Token::Float, Token::Float, Token::Float]);
+}
+
+#[test]
+fn leading_dot_float_after_range_colon_tokenizes_as_float() {
+    let src = "0:.1:10";
+    let tokens = tokenize(src);
+    assert_eq!(
+        tokens,
+        vec![
+            Token::Integer,
+            Token::Colon,
+            Token::Float,
+            Token::Colon,
+            Token::Integer,
+        ]
+    );
+}
+
+#[test]
+fn property_access_dot_is_not_rewritten_as_float() {
+    let src = "obj.field";
+    let tokens = tokenize(src);
+    assert_eq!(tokens, vec![Token::Ident, Token::Dot, Token::Ident]);
+}
+
+#[test]
 fn string_literal() {
     let src = "'hello world'";
     let tokens = tokenize(src);
