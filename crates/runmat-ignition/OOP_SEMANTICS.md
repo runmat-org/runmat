@@ -71,7 +71,7 @@ Calls are performed through the `call_method` builtin with the receiver as the f
 Unary and binary operators prefer object-specific methods exposed as builtins:
 
 - Unary: `uplus`, `uminus`
-- Binary arithmetic/matrix: `plus`, `minus`, `mtimes`, `mrdivide`, `power`
+- Binary arithmetic/matrix: `plus`, `minus`, `mtimes`, `mrdivide`, `mldivide`, `power`
 - Elementwise: `times`, `rdivide`, `ldivide`, `power`
 - Relational: `eq`, `ne`, `lt`, `le`, `gt`, `ge`
 

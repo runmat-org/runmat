@@ -2004,8 +2004,11 @@ impl Compiler {
                             BinOp::Mul => {
                                 self.emit(Instr::Mul);
                             }
-                            BinOp::Div | BinOp::LeftDiv => {
-                                self.emit(Instr::Div);
+                            BinOp::Div => {
+                                self.emit(Instr::RightDiv);
+                            }
+                            BinOp::LeftDiv => {
+                                self.emit(Instr::LeftDiv);
                             }
                             BinOp::Pow => {
                                 self.emit(Instr::Pow);
@@ -2013,8 +2016,11 @@ impl Compiler {
                             BinOp::ElemMul => {
                                 self.emit(Instr::ElemMul);
                             }
-                            BinOp::ElemDiv | BinOp::ElemLeftDiv => {
+                            BinOp::ElemDiv => {
                                 self.emit(Instr::ElemDiv);
+                            }
+                            BinOp::ElemLeftDiv => {
+                                self.emit(Instr::ElemLeftDiv);
                             }
                             BinOp::ElemPow => {
                                 self.emit(Instr::ElemPow);

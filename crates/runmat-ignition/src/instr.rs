@@ -24,7 +24,8 @@ pub enum Instr {
     Add,
     Sub,
     Mul,
-    Div,
+    RightDiv,
+    LeftDiv,
     Pow,
     Neg,
     UPlus,
@@ -217,7 +218,8 @@ impl Instr {
             Instr::Add
             | Instr::Sub
             | Instr::Mul
-            | Instr::Div
+            | Instr::RightDiv
+            | Instr::LeftDiv
             | Instr::Pow
             | Instr::ElemMul
             | Instr::ElemDiv

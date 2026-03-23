@@ -28,7 +28,7 @@ Notation:
 - UPlus: [+x] → [x] (object overload `uplus` if available)
 - Neg: [x] → [-x] (object overload `uminus`, else numeric elementwise)
 - Transpose: [V] → [V'] (calls builtin transpose)
-- Add/Sub/Mul/Div/Pow: binary numeric; object overloads (`plus`, `minus`, `mtimes`, `mrdivide`, `power`) attempted first
+- Add/Sub/Mul/RightDiv/LeftDiv/Pow: binary numeric or matrix ops; object overloads (`plus`, `minus`, `mtimes`, `mrdivide`, `mldivide`, `power`) attempted first
 - ElemMul/ElemDiv/ElemLeftDiv/ElemPow: elementwise ops with object overloads (`times`, `rdivide`, `ldivide`, `power`)
 - Equal/NotEqual/Less/LessEqual/Greater/GreaterEqual: numeric and array comparisons; object overloads (`eq`, `ne`, `lt`, `le`, `gt`, `ge`) with fallbacks; handle objects compare by identity via runtime
 - AndAnd(target), OrOr(target): short-circuit variants (currently unused by the compiler; `JumpIfFalse` lowering is used instead)

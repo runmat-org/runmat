@@ -2467,7 +2467,7 @@ async fn run_interpreter_inner(
                     }
                 }
             }
-            Instr::Div => {
+            Instr::RightDiv => {
                 let b = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
@@ -2485,8 +2485,8 @@ async fn run_interpreter_inner(
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let (a_acc, b_acc) =
-                                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                                let v = call_builtin_vm!("rdivide", &[a_acc, b_acc])?;
+                                    accel_promote_binary(AutoBinaryOp::MatMul, &a, &b).await?;
+                                let v = call_builtin_vm!("mrdivide", &[a_acc, b_acc])?;
                                 stack.push(v)
                             }
                         }
@@ -2501,16 +2501,64 @@ async fn run_interpreter_inner(
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let (a_acc, b_acc) =
-                                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                                let v = call_builtin_vm!("rdivide", &[a_acc, b_acc])?;
+                                    accel_promote_binary(AutoBinaryOp::MatMul, &a, &b).await?;
+                                let v = call_builtin_vm!("mrdivide", &[a_acc, b_acc])?;
                                 stack.push(v)
                             }
                         }
                     }
                     _ => {
                         let (a_acc, b_acc) =
-                            accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                        let v = call_builtin_vm!("rdivide", &[a_acc, b_acc])?;
+                            accel_promote_binary(AutoBinaryOp::MatMul, &a, &b).await?;
+                        let v = call_builtin_vm!("mrdivide", &[a_acc, b_acc])?;
+                        stack.push(v)
+                    }
+                }
+            }
+            Instr::LeftDiv => {
+                let b = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let a = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                match (&a, &b) {
+                    (Value::Object(obj), _) => {
+                        let args = vec![
+                            Value::Object(obj.clone()),
+                            Value::String("mldivide".to_string()),
+                            b.clone(),
+                        ];
+                        match call_builtin_vm!("call_method", &args) {
+                            Ok(v) => stack.push(v),
+                            Err(_) => {
+                                let (a_acc, b_acc) =
+                                    accel_promote_binary(AutoBinaryOp::MatMul, &a, &b).await?;
+                                let v = call_builtin_vm!("mldivide", &[a_acc, b_acc])?;
+                                stack.push(v)
+                            }
+                        }
+                    }
+                    (_, Value::Object(obj)) => {
+                        let args = vec![
+                            Value::Object(obj.clone()),
+                            Value::String("mldivide".to_string()),
+                            a.clone(),
+                        ];
+                        match call_builtin_vm!("call_method", &args) {
+                            Ok(v) => stack.push(v),
+                            Err(_) => {
+                                let (a_acc, b_acc) =
+                                    accel_promote_binary(AutoBinaryOp::MatMul, &a, &b).await?;
+                                let v = call_builtin_vm!("mldivide", &[a_acc, b_acc])?;
+                                stack.push(v)
+                            }
+                        }
+                    }
+                    _ => {
+                        let (a_acc, b_acc) =
+                            accel_promote_binary(AutoBinaryOp::MatMul, &a, &b).await?;
+                        let v = call_builtin_vm!("mldivide", &[a_acc, b_acc])?;
                         stack.push(v)
                     }
                 }

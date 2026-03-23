@@ -105,7 +105,8 @@ impl<'a> GraphBuilder<'a> {
             Instr::Add => self.handle_binary_primitive(pc, PrimitiveOp::Add),
             Instr::Sub => self.handle_binary_primitive(pc, PrimitiveOp::Sub),
             Instr::Mul => self.handle_binary_primitive(pc, PrimitiveOp::Mul),
-            Instr::Div => self.handle_binary_primitive(pc, PrimitiveOp::Div),
+            Instr::RightDiv => self.handle_binary_primitive(pc, PrimitiveOp::RightDiv),
+            Instr::LeftDiv => self.handle_binary_primitive(pc, PrimitiveOp::LeftDiv),
             Instr::Pow => self.handle_binary_primitive(pc, PrimitiveOp::Pow),
             Instr::ElemMul => self.handle_binary_primitive(pc, PrimitiveOp::ElemMul),
             Instr::ElemDiv => self.handle_binary_primitive(pc, PrimitiveOp::ElemDiv),
@@ -467,6 +468,26 @@ impl<'a> GraphBuilder<'a> {
                 match (lhs_type, rhs_type) {
                     (Some(left), Some(right)) => {
                         runmat_builtins::shape_rules::matmul_output_type(left, right)
+                    }
+                    _ => Type::Unknown,
+                }
+            }
+            PrimitiveOp::RightDiv => {
+                let lhs_type = self.values.get(lhs as usize).map(|v| &v.ty);
+                let rhs_type = self.values.get(rhs as usize).map(|v| &v.ty);
+                match (lhs_type, rhs_type) {
+                    (Some(left), Some(right)) => {
+                        runmat_builtins::shape_rules::right_divide_output_type(left, right)
+                    }
+                    _ => Type::Unknown,
+                }
+            }
+            PrimitiveOp::LeftDiv => {
+                let lhs_type = self.values.get(lhs as usize).map(|v| &v.ty);
+                let rhs_type = self.values.get(rhs as usize).map(|v| &v.ty);
+                match (lhs_type, rhs_type) {
+                    (Some(left), Some(right)) => {
+                        runmat_builtins::shape_rules::left_divide_output_type(left, right)
                     }
                     _ => Type::Unknown,
                 }
@@ -889,6 +910,7 @@ fn categorize_builtin(tags: &[AccelGraphTag]) -> AccelOpCategory {
 fn primitive_category(op: PrimitiveOp) -> AccelOpCategory {
     match op {
         PrimitiveOp::Transpose => AccelOpCategory::Transpose,
+        PrimitiveOp::RightDiv | PrimitiveOp::LeftDiv => AccelOpCategory::Other,
         PrimitiveOp::Less
         | PrimitiveOp::LessEqual
         | PrimitiveOp::Greater
@@ -912,6 +934,7 @@ fn primitive_category(op: PrimitiveOp) -> AccelOpCategory {
 fn primitive_tags(op: PrimitiveOp) -> Vec<AccelGraphTag> {
     match op {
         PrimitiveOp::Transpose => vec![AccelGraphTag::Transpose],
+        PrimitiveOp::RightDiv | PrimitiveOp::LeftDiv => vec![],
         PrimitiveOp::Neg | PrimitiveOp::UPlus => {
             vec![AccelGraphTag::Unary, AccelGraphTag::Elementwise]
         }
@@ -959,11 +982,11 @@ mod tests {
     }
 
     #[test]
-    fn accel_graph_div_uses_right_divide_shape() {
+    fn accel_graph_right_divide_uses_matrix_divide_shape() {
         let instructions = vec![
             Instr::LoadVar(0),
             Instr::LoadVar(1),
-            Instr::Div,
+            Instr::RightDiv,
             Instr::StoreVar(2),
         ];
         let var_types = vec![
@@ -978,7 +1001,7 @@ mod tests {
         let graph = build_accel_graph(&instructions, &var_types);
         let mut out_type = None;
         for node in &graph.nodes {
-            if let AccelNodeLabel::Primitive(PrimitiveOp::Div) = node.label {
+            if let AccelNodeLabel::Primitive(PrimitiveOp::RightDiv) = node.label {
                 let out_id = node.outputs.first().copied().expect("output");
                 let value = graph.value(out_id).expect("value");
                 out_type = Some(value.ty.clone());
@@ -988,6 +1011,40 @@ mod tests {
             out_type,
             Some(Type::Tensor {
                 shape: Some(vec![Some(2), Some(2)])
+            })
+        );
+    }
+
+    #[test]
+    fn accel_graph_left_divide_uses_matrix_divide_shape() {
+        let instructions = vec![
+            Instr::LoadVar(0),
+            Instr::LoadVar(1),
+            Instr::LeftDiv,
+            Instr::StoreVar(2),
+        ];
+        let var_types = vec![
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(3)]),
+            },
+            Type::Tensor {
+                shape: Some(vec![Some(2), Some(4)]),
+            },
+            Type::Unknown,
+        ];
+        let graph = build_accel_graph(&instructions, &var_types);
+        let mut out_type = None;
+        for node in &graph.nodes {
+            if let AccelNodeLabel::Primitive(PrimitiveOp::LeftDiv) = node.label {
+                let out_id = node.outputs.first().copied().expect("output");
+                let value = graph.value(out_id).expect("value");
+                out_type = Some(value.ty.clone());
+            }
+        }
+        assert_eq!(
+            out_type,
+            Some(Type::Tensor {
+                shape: Some(vec![Some(3), Some(4)])
             })
         );
     }
