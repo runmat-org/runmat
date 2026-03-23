@@ -67,6 +67,8 @@ pub struct Figure {
 pub struct TextStyle {
     pub color: Option<Vec4>,
     pub font_size: Option<f32>,
+    pub font_weight: Option<String>,
+    pub font_angle: Option<String>,
     pub interpreter: Option<String>,
     pub visible: bool,
 }
@@ -76,6 +78,8 @@ impl Default for TextStyle {
         Self {
             color: None,
             font_size: None,
+            font_weight: None,
+            font_angle: None,
             interpreter: None,
             visible: true,
         }
@@ -87,6 +91,11 @@ pub struct LegendStyle {
     pub location: Option<String>,
     pub visible: bool,
     pub font_size: Option<f32>,
+    pub font_weight: Option<String>,
+    pub font_angle: Option<String>,
+    pub interpreter: Option<String>,
+    pub box_visible: Option<bool>,
+    pub orientation: Option<String>,
     pub text_color: Option<Vec4>,
 }
 
@@ -96,6 +105,11 @@ impl Default for LegendStyle {
             location: None,
             visible: true,
             font_size: None,
+            font_weight: None,
+            font_angle: None,
+            interpreter: None,
+            box_visible: None,
+            orientation: None,
             text_color: None,
         }
     }

@@ -286,7 +286,6 @@ pub enum PlotObjectKind {
 }
 
 impl PlotObjectKind {
-    #[cfg(test)]
     fn from_u64(value: u64) -> Option<Self> {
         match value {
             1 => Some(Self::Title),
@@ -397,6 +396,36 @@ pub fn set_figure_title_for_axes(
         state.figure.set_axes_title(axes_index, title.to_string());
         state.figure.set_axes_title_style(axes_index, style);
         encode_plot_object_handle(handle, axes_index, PlotObjectKind::Title)
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(object_handle)
+}
+
+pub fn set_text_properties_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    kind: PlotObjectKind,
+    text: Option<String>,
+    style: Option<TextStyle>,
+) -> Result<f64, FigureError> {
+    let (object_handle, figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        if let Some(text) = text {
+            match kind {
+                PlotObjectKind::Title => state.figure.set_axes_title(axes_index, text),
+                PlotObjectKind::XLabel => state.figure.set_axes_xlabel(axes_index, text),
+                PlotObjectKind::YLabel => state.figure.set_axes_ylabel(axes_index, text),
+                PlotObjectKind::Legend => {}
+            }
+        }
+        if let Some(style) = style {
+            match kind {
+                PlotObjectKind::Title => state.figure.set_axes_title_style(axes_index, style),
+                PlotObjectKind::XLabel => state.figure.set_axes_xlabel_style(axes_index, style),
+                PlotObjectKind::YLabel => state.figure.set_axes_ylabel_style(axes_index, style),
+                PlotObjectKind::Legend => {}
+            }
+        }
+        encode_plot_object_handle(handle, axes_index, kind)
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(object_handle)
@@ -516,6 +545,23 @@ pub fn set_legend_for_axes(
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(object_handle)
+}
+
+pub fn legend_entries_snapshot(
+    handle: FigureHandle,
+    axes_index: usize,
+) -> Result<Vec<runmat_plot::plots::LegendEntry>, FigureError> {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, handle);
+    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    if axes_index >= total_axes {
+        return Err(FigureError::InvalidSubplotIndex {
+            rows: state.figure.axes_rows.max(1),
+            cols: state.figure.axes_cols.max(1),
+            index: axes_index,
+        });
+    }
+    Ok(state.figure.legend_entries_for_axes(axes_index))
 }
 
 pub fn toggle_colorbar() -> bool {
@@ -652,7 +698,6 @@ pub fn encode_plot_object_handle(
     encoded as f64
 }
 
-#[cfg(test)]
 pub fn decode_plot_object_handle(
     value: f64,
 ) -> Result<(FigureHandle, usize, PlotObjectKind), FigureError> {
@@ -855,6 +900,54 @@ pub fn axes_handle_exists(handle: FigureHandle, axes_index: usize) -> bool {
     let state = get_state_mut(&mut reg, handle);
     let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
     axes_index < total_axes
+}
+
+pub fn figure_handle_exists(handle: FigureHandle) -> bool {
+    let reg = registry();
+    reg.figures.contains_key(&handle)
+}
+
+pub fn axes_metadata_snapshot(
+    handle: FigureHandle,
+    axes_index: usize,
+) -> Result<runmat_plot::plots::AxesMetadata, FigureError> {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, handle);
+    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    if axes_index >= total_axes {
+        return Err(FigureError::InvalidSubplotIndex {
+            rows: state.figure.axes_rows.max(1),
+            cols: state.figure.axes_cols.max(1),
+            index: axes_index,
+        });
+    }
+    state
+        .figure
+        .axes_metadata(axes_index)
+        .cloned()
+        .ok_or(FigureError::InvalidAxesHandle)
+}
+
+pub fn axes_state_snapshot(
+    handle: FigureHandle,
+    axes_index: usize,
+) -> Result<FigureAxesState, FigureError> {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, handle);
+    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    if axes_index >= total_axes {
+        return Err(FigureError::InvalidSubplotIndex {
+            rows: state.figure.axes_rows.max(1),
+            cols: state.figure.axes_cols.max(1),
+            index: axes_index,
+        });
+    }
+    Ok(FigureAxesState {
+        handle,
+        rows: state.figure.axes_rows.max(1),
+        cols: state.figure.axes_cols.max(1),
+        active_index: axes_index,
+    })
 }
 
 fn with_axes_target_mut<R>(

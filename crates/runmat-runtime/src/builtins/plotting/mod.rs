@@ -12,6 +12,8 @@ pub(crate) mod gpu_helpers;
 pub(crate) mod perf;
 #[path = "core/point.rs"]
 pub(crate) mod point;
+#[path = "core/properties.rs"]
+pub(crate) mod properties;
 #[path = "core/state.rs"]
 pub(crate) mod state;
 #[path = "core/style.rs"]
@@ -42,6 +44,8 @@ pub(crate) mod figure;
 pub(crate) mod gca;
 #[path = "ops/gcf.rs"]
 pub(crate) mod gcf;
+#[path = "ops/get.rs"]
+pub(crate) mod get;
 #[path = "ops/handle_args.rs"]
 pub(crate) mod handle_args;
 #[path = "ops/hist.rs"]
@@ -62,6 +66,8 @@ pub(crate) mod plot;
 pub(crate) mod scatter;
 #[path = "ops/scatter3.rs"]
 pub(crate) mod scatter3;
+#[path = "ops/set.rs"]
+pub(crate) mod set;
 #[path = "ops/stairs.rs"]
 pub(crate) mod stairs;
 #[path = "ops/subplot.rs"]

@@ -1,14 +1,11 @@
-#[cfg(test)]
-use glam::Vec4;
 use runmat_builtins::Value;
 use runmat_plot::plots::{LegendStyle, TextStyle};
 
+use super::properties::{parse_text_style_pairs, split_legend_style_pairs};
 use super::state::{
     axes_handle_exists, current_axes_state, decode_axes_handle, FigureError, FigureHandle,
 };
-use super::style::{
-    parse_color_value, value_as_bool, value_as_f64, value_as_string, LineStyleParseOptions,
-};
+use super::style::value_as_string;
 use super::{plotting_error, plotting_error_with_source};
 use crate::BuiltinResult;
 
@@ -25,6 +22,29 @@ pub struct LegendCommand {
     pub enabled: bool,
     pub labels: Option<Vec<String>>,
     pub style: LegendStyle,
+}
+
+pub fn value_as_text_lines(value: &Value) -> Option<Vec<String>> {
+    match value {
+        Value::String(text) => Some(vec![text.clone()]),
+        Value::CharArray(chars) => Some(vec![chars.data.iter().collect()]),
+        Value::StringArray(arr) => Some(arr.data.clone()),
+        Value::Cell(cell) => {
+            let mut lines = Vec::new();
+            for row in 0..cell.rows {
+                for col in 0..cell.cols {
+                    let value = cell.get(row, col).ok()?;
+                    lines.push(value_as_string(&value)?);
+                }
+            }
+            Some(lines)
+        }
+        _ => None,
+    }
+}
+
+pub fn value_as_text_string(value: &Value) -> Option<String> {
+    value_as_text_lines(value).map(|lines| lines.join("\n"))
 }
 
 pub fn current_axes_target() -> (FigureHandle, usize) {
@@ -46,10 +66,10 @@ pub fn parse_text_command(builtin: &'static str, args: &[Value]) -> BuiltinResul
         ));
     }
 
-    let text = value_as_string(&rest[0]).ok_or_else(|| {
+    let text = value_as_text_string(&rest[0]).ok_or_else(|| {
         plotting_error(
             builtin,
-            format!("{builtin}: expected text as char array or string"),
+            format!("{builtin}: expected text as char array, string, string array, or cell array of strings"),
         )
     })?;
     let style = parse_text_style_pairs(builtin, &rest[1..])?;
@@ -91,6 +111,26 @@ pub fn parse_legend_command(builtin: &'static str, args: &[Value]) -> BuiltinRes
                         labels: None,
                         style,
                     })
+                }
+                "boxon" => {
+                    let mut style = style;
+                    style.box_visible = Some(true);
+                    return Ok(LegendCommand {
+                        target,
+                        enabled: true,
+                        labels: None,
+                        style,
+                    });
+                }
+                "boxoff" => {
+                    let mut style = style;
+                    style.box_visible = Some(false);
+                    return Ok(LegendCommand {
+                        target,
+                        enabled: true,
+                        labels: None,
+                        style,
+                    });
                 }
                 _ => {}
             }
@@ -136,99 +176,6 @@ fn try_parse_axes_target(value: &Value) -> Option<(FigureHandle, usize)> {
     }
 }
 
-fn parse_text_style_pairs(builtin: &'static str, args: &[Value]) -> BuiltinResult<TextStyle> {
-    if args.is_empty() {
-        return Ok(TextStyle::default());
-    }
-    if args.len() % 2 != 0 {
-        return Err(plotting_error(
-            builtin,
-            format!("{builtin}: property/value arguments must come in pairs"),
-        ));
-    }
-    let opts = LineStyleParseOptions::generic(builtin);
-    let mut style = TextStyle::default();
-    for pair in args.chunks_exact(2) {
-        let key = value_as_string(&pair[0])
-            .ok_or_else(|| {
-                plotting_error(
-                    builtin,
-                    format!("{builtin}: property names must be strings"),
-                )
-            })?
-            .trim()
-            .to_ascii_lowercase();
-        match key.as_str() {
-            "color" => style.color = Some(parse_color_value(&opts, &pair[1])?),
-            "fontsize" => {
-                style.font_size = Some(value_as_f64(&pair[1]).ok_or_else(|| {
-                    plotting_error(builtin, format!("{builtin}: FontSize must be numeric"))
-                })? as f32)
-            }
-            "interpreter" => {
-                style.interpreter = Some(value_as_string(&pair[1]).ok_or_else(|| {
-                    plotting_error(builtin, format!("{builtin}: Interpreter must be a string"))
-                })?)
-            }
-            "visible" => {
-                style.visible = value_as_bool(&pair[1]).ok_or_else(|| {
-                    plotting_error(builtin, format!("{builtin}: Visible must be logical"))
-                })?
-            }
-            other => {
-                return Err(plotting_error(
-                    builtin,
-                    format!("{builtin}: unsupported property `{other}`"),
-                ))
-            }
-        }
-    }
-    Ok(style)
-}
-
-fn split_legend_style_pairs<'a>(
-    builtin: &'static str,
-    args: &'a [Value],
-) -> BuiltinResult<(&'a [Value], LegendStyle)> {
-    let opts = LineStyleParseOptions::generic(builtin);
-    let mut style = LegendStyle::default();
-    let mut split = args.len();
-    while split >= 2 {
-        let key_idx = split - 2;
-        let Some(key) = value_as_string(&args[key_idx]) else {
-            break;
-        };
-        let key = key.trim().to_ascii_lowercase();
-        match key.as_str() {
-            "location" => {
-                style.location =
-                    Some(value_as_string(&args[key_idx + 1]).ok_or_else(|| {
-                        plotting_error(builtin, "legend: Location must be a string")
-                    })?);
-                split -= 2;
-            }
-            "fontsize" => {
-                style.font_size =
-                    Some(value_as_f64(&args[key_idx + 1]).ok_or_else(|| {
-                        plotting_error(builtin, "legend: FontSize must be numeric")
-                    })? as f32);
-                split -= 2;
-            }
-            "textcolor" | "color" => {
-                style.text_color = Some(parse_color_value(&opts, &args[key_idx + 1])?);
-                split -= 2;
-            }
-            "visible" => {
-                style.visible = value_as_bool(&args[key_idx + 1])
-                    .ok_or_else(|| plotting_error(builtin, "legend: Visible must be logical"))?;
-                split -= 2;
-            }
-            _ => break,
-        }
-    }
-    Ok((&args[..split], style))
-}
-
 fn collect_label_strings(builtin: &'static str, args: &[Value]) -> BuiltinResult<Vec<String>> {
     let mut labels = Vec::new();
     for arg in args {
@@ -240,13 +187,13 @@ fn collect_label_strings(builtin: &'static str, args: &[Value]) -> BuiltinResult
                         let value = cell.get(row, col).map_err(|err| {
                             plotting_error(builtin, format!("legend: invalid label cell: {err}"))
                         })?;
-                        labels.push(value_as_string(&value).ok_or_else(|| {
+                        labels.push(value_as_text_string(&value).ok_or_else(|| {
                             plotting_error(builtin, "legend: labels must be strings or char arrays")
                         })?);
                     }
                 }
             }
-            _ => labels.push(value_as_string(arg).ok_or_else(|| {
+            _ => labels.push(value_as_text_string(arg).ok_or_else(|| {
                 plotting_error(builtin, "legend: labels must be strings or char arrays")
             })?),
         }
@@ -255,7 +202,7 @@ fn collect_label_strings(builtin: &'static str, args: &[Value]) -> BuiltinResult
 }
 
 #[cfg(test)]
-pub fn vec4_eq(a: Option<Vec4>, b: Vec4) -> bool {
+pub fn vec4_eq(a: Option<glam::Vec4>, b: glam::Vec4) -> bool {
     a.map(|v| (v - b).abs().max_element() < 1e-6)
         .unwrap_or(false)
 }

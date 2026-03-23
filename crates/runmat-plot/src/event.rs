@@ -328,6 +328,10 @@ pub struct SerializedTextStyle {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub font_size: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_weight: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_angle: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub interpreter: Option<String>,
     pub visible: bool,
 }
@@ -337,6 +341,8 @@ impl From<TextStyle> for SerializedTextStyle {
         Self {
             color_rgba: value.color.map(vec4_to_rgba),
             font_size: value.font_size,
+            font_weight: value.font_weight,
+            font_angle: value.font_angle,
             interpreter: value.interpreter,
             visible: value.visible,
         }
@@ -348,6 +354,8 @@ impl From<SerializedTextStyle> for TextStyle {
         Self {
             color: value.color_rgba.map(rgba_to_vec4),
             font_size: value.font_size,
+            font_weight: value.font_weight,
+            font_angle: value.font_angle,
             interpreter: value.interpreter,
             visible: value.visible,
         }
@@ -363,6 +371,16 @@ pub struct SerializedLegendStyle {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub font_size: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_weight: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_angle: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interpreter: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub box_visible: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub orientation: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub text_color_rgba: Option<[f32; 4]>,
 }
 
@@ -372,6 +390,11 @@ impl From<LegendStyle> for SerializedLegendStyle {
             location: value.location,
             visible: value.visible,
             font_size: value.font_size,
+            font_weight: value.font_weight,
+            font_angle: value.font_angle,
+            interpreter: value.interpreter,
+            box_visible: value.box_visible,
+            orientation: value.orientation,
             text_color_rgba: value.text_color.map(vec4_to_rgba),
         }
     }
@@ -383,6 +406,11 @@ impl From<SerializedLegendStyle> for LegendStyle {
             location: value.location,
             visible: value.visible,
             font_size: value.font_size,
+            font_weight: value.font_weight,
+            font_angle: value.font_angle,
+            interpreter: value.interpreter,
+            box_visible: value.box_visible,
+            orientation: value.orientation,
             text_color: value.text_color_rgba.map(rgba_to_vec4),
         }
     }
@@ -990,9 +1018,15 @@ mod tests {
             1,
             LegendStyle {
                 location: Some("northeast".into()),
+                font_weight: Some("bold".into()),
+                orientation: Some("horizontal".into()),
                 ..Default::default()
             },
         );
+        if let Some(meta) = figure.axes_metadata.get_mut(0) {
+            meta.title_style.font_weight = Some("bold".into());
+            meta.title_style.font_angle = Some("italic".into());
+        }
         figure.set_active_axes_index(1);
 
         let rebuilt = FigureScene::capture(&figure)
@@ -1014,6 +1048,24 @@ mod tests {
         );
         assert!(!rebuilt.axes_metadata(0).unwrap().legend_enabled);
         assert_eq!(
+            rebuilt
+                .axes_metadata(0)
+                .unwrap()
+                .title_style
+                .font_weight
+                .as_deref(),
+            Some("bold")
+        );
+        assert_eq!(
+            rebuilt
+                .axes_metadata(0)
+                .unwrap()
+                .title_style
+                .font_angle
+                .as_deref(),
+            Some("italic")
+        );
+        assert_eq!(
             rebuilt.axes_metadata(1).and_then(|m| m.title.as_deref()),
             Some("Right")
         );
@@ -1033,6 +1085,24 @@ mod tests {
                 .location
                 .as_deref(),
             Some("northeast")
+        );
+        assert_eq!(
+            rebuilt
+                .axes_metadata(1)
+                .unwrap()
+                .legend_style
+                .font_weight
+                .as_deref(),
+            Some("bold")
+        );
+        assert_eq!(
+            rebuilt
+                .axes_metadata(1)
+                .unwrap()
+                .legend_style
+                .orientation
+                .as_deref(),
+            Some("horizontal")
         );
     }
 

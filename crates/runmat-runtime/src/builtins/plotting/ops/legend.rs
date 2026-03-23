@@ -93,6 +93,32 @@ mod tests {
         legend_builtin(vec![ax]).unwrap();
         let fig = clone_figure(figure).unwrap();
         assert!(fig.axes_metadata(0).unwrap().legend_enabled);
+
+        legend_builtin(vec![
+            Value::Num(crate::builtins::plotting::state::encode_axes_handle(
+                figure, 0,
+            )),
+            Value::String("boxoff".into()),
+        ])
+        .unwrap();
+        let fig = clone_figure(figure).unwrap();
+        assert_eq!(
+            fig.axes_metadata(0).unwrap().legend_style.box_visible,
+            Some(false)
+        );
+
+        legend_builtin(vec![
+            Value::Num(crate::builtins::plotting::state::encode_axes_handle(
+                figure, 0,
+            )),
+            Value::String("boxon".into()),
+        ])
+        .unwrap();
+        let fig = clone_figure(figure).unwrap();
+        assert_eq!(
+            fig.axes_metadata(0).unwrap().legend_style.box_visible,
+            Some(true)
+        );
     }
 
     #[test]

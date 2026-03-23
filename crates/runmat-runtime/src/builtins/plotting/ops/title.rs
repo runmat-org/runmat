@@ -34,7 +34,7 @@ mod tests {
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
     };
-    use runmat_builtins::{CharArray, Value};
+    use runmat_builtins::{CellArray, CharArray, StringArray, Value};
     use runmat_plot::plots::Figure;
 
     fn setup_plot_tests() -> PlotTestLockGuard {
@@ -121,5 +121,36 @@ mod tests {
         ])
         .unwrap_err();
         assert!(err.message.contains("FontSize must be numeric"));
+    }
+
+    #[test]
+    fn title_accepts_multiline_text_inputs() {
+        let _guard = setup_plot_tests();
+
+        title_builtin(vec![Value::StringArray(StringArray {
+            data: vec!["Line 1".into(), "Line 2".into()],
+            shape: vec![1, 2],
+            rows: 1,
+            cols: 2,
+        })])
+        .unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        assert_eq!(
+            fig.axes_metadata(0).and_then(|m| m.title.as_deref()),
+            Some("Line 1\nLine 2")
+        );
+
+        let cell = CellArray::new(
+            vec![Value::String("A".into()), Value::String("B".into())],
+            1,
+            2,
+        )
+        .unwrap();
+        title_builtin(vec![Value::Cell(cell)]).unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        assert_eq!(
+            fig.axes_metadata(0).and_then(|m| m.title.as_deref()),
+            Some("A\nB")
+        );
     }
 }

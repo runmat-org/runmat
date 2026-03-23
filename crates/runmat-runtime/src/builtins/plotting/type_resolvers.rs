@@ -34,3 +34,14 @@ pub fn hist_type(args: &[Type], ctx: &ResolveContext) -> Type {
         None => row_vector_type(ctx),
     }
 }
+
+pub fn get_type(args: &[Type], _context: &ResolveContext) -> Type {
+    if args.len() <= 1 {
+        return Type::Struct { known_fields: None };
+    }
+    Type::Unknown
+}
+
+pub fn set_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::Void
+}
