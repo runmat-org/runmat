@@ -223,6 +223,37 @@ mod tests {
     }
 
     #[test]
+    fn legend_accepts_labels_plus_trailing_properties() {
+        let _guard = setup_plot_tests();
+        let mut figure = Figure::new();
+        figure.add_line_plot(LinePlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap());
+        figure.add_line_plot(LinePlot::new(vec![0.0, 1.0], vec![2.0, 3.0]).unwrap());
+        let figure = crate::builtins::plotting::state::import_figure(figure);
+        let ax = Value::Num(crate::builtins::plotting::state::encode_axes_handle(
+            figure, 0,
+        ));
+
+        legend_builtin(vec![
+            ax,
+            Value::String("Left".into()),
+            Value::String("Right".into()),
+            Value::String("Location".into()),
+            Value::String("northwest".into()),
+            Value::String("Orientation".into()),
+            Value::String("horizontal".into()),
+        ])
+        .unwrap();
+
+        let fig = clone_figure(figure).unwrap();
+        let entries = fig.legend_entries_for_axes(0);
+        assert_eq!(entries[0].label, "Left");
+        assert_eq!(entries[1].label, "Right");
+        let meta = fig.axes_metadata(0).unwrap();
+        assert_eq!(meta.legend_style.location.as_deref(), Some("northwest"));
+        assert_eq!(meta.legend_style.orientation.as_deref(), Some("horizontal"));
+    }
+
+    #[test]
     fn legend_rejects_invalid_inputs() {
         let _guard = setup_plot_tests();
         let mut figure = Figure::new();

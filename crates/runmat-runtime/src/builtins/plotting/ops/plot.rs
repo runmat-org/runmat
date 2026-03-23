@@ -527,22 +527,16 @@ impl PlotSeriesInput {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::plotting::state::PlotTestLockGuard;
     use crate::builtins::plotting::state::{clear_figure, reset_hold_state_for_run};
-    use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clone_figure, current_figure_handle};
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_builtins::{ResolveContext, Type};
-    use std::sync::{Mutex, MutexGuard};
 
-    // All tests that touch the global figure registry must hold this guard for
-    // their entire duration. Without it, concurrent tests share one `current`
-    // figure handle and can stomp each other's `clear_figure` / `plot_builtin`
-    // calls, producing a spurious "Data" fallback label.
-    static PLOT_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    fn setup_plot_tests() -> MutexGuard<'static, ()> {
-        let guard = PLOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    fn setup_plot_tests() -> PlotTestLockGuard {
+        let guard = lock_plot_registry();
         ensure_plot_test_env();
         reset_hold_state_for_run();
         let _ = clear_figure(None);
