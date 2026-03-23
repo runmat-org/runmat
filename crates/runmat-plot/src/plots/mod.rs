@@ -25,7 +25,9 @@ pub use bar::BarChart;
 pub use contour::ContourPlot;
 pub use contour_fill::ContourFillPlot;
 pub use errorbar::ErrorBar;
-pub use figure::{Figure, LegendEntry, PlotElement, PlotType};
+pub use figure::{
+    AxesMetadata, Figure, LegendEntry, LegendStyle, PlotElement, PlotType, TextStyle,
+};
 pub use image::ImagePlot;
 pub use line::{LineGpuStyle, LineMarkerAppearance, LinePlot, LineStyle};
 pub use pie::PieChart;

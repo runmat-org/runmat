@@ -1,6 +1,7 @@
 use crate::plots::{
-    AreaPlot, ColorMap, ErrorBar, Figure, LegendEntry, LinePlot, MarkerStyle, PlotElement,
-    PlotType, Scatter3Plot, ScatterPlot, ShadingMode, StairsPlot, StemPlot, SurfacePlot,
+    AreaPlot, AxesMetadata, ColorMap, ErrorBar, Figure, LegendEntry, LegendStyle, LinePlot,
+    MarkerStyle, PlotElement, PlotType, Scatter3Plot, ScatterPlot, ShadingMode, StairsPlot,
+    StemPlot, SurfacePlot, TextStyle,
 };
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
@@ -220,11 +221,17 @@ impl FigureScene {
             self.layout.axes_rows as usize,
             self.layout.axes_cols as usize,
         );
-        figure.title = self.metadata.title;
-        figure.x_label = self.metadata.x_label;
-        figure.y_label = self.metadata.y_label;
+        figure.active_axes_index = self.metadata.active_axes_index as usize;
+        if let Some(axes_metadata) = self.metadata.axes_metadata.clone() {
+            figure.axes_metadata = axes_metadata.into_iter().map(AxesMetadata::from).collect();
+            figure.set_active_axes_index(figure.active_axes_index);
+        } else {
+            figure.title = self.metadata.title;
+            figure.x_label = self.metadata.x_label;
+            figure.y_label = self.metadata.y_label;
+            figure.legend_enabled = self.metadata.legend_enabled;
+        }
         figure.grid_enabled = self.metadata.grid_enabled;
-        figure.legend_enabled = self.metadata.legend_enabled;
         figure.colorbar_enabled = self.metadata.colorbar_enabled;
         figure.axis_equal = self.metadata.axis_equal;
         figure.background_color = rgba_to_vec4(self.metadata.background_rgba);
@@ -274,6 +281,10 @@ pub struct FigureMetadata {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_limits: Option<[f64; 2]>,
     pub legend_entries: Vec<FigureLegendEntry>,
+    #[serde(default)]
+    pub active_axes_index: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub axes_metadata: Option<Vec<SerializedAxesMetadata>>,
 }
 
 impl FigureMetadata {
@@ -296,6 +307,129 @@ impl FigureMetadata {
             colormap: Some(format!("{:?}", figure.colormap)),
             color_limits: figure.color_limits.map(|(lo, hi)| [lo, hi]),
             legend_entries,
+            active_axes_index: figure.active_axes_index as u32,
+            axes_metadata: Some(
+                figure
+                    .axes_metadata
+                    .iter()
+                    .cloned()
+                    .map(SerializedAxesMetadata::from)
+                    .collect(),
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerializedTextStyle {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_rgba: Option<[f32; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_size: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interpreter: Option<String>,
+    pub visible: bool,
+}
+
+impl From<TextStyle> for SerializedTextStyle {
+    fn from(value: TextStyle) -> Self {
+        Self {
+            color_rgba: value.color.map(vec4_to_rgba),
+            font_size: value.font_size,
+            interpreter: value.interpreter,
+            visible: value.visible,
+        }
+    }
+}
+
+impl From<SerializedTextStyle> for TextStyle {
+    fn from(value: SerializedTextStyle) -> Self {
+        Self {
+            color: value.color_rgba.map(rgba_to_vec4),
+            font_size: value.font_size,
+            interpreter: value.interpreter,
+            visible: value.visible,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerializedLegendStyle {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub location: Option<String>,
+    pub visible: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font_size: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub text_color_rgba: Option<[f32; 4]>,
+}
+
+impl From<LegendStyle> for SerializedLegendStyle {
+    fn from(value: LegendStyle) -> Self {
+        Self {
+            location: value.location,
+            visible: value.visible,
+            font_size: value.font_size,
+            text_color_rgba: value.text_color.map(vec4_to_rgba),
+        }
+    }
+}
+
+impl From<SerializedLegendStyle> for LegendStyle {
+    fn from(value: SerializedLegendStyle) -> Self {
+        Self {
+            location: value.location,
+            visible: value.visible,
+            font_size: value.font_size,
+            text_color: value.text_color_rgba.map(rgba_to_vec4),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerializedAxesMetadata {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub x_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub y_label: Option<String>,
+    pub legend_enabled: bool,
+    pub title_style: SerializedTextStyle,
+    pub x_label_style: SerializedTextStyle,
+    pub y_label_style: SerializedTextStyle,
+    pub legend_style: SerializedLegendStyle,
+}
+
+impl From<AxesMetadata> for SerializedAxesMetadata {
+    fn from(value: AxesMetadata) -> Self {
+        Self {
+            title: value.title,
+            x_label: value.x_label,
+            y_label: value.y_label,
+            legend_enabled: value.legend_enabled,
+            title_style: value.title_style.into(),
+            x_label_style: value.x_label_style.into(),
+            y_label_style: value.y_label_style.into(),
+            legend_style: value.legend_style.into(),
+        }
+    }
+}
+
+impl From<SerializedAxesMetadata> for AxesMetadata {
+    fn from(value: SerializedAxesMetadata) -> Self {
+        Self {
+            title: value.title,
+            x_label: value.x_label,
+            y_label: value.y_label,
+            legend_enabled: value.legend_enabled,
+            title_style: value.title_style.into(),
+            x_label_style: value.x_label_style.into(),
+            y_label_style: value.y_label_style.into(),
+            legend_style: value.legend_style.into(),
         }
     }
 }
@@ -838,6 +972,68 @@ mod tests {
             rebuilt.plots().nth(1),
             Some(PlotElement::Scatter3(_))
         ));
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_axes_local_annotation_metadata() {
+        let mut figure = Figure::new().with_subplot_grid(1, 2);
+        figure.set_active_axes_index(0);
+        figure.set_axes_title(0, "Left");
+        figure.set_axes_xlabel(0, "LX");
+        figure.set_axes_ylabel(0, "LY");
+        figure.set_axes_legend_enabled(0, false);
+        figure.set_axes_title(1, "Right");
+        figure.set_axes_xlabel(1, "RX");
+        figure.set_axes_ylabel(1, "RY");
+        figure.set_axes_legend_enabled(1, true);
+        figure.set_axes_legend_style(
+            1,
+            LegendStyle {
+                location: Some("northeast".into()),
+                ..Default::default()
+            },
+        );
+        figure.set_active_axes_index(1);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+
+        assert_eq!(rebuilt.active_axes_index, 1);
+        assert_eq!(
+            rebuilt.axes_metadata(0).and_then(|m| m.title.as_deref()),
+            Some("Left")
+        );
+        assert_eq!(
+            rebuilt.axes_metadata(0).and_then(|m| m.x_label.as_deref()),
+            Some("LX")
+        );
+        assert_eq!(
+            rebuilt.axes_metadata(0).and_then(|m| m.y_label.as_deref()),
+            Some("LY")
+        );
+        assert!(!rebuilt.axes_metadata(0).unwrap().legend_enabled);
+        assert_eq!(
+            rebuilt.axes_metadata(1).and_then(|m| m.title.as_deref()),
+            Some("Right")
+        );
+        assert_eq!(
+            rebuilt.axes_metadata(1).and_then(|m| m.x_label.as_deref()),
+            Some("RX")
+        );
+        assert_eq!(
+            rebuilt.axes_metadata(1).and_then(|m| m.y_label.as_deref()),
+            Some("RY")
+        );
+        assert_eq!(
+            rebuilt
+                .axes_metadata(1)
+                .unwrap()
+                .legend_style
+                .location
+                .as_deref(),
+            Some("northeast")
+        );
     }
 
     #[test]

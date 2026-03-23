@@ -48,10 +48,14 @@ pub(crate) mod handle_args;
 pub mod hist;
 #[path = "ops/hold.rs"]
 pub(crate) mod hold;
+#[path = "ops/legend.rs"]
+pub(crate) mod legend;
 #[path = "ops/mesh.rs"]
 pub(crate) mod mesh;
 #[path = "ops/meshc.rs"]
 pub(crate) mod meshc;
+#[path = "ops/common.rs"]
+pub(crate) mod op_common;
 #[path = "ops/plot.rs"]
 pub(crate) mod plot;
 #[path = "ops/scatter.rs"]
@@ -66,6 +70,12 @@ pub(crate) mod subplot;
 pub(crate) mod surf;
 #[path = "ops/surfc.rs"]
 pub(crate) mod surfc;
+#[path = "ops/title.rs"]
+pub(crate) mod title;
+#[path = "ops/xlabel.rs"]
+pub(crate) mod xlabel;
+#[path = "ops/ylabel.rs"]
+pub(crate) mod ylabel;
 
 pub use perf::{set_scatter_target_points, set_surface_vertex_budget};
 pub use state::{
@@ -209,5 +219,9 @@ pub(crate) mod tests {
         INIT.call_once(|| {
             state::disable_rendering_for_tests();
         });
+    }
+
+    pub(crate) fn lock_plot_registry() -> state::PlotTestLockGuard {
+        state::lock_plot_test_registry()
     }
 }

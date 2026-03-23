@@ -55,6 +55,62 @@ pub struct Figure {
     pub axes_cols: usize,
     /// For each plot element, the axes index (row-major, 0..rows*cols-1)
     plot_axes_indices: Vec<usize>,
+
+    /// The axes index whose annotation metadata is currently active.
+    pub active_axes_index: usize,
+
+    /// Per-axes metadata used for subplot-correct annotations and legend state.
+    pub axes_metadata: Vec<AxesMetadata>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TextStyle {
+    pub color: Option<Vec4>,
+    pub font_size: Option<f32>,
+    pub interpreter: Option<String>,
+    pub visible: bool,
+}
+
+impl Default for TextStyle {
+    fn default() -> Self {
+        Self {
+            color: None,
+            font_size: None,
+            interpreter: None,
+            visible: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LegendStyle {
+    pub location: Option<String>,
+    pub visible: bool,
+    pub font_size: Option<f32>,
+    pub text_color: Option<Vec4>,
+}
+
+impl Default for LegendStyle {
+    fn default() -> Self {
+        Self {
+            location: None,
+            visible: true,
+            font_size: None,
+            text_color: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AxesMetadata {
+    pub title: Option<String>,
+    pub x_label: Option<String>,
+    pub y_label: Option<String>,
+    pub legend_enabled: bool,
+    pub title_style: TextStyle,
+    pub x_label_style: TextStyle,
+    pub y_label_style: TextStyle,
+    pub legend_style: LegendStyle,
 }
 
 /// A plot element that can be any type of plot
@@ -128,7 +184,46 @@ impl Figure {
             axes_rows: 1,
             axes_cols: 1,
             plot_axes_indices: Vec::new(),
+            active_axes_index: 0,
+            axes_metadata: vec![AxesMetadata {
+                legend_enabled: true,
+                ..Default::default()
+            }],
         }
+    }
+
+    fn ensure_axes_metadata_capacity(&mut self, min_len: usize) {
+        while self.axes_metadata.len() < min_len.max(1) {
+            self.axes_metadata.push(AxesMetadata {
+                legend_enabled: true,
+                ..Default::default()
+            });
+        }
+    }
+
+    fn sync_legacy_fields_from_active_axes(&mut self) {
+        self.ensure_axes_metadata_capacity(self.active_axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get(self.active_axes_index).cloned() {
+            self.title = meta.title;
+            self.x_label = meta.x_label;
+            self.y_label = meta.y_label;
+            self.legend_enabled = meta.legend_enabled;
+        }
+    }
+
+    pub fn set_active_axes_index(&mut self, axes_index: usize) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        self.active_axes_index = axes_index;
+        self.sync_legacy_fields_from_active_axes();
+        self.dirty = true;
+    }
+
+    pub fn axes_metadata(&self, axes_index: usize) -> Option<&AxesMetadata> {
+        self.axes_metadata.get(axes_index)
+    }
+
+    pub fn active_axes_metadata(&self) -> Option<&AxesMetadata> {
+        self.axes_metadata(self.active_axes_index)
     }
 
     /// Set the figure title
@@ -139,8 +234,7 @@ impl Figure {
 
     /// Set the figure title in-place
     pub fn set_title<S: Into<String>>(&mut self, title: S) {
-        self.title = Some(title.into());
-        self.dirty = true;
+        self.set_axes_title(self.active_axes_index, title);
     }
 
     /// Set axis labels
@@ -151,8 +245,76 @@ impl Figure {
 
     /// Set axis labels in-place
     pub fn set_axis_labels<S: Into<String>>(&mut self, x_label: S, y_label: S) {
-        self.x_label = Some(x_label.into());
-        self.y_label = Some(y_label.into());
+        self.set_axes_labels(self.active_axes_index, x_label, y_label);
+        self.dirty = true;
+    }
+
+    pub fn set_axes_title<S: Into<String>>(&mut self, axes_index: usize, title: S) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.title = Some(title.into());
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_xlabel<S: Into<String>>(&mut self, axes_index: usize, label: S) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.x_label = Some(label.into());
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_ylabel<S: Into<String>>(&mut self, axes_index: usize, label: S) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.y_label = Some(label.into());
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_labels<S: Into<String>>(&mut self, axes_index: usize, x_label: S, y_label: S) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.x_label = Some(x_label.into());
+            meta.y_label = Some(y_label.into());
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_title_style(&mut self, axes_index: usize, style: TextStyle) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.title_style = style;
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_xlabel_style(&mut self, axes_index: usize, style: TextStyle) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.x_label_style = style;
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_ylabel_style(&mut self, axes_index: usize, style: TextStyle) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.y_label_style = style;
+        }
         self.dirty = true;
     }
 
@@ -166,8 +328,31 @@ impl Figure {
 
     /// Enable or disable the legend
     pub fn with_legend(mut self, enabled: bool) -> Self {
-        self.legend_enabled = enabled;
+        self.set_legend(enabled);
         self
+    }
+
+    pub fn set_legend(&mut self, enabled: bool) {
+        self.set_axes_legend_enabled(self.active_axes_index, enabled);
+    }
+
+    pub fn set_axes_legend_enabled(&mut self, axes_index: usize, enabled: bool) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.legend_enabled = enabled;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_legend_style(&mut self, axes_index: usize, style: LegendStyle) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.legend_style = style;
+        }
+        self.dirty = true;
     }
 
     /// Enable or disable the grid
@@ -255,6 +440,13 @@ impl Figure {
     pub fn set_subplot_grid(&mut self, rows: usize, cols: usize) {
         self.axes_rows = rows.max(1);
         self.axes_cols = cols.max(1);
+        self.ensure_axes_metadata_capacity(self.axes_rows * self.axes_cols);
+        self.active_axes_index = self.active_axes_index.min(
+            self.axes_rows
+                .saturating_mul(self.axes_cols)
+                .saturating_sub(1),
+        );
+        self.sync_legacy_fields_from_active_axes();
         self.dirty = true;
     }
 
@@ -441,6 +633,7 @@ impl Figure {
                 i += 1;
             }
         }
+        self.ensure_axes_metadata_capacity(axes_index + 1);
         self.dirty = true;
     }
 
@@ -577,10 +770,36 @@ impl Figure {
         entries
     }
 
+    pub fn legend_entries_for_axes(&self, axes_index: usize) -> Vec<LegendEntry> {
+        let mut entries = Vec::new();
+        for (plot_idx, plot) in self.plots.iter().enumerate() {
+            let plot_axes = *self.plot_axes_indices.get(plot_idx).unwrap_or(&0);
+            if plot_axes != axes_index {
+                continue;
+            }
+            if let Some(label) = plot.label() {
+                entries.push(LegendEntry {
+                    label,
+                    color: plot.color(),
+                    plot_type: plot.plot_type(),
+                });
+            }
+        }
+        entries
+    }
+
     /// Assign labels to visible plots in order
     pub fn set_labels(&mut self, labels: &[String]) {
+        self.set_labels_for_axes(self.active_axes_index, labels);
+    }
+
+    pub fn set_labels_for_axes(&mut self, axes_index: usize, labels: &[String]) {
         let mut idx = 0usize;
-        for plot in &mut self.plots {
+        for (plot_idx, plot) in self.plots.iter_mut().enumerate() {
+            let plot_axes = *self.plot_axes_indices.get(plot_idx).unwrap_or(&0);
+            if plot_axes != axes_index {
+                continue;
+            }
             if !plot.is_visible() {
                 continue;
             }
@@ -1057,5 +1276,74 @@ mod tests {
         assert_eq!(legend.len(), 3);
         assert_ne!(legend[0].color, legend[1].color);
         assert_ne!(legend[1].color, legend[2].color);
+    }
+
+    #[test]
+    fn axes_metadata_and_labels_are_isolated_per_subplot() {
+        let mut figure = Figure::new();
+        figure.set_subplot_grid(1, 2);
+        figure.set_axes_title(0, "Left Title");
+        figure.set_axes_xlabel(0, "Left X");
+        figure.set_axes_ylabel(0, "Left Y");
+        figure.set_axes_title(1, "Right Title");
+        figure.set_axes_legend_enabled(0, false);
+        figure.set_axes_legend_style(
+            1,
+            LegendStyle {
+                location: Some("southwest".into()),
+                ..Default::default()
+            },
+        );
+
+        assert_eq!(
+            figure.axes_metadata(0).and_then(|m| m.title.as_deref()),
+            Some("Left Title")
+        );
+        assert_eq!(
+            figure.axes_metadata(1).and_then(|m| m.title.as_deref()),
+            Some("Right Title")
+        );
+        assert_eq!(
+            figure.axes_metadata(0).and_then(|m| m.x_label.as_deref()),
+            Some("Left X")
+        );
+        assert_eq!(
+            figure.axes_metadata(0).and_then(|m| m.y_label.as_deref()),
+            Some("Left Y")
+        );
+        assert!(!figure.axes_metadata(0).unwrap().legend_enabled);
+        assert_eq!(
+            figure
+                .axes_metadata(1)
+                .unwrap()
+                .legend_style
+                .location
+                .as_deref(),
+            Some("southwest")
+        );
+    }
+
+    #[test]
+    fn set_labels_for_axes_only_updates_target_subplot() {
+        let mut figure = Figure::new();
+        figure.set_subplot_grid(1, 2);
+        figure.add_line_plot_on_axes(
+            LinePlot::new(vec![0.0, 1.0], vec![1.0, 2.0])
+                .unwrap()
+                .with_label("L0"),
+            0,
+        );
+        figure.add_line_plot_on_axes(
+            LinePlot::new(vec![0.0, 1.0], vec![2.0, 3.0])
+                .unwrap()
+                .with_label("R0"),
+            1,
+        );
+        figure.set_labels_for_axes(1, &["Right Only".into()]);
+
+        let left_entries = figure.legend_entries_for_axes(0);
+        let right_entries = figure.legend_entries_for_axes(1);
+        assert_eq!(left_entries[0].label, "L0");
+        assert_eq!(right_entries[0].label, "Right Only");
     }
 }

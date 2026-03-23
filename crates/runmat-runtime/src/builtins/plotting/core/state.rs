@@ -1,5 +1,7 @@
 use once_cell::sync::OnceCell;
-use runmat_plot::plots::{surface::ColorMap, surface::ShadingMode, Figure, LineStyle, PlotElement};
+use runmat_plot::plots::{
+    surface::ColorMap, surface::ShadingMode, Figure, LegendStyle, LineStyle, PlotElement, TextStyle,
+};
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 use std::collections::{hash_map::Entry, HashMap, HashSet};
@@ -199,6 +201,32 @@ static REGISTRY: OnceCell<Mutex<PlotRegistry>> = OnceCell::new();
 #[cfg(test)]
 static TEST_PLOT_REGISTRY_LOCK: Mutex<()> = Mutex::new(());
 
+#[cfg(test)]
+thread_local! {
+    static TEST_PLOT_OUTER_LOCK_HELD: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+pub(crate) struct PlotTestLockGuard {
+    _guard: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(test)]
+impl Drop for PlotTestLockGuard {
+    fn drop(&mut self) {
+        TEST_PLOT_OUTER_LOCK_HELD.with(|flag| flag.set(false));
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn lock_plot_test_registry() -> PlotTestLockGuard {
+    let guard = TEST_PLOT_REGISTRY_LOCK
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    TEST_PLOT_OUTER_LOCK_HELD.with(|flag| flag.set(true));
+    PlotTestLockGuard { _guard: guard }
+}
+
 #[cfg(target_arch = "wasm32")]
 runmat_thread_local! {
     static REGISTRY: RefCell<PlotRegistry> = RefCell::new(PlotRegistry::default());
@@ -212,14 +240,14 @@ type RegistryBackendGuard<'a> = std::cell::RefMut<'a, PlotRegistry>;
 struct PlotRegistryGuard<'a> {
     inner: RegistryBackendGuard<'a>,
     #[cfg(test)]
-    _test_lock: std::sync::MutexGuard<'static, ()>,
+    _test_lock: Option<std::sync::MutexGuard<'static, ()>>,
 }
 
 impl<'a> PlotRegistryGuard<'a> {
     #[cfg(test)]
     fn new(
         inner: RegistryBackendGuard<'a>,
-        _test_lock: std::sync::MutexGuard<'static, ()>,
+        _test_lock: Option<std::sync::MutexGuard<'static, ()>>,
     ) -> Self {
         Self { inner, _test_lock }
     }
@@ -246,6 +274,29 @@ impl<'a> DerefMut for PlotRegistryGuard<'a> {
 
 const AXES_INDEX_BITS: u32 = 20;
 const AXES_INDEX_MASK: u64 = (1 << AXES_INDEX_BITS) - 1;
+const OBJECT_KIND_BITS: u32 = 4;
+const OBJECT_KIND_MASK: u64 = (1 << OBJECT_KIND_BITS) - 1;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PlotObjectKind {
+    Title = 1,
+    XLabel = 2,
+    YLabel = 3,
+    Legend = 4,
+}
+
+impl PlotObjectKind {
+    #[cfg(test)]
+    fn from_u64(value: u64) -> Option<Self> {
+        match value {
+            1 => Some(Self::Title),
+            2 => Some(Self::XLabel),
+            3 => Some(Self::YLabel),
+            4 => Some(Self::Legend),
+            _ => None,
+        }
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum FigureError {
@@ -261,6 +312,8 @@ pub enum FigureError {
     },
     #[error("invalid axes handle")]
     InvalidAxesHandle,
+    #[error("invalid plot object handle")]
+    InvalidPlotObjectHandle,
     #[error("failed to render figure snapshot: {source}")]
     RenderFailure {
         #[source]
@@ -334,6 +387,51 @@ pub fn set_box_enabled(enabled: bool) {
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 }
 
+pub fn set_figure_title_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    title: &str,
+    style: TextStyle,
+) -> Result<f64, FigureError> {
+    let (object_handle, figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state.figure.set_axes_title(axes_index, title.to_string());
+        state.figure.set_axes_title_style(axes_index, style);
+        encode_plot_object_handle(handle, axes_index, PlotObjectKind::Title)
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(object_handle)
+}
+
+pub fn set_xlabel_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    label: &str,
+    style: TextStyle,
+) -> Result<f64, FigureError> {
+    let (object_handle, figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state.figure.set_axes_xlabel(axes_index, label.to_string());
+        state.figure.set_axes_xlabel_style(axes_index, style);
+        encode_plot_object_handle(handle, axes_index, PlotObjectKind::XLabel)
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(object_handle)
+}
+
+pub fn set_ylabel_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    label: &str,
+    style: TextStyle,
+) -> Result<f64, FigureError> {
+    let (object_handle, figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state.figure.set_axes_ylabel(axes_index, label.to_string());
+        state.figure.set_axes_ylabel_style(axes_index, style);
+        encode_plot_object_handle(handle, axes_index, PlotObjectKind::YLabel)
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(object_handle)
+}
+
 pub fn toggle_box() -> bool {
     let (handle, figure_clone, enabled) = {
         let mut reg = registry();
@@ -397,6 +495,27 @@ pub fn set_colorbar_enabled(enabled: bool) {
         (handle, state.figure.clone())
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn set_legend_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    enabled: bool,
+    labels: Option<&[String]>,
+    style: Option<LegendStyle>,
+) -> Result<f64, FigureError> {
+    let (object_handle, figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state.figure.set_axes_legend_enabled(axes_index, enabled);
+        if let Some(labels) = labels {
+            state.figure.set_labels_for_axes(axes_index, labels);
+        }
+        if let Some(style) = style {
+            state.figure.set_axes_legend_style(axes_index, style);
+        }
+        encode_plot_object_handle(handle, axes_index, PlotObjectKind::Legend)
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(object_handle)
 }
 
 pub fn toggle_colorbar() -> bool {
@@ -521,6 +640,37 @@ pub fn encode_axes_handle(handle: FigureHandle, axes_index: usize) -> f64 {
     encoded as f64
 }
 
+pub fn encode_plot_object_handle(
+    handle: FigureHandle,
+    axes_index: usize,
+    kind: PlotObjectKind,
+) -> f64 {
+    let encoded = (((handle.as_u32() as u64) << AXES_INDEX_BITS)
+        | ((axes_index as u64) & AXES_INDEX_MASK))
+        << OBJECT_KIND_BITS
+        | ((kind as u64) & OBJECT_KIND_MASK);
+    encoded as f64
+}
+
+#[cfg(test)]
+pub fn decode_plot_object_handle(
+    value: f64,
+) -> Result<(FigureHandle, usize, PlotObjectKind), FigureError> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(FigureError::InvalidPlotObjectHandle);
+    }
+    let encoded = value.round() as u64;
+    let kind = PlotObjectKind::from_u64(encoded & OBJECT_KIND_MASK)
+        .ok_or(FigureError::InvalidPlotObjectHandle)?;
+    let base = encoded >> OBJECT_KIND_BITS;
+    let figure_id = base >> AXES_INDEX_BITS;
+    if figure_id == 0 {
+        return Err(FigureError::InvalidPlotObjectHandle);
+    }
+    let axes_index = (base & AXES_INDEX_MASK) as usize;
+    Ok((FigureHandle::from(figure_id as u32), axes_index, kind))
+}
+
 #[allow(dead_code)]
 pub fn decode_axes_handle(value: f64) -> Result<(FigureHandle, usize), FigureError> {
     if !value.is_finite() || value <= 0.0 {
@@ -538,9 +688,17 @@ pub fn decode_axes_handle(value: f64) -> Result<(FigureHandle, usize), FigureErr
 #[cfg(not(target_arch = "wasm32"))]
 fn registry() -> PlotRegistryGuard<'static> {
     #[cfg(test)]
-    let test_lock = TEST_PLOT_REGISTRY_LOCK
-        .lock()
-        .expect("plot registry test lock poisoned");
+    let test_lock = TEST_PLOT_OUTER_LOCK_HELD.with(|flag| {
+        if flag.get() {
+            None
+        } else {
+            Some(
+                TEST_PLOT_REGISTRY_LOCK
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()),
+            )
+        }
+    });
     let guard = REGISTRY
         .get_or_init(|| Mutex::new(PlotRegistry::default()))
         .lock()
@@ -566,9 +724,17 @@ fn registry() -> PlotRegistryGuard<'static> {
             unsafe { std::mem::transmute::<std::cell::RefMut<'_, PlotRegistry>, _>(guard) };
         #[cfg(test)]
         {
-            let test_lock = TEST_PLOT_REGISTRY_LOCK
-                .lock()
-                .expect("plot registry test lock poisoned");
+            let test_lock = TEST_PLOT_OUTER_LOCK_HELD.with(|flag| {
+                if flag.get() {
+                    None
+                } else {
+                    Some(
+                        TEST_PLOT_REGISTRY_LOCK
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner()),
+                    )
+                }
+            });
             PlotRegistryGuard::new(guard_static, test_lock)
         }
         #[cfg(not(test))]
@@ -682,6 +848,35 @@ pub fn current_axes_state() -> FigureAxesState {
         cols: state.figure.axes_cols.max(1),
         active_index: state.active_axes,
     }
+}
+
+pub fn axes_handle_exists(handle: FigureHandle, axes_index: usize) -> bool {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, handle);
+    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    axes_index < total_axes
+}
+
+fn with_axes_target_mut<R>(
+    handle: FigureHandle,
+    axes_index: usize,
+    f: impl FnOnce(&mut FigureState) -> R,
+) -> Result<(R, Figure), FigureError> {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, handle);
+    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    if axes_index >= total_axes {
+        return Err(FigureError::InvalidSubplotIndex {
+            rows: state.figure.axes_rows.max(1),
+            cols: state.figure.axes_cols.max(1),
+            index: axes_index,
+        });
+    }
+    state.active_axes = axes_index;
+    state.figure.set_active_axes_index(axes_index);
+    let result = f(state);
+    state.revision = state.revision.wrapping_add(1);
+    Ok((result, state.figure.clone()))
 }
 
 pub fn current_hold_enabled() -> bool {
@@ -839,6 +1034,7 @@ pub fn configure_subplot(rows: usize, cols: usize, index: usize) -> Result<(), F
     let state = get_state_mut(&mut reg, handle);
     state.figure.set_subplot_grid(rows, cols);
     state.active_axes = index;
+    state.figure.set_active_axes_index(index);
     Ok(())
 }
 
@@ -857,6 +1053,7 @@ where
         let handle = reg.current;
         let state = get_state_mut(&mut reg, handle);
         let axes_index = state.active_axes;
+        state.figure.set_active_axes_index(axes_index);
 
         if !state.hold() {
             state.figure.clear_axes(axes_index);
@@ -864,9 +1061,11 @@ where
         }
 
         if !opts.title.is_empty() {
-            state.figure.set_title(opts.title);
+            state.figure.set_axes_title(axes_index, opts.title);
         }
-        state.figure.set_axis_labels(opts.x_label, opts.y_label);
+        state
+            .figure
+            .set_axes_labels(axes_index, opts.x_label, opts.y_label);
         state.figure.set_grid(opts.grid);
         state.figure.set_axis_equal(opts.axis_equal);
 
