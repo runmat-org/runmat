@@ -492,16 +492,6 @@ impl<'a> GraphBuilder<'a> {
                     _ => Type::Unknown,
                 }
             }
-            PrimitiveOp::Div => {
-                let lhs_type = self.values.get(lhs as usize).map(|v| &v.ty);
-                let rhs_type = self.values.get(rhs as usize).map(|v| &v.ty);
-                match (lhs_type, rhs_type) {
-                    (Some(left), Some(right)) => {
-                        runmat_builtins::shape_rules::right_divide_output_type(left, right)
-                    }
-                    _ => Type::Unknown,
-                }
-            }
             _ => {
                 let shape = self.infer_elementwise_shape(&inputs);
                 if matches!(shape, ShapeInfo::Unknown) {
@@ -920,7 +910,6 @@ fn primitive_category(op: PrimitiveOp) -> AccelOpCategory {
         | PrimitiveOp::Add
         | PrimitiveOp::Sub
         | PrimitiveOp::Mul
-        | PrimitiveOp::Div
         | PrimitiveOp::Pow
         | PrimitiveOp::Neg
         | PrimitiveOp::UPlus
