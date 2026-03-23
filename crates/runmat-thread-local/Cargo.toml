@@ -1,8 +1,8 @@
 [package]
 name = "runmat-thread-local"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
+description = "Cross-platform thread-local storage helpers for RunMat (native and wasm)"
 
 [lib]
 path = "lib.rs"
-

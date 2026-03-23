@@ -1,8 +1,9 @@
 [package]
 name = "runmat-runtime-integration-tests"
-version = "0.2.8"
+version = "0.3.0"
 edition = "2021"
 publish = false
+description = "Integration test suite for the RunMat runtime and acceleration backends"
 
 [dependencies]
 runmat-runtime = { path = "../runmat-runtime", features = ["wgpu"] }

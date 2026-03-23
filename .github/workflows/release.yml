@@ -553,4 +553,6 @@ jobs:
 
       - name: Publish bindings package to npm
         working-directory: bindings/ts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: npm publish --access public

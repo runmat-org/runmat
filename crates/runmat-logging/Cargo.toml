@@ -1,7 +1,8 @@
 [package]
 name = "runmat-logging"
-version = "0.1.0"
+version = "0.3.0"
 edition = "2021"
+description = "Structured logging and tracing utilities for RunMat hosts"
 
 [dependencies]
 tracing = "0.1"
