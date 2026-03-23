@@ -70,12 +70,7 @@ const BUILTIN_NAME: &str = "plot";
     type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::plot"
 )]
-pub async fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
-    let mut args = Vec::with_capacity(2 + rest.len());
-    args.push(x);
-    args.push(y);
-    args.extend(rest);
-
+pub async fn plot_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     let (mut series_plans, line_style_order) = parse_series_specs(args)?;
     let axes = current_axes_state().active_index;
     let hold_enabled = current_hold_enabled();
@@ -244,22 +239,33 @@ fn parse_series_specs(
 
     let mut idx = 0usize;
     while idx < args.len() {
-        let x_val = args[idx].clone();
+        let first_val = args[idx].clone();
         idx += 1;
-        if !is_numeric_value(&x_val) {
+        if !is_numeric_value(&first_val) {
             return Err(plot_err(
                 "expected numeric X data before style arguments or options",
             ));
         }
-        if idx >= args.len() {
-            return Err(plot_err("expected Y argument after X data"));
-        }
-        let y_arg_index = idx;
-        let y_val = args[idx].clone();
-        idx += 1;
-        if !is_numeric_value(&y_val) {
-            return Err(plot_err("expected numeric Y argument after X data"));
-        }
+
+        let shorthand_plot_y = match args.get(idx) {
+            None => true,
+            Some(Value::String(_) | Value::CharArray(_)) => true,
+            Some(next) => !is_numeric_value(next),
+        };
+
+        let (x_val, y_val, y_arg_index) = if shorthand_plot_y {
+            let y_val = first_val;
+            let x_val = infer_plot_x_from_y(&y_val)?;
+            (x_val, y_val, idx.saturating_sub(1))
+        } else {
+            let y_arg_index = idx;
+            let y_val = args[idx].clone();
+            idx += 1;
+            if !is_numeric_value(&y_val) {
+                return Err(plot_err("expected numeric Y argument after X data"));
+            }
+            (first_val, y_val, y_arg_index)
+        };
 
         let series_input = PlotSeriesInput::new(x_val, y_val)?;
 
@@ -312,6 +318,25 @@ fn is_numeric_value(value: &Value) -> bool {
         value,
         Value::Tensor(_) | Value::GpuTensor(_) | Value::Num(_) | Value::Int(_) | Value::Bool(_)
     )
+}
+
+fn infer_plot_x_from_y(y: &Value) -> BuiltinResult<Value> {
+    let len = match y {
+        Value::GpuTensor(handle) => handle.shape.iter().copied().product::<usize>().max(1),
+        other => {
+            let tensor = Tensor::try_from(other)
+                .map_err(|e| plotting_error(BUILTIN_NAME, format!("plot: {e}")))?;
+            tensor.data.len().max(1)
+        }
+    };
+    let data = (1..=len).map(|i| i as f64).collect::<Vec<_>>();
+    Ok(Value::Tensor(Tensor {
+        data,
+        shape: vec![len],
+        rows: len,
+        cols: 1,
+        dtype: runmat_builtins::NumericDType::F64,
+    }))
 }
 
 fn plot_err(msg: impl Into<String>) -> RuntimeError {
@@ -534,6 +559,7 @@ pub(crate) mod tests {
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_builtins::{ResolveContext, Type};
+    use runmat_plot::plots::PlotElement;
 
     fn setup_plot_tests() -> PlotTestLockGuard {
         let guard = lock_plot_registry();
@@ -578,11 +604,10 @@ pub(crate) mod tests {
     #[test]
     fn plot_builtin_produces_figure_even_without_backend() {
         let _guard = setup_plot_tests();
-        let result = block_on(plot_builtin(
+        let result = block_on(plot_builtin(vec![
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[0.0, 1.0])),
-            Vec::new(),
-        ));
+        ]));
         if let Err(flow) = result {
             assert_plotting_unavailable(&flow);
         }
@@ -600,11 +625,10 @@ pub(crate) mod tests {
         ];
         let _callsite_guard = crate::callsite::push_callsite(None, Some(spans));
 
-        let _ = block_on(plot_builtin(
+        let _ = block_on(plot_builtin(vec![
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[0.0, 1.0])),
-            Vec::new(),
-        ));
+        ]));
 
         let handle = current_figure_handle();
         let fig = clone_figure(handle).expect("figure exists");
@@ -640,7 +664,7 @@ pub(crate) mod tests {
             Value::String("linewidth".into()),
         ];
         let err = parse_series_specs(args).unwrap_err();
-        assert!(err.to_string().contains("expected numeric Y argument"));
+        assert!(err.to_string().contains("name-value arguments must come in pairs"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -683,5 +707,57 @@ pub(crate) mod tests {
             ),
             Type::String
         );
+    }
+
+    #[test]
+    fn parse_series_specs_supports_plot_y_shorthand() {
+        let _guard = setup_plot_tests();
+        let args = vec![Value::Tensor(tensor_from(&[10.0, 20.0, 30.0]))];
+        let (plans, order) = parse_series_specs(args).expect("parsed");
+        assert!(order.is_none());
+        assert_eq!(plans.len(), 1);
+        let (x_tensor, y_tensor) = futures::executor::block_on(
+            plans
+                .into_iter()
+                .next()
+                .unwrap()
+                .data
+                .into_tensors_async("plot"),
+        )
+        .unwrap();
+        assert_eq!(x_tensor.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(y_tensor.data, vec![10.0, 20.0, 30.0]);
+    }
+
+    #[test]
+    fn parse_series_specs_supports_plot_y_with_style() {
+        let _guard = setup_plot_tests();
+        let args = vec![
+            Value::Tensor(tensor_from(&[1.0, 2.0])),
+            Value::String("r--".into()),
+        ];
+        let (plans, order) = parse_series_specs(args).expect("parsed");
+        assert!(order.is_none());
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].appearance.line_style, LineStyle::Dashed);
+    }
+
+    #[test]
+    fn plot_builtin_supports_plot_y_shorthand_end_to_end() {
+        let _guard = setup_plot_tests();
+        let result = block_on(plot_builtin(vec![Value::Tensor(tensor_from(&[
+            5.0, 6.0, 7.0,
+        ]))]));
+        if let Err(flow) = result {
+            assert_plotting_unavailable(&flow);
+        }
+        let handle = current_figure_handle();
+        let fig = clone_figure(handle).expect("figure exists");
+        let first_plot = fig.plots().next().expect("plot created");
+        let PlotElement::Line(line) = first_plot else {
+            panic!("expected line plot");
+        };
+        assert_eq!(line.x_data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(line.y_data, vec![5.0, 6.0, 7.0]);
     }
 }
