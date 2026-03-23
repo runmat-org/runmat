@@ -246,3 +246,45 @@ end
         .iter()
         .any(|s| matches!(s, HirStmt::ClassDef { .. })));
 }
+
+#[test]
+fn function_output_reuses_param_binding_when_names_match() {
+    let src = r#"
+function [x, y] = f(x)
+  y = x;
+  x = x + 1;
+end
+"#;
+    let ast = parse(src).unwrap();
+    let lowered = runmat_hir::lower(&ast, &LoweringContext::empty()).unwrap();
+
+    let HirStmt::Function {
+        params,
+        outputs,
+        body,
+        ..
+    } = &lowered.hir.body[0]
+    else {
+        panic!("expected function");
+    };
+
+    assert_eq!(params.len(), 1);
+    assert_eq!(outputs.len(), 2);
+    assert_eq!(params[0], outputs[0]);
+
+    match &body[0] {
+        HirStmt::Assign(target, expr, _, _) => {
+            assert_eq!(*target, outputs[1]);
+            assert!(matches!(expr.kind, HirExprKind::Var(id) if id == params[0]));
+        }
+        _ => panic!("expected y = x assignment"),
+    }
+
+    match &body[1] {
+        HirStmt::Assign(target, expr, _, _) => {
+            assert_eq!(*target, params[0]);
+            assert!(matches!(expr.kind, HirExprKind::Binary(_, _, _)));
+        }
+        _ => panic!("expected x = x + 1 assignment"),
+    }
+}

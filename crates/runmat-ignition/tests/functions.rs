@@ -141,6 +141,40 @@ fn nested_function_calls() {
 }
 
 #[test]
+fn shared_input_output_name_behaves_like_in_out_parameter() {
+    let program = r#"
+        function x = bump(x)
+            x = x + 1;
+        end
+        r = bump(41);
+    "#;
+    let hir = lower(&parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 42.0).abs() < 1e-9)));
+}
+
+#[test]
+fn shared_input_output_name_preserves_input_value_for_other_outputs() {
+    let program = r#"
+        function [x, y] = bump_and_copy(x)
+            y = x;
+            x = x + 1;
+        end
+        [a, b] = bump_and_copy(5);
+    "#;
+    let hir = lower(&parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 6.0).abs() < 1e-9)));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
+}
+
+#[test]
 fn member_get_set_and_method_call_skeleton() {
     let input = "obj = new_object('Point'); obj = setfield(obj, 'x', 3); ax = getfield(obj, 'x');";
     let ast = parse(input).unwrap();

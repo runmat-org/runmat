@@ -3268,6 +3268,12 @@ impl Ctx {
         None
     }
 
+    fn lookup_current_scope(&self, name: &str) -> Option<VarId> {
+        self.scopes
+            .last()
+            .and_then(|scope| scope.bindings.get(name).copied())
+    }
+
     fn is_constant(&self, name: &str) -> bool {
         // Check if name is a registered constant
         runmat_builtins::constants().iter().any(|c| c.name == name)
@@ -3491,8 +3497,13 @@ impl Ctx {
             } => {
                 self.push_scope();
                 let param_ids: Vec<VarId> = params.iter().map(|p| self.define(p.clone())).collect();
-                let output_ids: Vec<VarId> =
-                    outputs.iter().map(|o| self.define(o.clone())).collect();
+                let output_ids: Vec<VarId> = outputs
+                    .iter()
+                    .map(|o| {
+                        self.lookup_current_scope(o)
+                            .unwrap_or_else(|| self.define(o.clone()))
+                    })
+                    .collect();
                 let body_hir = self.lower_stmts(body)?;
                 self.pop_scope();
 
