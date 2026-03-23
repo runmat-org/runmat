@@ -1,0 +1,6 @@
+[workspace]
+changelog_update = false
+git_release_enable = false
+git_tag_enable = false
+publish_no_verify = true
+semver_check = false
