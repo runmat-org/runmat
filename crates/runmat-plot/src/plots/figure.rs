@@ -23,6 +23,7 @@ pub struct Figure {
     pub title: Option<String>,
     pub x_label: Option<String>,
     pub y_label: Option<String>,
+    pub z_label: Option<String>,
     pub legend_enabled: bool,
     pub grid_enabled: bool,
     pub box_enabled: bool,
@@ -121,12 +122,16 @@ pub struct AxesMetadata {
     pub title: Option<String>,
     pub x_label: Option<String>,
     pub y_label: Option<String>,
+    pub z_label: Option<String>,
     pub x_log: bool,
     pub y_log: bool,
+    pub view_azimuth_deg: Option<f32>,
+    pub view_elevation_deg: Option<f32>,
     pub legend_enabled: bool,
     pub title_style: TextStyle,
     pub x_label_style: TextStyle,
     pub y_label_style: TextStyle,
+    pub z_label_style: TextStyle,
     pub legend_style: LegendStyle,
 }
 
@@ -184,6 +189,7 @@ impl Figure {
             title: None,
             x_label: None,
             y_label: None,
+            z_label: None,
             legend_enabled: true,
             grid_enabled: true,
             box_enabled: true,
@@ -225,6 +231,7 @@ impl Figure {
             self.title = meta.title;
             self.x_label = meta.x_label;
             self.y_label = meta.y_label;
+            self.z_label = meta.z_label;
             self.x_log = meta.x_log;
             self.y_log = meta.y_log;
             self.legend_enabled = meta.legend_enabled;
@@ -302,6 +309,17 @@ impl Figure {
         self.dirty = true;
     }
 
+    pub fn set_axes_zlabel<S: Into<String>>(&mut self, axes_index: usize, label: S) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.z_label = Some(label.into());
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
     pub fn set_axes_labels<S: Into<String>>(&mut self, axes_index: usize, x_label: S, y_label: S) {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
@@ -334,6 +352,14 @@ impl Figure {
         self.ensure_axes_metadata_capacity(axes_index + 1);
         if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
             meta.y_label_style = style;
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_zlabel_style(&mut self, axes_index: usize, style: TextStyle) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.z_label_style = style;
         }
         self.dirty = true;
     }
@@ -383,6 +409,15 @@ impl Figure {
         }
         if axes_index == self.active_axes_index {
             self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_view(&mut self, axes_index: usize, azimuth_deg: f32, elevation_deg: f32) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.view_azimuth_deg = Some(azimuth_deg);
+            meta.view_elevation_deg = Some(elevation_deg);
         }
         self.dirty = true;
     }
@@ -1398,5 +1433,27 @@ mod tests {
         figure.set_active_axes_index(1);
         assert!(figure.x_log);
         assert!(!figure.y_log);
+    }
+
+    #[test]
+    fn z_label_and_view_state_are_isolated_per_subplot() {
+        let mut figure = Figure::new();
+        figure.set_subplot_grid(1, 2);
+        figure.set_axes_zlabel(1, "Height");
+        figure.set_axes_view(1, 45.0, 20.0);
+
+        assert_eq!(figure.axes_metadata(0).unwrap().z_label, None);
+        assert_eq!(
+            figure.axes_metadata(1).unwrap().z_label.as_deref(),
+            Some("Height")
+        );
+        assert_eq!(
+            figure.axes_metadata(1).unwrap().view_azimuth_deg,
+            Some(45.0)
+        );
+        assert_eq!(
+            figure.axes_metadata(1).unwrap().view_elevation_deg,
+            Some(20.0)
+        );
     }
 }

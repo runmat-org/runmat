@@ -10,6 +10,7 @@ use super::style::{
     parse_color_value, value_as_bool, value_as_f64, value_as_string, LineStyleParseOptions,
 };
 use super::{plotting_error, plotting_error_with_source};
+use crate::builtins::plotting::op_common::limits::limits_from_value;
 use crate::builtins::plotting::op_common::value_as_text_string;
 use crate::BuiltinResult;
 
@@ -247,6 +248,14 @@ fn get_axes_property(
                 )),
             );
             st.insert(
+                "ZLabel",
+                Value::Num(super::state::encode_plot_object_handle(
+                    handle,
+                    axes_index,
+                    PlotObjectKind::ZLabel,
+                )),
+            );
+            st.insert(
                 "Legend",
                 Value::Num(super::state::encode_plot_object_handle(
                     handle,
@@ -272,11 +281,27 @@ fn get_axes_property(
             axes_index,
             PlotObjectKind::YLabel,
         ))),
+        Some("zlabel") => Ok(Value::Num(super::state::encode_plot_object_handle(
+            handle,
+            axes_index,
+            PlotObjectKind::ZLabel,
+        ))),
         Some("legend") => Ok(Value::Num(super::state::encode_plot_object_handle(
             handle,
             axes_index,
             PlotObjectKind::Legend,
         ))),
+        Some("view") => {
+            let az = meta.view_azimuth_deg.unwrap_or(-37.5) as f64;
+            let el = meta.view_elevation_deg.unwrap_or(30.0) as f64;
+            Ok(Value::Tensor(runmat_builtins::Tensor {
+                rows: 1,
+                cols: 2,
+                shape: vec![1, 2],
+                data: vec![az, el],
+                dtype: runmat_builtins::NumericDType::F64,
+            }))
+        }
         Some("legendvisible") => Ok(Value::Bool(meta.legend_enabled)),
         Some(other) => Err(plotting_error(
             builtin,
@@ -298,6 +323,7 @@ fn get_text_property(
         PlotObjectKind::Title => (meta.title, meta.title_style),
         PlotObjectKind::XLabel => (meta.x_label, meta.x_label_style),
         PlotObjectKind::YLabel => (meta.y_label, meta.y_label_style),
+        PlotObjectKind::ZLabel => (meta.z_label, meta.z_label_style),
         PlotObjectKind::Legend => unreachable!(),
     };
     match property.map(canonical_property_name) {
@@ -478,6 +504,8 @@ fn canonical_property_name(name: &str) -> &str {
         "title" => "title",
         "xlabel" => "xlabel",
         "ylabel" => "ylabel",
+        "zlabel" => "zlabel",
+        "view" => "view",
         "legend" => "legend",
         "legendvisible" => "legendvisible",
         other => Box::leak(other.to_string().into_boxed_str()),
@@ -628,6 +656,20 @@ fn apply_axes_property(
         "ylabel" => {
             apply_axes_text_alias(handle, axes_index, PlotObjectKind::YLabel, value, builtin)
         }
+        "zlabel" => {
+            apply_axes_text_alias(handle, axes_index, PlotObjectKind::ZLabel, value, builtin)
+        }
+        "view" => {
+            let limits = limits_from_value(value, builtin)?;
+            crate::builtins::plotting::state::set_view_for_axes(
+                handle,
+                axes_index,
+                limits.0 as f32,
+                limits.1 as f32,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
         other => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported axes property `{other}`"),
@@ -666,6 +708,7 @@ fn apply_axes_text_alias(
         PlotObjectKind::Title => (meta.title, meta.title_style),
         PlotObjectKind::XLabel => (meta.x_label, meta.x_label_style),
         PlotObjectKind::YLabel => (meta.y_label, meta.y_label_style),
+        PlotObjectKind::ZLabel => (meta.z_label, meta.z_label_style),
         PlotObjectKind::Legend => unreachable!(),
     };
     set_text_properties_for_axes(handle, axes_index, kind, text, Some(style))
@@ -759,6 +802,7 @@ fn key_name(kind: PlotObjectKind) -> &'static str {
         PlotObjectKind::Title => "Title",
         PlotObjectKind::XLabel => "XLabel",
         PlotObjectKind::YLabel => "YLabel",
+        PlotObjectKind::ZLabel => "ZLabel",
         PlotObjectKind::Legend => "Legend",
     }
 }
@@ -773,6 +817,7 @@ impl AxesMetadataExt for runmat_plot::plots::AxesMetadata {
             PlotObjectKind::Title => self.title_style.clone(),
             PlotObjectKind::XLabel => self.x_label_style.clone(),
             PlotObjectKind::YLabel => self.y_label_style.clone(),
+            PlotObjectKind::ZLabel => self.z_label_style.clone(),
             PlotObjectKind::Legend => TextStyle::default(),
         }
     }

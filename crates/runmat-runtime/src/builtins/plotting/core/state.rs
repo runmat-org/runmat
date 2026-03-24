@@ -282,7 +282,8 @@ pub enum PlotObjectKind {
     Title = 1,
     XLabel = 2,
     YLabel = 3,
-    Legend = 4,
+    ZLabel = 4,
+    Legend = 5,
 }
 
 impl PlotObjectKind {
@@ -291,7 +292,8 @@ impl PlotObjectKind {
             1 => Some(Self::Title),
             2 => Some(Self::XLabel),
             3 => Some(Self::YLabel),
-            4 => Some(Self::Legend),
+            4 => Some(Self::ZLabel),
+            5 => Some(Self::Legend),
             _ => None,
         }
     }
@@ -414,6 +416,7 @@ pub fn set_text_properties_for_axes(
                 PlotObjectKind::Title => state.figure.set_axes_title(axes_index, text),
                 PlotObjectKind::XLabel => state.figure.set_axes_xlabel(axes_index, text),
                 PlotObjectKind::YLabel => state.figure.set_axes_ylabel(axes_index, text),
+                PlotObjectKind::ZLabel => state.figure.set_axes_zlabel(axes_index, text),
                 PlotObjectKind::Legend => {}
             }
         }
@@ -422,6 +425,7 @@ pub fn set_text_properties_for_axes(
                 PlotObjectKind::Title => state.figure.set_axes_title_style(axes_index, style),
                 PlotObjectKind::XLabel => state.figure.set_axes_xlabel_style(axes_index, style),
                 PlotObjectKind::YLabel => state.figure.set_axes_ylabel_style(axes_index, style),
+                PlotObjectKind::ZLabel => state.figure.set_axes_zlabel_style(axes_index, style),
                 PlotObjectKind::Legend => {}
             }
         }
@@ -456,6 +460,21 @@ pub fn set_ylabel_for_axes(
         state.figure.set_axes_ylabel(axes_index, label.to_string());
         state.figure.set_axes_ylabel_style(axes_index, style);
         encode_plot_object_handle(handle, axes_index, PlotObjectKind::YLabel)
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(object_handle)
+}
+
+pub fn set_zlabel_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    label: &str,
+    style: TextStyle,
+) -> Result<f64, FigureError> {
+    let (object_handle, figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state.figure.set_axes_zlabel(axes_index, label.to_string());
+        state.figure.set_axes_zlabel_style(axes_index, style);
+        encode_plot_object_handle(handle, axes_index, PlotObjectKind::ZLabel)
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(object_handle)
@@ -600,6 +619,21 @@ pub fn set_log_modes_for_axes(
 ) -> Result<(), FigureError> {
     let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
         state.figure.set_axes_log_modes(axes_index, x_log, y_log);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
+pub fn set_view_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    azimuth_deg: f32,
+    elevation_deg: f32,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state
+            .figure
+            .set_axes_view(axes_index, azimuth_deg, elevation_deg);
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(())

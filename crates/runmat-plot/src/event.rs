@@ -429,14 +429,21 @@ pub struct SerializedAxesMetadata {
     pub x_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub y_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub z_label: Option<String>,
     #[serde(default)]
     pub x_log: bool,
     #[serde(default)]
     pub y_log: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view_azimuth_deg: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub view_elevation_deg: Option<f32>,
     pub legend_enabled: bool,
     pub title_style: SerializedTextStyle,
     pub x_label_style: SerializedTextStyle,
     pub y_label_style: SerializedTextStyle,
+    pub z_label_style: SerializedTextStyle,
     pub legend_style: SerializedLegendStyle,
 }
 
@@ -446,12 +453,16 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             title: value.title,
             x_label: value.x_label,
             y_label: value.y_label,
+            z_label: value.z_label,
             x_log: value.x_log,
             y_log: value.y_log,
+            view_azimuth_deg: value.view_azimuth_deg,
+            view_elevation_deg: value.view_elevation_deg,
             legend_enabled: value.legend_enabled,
             title_style: value.title_style.into(),
             x_label_style: value.x_label_style.into(),
             y_label_style: value.y_label_style.into(),
+            z_label_style: value.z_label_style.into(),
             legend_style: value.legend_style.into(),
         }
     }
@@ -463,12 +474,16 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             title: value.title,
             x_label: value.x_label,
             y_label: value.y_label,
+            z_label: value.z_label,
             x_log: value.x_log,
             y_log: value.y_log,
+            view_azimuth_deg: value.view_azimuth_deg,
+            view_elevation_deg: value.view_elevation_deg,
             legend_enabled: value.legend_enabled,
             title_style: value.title_style.into(),
             x_label_style: value.x_label_style.into(),
             y_label_style: value.y_label_style.into(),
+            z_label_style: value.z_label_style.into(),
             legend_style: value.legend_style.into(),
         }
     }
@@ -1135,6 +1150,32 @@ mod tests {
         assert!(rebuilt.axes_metadata(1).unwrap().y_log);
         assert!(!rebuilt.x_log);
         assert!(rebuilt.y_log);
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_zlabel_and_view_state() {
+        let mut figure = Figure::new().with_subplot_grid(1, 2);
+        figure.set_axes_zlabel(1, "Height");
+        figure.set_axes_view(1, 45.0, 20.0);
+        figure.set_active_axes_index(1);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+
+        assert_eq!(
+            rebuilt.axes_metadata(1).unwrap().z_label.as_deref(),
+            Some("Height")
+        );
+        assert_eq!(
+            rebuilt.axes_metadata(1).unwrap().view_azimuth_deg,
+            Some(45.0)
+        );
+        assert_eq!(
+            rebuilt.axes_metadata(1).unwrap().view_elevation_deg,
+            Some(20.0)
+        );
+        assert_eq!(rebuilt.z_label.as_deref(), Some("Height"));
     }
 
     #[test]

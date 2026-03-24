@@ -576,14 +576,15 @@ impl PlotOverlay {
             }
         }
 
-        // Draw axis labels only for 2D plots. In 3D (perspective) the axes cube already
-        // communicates orientation and drawing large "X/Y" labels looks like a 2D frame.
-        if !has_3d_axes {
-            if let Some(x_label) = &config.x_label {
-                self.draw_x_label(ui, centered_plot_rect, x_label, config.font_scale);
-            }
-            if let Some(y_label) = &config.y_label {
-                self.draw_y_label(ui, centered_plot_rect, y_label, config.font_scale);
+        if let Some(x_label) = &config.x_label {
+            self.draw_x_label(ui, centered_plot_rect, x_label, config.font_scale);
+        }
+        if let Some(y_label) = &config.y_label {
+            self.draw_y_label(ui, centered_plot_rect, y_label, config.font_scale);
+        }
+        if has_3d_axes {
+            if let Some(z_label) = plot_renderer.overlay_z_label() {
+                self.draw_z_label(ui, centered_plot_rect, z_label, config.font_scale);
             }
         }
 
@@ -1337,6 +1338,18 @@ impl PlotOverlay {
         let text_color = self.theme_text_color();
         ui.painter().text(
             Pos2::new(plot_rect.min.x - 40.0 * scale, plot_rect.center().y),
+            Align2::CENTER_CENTER,
+            label,
+            FontId::proportional(14.0 * scale),
+            text_color,
+        );
+    }
+
+    fn draw_z_label(&self, ui: &mut egui::Ui, plot_rect: Rect, label: &str, scale: f32) {
+        let scale = scale.max(0.75);
+        let text_color = self.theme_text_color();
+        ui.painter().text(
+            Pos2::new(plot_rect.max.x + 40.0 * scale, plot_rect.center().y),
             Align2::CENTER_CENTER,
             label,
             FontId::proportional(14.0 * scale),

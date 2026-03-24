@@ -42,6 +42,7 @@ pub struct PlotRenderer {
     figure_title: Option<String>,
     figure_x_label: Option<String>,
     figure_y_label: Option<String>,
+    figure_z_label: Option<String>,
     figure_show_grid: bool,
     figure_show_legend: bool,
     figure_show_box: bool,
@@ -235,6 +236,7 @@ impl PlotRenderer {
             figure_title: None,
             figure_x_label: None,
             figure_y_label: None,
+            figure_z_label: None,
             figure_show_grid: true,
             figure_show_legend: true,
             figure_show_box: true,
@@ -327,6 +329,7 @@ impl PlotRenderer {
             // unless the user explicitly asks (Fit Extents / Reset View) or we change plot mode.
             self.camera_auto_fit = false;
         }
+        self.apply_stored_axes_views();
     }
 
     /// Add a figure to the current scene
@@ -385,6 +388,7 @@ impl PlotRenderer {
         self.figure_title = figure.title.clone();
         self.figure_x_label = figure.x_label.clone();
         self.figure_y_label = figure.y_label.clone();
+        self.figure_z_label = figure.z_label.clone();
         self.figure_show_grid = figure.grid_enabled;
         self.figure_show_legend = figure.legend_enabled;
         self.figure_show_box = figure.box_enabled;
@@ -403,6 +407,22 @@ impl PlotRenderer {
         } else {
             self.figure_categorical_is_x = None;
             self.figure_categorical_labels = None;
+        }
+    }
+
+    fn apply_stored_axes_views(&mut self) {
+        let Some(fig) = self.last_figure.as_ref() else {
+            return;
+        };
+        if !self.figure_has_3d {
+            return;
+        }
+        for (idx, cam) in self.axes_cameras.iter_mut().enumerate() {
+            if let Some(meta) = fig.axes_metadata(idx) {
+                if let (Some(az), Some(el)) = (meta.view_azimuth_deg, meta.view_elevation_deg) {
+                    cam.set_view_angles_deg(az, el);
+                }
+            }
         }
     }
 
@@ -1973,6 +1993,9 @@ impl PlotRenderer {
     }
     pub fn overlay_y_label(&self) -> Option<&String> {
         self.figure_y_label.as_ref()
+    }
+    pub fn overlay_z_label(&self) -> Option<&String> {
+        self.figure_z_label.as_ref()
     }
     pub fn overlay_show_legend(&self) -> bool {
         self.figure_show_legend

@@ -86,6 +86,8 @@ pub(crate) mod surf;
 pub(crate) mod surfc;
 #[path = "ops/title.rs"]
 pub(crate) mod title;
+#[path = "ops/view.rs"]
+pub(crate) mod view;
 #[path = "ops/xlabel.rs"]
 pub(crate) mod xlabel;
 #[path = "ops/xlim.rs"]
@@ -94,6 +96,8 @@ pub(crate) mod xlim;
 pub(crate) mod ylabel;
 #[path = "ops/ylim.rs"]
 pub(crate) mod ylim;
+#[path = "ops/zlabel.rs"]
+pub(crate) mod zlabel;
 #[path = "ops/zlim.rs"]
 pub(crate) mod zlim;
 
