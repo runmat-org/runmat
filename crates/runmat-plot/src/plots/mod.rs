@@ -9,7 +9,6 @@ pub mod contour;
 pub mod contour_fill;
 pub mod errorbar;
 pub mod figure;
-pub mod image;
 pub mod line;
 pub mod pie;
 pub mod quiver;
@@ -28,7 +27,6 @@ pub use errorbar::ErrorBar;
 pub use figure::{
     AxesMetadata, Figure, LegendEntry, LegendStyle, PlotElement, PlotType, TextStyle,
 };
-pub use image::ImagePlot;
 pub use line::{LineGpuStyle, LineMarkerAppearance, LinePlot, LineStyle};
 pub use pie::PieChart;
 pub use quiver::QuiverPlot;

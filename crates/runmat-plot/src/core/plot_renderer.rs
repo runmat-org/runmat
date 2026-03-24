@@ -275,13 +275,11 @@ impl PlotRenderer {
 
         // Convert figure to scene nodes
         let prev_has_3d = self.figure_has_3d;
-        let stats = figure.statistics();
-        let next_has_3d = stats
-            .plot_type_counts
-            .contains_key(&crate::plots::figure::PlotType::Surface)
-            || stats
-                .plot_type_counts
-                .contains_key(&crate::plots::figure::PlotType::Scatter3);
+        let next_has_3d = figure.plots().any(|plot| match plot {
+            crate::plots::figure::PlotElement::Surface(surface) => !surface.image_mode,
+            crate::plots::figure::PlotElement::Scatter3(_) => true,
+            _ => false,
+        });
         self.figure_has_3d = next_has_3d;
 
         // If the plot "mode" changed (2D <-> 3D), reset auto-fit so the new mode gets a sensible
@@ -1996,6 +1994,15 @@ impl PlotRenderer {
     }
     pub fn overlay_z_label(&self) -> Option<&String> {
         self.figure_z_label.as_ref()
+    }
+    pub fn active_axes_pie_labels(&self) -> Vec<(String, glam::Vec2)> {
+        let Some(fig) = self.last_figure.as_ref() else {
+            return Vec::new();
+        };
+        fig.pie_labels_for_axes(fig.active_axes_index)
+            .into_iter()
+            .map(|entry| (entry.label, entry.position))
+            .collect()
     }
     pub fn overlay_show_legend(&self) -> bool {
         self.figure_show_legend

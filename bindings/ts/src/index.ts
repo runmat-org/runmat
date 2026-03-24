@@ -148,7 +148,6 @@ export type FigurePlotKind =
   | "area"
   | "quiver"
   | "pie"
-  | "image"
   | "surface"
   | "scatter3"
   | "contour"

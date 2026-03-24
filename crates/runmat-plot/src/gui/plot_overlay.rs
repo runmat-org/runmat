@@ -587,6 +587,9 @@ impl PlotOverlay {
                 self.draw_z_label(ui, centered_plot_rect, z_label, config.font_scale);
             }
         }
+        for (label, pos) in plot_renderer.active_axes_pie_labels() {
+            self.draw_pie_label(ui, centered_plot_rect, &label, pos, config.font_scale);
+        }
 
         // Draw legend if enabled and entries available
         if plot_renderer.overlay_show_legend() {
@@ -662,7 +665,6 @@ impl PlotOverlay {
                         | crate::plots::figure::PlotType::Area
                         | crate::plots::figure::PlotType::Surface
                         | crate::plots::figure::PlotType::Pie
-                        | crate::plots::figure::PlotType::Image
                         | crate::plots::figure::PlotType::ContourFill => {
                             // Filled rect
                             ui.painter().rect_filled(swatch_rect, 2.0, c);
@@ -1354,6 +1356,26 @@ impl PlotOverlay {
             label,
             FontId::proportional(14.0 * scale),
             text_color,
+        );
+    }
+
+    fn draw_pie_label(
+        &self,
+        ui: &mut egui::Ui,
+        plot_rect: Rect,
+        label: &str,
+        pos: glam::Vec2,
+        scale: f32,
+    ) {
+        let center = plot_rect.center();
+        let radius = plot_rect.width().min(plot_rect.height()) * 0.4;
+        let screen = Pos2::new(center.x + pos.x * radius, center.y - pos.y * radius);
+        ui.painter().text(
+            screen,
+            Align2::CENTER_CENTER,
+            label,
+            FontId::proportional(12.0 * scale.max(0.75)),
+            self.theme_text_color(),
         );
     }
 

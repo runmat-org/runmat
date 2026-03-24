@@ -26,6 +26,9 @@ pub struct SurfacePlot {
     /// If true, render Z at 0 (flat), but color-map using Z values
     pub flatten_z: bool,
 
+    /// If true, this flattened surface should behave like a 2D image for camera/UI decisions.
+    pub image_mode: bool,
+
     /// Optional color limits override for mapping Z -> color (caxis)
     pub color_limits: Option<(f64, f64)>,
 
@@ -143,6 +146,7 @@ impl SurfacePlot {
             wireframe: false,
             alpha: 1.0,
             flatten_z: false,
+            image_mode: false,
             color_limits: None,
             color_grid: None,
             lighting_enabled: true,
@@ -181,6 +185,7 @@ impl SurfacePlot {
             wireframe: false,
             alpha: 1.0,
             flatten_z: false,
+            image_mode: false,
             color_limits: None,
             color_grid: None,
             lighting_enabled: true,
@@ -278,6 +283,13 @@ impl SurfacePlot {
     /// Render surface flat in Z while mapping colors from Z values (for imagesc/imshow)
     pub fn with_flatten_z(mut self, enabled: bool) -> Self {
         self.flatten_z = enabled;
+        self.dirty = true;
+        self.drop_gpu_if_possible();
+        self
+    }
+
+    pub fn with_image_mode(mut self, enabled: bool) -> Self {
+        self.image_mode = enabled;
         self.dirty = true;
         self.drop_gpu_if_possible();
         self

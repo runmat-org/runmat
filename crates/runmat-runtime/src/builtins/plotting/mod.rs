@@ -54,6 +54,8 @@ pub(crate) mod get;
 pub mod hist;
 #[path = "ops/hold.rs"]
 pub(crate) mod hold;
+#[path = "ops/imagesc.rs"]
+pub(crate) mod imagesc;
 #[path = "ops/legend.rs"]
 pub(crate) mod legend;
 #[path = "ops/loglog.rs"]
@@ -64,6 +66,8 @@ pub(crate) mod mesh;
 pub(crate) mod meshc;
 #[path = "ops/common/mod.rs"]
 pub(crate) mod op_common;
+#[path = "ops/pie.rs"]
+pub(crate) mod pie;
 #[path = "ops/plot.rs"]
 pub(crate) mod plot;
 #[path = "ops/scatter.rs"]

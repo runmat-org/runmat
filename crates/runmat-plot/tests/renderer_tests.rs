@@ -69,15 +69,12 @@ mod export_subplot_tests {
         let xv: Vec<f64> = (1..=cols).map(|i| i as f64).collect();
         let mut yv: Vec<f64> = (1..=rows).map(|i| i as f64).collect();
         yv.reverse();
-        let img = runmat_plot::plots::ImagePlot::from_grayscale(
-            xv,
-            yv,
-            grid,
-            runmat_plot::plots::surface::ColorMap::Parula,
-            None,
-        )
-        .unwrap();
-        let i1 = fig.add_image_plot(img);
+        let img = runmat_plot::plots::SurfacePlot::new(xv, yv, grid)
+            .unwrap()
+            .with_colormap(runmat_plot::plots::surface::ColorMap::Parula)
+            .with_flatten_z(true)
+            .with_image_mode(true);
+        let i1 = fig.add_surface_plot(img);
         let _ = fig.assign_plot_to_axes(i1, 1);
         let x2: Vec<f64> = (0..=20).map(|i| i as f64 * 0.2).collect();
         let y2: Vec<f64> = x2.iter().map(|v| v.sin()).collect();
@@ -155,15 +152,12 @@ mod export_subplot_tests {
         let x: Vec<f64> = (1..=cols).map(|i| i as f64).collect();
         let mut yv: Vec<f64> = (1..=rows).map(|i| i as f64).collect();
         yv.reverse();
-        let img = runmat_plot::plots::ImagePlot::from_grayscale(
-            x.clone(),
-            yv.clone(),
-            grid,
-            runmat_plot::plots::surface::ColorMap::Parula,
-            None,
-        )
-        .unwrap();
-        let i1 = fig.add_image_plot(img);
+        let img = runmat_plot::plots::SurfacePlot::new(x.clone(), yv.clone(), grid)
+            .unwrap()
+            .with_colormap(runmat_plot::plots::surface::ColorMap::Parula)
+            .with_flatten_z(true)
+            .with_image_mode(true);
+        let i1 = fig.add_surface_plot(img);
         let _ = fig.assign_plot_to_axes(i1, 1);
         // Line in (1,0)
         let x2: Vec<f64> = (0..=50).map(|i| i as f64 * 0.2).collect();
@@ -417,32 +411,6 @@ mod svg_aesthetics_tests {
     }
 }
 
-#[cfg(test)]
-mod svg_image_embed_tests {
-    use runmat_plot::export::vector::{VectorExportSettings, VectorExporter};
-    use runmat_plot::plots::surface::ColorMap;
-    use runmat_plot::plots::{image::ImagePlot, Figure};
-
-    #[test]
-    fn test_svg_embeds_png_data_uri_for_imagesc() {
-        // Simple 2x2 grayscale grid
-        let x: Vec<f64> = vec![0.0, 1.0];
-        let y: Vec<f64> = vec![0.0, 1.0];
-        let z: Vec<Vec<f64>> = vec![vec![0.0, 0.5], vec![0.5, 1.0]];
-        let mut fig = Figure::new();
-        let img = ImagePlot::from_grayscale(x, y, z, ColorMap::Parula, None).unwrap();
-        fig.add_image_plot(img);
-
-        let exporter = VectorExporter::with_settings(VectorExportSettings {
-            width: 160.0,
-            height: 120.0,
-            ..Default::default()
-        });
-        let svg = exporter.render_to_svg(&mut fig).unwrap();
-        assert!(svg.contains("<image "));
-        assert!(svg.contains("xlink:href=\"data:image/png;base64,"));
-    }
-}
 #[test]
 fn test_uniform_buffer_layout() {
     // Test that uniforms have the expected memory layout for GPU buffers
@@ -914,7 +882,7 @@ mod new_plots_tests {
 mod image_export_tests {
     #![allow(unused_imports)]
     use runmat_plot::plots::surface::ColorMap;
-    use runmat_plot::plots::{image::ImagePlot, Figure};
+    use runmat_plot::plots::Figure;
     use std::path::PathBuf;
 
     // Helper to write PNG via headless exporter
@@ -940,9 +908,13 @@ mod image_export_tests {
             vec![0.25, 0.75, 0.1],
             vec![0.9, 0.2, 0.4],
         ];
-        let img = ImagePlot::from_grayscale(x, y, z, ColorMap::Parula, None).unwrap();
+        let img = runmat_plot::plots::SurfacePlot::new(x, y, z)
+            .unwrap()
+            .with_colormap(ColorMap::Parula)
+            .with_flatten_z(true)
+            .with_image_mode(true);
         let mut fig = Figure::new();
-        fig.add_image_plot(img);
+        fig.add_surface_plot(img);
         let png_path = export_png(&mut fig, "imagesc_gray").await.unwrap();
         assert!(png_path.exists());
         let bytes = std::fs::read(&png_path).unwrap();
@@ -961,13 +933,41 @@ mod image_export_tests {
         grid[0][1] = glam::Vec4::new(0.0, 1.0, 0.0, 1.0);
         grid[1][0] = glam::Vec4::new(0.0, 0.0, 1.0, 1.0);
         grid[1][1] = glam::Vec4::new(1.0, 1.0, 1.0, 1.0);
-        let img = ImagePlot::from_color_grid(x, y, grid).unwrap();
+        let img = runmat_plot::plots::SurfacePlot::new(x, y, vec![vec![0.0, 0.0], vec![0.0, 0.0]])
+            .unwrap()
+            .with_flatten_z(true)
+            .with_image_mode(true)
+            .with_color_grid(grid);
         let mut fig = Figure::new();
-        fig.add_image_plot(img);
+        fig.add_surface_plot(img);
         let png_path = export_png(&mut fig, "imshow_rgb").await.unwrap();
         assert!(png_path.exists());
         let bytes = std::fs::read(&png_path).unwrap();
         assert!(bytes.len() > 1000);
+    }
+}
+
+#[cfg(test)]
+mod pie_export_tests {
+    use runmat_plot::export::vector::{VectorExportSettings, VectorExporter};
+    use runmat_plot::plots::{Figure, PieChart};
+
+    #[test]
+    fn test_svg_includes_pie_slice_labels() {
+        let mut fig = Figure::new();
+        let pie = PieChart::new(vec![1.0, 2.0], None)
+            .unwrap()
+            .with_slice_labels(vec!["A".into(), "B".into()]);
+        fig.add_pie_chart(pie);
+
+        let exporter = VectorExporter::with_settings(VectorExportSettings {
+            width: 160.0,
+            height: 120.0,
+            ..Default::default()
+        });
+        let svg = exporter.render_to_svg(&mut fig).unwrap();
+        assert!(svg.contains(">A<"));
+        assert!(svg.contains(">B<"));
     }
 }
 

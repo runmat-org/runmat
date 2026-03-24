@@ -399,6 +399,20 @@ impl ImageExporter {
                                         Color32::BLACK,
                                     );
                                 }
+                                for pie_label in figure.pie_labels_for_axes(r * cols + c) {
+                                    let radius = cell_w.min(cell_h) * 0.4;
+                                    let screen = Pos2::new(
+                                        vp_center_x + pie_label.position.x * radius,
+                                        vp_center_y - pie_label.position.y * radius,
+                                    );
+                                    ui.painter().text(
+                                        screen,
+                                        Align2::CENTER_CENTER,
+                                        pie_label.label,
+                                        FontId::proportional(12.0),
+                                        Color32::BLACK,
+                                    );
+                                }
                             }
                         }
                     });

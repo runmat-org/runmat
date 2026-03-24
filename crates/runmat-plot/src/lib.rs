@@ -50,8 +50,8 @@ pub use event::{
     FigureSnapshot, PlotDescriptor, PlotKind,
 };
 pub use plots::{
-    AreaPlot, ContourFillPlot, ContourPlot, Figure, ImagePlot, LinePlot, PieChart, QuiverPlot,
-    Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
+    AreaPlot, ContourFillPlot, ContourPlot, Figure, LinePlot, PieChart, QuiverPlot, Scatter3Plot,
+    ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
 };
 
 // High-level API

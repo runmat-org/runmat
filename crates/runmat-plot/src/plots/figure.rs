@@ -6,8 +6,8 @@
 use crate::core::{BoundingBox, GpuPackContext, RenderData};
 use crate::plots::surface::ColorMap;
 use crate::plots::{
-    AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, ImagePlot, LinePlot, PieChart,
-    QuiverPlot, Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
+    AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, LinePlot, PieChart, QuiverPlot,
+    Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
 };
 use glam::Vec4;
 use log::trace;
@@ -147,7 +147,6 @@ pub enum PlotElement {
     Area(AreaPlot),
     Quiver(QuiverPlot),
     Pie(PieChart),
-    Image(ImagePlot),
     Surface(SurfacePlot),
     Scatter3(Scatter3Plot),
     Contour(ContourPlot),
@@ -162,6 +161,12 @@ pub struct LegendEntry {
     pub plot_type: PlotType,
 }
 
+#[derive(Debug, Clone)]
+pub struct PieLabelEntry {
+    pub label: String,
+    pub position: glam::Vec2,
+}
+
 /// Type of plot for legend rendering
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum PlotType {
@@ -174,7 +179,6 @@ pub enum PlotType {
     Area,
     Quiver,
     Pie,
-    Image,
     Surface,
     Scatter3,
     Contour,
@@ -613,14 +617,6 @@ impl Figure {
         self.push_plot(PlotElement::Area(plot), axes_index)
     }
 
-    pub fn add_image_plot(&mut self, plot: ImagePlot) -> usize {
-        self.add_image_plot_on_axes(plot, 0)
-    }
-
-    pub fn add_image_plot_on_axes(&mut self, plot: ImagePlot, axes_index: usize) -> usize {
-        self.push_plot(PlotElement::Image(plot), axes_index)
-    }
-
     pub fn add_quiver_plot(&mut self, plot: QuiverPlot) -> usize {
         self.add_quiver_plot_on_axes(plot, 0)
     }
@@ -849,15 +845,50 @@ impl Figure {
             if plot_axes != axes_index {
                 continue;
             }
-            if let Some(label) = plot.label() {
-                entries.push(LegendEntry {
-                    label,
-                    color: plot.color(),
-                    plot_type: plot.plot_type(),
-                });
+            match plot {
+                PlotElement::Pie(pie) => {
+                    for slice in pie.slice_meta() {
+                        entries.push(LegendEntry {
+                            label: slice.label,
+                            color: slice.color,
+                            plot_type: plot.plot_type(),
+                        });
+                    }
+                }
+                _ => {
+                    if let Some(label) = plot.label() {
+                        entries.push(LegendEntry {
+                            label,
+                            color: plot.color(),
+                            plot_type: plot.plot_type(),
+                        });
+                    }
+                }
             }
         }
         entries
+    }
+
+    pub fn pie_labels_for_axes(&self, axes_index: usize) -> Vec<PieLabelEntry> {
+        let mut out = Vec::new();
+        for (plot_idx, plot) in self.plots.iter().enumerate() {
+            let plot_axes = *self.plot_axes_indices.get(plot_idx).unwrap_or(&0);
+            if plot_axes != axes_index {
+                continue;
+            }
+            if let PlotElement::Pie(pie) = plot {
+                for slice in pie.slice_meta() {
+                    out.push(PieLabelEntry {
+                        label: slice.label,
+                        position: glam::Vec2::new(
+                            slice.mid_angle.cos() * 1.15 + slice.offset.x,
+                            slice.mid_angle.sin() * 1.15 + slice.offset.y,
+                        ),
+                    });
+                }
+            }
+        }
+        out
     }
 
     /// Assign labels to visible plots in order
@@ -878,8 +909,22 @@ impl Figure {
             if idx >= labels.len() {
                 break;
             }
-            plot.set_label(Some(labels[idx].clone()));
-            idx += 1;
+            match plot {
+                PlotElement::Pie(pie) => {
+                    let remaining = &labels[idx..];
+                    if remaining.len() >= pie.values.len() {
+                        pie.set_slice_labels(remaining[..pie.values.len()].to_vec());
+                        idx += pie.values.len();
+                    } else {
+                        pie.set_slice_labels(remaining.to_vec());
+                        idx = labels.len();
+                    }
+                }
+                _ => {
+                    plot.set_label(Some(labels[idx].clone()));
+                    idx += 1;
+                }
+            }
         }
         self.dirty = true;
     }
@@ -942,7 +987,6 @@ impl PlotElement {
             PlotElement::Area(plot) => plot.visible,
             PlotElement::Quiver(plot) => plot.visible,
             PlotElement::Pie(plot) => plot.visible,
-            PlotElement::Image(plot) => plot.visible,
             PlotElement::Surface(plot) => plot.visible,
             PlotElement::Scatter3(plot) => plot.visible,
             PlotElement::Contour(plot) => plot.visible,
@@ -962,7 +1006,6 @@ impl PlotElement {
             PlotElement::Area(plot) => plot.label.clone(),
             PlotElement::Quiver(plot) => plot.label.clone(),
             PlotElement::Pie(plot) => plot.label.clone(),
-            PlotElement::Image(plot) => plot.label.clone(),
             PlotElement::Surface(plot) => plot.label.clone(),
             PlotElement::Scatter3(plot) => plot.label.clone(),
             PlotElement::Contour(plot) => plot.label.clone(),
@@ -982,7 +1025,6 @@ impl PlotElement {
             PlotElement::Area(plot) => plot.label = label,
             PlotElement::Quiver(plot) => plot.label = label,
             PlotElement::Pie(plot) => plot.label = label,
-            PlotElement::Image(plot) => plot.label = label,
             PlotElement::Surface(plot) => plot.label = label,
             PlotElement::Scatter3(plot) => plot.label = label,
             PlotElement::Contour(plot) => plot.label = label,
@@ -1002,7 +1044,6 @@ impl PlotElement {
             PlotElement::Area(plot) => plot.color,
             PlotElement::Quiver(plot) => plot.color,
             PlotElement::Pie(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
-            PlotElement::Image(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
             PlotElement::Surface(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
             PlotElement::Scatter3(plot) => plot.colors.first().copied().unwrap_or(Vec4::ONE),
             PlotElement::Contour(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
@@ -1022,7 +1063,6 @@ impl PlotElement {
             PlotElement::Area(_) => PlotType::Area,
             PlotElement::Quiver(_) => PlotType::Quiver,
             PlotElement::Pie(_) => PlotType::Pie,
-            PlotElement::Image(_) => PlotType::Image,
             PlotElement::Surface(_) => PlotType::Surface,
             PlotElement::Scatter3(_) => PlotType::Scatter3,
             PlotElement::Contour(_) => PlotType::Contour,
@@ -1042,7 +1082,6 @@ impl PlotElement {
             PlotElement::Area(plot) => plot.bounds(),
             PlotElement::Quiver(plot) => plot.bounds(),
             PlotElement::Pie(plot) => plot.bounds(),
-            PlotElement::Image(plot) => plot.bounds(),
             PlotElement::Surface(plot) => plot.bounds(),
             PlotElement::Scatter3(plot) => plot.bounds(),
             PlotElement::Contour(plot) => plot.bounds(),
@@ -1062,7 +1101,6 @@ impl PlotElement {
             PlotElement::Area(plot) => plot.render_data(),
             PlotElement::Quiver(plot) => plot.render_data(),
             PlotElement::Pie(plot) => plot.render_data(),
-            PlotElement::Image(plot) => plot.render_data(),
             PlotElement::Surface(plot) => plot.render_data(),
             PlotElement::Scatter3(plot) => plot.render_data(),
             PlotElement::Contour(plot) => plot.render_data(),
@@ -1082,7 +1120,6 @@ impl PlotElement {
             PlotElement::Area(plot) => plot.estimated_memory_usage(),
             PlotElement::Quiver(plot) => plot.estimated_memory_usage(),
             PlotElement::Pie(plot) => plot.estimated_memory_usage(),
-            PlotElement::Image(plot) => plot.estimated_memory_usage(),
             PlotElement::Surface(_plot) => 0,
             PlotElement::Scatter3(plot) => plot.estimated_memory_usage(),
             PlotElement::Contour(plot) => plot.estimated_memory_usage(),
@@ -1455,5 +1492,18 @@ mod tests {
             figure.axes_metadata(1).unwrap().view_elevation_deg,
             Some(20.0)
         );
+    }
+
+    #[test]
+    fn pie_legend_entries_are_slice_based() {
+        let mut figure = Figure::new();
+        let pie = PieChart::new(vec![1.0, 2.0], None)
+            .unwrap()
+            .with_slice_labels(vec!["A".into(), "B".into()]);
+        figure.add_pie_chart(pie);
+        let entries = figure.legend_entries_for_axes(0);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].label, "A");
+        assert_eq!(entries[1].label, "B");
     }
 }

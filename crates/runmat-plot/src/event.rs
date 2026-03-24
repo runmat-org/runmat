@@ -151,6 +151,17 @@ pub enum ScenePlot {
         label: Option<String>,
         visible: bool,
     },
+    Pie {
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
+        values: Vec<f64>,
+        colors_rgba: Vec<[f32; 4]>,
+        slice_labels: Vec<String>,
+        label_format: Option<String>,
+        explode: Vec<bool>,
+        axes_index: u32,
+        label: Option<String>,
+        visible: bool,
+    },
     Unsupported {
         plot_kind: PlotKind,
         axes_index: u32,
@@ -607,6 +618,16 @@ impl ScenePlot {
                 label: scatter3.label.clone(),
                 visible: scatter3.visible,
             },
+            PlotElement::Pie(pie) => Self::Pie {
+                values: pie.values.clone(),
+                colors_rgba: pie.colors.iter().map(|c| vec4_to_rgba(*c)).collect(),
+                slice_labels: pie.slice_labels.clone(),
+                label_format: pie.label_format.clone(),
+                explode: pie.explode.clone(),
+                axes_index,
+                label: pie.label.clone(),
+                visible: pie.visible,
+            },
             _ => Self::Unsupported {
                 plot_kind: PlotKind::from(plot.plot_type()),
                 axes_index,
@@ -770,6 +791,29 @@ impl ScenePlot {
                 scatter3.visible = visible;
                 figure.add_scatter3_plot_on_axes(scatter3, axes_index as usize);
             }
+            ScenePlot::Pie {
+                values,
+                colors_rgba,
+                slice_labels,
+                label_format,
+                explode,
+                axes_index,
+                label,
+                visible,
+            } => {
+                let mut pie = crate::plots::PieChart::new(
+                    values,
+                    Some(colors_rgba.into_iter().map(rgba_to_vec4).collect()),
+                )?
+                .with_slice_labels(slice_labels)
+                .with_explode(explode);
+                if let Some(fmt) = label_format {
+                    pie = pie.with_label_format(fmt);
+                }
+                pie.label = label;
+                pie.set_visible(visible);
+                figure.add_pie_chart_on_axes(pie, axes_index as usize);
+            }
             ScenePlot::Unsupported { .. } => {}
         }
         Ok(())
@@ -895,7 +939,6 @@ impl From<PlotType> for PlotKind {
             PlotType::Area => Self::Area,
             PlotType::Quiver => Self::Quiver,
             PlotType::Pie => Self::Pie,
-            PlotType::Image => Self::Image,
             PlotType::Surface => Self::Surface,
             PlotType::Scatter3 => Self::Scatter3,
             PlotType::Contour => Self::Contour,
@@ -1176,6 +1219,25 @@ mod tests {
             Some(20.0)
         );
         assert_eq!(rebuilt.z_label.as_deref(), Some("Height"));
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_pie_metadata() {
+        let mut figure = Figure::new();
+        let pie = crate::plots::PieChart::new(vec![1.0, 2.0], None)
+            .unwrap()
+            .with_slice_labels(vec!["A".into(), "B".into()])
+            .with_explode(vec![false, true]);
+        figure.add_pie_chart(pie);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+        let crate::plots::figure::PlotElement::Pie(pie) = rebuilt.plots().next().unwrap() else {
+            panic!("expected pie")
+        };
+        assert_eq!(pie.slice_labels, vec!["A", "B"]);
+        assert_eq!(pie.explode, vec![false, true]);
     }
 
     #[test]
