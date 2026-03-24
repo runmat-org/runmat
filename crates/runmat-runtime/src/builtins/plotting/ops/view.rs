@@ -130,6 +130,8 @@ pub fn view_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::plotting::get::get_builtin;
+    use crate::builtins::plotting::set::set_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{
         clear_figure, clone_figure, configure_subplot, current_figure_handle,
@@ -162,5 +164,63 @@ mod tests {
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert_eq!(fig.axes_metadata(0).unwrap().view_azimuth_deg, None);
         assert_eq!(fig.axes_metadata(1).unwrap().view_azimuth_deg, Some(10.0));
+    }
+
+    #[test]
+    fn view_supports_query_forms_and_presets() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+
+        let ax = Value::Num(crate::builtins::plotting::state::encode_axes_handle(
+            current_figure_handle(),
+            0,
+        ));
+        let _ = view_builtin(vec![ax.clone(), Value::Num(2.0)]).unwrap();
+        let v = view_builtin(vec![ax.clone()]).unwrap();
+        let t = Tensor::try_from(&v).unwrap();
+        assert_eq!(t.data, vec![0.0, 90.0]);
+
+        let _ = view_builtin(vec![ax.clone(), Value::Num(3.0)]).unwrap();
+        let v = view_builtin(vec![ax]).unwrap();
+        let t = Tensor::try_from(&v).unwrap();
+        assert_eq!(t.data, vec![-37.5, 30.0]);
+    }
+
+    #[test]
+    fn view_handles_large_angles_and_property_roundtrip() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+
+        let ax = Value::Num(crate::builtins::plotting::state::encode_axes_handle(
+            current_figure_handle(),
+            0,
+        ));
+        let _ = view_builtin(vec![ax.clone(), Value::Num(405.0), Value::Num(89.0)]).unwrap();
+        let queried = get_builtin(vec![ax.clone(), Value::String("View".into())]).unwrap();
+        let t = Tensor::try_from(&queried).unwrap();
+        assert_eq!(t.data, vec![405.0, 89.0]);
+
+        set_builtin(vec![
+            ax,
+            Value::String("View".into()),
+            Value::Tensor(Tensor {
+                rows: 1,
+                cols: 2,
+                shape: vec![1, 2],
+                data: vec![180.0, -30.0],
+                dtype: runmat_builtins::NumericDType::F64,
+            }),
+        ])
+        .unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        assert_eq!(fig.axes_metadata(0).unwrap().view_azimuth_deg, Some(180.0));
+        assert_eq!(
+            fig.axes_metadata(0).unwrap().view_elevation_deg,
+            Some(-30.0)
+        );
     }
 }

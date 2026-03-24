@@ -10,7 +10,6 @@ use super::style::{
     parse_color_value, value_as_bool, value_as_f64, value_as_string, LineStyleParseOptions,
 };
 use super::{plotting_error, plotting_error_with_source};
-use crate::builtins::plotting::op_common::limits::limits_from_value;
 use crate::builtins::plotting::op_common::value_as_text_string;
 use crate::BuiltinResult;
 
@@ -660,12 +659,20 @@ fn apply_axes_property(
             apply_axes_text_alias(handle, axes_index, PlotObjectKind::ZLabel, value, builtin)
         }
         "view" => {
-            let limits = limits_from_value(value, builtin)?;
+            let tensor = runmat_builtins::Tensor::try_from(value)
+                .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
+            if tensor.data.len() != 2 || !tensor.data[0].is_finite() || !tensor.data[1].is_finite()
+            {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: View must be a 2-element finite numeric vector"),
+                ));
+            }
             crate::builtins::plotting::state::set_view_for_axes(
                 handle,
                 axes_index,
-                limits.0 as f32,
-                limits.1 as f32,
+                tensor.data[0] as f32,
+                tensor.data[1] as f32,
             )
             .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
