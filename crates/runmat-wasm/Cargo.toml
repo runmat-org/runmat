@@ -1,6 +1,6 @@
 [package]
 name = "runmat-wasm"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
@@ -40,7 +40,7 @@ thiserror = { workspace = true }
 async-trait = "0.1"
 getrandom = { version = "0.2", features = ["js"] }
 uuid = { version = "1", features = ["v4", "js"], default-features = false }
-runmat-logging = { path = "../runmat-logging", version = "=0.3.0" }
+runmat-logging = { path = "../runmat-logging", version = "=0.3.1" }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter", "registry"] }
 runmat-telemetry = { workspace = true }

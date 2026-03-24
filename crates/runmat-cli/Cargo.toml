@@ -1,6 +1,6 @@
 [package]
 name = "runmat"
-version = "0.3.0"
+version = "0.3.1"
 edition = "2021"
 description = "High-performance MATLAB/Octave runtime with Jupyter kernel support"
 authors = ["Dystr Team"]
@@ -48,23 +48,23 @@ openssl = { version = "0.10", optional = true }
 openssl-sys = { version = "0.9.109", optional = true }
 
 # RunMat crates
-runmat-kernel = { version = "=0.3.0", path = "../runmat-kernel" }
-runmat-core = { version = "=0.3.0", path = "../runmat-core" }
-runmat-parser = { version = "=0.3.0", path = "../runmat-parser" }
-runmat-hir = { version = "=0.3.0", path = "../runmat-hir" }
-runmat-ignition = { version = "=0.3.0", path = "../runmat-ignition" }
-runmat-runtime = { version = "=0.3.0", path = "../runmat-runtime" }
-runmat-turbine = { version = "=0.3.0", path = "../runmat-turbine" }
-runmat-gc = { version = "=0.3.0", path = "../runmat-gc" }
-runmat-builtins = { version = "=0.3.0", path = "../runmat-builtins" }
-runmat-snapshot = { version = "=0.3.0", path = "../runmat-snapshot" }
-runmat-plot = { version = "=0.3.0", path = "../runmat-plot" }
-runmat-accelerate = { version = "=0.3.0", path = "../runmat-accelerate" }
-runmat-accelerate-api = { version = "=0.3.0", path = "../runmat-accelerate-api" }
-runmat-config = { version = "=0.3.0", path = "../runmat-config", features = ["accelerate"] }
-runmat-time = { version = "=0.3.0", path = "../runmat-time" }
-runmat-filesystem = { version = "=0.3.0", path = "../runmat-filesystem" }
-runmat-telemetry = { version = "=0.3.0", path = "../runmat-telemetry" }
+runmat-kernel = { version = "=0.3.1", path = "../runmat-kernel" }
+runmat-core = { version = "=0.3.1", path = "../runmat-core" }
+runmat-parser = { version = "=0.3.1", path = "../runmat-parser" }
+runmat-hir = { version = "=0.3.1", path = "../runmat-hir" }
+runmat-ignition = { version = "=0.3.1", path = "../runmat-ignition" }
+runmat-runtime = { version = "=0.3.1", path = "../runmat-runtime" }
+runmat-turbine = { version = "=0.3.1", path = "../runmat-turbine" }
+runmat-gc = { version = "=0.3.1", path = "../runmat-gc" }
+runmat-builtins = { version = "=0.3.1", path = "../runmat-builtins" }
+runmat-snapshot = { version = "=0.3.1", path = "../runmat-snapshot" }
+runmat-plot = { version = "=0.3.1", path = "../runmat-plot" }
+runmat-accelerate = { version = "=0.3.1", path = "../runmat-accelerate" }
+runmat-accelerate-api = { version = "=0.3.1", path = "../runmat-accelerate-api" }
+runmat-config = { version = "=0.3.1", path = "../runmat-config", features = ["accelerate"] }
+runmat-time = { version = "=0.3.1", path = "../runmat-time" }
+runmat-filesystem = { version = "=0.3.1", path = "../runmat-filesystem" }
+runmat-telemetry = { version = "=0.3.1", path = "../runmat-telemetry" }
 
 [features]
 # High-level feature toggles (default build keeps everything enabled)
