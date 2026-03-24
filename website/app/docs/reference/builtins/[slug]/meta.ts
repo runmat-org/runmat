@@ -8,7 +8,7 @@ const FALLBACK_DESCRIPTION = 'RunMat / MATLAB Language Function documentation';
 export function builtinMetadataForSlug(slug: string): Metadata {
     const builtin = getBuiltinDocBySlug(slug);
     if (!builtin) {
-        const title = `${slug} — Open Source, Runnable MATLAB Docs`;
+        const title = `${slug} — MATLAB Function Reference | Run Examples Live`;
         return buildPageMetadata({
           title,
           description: FALLBACK_DESCRIPTION,
@@ -18,9 +18,12 @@ export function builtinMetadataForSlug(slug: string): Metadata {
         });
     }
 
-    const description = (builtin.description || builtin.summary || FALLBACK_DESCRIPTION).trim();
+    const summary = (builtin.summary || '').trim();
+    const description = summary
+      ? `${summary} Try ${builtin.title}() live — edit code, see output instantly. No MATLAB license needed.`
+      : (builtin.description || FALLBACK_DESCRIPTION).trim();
 
-    const title = `${builtin.title} — Open Source, Runnable MATLAB Docs`;
+    const title = `${builtin.title} — MATLAB Function Reference | Run Examples Live`;
     return buildPageMetadata({
       title,
       description,

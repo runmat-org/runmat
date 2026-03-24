@@ -311,6 +311,12 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
     }
   }
 
+  const ogVideoMap: Record<string, string> = {
+    'matlab-fprintf': 'https://web.runmatstatic.com/video/runmat-debugging.mp4',
+    'matlab-alternatives': 'https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.mp4',
+  };
+  const ogVideo = ogVideoMap[slug];
+
   return {
     title: post.frontmatter.title,
     description: post.frontmatter.description,
@@ -323,6 +329,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
       modifiedTime: post.frontmatter.dateModified || post.frontmatter.date,
       authors: authorNames,
       images: imageUrl ? [imageUrl] : undefined,
+      ...(ogVideo ? { videos: [{ url: ogVideo, type: 'video/mp4' }] } : {}),
     },
     twitter: {
       card: post.frontmatter.twitterCard ?? 'summary_large_image',

@@ -164,7 +164,7 @@ flowchart TB
 
 ## What teams do without historical state restoration
 
-People fill the gap however they can: screenshots of plots, copied terminal logs, ad-hoc checkpoint files written to shared drives, and reruns on a colleague's machine. Each of these helps in the moment. These rarely compose into a reliable team process when runs cost hours of compute and collaboration happens asynchronously across time zones.
+Without historical state restoration, teams default to screenshots, copied terminal logs, ad-hoc checkpoint files, and speculative reruns — none of which compose into a reliable investigation process. People fill the gap however they can: screenshots of plots, copied terminal logs, ad-hoc checkpoint files written to shared drives, and reruns on a colleague's machine. Each of these helps in the moment. These rarely compose into a reliable team process when runs cost hours of compute and collaboration happens asynchronously across time zones.
 
 The symptoms follow a pattern teams recognize immediately: repeated reruns just to regain context, long "is this the same issue?" threads that span days, and postmortems built on partial evidence because nobody can reproduce the exact state that triggered the investigation.
 
@@ -178,7 +178,7 @@ The pattern shows up consistently when three conditions are present: runs are ex
 
 ## What historical state restoration actually restores
 
-Historical-state tooling restores enough context to make debugging concrete rather than speculative:
+Historical state restoration recovers four things from a past run: session identity, figure state, workspace variables, and output context. Historical-state tooling restores enough context to make debugging concrete rather than speculative:
 
 - run and session identity (which execution, on which machine, at what time),
 - figure state (the exact plots and visualizations produced),
@@ -214,7 +214,7 @@ We wrote separately about the persistence design in [From Ad-Hoc Checkpoints to 
 
 ## Why teams feel this hardest in scientific and numerical work
 
-The payoff is strongest where runs are expensive and handoffs are common: simulation groups running multi-hour CFD or FEA jobs, quant desks where a single risk model run can take 90 minutes on a 64-core machine, large preprocessing pipelines that chain data ingestion through numerical analysis, and platform teams supporting dozens of analysts who each need to review someone else's output.
+The cost of missing state restoration scales with run duration and team size. Simulation groups, quant desks, and applied R&D teams feel it most because a single rerun can cost hours of compute and hundreds of dollars in cloud spend. The payoff is strongest where runs are expensive and handoffs are common: simulation groups running multi-hour CFD or FEA jobs, quant desks where a single risk model run can take 90 minutes on a 64-core machine, large preprocessing pipelines that chain data ingestion through numerical analysis, and platform teams supporting dozens of analysts who each need to review someone else's output.
 
 Solo developers running 30-second scripts rarely feel this pain. The cost concentrates in teams where runs take hours, results need peer review, and the person investigating is often not the person who originally ran the job.
 

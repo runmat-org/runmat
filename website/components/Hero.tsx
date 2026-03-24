@@ -7,9 +7,9 @@ export default function Hero() {
       <div className="container mx-auto px-4 md:px-6">
         <div className="grid grid-cols-1 gap-10 lg:grid-cols-2 lg:items-center">
           <div className="flex flex-col space-y-6 text-left items-start">
-            <h1 className="font-heading text-left leading-tight tracking-tight text-[clamp(2.6rem,4.8vw,4.25rem)] sm:text-[clamp(3rem,4vw,5rem)] lg:text-[clamp(3.25rem,3.6vw,5.25rem)]">
+            <p className="font-heading text-left leading-tight tracking-tight text-[clamp(2.6rem,4.8vw,4.25rem)] sm:text-[clamp(3rem,4vw,5rem)] lg:text-[clamp(3.25rem,3.6vw,5.25rem)]" role="heading" aria-level={2}>
               Run your math, blazing fast
-            </h1>
+            </p>
             <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-base sm:text-lg">
               Write MATLAB-syntax code and run it with GPU acceleration, in your browser, on the desktop, or from the CLI. No license required.
             </p>
@@ -37,6 +37,7 @@ export default function Hero() {
               muted
               loop
               playsInline
+              poster="https://web.runmatstatic.com/video/posters/runmat-wave-simulation.png"
               aria-label="RunMat wave simulation demo"
             >
               <source src="https://web.runmatstatic.com/video/runmat-wave-simulation.mp4" type="video/mp4" />

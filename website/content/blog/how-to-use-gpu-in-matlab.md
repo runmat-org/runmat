@@ -1,6 +1,6 @@
 ---
-title: "How to Use GPUs in MATLAB: Complete NVIDIA Setup & Optimization Guide"
-description: "Step-by-step guide to GPU acceleration in MATLAB: system requirements, Parallel Computing Toolbox setup, gpuArray patterns, performance traps, and a cross-platform alternative."
+title: "GPU in MATLAB: Setup, Performance Traps & a Toolbox-Free Option"
+description: "NVIDIA setup, gpuArray patterns, and the performance traps that silently erase your speedups. Plus: how to get GPU acceleration without the Parallel Computing Toolbox or CUDA."
 date: "2026-01-28"
 dateModified: "2026-02-20"
 authors:
@@ -10,14 +10,14 @@ readTime: "14 min read"
 slug: "how-to-use-gpu-in-matlab"
 tags: ["matlab", "gpu", "nvidia", "gpuArray", "scientific-computing", "parallel-computing-toolbox"]
 collections: ["guides"]
-keywords: "how to use nvidia gpus for matlab, matlab gpu setup, gpuArray tutorial, matlab parallel computing toolbox, matlab gpu acceleration, MATLAB GPU, gpuArray, NVIDIA GPU, GPU-shaped"
+keywords: "matlab gpu without parallel computing toolbox, free matlab gpu, matlab gpu alternative, matlab gpu performance traps, matlab gpu setup, gpuArray tutorial, matlab gpu acceleration, MATLAB GPU, gpuArray, NVIDIA GPU"
 excerpt: "A complete guide to GPU acceleration in MATLAB: prerequisites, gpuArray setup, GPU-enabled functions, performance traps, benchmarking, and an alternative that works on any GPU without manual device management."
 ogType: "article"
-ogTitle: "How to Use GPUs in MATLAB: Complete NVIDIA Setup & Optimization Guide"
-ogDescription: "Step-by-step guide to GPU acceleration in MATLAB: system requirements, Parallel Computing Toolbox setup, gpuArray patterns, performance traps, and a cross-platform alternative."
+ogTitle: "GPU in MATLAB: Setup, Performance Traps & a Toolbox-Free Option"
+ogDescription: "NVIDIA setup, gpuArray patterns, and the performance traps that silently erase your speedups. Plus: how to get GPU acceleration without the Parallel Computing Toolbox or CUDA."
 twitterCard: "summary_large_image"
-twitterTitle: "How to Use GPUs in MATLAB: Complete NVIDIA Setup & Optimization Guide"
-twitterDescription: "Step-by-step guide to GPU acceleration in MATLAB: system requirements, gpuArray setup, performance traps, and a cross-platform alternative."
+twitterTitle: "GPU in MATLAB: Setup, Performance Traps & a Toolbox-Free Option"
+twitterDescription: "NVIDIA setup, gpuArray patterns, and the performance traps that silently erase your speedups. Plus: GPU acceleration without the Parallel Computing Toolbox."
 image: "https://web.runmatstatic.com/MATLAB-NVIDIA.png"
 imageAlt: "How to use GPUs in MATLAB: setup and optimization guide"
 canonical: "https://runmat.com/blog/how-to-use-gpu-in-matlab"
@@ -415,7 +415,7 @@ If the GPU isn't helping, it's usually one of three things: the problem is too s
 
 ## **Beyond NVIDIA: GPU acceleration on any hardware**
 
-The sections above cover MATLAB's GPU path — which works well when you have an NVIDIA GPU, the Parallel Computing Toolbox, and you're comfortable managing `gpuArray` and `gather` calls. But there are real limitations:
+MATLAB's GPU path is locked to NVIDIA hardware and the Parallel Computing Toolbox license. RunMat provides GPU acceleration on any vendor (NVIDIA, AMD, Intel, Apple Silicon) with no explicit device management and no extra license. Here are the specific limitations of the MATLAB approach:
 
 - If you're on Apple Silicon, AMD, or Intel integrated graphics, MATLAB's GPU path doesn't work.
 - The Parallel Computing Toolbox is a separate license on top of MATLAB.
