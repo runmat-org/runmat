@@ -395,7 +395,7 @@ jobs:
         run: rustup target add wasm32-unknown-unknown
 
       - name: Install wasm-pack
-        run: curl https://drager.github.io/wasm-pack/installer/init.sh -sSf | bash
+        run: cargo install wasm-pack --locked
 
       - name: Install system dependencies for headless Chrome
         run: |
