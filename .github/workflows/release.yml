@@ -337,11 +337,11 @@ jobs:
         run: |
           set -euxo pipefail
           for toml in crates/*/Cargo.toml; do
-            if grep -q '^license-file\s*=\s*"\..*/LICENSE' "$toml"; then
-              sed -i.bak 's#^license-file\s*=\s*"\..*/LICENSE.*#license-file = "LICENSE"#' "$toml"
+            if grep -Eq '^license-file[[:space:]]*=[[:space:]]*"\..*/LICENSE' "$toml"; then
+              sed -E -i.bak 's#^license-file[[:space:]]*=[[:space:]]*"\..*/LICENSE.*#license-file = "LICENSE"#' "$toml"
               rm -f "$toml.bak"
             fi
-            if ! grep -q '^license\s*=' "$toml" && [ -f "${toml%/*}/LICENSE" ]; then
+            if ! grep -Eq '^license[[:space:]]*=' "$toml" && [ -f "${toml%/*}/LICENSE" ]; then
               awk 'BEGIN{printed=0} {print} /^\[package\]/{if(!printed){print "license = \"MIT\""; printed=1}}' "$toml" > "$toml.tmp" && mv "$toml.tmp" "$toml"
             fi
           done
