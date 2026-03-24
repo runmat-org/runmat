@@ -429,6 +429,10 @@ pub struct SerializedAxesMetadata {
     pub x_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub y_label: Option<String>,
+    #[serde(default)]
+    pub x_log: bool,
+    #[serde(default)]
+    pub y_log: bool,
     pub legend_enabled: bool,
     pub title_style: SerializedTextStyle,
     pub x_label_style: SerializedTextStyle,
@@ -442,6 +446,8 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             title: value.title,
             x_label: value.x_label,
             y_label: value.y_label,
+            x_log: value.x_log,
+            y_log: value.y_log,
             legend_enabled: value.legend_enabled,
             title_style: value.title_style.into(),
             x_label_style: value.x_label_style.into(),
@@ -457,6 +463,8 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             title: value.title,
             x_label: value.x_label,
             y_label: value.y_label,
+            x_log: value.x_log,
+            y_log: value.y_log,
             legend_enabled: value.legend_enabled,
             title_style: value.title_style.into(),
             x_label_style: value.x_label_style.into(),
@@ -1108,6 +1116,25 @@ mod tests {
                 .as_deref(),
             Some("horizontal")
         );
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_axes_local_log_modes() {
+        let mut figure = Figure::new().with_subplot_grid(1, 2);
+        figure.set_axes_log_modes(0, true, false);
+        figure.set_axes_log_modes(1, false, true);
+        figure.set_active_axes_index(1);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+
+        assert!(rebuilt.axes_metadata(0).unwrap().x_log);
+        assert!(!rebuilt.axes_metadata(0).unwrap().y_log);
+        assert!(!rebuilt.axes_metadata(1).unwrap().x_log);
+        assert!(rebuilt.axes_metadata(1).unwrap().y_log);
+        assert!(!rebuilt.x_log);
+        assert!(rebuilt.y_log);
     }
 
     #[test]

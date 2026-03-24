@@ -121,6 +121,8 @@ pub struct AxesMetadata {
     pub title: Option<String>,
     pub x_label: Option<String>,
     pub y_label: Option<String>,
+    pub x_log: bool,
+    pub y_log: bool,
     pub legend_enabled: bool,
     pub title_style: TextStyle,
     pub x_label_style: TextStyle,
@@ -223,6 +225,8 @@ impl Figure {
             self.title = meta.title;
             self.x_label = meta.x_label;
             self.y_label = meta.y_label;
+            self.x_log = meta.x_log;
+            self.y_log = meta.y_log;
             self.legend_enabled = meta.legend_enabled;
         }
     }
@@ -371,6 +375,18 @@ impl Figure {
         self.dirty = true;
     }
 
+    pub fn set_axes_log_modes(&mut self, axes_index: usize, x_log: bool, y_log: bool) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.x_log = x_log;
+            meta.y_log = y_log;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
     /// Enable or disable the grid
     pub fn with_grid(mut self, enabled: bool) -> Self {
         self.set_grid(enabled);
@@ -390,11 +406,11 @@ impl Figure {
 
     /// Set log scale flags
     pub fn with_xlog(mut self, enabled: bool) -> Self {
-        self.x_log = enabled;
+        self.set_axes_log_modes(self.active_axes_index, enabled, self.y_log);
         self
     }
     pub fn with_ylog(mut self, enabled: bool) -> Self {
-        self.y_log = enabled;
+        self.set_axes_log_modes(self.active_axes_index, self.x_log, enabled);
         self
     }
     pub fn with_axis_equal(mut self, enabled: bool) -> Self {
@@ -1366,5 +1382,21 @@ mod tests {
         let right_entries = figure.legend_entries_for_axes(1);
         assert_eq!(left_entries[0].label, "L0");
         assert_eq!(right_entries[0].label, "Right Only");
+    }
+
+    #[test]
+    fn axes_log_modes_are_isolated_per_subplot() {
+        let mut figure = Figure::new();
+        figure.set_subplot_grid(1, 2);
+        figure.set_axes_log_modes(1, true, false);
+
+        assert!(!figure.axes_metadata(0).unwrap().x_log);
+        assert!(!figure.axes_metadata(0).unwrap().y_log);
+        assert!(figure.axes_metadata(1).unwrap().x_log);
+        assert!(!figure.axes_metadata(1).unwrap().y_log);
+
+        figure.set_active_axes_index(1);
+        assert!(figure.x_log);
+        assert!(!figure.y_log);
     }
 }

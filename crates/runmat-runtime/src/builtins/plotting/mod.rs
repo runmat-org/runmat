@@ -56,6 +56,8 @@ pub mod hist;
 pub(crate) mod hold;
 #[path = "ops/legend.rs"]
 pub(crate) mod legend;
+#[path = "ops/loglog.rs"]
+pub(crate) mod loglog;
 #[path = "ops/mesh.rs"]
 pub(crate) mod mesh;
 #[path = "ops/meshc.rs"]
@@ -68,6 +70,10 @@ pub(crate) mod plot;
 pub(crate) mod scatter;
 #[path = "ops/scatter3.rs"]
 pub(crate) mod scatter3;
+#[path = "ops/semilogx.rs"]
+pub(crate) mod semilogx;
+#[path = "ops/semilogy.rs"]
+pub(crate) mod semilogy;
 #[path = "ops/set.rs"]
 pub(crate) mod set;
 #[path = "ops/stairs.rs"]

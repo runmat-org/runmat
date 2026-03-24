@@ -592,6 +592,19 @@ pub fn set_legend_for_axes(
     Ok(object_handle)
 }
 
+pub fn set_log_modes_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    x_log: bool,
+    y_log: bool,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state.figure.set_axes_log_modes(axes_index, x_log, y_log);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
 pub fn legend_entries_snapshot(
     handle: FigureHandle,
     axes_index: usize,
