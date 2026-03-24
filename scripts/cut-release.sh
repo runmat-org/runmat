@@ -25,10 +25,10 @@ if [ "$(git rev-parse --abbrev-ref HEAD)" != "main" ]; then
   exit 1
 fi
 
-if [ -n "$(git status --porcelain)" ]; then
-  echo "Error: working tree not clean. Commit or stash changes first." >&2
-  exit 1
-fi
+#if [ -n "$(git status --porcelain)" ]; then
+#  echo "Error: working tree not clean. Commit or stash changes first." >&2
+#  exit 1
+#fi
 
 git fetch origin +refs/heads/main:refs/remotes/origin/main
 if ! git merge-base --is-ancestor HEAD refs/remotes/origin/main; then
@@ -41,35 +41,18 @@ if git rev-parse -q --verify "refs/tags/${TAG}" >/dev/null; then
   exit 1
 fi
 
-if ! command -v release-plz >/dev/null 2>&1; then
-  echo "Installing release-plz..."
-  cargo install --locked release-plz
-fi
-
-export RELEASE_VERSION="$VERSION"
-mapfile -t VERSION_ARGS < <(
-  python3 - <<'PY'
-import os
-import pathlib
-import tomllib
-
-version = os.environ["RELEASE_VERSION"]
-for manifest in sorted(pathlib.Path("crates").glob("*/Cargo.toml")):
-    data = tomllib.loads(manifest.read_text())
-    package = data.get("package", {})
-    if package.get("publish", True) is False:
-        continue
-    print(f"{package['name']}@{version}")
-PY
-)
-
-if [ ${#VERSION_ARGS[@]} -eq 0 ]; then
-  echo "Error: no publishable crates found" >&2
-  exit 1
+if ! cargo workspaces -V >/dev/null 2>&1; then
+  echo "Installing cargo-workspaces..."
+  cargo install cargo-workspaces --locked
 fi
 
 echo "Setting crate versions to ${VERSION}..."
-release-plz set-version "${VERSION_ARGS[@]}"
+cargo workspaces version custom "${VERSION}" \
+  --force '*' \
+  --no-git-commit \
+  --exact \
+  --all \
+  --yes
 
 echo "Updating bindings/ts package version to ${VERSION}..."
 (

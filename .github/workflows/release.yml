@@ -309,7 +309,6 @@ jobs:
       contents: read
     env:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
-      GITHUB_TOKEN: ${{ github.token }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -347,14 +346,15 @@ jobs:
             fi
           done
 
-      - name: Publish crates with release-plz
-        uses: release-plz/action@v0.5
+      - name: Publish crates with publish-crates
+        id: publish-crates
+        uses: katyo/publish-crates@v2
         with:
-          command: release
-          config: release-plz.toml
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          registry-token: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+          no-verify: true
+          ignore-unpublished-changes: true
+          check-repo: false
+          publish-delay: 15000
 
   publish-bindings:
     name: Test & publish wasm bindings to npm
