@@ -4,7 +4,8 @@ use crate::builtins::plotting::common::{
     gather_tensor_from_gpu_async, tensor_to_surface_grid, SurfaceDataInput,
 };
 use crate::builtins::plotting::contour::{
-    build_contour_gpu_plot, build_contour_plot, ContourLevelSpec, ContourLineColor,
+    build_contour_gpu_plot, build_contour_gpu_plot_with_axes, build_contour_plot, ContourLevelSpec,
+    ContourLineColor,
 };
 use crate::builtins::plotting::op_common::surface_inputs::{axis_sources_to_host, AxisSource};
 use crate::BuiltinResult;
@@ -60,6 +61,20 @@ pub async fn contour_for_surface_axes_input(
     base_z: f32,
     level_spec: &ContourLevelSpec,
 ) -> BuiltinResult<ContourPlot> {
+    if let Some(z_gpu) = z_gpu.clone() {
+        if let Ok(contour) = build_contour_gpu_plot_with_axes(
+            builtin,
+            x_axis,
+            y_axis,
+            &z_gpu,
+            contour_map,
+            base_z,
+            level_spec,
+            &ContourLineColor::Auto,
+        ) {
+            return Ok(contour);
+        }
+    }
     let (x_host, y_host) = axis_sources_to_host(x_axis, y_axis, builtin).await?;
     contour_for_surface_input(
         builtin,

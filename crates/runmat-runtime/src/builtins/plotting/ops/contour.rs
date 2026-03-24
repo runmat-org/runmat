@@ -12,6 +12,7 @@ use runmat_plot::plots::contour::contour_bounds;
 use runmat_plot::plots::{ColorMap, ContourFillPlot, ContourPlot};
 
 use super::common::{numeric_vector, tensor_to_surface_grid, value_as_f64, SurfaceDataInput};
+use super::op_common::surface_inputs::AxisSource;
 use super::style::{parse_color_value, value_as_string, LineStyleParseOptions};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -580,6 +581,28 @@ pub(crate) fn build_contour_gpu_plot(
     level_spec: &ContourLevelSpec,
     line_color: &ContourLineColor,
 ) -> BuiltinResult<ContourPlot> {
+    build_contour_gpu_plot_with_axes(
+        name,
+        &AxisSource::Host(x_axis.to_vec()),
+        &AxisSource::Host(y_axis.to_vec()),
+        z,
+        color_map,
+        base_z,
+        level_spec,
+        line_color,
+    )
+}
+
+pub(crate) fn build_contour_gpu_plot_with_axes(
+    name: &'static str,
+    x_axis: &AxisSource,
+    y_axis: &AxisSource,
+    z: &GpuTensorHandle,
+    color_map: ColorMap,
+    base_z: f32,
+    level_spec: &ContourLevelSpec,
+    line_color: &ContourLineColor,
+) -> BuiltinResult<ContourPlot> {
     let context = super::gpu_helpers::ensure_shared_wgpu_context(name)?;
     let z_ref = runmat_accelerate_api::export_wgpu_buffer(z)
         .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Z data")))?;
@@ -594,49 +617,88 @@ pub(crate) fn build_contour_gpu_plot(
     }
 
     let scalar = ScalarType::from_is_f64(z_ref.precision == ProviderPrecision::F64);
-    let x_f32 = if scalar == ScalarType::F32 {
-        Some(x_axis.iter().map(|&v| v as f32).collect::<Vec<f32>>())
-    } else {
-        None
-    };
-    let y_f32 = if scalar == ScalarType::F32 {
-        Some(y_axis.iter().map(|&v| v as f32).collect::<Vec<f32>>())
-    } else {
-        None
-    };
     let color_table = match line_color {
         ContourLineColor::Auto => build_color_lut(color_map, 512, 1.0),
         ContourLineColor::Color(color) => vec![color.to_array()],
         ContourLineColor::None => vec![[0.0, 0.0, 0.0, 0.0]],
     };
-    let (min_x, max_x) = (
-        x_axis
-            .iter()
-            .fold(f32::INFINITY, |acc, &v| acc.min(v as f32)),
-        x_axis
-            .iter()
-            .fold(f32::NEG_INFINITY, |acc, &v| acc.max(v as f32)),
-    );
-    let (min_y, max_y) = (
-        y_axis
-            .iter()
-            .fold(f32::INFINITY, |acc, &v| acc.min(v as f32)),
-        y_axis
-            .iter()
-            .fold(f32::NEG_INFINITY, |acc, &v| acc.max(v as f32)),
-    );
+    let (min_x, max_x) = match x_axis {
+        AxisSource::Host(v) => (
+            v.iter().fold(f32::INFINITY, |acc, &v| acc.min(v as f32)),
+            v.iter()
+                .fold(f32::NEG_INFINITY, |acc, &v| acc.max(v as f32)),
+        ),
+        AxisSource::Gpu(h) => axis_bounds(h, name)?,
+    };
+    let (min_y, max_y) = match y_axis {
+        AxisSource::Host(v) => (
+            v.iter().fold(f32::INFINITY, |acc, &v| acc.min(v as f32)),
+            v.iter()
+                .fold(f32::NEG_INFINITY, |acc, &v| acc.max(v as f32)),
+        ),
+        AxisSource::Gpu(h) => axis_bounds(h, name)?,
+    };
     let bounds = contour_bounds(min_x, max_x, min_y, max_y, base_z);
 
-    let x_axis_data = if let Some(values) = x_f32.as_ref() {
-        runmat_plot::gpu::axis::AxisData::F32(values.as_slice())
-    } else {
-        runmat_plot::gpu::axis::AxisData::F64(x_axis)
+    let mut x_f32_storage: Vec<f32> = Vec::new();
+    let x_axis_data = match x_axis {
+        AxisSource::Gpu(h) => {
+            let exported = runmat_accelerate_api::export_wgpu_buffer(h).ok_or_else(|| {
+                plotting_error(name, format!("{name}: unable to export GPU X axis buffer"))
+            })?;
+            if exported.len as usize != x_axis.len() {
+                return Err(plotting_error(
+                    name,
+                    format!("{name}: X axis length mismatch"),
+                ));
+            }
+            if exported.precision != z_ref.precision {
+                return Err(plotting_error(
+                    name,
+                    format!("{name}: X axis precision must match Z precision"),
+                ));
+            }
+            runmat_plot::gpu::axis::AxisData::Buffer(exported.buffer.clone())
+        }
+        AxisSource::Host(v) => {
+            if scalar == ScalarType::F32 {
+                x_f32_storage = v.iter().map(|&val| val as f32).collect();
+                runmat_plot::gpu::axis::AxisData::F32(x_f32_storage.as_slice())
+            } else {
+                runmat_plot::gpu::axis::AxisData::F64(v.as_slice())
+            }
+        }
     };
-    let y_axis_data = if let Some(values) = y_f32.as_ref() {
-        runmat_plot::gpu::axis::AxisData::F32(values.as_slice())
-    } else {
-        runmat_plot::gpu::axis::AxisData::F64(y_axis)
+    let mut y_f32_storage: Vec<f32> = Vec::new();
+    let y_axis_data = match y_axis {
+        AxisSource::Gpu(h) => {
+            let exported = runmat_accelerate_api::export_wgpu_buffer(h).ok_or_else(|| {
+                plotting_error(name, format!("{name}: unable to export GPU Y axis buffer"))
+            })?;
+            if exported.len as usize != y_axis.len() {
+                return Err(plotting_error(
+                    name,
+                    format!("{name}: Y axis length mismatch"),
+                ));
+            }
+            if exported.precision != z_ref.precision {
+                return Err(plotting_error(
+                    name,
+                    format!("{name}: Y axis precision must match Z precision"),
+                ));
+            }
+            runmat_plot::gpu::axis::AxisData::Buffer(exported.buffer.clone())
+        }
+        AxisSource::Host(v) => {
+            if scalar == ScalarType::F32 {
+                y_f32_storage = v.iter().map(|&val| val as f32).collect();
+                runmat_plot::gpu::axis::AxisData::F32(y_f32_storage.as_slice())
+            } else {
+                runmat_plot::gpu::axis::AxisData::F64(v.as_slice())
+            }
+        }
     };
+    let _keep_alive = (&x_f32_storage, &y_f32_storage);
 
     let inputs = runmat_plot::gpu::contour::ContourGpuInputs {
         x_axis: x_axis_data,
