@@ -232,6 +232,7 @@ impl FigureScene {
             figure.legend_enabled = self.metadata.legend_enabled;
         }
         figure.grid_enabled = self.metadata.grid_enabled;
+        figure.z_limits = self.metadata.z_limits.map(|[lo, hi]| (lo, hi));
         figure.colorbar_enabled = self.metadata.colorbar_enabled;
         figure.axis_equal = self.metadata.axis_equal;
         figure.background_color = rgba_to_vec4(self.metadata.background_rgba);
@@ -280,6 +281,8 @@ pub struct FigureMetadata {
     pub colormap: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub color_limits: Option<[f64; 2]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub z_limits: Option<[f64; 2]>,
     pub legend_entries: Vec<FigureLegendEntry>,
     #[serde(default)]
     pub active_axes_index: u32,
@@ -306,6 +309,7 @@ impl FigureMetadata {
             background_rgba: vec4_to_rgba(figure.background_color),
             colormap: Some(format!("{:?}", figure.colormap)),
             color_limits: figure.color_limits.map(|(lo, hi)| [lo, hi]),
+            z_limits: figure.z_limits.map(|(lo, hi)| [lo, hi]),
             legend_entries,
             active_axes_index: figure.active_axes_index as u32,
             axes_metadata: Some(

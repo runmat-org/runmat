@@ -17,7 +17,7 @@ use crate::builtins::common::spec::{
 
 use super::common::{tensor_to_surface_grid, SurfaceDataInput};
 use super::op_common::surface_inputs::{
-    axis_sources_from_xy_values, axis_sources_to_host, AxisSource,
+    axis_sources_from_xy_values, axis_sources_to_host, parse_surface_call_args, AxisSource,
 };
 use super::perf::compute_surface_lod;
 use super::plotting_error;
@@ -71,12 +71,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::surf"
 )]
-pub async fn surf_builtin(
-    x: Value,
-    y: Value,
-    z: Value,
-    rest: Vec<Value>,
-) -> crate::BuiltinResult<String> {
+pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
+    let (x, y, z, rest) = parse_surface_call_args(args, BUILTIN_NAME)?;
     let z_input = SurfaceDataInput::from_value(z, "surf")?;
     let (rows, cols) = z_input.grid_shape(BUILTIN_NAME)?;
 
@@ -430,7 +426,7 @@ pub(crate) mod tests {
     #[test]
     fn surf_requires_matching_grid() {
         setup_plot_tests();
-        let res = futures::executor::block_on(surf_builtin(
+        let res = futures::executor::block_on(surf_builtin(vec![
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[0.0])),
             Value::Tensor(Tensor {
@@ -440,8 +436,7 @@ pub(crate) mod tests {
                 cols: 1,
                 dtype: runmat_builtins::NumericDType::F64,
             }),
-            Vec::new(),
-        ));
+        ]));
         assert!(res.is_err());
     }
 

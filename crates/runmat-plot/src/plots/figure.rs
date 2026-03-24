@@ -31,6 +31,7 @@ pub struct Figure {
     /// Axis limits (None = auto-scale)
     pub x_limits: Option<(f64, f64)>,
     pub y_limits: Option<(f64, f64)>,
+    pub z_limits: Option<(f64, f64)>,
 
     /// Axis scales
     pub x_log: bool,
@@ -187,6 +188,7 @@ impl Figure {
             background_color: Vec4::new(1.0, 1.0, 1.0, 1.0), // White background
             x_limits: None,
             y_limits: None,
+            z_limits: None,
             x_log: false,
             y_log: false,
             axis_equal: false,
@@ -472,6 +474,11 @@ impl Figure {
                 s.set_color_limits(limits);
             }
         }
+        self.dirty = true;
+    }
+
+    pub fn set_z_limits(&mut self, limits: Option<(f64, f64)>) {
+        self.z_limits = limits;
         self.dirty = true;
     }
 

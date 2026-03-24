@@ -5,6 +5,100 @@ use crate::builtins::plotting::common::{gather_tensor_from_gpu_async, numeric_ve
 use crate::builtins::plotting::plotting_error;
 use crate::BuiltinResult;
 
+pub fn parse_surface_call_args(
+    args: Vec<Value>,
+    builtin: &'static str,
+) -> BuiltinResult<(Value, Value, Value, Vec<Value>)> {
+    match args.len() {
+        0 => Err(plotting_error(
+            builtin,
+            format!("{builtin}: expected Z or X,Y,Z input"),
+        )),
+        1 => {
+            let z = args.into_iter().next().expect("one arg");
+            let (rows, cols) = inferred_grid_shape(&z, builtin)?;
+            let x = Value::Tensor(default_surface_axis(rows));
+            let y = Value::Tensor(default_surface_axis(cols));
+            Ok((x, y, z, Vec::new()))
+        }
+        2 => Err(plotting_error(
+            builtin,
+            format!("{builtin}: expected Z or X,Y,Z input"),
+        )),
+        _ => {
+            let mut it = args.into_iter();
+            let x = it.next().expect("x");
+            let y = it.next().expect("y");
+            let z = it.next().expect("z");
+            let rest = it.collect();
+            Ok((x, y, z, rest))
+        }
+    }
+}
+
+fn inferred_grid_shape(value: &Value, builtin: &'static str) -> BuiltinResult<(usize, usize)> {
+    match value {
+        Value::GpuTensor(handle) => {
+            if handle.shape.len() < 2 {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: Z must contain at least a 2-D grid"),
+                ));
+            }
+            let rows = handle.shape[0].max(1);
+            let cols = handle.shape[1].max(1);
+            Ok((rows, cols))
+        }
+        other => {
+            let tensor = Tensor::try_from(other)
+                .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
+            if tensor.rows == 0 || tensor.cols == 0 {
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: Z must contain at least a 2-D grid"),
+                ));
+            }
+            Ok((tensor.rows, tensor.cols))
+        }
+    }
+}
+
+fn default_surface_axis(len: usize) -> Tensor {
+    Tensor {
+        data: (1..=len).map(|i| i as f64).collect(),
+        shape: vec![len],
+        rows: len,
+        cols: 1,
+        dtype: runmat_builtins::NumericDType::F64,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_surface_call_args_supports_z_only_shorthand() {
+        let z = Value::Tensor(Tensor {
+            data: vec![1.0, 2.0, 3.0, 4.0],
+            shape: vec![2, 2],
+            rows: 2,
+            cols: 2,
+            dtype: runmat_builtins::NumericDType::F64,
+        });
+        let (x, y, z_out, rest) = parse_surface_call_args(vec![z.clone()], "surf").unwrap();
+        let x = Tensor::try_from(&x).unwrap();
+        let y = Tensor::try_from(&y).unwrap();
+        assert_eq!(x.data, vec![1.0, 2.0]);
+        assert_eq!(y.data, vec![1.0, 2.0]);
+        assert!(rest.is_empty());
+        assert_eq!(
+            Tensor::try_from(&z_out).unwrap().data,
+            Tensor::try_from(&z).unwrap().data
+        );
+    }
+}
+
 #[derive(Clone)]
 pub enum AxisSource {
     Host(Vec<f64>),

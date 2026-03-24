@@ -9,6 +9,7 @@ use super::common::{numeric_vector, tensor_to_surface_grid, SurfaceDataInput};
 use super::contour::{build_contour_plot, default_level_count, ContourLevelSpec, ContourLineColor};
 use super::mesh::build_mesh_surface;
 use super::op_common::surface_composite::contour_for_surface_input;
+use super::op_common::surface_inputs::parse_surface_call_args;
 use super::state::{render_active_plot, PlotRenderOptions};
 
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
@@ -28,14 +29,16 @@ const BUILTIN_NAME: &str = "meshc";
     type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::meshc"
 )]
-pub async fn meshc_builtin(
-    x: Tensor,
-    y: Tensor,
-    z: Value,
-    rest: Vec<Value>,
-) -> crate::BuiltinResult<String> {
-    let x_axis = numeric_vector(x);
-    let y_axis = numeric_vector(y);
+pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
+    let (x, y, z, rest) = parse_surface_call_args(args, BUILTIN_NAME)?;
+    let x_axis = numeric_vector(
+        Tensor::try_from(&x)
+            .map_err(|e| super::plotting_error(BUILTIN_NAME, format!("meshc: {e}")))?,
+    );
+    let y_axis = numeric_vector(
+        Tensor::try_from(&y)
+            .map_err(|e| super::plotting_error(BUILTIN_NAME, format!("meshc: {e}")))?,
+    );
     let z_input = SurfaceDataInput::from_value(z, "meshc")?;
     let style = Arc::new(parse_surface_style_args(
         "meshc",
@@ -173,9 +176,9 @@ pub(crate) mod tests {
     #[test]
     fn meshc_requires_matching_grid() {
         setup_plot_tests();
-        let res = futures::executor::block_on(meshc_builtin(
-            tensor_from(&[0.0]),
-            tensor_from(&[0.0, 1.0]),
+        let res = futures::executor::block_on(meshc_builtin(vec![
+            Value::Tensor(tensor_from(&[0.0])),
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(Tensor {
                 data: vec![0.0],
                 shape: vec![1],
@@ -183,8 +186,7 @@ pub(crate) mod tests {
                 cols: 1,
                 dtype: runmat_builtins::NumericDType::F64,
             }),
-            Vec::new(),
-        ));
+        ]));
         assert!(res.is_err());
     }
 

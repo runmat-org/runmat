@@ -500,6 +500,51 @@ pub fn set_axis_limits(x: Option<(f64, f64)>, y: Option<(f64, f64)>) {
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 }
 
+pub fn axis_limits_snapshot() -> (Option<(f64, f64)>, Option<(f64, f64)>) {
+    let mut reg = registry();
+    let handle = reg.current;
+    let state = get_state_mut(&mut reg, handle);
+    (state.figure.x_limits, state.figure.y_limits)
+}
+
+pub fn z_limits_snapshot() -> Option<(f64, f64)> {
+    let mut reg = registry();
+    let handle = reg.current;
+    let state = get_state_mut(&mut reg, handle);
+    state.figure.z_limits
+}
+
+pub fn color_limits_snapshot() -> Option<(f64, f64)> {
+    let mut reg = registry();
+    let handle = reg.current;
+    let state = get_state_mut(&mut reg, handle);
+    state.figure.color_limits
+}
+
+pub fn set_z_limits(limits: Option<(f64, f64)>) {
+    let (handle, figure_clone) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        state.figure.set_z_limits(limits);
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone())
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn set_color_limits_runtime(limits: Option<(f64, f64)>) {
+    let (handle, figure_clone) = {
+        let mut reg = registry();
+        let handle = reg.current;
+        let state = get_state_mut(&mut reg, handle);
+        state.figure.set_color_limits(limits);
+        state.revision = state.revision.wrapping_add(1);
+        (handle, state.figure.clone())
+    };
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
 pub fn clear_current_axes() {
     let (handle, figure_clone) = {
         let mut reg = registry();

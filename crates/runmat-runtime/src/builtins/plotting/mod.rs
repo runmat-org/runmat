@@ -26,8 +26,12 @@ pub(crate) mod type_resolvers;
 
 #[path = "ops/bar.rs"]
 pub(crate) mod bar;
+#[path = "ops/caxis.rs"]
+pub(crate) mod caxis;
 #[path = "ops/clf.rs"]
 pub(crate) mod clf;
+#[path = "ops/clim.rs"]
+pub(crate) mod clim;
 #[path = "ops/close.rs"]
 pub(crate) mod close;
 #[path = "ops/cmds.rs"]
@@ -78,8 +82,14 @@ pub(crate) mod surfc;
 pub(crate) mod title;
 #[path = "ops/xlabel.rs"]
 pub(crate) mod xlabel;
+#[path = "ops/xlim.rs"]
+pub(crate) mod xlim;
 #[path = "ops/ylabel.rs"]
 pub(crate) mod ylabel;
+#[path = "ops/ylim.rs"]
+pub(crate) mod ylim;
+#[path = "ops/zlim.rs"]
+pub(crate) mod zlim;
 
 pub use perf::{set_scatter_target_points, set_surface_vertex_budget};
 pub use state::{
