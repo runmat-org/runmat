@@ -313,7 +313,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
 
   const ogVideoMap: Record<string, string> = {
     'matlab-fprintf': 'https://web.runmatstatic.com/video/runmat-debugging.mp4',
-    'matlab-alternatives': 'https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.mp4',
+    'free-matlab-alternatives': 'https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.mp4',
   };
   const ogVideo = ogVideoMap[slug];
 

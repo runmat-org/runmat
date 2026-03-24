@@ -171,7 +171,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
         description: 'Demo of RunMat variable explorer inspecting workspace state during a thermal simulation.',
       },
     ],
-    'matlab-alternatives': [
+    'free-matlab-alternatives': [
       {
         title: 'RunMat 3D interactive plotting in the browser',
         thumbnail_loc: `${videoPosters}/3d-interactive-plotting-runmat.png`,
