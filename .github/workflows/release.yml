@@ -359,6 +359,7 @@ jobs:
             --allow-dirty \
             --skip-published \
             --publish-as-is \
+            --publish-interval 30 \
             --no-verify \
             --token "$CARGO_REGISTRY_TOKEN"
 
