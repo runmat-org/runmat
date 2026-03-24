@@ -355,6 +355,7 @@ jobs:
           ignore-unpublished-changes: true
           check-repo: false
           publish-delay: 15000
+          args: --allow-dirty
 
   publish-bindings:
     name: Test & publish wasm bindings to npm
