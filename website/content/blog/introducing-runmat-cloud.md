@@ -7,7 +7,7 @@ authors:
     url: "https://x.com/nabeelallana"
 readTime: "9 min read"
 slug: "introducing-runmat-cloud"
-visibility: unlisted
+visibility: public
 tags: ["RunMat Cloud", "sandbox", "scientific computing", "GPU computing", "WebAssembly", "WebGPU", "collaboration"]
 keywords: "RunMat Cloud, RunMat sandbox, MATLAB online alternative, browser GPU computing, WebAssembly scientific computing, WebGPU math, engineering collaboration tool, version control scientific computing, MATLAB cloud alternative, durable project state, run history, version snapshots"
 excerpt: "RunMat launched as a CLI last August. Accelerate added GPU acceleration in November. Now the sandbox runs the same engine in your browser, and RunMat Cloud turns each run into durable project state you can keep, inspect, compare, and share."
