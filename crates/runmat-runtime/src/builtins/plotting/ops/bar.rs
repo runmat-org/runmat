@@ -696,6 +696,29 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn bar_x_y_shorthand_builds_chart_with_explicit_labels() {
+        setup_plot_tests();
+        let out = bar_builtin(vec![
+            Value::Tensor(tensor_from(&[10.0, 20.0])),
+            Value::Tensor(tensor_from(&[1.0, 2.0])),
+        ]);
+        if let Err(err) = out {
+            let msg = err.to_string().to_lowercase();
+            assert!(msg.contains("plotting is unavailable") || msg.contains("non-main thread"));
+        }
+        let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
+        let style = parse_bar_style_args("bar", &[], defaults).unwrap();
+        let charts = build_bar_series_from_tensor(
+            Some(tensor_from(&[10.0, 20.0])),
+            tensor_from(&[1.0, 2.0]),
+            &style,
+        )
+        .unwrap();
+        assert_eq!(charts[0].labels[0], "10");
+        assert_eq!(charts[0].labels[1], "20");
+    }
+
+    #[test]
     fn bar_type_is_string() {
         assert_eq!(
             string_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),

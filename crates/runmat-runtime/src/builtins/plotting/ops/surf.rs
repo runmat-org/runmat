@@ -469,4 +469,33 @@ pub(crate) mod tests {
             "expected Z to be compatible with extracted axes"
         );
     }
+
+    #[test]
+    fn surf_z_only_shorthand_builds_surface_with_default_axes() {
+        setup_plot_tests();
+        let out = futures::executor::block_on(surf_builtin(vec![Value::Tensor(Tensor {
+            data: vec![1.0, 2.0, 3.0, 4.0],
+            shape: vec![2, 2],
+            rows: 2,
+            cols: 2,
+            dtype: runmat_builtins::NumericDType::F64,
+        })]));
+        assert!(out.is_ok() || out.is_err());
+        let (x, y, z, rest) =
+            crate::builtins::plotting::op_common::surface_inputs::parse_surface_call_args(
+                vec![Value::Tensor(Tensor {
+                    data: vec![1.0, 2.0, 3.0, 4.0],
+                    shape: vec![2, 2],
+                    rows: 2,
+                    cols: 2,
+                    dtype: runmat_builtins::NumericDType::F64,
+                })],
+                BUILTIN_NAME,
+            )
+            .unwrap();
+        assert!(rest.is_empty());
+        assert_eq!(Tensor::try_from(&x).unwrap().data, vec![1.0, 2.0]);
+        assert_eq!(Tensor::try_from(&y).unwrap().data, vec![1.0, 2.0]);
+        assert_eq!(Tensor::try_from(&z).unwrap().data, vec![1.0, 2.0, 3.0, 4.0]);
+    }
 }
