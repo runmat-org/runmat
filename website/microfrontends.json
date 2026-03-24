@@ -23,6 +23,9 @@
           "paths": ["/invite/accept"]
         },
         {
+          "paths": ["/email-verified"]
+        },
+        {
           "paths": ["/_p/:path*"]
         },
         {
