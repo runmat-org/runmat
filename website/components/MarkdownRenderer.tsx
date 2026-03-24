@@ -343,6 +343,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
   function sanitizeMarkdown(input: string): string {
     const lines = input.split(/\r?\n/);
     let inFence = false;
+    let inHtmlTag = false;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       if (/^\s*```/.test(line)) {
@@ -351,6 +352,20 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       }
       // Skip processing inside code fences (including mermaid)
       if (inFence) continue;
+      
+      // Check if this line is inside an HTML/JSX tag (e.g., <video>, <div>)
+      // Simple heuristic: if line starts with < and contains JSX-style attributes, skip it
+      if (/^\s*<\w+/.test(line) || inHtmlTag) {
+        // Track if we're in a multi-line tag
+        if (/^\s*<\w+/.test(line) && !line.includes('>')) {
+          inHtmlTag = true;
+        }
+        if (line.includes('>')) {
+          inHtmlTag = false;
+        }
+        continue;
+      }
+      
       // Process only parts of the line that are not inside inline code (backticks)
       const segments = line.split(/(`[^`]*`)/g);
       for (let s = 0; s < segments.length; s++) {
