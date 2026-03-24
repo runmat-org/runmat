@@ -357,7 +357,7 @@ If the vectorized version is equally readable and maps to an optimized builtin, 
 
 ## Loop patterns and performance
 
-Common loop patterns, each with a runnable example and guidance on when to vectorize instead.
+Four loop patterns cover most MATLAB workloads: accumulation, element-wise with conditions, running statistics, and sequential dependencies. Each has different vectorization tradeoffs.
 
 ### Accumulation
 

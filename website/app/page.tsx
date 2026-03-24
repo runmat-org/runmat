@@ -95,6 +95,16 @@ const jsonLd = {
         "url": "https://web.runmatstatic.com/runmat-sandbox-dark.png",
         "caption": "RunMat Desktop and Browser Sandbox"
       }
+    },
+    {
+      "@type": "VideoObject",
+      "@id": "https://runmat.com/#hero-video",
+      "name": "RunMat wave interference simulation",
+      "description": "GPU-accelerated wave interference simulation rendered in real time using RunMat's surf() function.",
+      "thumbnailUrl": "https://web.runmatstatic.com/video/posters/runmat-wave-simulation.png",
+      "contentUrl": "https://web.runmatstatic.com/video/runmat-wave-simulation.mp4",
+      "uploadDate": "2026-03-03T00:00:00Z",
+      "duration": "PT10S"
     }
   ]
 };
@@ -147,6 +157,12 @@ export const metadata: Metadata = {
     url: "/",
     siteName: "RunMat",
     type: "website",
+    videos: [
+      {
+        url: "https://web.runmatstatic.com/video/runmat-wave-simulation.mp4",
+        type: "video/mp4",
+      },
+    ],
   },
   twitter: {
     card: "summary_large_image",
@@ -194,6 +210,7 @@ export default function HomePage() {
                   muted
                   loop
                   playsInline
+                  poster="https://web.runmatstatic.com/video/posters/3d-interactive-plotting-runmat.png"
                   aria-label="RunMat 3D interactive plotting demo"
                 >
                   <source src="https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.mp4" type="video/mp4" />
@@ -278,6 +295,7 @@ export default function HomePage() {
                   muted
                   loop
                   playsInline
+                  poster="https://web.runmatstatic.com/video/posters/runmat-shape-tracking.png"
                   aria-label="RunMat shape tracking and type system demo"
                 >
                   <source src="https://web.runmatstatic.com/video/runmat-shape-tracking.mp4" type="video/mp4" />
@@ -310,6 +328,7 @@ export default function HomePage() {
                 muted
                 loop
                 playsInline
+                poster="https://web.runmatstatic.com/video/posters/runmat-versioning.png"
                 aria-label="RunMat versioning demo"
               >
                 <source src="https://web.runmatstatic.com/video/runmat-versioning.mp4" type="video/mp4" />
