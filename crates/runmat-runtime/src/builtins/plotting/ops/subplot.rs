@@ -3,48 +3,9 @@
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
-use super::plotting_error;
+use super::op_common::cmd_parsing::scalar_from_value;
 use super::state::configure_subplot_with_builtin;
 use crate::builtins::plotting::type_resolvers::string_type;
-
-use crate::BuiltinResult;
-
-fn scalar_from_value(value: &Value, name: &str) -> BuiltinResult<usize> {
-    match value {
-        Value::Num(v) => to_positive_index(*v, name),
-        Value::Bool(flag) => to_positive_index(if *flag { 1.0 } else { 0.0 }, name),
-        Value::Tensor(tensor) => {
-            if tensor.data.len() != 1 {
-                return Err(plotting_error(
-                    name,
-                    format!("{name}: expected scalar input"),
-                ));
-            }
-            to_positive_index(tensor.data[0], name)
-        }
-        _ => Err(plotting_error(
-            name,
-            format!("{name}: unsupported argument type"),
-        )),
-    }
-}
-
-fn to_positive_index(value: f64, name: &str) -> BuiltinResult<usize> {
-    if !value.is_finite() {
-        return Err(plotting_error(
-            name,
-            format!("{name}: value must be finite"),
-        ));
-    }
-    let rounded = value.round() as i64;
-    if rounded <= 0 {
-        return Err(plotting_error(
-            name,
-            format!("{name}: value must be positive"),
-        ));
-    }
-    Ok(rounded as usize)
-}
 
 #[runtime_builtin(
     name = "subplot",

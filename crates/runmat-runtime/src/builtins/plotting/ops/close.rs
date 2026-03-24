@@ -5,11 +5,9 @@ use std::collections::BTreeSet;
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 
-use super::handle_args::{handle_from_string, handles_from_value, parse_string};
+use super::op_common::figure_actions::{parse_close_action, FigureAction};
 use super::state::{close_figure, close_figure_with_builtin, figure_handles, FigureHandle};
 use crate::builtins::plotting::type_resolvers::string_type;
-
-use crate::BuiltinResult;
 
 #[runtime_builtin(
     name = "close",
@@ -23,11 +21,11 @@ use crate::BuiltinResult;
 )]
 pub fn close_builtin(rest: Vec<Value>) -> crate::BuiltinResult<String> {
     match parse_close_action(&rest)? {
-        CloseAction::Current => {
+        FigureAction::Current => {
             let closed = close_figure_with_builtin("close", None)?;
             Ok(format!("Closed figure {}", closed.as_u32()))
         }
-        CloseAction::Handles(handles) => {
+        FigureAction::Handles(handles) => {
             let unique: BTreeSet<u32> = handles.into_iter().map(|h| h.as_u32()).collect();
             if unique.is_empty() {
                 let closed = close_figure_with_builtin("close", None)?;
@@ -45,7 +43,7 @@ pub fn close_builtin(rest: Vec<Value>) -> crate::BuiltinResult<String> {
                 Ok(format!("Closed {} figures", closed.len()))
             }
         }
-        CloseAction::All => {
+        FigureAction::All => {
             let handles = figure_handles();
             if handles.is_empty() {
                 return Ok("close: no figures to close".to_string());
@@ -55,47 +53,6 @@ pub fn close_builtin(rest: Vec<Value>) -> crate::BuiltinResult<String> {
             }
             Ok("Closed all figures".to_string())
         }
-    }
-}
-
-#[derive(Debug)]
-enum CloseAction {
-    Current,
-    Handles(Vec<FigureHandle>),
-    All,
-}
-
-fn parse_close_action(args: &[Value]) -> BuiltinResult<CloseAction> {
-    if args.is_empty() {
-        return Ok(CloseAction::Current);
-    }
-    let mut handles = Vec::new();
-    let mut close_all = false;
-    for value in args {
-        if let Some(text) = parse_string(value) {
-            let normalized = text.trim().to_ascii_lowercase();
-            if normalized.is_empty() {
-                continue;
-            }
-            if matches!(normalized.as_str(), "all" | "force" | "force all") {
-                close_all = true;
-                continue;
-            }
-            if normalized == "current" {
-                continue;
-            }
-            handles.push(handle_from_string(&normalized, "close")?);
-            continue;
-        }
-        handles.extend(handles_from_value(value, "close")?);
-    }
-    if close_all {
-        return Ok(CloseAction::All);
-    }
-    if handles.is_empty() {
-        Ok(CloseAction::Current)
-    } else {
-        Ok(CloseAction::Handles(handles))
     }
 }
 
@@ -115,7 +72,7 @@ pub(crate) mod tests {
         setup_plot_tests();
         assert!(matches!(
             parse_close_action(&[]).unwrap(),
-            CloseAction::Current
+            FigureAction::Current
         ));
     }
 
@@ -125,7 +82,7 @@ pub(crate) mod tests {
         setup_plot_tests();
         let values = vec![Value::Num(3.0), Value::Num(1.0)];
         match parse_close_action(&values).unwrap() {
-            CloseAction::Handles(handles) => {
+            FigureAction::Handles(handles) => {
                 assert_eq!(handles.len(), 2);
                 assert_eq!(handles[0].as_u32(), 3);
                 assert_eq!(handles[1].as_u32(), 1);
@@ -141,7 +98,7 @@ pub(crate) mod tests {
         let values = vec![Value::String("all".to_string())];
         assert!(matches!(
             parse_close_action(&values).unwrap(),
-            CloseAction::All
+            FigureAction::All
         ));
     }
 

@@ -1,10 +1,11 @@
 //! MATLAB-compatible `scatter3` builtin.
 
-use futures::executor::block_on;
 use glam::{Vec3, Vec4};
 use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
-use runmat_builtins::{Tensor, Value};
+#[cfg(test)]
+use runmat_builtins::Tensor;
+use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
 use runmat_plot::gpu::scatter2::{ScatterAttributeBuffer, ScatterColorBuffer};
@@ -14,17 +15,17 @@ use runmat_plot::plots::surface::ColorMap;
 use runmat_plot::plots::LineStyle;
 use runmat_plot::plots::Scatter3Plot;
 
-use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed_async;
 use crate::{BuiltinResult, RuntimeError};
 use std::convert::TryFrom;
 
+use super::common::gather_tensor_from_gpu;
 use super::common::numeric_triplet;
 use super::gpu_helpers::axis_bounds;
+use super::op_common::line_inputs::NumericInput as ScatterInput;
 use super::perf::scatter3_lod_stride;
 use super::plotting_error;
 use super::point::{
@@ -83,9 +84,9 @@ pub async fn scatter3_builtin(
     rest: Vec<Value>,
 ) -> crate::BuiltinResult<String> {
     let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter3())?;
-    let mut x_input = Some(ScatterInput::from_value(x)?);
-    let mut y_input = Some(ScatterInput::from_value(y)?);
-    let mut z_input = Some(ScatterInput::from_value(z)?);
+    let mut x_input = Some(ScatterInput::from_value(x, BUILTIN_NAME)?);
+    let mut y_input = Some(ScatterInput::from_value(y, BUILTIN_NAME)?);
+    let mut z_input = Some(ScatterInput::from_value(z, BUILTIN_NAME)?);
     let opts = PlotRenderOptions {
         title: "3-D Scatter",
         x_label: "X",
@@ -278,60 +279,6 @@ fn build_scatter3_plot(
             .map_err(|e| scatter3_err(format!("scatter3: {e}")))?;
     }
     Ok(scatter)
-}
-
-enum ScatterInput {
-    Host(Tensor),
-    Gpu(GpuTensorHandle),
-}
-
-impl ScatterInput {
-    fn from_value(value: Value) -> BuiltinResult<Self> {
-        match value {
-            Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
-            other => {
-                let tensor =
-                    Tensor::try_from(&other).map_err(|e| scatter3_err(format!("scatter3: {e}")))?;
-                Ok(Self::Host(tensor))
-            }
-        }
-    }
-
-    fn gpu_handle(&self) -> Option<&GpuTensorHandle> {
-        match self {
-            Self::Gpu(handle) => Some(handle),
-            Self::Host(_) => None,
-        }
-    }
-
-    fn len(&self) -> usize {
-        match self {
-            Self::Host(tensor) => tensor.data.len(),
-            Self::Gpu(handle) => handle.shape.iter().product(),
-        }
-    }
-
-    fn into_tensor(self, name: &'static str) -> BuiltinResult<Tensor> {
-        match self {
-            Self::Host(t) => Ok(t),
-            Self::Gpu(handle) => gather_tensor_from_gpu(handle, name),
-        }
-    }
-}
-
-async fn gather_tensor_from_gpu_async(
-    handle: GpuTensorHandle,
-    name: &'static str,
-) -> BuiltinResult<Tensor> {
-    let value = Value::GpuTensor(handle);
-    let gathered = gather_if_needed_async(&value)
-        .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, name))?;
-    Tensor::try_from(&gathered).map_err(|e| scatter3_err(format!("{name}: {e}")))
-}
-
-fn gather_tensor_from_gpu(handle: GpuTensorHandle, name: &'static str) -> BuiltinResult<Tensor> {
-    block_on(gather_tensor_from_gpu_async(handle, name))
 }
 
 fn build_scatter3_gpu_plot(

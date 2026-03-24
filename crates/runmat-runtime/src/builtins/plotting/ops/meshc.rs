@@ -6,11 +6,9 @@ use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode};
 
 use super::common::{numeric_vector, tensor_to_surface_grid, SurfaceDataInput};
-use super::contour::{
-    build_contour_gpu_plot, build_contour_plot, default_level_count, ContourLevelSpec,
-    ContourLineColor,
-};
+use super::contour::{build_contour_plot, default_level_count, ContourLevelSpec, ContourLineColor};
 use super::mesh::build_mesh_surface;
+use super::op_common::surface_composite::contour_for_surface_input;
 use super::state::{render_active_plot, PlotRenderOptions};
 
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
@@ -76,42 +74,18 @@ pub async fn meshc_builtin(
                 let mut surface = surface_gpu.with_wireframe(true);
                 style.apply_to_plot(&mut surface);
                 let base_z = surface.bounds().min.z;
-                match build_contour_gpu_plot(
+                let contour = contour_for_surface_input(
                     BUILTIN_NAME,
                     &x_axis,
                     &y_axis,
-                    &z_gpu,
+                    &z_input,
+                    Some(z_gpu),
                     contour_map,
                     base_z,
                     &level_spec,
-                    &ContourLineColor::Auto,
-                ) {
-                    Ok(contour) => (surface, contour),
-                    Err(err) => {
-                        warn!("meshc contour GPU path unavailable: {err}");
-                        let z_tensor =
-                            super::common::gather_tensor_from_gpu_async(z_gpu, BUILTIN_NAME)
-                                .await?;
-                        let grid = tensor_to_surface_grid(
-                            z_tensor,
-                            x_axis.len(),
-                            y_axis.len(),
-                            BUILTIN_NAME,
-                        )?;
-                        let base_z = surface.bounds().min.z;
-                        let contour = build_contour_plot(
-                            BUILTIN_NAME,
-                            &x_axis,
-                            &y_axis,
-                            &grid,
-                            contour_map,
-                            base_z,
-                            &level_spec,
-                            &ContourLineColor::Auto,
-                        )?;
-                        (surface, contour)
-                    }
-                }
+                )
+                .await?;
+                (surface, contour)
             }
             Err(err) => {
                 warn!("meshc surface GPU path unavailable: {err}");

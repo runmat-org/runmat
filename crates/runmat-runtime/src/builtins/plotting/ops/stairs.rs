@@ -2,7 +2,9 @@
 
 use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
-use runmat_builtins::{Tensor, Value};
+#[cfg(test)]
+use runmat_builtins::Tensor;
+use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 use runmat_plot::gpu::line::{
     self, LineGpuInputs as MarkerGpuInputs, LineGpuParams as MarkerGpuParams,
@@ -17,7 +19,8 @@ use crate::builtins::common::spec::{
 };
 
 use super::common::numeric_pair;
-use super::gpu_helpers::{gather_tensor_from_gpu, gpu_xy_bounds};
+use super::gpu_helpers::gpu_xy_bounds;
+use super::op_common::line_inputs::NumericInput as StairsInput;
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{
@@ -70,8 +73,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 )]
 pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let parsed_style = parse_line_style_args(&rest, &LineStyleParseOptions::stairs())?;
-    let mut x_input = Some(StairsInput::from_value(x)?);
-    let mut y_input = Some(StairsInput::from_value(y)?);
+    let mut x_input = Some(StairsInput::from_value(x, BUILTIN_NAME)?);
+    let mut y_input = Some(StairsInput::from_value(y, BUILTIN_NAME)?);
     let opts = PlotRenderOptions {
         title: "Stairs",
         x_label: "X",
@@ -248,38 +251,6 @@ fn apply_stairs_marker_metadata(plot: &mut StairsPlot, marker_meta: Option<LineM
         plot.set_marker(Some(marker));
     } else {
         plot.set_marker(None);
-    }
-}
-
-enum StairsInput {
-    Host(Tensor),
-    Gpu(GpuTensorHandle),
-}
-
-impl StairsInput {
-    fn from_value(value: Value) -> BuiltinResult<Self> {
-        match value {
-            Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
-            other => {
-                let tensor = Tensor::try_from(&other)
-                    .map_err(|e| plotting_error(BUILTIN_NAME, format!("stairs: {e}")))?;
-                Ok(Self::Host(tensor))
-            }
-        }
-    }
-
-    fn gpu_handle(&self) -> Option<&GpuTensorHandle> {
-        match self {
-            Self::Gpu(handle) => Some(handle),
-            Self::Host(_) => None,
-        }
-    }
-
-    fn into_tensor(self, name: &'static str) -> BuiltinResult<Tensor> {
-        match self {
-            Self::Host(tensor) => Ok(tensor),
-            Self::Gpu(handle) => gather_tensor_from_gpu(handle, name),
-        }
     }
 }
 

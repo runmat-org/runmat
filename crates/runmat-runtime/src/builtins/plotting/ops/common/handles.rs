@@ -1,12 +1,11 @@
 use runmat_builtins::Value;
 
-use super::plotting_error;
-use super::state::FigureHandle;
-use super::style::value_as_string;
-
+use crate::builtins::plotting::plotting_error;
+use crate::builtins::plotting::state::FigureHandle;
+use crate::builtins::plotting::style::value_as_string;
 use crate::{build_runtime_error, BuiltinResult};
 
-pub(super) fn handles_from_value(value: &Value, ctx: &str) -> BuiltinResult<Vec<FigureHandle>> {
+pub fn handles_from_value(value: &Value, ctx: &str) -> BuiltinResult<Vec<FigureHandle>> {
     match value {
         Value::Num(v) => Ok(vec![handle_from_scalar(*v, ctx)?]),
         Value::Int(i) => Ok(vec![handle_from_scalar(i.to_f64(), ctx)?]),
@@ -17,11 +16,11 @@ pub(super) fn handles_from_value(value: &Value, ctx: &str) -> BuiltinResult<Vec<
                     format!("{ctx}: handle array cannot be empty"),
                 ));
             }
-            let mut handles = Vec::with_capacity(tensor.data.len());
-            for val in &tensor.data {
-                handles.push(handle_from_scalar(*val, ctx)?);
-            }
-            Ok(handles)
+            tensor
+                .data
+                .iter()
+                .map(|v| handle_from_scalar(*v, ctx))
+                .collect()
         }
         Value::CharArray(_) | Value::String(_) => {
             let text = parse_string(value).unwrap_or_default();
@@ -40,11 +39,11 @@ pub(super) fn handles_from_value(value: &Value, ctx: &str) -> BuiltinResult<Vec<
     }
 }
 
-pub(super) fn parse_string(value: &Value) -> Option<String> {
+pub fn parse_string(value: &Value) -> Option<String> {
     value_as_string(value).map(|s| s.trim().to_string())
 }
 
-pub(super) fn handle_from_string(text: &str, ctx: &str) -> BuiltinResult<FigureHandle> {
+pub fn handle_from_string(text: &str, ctx: &str) -> BuiltinResult<FigureHandle> {
     let trimmed = text.trim();
     if trimmed.is_empty() {
         return Err(plotting_error(
@@ -69,7 +68,7 @@ pub(super) fn handle_from_string(text: &str, ctx: &str) -> BuiltinResult<FigureH
     Ok(FigureHandle::from(id))
 }
 
-pub(super) fn handle_from_scalar(value: f64, ctx: &str) -> BuiltinResult<FigureHandle> {
+pub fn handle_from_scalar(value: f64, ctx: &str) -> BuiltinResult<FigureHandle> {
     if !value.is_finite() {
         return Err(plotting_error(
             ctx,
@@ -84,4 +83,33 @@ pub(super) fn handle_from_scalar(value: f64, ctx: &str) -> BuiltinResult<FigureH
         ));
     }
     Ok(FigureHandle::from(rounded as u32))
+}
+
+pub fn parse_optional_figure_handle(
+    value: &Value,
+    ctx: &str,
+) -> BuiltinResult<Option<FigureHandle>> {
+    match value {
+        Value::CharArray(_) | Value::String(_) => {
+            let text = parse_string(value).unwrap_or_default();
+            parse_string_handle_or_next(&text, ctx)
+        }
+        Value::Tensor(tensor) if tensor.data.len() == 1 => {
+            Ok(Some(handle_from_scalar(tensor.data[0], ctx)?))
+        }
+        Value::Num(v) => Ok(Some(handle_from_scalar(*v, ctx)?)),
+        Value::Int(i) => Ok(Some(handle_from_scalar(i.to_f64(), ctx)?)),
+        _ => Err(plotting_error(
+            ctx,
+            format!("{ctx}: unsupported handle type"),
+        )),
+    }
+}
+
+pub fn parse_string_handle_or_next(text: &str, ctx: &str) -> BuiltinResult<Option<FigureHandle>> {
+    if text.eq_ignore_ascii_case("next") {
+        Ok(None)
+    } else {
+        Ok(Some(handle_from_string(text, ctx)?))
+    }
 }

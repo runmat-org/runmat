@@ -46,8 +46,6 @@ pub(crate) mod gca;
 pub(crate) mod gcf;
 #[path = "ops/get.rs"]
 pub(crate) mod get;
-#[path = "ops/handle_args.rs"]
-pub(crate) mod handle_args;
 #[path = "ops/hist.rs"]
 pub mod hist;
 #[path = "ops/hold.rs"]
@@ -58,7 +56,7 @@ pub(crate) mod legend;
 pub(crate) mod mesh;
 #[path = "ops/meshc.rs"]
 pub(crate) mod meshc;
-#[path = "ops/common.rs"]
+#[path = "ops/common/mod.rs"]
 pub(crate) mod op_common;
 #[path = "ops/plot.rs"]
 pub(crate) mod plot;

@@ -1,10 +1,11 @@
 //! MATLAB-compatible `scatter` builtin.
 
-use futures::executor::block_on;
 use glam::{Vec3, Vec4};
 use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
-use runmat_builtins::{Tensor, Value};
+#[cfg(test)]
+use runmat_builtins::Tensor;
+use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
 use runmat_plot::gpu::scatter2::{
@@ -16,16 +17,16 @@ use runmat_plot::plots::surface::ColorMap;
 use runmat_plot::plots::LineStyle;
 use runmat_plot::plots::ScatterPlot;
 
-use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed_async;
 use std::convert::TryFrom;
 
+use super::common::gather_tensor_from_gpu;
 use super::common::numeric_pair;
 use super::gpu_helpers::axis_bounds;
+use super::op_common::line_inputs::NumericInput as ScatterInput;
 use super::perf::scatter_target_points;
 use super::plotting_error;
 use super::point::{
@@ -80,8 +81,8 @@ const BUILTIN_NAME: &str = "scatter";
 )]
 pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
     let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter())?;
-    let mut x_input = Some(ScatterInput::from_value(x)?);
-    let mut y_input = Some(ScatterInput::from_value(y)?);
+    let mut x_input = Some(ScatterInput::from_value(x, BUILTIN_NAME)?);
+    let mut y_input = Some(ScatterInput::from_value(y, BUILTIN_NAME)?);
     let opts = PlotRenderOptions {
         title: "Scatter Plot",
         x_label: "X",
@@ -341,60 +342,6 @@ fn resolve_marker_color(marker_color: &MarkerColor, fallback: Vec4, default_base
         MarkerColor::Flat => fallback,
         MarkerColor::Color(color) => *color,
     }
-}
-
-enum ScatterInput {
-    Host(Tensor),
-    Gpu(GpuTensorHandle),
-}
-
-impl ScatterInput {
-    fn from_value(value: Value) -> BuiltinResult<Self> {
-        match value {
-            Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
-            other => {
-                let tensor =
-                    Tensor::try_from(&other).map_err(|e| scatter_err(format!("scatter: {e}")))?;
-                Ok(Self::Host(tensor))
-            }
-        }
-    }
-
-    fn gpu_handle(&self) -> Option<&GpuTensorHandle> {
-        match self {
-            Self::Gpu(handle) => Some(handle),
-            Self::Host(_) => None,
-        }
-    }
-
-    fn len(&self) -> usize {
-        match self {
-            Self::Host(tensor) => tensor.data.len(),
-            Self::Gpu(handle) => handle.shape.iter().product(),
-        }
-    }
-
-    fn into_tensor(self, name: &'static str) -> BuiltinResult<Tensor> {
-        match self {
-            Self::Host(tensor) => Ok(tensor),
-            Self::Gpu(handle) => gather_tensor_from_gpu(handle, name),
-        }
-    }
-}
-
-async fn gather_tensor_from_gpu_async(
-    handle: GpuTensorHandle,
-    name: &'static str,
-) -> BuiltinResult<Tensor> {
-    let value = Value::GpuTensor(handle);
-    let gathered = gather_if_needed_async(&value)
-        .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, name))?;
-    Tensor::try_from(&gathered).map_err(|e| scatter_err(format!("{name}: {e}")))
-}
-
-fn gather_tensor_from_gpu(handle: GpuTensorHandle, name: &'static str) -> BuiltinResult<Tensor> {
-    block_on(gather_tensor_from_gpu_async(handle, name))
 }
 
 fn build_scatter_gpu_plot(

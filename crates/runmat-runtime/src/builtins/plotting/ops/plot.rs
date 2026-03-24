@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
 };
 
 use super::common::numeric_pair;
+use super::op_common::line_inputs::NumericInput;
 use super::plotting_error;
 use super::state::{
     current_axes_state, current_hold_enabled, next_line_style_for_axes, render_active_plot,
@@ -119,12 +120,12 @@ pub async fn plot_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
         } = plan;
 
         let x_kind = match &data.x {
-            LineInput::Host(_) => "Host",
-            LineInput::Gpu(_) => "Gpu",
+            NumericInput::Host(_) => "Host",
+            NumericInput::Gpu(_) => "Gpu",
         };
         let y_kind = match &data.y {
-            LineInput::Host(_) => "Host",
-            LineInput::Gpu(_) => "Gpu",
+            NumericInput::Host(_) => "Host",
+            NumericInput::Gpu(_) => "Gpu",
         };
         let gpu_pair = data.gpu_handles().map(|(x, y)| {
             format!(
@@ -198,32 +199,6 @@ fn build_line_plot(
         );
     apply_marker_metadata(&mut plot, appearance, point_count);
     Ok(plot)
-}
-
-#[derive(Debug)]
-enum LineInput {
-    Host(Tensor),
-    Gpu(GpuTensorHandle),
-}
-
-impl LineInput {
-    fn from_value(value: Value) -> BuiltinResult<Self> {
-        match value {
-            Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
-            other => {
-                let tensor = Tensor::try_from(&other)
-                    .map_err(|e| plotting_error(BUILTIN_NAME, format!("plot: {e}")))?;
-                Ok(Self::Host(tensor))
-            }
-        }
-    }
-
-    fn gpu_handle(&self) -> Option<&GpuTensorHandle> {
-        match self {
-            Self::Gpu(handle) => Some(handle),
-            Self::Host(_) => None,
-        }
-    }
 }
 
 fn parse_series_specs(
@@ -507,8 +482,8 @@ async fn build_line_gpu_plot_async(
 
 #[derive(Debug)]
 struct PlotSeriesInput {
-    x: LineInput,
-    y: LineInput,
+    x: NumericInput,
+    y: NumericInput,
 }
 
 #[derive(Debug)]
@@ -524,8 +499,8 @@ struct SeriesRenderPlan {
 impl PlotSeriesInput {
     fn new(x: Value, y: Value) -> BuiltinResult<Self> {
         Ok(Self {
-            x: LineInput::from_value(x)?,
-            y: LineInput::from_value(y)?,
+            x: NumericInput::from_value(x, BUILTIN_NAME)?,
+            y: NumericInput::from_value(y, BUILTIN_NAME)?,
         })
     }
 
@@ -537,14 +512,8 @@ impl PlotSeriesInput {
     }
 
     async fn into_tensors_async(self, name: &'static str) -> BuiltinResult<(Tensor, Tensor)> {
-        let x = match self.x {
-            LineInput::Host(t) => t,
-            LineInput::Gpu(h) => super::gpu_helpers::gather_tensor_from_gpu_async(h, name).await?,
-        };
-        let y = match self.y {
-            LineInput::Host(t) => t,
-            LineInput::Gpu(h) => super::gpu_helpers::gather_tensor_from_gpu_async(h, name).await?,
-        };
+        let x = self.x.into_tensor_async(name).await?;
+        let y = self.y.into_tensor_async(name).await?;
         Ok((x, y))
     }
 }
@@ -664,7 +633,9 @@ pub(crate) mod tests {
             Value::String("linewidth".into()),
         ];
         let err = parse_series_specs(args).unwrap_err();
-        assert!(err.to_string().contains("name-value arguments must come in pairs"));
+        assert!(err
+            .to_string()
+            .contains("name-value arguments must come in pairs"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

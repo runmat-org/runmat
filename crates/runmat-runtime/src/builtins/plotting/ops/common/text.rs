@@ -1,12 +1,12 @@
 use runmat_builtins::Value;
 use runmat_plot::plots::{LegendStyle, TextStyle};
 
-use super::properties::{parse_text_style_pairs, split_legend_style_pairs};
-use super::state::{
+use crate::builtins::plotting::properties::{parse_text_style_pairs, split_legend_style_pairs};
+use crate::builtins::plotting::state::{
     axes_handle_exists, current_axes_state, decode_axes_handle, FigureError, FigureHandle,
 };
-use super::style::value_as_string;
-use super::{plotting_error, plotting_error_with_source};
+use crate::builtins::plotting::style::value_as_string;
+use crate::builtins::plotting::{plotting_error, plotting_error_with_source};
 use crate::BuiltinResult;
 
 #[derive(Clone, Debug)]
@@ -69,7 +69,9 @@ pub fn parse_text_command(builtin: &'static str, args: &[Value]) -> BuiltinResul
     let text = value_as_text_string(&rest[0]).ok_or_else(|| {
         plotting_error(
             builtin,
-            format!("{builtin}: expected text as char array, string, string array, or cell array of strings"),
+            format!(
+                "{builtin}: expected text as char array, string, string array, or cell array of strings"
+            ),
         )
     })?;
     let style = parse_text_style_pairs(builtin, &rest[1..])?;
@@ -102,7 +104,7 @@ pub fn parse_legend_command(builtin: &'static str, args: &[Value]) -> BuiltinRes
                         enabled: true,
                         labels: None,
                         style,
-                    })
+                    });
                 }
                 "off" | "hide" => {
                     return Ok(LegendCommand {
@@ -110,7 +112,7 @@ pub fn parse_legend_command(builtin: &'static str, args: &[Value]) -> BuiltinRes
                         enabled: false,
                         labels: None,
                         style,
-                    })
+                    });
                 }
                 "boxon" => {
                     let mut style = style;

@@ -93,13 +93,6 @@ pub async fn gather_tensor_from_gpu_async(
     Tensor::try_from(&gathered).map_err(|e| plotting_error(name, format!("{name}: {e}")))
 }
 
-pub fn gather_tensor_from_gpu(
-    handle: GpuTensorHandle,
-    name: &'static str,
-) -> BuiltinResult<Tensor> {
-    block_on(gather_tensor_from_gpu_async(handle, name))
-}
-
 /// Convert a runtime value (potentially GPU-resident) into a concrete scalar.
 pub async fn value_to_scalar_async(mut value: Value, context: &'static str) -> BuiltinResult<f64> {
     if value_contains_gpu(&value) {

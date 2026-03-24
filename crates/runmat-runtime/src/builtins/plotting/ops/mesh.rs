@@ -1,7 +1,9 @@
 //! MATLAB-compatible `mesh` builtin.
 
 use log::warn;
-use runmat_builtins::{Tensor, Value};
+#[cfg(test)]
+use runmat_builtins::Tensor;
+use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
 
@@ -10,11 +12,13 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 
-use super::common::{numeric_vector, tensor_to_surface_grid, SurfaceDataInput};
+use super::common::{tensor_to_surface_grid, SurfaceDataInput};
+use super::op_common::surface_inputs::{
+    axis_sources_from_xy_values, axis_sources_to_host, AxisSource,
+};
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
-use super::surf::{extract_meshgrid_axes_from_xy_matrices, is_vector_like_shape, AxisSource};
 use crate::builtins::plotting::type_resolvers::string_type;
 use crate::BuiltinResult;
 use std::sync::Arc;
@@ -71,47 +75,7 @@ pub async fn mesh_builtin(
 
     // Match surf semantics: keep vector-like gpuArray axes on-device when possible; otherwise
     // gather to validate meshgrid matrix inputs and extract axis vectors.
-    let (x_axis, y_axis) = match (x, y) {
-        (Value::GpuTensor(xh), Value::GpuTensor(yh))
-            if is_vector_like_shape(&xh.shape) && is_vector_like_shape(&yh.shape) =>
-        {
-            (AxisSource::Gpu(xh), AxisSource::Gpu(yh))
-        }
-        (x_val, y_val) => {
-            let x_tensor = match x_val {
-                Value::GpuTensor(handle) => {
-                    super::common::gather_tensor_from_gpu_async(handle, BUILTIN_NAME).await?
-                }
-                other => Tensor::try_from(&other)
-                    .map_err(|e| plotting_error(BUILTIN_NAME, format!("mesh: {e}")))?,
-            };
-            let y_tensor = match y_val {
-                Value::GpuTensor(handle) => {
-                    super::common::gather_tensor_from_gpu_async(handle, BUILTIN_NAME).await?
-                }
-                other => Tensor::try_from(&other)
-                    .map_err(|e| plotting_error(BUILTIN_NAME, format!("mesh: {e}")))?,
-            };
-
-            if x_tensor.data.is_empty() || y_tensor.data.is_empty() {
-                return Err(plotting_error(
-                    BUILTIN_NAME,
-                    "mesh: axis vectors must be non-empty",
-                ));
-            }
-
-            if x_tensor.rows == 1 || x_tensor.cols == 1 {
-                (
-                    AxisSource::Host(numeric_vector(x_tensor)),
-                    AxisSource::Host(numeric_vector(y_tensor)),
-                )
-            } else {
-                let (x_vec, y_vec) =
-                    extract_meshgrid_axes_from_xy_matrices(&x_tensor, &y_tensor, rows, cols)?;
-                (AxisSource::Host(x_vec), AxisSource::Host(y_vec))
-            }
-        }
-    };
+    let (x_axis, y_axis) = axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME).await?;
 
     let style = Arc::new(parse_surface_style_args(
         "mesh",
@@ -183,20 +147,7 @@ async fn build_mesh_cpu(
     x_axis: &AxisSource,
     y_axis: &AxisSource,
 ) -> BuiltinResult<SurfacePlot> {
-    let x_host = match x_axis {
-        AxisSource::Host(v) => v.clone(),
-        AxisSource::Gpu(h) => {
-            let t = super::common::gather_tensor_from_gpu_async(h.clone(), BUILTIN_NAME).await?;
-            numeric_vector(t)
-        }
-    };
-    let y_host = match y_axis {
-        AxisSource::Host(v) => v.clone(),
-        AxisSource::Gpu(h) => {
-            let t = super::common::gather_tensor_from_gpu_async(h.clone(), BUILTIN_NAME).await?;
-            numeric_vector(t)
-        }
-    };
+    let (x_host, y_host) = axis_sources_to_host(x_axis, y_axis, BUILTIN_NAME).await?;
     let z_tensor = match z_input {
         SurfaceDataInput::Host(t) => t.clone(),
         SurfaceDataInput::Gpu(h) => {
