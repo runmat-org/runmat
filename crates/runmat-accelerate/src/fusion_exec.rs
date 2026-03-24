@@ -956,7 +956,7 @@ pub async fn execute_matmul_epilogue(request: FusionExecutionRequest<'_>) -> Res
                             }
                         }
                     }
-                    crate::graph::PrimitiveOp::Div | crate::graph::PrimitiveOp::ElemDiv => {
+                    crate::graph::PrimitiveOp::RightDiv | crate::graph::PrimitiveOp::ElemDiv => {
                         if let Some(val) = const_f64 {
                             if val != 0.0 {
                                 alpha *= 1.0 / val;

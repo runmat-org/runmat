@@ -56,7 +56,7 @@ fn stats_centered_gram_pattern() {
     assert!(count_primitives(&graph, PrimitiveOp::Sub) >= 1);
     assert!(count_primitives(&graph, PrimitiveOp::Transpose) >= 1);
     assert!(count_primitives(&graph, PrimitiveOp::Mul) >= 1);
-    assert!(count_primitives(&graph, PrimitiveOp::Div) >= 1);
+    assert!(count_primitives(&graph, PrimitiveOp::RightDiv) >= 1);
     assert!(has_builtin(&graph, "diag"));
 }
 
@@ -168,7 +168,7 @@ fn monte_carlo_factor_risk_pattern() {
     assert!(count_primitives(&graph, PrimitiveOp::Sub) >= 1);
     assert!(count_primitives(&graph, PrimitiveOp::Transpose) >= 1);
     assert!(count_primitives(&graph, PrimitiveOp::Mul) >= 2);
-    assert!(count_primitives(&graph, PrimitiveOp::Div) >= 1);
+    assert!(count_primitives(&graph, PrimitiveOp::RightDiv) >= 1);
     assert!(has_builtin(&graph, "diag"));
 }
 

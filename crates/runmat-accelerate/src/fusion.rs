@@ -228,7 +228,7 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
                     | AccelNodeLabel::Primitive(PrimitiveOp::Sub)
                     | AccelNodeLabel::Primitive(PrimitiveOp::Mul)
                     | AccelNodeLabel::Primitive(PrimitiveOp::ElemMul)
-                    | AccelNodeLabel::Primitive(PrimitiveOp::Div)
+                    | AccelNodeLabel::Primitive(PrimitiveOp::RightDiv)
                     | AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv)
             );
             if !allowed {
@@ -1089,7 +1089,7 @@ impl FusionGroupPlan {
                         match &node.label {
                             AccelNodeLabel::Primitive(PrimitiveOp::Mul)
                             | AccelNodeLabel::Primitive(PrimitiveOp::ElemMul)
-                            | AccelNodeLabel::Primitive(PrimitiveOp::Div)
+                            | AccelNodeLabel::Primitive(PrimitiveOp::RightDiv)
                             | AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv)
                             | AccelNodeLabel::Primitive(PrimitiveOp::ElemLeftDiv)
                             | AccelNodeLabel::Primitive(PrimitiveOp::Add)
@@ -1819,7 +1819,7 @@ fn detect_centered_gram(
             AccelNodeLabel::Primitive(op) => op,
             _ => continue,
         };
-        if div_op != PrimitiveOp::Div && div_op != PrimitiveOp::ElemDiv {
+        if div_op != PrimitiveOp::RightDiv && div_op != PrimitiveOp::ElemDiv {
             continue;
         }
         if div_node.inputs.len() != 2 {
@@ -2094,7 +2094,7 @@ fn detect_power_step_normalize(
             AccelNodeLabel::Primitive(op) => op,
             _ => continue,
         };
-        if div_op != PrimitiveOp::Div && div_op != PrimitiveOp::ElemDiv {
+        if div_op != PrimitiveOp::RightDiv && div_op != PrimitiveOp::ElemDiv {
             continue;
         }
         if div_node.inputs.len() != 2 {
@@ -2599,7 +2599,7 @@ fn primitive_expr(
             let (lhs, rhs) = binary(exprs)?;
             Some(format!("({lhs} * {rhs})"))
         }
-        PrimitiveOp::Div | PrimitiveOp::ElemDiv | PrimitiveOp::ElemLeftDiv => {
+        PrimitiveOp::RightDiv | PrimitiveOp::ElemDiv | PrimitiveOp::ElemLeftDiv => {
             let (lhs, rhs) = binary(exprs)?;
             Some(format!("({lhs} / {rhs})"))
         }
@@ -3003,7 +3003,7 @@ fn analyze_image_normalize(
     }
     match div_node.label {
         AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv)
-        | AccelNodeLabel::Primitive(PrimitiveOp::Div) => {}
+        | AccelNodeLabel::Primitive(PrimitiveOp::RightDiv) => {}
         _ => img_norm_fail!("not div primitive"),
     }
     if div_node.inputs.len() != 2 {
