@@ -1,7 +1,7 @@
 ---
 title: "Durable Project State: Introducing RunMat Cloud"
 description: "RunMat launched last August as a CLI. In November we added GPU acceleration with Accelerate. Now the sandbox puts the full runtime in your browser, and RunMat Cloud makes it persistent: projects, run history, version snapshots, and collaboration."
-date: "2026-03-10"
+date: "2026-03-25"
 authors:
   - name: "Nabeel Allana"
     url: "https://x.com/nabeelallana"
@@ -44,8 +44,8 @@ jsonLd:
       alternativeHeadline: "GPU-Accelerated Math in Your Browser, Now with Persistent Projects"
       description: "RunMat launched as a CLI last August. Accelerate added GPU acceleration in November. Now the sandbox runs in your browser, and RunMat Cloud turns each run into durable project state: run history, version snapshots, and collaboration."
       image: "https://web.runmatstatic.com/blog-images/introducing-runmat-cloud.png"
-      datePublished: "2026-03-10T00:00:00Z"
-      dateModified: "2026-03-10T00:00:00Z"
+      datePublished: "2026-03-25T00:00:00Z"
+      dateModified: "2026-03-25T00:00:00Z"
       author:
         "@type": "Person"
         name: "Nabeel Allana"
@@ -138,18 +138,11 @@ The hard part of serious numerical work is often not producing one result once. 
 
 RunMat Cloud is designed for that reality. You can point to a specific run, restore a project to any prior state, and let a dataset evolve without forcing a full rewrite every time it changes.
 
-<video
-  autoPlay
-  controls
-  loop
-  muted
-  playsInline
-  preload="metadata"
-  style={{ width: "100%", maxWidth: "520px", aspectRatio: "1 / 1", margin: "0 auto", display: "block" }}
->
-  <source src="https://web.runmatstatic.com/video/runmat-run-history.mp4" type="video/mp4" />
-  Your browser does not support the video tag.
-</video>
+<div className="flex justify-center my-6">
+  <video autoPlay controls loop muted playsInline preload="metadata" className="w-3/4 max-w-[540px] rounded-lg aspect-square">
+    <source src="https://web.runmatstatic.com/video/runmat-run-history.mp4" type="video/mp4" />
+  </video>
+</div>
 
 
 
@@ -220,18 +213,11 @@ A useful history system for this kind of work has to preserve the project as a w
 
 Snapshots, historical runs, and shared access are what make this practical — the project state is preserved, browseable, and available to the whole team. If your team does not use git today, this is [version control designed for how engineers actually work](/blog/version-control-for-engineers-who-dont-use-git).
 
-<video
-  autoPlay
-  controls
-  loop
-  muted
-  playsInline
-  preload="metadata"
-  style={{ width: "100%", maxWidth: "520px", aspectRatio: "1 / 1", margin: "0 auto", display: "block" }}
->
-  <source src="https://web.runmatstatic.com/video/runmat-versioning.mp4" type="video/mp4" />
-  Your browser does not support the video tag.
-</video>
+<div className="flex justify-center my-6">
+  <video autoPlay controls loop muted playsInline preload="metadata" className="w-3/4 max-w-[540px] rounded-lg aspect-square">
+    <source src="https://web.runmatstatic.com/video/runmat-versioning.mp4" type="video/mp4" />
+  </video>
+</div>
 
 ## What else shipped into the sandbox and cloud
 
