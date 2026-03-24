@@ -3,7 +3,38 @@ use runmat_macros::runtime_builtin;
 
 use super::plot::plot_builtin;
 use super::state::{current_axes_state, set_log_modes_for_axes};
+use crate::builtins::common::spec::{
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ReductionNaN, ResidencyPolicy, ShapeRequirements,
+};
 use crate::builtins::plotting::type_resolvers::string_type;
+
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::semilogx")]
+pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
+    name: "semilogx",
+    op_kind: GpuOpKind::Custom("plot-render"),
+    supported_precisions: &[],
+    broadcast: BroadcastSemantics::None,
+    provider_hooks: &[],
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    residency: ResidencyPolicy::InheritInputs,
+    nan_mode: ReductionNaN::Include,
+    two_pass_threshold: None,
+    workgroup_size: None,
+    accepts_nan_mode: false,
+    notes: "semilogx is a plotting sink; GPU inputs may remain on device when a shared WGPU context is installed.",
+};
+
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::semilogx")]
+pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
+    name: "semilogx",
+    shape: ShapeRequirements::Any,
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    elementwise: None,
+    reduction: None,
+    emits_nan: false,
+    notes: "semilogx performs rendering and terminates fusion graphs.",
+};
 
 #[runtime_builtin(
     name = "semilogx",
