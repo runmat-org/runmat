@@ -67,10 +67,11 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     type_resolver(string_type),
     builtin_path = "crate::builtins::plotting::bar"
 )]
-pub async fn bar_builtin(values: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
+pub async fn bar_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
+    let (x_values, values, rest) = parse_bar_call_args(args)?;
     let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
     let style = parse_bar_style_args("bar", &rest, defaults)?;
-    let mut input = Some(BarInput::from_value(values)?);
+    let mut input = Some(BarInput::from_value(x_values, values)?);
     let opts = PlotRenderOptions {
         title: "Bar Chart",
         x_label: "Category",
@@ -99,8 +100,8 @@ pub async fn bar_builtin(values: Value, rest: Vec<Value>) -> crate::BuiltinResul
                 }
             }
         }
-        let tensor = arg.into_tensor("bar")?;
-        let charts = build_bar_series_from_tensor(tensor, &style)?;
+        let (x_tensor, tensor) = arg.into_tensors("bar")?;
+        let charts = build_bar_series_from_tensor(x_tensor, tensor, &style)?;
         let total = charts.len();
         for (idx, mut bar) in charts.into_iter().enumerate() {
             let default_label = default_series_label(idx, total);
@@ -133,14 +134,36 @@ fn default_bar_color() -> Vec4 {
     Vec4::new(0.2, 0.6, 0.9, 0.95)
 }
 
-fn build_bar_chart(values: Vec<f64>) -> BuiltinResult<BarChart> {
+fn parse_bar_call_args(args: Vec<Value>) -> BuiltinResult<(Option<Value>, Value, Vec<Value>)> {
+    if args.is_empty() {
+        return Err(bar_err("bar: expected at least one input"));
+    }
+    let mut it = args.into_iter();
+    let first = it.next().expect("first");
+    let Some(second) = it.next() else {
+        return Ok((None, first, Vec::new()));
+    };
+    if matches!(second, Value::String(_) | Value::CharArray(_)) {
+        let mut rest = vec![second];
+        rest.extend(it);
+        return Ok((None, first, rest));
+    }
+    let rest: Vec<Value> = it.collect();
+    Ok((Some(first), second, rest))
+}
+
+fn build_bar_chart_with_x(x_tensor: Option<Tensor>, values: Vec<f64>) -> BuiltinResult<BarChart> {
     if values.is_empty() {
         return Err(bar_err("bar: input cannot be empty"));
     }
-    let labels: Vec<String> = (1..=values.len()).map(|idx| format!("{idx}")).collect();
-
-    let bar = BarChart::new(labels, values).map_err(|err| bar_err(format!("bar: {err}")))?;
-    Ok(bar)
+    let labels: Vec<String> = match x_tensor {
+        Some(x) => numeric_vector(x)
+            .into_iter()
+            .map(|v| format_number_label(v))
+            .collect(),
+        None => (1..=values.len()).map(|idx| format!("{idx}")).collect(),
+    };
+    BarChart::new(labels, values).map_err(|err| bar_err(format!("bar: {err}")))
 }
 
 fn build_bar_gpu_series(
@@ -351,17 +374,23 @@ fn build_stacked_bar_gpu_bounds(
 }
 
 enum BarInput {
-    Host(Tensor),
+    Host { x: Option<Tensor>, y: Tensor },
     Gpu(GpuTensorHandle),
 }
 
 impl BarInput {
-    fn from_value(value: Value) -> BuiltinResult<Self> {
-        match value {
-            Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
-            other => {
-                let tensor = Tensor::try_from(&other).map_err(|e| bar_err(format!("bar: {e}")))?;
-                Ok(Self::Host(tensor))
+    fn from_value(x: Option<Value>, value: Value) -> BuiltinResult<Self> {
+        match (x, value) {
+            (None, Value::GpuTensor(handle)) => Ok(Self::Gpu(handle)),
+            (x, other) => {
+                let y = Tensor::try_from(&other).map_err(|e| bar_err(format!("bar: {e}")))?;
+                let x = match x {
+                    Some(value) => {
+                        Some(Tensor::try_from(&value).map_err(|e| bar_err(format!("bar: {e}")))?)
+                    }
+                    None => None,
+                };
+                Ok(Self::Host { x, y })
             }
         }
     }
@@ -369,14 +398,14 @@ impl BarInput {
     fn gpu_handle(&self) -> Option<&GpuTensorHandle> {
         match self {
             Self::Gpu(handle) => Some(handle),
-            Self::Host(_) => None,
+            Self::Host { .. } => None,
         }
     }
 
-    fn into_tensor(self, context: &'static str) -> BuiltinResult<Tensor> {
+    fn into_tensors(self, context: &'static str) -> BuiltinResult<(Option<Tensor>, Tensor)> {
         match self {
-            Self::Host(tensor) => Ok(tensor),
-            Self::Gpu(handle) => gather_tensor_from_gpu(handle, context),
+            Self::Host { x, y } => Ok((x, y)),
+            Self::Gpu(handle) => Ok((None, gather_tensor_from_gpu(handle, context)?)),
         }
     }
 }
@@ -479,24 +508,35 @@ fn tensor_to_bar_input(tensor: Tensor) -> BuiltinResult<BarTensorInput> {
     }))
 }
 
-fn build_bar_series_from_tensor(tensor: Tensor, style: &BarStyle) -> BuiltinResult<Vec<BarChart>> {
+fn build_bar_series_from_tensor(
+    x_tensor: Option<Tensor>,
+    tensor: Tensor,
+    style: &BarStyle,
+) -> BuiltinResult<Vec<BarChart>> {
     match tensor_to_bar_input(tensor)? {
         BarTensorInput::Vector(values) => {
-            let bar = build_bar_chart(values)?;
+            let bar = build_bar_chart_with_x(x_tensor, values)?;
             Ok(vec![bar])
         }
-        BarTensorInput::Matrix(matrix) => build_bar_series_from_matrix(matrix, style),
+        BarTensorInput::Matrix(matrix) => build_bar_series_from_matrix(x_tensor, matrix, style),
     }
 }
 
 fn build_bar_series_from_matrix(
+    x_tensor: Option<Tensor>,
     matrix: BarMatrixData,
     style: &BarStyle,
 ) -> BuiltinResult<Vec<BarChart>> {
     if matrix.cols == 0 {
         return Err(bar_err("bar: input cannot be empty"));
     }
-    let labels: Vec<String> = (1..=matrix.rows).map(|idx| format!("{idx}")).collect();
+    let labels: Vec<String> = match x_tensor {
+        Some(x) => numeric_vector(x)
+            .into_iter()
+            .map(|v| format_number_label(v))
+            .collect(),
+        None => (1..=matrix.rows).map(|idx| format!("{idx}")).collect(),
+    };
     let mut charts = Vec::with_capacity(matrix.cols);
     let mut pos_offsets = vec![0.0f64; matrix.rows];
     let mut neg_offsets = vec![0.0f64; matrix.rows];
@@ -516,6 +556,14 @@ fn build_bar_series_from_matrix(
         charts.push(chart);
     }
     Ok(charts)
+}
+
+fn format_number_label(value: f64) -> String {
+    if value.fract() == 0.0 {
+        format!("{}", value as i64)
+    } else {
+        format!("{value}")
+    }
 }
 
 fn compute_stack_offsets(
@@ -552,8 +600,8 @@ pub(crate) mod tests {
         ensure_plot_test_env();
     }
 
-    fn bar_builtin(values: Value, rest: Vec<Value>) -> BuiltinResult<String> {
-        block_on(super::bar_builtin(values, rest))
+    fn bar_builtin(args: Vec<Value>) -> BuiltinResult<String> {
+        block_on(super::bar_builtin(args))
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
@@ -580,14 +628,14 @@ pub(crate) mod tests {
     #[test]
     fn bar_requires_non_empty_input() {
         setup_plot_tests();
-        assert!(build_bar_chart(vec![]).is_err());
+        assert!(build_bar_chart_with_x(None, vec![]).is_err());
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn bar_builtin_matches_backend_contract() {
         setup_plot_tests();
-        let out = bar_builtin(Value::Tensor(tensor_from(&[1.0, 2.0, 3.0])), Vec::new());
+        let out = bar_builtin(vec![Value::Tensor(tensor_from(&[1.0, 2.0, 3.0]))]);
         if let Err(err) = out {
             let msg_lower = err.to_string().to_lowercase();
             assert!(
@@ -615,7 +663,7 @@ pub(crate) mod tests {
         let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
         let tensor = matrix_tensor(&[1.0, 2.0, 3.0, 4.0], 2, 2);
         let style = parse_bar_style_args("bar", &[], defaults).unwrap();
-        let charts = build_bar_series_from_tensor(tensor, &style).unwrap();
+        let charts = build_bar_series_from_tensor(None, tensor, &style).unwrap();
         assert_eq!(charts.len(), 2);
     }
 
@@ -627,8 +675,24 @@ pub(crate) mod tests {
         let style =
             parse_bar_style_args("bar", &[Value::String("stacked".into())], defaults).unwrap();
         let tensor = matrix_tensor(&[1.0, -2.0, 3.0, 4.0], 2, 2);
-        let charts = build_bar_series_from_tensor(tensor, &style).unwrap();
+        let charts = build_bar_series_from_tensor(None, tensor, &style).unwrap();
         assert_eq!(charts.len(), 2);
+    }
+
+    #[test]
+    fn bar_supports_explicit_x_values() {
+        setup_plot_tests();
+        let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
+        let style = parse_bar_style_args("bar", &[], defaults).unwrap();
+        let charts = build_bar_series_from_tensor(
+            Some(tensor_from(&[10.0, 20.0])),
+            tensor_from(&[1.0, 2.0]),
+            &style,
+        )
+        .unwrap();
+        assert_eq!(charts.len(), 1);
+        assert_eq!(charts[0].labels[0], "10");
+        assert_eq!(charts[0].labels[1], "20");
     }
 
     #[test]

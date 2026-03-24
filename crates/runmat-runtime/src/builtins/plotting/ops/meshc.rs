@@ -1,19 +1,23 @@
 //! MATLAB-compatible `meshc` builtin (mesh with contour).
 
 use log::warn;
-use runmat_builtins::{Tensor, Value};
+#[cfg(test)]
+use runmat_builtins::Tensor;
+use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode};
 
-use super::common::{numeric_vector, tensor_to_surface_grid, SurfaceDataInput};
+use super::common::{tensor_to_surface_grid, SurfaceDataInput};
 use super::contour::{build_contour_plot, default_level_count, ContourLevelSpec, ContourLineColor};
 use super::mesh::build_mesh_surface;
-use super::op_common::surface_composite::contour_for_surface_input;
-use super::op_common::surface_inputs::parse_surface_call_args;
+use super::op_common::surface_composite::contour_for_surface_axes_input;
+use super::op_common::surface_inputs::{
+    axis_sources_from_xy_values, axis_sources_to_host, parse_surface_call_args,
+};
 use super::state::{render_active_plot, PlotRenderOptions};
 
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
-use super::surf::build_surface_gpu_plot;
+use super::surf::build_surface_gpu_plot_with_bounds_async;
 use crate::builtins::plotting::type_resolvers::string_type;
 use std::sync::Arc;
 
@@ -31,15 +35,9 @@ const BUILTIN_NAME: &str = "meshc";
 )]
 pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     let (x, y, z, rest) = parse_surface_call_args(args, BUILTIN_NAME)?;
-    let x_axis = numeric_vector(
-        Tensor::try_from(&x)
-            .map_err(|e| super::plotting_error(BUILTIN_NAME, format!("meshc: {e}")))?,
-    );
-    let y_axis = numeric_vector(
-        Tensor::try_from(&y)
-            .map_err(|e| super::plotting_error(BUILTIN_NAME, format!("meshc: {e}")))?,
-    );
     let z_input = SurfaceDataInput::from_value(z, "meshc")?;
+    let (rows, cols) = z_input.grid_shape(BUILTIN_NAME)?;
+    let (x_axis, y_axis) = axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME).await?;
     let style = Arc::new(parse_surface_style_args(
         "meshc",
         &rest,
@@ -62,47 +60,76 @@ pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     let level_spec = ContourLevelSpec::Count(default_level_count());
     let contour_map = style.colormap;
     let (mut surface, contour) = if let Some(z_gpu) = z_input.gpu_handle().cloned() {
-        match build_surface_gpu_plot(
-            BUILTIN_NAME,
-            &x_axis,
-            &y_axis,
-            &z_gpu,
-            style.colormap,
-            style.alpha,
-            style.flatten_z,
-        )
-        .await
-        {
-            Ok(surface_gpu) => {
-                let mut surface = surface_gpu.with_wireframe(true);
-                style.apply_to_plot(&mut surface);
-                let base_z = surface.bounds().min.z;
-                let contour = contour_for_surface_input(
-                    BUILTIN_NAME,
-                    &x_axis,
-                    &y_axis,
-                    &z_input,
-                    Some(z_gpu),
-                    contour_map,
-                    base_z,
-                    &level_spec,
-                )
-                .await?;
-                (surface, contour)
-            }
+        match super::gpu_helpers::axis_bounds_async(&z_gpu, BUILTIN_NAME).await {
+            Ok((min_z, max_z)) => match build_surface_gpu_plot_with_bounds_async(
+                BUILTIN_NAME,
+                &x_axis,
+                &y_axis,
+                &z_gpu,
+                min_z,
+                max_z,
+                style.colormap,
+                style.alpha,
+                style.flatten_z,
+            )
+            .await
+            {
+                Ok(surface_gpu) => {
+                    let mut surface = surface_gpu.with_wireframe(true);
+                    style.apply_to_plot(&mut surface);
+                    let base_z = surface.bounds().min.z;
+                    let contour = contour_for_surface_axes_input(
+                        BUILTIN_NAME,
+                        &x_axis,
+                        &y_axis,
+                        &z_input,
+                        Some(z_gpu),
+                        contour_map,
+                        base_z,
+                        &level_spec,
+                    )
+                    .await?;
+                    (surface, contour)
+                }
+                Err(err) => {
+                    warn!("meshc surface GPU path unavailable: {err}");
+                    let (x_host, y_host) =
+                        axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
+                    let z_tensor =
+                        super::common::gather_tensor_from_gpu_async(z_gpu, BUILTIN_NAME).await?;
+                    let grid =
+                        tensor_to_surface_grid(z_tensor, x_host.len(), y_host.len(), BUILTIN_NAME)?;
+                    let mut surface =
+                        build_mesh_surface(x_host.clone(), y_host.clone(), grid.clone())?;
+                    style.apply_to_plot(&mut surface);
+                    let base_z = surface.bounds().min.z;
+                    let contour = build_contour_plot(
+                        BUILTIN_NAME,
+                        &x_host,
+                        &y_host,
+                        &grid,
+                        contour_map,
+                        base_z,
+                        &level_spec,
+                        &ContourLineColor::Auto,
+                    )?;
+                    (surface, contour)
+                }
+            },
             Err(err) => {
-                warn!("meshc surface GPU path unavailable: {err}");
+                warn!("meshc GPU bounds unavailable: {err}");
+                let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
                 let z_tensor =
                     super::common::gather_tensor_from_gpu_async(z_gpu, BUILTIN_NAME).await?;
                 let grid =
-                    tensor_to_surface_grid(z_tensor, x_axis.len(), y_axis.len(), BUILTIN_NAME)?;
-                let mut surface = build_mesh_surface(x_axis.clone(), y_axis.clone(), grid.clone())?;
+                    tensor_to_surface_grid(z_tensor, x_host.len(), y_host.len(), BUILTIN_NAME)?;
+                let mut surface = build_mesh_surface(x_host.clone(), y_host.clone(), grid.clone())?;
                 style.apply_to_plot(&mut surface);
                 let base_z = surface.bounds().min.z;
                 let contour = build_contour_plot(
                     BUILTIN_NAME,
-                    &x_axis,
-                    &y_axis,
+                    &x_host,
+                    &y_host,
                     &grid,
                     contour_map,
                     base_z,
@@ -113,19 +140,20 @@ pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
             }
         }
     } else {
+        let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
         let grid = tensor_to_surface_grid(
             z_input.into_tensor(BUILTIN_NAME)?,
-            x_axis.len(),
-            y_axis.len(),
+            x_host.len(),
+            y_host.len(),
             BUILTIN_NAME,
         )?;
-        let mut surface = build_mesh_surface(x_axis.clone(), y_axis.clone(), grid.clone())?;
+        let mut surface = build_mesh_surface(x_host.clone(), y_host.clone(), grid.clone())?;
         style.apply_to_plot(&mut surface);
         let base_z = surface.bounds().min.z;
         let contour = build_contour_plot(
             BUILTIN_NAME,
-            &x_axis,
-            &y_axis,
+            &x_host,
+            &y_host,
             &grid,
             contour_map,
             base_z,

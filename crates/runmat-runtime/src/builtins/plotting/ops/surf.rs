@@ -179,30 +179,6 @@ pub(crate) fn build_surface(
     Ok(surface)
 }
 
-pub(crate) async fn build_surface_gpu_plot(
-    name: &'static str,
-    x_axis: &[f64],
-    y_axis: &[f64],
-    z: &GpuTensorHandle,
-    colormap: ColorMap,
-    alpha: f32,
-    flatten_z: bool,
-) -> BuiltinResult<SurfacePlot> {
-    let (min_z, max_z) = super::gpu_helpers::axis_bounds_async(z, name).await?;
-    build_surface_gpu_plot_with_bounds_async(
-        name,
-        &AxisSource::Host(x_axis.to_vec()),
-        &AxisSource::Host(y_axis.to_vec()),
-        z,
-        min_z,
-        max_z,
-        colormap,
-        alpha,
-        flatten_z,
-    )
-    .await
-}
-
 pub(crate) async fn build_surface_gpu_plot_with_bounds_async(
     name: &'static str,
     x_axis: &AxisSource,

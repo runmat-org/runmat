@@ -6,6 +6,7 @@ use crate::builtins::plotting::common::{
 use crate::builtins::plotting::contour::{
     build_contour_gpu_plot, build_contour_plot, ContourLevelSpec, ContourLineColor,
 };
+use crate::builtins::plotting::op_common::surface_inputs::{axis_sources_to_host, AxisSource};
 use crate::BuiltinResult;
 
 pub async fn contour_for_surface_input(
@@ -47,4 +48,28 @@ pub async fn contour_for_surface_input(
         level_spec,
         &ContourLineColor::Auto,
     )
+}
+
+pub async fn contour_for_surface_axes_input(
+    builtin: &'static str,
+    x_axis: &AxisSource,
+    y_axis: &AxisSource,
+    z_input: &SurfaceDataInput,
+    z_gpu: Option<runmat_accelerate_api::GpuTensorHandle>,
+    contour_map: runmat_plot::plots::ColorMap,
+    base_z: f32,
+    level_spec: &ContourLevelSpec,
+) -> BuiltinResult<ContourPlot> {
+    let (x_host, y_host) = axis_sources_to_host(x_axis, y_axis, builtin).await?;
+    contour_for_surface_input(
+        builtin,
+        &x_host,
+        &y_host,
+        z_input,
+        z_gpu,
+        contour_map,
+        base_z,
+        level_spec,
+    )
+    .await
 }
