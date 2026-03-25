@@ -6,7 +6,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 use super::common::gather_tensor_from_gpu_async;
 use super::op_common::value_as_text_string;
@@ -17,7 +17,7 @@ const BUILTIN_NAME: &str = "pie";
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::pie")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "pie",
-    op_kind: GpuOpKind::Custom("plot-render"),
+    op_kind: GpuOpKind::PlotRender,
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
@@ -48,10 +48,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "pie,plotting,chart",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::pie"
 )]
-pub async fn pie_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
+pub async fn pie_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (target_axes, args) = parse_axes_target(args)?;
     let (values, explode, labels) = parse_pie_args(args).await?;
     let mut chart = PieChart::new(values, None)
@@ -70,7 +70,10 @@ pub async fn pie_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
         }
     }
     let mut chart = Some(chart);
-    let rendered = render_active_plot(
+    let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
             title: "Pie Chart",
@@ -82,11 +85,23 @@ pub async fn pie_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
         },
         move |figure, axes| {
             let axes = target_axes.unwrap_or(axes);
-            figure.add_pie_chart_on_axes(chart.take().expect("pie consumed once"), axes);
+            let plot_index = figure.add_pie_chart_on_axes(chart.take().expect("pie consumed once"), axes);
+            *plot_index_slot.borrow_mut() = Some((axes, plot_index));
             Ok(())
         },
-    )?;
-    Ok(rendered)
+    );
+    let Some((axes, plot_index)) = *plot_index_out.borrow() else {
+        return render_result.map(|_| f64::NAN);
+    };
+    let handle = crate::builtins::plotting::state::register_pie_handle(figure_handle, axes, plot_index);
+    if let Err(err) = render_result {
+        let lower = err.to_string().to_lowercase();
+        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+            return Ok(handle);
+        }
+        return Err(err);
+    }
+    Ok(handle)
 }
 
 enum PieLabelsArg {

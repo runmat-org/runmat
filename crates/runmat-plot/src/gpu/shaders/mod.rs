@@ -1,10 +1,13 @@
+pub mod area;
 pub mod bar;
 pub mod contour;
 pub mod contour_fill;
 pub mod errorbar;
 pub mod histogram;
+pub mod image;
 pub mod line;
 pub mod line3;
+pub mod quiver;
 pub mod scatter2;
 pub mod scatter3;
 pub mod stairs;

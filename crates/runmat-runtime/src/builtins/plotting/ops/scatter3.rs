@@ -35,14 +35,14 @@ use super::point::{
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::LineStyleParseOptions;
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 const BUILTIN_NAME: &str = "scatter3";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::scatter3")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "scatter3",
-    op_kind: GpuOpKind::Custom("plot-render"),
+    op_kind: GpuOpKind::PlotRender,
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
@@ -74,7 +74,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "scatter3,plotting,3d,pointcloud",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::scatter3"
 )]
 pub async fn scatter3_builtin(
@@ -82,7 +82,7 @@ pub async fn scatter3_builtin(
     y: Value,
     z: Value,
     rest: Vec<Value>,
-) -> crate::BuiltinResult<String> {
+) -> crate::BuiltinResult<f64> {
     let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter3())?;
     let mut x_input = Some(ScatterInput::from_value(x, BUILTIN_NAME)?);
     let mut y_input = Some(ScatterInput::from_value(y, BUILTIN_NAME)?);
@@ -94,7 +94,10 @@ pub async fn scatter3_builtin(
         axis_equal: true,
         ..Default::default()
     };
-    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+    let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let style_args = style_args.clone();
         let point_count = x_input.as_ref().map(|input| input.len()).unwrap_or(0);
         let mut resolved_style = resolve_scatter3_style(point_count, &style_args, "scatter3")?;
@@ -108,7 +111,8 @@ pub async fn scatter3_builtin(
             if !resolved_style.requires_cpu {
                 match build_scatter3_gpu_plot(x_gpu, y_gpu, z_gpu, &resolved_style) {
                     Ok(plot) => {
-                        figure.add_scatter3_plot_on_axes(plot, axes);
+                        let plot_index = figure.add_scatter3_plot_on_axes(plot, axes);
+                        *plot_index_slot.borrow_mut() = Some((axes, plot_index));
                         return Ok(());
                     }
                     Err(err) => {
@@ -125,10 +129,22 @@ pub async fn scatter3_builtin(
         );
         let (x_vals, y_vals, z_vals) = numeric_triplet(x_tensor, y_tensor, z_tensor, "scatter3")?;
         let scatter = build_scatter3_plot(x_vals, y_vals, z_vals, &mut resolved_style)?;
-        figure.add_scatter3_plot_on_axes(scatter, axes);
+        let plot_index = figure.add_scatter3_plot_on_axes(scatter, axes);
+        *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())
-    })?;
-    Ok(rendered)
+    });
+    let Some((axes, plot_index)) = *plot_index_out.borrow() else {
+        return render_result.map(|_| f64::NAN);
+    };
+    let handle = crate::builtins::plotting::state::register_scatter3_handle(figure_handle, axes, plot_index);
+    if let Err(err) = render_result {
+        let lower = err.to_string().to_lowercase();
+        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+            return Ok(handle);
+        }
+        return Err(err);
+    }
+    Ok(handle)
 }
 
 const DEFAULT_POINT_SIZE: f32 = 6.0;
@@ -476,7 +492,7 @@ pub(crate) mod tests {
         ensure_plot_test_env();
     }
 
-    fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> BuiltinResult<String> {
+    fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> BuiltinResult<f64> {
         block_on(super::scatter3_builtin(x, y, z, rest))
     }
 
@@ -568,13 +584,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn scatter3_type_is_string() {
+    fn scatter3_type_is_numeric_handle() {
         assert_eq!(
-            string_type(
+            handle_scalar_type(
                 &[Type::tensor(), Type::tensor(), Type::tensor()],
                 &ResolveContext::new(Vec::new())
             ),
-            Type::String
+            Type::Num
         );
     }
 }

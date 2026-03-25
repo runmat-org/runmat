@@ -15,31 +15,19 @@ use crate::builtins::plotting::op_common::limits::limit_value;
 use crate::builtins::plotting::op_common::value_as_text_string;
 use crate::BuiltinResult;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum PlotHandle {
     Figure(FigureHandle),
     Axes(FigureHandle, usize),
     Text(FigureHandle, usize, PlotObjectKind),
     Legend(FigureHandle, usize),
-    Histogram(f64),
-    Stem(f64),
-    ErrorBar(f64),
-    Quiver(f64),
-    Image(f64),
-    Area(f64),
+    PlotChild(super::state::PlotChildHandleState),
 }
 
 pub fn resolve_plot_handle(value: &Value, builtin: &'static str) -> BuiltinResult<PlotHandle> {
     let scalar = handle_scalar(value, builtin)?;
     if let Ok(state) = super::state::plot_child_handle_snapshot(scalar) {
-        return Ok(match state {
-            super::state::PlotChildHandleState::Histogram(_) => PlotHandle::Histogram(scalar),
-            super::state::PlotChildHandleState::Stem(_) => PlotHandle::Stem(scalar),
-            super::state::PlotChildHandleState::ErrorBar(_) => PlotHandle::ErrorBar(scalar),
-            super::state::PlotChildHandleState::Quiver(_) => PlotHandle::Quiver(scalar),
-            super::state::PlotChildHandleState::Image(_) => PlotHandle::Image(scalar),
-            super::state::PlotChildHandleState::Area(_) => PlotHandle::Area(scalar),
-        });
+        return Ok(PlotHandle::PlotChild(state));
     }
     if let Ok((handle, axes_index, kind)) = decode_plot_object_handle(scalar) {
         if axes_handle_exists(handle, axes_index) {
@@ -84,12 +72,7 @@ pub fn get_properties(
             get_legend_property(handle, axes_index, property, builtin)
         }
         PlotHandle::Figure(handle) => get_figure_property(handle, property, builtin),
-        PlotHandle::Histogram(handle) => get_histogram_property(handle, property, builtin),
-        PlotHandle::Stem(handle) => get_stem_property(handle, property, builtin),
-        PlotHandle::ErrorBar(handle) => get_errorbar_property(handle, property, builtin),
-        PlotHandle::Quiver(handle) => get_quiver_property(handle, property, builtin),
-        PlotHandle::Image(handle) => get_image_property(handle, property, builtin),
-        PlotHandle::Area(handle) => get_area_property(handle, property, builtin),
+        PlotHandle::PlotChild(state) => get_plot_child_property(&state, property, builtin),
     }
 }
 
@@ -153,45 +136,10 @@ pub fn set_properties(
                 .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
-        PlotHandle::Histogram(handle) => {
+        PlotHandle::PlotChild(state) => {
             for pair in args.chunks_exact(2) {
                 let key = property_name(&pair[0], builtin)?;
-                apply_histogram_property(handle, &key, &pair[1], builtin)?;
-            }
-            Ok(())
-        }
-        PlotHandle::Stem(handle) => {
-            for pair in args.chunks_exact(2) {
-                let key = property_name(&pair[0], builtin)?;
-                apply_stem_property(handle, &key, &pair[1], builtin)?;
-            }
-            Ok(())
-        }
-        PlotHandle::ErrorBar(handle) => {
-            for pair in args.chunks_exact(2) {
-                let key = property_name(&pair[0], builtin)?;
-                apply_errorbar_property(handle, &key, &pair[1], builtin)?;
-            }
-            Ok(())
-        }
-        PlotHandle::Quiver(handle) => {
-            for pair in args.chunks_exact(2) {
-                let key = property_name(&pair[0], builtin)?;
-                apply_quiver_property(handle, &key, &pair[1], builtin)?;
-            }
-            Ok(())
-        }
-        PlotHandle::Image(handle) => {
-            for pair in args.chunks_exact(2) {
-                let key = property_name(&pair[0], builtin)?;
-                apply_image_property(handle, &key, &pair[1], builtin)?;
-            }
-            Ok(())
-        }
-        PlotHandle::Area(handle) => {
-            for pair in args.chunks_exact(2) {
-                let key = property_name(&pair[0], builtin)?;
-                apply_area_property(handle, &key, &pair[1], builtin)?;
+                apply_plot_child_property(&state, &key, &pair[1], builtin)?;
             }
             Ok(())
         }
@@ -1034,18 +982,10 @@ fn apply_figure_property(
 }
 
 fn get_histogram_property(
-    handle: f64,
+    hist: &super::state::HistogramHandleState,
     property: Option<&str>,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
-    let state = super::state::plot_child_handle_snapshot(handle)
-        .map_err(|err| map_figure_error(builtin, err))?;
-    let super::state::PlotChildHandleState::Histogram(hist) = state else {
-        return Err(plotting_error(
-            builtin,
-            format!("{builtin}: invalid histogram handle"),
-        ));
-    };
     let normalized =
         apply_histogram_normalization(&hist.raw_counts, &hist.bin_edges, &hist.normalization);
     match property.map(canonical_property_name) {
@@ -1060,9 +1000,9 @@ fn get_histogram_property(
                 )),
             );
             st.insert("Children", handles_value(Vec::new()));
-            st.insert("BinEdges", tensor_from_vec(hist.bin_edges));
+            st.insert("BinEdges", tensor_from_vec(hist.bin_edges.clone()));
             st.insert("BinCounts", tensor_from_vec(normalized));
-            st.insert("Normalization", Value::String(hist.normalization));
+            st.insert("Normalization", Value::String(hist.normalization.clone()));
             st.insert("NumBins", Value::Num(hist.raw_counts.len() as f64));
             Ok(Value::Struct(st))
         }
@@ -1072,9 +1012,9 @@ fn get_histogram_property(
             hist.axes_index,
         ))),
         Some("children") => Ok(handles_value(Vec::new())),
-        Some("binedges") => Ok(tensor_from_vec(hist.bin_edges)),
+        Some("binedges") => Ok(tensor_from_vec(hist.bin_edges.clone())),
         Some("bincounts") => Ok(tensor_from_vec(normalized)),
-        Some("normalization") => Ok(Value::String(hist.normalization)),
+        Some("normalization") => Ok(Value::String(hist.normalization.clone())),
         Some("numbins") => Ok(Value::Num(hist.raw_counts.len() as f64)),
         Some(other) => Err(plotting_error(
             builtin,
@@ -1083,19 +1023,499 @@ fn get_histogram_property(
     }
 }
 
-fn get_stem_property(
-    handle: f64,
+fn get_plot_child_property(
+    state: &super::state::PlotChildHandleState,
     property: Option<&str>,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
-    let state = super::state::plot_child_handle_snapshot(handle)
-        .map_err(|err| map_figure_error(builtin, err))?;
-    let super::state::PlotChildHandleState::Stem(stem_handle) = state else {
+    match state {
+        super::state::PlotChildHandleState::Histogram(hist) => {
+            get_histogram_property(hist, property, builtin)
+        }
+        super::state::PlotChildHandleState::Line(plot) => {
+            get_line_property(plot, property, builtin)
+        }
+        super::state::PlotChildHandleState::Scatter(plot) => {
+            get_scatter_property(plot, property, builtin)
+        }
+        super::state::PlotChildHandleState::Bar(plot) => get_bar_property(plot, property, builtin),
+        super::state::PlotChildHandleState::Stem(stem) => {
+            get_stem_property(stem, property, builtin)
+        }
+        super::state::PlotChildHandleState::ErrorBar(errorbar) => {
+            get_errorbar_property(errorbar, property, builtin)
+        }
+        super::state::PlotChildHandleState::Stairs(plot) => {
+            get_stairs_property(plot, property, builtin)
+        }
+        super::state::PlotChildHandleState::Quiver(quiver) => {
+            get_quiver_property(quiver, property, builtin)
+        }
+        super::state::PlotChildHandleState::Image(image) => {
+            get_image_property(image, property, builtin)
+        }
+        super::state::PlotChildHandleState::Area(area) => {
+            get_area_property(area, property, builtin)
+        }
+        super::state::PlotChildHandleState::Surface(plot) => {
+            get_surface_property(plot, property, builtin)
+        }
+        super::state::PlotChildHandleState::Line3(plot) => {
+            get_line3_property(plot, property, builtin)
+        }
+        super::state::PlotChildHandleState::Scatter3(plot) => {
+            get_scatter3_property(plot, property, builtin)
+        }
+        super::state::PlotChildHandleState::Pie(plot) => get_pie_property(plot, property, builtin),
+    }
+}
+
+fn apply_plot_child_property(
+    state: &super::state::PlotChildHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    match state {
+        super::state::PlotChildHandleState::Histogram(hist) => {
+            apply_histogram_property(hist, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::Line(plot) => {
+            apply_line_property(plot, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::Scatter(plot) => {
+            apply_scatter_property(plot, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::Bar(plot) => {
+            apply_bar_property(plot, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::Stem(stem) => {
+            apply_stem_property(stem, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::ErrorBar(errorbar) => {
+            apply_errorbar_property(errorbar, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::Stairs(plot) => {
+            apply_stairs_property(plot, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::Quiver(quiver) => {
+            apply_quiver_property(quiver, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::Image(image) => {
+            apply_image_property(image, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::Area(area) => {
+            apply_area_property(area, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::Surface(plot) => {
+            apply_surface_property(plot, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::Line3(plot) => {
+            apply_line3_property(plot, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::Scatter3(plot) => {
+            apply_scatter3_property(plot, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::Pie(plot) => {
+            apply_pie_property(plot, key, value, builtin)
+        }
+    }
+}
+
+fn child_parent_handle(figure: FigureHandle, axes_index: usize) -> Value {
+    Value::Num(super::state::encode_axes_handle(figure, axes_index))
+}
+
+fn child_base_struct(kind: &str, figure: FigureHandle, axes_index: usize) -> StructValue {
+    let mut st = StructValue::new();
+    st.insert("Type", Value::String(kind.into()));
+    st.insert("Parent", child_parent_handle(figure, axes_index));
+    st.insert("Children", handles_value(Vec::new()));
+    st
+}
+
+fn get_simple_plot(
+    plot: &super::state::SimplePlotHandleState,
+    builtin: &'static str,
+) -> BuiltinResult<runmat_plot::plots::figure::PlotElement> {
+    let figure = super::state::clone_figure(plot.figure)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid plot figure")))?;
+    let resolved = figure
+        .plots()
+        .nth(plot.plot_index)
+        .cloned()
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid plot handle")))?;
+    Ok(resolved)
+}
+
+fn get_line_property(
+    line_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let plot = get_simple_plot(line_handle, builtin)?;
+    let runmat_plot::plots::figure::PlotElement::Line(line) = plot else {
         return Err(plotting_error(
             builtin,
-            format!("{builtin}: invalid stem handle"),
+            format!("{builtin}: invalid line handle"),
         ));
     };
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st = child_base_struct("line", line_handle.figure, line_handle.axes_index);
+            st.insert("XData", tensor_from_vec(line.x_data.clone()));
+            st.insert("YData", tensor_from_vec(line.y_data.clone()));
+            st.insert("Color", Value::String(color_to_short_name(line.color)));
+            st.insert("LineWidth", Value::Num(line.line_width as f64));
+            st.insert(
+                "LineStyle",
+                Value::String(line_style_name(line.line_style).into()),
+            );
+            if let Some(label) = line.label.clone() {
+                st.insert("DisplayName", Value::String(label));
+            }
+            insert_line_marker_struct_props(&mut st, line.marker.as_ref());
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("line".into())),
+        Some("parent") => Ok(child_parent_handle(
+            line_handle.figure,
+            line_handle.axes_index,
+        )),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("xdata") => Ok(tensor_from_vec(line.x_data.clone())),
+        Some("ydata") => Ok(tensor_from_vec(line.y_data.clone())),
+        Some("color") => Ok(Value::String(color_to_short_name(line.color))),
+        Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
+        Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
+        Some("displayname") => Ok(Value::String(line.label.unwrap_or_default())),
+        Some(name) => line_marker_property_value(&line.marker, name, builtin),
+    }
+}
+
+fn get_stairs_property(
+    stairs_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let plot = get_simple_plot(stairs_handle, builtin)?;
+    let runmat_plot::plots::figure::PlotElement::Stairs(stairs) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid stairs handle"),
+        ));
+    };
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st =
+                child_base_struct("stairs", stairs_handle.figure, stairs_handle.axes_index);
+            st.insert("XData", tensor_from_vec(stairs.x.clone()));
+            st.insert("YData", tensor_from_vec(stairs.y.clone()));
+            st.insert("Color", Value::String(color_to_short_name(stairs.color)));
+            st.insert("LineWidth", Value::Num(stairs.line_width as f64));
+            if let Some(label) = stairs.label.clone() {
+                st.insert("DisplayName", Value::String(label));
+            }
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("stairs".into())),
+        Some("parent") => Ok(child_parent_handle(
+            stairs_handle.figure,
+            stairs_handle.axes_index,
+        )),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("xdata") => Ok(tensor_from_vec(stairs.x.clone())),
+        Some("ydata") => Ok(tensor_from_vec(stairs.y.clone())),
+        Some("color") => Ok(Value::String(color_to_short_name(stairs.color))),
+        Some("linewidth") => Ok(Value::Num(stairs.line_width as f64)),
+        Some("displayname") => Ok(Value::String(stairs.label.unwrap_or_default())),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported stairs property `{other}`"),
+        )),
+    }
+}
+
+fn get_scatter_property(
+    scatter_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let plot = get_simple_plot(scatter_handle, builtin)?;
+    let runmat_plot::plots::figure::PlotElement::Scatter(scatter) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid scatter handle"),
+        ));
+    };
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st =
+                child_base_struct("scatter", scatter_handle.figure, scatter_handle.axes_index);
+            st.insert("XData", tensor_from_vec(scatter.x_data.clone()));
+            st.insert("YData", tensor_from_vec(scatter.y_data.clone()));
+            st.insert(
+                "Marker",
+                Value::String(marker_style_name(scatter.marker_style).into()),
+            );
+            st.insert("SizeData", Value::Num(scatter.marker_size as f64));
+            st.insert(
+                "MarkerFaceColor",
+                Value::String(color_to_short_name(scatter.color)),
+            );
+            st.insert(
+                "MarkerEdgeColor",
+                Value::String(color_to_short_name(scatter.edge_color)),
+            );
+            st.insert("LineWidth", Value::Num(scatter.edge_thickness as f64));
+            if let Some(label) = scatter.label.clone() {
+                st.insert("DisplayName", Value::String(label));
+            }
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("scatter".into())),
+        Some("parent") => Ok(child_parent_handle(
+            scatter_handle.figure,
+            scatter_handle.axes_index,
+        )),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("xdata") => Ok(tensor_from_vec(scatter.x_data.clone())),
+        Some("ydata") => Ok(tensor_from_vec(scatter.y_data.clone())),
+        Some("marker") => Ok(Value::String(
+            marker_style_name(scatter.marker_style).into(),
+        )),
+        Some("sizedata") => Ok(Value::Num(scatter.marker_size as f64)),
+        Some("markerfacecolor") => Ok(Value::String(color_to_short_name(scatter.color))),
+        Some("markeredgecolor") => Ok(Value::String(color_to_short_name(scatter.edge_color))),
+        Some("linewidth") => Ok(Value::Num(scatter.edge_thickness as f64)),
+        Some("displayname") => Ok(Value::String(scatter.label.unwrap_or_default())),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported scatter property `{other}`"),
+        )),
+    }
+}
+
+fn get_bar_property(
+    bar_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let plot = get_simple_plot(bar_handle, builtin)?;
+    let runmat_plot::plots::figure::PlotElement::Bar(bar) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid bar handle"),
+        ));
+    };
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st = child_base_struct("bar", bar_handle.figure, bar_handle.axes_index);
+            st.insert("FaceColor", Value::String(color_to_short_name(bar.color)));
+            st.insert("BarWidth", Value::Num(bar.bar_width as f64));
+            if let Some(label) = bar.label.clone() {
+                st.insert("DisplayName", Value::String(label));
+            }
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("bar".into())),
+        Some("parent") => Ok(child_parent_handle(
+            bar_handle.figure,
+            bar_handle.axes_index,
+        )),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("facecolor") | Some("color") => Ok(Value::String(color_to_short_name(bar.color))),
+        Some("barwidth") => Ok(Value::Num(bar.bar_width as f64)),
+        Some("displayname") => Ok(Value::String(bar.label.unwrap_or_default())),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported bar property `{other}`"),
+        )),
+    }
+}
+
+fn get_surface_property(
+    surface_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let plot = get_simple_plot(surface_handle, builtin)?;
+    let runmat_plot::plots::figure::PlotElement::Surface(surface) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid surface handle"),
+        ));
+    };
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st =
+                child_base_struct("surface", surface_handle.figure, surface_handle.axes_index);
+            st.insert("XData", tensor_from_vec(surface.x_data.clone()));
+            st.insert("YData", tensor_from_vec(surface.y_data.clone()));
+            if let Some(z) = surface.z_data.clone() {
+                st.insert("ZData", tensor_from_matrix(z));
+            }
+            st.insert("FaceAlpha", Value::Num(surface.alpha as f64));
+            if let Some(label) = surface.label.clone() {
+                st.insert("DisplayName", Value::String(label));
+            }
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("surface".into())),
+        Some("parent") => Ok(child_parent_handle(
+            surface_handle.figure,
+            surface_handle.axes_index,
+        )),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("xdata") => Ok(tensor_from_vec(surface.x_data.clone())),
+        Some("ydata") => Ok(tensor_from_vec(surface.y_data.clone())),
+        Some("zdata") => Ok(surface
+            .z_data
+            .clone()
+            .map(tensor_from_matrix)
+            .unwrap_or_else(|| tensor_from_vec(Vec::new()))),
+        Some("facealpha") => Ok(Value::Num(surface.alpha as f64)),
+        Some("displayname") => Ok(Value::String(surface.label.unwrap_or_default())),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported surface property `{other}`"),
+        )),
+    }
+}
+
+fn get_line3_property(
+    line_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let plot = get_simple_plot(line_handle, builtin)?;
+    let runmat_plot::plots::figure::PlotElement::Line3(line) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid plot3 handle"),
+        ));
+    };
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st = child_base_struct("line", line_handle.figure, line_handle.axes_index);
+            st.insert("XData", tensor_from_vec(line.x_data.clone()));
+            st.insert("YData", tensor_from_vec(line.y_data.clone()));
+            st.insert("ZData", tensor_from_vec(line.z_data.clone()));
+            st.insert("Color", Value::String(color_to_short_name(line.color)));
+            st.insert("LineWidth", Value::Num(line.line_width as f64));
+            st.insert(
+                "LineStyle",
+                Value::String(line_style_name(line.line_style).into()),
+            );
+            if let Some(label) = line.label.clone() {
+                st.insert("DisplayName", Value::String(label));
+            }
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("line".into())),
+        Some("parent") => Ok(child_parent_handle(
+            line_handle.figure,
+            line_handle.axes_index,
+        )),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("xdata") => Ok(tensor_from_vec(line.x_data.clone())),
+        Some("ydata") => Ok(tensor_from_vec(line.y_data.clone())),
+        Some("zdata") => Ok(tensor_from_vec(line.z_data.clone())),
+        Some("color") => Ok(Value::String(color_to_short_name(line.color))),
+        Some("linewidth") => Ok(Value::Num(line.line_width as f64)),
+        Some("linestyle") => Ok(Value::String(line_style_name(line.line_style).into())),
+        Some("displayname") => Ok(Value::String(line.label.unwrap_or_default())),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported plot3 property `{other}`"),
+        )),
+    }
+}
+
+fn get_scatter3_property(
+    scatter_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let plot = get_simple_plot(scatter_handle, builtin)?;
+    let runmat_plot::plots::figure::PlotElement::Scatter3(scatter) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid scatter3 handle"),
+        ));
+    };
+    let (x, y, z): (Vec<f64>, Vec<f64>, Vec<f64>) = scatter
+        .points
+        .iter()
+        .map(|p| (p.x as f64, p.y as f64, p.z as f64))
+        .unzip_n_vec();
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st =
+                child_base_struct("scatter", scatter_handle.figure, scatter_handle.axes_index);
+            st.insert("XData", tensor_from_vec(x));
+            st.insert("YData", tensor_from_vec(y));
+            st.insert("ZData", tensor_from_vec(z));
+            st.insert("SizeData", Value::Num(scatter.point_size as f64));
+            if let Some(label) = scatter.label.clone() {
+                st.insert("DisplayName", Value::String(label));
+            }
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("scatter".into())),
+        Some("parent") => Ok(child_parent_handle(
+            scatter_handle.figure,
+            scatter_handle.axes_index,
+        )),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("sizedata") => Ok(Value::Num(scatter.point_size as f64)),
+        Some("displayname") => Ok(Value::String(scatter.label.unwrap_or_default())),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported scatter3 property `{other}`"),
+        )),
+    }
+}
+
+fn get_pie_property(
+    pie_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let plot = get_simple_plot(pie_handle, builtin)?;
+    let runmat_plot::plots::figure::PlotElement::Pie(pie) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid pie handle"),
+        ));
+    };
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st = child_base_struct("pie", pie_handle.figure, pie_handle.axes_index);
+            if let Some(label) = pie.label.clone() {
+                st.insert("DisplayName", Value::String(label));
+            }
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("pie".into())),
+        Some("parent") => Ok(child_parent_handle(
+            pie_handle.figure,
+            pie_handle.axes_index,
+        )),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("displayname") => Ok(Value::String(pie.label.unwrap_or_default())),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported pie property `{other}`"),
+        )),
+    }
+}
+
+fn get_stem_property(
+    stem_handle: &super::state::StemHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
     let figure = super::state::clone_figure(stem_handle.figure)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid stem figure")))?;
     let plot = figure
@@ -1189,18 +1609,10 @@ fn get_stem_property(
 }
 
 fn get_errorbar_property(
-    handle: f64,
+    error_handle: &super::state::ErrorBarHandleState,
     property: Option<&str>,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
-    let state = super::state::plot_child_handle_snapshot(handle)
-        .map_err(|err| map_figure_error(builtin, err))?;
-    let super::state::PlotChildHandleState::ErrorBar(error_handle) = state else {
-        return Err(plotting_error(
-            builtin,
-            format!("{builtin}: invalid errorbar handle"),
-        ));
-    };
     let figure = super::state::clone_figure(error_handle.figure)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid errorbar figure")))?;
     let plot = figure
@@ -1273,18 +1685,10 @@ fn get_errorbar_property(
 }
 
 fn get_quiver_property(
-    handle: f64,
+    quiver_handle: &super::state::QuiverHandleState,
     property: Option<&str>,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
-    let state = super::state::plot_child_handle_snapshot(handle)
-        .map_err(|err| map_figure_error(builtin, err))?;
-    let super::state::PlotChildHandleState::Quiver(quiver_handle) = state else {
-        return Err(plotting_error(
-            builtin,
-            format!("{builtin}: invalid quiver handle"),
-        ));
-    };
     let figure = super::state::clone_figure(quiver_handle.figure)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid quiver figure")))?;
     let plot = figure
@@ -1333,18 +1737,10 @@ fn get_quiver_property(
 }
 
 fn get_image_property(
-    handle: f64,
+    image_handle: &super::state::ImageHandleState,
     property: Option<&str>,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
-    let state = super::state::plot_child_handle_snapshot(handle)
-        .map_err(|err| map_figure_error(builtin, err))?;
-    let super::state::PlotChildHandleState::Image(image_handle) = state else {
-        return Err(plotting_error(
-            builtin,
-            format!("{builtin}: invalid image handle"),
-        ));
-    };
     let figure = super::state::clone_figure(image_handle.figure)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid image figure")))?;
     let plot = figure
@@ -1408,18 +1804,10 @@ fn get_image_property(
 }
 
 fn get_area_property(
-    handle: f64,
+    area_handle: &super::state::AreaHandleState,
     property: Option<&str>,
     builtin: &'static str,
 ) -> BuiltinResult<Value> {
-    let state = super::state::plot_child_handle_snapshot(handle)
-        .map_err(|err| map_figure_error(builtin, err))?;
-    let super::state::PlotChildHandleState::Area(area_handle) = state else {
-        return Err(plotting_error(
-            builtin,
-            format!("{builtin}: invalid area handle"),
-        ));
-    };
     let figure = super::state::clone_figure(area_handle.figure)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid area figure")))?;
     let plot = figure
@@ -1468,19 +1856,11 @@ fn get_area_property(
 }
 
 fn apply_histogram_property(
-    handle: f64,
+    hist: &super::state::HistogramHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    let state = super::state::plot_child_handle_snapshot(handle)
-        .map_err(|err| map_figure_error(builtin, err))?;
-    let super::state::PlotChildHandleState::Histogram(hist) = state else {
-        return Err(plotting_error(
-            builtin,
-            format!("{builtin}: invalid histogram handle"),
-        ));
-    };
     match key {
         "normalization" => {
             let norm = value_as_string(value)
@@ -1503,8 +1883,14 @@ fn apply_histogram_property(
                 normalized,
             )
             .map_err(|err| map_figure_error(builtin, err))?;
-            super::state::update_histogram_handle(handle, norm, hist.raw_counts)
-                .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::update_histogram_handle_for_plot(
+                hist.figure,
+                hist.axes_index,
+                hist.plot_index,
+                norm,
+                hist.raw_counts.clone(),
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
             Ok(())
         }
         other => Err(plotting_error(
@@ -1515,19 +1901,11 @@ fn apply_histogram_property(
 }
 
 fn apply_stem_property(
-    handle: f64,
+    stem_handle: &super::state::StemHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    let state = super::state::plot_child_handle_snapshot(handle)
-        .map_err(|err| map_figure_error(builtin, err))?;
-    let super::state::PlotChildHandleState::Stem(stem_handle) = state else {
-        return Err(plotting_error(
-            builtin,
-            format!("{builtin}: invalid stem handle"),
-        ));
-    };
     super::state::update_stem_plot(
         stem_handle.figure,
         stem_handle.plot_index,
@@ -1599,19 +1977,11 @@ fn apply_stem_property(
 }
 
 fn apply_errorbar_property(
-    handle: f64,
+    error_handle: &super::state::ErrorBarHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    let state = super::state::plot_child_handle_snapshot(handle)
-        .map_err(|err| map_figure_error(builtin, err))?;
-    let super::state::PlotChildHandleState::ErrorBar(error_handle) = state else {
-        return Err(plotting_error(
-            builtin,
-            format!("{builtin}: invalid errorbar handle"),
-        ));
-    };
     super::state::update_errorbar_plot(error_handle.figure, error_handle.plot_index, |errorbar| {
         match key {
             "linewidth" => {
@@ -1654,19 +2024,11 @@ fn apply_errorbar_property(
 }
 
 fn apply_quiver_property(
-    handle: f64,
+    quiver_handle: &super::state::QuiverHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    let state = super::state::plot_child_handle_snapshot(handle)
-        .map_err(|err| map_figure_error(builtin, err))?;
-    let super::state::PlotChildHandleState::Quiver(quiver_handle) = state else {
-        return Err(plotting_error(
-            builtin,
-            format!("{builtin}: invalid quiver handle"),
-        ));
-    };
     super::state::update_quiver_plot(quiver_handle.figure, quiver_handle.plot_index, |quiver| {
         match key {
             "color" => {
@@ -1697,19 +2059,11 @@ fn apply_quiver_property(
 }
 
 fn apply_image_property(
-    handle: f64,
+    image_handle: &super::state::ImageHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    let state = super::state::plot_child_handle_snapshot(handle)
-        .map_err(|err| map_figure_error(builtin, err))?;
-    let super::state::PlotChildHandleState::Image(image_handle) = state else {
-        return Err(plotting_error(
-            builtin,
-            format!("{builtin}: invalid image handle"),
-        ));
-    };
     super::state::update_image_plot(image_handle.figure, image_handle.plot_index, |surface| {
         match key {
             "xdata" => {
@@ -1737,19 +2091,11 @@ fn apply_image_property(
 }
 
 fn apply_area_property(
-    handle: f64,
+    area_handle: &super::state::AreaHandleState,
     key: &str,
     value: &Value,
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    let state = super::state::plot_child_handle_snapshot(handle)
-        .map_err(|err| map_figure_error(builtin, err))?;
-    let super::state::PlotChildHandleState::Area(area_handle) = state else {
-        return Err(plotting_error(
-            builtin,
-            format!("{builtin}: invalid area handle"),
-        ));
-    };
     super::state::update_area_plot(
         area_handle.figure,
         area_handle.plot_index,
@@ -1770,6 +2116,300 @@ fn apply_area_property(
     )
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
+}
+
+fn apply_line_property(
+    line_handle: &super::state::SimplePlotHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    super::state::update_plot_element(line_handle.figure, line_handle.plot_index, |plot| {
+        if let runmat_plot::plots::figure::PlotElement::Line(line) = plot {
+            apply_line_plot_properties(line, key, value, builtin);
+        }
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn apply_stairs_property(
+    stairs_handle: &super::state::SimplePlotHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    super::state::update_plot_element(stairs_handle.figure, stairs_handle.plot_index, |plot| {
+        if let runmat_plot::plots::figure::PlotElement::Stairs(stairs) = plot {
+            match key {
+                "color" => {
+                    if let Ok(c) =
+                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                    {
+                        stairs.color = c;
+                    }
+                }
+                "linewidth" => {
+                    if let Some(v) = value_as_f64(value) {
+                        stairs.line_width = v as f32;
+                    }
+                }
+                "displayname" => {
+                    stairs.label = value_as_string(value).map(|s| s.to_string());
+                }
+                _ => {}
+            }
+        }
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn apply_scatter_property(
+    scatter_handle: &super::state::SimplePlotHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    super::state::update_plot_element(scatter_handle.figure, scatter_handle.plot_index, |plot| {
+        if let runmat_plot::plots::figure::PlotElement::Scatter(scatter) = plot {
+            match key {
+                "marker" => {
+                    if let Some(s) = value_as_string(value) {
+                        scatter.marker_style = scatter_marker_from_name(&s, scatter.marker_style);
+                    }
+                }
+                "sizedata" => {
+                    if let Some(v) = value_as_f64(value) {
+                        scatter.marker_size = v as f32;
+                    }
+                }
+                "markerfacecolor" => {
+                    if let Ok(c) =
+                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                    {
+                        scatter.set_face_color(c);
+                    }
+                }
+                "markeredgecolor" => {
+                    if let Ok(c) =
+                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                    {
+                        scatter.set_edge_color(c);
+                    }
+                }
+                "linewidth" => {
+                    if let Some(v) = value_as_f64(value) {
+                        scatter.set_edge_thickness(v as f32);
+                    }
+                }
+                "displayname" => {
+                    scatter.label = value_as_string(value).map(|s| s.to_string());
+                }
+                _ => {}
+            }
+        }
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn apply_bar_property(
+    bar_handle: &super::state::SimplePlotHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    super::state::update_plot_element(bar_handle.figure, bar_handle.plot_index, |plot| {
+        if let runmat_plot::plots::figure::PlotElement::Bar(bar) = plot {
+            match key {
+                "facecolor" | "color" => {
+                    if let Ok(c) =
+                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                    {
+                        bar.color = c;
+                    }
+                }
+                "barwidth" => {
+                    if let Some(v) = value_as_f64(value) {
+                        bar.bar_width = v as f32;
+                    }
+                }
+                "displayname" => {
+                    bar.label = value_as_string(value).map(|s| s.to_string());
+                }
+                _ => {}
+            }
+        }
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn apply_surface_property(
+    surface_handle: &super::state::SimplePlotHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    super::state::update_plot_element(surface_handle.figure, surface_handle.plot_index, |plot| {
+        if let runmat_plot::plots::figure::PlotElement::Surface(surface) = plot {
+            match key {
+                "facealpha" => {
+                    if let Some(v) = value_as_f64(value) {
+                        surface.alpha = v as f32;
+                    }
+                }
+                "displayname" => {
+                    surface.label = value_as_string(value).map(|s| s.to_string());
+                }
+                _ => {}
+            }
+        }
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn apply_line3_property(
+    line_handle: &super::state::SimplePlotHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    super::state::update_plot_element(line_handle.figure, line_handle.plot_index, |plot| {
+        if let runmat_plot::plots::figure::PlotElement::Line3(line) = plot {
+            match key {
+                "color" => {
+                    if let Ok(c) =
+                        parse_color_value(&LineStyleParseOptions::generic(builtin), value)
+                    {
+                        line.color = c;
+                    }
+                }
+                "linewidth" => {
+                    if let Some(v) = value_as_f64(value) {
+                        line.line_width = v as f32;
+                    }
+                }
+                "linestyle" => {
+                    if let Some(s) = value_as_string(value) {
+                        line.line_style = parse_line_style_name_for_props(&s);
+                    }
+                }
+                "displayname" => {
+                    line.label = value_as_string(value).map(|s| s.to_string());
+                }
+                _ => {}
+            }
+        }
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn apply_scatter3_property(
+    scatter_handle: &super::state::SimplePlotHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    super::state::update_plot_element(scatter_handle.figure, scatter_handle.plot_index, |plot| {
+        if let runmat_plot::plots::figure::PlotElement::Scatter3(scatter) = plot {
+            match key {
+                "sizedata" => {
+                    if let Some(v) = value_as_f64(value) {
+                        scatter.point_size = v as f32;
+                    }
+                }
+                "displayname" => {
+                    scatter.label = value_as_string(value).map(|s| s.to_string());
+                }
+                _ => {}
+            }
+        }
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn apply_pie_property(
+    pie_handle: &super::state::SimplePlotHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    super::state::update_plot_element(pie_handle.figure, pie_handle.plot_index, |plot| {
+        if let runmat_plot::plots::figure::PlotElement::Pie(pie) = plot {
+            if key == "displayname" {
+                pie.label = value_as_string(value).map(|s| s.to_string());
+            }
+        }
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn apply_line_plot_properties(
+    line: &mut runmat_plot::plots::LinePlot,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) {
+    match key {
+        "color" => {
+            if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
+                line.color = c;
+            }
+        }
+        "linewidth" => {
+            if let Some(v) = value_as_f64(value) {
+                line.line_width = v as f32;
+            }
+        }
+        "linestyle" => {
+            if let Some(s) = value_as_string(value) {
+                line.line_style = parse_line_style_name_for_props(&s);
+            }
+        }
+        "displayname" => {
+            line.label = value_as_string(value).map(|s| s.to_string());
+        }
+        "marker" => {
+            if let Some(s) = value_as_string(value) {
+                line.marker = marker_from_name(&s, line.marker.clone());
+            }
+        }
+        "markersize" => {
+            if let Some(v) = value_as_f64(value) {
+                if let Some(marker) = &mut line.marker {
+                    marker.size = v as f32;
+                }
+            }
+        }
+        "markerfacecolor" => {
+            if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
+                if let Some(marker) = &mut line.marker {
+                    marker.face_color = c;
+                }
+            }
+        }
+        "markeredgecolor" => {
+            if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
+                if let Some(marker) = &mut line.marker {
+                    marker.edge_color = c;
+                }
+            }
+        }
+        "filled" => {
+            if let Some(v) = value_as_bool(value) {
+                if let Some(marker) = &mut line.marker {
+                    marker.filled = v;
+                }
+            }
+        }
+        _ => {}
+    }
 }
 
 fn limits_from_optional_value(
@@ -1938,6 +2578,78 @@ fn tensor_from_vec(data: Vec<f64>) -> Value {
     })
 }
 
+fn tensor_from_matrix(data: Vec<Vec<f64>>) -> Value {
+    let rows = data.len();
+    let cols = data.first().map(|row| row.len()).unwrap_or(0);
+    let flat = data.into_iter().flat_map(|row| row.into_iter()).collect();
+    Value::Tensor(runmat_builtins::Tensor {
+        rows,
+        cols,
+        shape: vec![rows, cols],
+        data: flat,
+        dtype: runmat_builtins::NumericDType::F64,
+    })
+}
+
+fn insert_line_marker_struct_props(
+    st: &mut StructValue,
+    marker: Option<&runmat_plot::plots::line::LineMarkerAppearance>,
+) {
+    if let Some(marker) = marker {
+        st.insert(
+            "Marker",
+            Value::String(marker_style_name(marker.kind).into()),
+        );
+        st.insert("MarkerSize", Value::Num(marker.size as f64));
+        st.insert(
+            "MarkerFaceColor",
+            Value::String(color_to_short_name(marker.face_color)),
+        );
+        st.insert(
+            "MarkerEdgeColor",
+            Value::String(color_to_short_name(marker.edge_color)),
+        );
+        st.insert("Filled", Value::Bool(marker.filled));
+    }
+}
+
+fn line_marker_property_value(
+    marker: &Option<runmat_plot::plots::line::LineMarkerAppearance>,
+    name: &str,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    match name {
+        "marker" => Ok(Value::String(
+            marker
+                .as_ref()
+                .map(|m| marker_style_name(m.kind).to_string())
+                .unwrap_or_else(|| "none".into()),
+        )),
+        "markersize" => Ok(Value::Num(
+            marker.as_ref().map(|m| m.size as f64).unwrap_or(0.0),
+        )),
+        "markerfacecolor" => Ok(Value::String(
+            marker
+                .as_ref()
+                .map(|m| color_to_short_name(m.face_color))
+                .unwrap_or_else(|| "none".into()),
+        )),
+        "markeredgecolor" => Ok(Value::String(
+            marker
+                .as_ref()
+                .map(|m| color_to_short_name(m.edge_color))
+                .unwrap_or_else(|| "none".into()),
+        )),
+        "filled" => Ok(Value::Bool(
+            marker.as_ref().map(|m| m.filled).unwrap_or(false),
+        )),
+        other => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported line property `{other}`"),
+        )),
+    }
+}
+
 fn histogram_labels_from_edges(edges: &[f64]) -> Vec<String> {
     edges
         .windows(2)
@@ -2066,6 +2778,44 @@ fn marker_from_name(
         _ => marker.kind,
     };
     Some(marker)
+}
+
+fn scatter_marker_from_name(
+    name: &str,
+    current: runmat_plot::plots::scatter::MarkerStyle,
+) -> runmat_plot::plots::scatter::MarkerStyle {
+    match name.trim() {
+        "o" => runmat_plot::plots::scatter::MarkerStyle::Circle,
+        "s" => runmat_plot::plots::scatter::MarkerStyle::Square,
+        "^" => runmat_plot::plots::scatter::MarkerStyle::Triangle,
+        "d" => runmat_plot::plots::scatter::MarkerStyle::Diamond,
+        "+" => runmat_plot::plots::scatter::MarkerStyle::Plus,
+        "x" => runmat_plot::plots::scatter::MarkerStyle::Cross,
+        "*" => runmat_plot::plots::scatter::MarkerStyle::Star,
+        "h" => runmat_plot::plots::scatter::MarkerStyle::Hexagon,
+        _ => current,
+    }
+}
+
+trait Unzip3Vec<A, B, C> {
+    fn unzip_n_vec(self) -> (Vec<A>, Vec<B>, Vec<C>);
+}
+
+impl<I, A, B, C> Unzip3Vec<A, B, C> for I
+where
+    I: Iterator<Item = (A, B, C)>,
+{
+    fn unzip_n_vec(self) -> (Vec<A>, Vec<B>, Vec<C>) {
+        let mut a = Vec::new();
+        let mut b = Vec::new();
+        let mut c = Vec::new();
+        for (va, vb, vc) in self {
+            a.push(va);
+            b.push(vb);
+            c.push(vc);
+        }
+        (a, b, c)
+    }
 }
 
 fn color_to_short_name(color: glam::Vec4) -> String {

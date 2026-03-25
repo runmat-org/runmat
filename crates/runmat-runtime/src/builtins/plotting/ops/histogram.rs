@@ -22,7 +22,7 @@ const HIST_DEFAULT_LABEL: &str = "Frequency";
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::histogram")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "histogram",
-    op_kind: GpuOpKind::Custom("plot-render"),
+    op_kind: GpuOpKind::PlotRender,
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],

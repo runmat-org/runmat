@@ -24,7 +24,7 @@ use super::style::{
     value_as_string, LineAppearance, LineStyleParseOptions, MarkerAppearance, MarkerColor,
     MarkerKind, DEFAULT_LINE_MARKER_SIZE,
 };
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use std::convert::TryFrom;
 
 use crate::{BuiltinResult, RuntimeError};
@@ -32,7 +32,7 @@ use crate::{BuiltinResult, RuntimeError};
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::plot")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "plot",
-    op_kind: GpuOpKind::Custom("plot-render"),
+    op_kind: GpuOpKind::PlotRender,
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
@@ -68,10 +68,10 @@ const BUILTIN_NAME: &str = "plot";
     keywords = "plot,line,2d,visualization",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::plot"
 )]
-pub async fn plot_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
+pub async fn plot_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (mut series_plans, line_style_order) = parse_series_specs(args)?;
     let axes = current_axes_state().active_index;
     let hold_enabled = current_hold_enabled();
@@ -172,14 +172,35 @@ pub async fn plot_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     }
 
     let mut plots_opt = Some(plots);
-    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes_index| {
+    let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes_index| {
         let plots = plots_opt.take().expect("plot series consumed exactly once");
-        for plot in plots {
-            figure.add_line_plot_on_axes(plot, axes_index);
+        for (idx, plot) in plots.into_iter().enumerate() {
+            let plot_index = figure.add_line_plot_on_axes(plot, axes_index);
+            if idx == 0 {
+                *plot_index_slot.borrow_mut() = Some((axes_index, plot_index));
+            }
         }
         Ok(())
-    })?;
-    Ok(rendered)
+    });
+    let Some((axes_index, plot_index)) = *plot_index_out.borrow() else {
+        return render_result.map(|_| f64::NAN);
+    };
+    let handle = crate::builtins::plotting::state::register_line_handle(
+        figure_handle,
+        axes_index,
+        plot_index,
+    );
+    if let Err(err) = render_result {
+        let lower = err.to_string().to_lowercase();
+        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+            return Ok(handle);
+        }
+        return Err(err);
+    }
+    Ok(handle)
 }
 
 fn build_line_plot(
@@ -521,6 +542,8 @@ impl PlotSeriesInput {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::plotting::get::get_builtin;
+    use crate::builtins::plotting::set::set_builtin;
     use crate::builtins::plotting::state::PlotTestLockGuard;
     use crate::builtins::plotting::state::{clear_figure, reset_hold_state_for_run};
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
@@ -606,6 +629,36 @@ pub(crate) mod tests {
         assert_eq!(entries[0].label, "b");
     }
 
+    #[test]
+    fn plot_returns_handle_and_supports_line_properties() {
+        let _guard = setup_plot_tests();
+        let handle = block_on(plot_builtin(vec![
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[1.0, 2.0])),
+        ]))
+        .expect("plot should return a handle");
+        assert_eq!(
+            get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap(),
+            Value::String("line".into())
+        );
+        set_builtin(vec![
+            Value::Num(handle),
+            Value::String("LineWidth".into()),
+            Value::Num(2.5),
+            Value::String("DisplayName".into()),
+            Value::String("Series A".into()),
+        ])
+        .unwrap();
+        assert_eq!(
+            get_builtin(vec![Value::Num(handle), Value::String("LineWidth".into())]).unwrap(),
+            Value::Num(2.5)
+        );
+        assert_eq!(
+            get_builtin(vec![Value::Num(handle), Value::String("DisplayName".into())]).unwrap(),
+            Value::String("Series A".into())
+        );
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn parse_series_specs_handles_interleaved_styles() {
@@ -670,13 +723,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn plot_type_is_string() {
+    fn plot_type_is_numeric_handle() {
         assert_eq!(
-            string_type(
+            handle_scalar_type(
                 &[Type::tensor(), Type::tensor()],
                 &ResolveContext::new(Vec::new())
             ),
-            Type::String
+            Type::Num
         );
     }
 

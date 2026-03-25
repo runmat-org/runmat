@@ -29,7 +29,7 @@ const BUILTIN_NAME: &str = "stem";
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::stem")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "stem",
-    op_kind: GpuOpKind::Custom("plot-render"),
+    op_kind: GpuOpKind::PlotRender,
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],

@@ -7,12 +7,12 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::semilogx")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "semilogx",
-    op_kind: GpuOpKind::Custom("plot-render"),
+    op_kind: GpuOpKind::PlotRender,
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
@@ -43,10 +43,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "semilogx,plotting,log",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::semilogx"
 )]
-pub async fn semilogx_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
+pub async fn semilogx_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let result = plot_builtin(args).await;
     let axes = current_axes_state();
     set_log_modes_for_axes(axes.handle, axes.active_index, true, false).map_err(|err| {

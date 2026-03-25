@@ -22,7 +22,7 @@ const BUILTIN_NAME: &str = "imagesc";
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::imagesc")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "imagesc",
-    op_kind: GpuOpKind::Custom("plot-render"),
+    op_kind: GpuOpKind::PlotRender,
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],

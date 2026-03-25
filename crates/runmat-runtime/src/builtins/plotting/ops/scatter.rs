@@ -36,13 +36,13 @@ use super::point::{
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{LineStyleParseOptions, MarkerColor};
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::{BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::scatter")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "scatter",
-    op_kind: GpuOpKind::Custom("plot-render"),
+    op_kind: GpuOpKind::PlotRender,
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
@@ -76,10 +76,10 @@ const BUILTIN_NAME: &str = "scatter";
     keywords = "scatter,plotting,2d,markers",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::scatter"
 )]
-pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
+pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<f64> {
     let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter())?;
     let mut x_input = Some(ScatterInput::from_value(x, BUILTIN_NAME)?);
     let mut y_input = Some(ScatterInput::from_value(y, BUILTIN_NAME)?);
@@ -89,7 +89,10 @@ pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
         y_label: "Y",
         ..Default::default()
     };
-    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+    let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let style_args = style_args.clone();
         let point_count = x_input.as_ref().map(|input| input.len()).unwrap_or(0);
         let mut resolved_style = resolve_scatter_style(point_count, &style_args, "scatter")?;
@@ -100,7 +103,8 @@ pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
             if let (Some(x_gpu), Some(y_gpu)) = (x_arg.gpu_handle(), y_arg.gpu_handle()) {
                 match build_scatter_gpu_plot(x_gpu, y_gpu, &resolved_style) {
                     Ok(plot) => {
-                        figure.add_scatter_plot_on_axes(plot, axes);
+                        let plot_index = figure.add_scatter_plot_on_axes(plot, axes);
+                        *plot_index_slot.borrow_mut() = Some((axes, plot_index));
                         return Ok(());
                     }
                     Err(err) => {
@@ -113,10 +117,22 @@ pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
         let (x_tensor, y_tensor) = (x_arg.into_tensor("scatter")?, y_arg.into_tensor("scatter")?);
         let (x_data, y_data) = numeric_pair(x_tensor, y_tensor, "scatter")?;
         let scatter = build_scatter_plot(x_data, y_data, &mut resolved_style)?;
-        figure.add_scatter_plot_on_axes(scatter, axes);
+        let plot_index = figure.add_scatter_plot_on_axes(scatter, axes);
+        *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())
-    })?;
-    Ok(rendered)
+    });
+    let Some((axes, plot_index)) = *plot_index_out.borrow() else {
+        return render_result.map(|_| f64::NAN);
+    };
+    let handle = crate::builtins::plotting::state::register_scatter_handle(figure_handle, axes, plot_index);
+    if let Err(err) = render_result {
+        let lower = err.to_string().to_lowercase();
+        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+            return Ok(handle);
+        }
+        return Err(err);
+    }
+    Ok(handle)
 }
 
 fn build_scatter_plot(
@@ -556,7 +572,7 @@ pub(crate) mod tests {
         ensure_plot_test_env();
     }
 
-    fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<String> {
+    fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<f64> {
         block_on(super::scatter_builtin(x, y, rest))
     }
 
@@ -719,13 +735,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn scatter_type_is_string() {
+    fn scatter_type_is_numeric_handle() {
         assert_eq!(
-            string_type(
+            handle_scalar_type(
                 &[Type::tensor(), Type::tensor()],
                 &ResolveContext::new(Vec::new())
             ),
-            Type::String
+            Type::Num
         );
     }
 }

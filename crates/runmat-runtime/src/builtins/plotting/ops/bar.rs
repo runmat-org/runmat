@@ -25,14 +25,14 @@ use super::gpu_helpers::axis_bounds;
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_bar_style_args, BarLayout, BarStyle, BarStyleDefaults};
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 const BUILTIN_NAME: &str = "bar";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::bar")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "bar",
-    op_kind: GpuOpKind::Custom("plot-render"),
+    op_kind: GpuOpKind::PlotRender,
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
@@ -64,10 +64,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "bar,barchart,plotting",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::bar"
 )]
-pub async fn bar_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
+pub async fn bar_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (x_values, values, rest) = parse_bar_call_args(args)?;
     let defaults = BarStyleDefaults::new(default_bar_color(), DEFAULT_BAR_WIDTH);
     let style = parse_bar_style_args("bar", &rest, defaults)?;
@@ -78,7 +78,10 @@ pub async fn bar_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
         y_label: "Value",
         ..Default::default()
     };
-    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+    let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let style = style.clone();
         let arg = input.take().expect("bar input consumed once");
         if !style.requires_cpu_path() {
@@ -89,7 +92,10 @@ pub async fn bar_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
                         for (idx, mut bar) in charts.into_iter().enumerate() {
                             let default_label = default_series_label(idx, total);
                             apply_bar_style(&mut bar, &style, &default_label);
-                            figure.add_bar_chart_on_axes(bar, axes);
+                            let plot_index = figure.add_bar_chart_on_axes(bar, axes);
+                            if idx == 0 {
+                                *plot_index_slot.borrow_mut() = Some((axes, plot_index));
+                            }
                         }
                         return Ok(());
                     }
@@ -106,11 +112,25 @@ pub async fn bar_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
         for (idx, mut bar) in charts.into_iter().enumerate() {
             let default_label = default_series_label(idx, total);
             apply_bar_style(&mut bar, &style, &default_label);
-            figure.add_bar_chart_on_axes(bar, axes);
+            let plot_index = figure.add_bar_chart_on_axes(bar, axes);
+            if idx == 0 {
+                *plot_index_slot.borrow_mut() = Some((axes, plot_index));
+            }
         }
         Ok(())
-    })?;
-    Ok(rendered)
+    });
+    let Some((axes, plot_index)) = *plot_index_out.borrow() else {
+        return render_result.map(|_| f64::NAN);
+    };
+    let handle = crate::builtins::plotting::state::register_bar_handle(figure_handle, axes, plot_index);
+    if let Err(err) = render_result {
+        let lower = err.to_string().to_lowercase();
+        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+            return Ok(handle);
+        }
+        return Err(err);
+    }
+    Ok(handle)
 }
 
 const DEFAULT_BAR_WIDTH: f32 = 0.75;
@@ -600,7 +620,7 @@ pub(crate) mod tests {
         ensure_plot_test_env();
     }
 
-    fn bar_builtin(args: Vec<Value>) -> BuiltinResult<String> {
+    fn bar_builtin(args: Vec<Value>) -> BuiltinResult<f64> {
         block_on(super::bar_builtin(args))
     }
 
@@ -719,10 +739,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn bar_type_is_string() {
+    fn bar_type_is_numeric_handle() {
         assert_eq!(
-            string_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
-            Type::String
+            handle_scalar_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::Num
         );
     }
 }

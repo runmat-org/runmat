@@ -8,7 +8,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 use super::common::numeric_triplet;
 use super::gpu_helpers::gpu_xyz_bounds_async;
@@ -22,7 +22,7 @@ const BUILTIN_NAME: &str = "plot3";
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::plot3")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "plot3",
-    op_kind: GpuOpKind::Custom("plot-render"),
+    op_kind: GpuOpKind::PlotRender,
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
@@ -53,10 +53,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "plot3,line,3d,visualization",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::plot3"
 )]
-pub async fn plot3_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
+pub async fn plot3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (mut plans, _line_style_order) = parse_plot3_series_specs(args)?;
 
     let opts = PlotRenderOptions {
@@ -93,13 +93,31 @@ pub async fn plot3_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
         plots.push(build_line3_plot(x, y, z, &label, &plan.appearance)?);
     }
     let mut plots_opt = Some(plots);
-    render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+    let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let plots = plots_opt.take().expect("plot3 consumed once");
-        for plot in plots {
-            figure.add_line3_plot_on_axes(plot, axes);
+        for (idx, plot) in plots.into_iter().enumerate() {
+            let plot_index = figure.add_line3_plot_on_axes(plot, axes);
+            if idx == 0 {
+                *plot_index_slot.borrow_mut() = Some((axes, plot_index));
+            }
         }
         Ok(())
-    })
+    });
+    let Some((axes, plot_index)) = *plot_index_out.borrow() else {
+        return render_result.map(|_| f64::NAN);
+    };
+    let handle = crate::builtins::plotting::state::register_line3_handle(figure_handle, axes, plot_index);
+    if let Err(err) = render_result {
+        let lower = err.to_string().to_lowercase();
+        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+            return Ok(handle);
+        }
+        return Err(err);
+    }
+    Ok(handle)
 }
 
 #[derive(Clone)]

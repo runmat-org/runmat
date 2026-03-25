@@ -23,7 +23,7 @@ use super::perf::compute_surface_lod;
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use std::convert::TryFrom;
 use std::sync::Arc;
 
@@ -34,7 +34,7 @@ const BUILTIN_NAME: &str = "surf";
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::surf")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "surf",
-    op_kind: GpuOpKind::Custom("plot-render"),
+    op_kind: GpuOpKind::PlotRender,
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
@@ -68,10 +68,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "surf,plotting,3d,surface",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::surf"
 )]
-pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
+pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (x, y, z, rest) = parse_surface_call_args(args, BUILTIN_NAME)?;
     let z_input = SurfaceDataInput::from_value(z, "surf")?;
     let (rows, cols) = z_input.grid_shape(BUILTIN_NAME)?;
@@ -137,12 +137,27 @@ pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
 
     style.apply_to_plot(&mut surface);
     let mut surface = Some(surface);
-    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+    let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let surface = surface.take().expect("surf plot consumed once");
-        figure.add_surface_plot_on_axes(surface, axes);
+        let plot_index = figure.add_surface_plot_on_axes(surface, axes);
+        *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())
-    })?;
-    Ok(rendered)
+    });
+    let Some((axes, plot_index)) = *plot_index_out.borrow() else {
+        return render_result.map(|_| f64::NAN);
+    };
+    let handle = crate::builtins::plotting::state::register_surface_handle(figure_handle, axes, plot_index);
+    if let Err(err) = render_result {
+        let lower = err.to_string().to_lowercase();
+        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+            return Ok(handle);
+        }
+        return Err(err);
+    }
+    Ok(handle)
 }
 
 async fn build_surface_cpu(
@@ -417,13 +432,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn surf_type_is_string() {
+    fn surf_type_is_numeric_handle() {
         assert_eq!(
-            string_type(
+            handle_scalar_type(
                 &[Type::tensor(), Type::tensor(), Type::tensor()],
                 &ResolveContext::new(Vec::new())
             ),
-            Type::String
+            Type::Num
         );
     }
 
@@ -497,5 +512,19 @@ pub(crate) mod tests {
         assert_eq!(Tensor::try_from(&x).unwrap().data, vec![1.0, 2.0]);
         assert_eq!(Tensor::try_from(&y).unwrap().data, vec![1.0, 2.0]);
         assert_eq!(Tensor::try_from(&z).unwrap().data, vec![1.0, 2.0, 3.0, 4.0]);
+    }
+
+    #[test]
+    fn surf_returns_surface_handle() {
+        setup_plot_tests();
+        let handle = futures::executor::block_on(surf_builtin(vec![Value::Tensor(Tensor {
+            data: vec![1.0, 2.0, 3.0, 4.0],
+            shape: vec![2, 2],
+            rows: 2,
+            cols: 2,
+            dtype: runmat_builtins::NumericDType::F64,
+        })]))
+        .expect("surf should return a handle");
+        assert!(handle.is_finite());
     }
 }

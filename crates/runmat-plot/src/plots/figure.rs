@@ -932,6 +932,17 @@ impl Figure {
         viewport_px: Option<(u32, u32)>,
         gpu: Option<&GpuPackContext<'_>>,
     ) -> Vec<RenderData> {
+        fn push_with_optional_markers(
+            out: &mut Vec<RenderData>,
+            render_data: RenderData,
+            marker_data: Option<RenderData>,
+        ) {
+            out.push(render_data);
+            if let Some(marker_data) = marker_data {
+                out.push(marker_data);
+            }
+        }
+
         let mut out = Vec::new();
         for (plot_idx, p) in self.plots.iter_mut().enumerate() {
             if !p.is_visible() {
@@ -955,28 +966,32 @@ impl Figure {
                         plot.has_gpu_line_inputs(),
                         plot.has_gpu_vertices()
                     );
-                    out.push(plot.render_data_with_viewport_gpu(viewport_px, gpu));
-                    if let Some(marker_data) = plot.marker_render_data() {
-                        out.push(marker_data);
-                    }
+                    push_with_optional_markers(
+                        &mut out,
+                        plot.render_data_with_viewport_gpu(viewport_px, gpu),
+                        plot.marker_render_data(),
+                    );
                 }
                 PlotElement::ErrorBar(plot) => {
-                    out.push(plot.render_data());
-                    if let Some(marker_data) = plot.marker_render_data() {
-                        out.push(marker_data);
-                    }
+                    push_with_optional_markers(
+                        &mut out,
+                        plot.render_data(),
+                        plot.marker_render_data(),
+                    );
                 }
                 PlotElement::Stairs(plot) => {
-                    out.push(plot.render_data());
-                    if let Some(marker_data) = plot.marker_render_data() {
-                        out.push(marker_data);
-                    }
+                    push_with_optional_markers(
+                        &mut out,
+                        plot.render_data(),
+                        plot.marker_render_data(),
+                    );
                 }
                 PlotElement::Stem(plot) => {
-                    out.push(plot.render_data());
-                    if let Some(marker_data) = plot.marker_render_data() {
-                        out.push(marker_data);
-                    }
+                    push_with_optional_markers(
+                        &mut out,
+                        plot.render_data(),
+                        plot.marker_render_data(),
+                    );
                 }
                 _ => out.push(p.render_data()),
             }

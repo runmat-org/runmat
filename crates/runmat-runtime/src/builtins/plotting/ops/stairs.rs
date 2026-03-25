@@ -27,7 +27,7 @@ use super::style::{
     marker_metadata_from_appearance, parse_line_style_args, LineAppearance, LineStyleParseOptions,
     DEFAULT_LINE_MARKER_SIZE,
 };
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use std::convert::TryFrom;
 
 use crate::BuiltinResult;
@@ -36,7 +36,7 @@ const BUILTIN_NAME: &str = "stairs";
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::stairs")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "stairs",
-    op_kind: GpuOpKind::Custom("plot-render"),
+    op_kind: GpuOpKind::PlotRender,
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
@@ -68,10 +68,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "stairs,plotting,step",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::stairs"
 )]
-pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
+pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<f64> {
     let parsed_style = parse_line_style_args(&rest, &LineStyleParseOptions::stairs())?;
     let mut x_input = Some(StairsInput::from_value(x, BUILTIN_NAME)?);
     let mut y_input = Some(StairsInput::from_value(y, BUILTIN_NAME)?);
@@ -81,7 +81,10 @@ pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinRes
         y_label: "Y",
         ..Default::default()
     };
-    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+    let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let appearance = parsed_style.appearance.clone();
         let marker_meta = marker_metadata_from_appearance(&appearance);
         let label = parsed_style
@@ -101,7 +104,8 @@ pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinRes
                 &label,
             ) {
                 Ok(plot) => {
-                    figure.add_stairs_plot_on_axes(plot, axes);
+                    let plot_index = figure.add_stairs_plot_on_axes(plot, axes);
+                    *plot_index_slot.borrow_mut() = Some((axes, plot_index));
                     return Ok(());
                 }
                 Err(err) => {
@@ -113,10 +117,23 @@ pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinRes
         let (x_tensor, y_tensor) = (x_arg.into_tensor("stairs")?, y_arg.into_tensor("stairs")?);
         let (x_vals, y_vals) = numeric_pair(x_tensor, y_tensor, "stairs")?;
         let plot = build_stairs_plot(x_vals, y_vals, &appearance, marker_meta, &label)?;
-        figure.add_stairs_plot_on_axes(plot, axes);
+        let plot_index = figure.add_stairs_plot_on_axes(plot, axes);
+        *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())
-    })?;
-    Ok(rendered)
+    });
+    let Some((axes, plot_index)) = *plot_index_out.borrow() else {
+        return render_result.map(|_| f64::NAN);
+    };
+    let handle =
+        crate::builtins::plotting::state::register_stairs_handle(figure_handle, axes, plot_index);
+    if let Err(err) = render_result {
+        let lower = err.to_string().to_lowercase();
+        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+            return Ok(handle);
+        }
+        return Err(err);
+    }
+    Ok(handle)
 }
 
 fn build_stairs_plot(
@@ -299,13 +316,13 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn stairs_type_is_string() {
+    fn stairs_type_is_numeric_handle() {
         assert_eq!(
-            string_type(
+            handle_scalar_type(
                 &[Type::tensor(), Type::tensor()],
                 &ResolveContext::new(Vec::new())
             ),
-            Type::String
+            Type::Num
         );
     }
 }

@@ -259,7 +259,7 @@ pub(crate) fn default_level_count() -> usize {
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::contour")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "contour",
-    op_kind: GpuOpKind::Custom("plot-render"),
+    op_kind: GpuOpKind::PlotRender,
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
