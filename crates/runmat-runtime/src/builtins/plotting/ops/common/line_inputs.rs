@@ -5,7 +5,7 @@ use crate::builtins::plotting::common::{gather_tensor_from_gpu, gather_tensor_fr
 use crate::builtins::plotting::plotting_error;
 use crate::BuiltinResult;
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub enum NumericInput {
     Host(Tensor),
     Gpu(GpuTensorHandle),

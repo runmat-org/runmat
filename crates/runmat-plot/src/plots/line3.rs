@@ -102,25 +102,18 @@ impl Line3Plot {
             return self.vertices.as_ref().unwrap();
         }
         if self.dirty || self.vertices.is_none() {
-            let mut vertices = Vec::with_capacity((self.x_data.len() - 1) * 2);
-            for i in 0..self.x_data.len() - 1 {
-                vertices.push(Vertex::new(
-                    Vec3::new(
-                        self.x_data[i] as f32,
-                        self.y_data[i] as f32,
-                        self.z_data[i] as f32,
-                    ),
-                    self.color,
-                ));
-                vertices.push(Vertex::new(
-                    Vec3::new(
-                        self.x_data[i + 1] as f32,
-                        self.y_data[i + 1] as f32,
-                        self.z_data[i + 1] as f32,
-                    ),
-                    self.color,
-                ));
-            }
+            let points: Vec<Vec3> = self
+                .x_data
+                .iter()
+                .zip(self.y_data.iter())
+                .zip(self.z_data.iter())
+                .map(|((&x, &y), &z)| Vec3::new(x as f32, y as f32, z as f32))
+                .collect();
+            let vertices = if self.line_width > 1.0 {
+                create_thick_polyline3_dashed(&points, self.color, self.line_width, self.line_style)
+            } else {
+                create_line3_vertices_dashed(&points, self.color, self.line_style)
+            };
             self.vertices = Some(vertices);
             self.dirty = false;
         }
@@ -182,6 +175,81 @@ impl Line3Plot {
     }
 }
 
+fn create_line3_vertices_dashed(
+    points: &[Vec3],
+    color: Vec4,
+    style: crate::plots::line::LineStyle,
+) -> Vec<Vertex> {
+    let mut vertices = Vec::new();
+    for i in 1..points.len() {
+        let include = match style {
+            crate::plots::line::LineStyle::Solid => true,
+            crate::plots::line::LineStyle::Dashed => (i % 4) < 2,
+            crate::plots::line::LineStyle::Dotted => (i % 4) == 0,
+            crate::plots::line::LineStyle::DashDot => {
+                let m = i % 6;
+                m < 2 || m == 3
+            }
+        };
+        if include {
+            vertices.push(Vertex::new(points[i - 1], color));
+            vertices.push(Vertex::new(points[i], color));
+        }
+    }
+    vertices
+}
+
+fn create_thick_polyline3_dashed(
+    points: &[Vec3],
+    color: Vec4,
+    width: f32,
+    style: crate::plots::line::LineStyle,
+) -> Vec<Vertex> {
+    let mut out = Vec::new();
+    for i in 0..points.len().saturating_sub(1) {
+        let include = match style {
+            crate::plots::line::LineStyle::Solid => true,
+            crate::plots::line::LineStyle::Dashed => (i % 4) < 2,
+            crate::plots::line::LineStyle::Dotted => (i % 4) == 0,
+            crate::plots::line::LineStyle::DashDot => {
+                let m = i % 6;
+                m < 2 || m == 3
+            }
+        };
+        if !include {
+            continue;
+        }
+        out.extend(extrude_segment_3d(
+            points[i],
+            points[i + 1],
+            color,
+            width.max(0.5) * 0.01,
+        ));
+    }
+    out
+}
+
+fn extrude_segment_3d(start: Vec3, end: Vec3, color: Vec4, half_width: f32) -> Vec<Vertex> {
+    let dir = (end - start).normalize_or_zero();
+    let mut normal = dir.cross(Vec3::Z);
+    if normal.length_squared() < 1e-6 {
+        normal = dir.cross(Vec3::X);
+    }
+    let normal = normal.normalize_or_zero() * half_width;
+    let v0 = start + normal;
+    let v1 = end + normal;
+    let v2 = end - normal;
+    let v3 = start - normal;
+    vec![
+        Vertex::new(v0, color),
+        Vertex::new(v1, color),
+        Vertex::new(v2, color),
+        Vertex::new(v0, color),
+        Vertex::new(v2, color),
+        Vertex::new(v3, color),
+    ]
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,5 +260,20 @@ mod tests {
         let bounds = plot.bounds();
         assert_eq!(bounds.min, Vec3::new(0.0, 1.0, 2.0));
         assert_eq!(bounds.max, Vec3::new(1.0, 2.0, 3.0));
+    }
+
+    #[test]
+    fn line3_dashed_and_thick_generate_geometry() {
+        let mut plot = Line3Plot::new(
+            vec![0.0, 1.0, 2.0],
+            vec![0.0, 1.0, 0.0],
+            vec![0.0, 0.0, 1.0],
+        )
+        .unwrap()
+        .with_style(Vec4::ONE, 3.0, crate::plots::line::LineStyle::Dashed);
+        let render = plot.render_data();
+        assert_eq!(render.pipeline_type, PipelineType::Lines);
+        assert!(!render.vertices.is_empty());
+        assert!(render.draw_calls[0].vertex_count >= 2);
     }
 }

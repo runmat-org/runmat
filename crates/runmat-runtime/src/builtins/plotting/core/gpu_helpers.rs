@@ -138,3 +138,19 @@ pub fn gpu_xy_bounds(
 ) -> BuiltinResult<BoundingBox> {
     block_on(gpu_xy_bounds_async(x, y, context))
 }
+
+#[cfg(feature = "plot-core")]
+pub async fn gpu_xyz_bounds_async(
+    x: &GpuTensorHandle,
+    y: &GpuTensorHandle,
+    z: &GpuTensorHandle,
+    context: &'static str,
+) -> BuiltinResult<BoundingBox> {
+    let (min_x, max_x) = axis_bounds_async(x, context).await?;
+    let (min_y, max_y) = axis_bounds_async(y, context).await?;
+    let (min_z, max_z) = axis_bounds_async(z, context).await?;
+    Ok(BoundingBox::new(
+        Vec3::new(min_x, min_y, min_z),
+        Vec3::new(max_x, max_y, max_z),
+    ))
+}

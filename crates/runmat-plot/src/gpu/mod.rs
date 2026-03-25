@@ -4,6 +4,7 @@ pub mod contour;
 pub mod contour_fill;
 pub mod histogram;
 pub mod line;
+pub mod line3;
 pub mod scatter2;
 pub mod scatter3;
 pub mod shaders;
