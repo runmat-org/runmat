@@ -1245,6 +1245,42 @@ mod tests {
     }
 
     #[test]
+    fn figure_scene_roundtrip_preserves_stem_style_surface() {
+        let mut figure = Figure::new();
+        let mut stem = StemPlot::new(vec![0.0, 1.0], vec![1.0, 2.0])
+            .unwrap()
+            .with_style(
+                Vec4::new(1.0, 0.0, 0.0, 1.0),
+                2.0,
+                crate::plots::line::LineStyle::Dashed,
+                -1.0,
+            )
+            .with_baseline_style(Vec4::new(0.0, 0.0, 0.0, 1.0), false)
+            .with_label("Impulse");
+        stem.set_marker(Some(crate::plots::line::LineMarkerAppearance {
+            kind: crate::plots::scatter::MarkerStyle::Square,
+            size: 8.0,
+            edge_color: Vec4::new(0.0, 0.0, 0.0, 1.0),
+            face_color: Vec4::new(1.0, 0.0, 0.0, 1.0),
+            filled: true,
+        }));
+        figure.add_stem_plot(stem);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+        let PlotElement::Stem(stem) = rebuilt.plots().next().unwrap() else {
+            panic!("expected stem")
+        };
+        assert_eq!(stem.baseline, -1.0);
+        assert_eq!(stem.line_width, 2.0);
+        assert_eq!(stem.label.as_deref(), Some("Impulse"));
+        assert!(!stem.baseline_visible);
+        assert!(stem.marker.as_ref().map(|m| m.filled).unwrap_or(false));
+        assert_eq!(stem.marker.as_ref().map(|m| m.size), Some(8.0));
+    }
+
+    #[test]
     fn figure_scene_roundtrip_preserves_axes_local_limits_and_colormap_state() {
         let mut figure = Figure::new().with_subplot_grid(1, 2);
         figure.set_axes_limits(1, Some((1.0, 2.0)), Some((3.0, 4.0)));

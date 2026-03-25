@@ -223,6 +223,34 @@ mod tests {
     }
 
     #[test]
+    fn set_updates_stem_properties() {
+        let _guard = setup();
+        let handle = crate::builtins::plotting::stem::stem_builtin(vec![Value::Tensor(
+            runmat_builtins::Tensor {
+                rows: 2,
+                cols: 1,
+                shape: vec![2],
+                data: vec![1.0, 2.0],
+                dtype: runmat_builtins::NumericDType::F64,
+            },
+        )])
+        .unwrap();
+        set_builtin(vec![
+            Value::Num(handle),
+            Value::String("BaseValue".into()),
+            Value::Num(-2.0),
+            Value::String("Filled".into()),
+            Value::Bool(true),
+        ])
+        .unwrap();
+        let base =
+            get_builtin(vec![Value::Num(handle), Value::String("BaseValue".into())]).unwrap();
+        let filled = get_builtin(vec![Value::Num(handle), Value::String("Filled".into())]).unwrap();
+        assert_eq!(base, Value::Num(-2.0));
+        assert_eq!(filled, Value::Bool(true));
+    }
+
+    #[test]
     fn set_rejects_invalid_property_assignments() {
         let _guard = setup();
         let h = title_builtin(vec![Value::String("Signal".into())]).unwrap();

@@ -6,12 +6,14 @@ use runmat_plot::gpu::line::{
 use runmat_plot::gpu::stem::{StemGpuInputs, StemGpuParams};
 use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::{LineMarkerAppearance, StemPlot};
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 use super::common::numeric_pair;
 use super::gpu_helpers::gpu_xy_bounds;
@@ -58,10 +60,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "stem,plotting,discrete",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::stem"
 )]
-pub fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
+pub fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (target_axes, x, y, rest) = parse_stem_args(args)?;
     let parsed = parse_stem_style_args(&rest)?;
     let mut x_input = Some(NumericInput::from_value(x, BUILTIN_NAME)?);
@@ -72,14 +74,19 @@ pub fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
         y_label: "Y",
         ..Default::default()
     };
-    render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+    let plot_index_out = Rc::new(RefCell::new(None));
+    let plot_index_slot = Rc::clone(&plot_index_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+        let axes = target_axes.unwrap_or(axes);
         let label = parsed.label.clone().unwrap_or_else(|| "Data".into());
         let x_arg = x_input.take().expect("stem x consumed once");
         let y_arg = y_input.take().expect("stem y consumed once");
         if let (Some(x_gpu), Some(y_gpu)) = (x_arg.gpu_handle(), y_arg.gpu_handle()) {
             match build_stem_gpu_plot(BUILTIN_NAME, x_gpu, y_gpu, &parsed, &label) {
                 Ok(plot) => {
-                    figure.add_stem_plot_on_axes(plot, target_axes.unwrap_or(axes));
+                    let plot_index = figure.add_stem_plot_on_axes(plot, axes);
+                    *plot_index_slot.borrow_mut() = Some((axes, plot_index));
                     return Ok(());
                 }
                 Err(err) => log::warn!("stem GPU path unavailable: {err}"),
@@ -89,9 +96,23 @@ pub fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
         let y = y_arg.into_tensor(BUILTIN_NAME)?;
         let (x, y) = numeric_pair(x, y, BUILTIN_NAME)?;
         let plot = build_stem_plot(x, y, &parsed, &label)?;
-        figure.add_stem_plot_on_axes(plot, target_axes.unwrap_or(axes));
+        let plot_index = figure.add_stem_plot_on_axes(plot, axes);
+        *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())
-    })
+    });
+    let Some((axes, plot_index)) = *plot_index_out.borrow() else {
+        return render_result.map(|_| f64::NAN);
+    };
+    let handle =
+        crate::builtins::plotting::state::register_stem_handle(figure_handle, axes, plot_index);
+    if let Err(err) = render_result {
+        let lower = err.to_string().to_lowercase();
+        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+            return Ok(handle);
+        }
+        return Err(err);
+    }
+    Ok(handle)
 }
 
 fn build_stem_plot(
@@ -388,6 +409,8 @@ fn parse_stem_args(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::plotting::get::get_builtin;
+    use crate::builtins::plotting::set::set_builtin;
     use crate::builtins::plotting::subplot::subplot_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{
@@ -411,9 +434,11 @@ mod tests {
         ensure_plot_test_env();
         reset_hold_state_for_run();
         let _ = clear_figure(None);
-        let _ = stem_builtin(vec![Value::Tensor(tensor_from(&[1.0, 2.0, 3.0]))]);
+        let handle = stem_builtin(vec![Value::Tensor(tensor_from(&[1.0, 2.0, 3.0]))]).unwrap();
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert!(matches!(fig.plots().next().unwrap(), PlotElement::Stem(_)));
+        let ty = get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap();
+        assert_eq!(ty, Value::String("stem".into()));
     }
 
     #[test]
@@ -437,6 +462,7 @@ mod tests {
             let msg = err.to_string().to_lowercase();
             assert!(msg.contains("plotting is unavailable") || msg.contains("non-main thread"));
         }
+        let handle = result.unwrap_or(-1.0);
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert_eq!(fig.plot_axes_indices()[0], 1);
         let PlotElement::Stem(stem) = fig.plots().next().unwrap() else {
@@ -445,5 +471,13 @@ mod tests {
         assert_eq!(stem.baseline, -1.0);
         assert_eq!(stem.label.as_deref(), Some("Impulse"));
         assert!(stem.marker.as_ref().map(|m| m.filled).unwrap_or(false));
+        set_builtin(vec![
+            Value::Num(handle),
+            Value::String("Filled".into()),
+            Value::Bool(false),
+        ])
+        .unwrap();
+        let filled = get_builtin(vec![Value::Num(handle), Value::String("Filled".into())]).unwrap();
+        assert_eq!(filled, Value::Bool(false));
     }
 }

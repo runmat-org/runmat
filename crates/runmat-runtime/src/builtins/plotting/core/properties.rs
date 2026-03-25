@@ -22,12 +22,16 @@ pub enum PlotHandle {
     Text(FigureHandle, usize, PlotObjectKind),
     Legend(FigureHandle, usize),
     Histogram(f64),
+    Stem(f64),
 }
 
 pub fn resolve_plot_handle(value: &Value, builtin: &'static str) -> BuiltinResult<PlotHandle> {
     let scalar = handle_scalar(value, builtin)?;
-    if super::state::plot_child_handle_snapshot(scalar).is_ok() {
-        return Ok(PlotHandle::Histogram(scalar));
+    if let Ok(state) = super::state::plot_child_handle_snapshot(scalar) {
+        return Ok(match state {
+            super::state::PlotChildHandleState::Histogram(_) => PlotHandle::Histogram(scalar),
+            super::state::PlotChildHandleState::Stem(_) => PlotHandle::Stem(scalar),
+        });
     }
     if let Ok((handle, axes_index, kind)) = decode_plot_object_handle(scalar) {
         if axes_handle_exists(handle, axes_index) {
@@ -73,6 +77,7 @@ pub fn get_properties(
         }
         PlotHandle::Figure(handle) => get_figure_property(handle, property, builtin),
         PlotHandle::Histogram(handle) => get_histogram_property(handle, property, builtin),
+        PlotHandle::Stem(handle) => get_stem_property(handle, property, builtin),
     }
 }
 
@@ -140,6 +145,13 @@ pub fn set_properties(
             for pair in args.chunks_exact(2) {
                 let key = property_name(&pair[0], builtin)?;
                 apply_histogram_property(handle, &key, &pair[1], builtin)?;
+            }
+            Ok(())
+        }
+        PlotHandle::Stem(handle) => {
+            for pair in args.chunks_exact(2) {
+                let key = property_name(&pair[0], builtin)?;
+                apply_stem_property(handle, &key, &pair[1], builtin)?;
             }
             Ok(())
         }
@@ -988,7 +1000,12 @@ fn get_histogram_property(
 ) -> BuiltinResult<Value> {
     let state = super::state::plot_child_handle_snapshot(handle)
         .map_err(|err| map_figure_error(builtin, err))?;
-    let super::state::PlotChildHandleState::Histogram(hist) = state;
+    let super::state::PlotChildHandleState::Histogram(hist) = state else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid histogram handle"),
+        ));
+    };
     let normalized =
         apply_histogram_normalization(&hist.raw_counts, &hist.bin_edges, &hist.normalization);
     match property.map(canonical_property_name) {
@@ -1026,6 +1043,111 @@ fn get_histogram_property(
     }
 }
 
+fn get_stem_property(
+    handle: f64,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let state = super::state::plot_child_handle_snapshot(handle)
+        .map_err(|err| map_figure_error(builtin, err))?;
+    let super::state::PlotChildHandleState::Stem(stem_handle) = state else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid stem handle"),
+        ));
+    };
+    let figure = super::state::clone_figure(stem_handle.figure)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid stem figure")))?;
+    let plot = figure
+        .plots()
+        .nth(stem_handle.plot_index)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid stem handle")))?;
+    let runmat_plot::plots::figure::PlotElement::Stem(stem) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid stem handle"),
+        ));
+    };
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st = StructValue::new();
+            st.insert("Type", Value::String("stem".into()));
+            st.insert(
+                "Parent",
+                Value::Num(super::state::encode_axes_handle(
+                    stem_handle.figure,
+                    stem_handle.axes_index,
+                )),
+            );
+            st.insert("Children", handles_value(Vec::new()));
+            st.insert("BaseValue", Value::Num(stem.baseline));
+            st.insert("BaseLine", Value::Bool(stem.baseline_visible));
+            st.insert("LineWidth", Value::Num(stem.line_width as f64));
+            st.insert(
+                "LineStyle",
+                Value::String(line_style_name(stem.line_style).into()),
+            );
+            st.insert("Color", Value::String(color_to_short_name(stem.color)));
+            if let Some(marker) = &stem.marker {
+                st.insert(
+                    "Marker",
+                    Value::String(marker_style_name(marker.kind).into()),
+                );
+                st.insert("MarkerSize", Value::Num(marker.size as f64));
+                st.insert(
+                    "MarkerFaceColor",
+                    Value::String(color_to_short_name(marker.face_color)),
+                );
+                st.insert(
+                    "MarkerEdgeColor",
+                    Value::String(color_to_short_name(marker.edge_color)),
+                );
+                st.insert("Filled", Value::Bool(marker.filled));
+            }
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("stem".into())),
+        Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
+            stem_handle.figure,
+            stem_handle.axes_index,
+        ))),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("basevalue") => Ok(Value::Num(stem.baseline)),
+        Some("baseline") => Ok(Value::Bool(stem.baseline_visible)),
+        Some("linewidth") => Ok(Value::Num(stem.line_width as f64)),
+        Some("linestyle") => Ok(Value::String(line_style_name(stem.line_style).into())),
+        Some("color") => Ok(Value::String(color_to_short_name(stem.color))),
+        Some("marker") => Ok(Value::String(
+            stem.marker
+                .as_ref()
+                .map(|m| marker_style_name(m.kind).to_string())
+                .unwrap_or("none".into()),
+        )),
+        Some("markersize") => Ok(Value::Num(
+            stem.marker.as_ref().map(|m| m.size as f64).unwrap_or(0.0),
+        )),
+        Some("markerfacecolor") => Ok(Value::String(
+            stem.marker
+                .as_ref()
+                .map(|m| color_to_short_name(m.face_color))
+                .unwrap_or("none".into()),
+        )),
+        Some("markeredgecolor") => Ok(Value::String(
+            stem.marker
+                .as_ref()
+                .map(|m| color_to_short_name(m.edge_color))
+                .unwrap_or("none".into()),
+        )),
+        Some("filled") => Ok(Value::Bool(
+            stem.marker.as_ref().map(|m| m.filled).unwrap_or(false),
+        )),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported stem property `{other}`"),
+        )),
+    }
+}
+
 fn apply_histogram_property(
     handle: f64,
     key: &str,
@@ -1034,7 +1156,12 @@ fn apply_histogram_property(
 ) -> BuiltinResult<()> {
     let state = super::state::plot_child_handle_snapshot(handle)
         .map_err(|err| map_figure_error(builtin, err))?;
-    let super::state::PlotChildHandleState::Histogram(hist) = state;
+    let super::state::PlotChildHandleState::Histogram(hist) = state else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid histogram handle"),
+        ));
+    };
     match key {
         "normalization" => {
             let norm = value_as_string(value)
@@ -1066,6 +1193,90 @@ fn apply_histogram_property(
             format!("{builtin}: unsupported histogram property `{other}`"),
         )),
     }
+}
+
+fn apply_stem_property(
+    handle: f64,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let state = super::state::plot_child_handle_snapshot(handle)
+        .map_err(|err| map_figure_error(builtin, err))?;
+    let super::state::PlotChildHandleState::Stem(stem_handle) = state else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid stem handle"),
+        ));
+    };
+    super::state::update_stem_plot(
+        stem_handle.figure,
+        stem_handle.plot_index,
+        |stem| match key {
+            "basevalue" => {
+                if let Some(v) = value_as_f64(value) {
+                    stem.baseline = v;
+                    stem.color = stem.color;
+                }
+            }
+            "baseline" => {
+                if let Some(v) = value_as_bool(value) {
+                    stem.baseline_visible = v;
+                }
+            }
+            "linewidth" => {
+                if let Some(v) = value_as_f64(value) {
+                    stem.line_width = v as f32;
+                }
+            }
+            "linestyle" => {
+                if let Some(s) = value_as_string(value) {
+                    stem.line_style = parse_line_style_name_for_props(&s);
+                }
+            }
+            "color" => {
+                if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
+                    stem.color = c;
+                }
+            }
+            "marker" => {
+                if let Some(s) = value_as_string(value) {
+                    stem.marker = marker_from_name(&s, stem.marker.clone());
+                }
+            }
+            "markersize" => {
+                if let Some(v) = value_as_f64(value) {
+                    if let Some(marker) = &mut stem.marker {
+                        marker.size = v as f32;
+                    }
+                }
+            }
+            "markerfacecolor" => {
+                if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
+                    if let Some(marker) = &mut stem.marker {
+                        marker.face_color = c;
+                    }
+                }
+            }
+            "markeredgecolor" => {
+                if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
+                    if let Some(marker) = &mut stem.marker {
+                        marker.edge_color = c;
+                    }
+                }
+            }
+            "filled" => {
+                if let Some(v) = value_as_bool(value) {
+                    if let Some(marker) = &mut stem.marker {
+                        marker.filled = v;
+                    }
+                }
+            }
+            _ => {}
+        },
+    )
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
 }
 
 fn limits_from_optional_value(
@@ -1305,6 +1516,63 @@ fn apply_histogram_normalization(raw_counts: &[f64], edges: &[f64], norm: &str) 
         }
         _ => raw_counts.to_vec(),
     }
+}
+
+fn line_style_name(style: runmat_plot::plots::line::LineStyle) -> &'static str {
+    match style {
+        runmat_plot::plots::line::LineStyle::Solid => "-",
+        runmat_plot::plots::line::LineStyle::Dashed => "--",
+        runmat_plot::plots::line::LineStyle::Dotted => ":",
+        runmat_plot::plots::line::LineStyle::DashDot => "-.",
+    }
+}
+
+fn parse_line_style_name_for_props(name: &str) -> runmat_plot::plots::line::LineStyle {
+    match name.trim() {
+        "--" | "dashed" => runmat_plot::plots::line::LineStyle::Dashed,
+        ":" | "dotted" => runmat_plot::plots::line::LineStyle::Dotted,
+        "-." | "dashdot" => runmat_plot::plots::line::LineStyle::DashDot,
+        _ => runmat_plot::plots::line::LineStyle::Solid,
+    }
+}
+
+fn marker_style_name(style: runmat_plot::plots::scatter::MarkerStyle) -> &'static str {
+    match style {
+        runmat_plot::plots::scatter::MarkerStyle::Circle => "o",
+        runmat_plot::plots::scatter::MarkerStyle::Square => "s",
+        runmat_plot::plots::scatter::MarkerStyle::Triangle => "^",
+        runmat_plot::plots::scatter::MarkerStyle::Diamond => "d",
+        runmat_plot::plots::scatter::MarkerStyle::Plus => "+",
+        runmat_plot::plots::scatter::MarkerStyle::Cross => "x",
+        runmat_plot::plots::scatter::MarkerStyle::Star => "*",
+        runmat_plot::plots::scatter::MarkerStyle::Hexagon => "h",
+    }
+}
+
+fn marker_from_name(
+    name: &str,
+    current: Option<runmat_plot::plots::line::LineMarkerAppearance>,
+) -> Option<runmat_plot::plots::line::LineMarkerAppearance> {
+    let mut marker = current.unwrap_or(runmat_plot::plots::line::LineMarkerAppearance {
+        kind: runmat_plot::plots::scatter::MarkerStyle::Circle,
+        size: 6.0,
+        edge_color: glam::Vec4::new(0.0, 0.447, 0.741, 1.0),
+        face_color: glam::Vec4::new(0.0, 0.447, 0.741, 1.0),
+        filled: false,
+    });
+    marker.kind = match name.trim() {
+        "o" => runmat_plot::plots::scatter::MarkerStyle::Circle,
+        "s" => runmat_plot::plots::scatter::MarkerStyle::Square,
+        "^" => runmat_plot::plots::scatter::MarkerStyle::Triangle,
+        "d" => runmat_plot::plots::scatter::MarkerStyle::Diamond,
+        "+" => runmat_plot::plots::scatter::MarkerStyle::Plus,
+        "x" => runmat_plot::plots::scatter::MarkerStyle::Cross,
+        "*" => runmat_plot::plots::scatter::MarkerStyle::Star,
+        "h" => runmat_plot::plots::scatter::MarkerStyle::Hexagon,
+        "none" => return None,
+        _ => marker.kind,
+    };
+    Some(marker)
 }
 
 fn color_to_short_name(color: glam::Vec4) -> String {

@@ -253,4 +253,31 @@ mod tests {
         assert!(isgraphics_builtin(vec![Value::Num(ax)]).unwrap());
         assert!(!ishandle_builtin(vec![Value::Num(-1.0)]).unwrap());
     }
+
+    #[test]
+    fn stem_handle_exposes_runtime_properties() {
+        let _guard = setup();
+        let handle = crate::builtins::plotting::stem::stem_builtin(vec![
+            Value::Tensor(runmat_builtins::Tensor {
+                rows: 2,
+                cols: 1,
+                shape: vec![2],
+                data: vec![1.0, 2.0],
+                dtype: runmat_builtins::NumericDType::F64,
+            }),
+            Value::String("DisplayName".into()),
+            Value::String("Impulse".into()),
+            Value::String("BaseValue".into()),
+            Value::Num(-1.0),
+            Value::String("filled".into()),
+        ])
+        .unwrap();
+        let props = get_builtin(vec![Value::Num(handle)]).unwrap();
+        let Value::Struct(st) = props else {
+            panic!("expected struct");
+        };
+        assert_eq!(st.fields.get("Type"), Some(&Value::String("stem".into())));
+        assert_eq!(st.fields.get("BaseValue"), Some(&Value::Num(-1.0)));
+        assert_eq!(st.fields.get("Filled"), Some(&Value::Bool(true)));
+    }
 }
