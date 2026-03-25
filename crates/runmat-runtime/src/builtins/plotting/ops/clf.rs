@@ -7,7 +7,7 @@ use runmat_macros::runtime_builtin;
 
 use super::op_common::figure_actions::{parse_clf_action, FigureAction};
 use super::state::{clear_figure, clear_figure_with_builtin, figure_handles, FigureHandle};
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 #[runtime_builtin(
     name = "clf",
@@ -16,40 +16,41 @@ use crate::builtins::plotting::type_resolvers::string_type;
     keywords = "clf,clear figure,plotting",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::clf"
 )]
-pub fn clf_builtin(rest: Vec<Value>) -> crate::BuiltinResult<String> {
+pub fn clf_builtin(rest: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (action, _reset) = parse_clf_action(&rest)?;
     match action {
         FigureAction::Current => {
             let cleared = clear_figure_with_builtin("clf", None)?;
-            Ok(format!("Cleared figure {}", cleared.as_u32()))
+            Ok(cleared.as_u32() as f64)
         }
         FigureAction::Handles(handles) => {
             let ordered: BTreeSet<u32> = handles.into_iter().map(|h| h.as_u32()).collect();
             if ordered.is_empty() {
                 let cleared = clear_figure_with_builtin("clf", None)?;
-                return Ok(format!("Cleared figure {}", cleared.as_u32()));
+                return Ok(cleared.as_u32() as f64);
             }
             for id in &ordered {
                 clear_figure_with_builtin("clf", Some(FigureHandle::from(*id)))?;
             }
             if ordered.len() == 1 {
-                Ok(format!("Cleared figure {}", ordered.iter().next().unwrap()))
+                Ok(*ordered.iter().next().unwrap() as f64)
             } else {
-                Ok(format!("Cleared {} figures", ordered.len()))
+                Ok(ordered.len() as f64)
             }
         }
         FigureAction::All => {
             let handles = figure_handles();
             if handles.is_empty() {
-                return Ok("clf: no figures to clear".to_string());
+                return Ok(0.0);
             }
+            let count = handles.len();
             for handle in handles {
                 let _ = clear_figure(Some(handle));
             }
-            Ok("Cleared all figures".to_string())
+            Ok(count as f64)
         }
     }
 }
@@ -100,10 +101,10 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn clf_type_is_string() {
+    fn clf_type_is_numeric_handle() {
         assert_eq!(
-            string_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
-            Type::String
+            handle_scalar_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::Num
         );
     }
 }

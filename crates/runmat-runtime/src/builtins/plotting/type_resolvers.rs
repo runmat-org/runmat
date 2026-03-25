@@ -2,12 +2,12 @@ use runmat_builtins::{ResolveContext, Type};
 
 use crate::builtins::array::type_resolvers::{row_vector_type, size_vector_len};
 
-pub fn string_type(_args: &[Type], _context: &ResolveContext) -> Type {
-    Type::String
-}
-
 pub fn handle_scalar_type(_args: &[Type], _context: &ResolveContext) -> Type {
     Type::Num
+}
+
+pub fn bool_type(_args: &[Type], _context: &ResolveContext) -> Type {
+    Type::Bool
 }
 
 pub fn gca_type(args: &[Type], _context: &ResolveContext) -> Type {

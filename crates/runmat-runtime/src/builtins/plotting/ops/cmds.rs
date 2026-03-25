@@ -11,7 +11,7 @@ use super::state::{
     clear_current_axes, set_axis_equal, set_axis_limits, set_box_enabled, set_colorbar_enabled,
     set_colormap, set_grid_enabled, set_surface_shading, toggle_box, toggle_colorbar, toggle_grid,
 };
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::bool_type;
 
 #[runtime_builtin(
     name = "grid",
@@ -19,18 +19,18 @@ use crate::builtins::plotting::type_resolvers::string_type;
     summary = "Toggle grid lines on current axes.",
     keywords = "grid,plotting",
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(bool_type),
     builtin_path = "crate::builtins::plotting::cmds"
 )]
-pub fn grid_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
+pub fn grid_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
     match parse_on_off("grid", args.first())? {
         Some(enabled) => {
             set_grid_enabled(enabled);
-            Ok(if enabled { "grid on" } else { "grid off" }.to_string())
+            Ok(enabled)
         }
         None => {
             let enabled = toggle_grid();
-            Ok(if enabled { "grid on" } else { "grid off" }.to_string())
+            Ok(enabled)
         }
     }
 }
@@ -41,18 +41,18 @@ pub fn grid_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     summary = "Toggle axes box outline.",
     keywords = "box,plotting",
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(bool_type),
     builtin_path = "crate::builtins::plotting::cmds"
 )]
-pub fn box_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
+pub fn box_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
     match parse_on_off("box", args.first())? {
         Some(enabled) => {
             set_box_enabled(enabled);
-            Ok(if enabled { "box on" } else { "box off" }.to_string())
+            Ok(enabled)
         }
         None => {
             let enabled = toggle_box();
-            Ok(if enabled { "box on" } else { "box off" }.to_string())
+            Ok(enabled)
         }
     }
 }
@@ -63,12 +63,12 @@ pub fn box_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     summary = "Set axis limits/aspect.",
     keywords = "axis,plotting",
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(bool_type),
     builtin_path = "crate::builtins::plotting::cmds"
 )]
-pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
+pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
     if args.is_empty() {
-        return Ok("axis".to_string());
+        return Ok(true);
     }
 
     // Numeric form: axis([xmin xmax ymin ymax])
@@ -82,7 +82,7 @@ pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
                 return Err(plotting_error("axis", "axis: limits must be finite"));
             }
             set_axis_limits(Some((xmin, xmax)), Some((ymin, ymax)));
-            return Ok("axis limits set".to_string());
+            return Ok(true);
         }
     }
 
@@ -95,17 +95,17 @@ pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     match mode.trim() {
         "equal" => {
             set_axis_equal(true);
-            Ok("axis equal".to_string())
+            Ok(true)
         }
         "auto" => {
             set_axis_equal(false);
             set_axis_limits(None, None);
-            Ok("axis auto".to_string())
+            Ok(true)
         }
         "tight" => {
             // Treat as auto; camera fit uses data bounds.
             set_axis_limits(None, None);
-            Ok("axis tight".to_string())
+            Ok(true)
         }
         other => Err(plotting_error(
             "axis",
@@ -120,12 +120,12 @@ pub fn axis_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     summary = "Clear current axes.",
     keywords = "cla,plotting",
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(bool_type),
     builtin_path = "crate::builtins::plotting::cmds"
 )]
-pub fn cla_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
+pub fn cla_builtin(_args: Vec<Value>) -> crate::BuiltinResult<bool> {
     clear_current_axes();
-    Ok("axes cleared".to_string())
+    Ok(true)
 }
 
 #[runtime_builtin(
@@ -134,10 +134,10 @@ pub fn cla_builtin(_args: Vec<Value>) -> crate::BuiltinResult<String> {
     summary = "Set the active colormap.",
     keywords = "colormap,plotting",
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(bool_type),
     builtin_path = "crate::builtins::plotting::cmds"
 )]
-pub fn colormap_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
+pub fn colormap_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
     let Some(arg) = args.first() else {
         return Err(plotting_error("colormap", "colormap: expected a name"));
     };
@@ -174,7 +174,7 @@ pub fn colormap_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
         }
     };
     set_colormap(cmap);
-    Ok(format!("colormap {name}"))
+    Ok(true)
 }
 
 #[runtime_builtin(
@@ -183,10 +183,10 @@ pub fn colormap_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     summary = "Set shading mode for surface plots.",
     keywords = "shading,plotting",
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(bool_type),
     builtin_path = "crate::builtins::plotting::cmds"
 )]
-pub fn shading_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
+pub fn shading_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
     let Some(arg) = args.first() else {
         return Err(plotting_error(
             "shading",
@@ -208,7 +208,7 @@ pub fn shading_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
         }
     };
     set_surface_shading(shading);
-    Ok(format!("shading {mode}"))
+    Ok(true)
 }
 
 #[runtime_builtin(
@@ -217,28 +217,18 @@ pub fn shading_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     summary = "Toggle colorbar visibility.",
     keywords = "colorbar,plotting",
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(bool_type),
     builtin_path = "crate::builtins::plotting::cmds"
 )]
-pub fn colorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
+pub fn colorbar_builtin(args: Vec<Value>) -> crate::BuiltinResult<bool> {
     match parse_on_off("colorbar", args.first())? {
         Some(enabled) => {
             set_colorbar_enabled(enabled);
-            Ok(if enabled {
-                "colorbar on"
-            } else {
-                "colorbar off"
-            }
-            .to_string())
+            Ok(enabled)
         }
         None => {
             let enabled = toggle_colorbar();
-            Ok(if enabled {
-                "colorbar on"
-            } else {
-                "colorbar off"
-            }
-            .to_string())
+            Ok(enabled)
         }
     }
 }
