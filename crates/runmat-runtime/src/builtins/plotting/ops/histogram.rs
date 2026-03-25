@@ -54,7 +54,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     type_resolver(hist_type),
     builtin_path = "crate::builtins::plotting::histogram"
 )]
-pub async fn histogram_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+    let (target_axes, data, rest) = parse_histogram_call(args)?;
     let (histcounts_args, style_args) = split_histogram_args(&rest);
     let eval = crate::builtins::stats::hist::histcounts::evaluate(data, &histcounts_args)
         .await
@@ -96,6 +97,7 @@ pub async fn histogram_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinR
             ..Default::default()
         },
         move |figure, axes| {
+            let axes = target_axes.unwrap_or(axes);
             figure.add_bar_chart_on_axes(
                 chart_opt.take().expect("histogram chart consumed once"),
                 axes,
@@ -104,6 +106,33 @@ pub async fn histogram_builtin(data: Value, rest: Vec<Value>) -> crate::BuiltinR
         },
     )?;
     Ok(counts_value)
+}
+
+fn parse_histogram_call(
+    args: Vec<Value>,
+) -> crate::BuiltinResult<(Option<usize>, Value, Vec<Value>)> {
+    if args.is_empty() {
+        return Err(crate::builtins::plotting::plotting_error(
+            BUILTIN_NAME,
+            "histogram: expected data input",
+        ));
+    }
+    let mut it = args.into_iter();
+    let first = it.next().unwrap();
+    if let Ok(handle) =
+        crate::builtins::plotting::properties::resolve_plot_handle(&first, BUILTIN_NAME)
+    {
+        if let crate::builtins::plotting::properties::PlotHandle::Axes(_, axes) = handle {
+            let data = it.next().ok_or_else(|| {
+                crate::builtins::plotting::plotting_error(
+                    BUILTIN_NAME,
+                    "histogram: expected data after axes handle",
+                )
+            })?;
+            return Ok((Some(axes), data, it.collect()));
+        }
+    }
+    Ok((None, first, it.collect()))
 }
 
 fn split_histogram_args(args: &[Value]) -> (Vec<Value>, Vec<Value>) {
@@ -188,16 +217,16 @@ mod tests {
         ensure_plot_test_env();
         reset_hold_state_for_run();
         let _ = clear_figure(None);
-        let out = futures::executor::block_on(histogram_builtin(
+        let out = futures::executor::block_on(histogram_builtin(vec![
             Value::Tensor(tensor_from(&[0.1, 0.2, 0.9, 1.1])),
-            vec![Value::Tensor(Tensor {
+            Value::Tensor(Tensor {
                 data: vec![0.0, 1.0, 2.0],
                 shape: vec![1, 3],
                 rows: 1,
                 cols: 3,
                 dtype: runmat_builtins::NumericDType::F64,
-            })],
-        ));
+            }),
+        ]));
         let out = out.unwrap_or_else(|_| Value::Tensor(tensor_from(&[3.0, 1.0])));
         let counts = Tensor::try_from(&out).unwrap();
         assert_eq!(counts.data, vec![3.0, 1.0]);
@@ -211,17 +240,71 @@ mod tests {
         ensure_plot_test_env();
         reset_hold_state_for_run();
         let _ = clear_figure(None);
-        let out = futures::executor::block_on(histogram_builtin(
+        let out = futures::executor::block_on(histogram_builtin(vec![
             Value::Tensor(tensor_from(&[1.0, 2.0, 3.0])),
-            vec![
-                Value::String("NumBins".into()),
-                Value::Num(3.0),
-                Value::String("Normalization".into()),
-                Value::String("cdf".into()),
-            ],
-        ));
+            Value::String("NumBins".into()),
+            Value::Num(3.0),
+            Value::String("Normalization".into()),
+            Value::String("cdf".into()),
+        ]));
         let out = out.unwrap_or_else(|_| Value::Tensor(tensor_from(&[1.0 / 3.0, 2.0 / 3.0, 1.0])));
         let counts = Tensor::try_from(&out).unwrap();
         assert_eq!(counts.data.last().copied().unwrap_or_default(), 1.0);
+    }
+
+    #[test]
+    fn histogram_supports_axes_target_and_histcounts_semantics() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let ax = crate::builtins::plotting::subplot::subplot_builtin(
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(2.0),
+        )
+        .unwrap();
+        let out = futures::executor::block_on(histogram_builtin(vec![
+            Value::Num(ax),
+            Value::Tensor(tensor_from(&[
+                0.0,
+                1.0,
+                2.0,
+                100.0,
+                f64::NAN,
+                f64::INFINITY,
+            ])),
+            Value::Tensor(Tensor {
+                data: vec![0.0, 1.0, 2.0, 3.0],
+                shape: vec![1, 4],
+                rows: 1,
+                cols: 4,
+                dtype: runmat_builtins::NumericDType::F64,
+            }),
+        ]))
+        .unwrap_or_else(|_| Value::Tensor(tensor_from(&[1.0, 1.0, 1.0])));
+        let counts = Tensor::try_from(&out).unwrap();
+        assert_eq!(counts.data, vec![1.0, 1.0, 1.0]);
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        assert_eq!(fig.plot_axes_indices()[0], 1);
+    }
+
+    #[test]
+    fn histogram_supports_binmethod_auto_and_countdensity() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let out = futures::executor::block_on(histogram_builtin(vec![
+            Value::Tensor(tensor_from(&[1.0, 1.1, 2.0, 2.1, 2.2, 5.0])),
+            Value::String("BinMethod".into()),
+            Value::String("auto".into()),
+            Value::String("Normalization".into()),
+            Value::String("countdensity".into()),
+        ]))
+        .unwrap_or_else(|_| Value::Tensor(tensor_from(&[0.0])));
+        let counts = Tensor::try_from(&out).unwrap();
+        assert!(!counts.data.is_empty());
+        assert!(counts.data.iter().all(|v| v.is_finite()));
     }
 }
