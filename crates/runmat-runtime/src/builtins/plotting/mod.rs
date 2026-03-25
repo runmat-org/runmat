@@ -90,6 +90,8 @@ pub(crate) mod semilogy;
 pub(crate) mod set;
 #[path = "ops/stairs.rs"]
 pub(crate) mod stairs;
+#[path = "ops/stem.rs"]
+pub(crate) mod stem;
 #[path = "ops/subplot.rs"]
 pub(crate) mod subplot;
 #[path = "ops/surf.rs"]

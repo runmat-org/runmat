@@ -1,6 +1,7 @@
-//! Stem plot implementation (lines from baseline to points)
+//! Stem plot implementation.
 
-use crate::core::{BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex};
+use crate::core::{AlphaMode, BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex};
+use crate::plots::line::{LineMarkerAppearance, LineStyle};
 use glam::{Vec3, Vec4};
 
 #[derive(Debug, Clone)]
@@ -9,12 +10,18 @@ pub struct StemPlot {
     pub y: Vec<f64>,
     pub baseline: f64,
     pub color: Vec4,
-    pub marker_color: Vec4,
+    pub line_width: f32,
+    pub line_style: LineStyle,
+    pub baseline_color: Vec4,
+    pub baseline_visible: bool,
+    pub marker: Option<LineMarkerAppearance>,
     pub label: Option<String>,
     pub visible: bool,
     vertices: Option<Vec<Vertex>>,
     bounds: Option<BoundingBox>,
     dirty: bool,
+    marker_vertices: Option<Vec<Vertex>>,
+    marker_dirty: bool,
 }
 
 impl StemPlot {
@@ -26,32 +33,88 @@ impl StemPlot {
             x,
             y,
             baseline: 0.0,
-            color: Vec4::new(0.0, 0.0, 0.0, 1.0),
-            marker_color: Vec4::new(0.0, 0.5, 1.0, 1.0),
+            color: Vec4::new(0.0, 0.447, 0.741, 1.0),
+            line_width: 1.0,
+            line_style: LineStyle::Solid,
+            baseline_color: Vec4::new(0.15, 0.15, 0.15, 1.0),
+            baseline_visible: true,
+            marker: Some(LineMarkerAppearance {
+                kind: crate::plots::scatter::MarkerStyle::Circle,
+                size: 6.0,
+                edge_color: Vec4::new(0.0, 0.447, 0.741, 1.0),
+                face_color: Vec4::new(0.0, 0.447, 0.741, 1.0),
+                filled: false,
+            }),
             label: None,
             visible: true,
             vertices: None,
             bounds: None,
             dirty: true,
+            marker_vertices: None,
+            marker_dirty: true,
         })
     }
-    pub fn with_style(mut self, color: Vec4, marker_color: Vec4, baseline: f64) -> Self {
+
+    pub fn with_style(
+        mut self,
+        color: Vec4,
+        line_width: f32,
+        line_style: LineStyle,
+        baseline: f64,
+    ) -> Self {
         self.color = color;
-        self.marker_color = marker_color;
+        self.line_width = line_width.max(0.5);
+        self.line_style = line_style;
         self.baseline = baseline;
         self.dirty = true;
         self
     }
+
+    pub fn with_baseline_style(mut self, color: Vec4, visible: bool) -> Self {
+        self.baseline_color = color;
+        self.baseline_visible = visible;
+        self.dirty = true;
+        self
+    }
+
     pub fn with_label<S: Into<String>>(mut self, label: S) -> Self {
         self.label = Some(label.into());
         self
     }
-    pub fn set_visible(&mut self, v: bool) {
-        self.visible = v;
+
+    pub fn set_visible(&mut self, visible: bool) {
+        self.visible = visible;
     }
+
+    pub fn set_marker(&mut self, marker: Option<LineMarkerAppearance>) {
+        self.marker = marker;
+        self.marker_dirty = true;
+        if self.marker.is_none() {
+            self.marker_vertices = None;
+        }
+    }
+
     pub fn generate_vertices(&mut self) -> &Vec<Vertex> {
         if self.dirty || self.vertices.is_none() {
-            let mut verts = Vec::new();
+            let mut vertices = Vec::new();
+            let finite_x: Vec<f32> = self
+                .x
+                .iter()
+                .map(|v| *v as f32)
+                .filter(|v| v.is_finite())
+                .collect();
+            if self.baseline_visible && !finite_x.is_empty() {
+                let min_x = finite_x.iter().copied().fold(f32::INFINITY, f32::min);
+                let max_x = finite_x.iter().copied().fold(f32::NEG_INFINITY, f32::max);
+                vertices.push(Vertex::new(
+                    Vec3::new(min_x, self.baseline as f32, 0.0),
+                    self.baseline_color,
+                ));
+                vertices.push(Vertex::new(
+                    Vec3::new(max_x, self.baseline as f32, 0.0),
+                    self.baseline_color,
+                ));
+            }
             for i in 0..self.x.len() {
                 let x = self.x[i] as f32;
                 let y = self.y[i] as f32;
@@ -59,21 +122,63 @@ impl StemPlot {
                 if !x.is_finite() || !y.is_finite() {
                     continue;
                 }
-                // Stem line
-                verts.push(Vertex::new(Vec3::new(x, b, 0.0), self.color));
-                verts.push(Vertex::new(Vec3::new(x, y, 0.0), self.color));
-                // Marker as short cross
-                let s = 0.01f32.max(0.01);
-                verts.push(Vertex::new(Vec3::new(x - s, y, 0.0), self.marker_color));
-                verts.push(Vertex::new(Vec3::new(x + s, y, 0.0), self.marker_color));
-                verts.push(Vertex::new(Vec3::new(x, y - s, 0.0), self.marker_color));
-                verts.push(Vertex::new(Vec3::new(x, y + s, 0.0), self.marker_color));
+                if include_segment(i, self.line_style) {
+                    vertices.push(Vertex::new(Vec3::new(x, b, 0.0), self.color));
+                    vertices.push(Vertex::new(Vec3::new(x, y, 0.0), self.color));
+                }
             }
-            self.vertices = Some(verts);
+            self.vertices = Some(vertices);
             self.dirty = false;
         }
         self.vertices.as_ref().unwrap()
     }
+
+    pub fn marker_render_data(&mut self) -> Option<RenderData> {
+        let marker = self.marker.clone()?;
+        if self.marker_dirty || self.marker_vertices.is_none() {
+            let size = (marker.size.max(1.0) * 0.005).max(0.005);
+            let mut vertices = Vec::new();
+            for (&x, &y) in self.x.iter().zip(self.y.iter()) {
+                let x = x as f32;
+                let y = y as f32;
+                if !x.is_finite() || !y.is_finite() {
+                    continue;
+                }
+                vertices.extend(square_marker(x, y, size, marker.face_color));
+            }
+            self.marker_vertices = Some(vertices);
+            self.marker_dirty = false;
+        }
+        let vertices = self.marker_vertices.as_ref()?;
+        if vertices.is_empty() {
+            return None;
+        }
+        Some(RenderData {
+            pipeline_type: PipelineType::Triangles,
+            vertices: vertices.clone(),
+            indices: None,
+            gpu_vertices: None,
+            bounds: None,
+            material: Material {
+                albedo: marker.face_color,
+                alpha_mode: if marker.face_color.w < 0.999 {
+                    AlphaMode::Blend
+                } else {
+                    AlphaMode::Opaque
+                },
+                ..Default::default()
+            },
+            draw_calls: vec![DrawCall {
+                vertex_offset: 0,
+                vertex_count: vertices.len(),
+                index_offset: None,
+                index_count: None,
+                instance_count: 1,
+            }],
+            image: None,
+        })
+    }
+
     pub fn bounds(&mut self) -> BoundingBox {
         if self.dirty || self.bounds.is_none() {
             let mut min = Vec3::new(f32::INFINITY, f32::INFINITY, 0.0);
@@ -96,33 +201,76 @@ impl StemPlot {
         }
         self.bounds.unwrap()
     }
+
     pub fn render_data(&mut self) -> RenderData {
         let vertices = self.generate_vertices().clone();
-        let material = Material {
-            albedo: self.color,
-            ..Default::default()
-        };
-        let draw_call = DrawCall {
-            vertex_offset: 0,
-            vertex_count: vertices.len(),
-            index_offset: None,
-            index_count: None,
-            instance_count: 1,
-        };
         RenderData {
             pipeline_type: PipelineType::Lines,
-            vertices,
+            vertices: vertices.clone(),
             indices: None,
             gpu_vertices: None,
             bounds: None,
-            material,
-            draw_calls: vec![draw_call],
+            material: Material {
+                albedo: self.color,
+                roughness: self.line_width,
+                ..Default::default()
+            },
+            draw_calls: vec![DrawCall {
+                vertex_offset: 0,
+                vertex_count: vertices.len(),
+                index_offset: None,
+                index_count: None,
+                instance_count: 1,
+            }],
             image: None,
         }
     }
+
     pub fn estimated_memory_usage(&self) -> usize {
         self.vertices
             .as_ref()
             .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>())
+            + self
+                .marker_vertices
+                .as_ref()
+                .map_or(0, |v| v.len() * std::mem::size_of::<Vertex>())
+    }
+}
+
+fn include_segment(index: usize, style: LineStyle) -> bool {
+    match style {
+        LineStyle::Solid => true,
+        LineStyle::Dashed => (index % 4) < 2,
+        LineStyle::Dotted => (index % 4) == 0,
+        LineStyle::DashDot => {
+            let m = index % 6;
+            m < 2 || m == 3
+        }
+    }
+}
+
+fn square_marker(x: f32, y: f32, half: f32, color: Vec4) -> [Vertex; 6] {
+    [
+        Vertex::new(Vec3::new(x - half, y - half, 0.0), color),
+        Vertex::new(Vec3::new(x + half, y - half, 0.0), color),
+        Vertex::new(Vec3::new(x + half, y + half, 0.0), color),
+        Vertex::new(Vec3::new(x - half, y - half, 0.0), color),
+        Vertex::new(Vec3::new(x + half, y + half, 0.0), color),
+        Vertex::new(Vec3::new(x - half, y + half, 0.0), color),
+    ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn stem_bounds_include_baseline() {
+        let mut plot = StemPlot::new(vec![0.0, 1.0], vec![1.0, -2.0])
+            .unwrap()
+            .with_style(Vec4::ONE, 1.0, LineStyle::Solid, -1.0);
+        let bounds = plot.bounds();
+        assert_eq!(bounds.min.y, -2.0);
+        assert_eq!(bounds.max.y, 1.0);
     }
 }

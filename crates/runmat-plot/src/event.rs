@@ -107,7 +107,13 @@ pub enum ScenePlot {
         #[serde(deserialize_with = "deserialize_f64_lossy")]
         baseline: f64,
         color_rgba: [f32; 4],
+        line_width: f32,
+        line_style: String,
+        baseline_color_rgba: [f32; 4],
+        baseline_visible: bool,
         marker_color_rgba: [f32; 4],
+        marker_size: f32,
+        marker_filled: bool,
         axes_index: u32,
         label: Option<String>,
         visible: bool,
@@ -622,7 +628,18 @@ impl ScenePlot {
                 y: stem.y.clone(),
                 baseline: stem.baseline,
                 color_rgba: vec4_to_rgba(stem.color),
-                marker_color_rgba: vec4_to_rgba(stem.marker_color),
+                line_width: stem.line_width,
+                line_style: format!("{:?}", stem.line_style),
+                baseline_color_rgba: vec4_to_rgba(stem.baseline_color),
+                baseline_visible: stem.baseline_visible,
+                marker_color_rgba: vec4_to_rgba(
+                    stem.marker
+                        .as_ref()
+                        .map(|m| m.face_color)
+                        .unwrap_or(stem.color),
+                ),
+                marker_size: stem.marker.as_ref().map(|m| m.size).unwrap_or(0.0),
+                marker_filled: stem.marker.as_ref().map(|m| m.filled).unwrap_or(false),
                 axes_index,
                 label: stem.label.clone(),
                 visible: stem.visible,
@@ -776,15 +793,35 @@ impl ScenePlot {
                 y,
                 baseline,
                 color_rgba,
+                line_width,
+                line_style,
+                baseline_color_rgba,
+                baseline_visible,
                 marker_color_rgba,
+                marker_size,
+                marker_filled,
                 axes_index,
                 label,
                 visible,
             } => {
                 let mut stem = StemPlot::new(x, y)?;
-                stem.baseline = baseline;
-                stem.color = rgba_to_vec4(color_rgba);
-                stem.marker_color = rgba_to_vec4(marker_color_rgba);
+                stem = stem
+                    .with_style(
+                        rgba_to_vec4(color_rgba),
+                        line_width,
+                        parse_line_style_name(&line_style),
+                        baseline,
+                    )
+                    .with_baseline_style(rgba_to_vec4(baseline_color_rgba), baseline_visible);
+                if marker_size > 0.0 {
+                    stem.set_marker(Some(crate::plots::line::LineMarkerAppearance {
+                        kind: crate::plots::scatter::MarkerStyle::Circle,
+                        size: marker_size,
+                        edge_color: rgba_to_vec4(marker_color_rgba),
+                        face_color: rgba_to_vec4(marker_color_rgba),
+                        filled: marker_filled,
+                    }));
+                }
                 stem.label = label;
                 stem.set_visible(visible);
                 figure.add_stem_plot_on_axes(stem, axes_index as usize);
