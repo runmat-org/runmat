@@ -10,6 +10,7 @@ pub mod contour_fill;
 pub mod errorbar;
 pub mod figure;
 pub mod line;
+pub mod line3;
 pub mod pie;
 pub mod quiver;
 pub mod scatter;
@@ -28,6 +29,7 @@ pub use figure::{
     AxesMetadata, Figure, LegendEntry, LegendStyle, PlotElement, PlotType, TextStyle,
 };
 pub use line::{LineGpuStyle, LineMarkerAppearance, LinePlot, LineStyle};
+pub use line3::Line3Plot;
 pub use pie::PieChart;
 pub use quiver::QuiverPlot;
 pub use scatter::{MarkerStyle, ScatterPlot};

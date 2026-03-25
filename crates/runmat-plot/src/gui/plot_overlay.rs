@@ -639,6 +639,7 @@ impl PlotOverlay {
                     // Draw a small symbol representative of plot type
                     match e.plot_type {
                         crate::plots::figure::PlotType::Line
+                        | crate::plots::figure::PlotType::Line3
                         | crate::plots::figure::PlotType::Contour => {
                             // Line: horizontal segment
                             let ymid = swatch_rect.center().y;

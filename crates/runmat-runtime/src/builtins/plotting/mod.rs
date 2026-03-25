@@ -70,6 +70,8 @@ pub(crate) mod op_common;
 pub(crate) mod pie;
 #[path = "ops/plot.rs"]
 pub(crate) mod plot;
+#[path = "ops/plot3.rs"]
+pub(crate) mod plot3;
 #[path = "ops/scatter.rs"]
 pub(crate) mod scatter;
 #[path = "ops/scatter3.rs"]

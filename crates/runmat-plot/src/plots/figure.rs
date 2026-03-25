@@ -6,8 +6,8 @@
 use crate::core::{BoundingBox, GpuPackContext, RenderData};
 use crate::plots::surface::ColorMap;
 use crate::plots::{
-    AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, LinePlot, PieChart, QuiverPlot,
-    Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
+    AreaPlot, BarChart, ContourFillPlot, ContourPlot, ErrorBar, Line3Plot, LinePlot, PieChart,
+    QuiverPlot, Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
 };
 use glam::Vec4;
 use log::trace;
@@ -148,6 +148,7 @@ pub enum PlotElement {
     Quiver(QuiverPlot),
     Pie(PieChart),
     Surface(SurfacePlot),
+    Line3(Line3Plot),
     Scatter3(Scatter3Plot),
     Contour(ContourPlot),
     ContourFill(ContourFillPlot),
@@ -180,6 +181,7 @@ pub enum PlotType {
     Quiver,
     Pie,
     Surface,
+    Line3,
     Scatter3,
     Contour,
     ContourFill,
@@ -642,6 +644,14 @@ impl Figure {
         self.push_plot(PlotElement::Surface(plot), axes_index)
     }
 
+    pub fn add_line3_plot(&mut self, plot: Line3Plot) -> usize {
+        self.add_line3_plot_on_axes(plot, self.active_axes_index)
+    }
+
+    pub fn add_line3_plot_on_axes(&mut self, plot: Line3Plot, axes_index: usize) -> usize {
+        self.push_plot(PlotElement::Line3(plot), axes_index)
+    }
+
     /// Add a 3D scatter plot to the figure
     pub fn add_scatter3_plot(&mut self, plot: Scatter3Plot) -> usize {
         self.add_scatter3_plot_on_axes(plot, 0)
@@ -988,6 +998,7 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.visible,
             PlotElement::Pie(plot) => plot.visible,
             PlotElement::Surface(plot) => plot.visible,
+            PlotElement::Line3(plot) => plot.visible,
             PlotElement::Scatter3(plot) => plot.visible,
             PlotElement::Contour(plot) => plot.visible,
             PlotElement::ContourFill(plot) => plot.visible,
@@ -1007,6 +1018,7 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.label.clone(),
             PlotElement::Pie(plot) => plot.label.clone(),
             PlotElement::Surface(plot) => plot.label.clone(),
+            PlotElement::Line3(plot) => plot.label.clone(),
             PlotElement::Scatter3(plot) => plot.label.clone(),
             PlotElement::Contour(plot) => plot.label.clone(),
             PlotElement::ContourFill(plot) => plot.label.clone(),
@@ -1026,6 +1038,7 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.label = label,
             PlotElement::Pie(plot) => plot.label = label,
             PlotElement::Surface(plot) => plot.label = label,
+            PlotElement::Line3(plot) => plot.label = label,
             PlotElement::Scatter3(plot) => plot.label = label,
             PlotElement::Contour(plot) => plot.label = label,
             PlotElement::ContourFill(plot) => plot.label = label,
@@ -1045,6 +1058,7 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.color,
             PlotElement::Pie(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
             PlotElement::Surface(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
+            PlotElement::Line3(plot) => plot.color,
             PlotElement::Scatter3(plot) => plot.colors.first().copied().unwrap_or(Vec4::ONE),
             PlotElement::Contour(_plot) => Vec4::new(1.0, 1.0, 1.0, 1.0),
             PlotElement::ContourFill(_plot) => Vec4::new(0.9, 0.9, 0.9, 1.0),
@@ -1064,6 +1078,7 @@ impl PlotElement {
             PlotElement::Quiver(_) => PlotType::Quiver,
             PlotElement::Pie(_) => PlotType::Pie,
             PlotElement::Surface(_) => PlotType::Surface,
+            PlotElement::Line3(_) => PlotType::Line3,
             PlotElement::Scatter3(_) => PlotType::Scatter3,
             PlotElement::Contour(_) => PlotType::Contour,
             PlotElement::ContourFill(_) => PlotType::ContourFill,
@@ -1083,6 +1098,7 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.bounds(),
             PlotElement::Pie(plot) => plot.bounds(),
             PlotElement::Surface(plot) => plot.bounds(),
+            PlotElement::Line3(plot) => plot.bounds(),
             PlotElement::Scatter3(plot) => plot.bounds(),
             PlotElement::Contour(plot) => plot.bounds(),
             PlotElement::ContourFill(plot) => plot.bounds(),
@@ -1102,6 +1118,7 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.render_data(),
             PlotElement::Pie(plot) => plot.render_data(),
             PlotElement::Surface(plot) => plot.render_data(),
+            PlotElement::Line3(plot) => plot.render_data(),
             PlotElement::Scatter3(plot) => plot.render_data(),
             PlotElement::Contour(plot) => plot.render_data(),
             PlotElement::ContourFill(plot) => plot.render_data(),
@@ -1121,6 +1138,7 @@ impl PlotElement {
             PlotElement::Quiver(plot) => plot.estimated_memory_usage(),
             PlotElement::Pie(plot) => plot.estimated_memory_usage(),
             PlotElement::Surface(_plot) => 0,
+            PlotElement::Line3(plot) => plot.estimated_memory_usage(),
             PlotElement::Scatter3(plot) => plot.estimated_memory_usage(),
             PlotElement::Contour(plot) => plot.estimated_memory_usage(),
             PlotElement::ContourFill(plot) => plot.estimated_memory_usage(),
@@ -1505,5 +1523,19 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].label, "A");
         assert_eq!(entries[1].label, "B");
+    }
+
+    #[test]
+    fn line3_contributes_to_3d_bounds_and_metadata() {
+        let mut figure = Figure::new();
+        let line3 = Line3Plot::new(vec![0.0, 1.0], vec![1.0, 2.0], vec![2.0, 4.0])
+            .unwrap()
+            .with_label("Trajectory");
+        figure.add_line3_plot(line3);
+        let bounds = figure.bounds();
+        assert_eq!(bounds.min.z, 2.0);
+        assert_eq!(bounds.max.z, 4.0);
+        let entries = figure.legend_entries_for_axes(0);
+        assert_eq!(entries[0].plot_type, PlotType::Line3);
     }
 }

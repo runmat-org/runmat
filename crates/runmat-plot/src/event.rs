@@ -1,7 +1,7 @@
 use crate::plots::{
-    AreaPlot, AxesMetadata, ColorMap, ErrorBar, Figure, LegendEntry, LegendStyle, LinePlot,
-    MarkerStyle, PlotElement, PlotType, Scatter3Plot, ScatterPlot, ShadingMode, StairsPlot,
-    StemPlot, SurfacePlot, TextStyle,
+    AreaPlot, AxesMetadata, ColorMap, ErrorBar, Figure, LegendEntry, LegendStyle, Line3Plot,
+    LinePlot, MarkerStyle, PlotElement, PlotType, Scatter3Plot, ScatterPlot, ShadingMode,
+    StairsPlot, StemPlot, SurfacePlot, TextStyle,
 };
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
@@ -138,6 +138,20 @@ pub enum ScenePlot {
         flatten_z: bool,
         #[serde(default, deserialize_with = "deserialize_option_pair_f64_lossy")]
         color_limits: Option<[f64; 2]>,
+        axes_index: u32,
+        label: Option<String>,
+        visible: bool,
+    },
+    Line3 {
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
+        x: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
+        y: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
+        z: Vec<f64>,
+        color_rgba: [f32; 4],
+        line_width: f32,
+        line_style: String,
         axes_index: u32,
         label: Option<String>,
         visible: bool,
@@ -601,6 +615,17 @@ impl ScenePlot {
                 label: surface.label.clone(),
                 visible: surface.visible,
             },
+            PlotElement::Line3(line) => Self::Line3 {
+                x: line.x_data.clone(),
+                y: line.y_data.clone(),
+                z: line.z_data.clone(),
+                color_rgba: vec4_to_rgba(line.color),
+                line_width: line.line_width,
+                line_style: format!("{:?}", line.line_style),
+                axes_index,
+                label: line.label.clone(),
+                visible: line.visible,
+            },
             PlotElement::Scatter3(scatter3) => Self::Scatter3 {
                 points: scatter3
                     .points
@@ -770,6 +795,27 @@ impl ScenePlot {
                 surface.visible = visible;
                 figure.add_surface_plot_on_axes(surface, axes_index as usize);
             }
+            ScenePlot::Line3 {
+                x,
+                y,
+                z,
+                color_rgba,
+                line_width,
+                line_style,
+                axes_index,
+                label,
+                visible,
+            } => {
+                let mut plot = Line3Plot::new(x, y, z)?
+                    .with_style(
+                        rgba_to_vec4(color_rgba),
+                        line_width,
+                        parse_line_style_name(&line_style),
+                    )
+                    .with_label(label.unwrap_or_else(|| "Data".to_string()));
+                plot.set_visible(visible);
+                figure.add_line3_plot_on_axes(plot, axes_index as usize);
+            }
             ScenePlot::Scatter3 {
                 points,
                 colors_rgba,
@@ -912,6 +958,7 @@ impl From<LegendEntry> for FigureLegendEntry {
 #[serde(rename_all = "snake_case")]
 pub enum PlotKind {
     Line,
+    Line3,
     Scatter,
     Bar,
     ErrorBar,
@@ -931,6 +978,7 @@ impl From<PlotType> for PlotKind {
     fn from(value: PlotType) -> Self {
         match value {
             PlotType::Line => Self::Line,
+            PlotType::Line3 => Self::Line3,
             PlotType::Scatter => Self::Scatter,
             PlotType::Bar => Self::Bar,
             PlotType::ErrorBar => Self::ErrorBar,
@@ -944,6 +992,15 @@ impl From<PlotType> for PlotKind {
             PlotType::Contour => Self::Contour,
             PlotType::ContourFill => Self::ContourFill,
         }
+    }
+}
+
+fn parse_line_style_name(name: &str) -> crate::plots::line::LineStyle {
+    match name.to_ascii_lowercase().as_str() {
+        "dashed" => crate::plots::line::LineStyle::Dashed,
+        "dotted" => crate::plots::line::LineStyle::Dotted,
+        "dashdot" => crate::plots::line::LineStyle::DashDot,
+        _ => crate::plots::line::LineStyle::Solid,
     }
 }
 
@@ -996,7 +1053,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plots::{Figure, LinePlot, Scatter3Plot, ScatterPlot, SurfacePlot};
+    use crate::plots::{Figure, Line3Plot, LinePlot, Scatter3Plot, ScatterPlot, SurfacePlot};
     use glam::Vec3;
 
     #[test]
@@ -1070,6 +1127,26 @@ mod tests {
             rebuilt.plots().nth(1),
             Some(PlotElement::Scatter3(_))
         ));
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_line3_plot() {
+        let mut figure = Figure::new();
+        let line3 = Line3Plot::new(vec![0.0, 1.0], vec![1.0, 2.0], vec![2.0, 3.0])
+            .unwrap()
+            .with_label("Trajectory");
+        figure.add_line3_plot(line3);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+
+        let PlotElement::Line3(line3) = rebuilt.plots().next().unwrap() else {
+            panic!("expected line3")
+        };
+        assert_eq!(line3.x_data, vec![0.0, 1.0]);
+        assert_eq!(line3.z_data, vec![2.0, 3.0]);
+        assert_eq!(line3.label.as_deref(), Some("Trajectory"));
     }
 
     #[test]

@@ -277,6 +277,7 @@ impl PlotRenderer {
         let prev_has_3d = self.figure_has_3d;
         let next_has_3d = figure.plots().any(|plot| match plot {
             crate::plots::figure::PlotElement::Surface(surface) => !surface.image_mode,
+            crate::plots::figure::PlotElement::Line3(_) => true,
             crate::plots::figure::PlotElement::Scatter3(_) => true,
             _ => false,
         });

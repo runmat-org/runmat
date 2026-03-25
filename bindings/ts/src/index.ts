@@ -140,6 +140,7 @@ export interface FigurePlotDescriptor {
 
 export type FigurePlotKind =
   | "line"
+  | "line3"
   | "scatter"
   | "bar"
   | "error_bar"
