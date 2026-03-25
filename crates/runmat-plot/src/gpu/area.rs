@@ -166,3 +166,69 @@ fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
         count: None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pollster::FutureExt;
+    fn maybe_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
+        if std::env::var("RUNMAT_PLOT_SKIP_GPU_TESTS").is_ok()
+            || std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").is_err()
+        {
+            return None;
+        }
+        let instance = wgpu::Instance::default();
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            })
+            .block_on()?;
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("runmat-plot-area-test-device"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: adapter.limits(),
+                },
+                None,
+            )
+            .block_on()
+            .ok()?;
+        Some((Arc::new(device), Arc::new(queue)))
+    }
+
+    #[test]
+    fn gpu_packer_generates_area_vertices() {
+        let Some((device, queue)) = maybe_device() else {
+            return;
+        };
+        let x = [1.0f32, 2.0f32, 3.0f32];
+        let y = Arc::new(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("area-test-y"),
+                contents: bytemuck::cast_slice(&[1.0f32, 2.0f32, 3.0f32, 0.5f32, 0.5f32, 0.5f32]),
+                usage: wgpu::BufferUsages::STORAGE,
+            }),
+        );
+        let packed = pack_vertices(
+            &device,
+            &queue,
+            &AreaGpuInputs {
+                x_axis: AxisData::F32(&x),
+                y_buffer: y,
+                rows: 3,
+                cols: 2,
+                target_col: 1,
+                scalar: ScalarType::F32,
+            },
+            &AreaGpuParams {
+                color: Vec4::ONE,
+                baseline: 0.0,
+            },
+        )
+        .expect("area pack should succeed");
+        assert_eq!(packed.vertex_count, 12);
+    }
+}

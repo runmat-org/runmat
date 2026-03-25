@@ -159,3 +159,69 @@ fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
         count: None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pollster::FutureExt;
+    fn maybe_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
+        if std::env::var("RUNMAT_PLOT_SKIP_GPU_TESTS").is_ok()
+            || std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").is_err()
+        {
+            return None;
+        }
+        let instance = wgpu::Instance::default();
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            })
+            .block_on()?;
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("runmat-plot-image-test-device"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: adapter.limits(),
+                },
+                None,
+            )
+            .block_on()
+            .ok()?;
+        Some((Arc::new(device), Arc::new(queue)))
+    }
+
+    #[test]
+    fn gpu_packer_generates_truecolor_image_vertices() {
+        let Some((device, queue)) = maybe_device() else {
+            return;
+        };
+        let x = [1.0f32, 2.0f32];
+        let y = [1.0f32, 2.0f32];
+        let image = Arc::new(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("image-test-truecolor"),
+                contents: bytemuck::cast_slice(&[
+                    1.0f32, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0,
+                ]),
+                usage: wgpu::BufferUsages::STORAGE,
+            }),
+        );
+        let packed = pack_truecolor_vertices(
+            &device,
+            &queue,
+            &TrueColorImageGpuInputs {
+                x_axis: AxisData::F32(&x),
+                y_axis: AxisData::F32(&y),
+                image_buffer: image,
+                rows: 2,
+                cols: 2,
+                channels: 3,
+                scalar: ScalarType::F32,
+            },
+        )
+        .expect("image pack should succeed");
+        assert_eq!(packed.vertex_count, 4);
+    }
+}

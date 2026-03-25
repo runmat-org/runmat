@@ -1066,6 +1066,12 @@ fn get_plot_child_property(
         super::state::PlotChildHandleState::Scatter3(plot) => {
             get_scatter3_property(plot, property, builtin)
         }
+        super::state::PlotChildHandleState::Contour(plot) => {
+            get_contour_property(plot, property, builtin)
+        }
+        super::state::PlotChildHandleState::ContourFill(plot) => {
+            get_contour_fill_property(plot, property, builtin)
+        }
         super::state::PlotChildHandleState::Pie(plot) => get_pie_property(plot, property, builtin),
     }
 }
@@ -1115,6 +1121,12 @@ fn apply_plot_child_property(
         }
         super::state::PlotChildHandleState::Scatter3(plot) => {
             apply_scatter3_property(plot, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::Contour(plot) => {
+            apply_contour_property(plot, key, value, builtin)
+        }
+        super::state::PlotChildHandleState::ContourFill(plot) => {
+            apply_contour_fill_property(plot, key, value, builtin)
         }
         super::state::PlotChildHandleState::Pie(plot) => {
             apply_pie_property(plot, key, value, builtin)
@@ -1507,6 +1519,77 @@ fn get_pie_property(
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported pie property `{other}`"),
+        )),
+    }
+}
+
+fn get_contour_property(
+    contour_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let plot = get_simple_plot(contour_handle, builtin)?;
+    let runmat_plot::plots::figure::PlotElement::Contour(contour) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid contour handle"),
+        ));
+    };
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st =
+                child_base_struct("contour", contour_handle.figure, contour_handle.axes_index);
+            st.insert("ZData", Value::Num(contour.base_z as f64));
+            if let Some(label) = contour.label.clone() {
+                st.insert("DisplayName", Value::String(label));
+            }
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("contour".into())),
+        Some("parent") => Ok(child_parent_handle(
+            contour_handle.figure,
+            contour_handle.axes_index,
+        )),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("zdata") => Ok(Value::Num(contour.base_z as f64)),
+        Some("displayname") => Ok(Value::String(contour.label.unwrap_or_default())),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported contour property `{other}`"),
+        )),
+    }
+}
+
+fn get_contour_fill_property(
+    fill_handle: &super::state::SimplePlotHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let plot = get_simple_plot(fill_handle, builtin)?;
+    let runmat_plot::plots::figure::PlotElement::ContourFill(fill) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid contourf handle"),
+        ));
+    };
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st = child_base_struct("contour", fill_handle.figure, fill_handle.axes_index);
+            if let Some(label) = fill.label.clone() {
+                st.insert("DisplayName", Value::String(label));
+            }
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("contour".into())),
+        Some("parent") => Ok(child_parent_handle(
+            fill_handle.figure,
+            fill_handle.axes_index,
+        )),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("displayname") => Ok(Value::String(fill.label.unwrap_or_default())),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported contourf property `{other}`"),
         )),
     }
 }
@@ -2343,6 +2426,40 @@ fn apply_pie_property(
         if let runmat_plot::plots::figure::PlotElement::Pie(pie) = plot {
             if key == "displayname" {
                 pie.label = value_as_string(value).map(|s| s.to_string());
+            }
+        }
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn apply_contour_property(
+    contour_handle: &super::state::SimplePlotHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    super::state::update_plot_element(contour_handle.figure, contour_handle.plot_index, |plot| {
+        if let runmat_plot::plots::figure::PlotElement::Contour(contour) = plot {
+            if key == "displayname" {
+                contour.label = value_as_string(value).map(|s| s.to_string());
+            }
+        }
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn apply_contour_fill_property(
+    fill_handle: &super::state::SimplePlotHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    super::state::update_plot_element(fill_handle.figure, fill_handle.plot_index, |plot| {
+        if let runmat_plot::plots::figure::PlotElement::ContourFill(fill) = plot {
+            if key == "displayname" {
+                fill.label = value_as_string(value).map(|s| s.to_string());
             }
         }
     })

@@ -18,7 +18,7 @@ use super::state::{render_active_plot, PlotRenderOptions};
 
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use super::surf::build_surface_gpu_plot_with_bounds_async;
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use std::sync::Arc;
 
 const BUILTIN_NAME: &str = "meshc";
@@ -30,10 +30,10 @@ const BUILTIN_NAME: &str = "meshc";
     keywords = "meshc,plotting,mesh,contour",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::meshc"
 )]
-pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
+pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (x, y, z, rest) = parse_surface_call_args(args, BUILTIN_NAME)?;
     let z_input = SurfaceDataInput::from_value(z, "meshc")?;
     let (rows, cols) = z_input.grid_shape(BUILTIN_NAME)?;
@@ -170,14 +170,29 @@ pub async fn meshc_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
 
     let mut surface_opt = Some(surface);
     let mut contour_opt = Some(contour);
-    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+    let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let surface = surface_opt.take().expect("meshc surface consumed once");
         let contour = contour_opt.take().expect("meshc contour consumed once");
-        figure.add_surface_plot_on_axes(surface, axes);
+        let plot_index = figure.add_surface_plot_on_axes(surface, axes);
+        *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         figure.add_contour_plot_on_axes(contour, axes);
         Ok(())
-    })?;
-    Ok(rendered)
+    });
+    let Some((axes, plot_index)) = *plot_index_out.borrow() else {
+        return render_result.map(|_| f64::NAN);
+    };
+    let handle = crate::builtins::plotting::state::register_surface_handle(figure_handle, axes, plot_index);
+    if let Err(err) = render_result {
+        let lower = err.to_string().to_lowercase();
+        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+            return Ok(handle);
+        }
+        return Err(err);
+    }
+    Ok(handle)
 }
 
 #[cfg(test)]
@@ -219,13 +234,27 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn meshc_type_is_string() {
+    fn meshc_type_is_numeric_handle() {
         assert_eq!(
-            string_type(
+            handle_scalar_type(
                 &[Type::tensor(), Type::tensor(), Type::tensor()],
                 &ResolveContext::new(Vec::new())
             ),
-            Type::String
+            Type::Num
         );
+    }
+
+    #[test]
+    fn meshc_returns_surface_handle() {
+        setup_plot_tests();
+        let handle = futures::executor::block_on(meshc_builtin(vec![Value::Tensor(Tensor {
+            data: vec![0.0, 1.0, 1.0, 0.0],
+            shape: vec![2, 2],
+            rows: 2,
+            cols: 2,
+            dtype: runmat_builtins::NumericDType::F64,
+        })]))
+        .expect("meshc should return handle");
+        assert!(handle.is_finite());
     }
 }

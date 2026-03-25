@@ -254,6 +254,8 @@ pub enum PlotChildHandleState {
     Surface(SimplePlotHandleState),
     Line3(SimplePlotHandleState),
     Scatter3(SimplePlotHandleState),
+    Contour(SimplePlotHandleState),
+    ContourFill(SimplePlotHandleState),
     Pie(SimplePlotHandleState),
 }
 
@@ -1153,6 +1155,28 @@ pub fn register_scatter3_handle(figure: FigureHandle, axes_index: usize, plot_in
     )
 }
 
+pub fn register_contour_handle(figure: FigureHandle, axes_index: usize, plot_index: usize) -> f64 {
+    register_simple_plot_handle(
+        figure,
+        axes_index,
+        plot_index,
+        PlotChildHandleState::Contour,
+    )
+}
+
+pub fn register_contour_fill_handle(
+    figure: FigureHandle,
+    axes_index: usize,
+    plot_index: usize,
+) -> f64 {
+    register_simple_plot_handle(
+        figure,
+        axes_index,
+        plot_index,
+        PlotChildHandleState::ContourFill,
+    )
+}
+
 pub fn register_pie_handle(figure: FigureHandle, axes_index: usize, plot_index: usize) -> f64 {
     register_simple_plot_handle(figure, axes_index, plot_index, PlotChildHandleState::Pie)
 }
@@ -1339,6 +1363,8 @@ fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) 
         | PlotChildHandleState::Surface(plot)
         | PlotChildHandleState::Line3(plot)
         | PlotChildHandleState::Scatter3(plot)
+        | PlotChildHandleState::Contour(plot)
+        | PlotChildHandleState::ContourFill(plot)
         | PlotChildHandleState::Pie(plot) => plot.figure != handle,
         PlotChildHandleState::Stem(stem) => stem.figure != handle,
         PlotChildHandleState::ErrorBar(err) => err.figure != handle,
@@ -1360,6 +1386,8 @@ fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, ax
         | PlotChildHandleState::Surface(plot)
         | PlotChildHandleState::Line3(plot)
         | PlotChildHandleState::Scatter3(plot)
+        | PlotChildHandleState::Contour(plot)
+        | PlotChildHandleState::ContourFill(plot)
         | PlotChildHandleState::Pie(plot) => {
             !(plot.figure == handle && plot.axes_index == axes_index)
         }

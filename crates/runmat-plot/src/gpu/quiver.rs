@@ -181,3 +181,81 @@ fn uniform_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
         count: None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pollster::FutureExt;
+    fn maybe_device() -> Option<(Arc<wgpu::Device>, Arc<wgpu::Queue>)> {
+        if std::env::var("RUNMAT_PLOT_SKIP_GPU_TESTS").is_ok()
+            || std::env::var("RUNMAT_PLOT_FORCE_GPU_TESTS").is_err()
+        {
+            return None;
+        }
+        let instance = wgpu::Instance::default();
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: None,
+                force_fallback_adapter: false,
+            })
+            .block_on()?;
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("runmat-plot-quiver-test-device"),
+                    required_features: wgpu::Features::empty(),
+                    required_limits: adapter.limits(),
+                },
+                None,
+            )
+            .block_on()
+            .ok()?;
+        Some((Arc::new(device), Arc::new(queue)))
+    }
+
+    #[test]
+    fn gpu_packer_generates_quiver_vertices() {
+        let Some((device, queue)) = maybe_device() else {
+            return;
+        };
+        let x = [1.0f32, 2.0f32];
+        let y = [1.0f32, 2.0f32];
+        let u = Arc::new(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("quiver-test-u"),
+                contents: bytemuck::cast_slice(&[0.5f32, -0.25f32]),
+                usage: wgpu::BufferUsages::STORAGE,
+            }),
+        );
+        let v = Arc::new(
+            device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("quiver-test-v"),
+                contents: bytemuck::cast_slice(&[1.0f32, 0.75f32]),
+                usage: wgpu::BufferUsages::STORAGE,
+            }),
+        );
+        let packed = pack_vertices(
+            &device,
+            &queue,
+            &QuiverGpuInputs {
+                x_data: AxisData::F32(&x),
+                y_data: AxisData::F32(&y),
+                u_buffer: u,
+                v_buffer: v,
+                count: 2,
+                rows: 2,
+                cols: 1,
+                xy_mode: 0,
+                scalar: ScalarType::F32,
+            },
+            &QuiverGpuParams {
+                color: Vec4::ONE,
+                scale: 1.0,
+                head_size: 0.2,
+            },
+        )
+        .expect("quiver pack should succeed");
+        assert_eq!(packed.vertex_count, 12);
+    }
+}

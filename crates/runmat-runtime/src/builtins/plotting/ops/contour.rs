@@ -23,7 +23,7 @@ use super::gpu_helpers::axis_bounds;
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::surf::build_color_lut;
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 use crate::BuiltinResult;
 
@@ -292,10 +292,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "contour,plotting,isolines",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::contour"
 )]
-pub fn contour_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
+pub fn contour_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<f64> {
     let mut call = Some(ContourCall::parse(BUILTIN_NAME, first, rest)?);
     let opts = PlotRenderOptions {
         title: "Contour Plot",
@@ -304,11 +304,32 @@ pub fn contour_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<S
         axis_equal: true,
         ..Default::default()
     };
-    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+    let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let current = call.take().expect("contour call consumed once");
-        current.render(figure, axes)
-    })?;
-    Ok(rendered)
+        let before = figure.plots().count();
+        current.render(figure, axes)?;
+        let after = figure.plots().count();
+        if after > before {
+            *plot_index_slot.borrow_mut() = Some((axes, after - 1));
+        }
+        Ok(())
+    });
+    let Some((axes, plot_index)) = *plot_index_out.borrow() else {
+        return render_result.map(|_| f64::NAN);
+    };
+    let handle =
+        crate::builtins::plotting::state::register_contour_handle(figure_handle, axes, plot_index);
+    if let Err(err) = render_result {
+        let lower = err.to_string().to_lowercase();
+        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+            return Ok(handle);
+        }
+        return Err(err);
+    }
+    Ok(handle)
 }
 
 struct ContourCall {
@@ -1402,10 +1423,21 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn contour_type_is_string() {
+    fn contour_type_is_numeric_handle() {
         assert_eq!(
-            string_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
-            Type::String
+            handle_scalar_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::Num
         );
+    }
+
+    #[test]
+    fn contour_returns_handle() {
+        setup_plot_tests();
+        let handle = contour_builtin(
+            Value::Tensor(tensor_from(&[0.0, 1.0, 1.0, 0.0], 2, 2)),
+            Vec::new(),
+        )
+        .expect("contour should return handle");
+        assert!(handle.is_finite());
     }
 }

@@ -34,7 +34,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "image is a plotting sink; indexed gpuArray inputs may remain on device when a shared WGPU context is installed, while truecolor images currently gather to the host.",
+    notes: "image is a plotting sink; indexed and truecolor gpuArray inputs may remain on device when a shared WGPU context is installed.",
 };
 
 #[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::plotting::image")]
@@ -259,7 +259,7 @@ fn truecolor_shape(tensor: &Tensor, builtin: &'static str) -> crate::BuiltinResu
     Ok((rows, cols))
 }
 
-async fn build_indexed_image_surface(
+pub(crate) async fn build_indexed_image_surface(
     c_input: &SurfaceDataInput,
     x_axis: &super::op_common::surface_inputs::AxisSource,
     y_axis: &super::op_common::surface_inputs::AxisSource,

@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
-use log::warn;
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode};
 
-use super::common::{tensor_to_surface_grid, SurfaceDataInput};
+use super::common::SurfaceDataInput;
 use super::op_common::surface_inputs::{
-    axis_sources_from_xy_values, axis_sources_to_host, parse_surface_call_args,
+    axis_sources_from_xy_values, parse_surface_call_args,
 };
 use super::state::{color_limits_snapshot, render_active_plot, PlotRenderOptions};
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
@@ -67,40 +66,14 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let style = Arc::new(parse_surface_style_args(BUILTIN_NAME, &rest, defaults)?);
     let color_limits = color_limits_snapshot();
 
-    let mut surface = if let Some(c_gpu) = c_input.gpu_handle().cloned() {
-        match super::gpu_helpers::axis_bounds_async(&c_gpu, BUILTIN_NAME).await {
-            Ok((min_z, max_z)) => match super::surf::build_surface_gpu_plot_with_bounds_async(
-                BUILTIN_NAME,
-                &x_axis,
-                &y_axis,
-                &c_gpu,
-                min_z,
-                max_z,
-                style.colormap,
-                style.alpha,
-                true,
-            )
-            .await
-            {
-                Ok(surface) => surface,
-                Err(err) => {
-                    warn!("imagesc GPU path unavailable: {err}");
-                    let (x_host, y_host) =
-                        axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
-                    build_imagesc_cpu(&c_input, x_host, y_host, style.colormap, color_limits)
-                        .await?
-                }
-            },
-            Err(err) => {
-                warn!("imagesc GPU bounds unavailable: {err}");
-                let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
-                build_imagesc_cpu(&c_input, x_host, y_host, style.colormap, color_limits).await?
-            }
-        }
-    } else {
-        let (x_host, y_host) = axis_sources_to_host(&x_axis, &y_axis, BUILTIN_NAME).await?;
-        build_imagesc_cpu(&c_input, x_host, y_host, style.colormap, color_limits).await?
-    };
+    let mut surface = super::image::build_indexed_image_surface(
+        &c_input,
+        &x_axis,
+        &y_axis,
+        style.colormap,
+        color_limits,
+    )
+    .await?;
 
     surface = surface.with_flatten_z(true).with_image_mode(true);
     if color_limits.is_some() {
@@ -136,29 +109,6 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
         return Err(err);
     }
     Ok(handle)
-}
-
-async fn build_imagesc_cpu(
-    c_input: &SurfaceDataInput,
-    x_axis: Vec<f64>,
-    y_axis: Vec<f64>,
-    colormap: ColorMap,
-    color_limits: Option<(f64, f64)>,
-) -> crate::BuiltinResult<runmat_plot::plots::SurfacePlot> {
-    let tensor = match c_input.clone() {
-        SurfaceDataInput::Host(tensor) => tensor,
-        SurfaceDataInput::Gpu(handle) => {
-            super::common::gather_tensor_from_gpu_async(handle, BUILTIN_NAME).await?
-        }
-    };
-    let grid = tensor_to_surface_grid(tensor, x_axis.len(), y_axis.len(), BUILTIN_NAME)?;
-    let surface = super::surf::build_surface(x_axis, y_axis, grid)?
-        .with_flatten_z(true)
-        .with_image_mode(true)
-        .with_colormap(colormap)
-        .with_shading(ShadingMode::None)
-        .with_color_limits(color_limits);
-    Ok(surface)
 }
 
 #[cfg(test)]

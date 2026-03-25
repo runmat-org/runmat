@@ -11,7 +11,7 @@ use super::contour::{
     build_contour_plot, parse_contour_args, ContourArgs, ContourLineColor,
 };
 use super::state::{render_active_plot, PlotRenderOptions};
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 const BUILTIN_NAME: &str = "contourf";
 
@@ -22,10 +22,10 @@ const BUILTIN_NAME: &str = "contourf";
     keywords = "contourf,plotting,filled,contour",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::contourf"
 )]
-pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
+pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<f64> {
     let mut args = Some(parse_contour_args("contourf", first, rest)?);
     let opts = PlotRenderOptions {
         title: "Filled Contour Plot",
@@ -34,7 +34,11 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
         axis_equal: true,
         ..Default::default()
     };
-    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+    let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+        let before = figure.plots().count();
         let ContourArgs {
             name,
             x_axis,
@@ -58,6 +62,7 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             ) {
                 Ok(fill_plot) => {
                     figure.add_contour_fill_plot_on_axes(fill_plot, axes);
+                    *plot_index_slot.borrow_mut() = Some((axes, before));
                     if !matches!(line_color, ContourLineColor::None) {
                         match build_contour_gpu_plot(
                             name,
@@ -97,6 +102,7 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             &level_spec,
         )?;
         figure.add_contour_fill_plot_on_axes(fill_plot, axes);
+        *plot_index_slot.borrow_mut() = Some((axes, before));
         if !matches!(line_color, ContourLineColor::None) {
             match build_contour_plot(
                 name,
@@ -117,8 +123,23 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             }
         }
         Ok(())
-    })?;
-    Ok(rendered)
+    });
+    let Some((axes, plot_index)) = *plot_index_out.borrow() else {
+        return render_result.map(|_| f64::NAN);
+    };
+    let handle = crate::builtins::plotting::state::register_contour_fill_handle(
+        figure_handle,
+        axes,
+        plot_index,
+    );
+    if let Err(err) = render_result {
+        let lower = err.to_string().to_lowercase();
+        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+            return Ok(handle);
+        }
+        return Err(err);
+    }
+    Ok(handle)
 }
 
 #[cfg(test)]
@@ -157,10 +178,27 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn contourf_type_is_string() {
+    fn contourf_type_is_numeric_handle() {
         assert_eq!(
-            string_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
-            Type::String
+            handle_scalar_type(&[Type::tensor()], &ResolveContext::new(Vec::new())),
+            Type::Num
         );
+    }
+
+    #[test]
+    fn contourf_returns_handle() {
+        setup_plot_tests();
+        let handle = contourf_builtin(
+            Value::Tensor(Tensor {
+                data: vec![0.0, 1.0, 1.0, 0.0],
+                shape: vec![2, 2],
+                rows: 2,
+                cols: 2,
+                dtype: runmat_builtins::NumericDType::F64,
+            }),
+            Vec::new(),
+        )
+        .expect("contourf should return handle");
+        assert!(handle.is_finite());
     }
 }

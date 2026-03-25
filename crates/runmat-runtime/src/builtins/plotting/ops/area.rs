@@ -1,9 +1,8 @@
-use std::cell::RefCell;
-use std::rc::Rc;
-
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::AreaPlot;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -147,7 +146,6 @@ pub fn area_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     Ok(handle)
 }
 
-#[allow(unused_assignments)]
 fn build_area_gpu_plots(
     x: &NumericInput,
     y: &runmat_accelerate_api::GpuTensorHandle,
@@ -161,9 +159,7 @@ fn build_area_gpu_plots(
     let scalar = runmat_plot::gpu::ScalarType::from_is_f64(
         y_ref.precision == runmat_accelerate_api::ProviderPrecision::F64,
     );
-    let mut x_f32_buf = Vec::new();
-    let mut x_f64_buf = Vec::new();
-    let (x_axis, x_vals) = match x {
+    let (x_axis, x_bounds) = match x {
         NumericInput::Gpu(handle) => {
             let x_ref = runmat_accelerate_api::export_wgpu_buffer(handle)
                 .ok_or_else(|| plotting_error(BUILTIN_NAME, "area: unable to export GPU X data"))?;
@@ -173,13 +169,11 @@ fn build_area_gpu_plots(
                     "area: X length must match rows of Y",
                 ));
             }
-            let x_tensor = crate::builtins::plotting::common::gather_tensor_from_gpu(
-                handle.clone(),
-                BUILTIN_NAME,
-            )?;
+            let bounds =
+                super::gpu_helpers::axis_bounds(handle, BUILTIN_NAME).unwrap_or((0.0, 0.0));
             (
                 runmat_plot::gpu::axis::AxisData::Buffer(x_ref.buffer.clone()),
-                x_tensor.data,
+                bounds,
             )
         }
         NumericInput::Host(tensor) => {
@@ -192,40 +186,43 @@ fn build_area_gpu_plots(
             }
             let axis = match scalar {
                 runmat_plot::gpu::ScalarType::F32 => {
-                    x_f32_buf = values.iter().map(|v| *v as f32).collect();
-                    runmat_plot::gpu::axis::AxisData::F32(&x_f32_buf)
+                    let owned: Box<[f32]> = values
+                        .iter()
+                        .map(|v| *v as f32)
+                        .collect::<Vec<_>>()
+                        .into_boxed_slice();
+                    let leaked: &'static [f32] = Box::leak(owned);
+                    runmat_plot::gpu::axis::AxisData::F32(leaked)
                 }
                 runmat_plot::gpu::ScalarType::F64 => {
-                    x_f64_buf = values.clone();
-                    runmat_plot::gpu::axis::AxisData::F64(&x_f64_buf)
+                    let owned: Box<[f64]> = values.clone().into_boxed_slice();
+                    let leaked: &'static [f64] = Box::leak(owned);
+                    runmat_plot::gpu::axis::AxisData::F64(leaked)
                 }
             };
-            (axis, values)
+            (
+                axis,
+                (
+                    values.first().copied().unwrap_or(0.0) as f32,
+                    values.last().copied().unwrap_or(0.0) as f32,
+                ),
+            )
         }
     };
-    let x_bounds = (
-        x_vals.first().copied().unwrap_or(0.0) as f32,
-        x_vals.last().copied().unwrap_or(0.0) as f32,
-    );
-    let y_tensor =
-        crate::builtins::plotting::common::gather_tensor_from_gpu(y.clone(), BUILTIN_NAME)?;
-    let series = area_series_from_tensor(x_vals.clone(), &y_tensor, BUILTIN_NAME)?;
     let mut plots = Vec::with_capacity(cols);
-    for (idx, (upper, lower)) in series.into_iter().enumerate() {
-        let min_y = lower
-            .as_ref()
-            .into_iter()
-            .flatten()
-            .copied()
-            .chain(upper.iter().copied())
-            .fold(parsed.base_value, f64::min);
-        let max_y = lower
-            .as_ref()
-            .into_iter()
-            .flatten()
-            .copied()
-            .chain(upper.iter().copied())
-            .fold(parsed.base_value, f64::max);
+    let (min_cell, max_cell) =
+        super::gpu_helpers::axis_bounds(y, BUILTIN_NAME).unwrap_or((0.0, 0.0));
+    let min_stack = if min_cell < 0.0 {
+        parsed.base_value as f32 + (min_cell * cols as f32)
+    } else {
+        parsed.base_value as f32
+    };
+    let max_stack = if max_cell > 0.0 {
+        parsed.base_value as f32 + (max_cell * cols as f32)
+    } else {
+        parsed.base_value as f32
+    };
+    for idx in 0..cols {
         let gpu_vertices = runmat_plot::gpu::area::pack_vertices(
             &context.device,
             &context.queue,
@@ -255,16 +252,14 @@ fn build_area_gpu_plots(
                 .color
                 .unwrap_or(MATLAB_COLOR_ORDER[idx % MATLAB_COLOR_ORDER.len()]),
             parsed.base_value,
-            lower.clone(),
+            None,
             gpu_vertices,
             (rows - 1) * 6,
             runmat_plot::core::BoundingBox::new(
-                glam::Vec3::new(x_bounds.0 as f32, min_y as f32, 0.0),
-                glam::Vec3::new(x_bounds.1 as f32, max_y as f32, 0.0),
+                glam::Vec3::new(x_bounds.0, min_stack, 0.0),
+                glam::Vec3::new(x_bounds.1, max_stack, 0.0),
             ),
         );
-        plot.x = x_vals.clone();
-        plot.y = upper;
         plot.label = Some(
             parsed
                 .label
