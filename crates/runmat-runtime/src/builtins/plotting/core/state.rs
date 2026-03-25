@@ -355,11 +355,24 @@ pub fn set_grid_enabled(enabled: bool) {
         let mut reg = registry();
         let handle = reg.current;
         let state = get_state_mut(&mut reg, handle);
-        state.figure.set_grid(enabled);
+        let axes = state.active_axes;
+        state.figure.set_axes_grid_enabled(axes, enabled);
         state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone())
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn set_grid_enabled_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    enabled: bool,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state.figure.set_axes_grid_enabled(axes_index, enabled);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
 }
 
 pub fn toggle_grid() -> bool {
@@ -367,8 +380,13 @@ pub fn toggle_grid() -> bool {
         let mut reg = registry();
         let handle = reg.current;
         let state = get_state_mut(&mut reg, handle);
-        let next = !state.figure.grid_enabled;
-        state.figure.set_grid(next);
+        let axes = state.active_axes;
+        let next = !state
+            .figure
+            .axes_metadata(axes)
+            .map(|m| m.grid_enabled)
+            .unwrap_or(true);
+        state.figure.set_axes_grid_enabled(axes, next);
         state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone(), next)
     };
@@ -381,11 +399,24 @@ pub fn set_box_enabled(enabled: bool) {
         let mut reg = registry();
         let handle = reg.current;
         let state = get_state_mut(&mut reg, handle);
-        state.figure.box_enabled = enabled;
+        let axes = state.active_axes;
+        state.figure.set_axes_box_enabled(axes, enabled);
         state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone())
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn set_box_enabled_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    enabled: bool,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state.figure.set_axes_box_enabled(axes_index, enabled);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
 }
 
 pub fn set_figure_title_for_axes(
@@ -485,8 +516,13 @@ pub fn toggle_box() -> bool {
         let mut reg = registry();
         let handle = reg.current;
         let state = get_state_mut(&mut reg, handle);
-        let next = !state.figure.box_enabled;
-        state.figure.box_enabled = next;
+        let axes = state.active_axes;
+        let next = !state
+            .figure
+            .axes_metadata(axes)
+            .map(|m| m.box_enabled)
+            .unwrap_or(true);
+        state.figure.set_axes_box_enabled(axes, next);
         state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone(), next)
     };
@@ -499,11 +535,24 @@ pub fn set_axis_equal(enabled: bool) {
         let mut reg = registry();
         let handle = reg.current;
         let state = get_state_mut(&mut reg, handle);
-        state.figure.set_axis_equal(enabled);
+        let axes = state.active_axes;
+        state.figure.set_axes_axis_equal(axes, enabled);
         state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone())
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn set_axis_equal_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    enabled: bool,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state.figure.set_axes_axis_equal(axes_index, enabled);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
 }
 
 pub fn set_axis_limits(x: Option<(f64, f64)>, y: Option<(f64, f64)>) {
@@ -511,33 +560,57 @@ pub fn set_axis_limits(x: Option<(f64, f64)>, y: Option<(f64, f64)>) {
         let mut reg = registry();
         let handle = reg.current;
         let state = get_state_mut(&mut reg, handle);
-        state.figure.x_limits = x;
-        state.figure.y_limits = y;
+        let axes = state.active_axes;
+        state.figure.set_axes_limits(axes, x, y);
         state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone())
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 }
 
+pub fn set_axis_limits_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    x: Option<(f64, f64)>,
+    y: Option<(f64, f64)>,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state.figure.set_axes_limits(axes_index, x, y);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
+}
+
 pub fn axis_limits_snapshot() -> (Option<(f64, f64)>, Option<(f64, f64)>) {
     let mut reg = registry();
     let handle = reg.current;
     let state = get_state_mut(&mut reg, handle);
-    (state.figure.x_limits, state.figure.y_limits)
+    let axes = state.active_axes;
+    let meta = state
+        .figure
+        .axes_metadata(axes)
+        .cloned()
+        .unwrap_or_default();
+    (meta.x_limits, meta.y_limits)
 }
 
 pub fn z_limits_snapshot() -> Option<(f64, f64)> {
     let mut reg = registry();
     let handle = reg.current;
     let state = get_state_mut(&mut reg, handle);
-    state.figure.z_limits
+    let axes = state.active_axes;
+    state.figure.axes_metadata(axes).and_then(|m| m.z_limits)
 }
 
 pub fn color_limits_snapshot() -> Option<(f64, f64)> {
     let mut reg = registry();
     let handle = reg.current;
     let state = get_state_mut(&mut reg, handle);
-    state.figure.color_limits
+    let axes = state.active_axes;
+    state
+        .figure
+        .axes_metadata(axes)
+        .and_then(|m| m.color_limits)
 }
 
 pub fn set_z_limits(limits: Option<(f64, f64)>) {
@@ -545,11 +618,24 @@ pub fn set_z_limits(limits: Option<(f64, f64)>) {
         let mut reg = registry();
         let handle = reg.current;
         let state = get_state_mut(&mut reg, handle);
-        state.figure.set_z_limits(limits);
+        let axes = state.active_axes;
+        state.figure.set_axes_z_limits(axes, limits);
         state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone())
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn set_z_limits_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    limits: Option<(f64, f64)>,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state.figure.set_axes_z_limits(axes_index, limits);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
 }
 
 pub fn set_color_limits_runtime(limits: Option<(f64, f64)>) {
@@ -557,11 +643,24 @@ pub fn set_color_limits_runtime(limits: Option<(f64, f64)>) {
         let mut reg = registry();
         let handle = reg.current;
         let state = get_state_mut(&mut reg, handle);
-        state.figure.set_color_limits(limits);
+        let axes = state.active_axes;
+        state.figure.set_axes_color_limits(axes, limits);
         state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone())
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn set_color_limits_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    limits: Option<(f64, f64)>,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state.figure.set_axes_color_limits(axes_index, limits);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
 }
 
 pub fn clear_current_axes() {
@@ -583,11 +682,24 @@ pub fn set_colorbar_enabled(enabled: bool) {
         let mut reg = registry();
         let handle = reg.current;
         let state = get_state_mut(&mut reg, handle);
-        state.figure.colorbar_enabled = enabled;
+        let axes = state.active_axes;
+        state.figure.set_axes_colorbar_enabled(axes, enabled);
         state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone())
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn set_colorbar_enabled_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    enabled: bool,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state.figure.set_axes_colorbar_enabled(axes_index, enabled);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
 }
 
 pub fn set_legend_for_axes(
@@ -661,8 +773,13 @@ pub fn toggle_colorbar() -> bool {
         let mut reg = registry();
         let handle = reg.current;
         let state = get_state_mut(&mut reg, handle);
-        let next = !state.figure.colorbar_enabled;
-        state.figure.colorbar_enabled = next;
+        let axes = state.active_axes;
+        let next = !state
+            .figure
+            .axes_metadata(axes)
+            .map(|m| m.colorbar_enabled)
+            .unwrap_or(false);
+        state.figure.set_axes_colorbar_enabled(axes, next);
         state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone(), next)
     };
@@ -675,18 +792,24 @@ pub fn set_colormap(colormap: ColorMap) {
         let mut reg = registry();
         let handle = reg.current;
         let state = get_state_mut(&mut reg, handle);
-        state.figure.colormap = colormap;
-        // Propagate to existing surface plots (matches expected MATLAB semantics).
-        let plot_count = state.figure.len();
-        for idx in 0..plot_count {
-            if let Some(PlotElement::Surface(surface)) = state.figure.get_plot_mut(idx) {
-                *surface = surface.clone().with_colormap(colormap);
-            }
-        }
+        let axes = state.active_axes;
+        state.figure.set_axes_colormap(axes, colormap);
         state.revision = state.revision.wrapping_add(1);
         (handle, state.figure.clone())
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+}
+
+pub fn set_colormap_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    colormap: ColorMap,
+) -> Result<(), FigureError> {
+    let ((), figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state.figure.set_axes_colormap(axes_index, colormap);
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(())
 }
 
 pub fn set_surface_shading(mode: ShadingMode) {
@@ -1040,6 +1163,39 @@ pub fn axes_state_snapshot(
         cols: state.figure.axes_cols.max(1),
         active_index: axes_index,
     })
+}
+
+pub fn current_axes_handle_for_figure(handle: FigureHandle) -> Result<f64, FigureError> {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, handle);
+    Ok(encode_axes_handle(handle, state.active_axes))
+}
+
+pub fn axes_handles_for_figure(handle: FigureHandle) -> Result<Vec<f64>, FigureError> {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, handle);
+    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    Ok((0..total_axes)
+        .map(|idx| encode_axes_handle(handle, idx))
+        .collect())
+}
+
+pub fn select_axes_for_figure(handle: FigureHandle, axes_index: usize) -> Result<(), FigureError> {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, handle);
+    let total_axes = state.figure.axes_rows.max(1) * state.figure.axes_cols.max(1);
+    if axes_index >= total_axes {
+        return Err(FigureError::InvalidSubplotIndex {
+            rows: state.figure.axes_rows.max(1),
+            cols: state.figure.axes_cols.max(1),
+            index: axes_index,
+        });
+    }
+    reg.current = handle;
+    let state = get_state_mut(&mut reg, handle);
+    state.active_axes = axes_index;
+    state.figure.set_active_axes_index(axes_index);
+    Ok(())
 }
 
 fn with_axes_target_mut<R>(

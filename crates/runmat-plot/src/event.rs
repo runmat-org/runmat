@@ -456,6 +456,12 @@ pub struct SerializedAxesMetadata {
     pub y_label: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub z_label: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub x_limits: Option<[f64; 2]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub y_limits: Option<[f64; 2]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub z_limits: Option<[f64; 2]>,
     #[serde(default)]
     pub x_log: bool,
     #[serde(default)]
@@ -464,7 +470,18 @@ pub struct SerializedAxesMetadata {
     pub view_azimuth_deg: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub view_elevation_deg: Option<f32>,
+    #[serde(default)]
+    pub grid_enabled: bool,
+    #[serde(default)]
+    pub box_enabled: bool,
+    #[serde(default)]
+    pub axis_equal: bool,
     pub legend_enabled: bool,
+    #[serde(default)]
+    pub colorbar_enabled: bool,
+    pub colormap: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub color_limits: Option<[f64; 2]>,
     pub title_style: SerializedTextStyle,
     pub x_label_style: SerializedTextStyle,
     pub y_label_style: SerializedTextStyle,
@@ -479,11 +496,20 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             x_label: value.x_label,
             y_label: value.y_label,
             z_label: value.z_label,
+            x_limits: value.x_limits.map(|(a, b)| [a, b]),
+            y_limits: value.y_limits.map(|(a, b)| [a, b]),
+            z_limits: value.z_limits.map(|(a, b)| [a, b]),
             x_log: value.x_log,
             y_log: value.y_log,
             view_azimuth_deg: value.view_azimuth_deg,
             view_elevation_deg: value.view_elevation_deg,
+            grid_enabled: value.grid_enabled,
+            box_enabled: value.box_enabled,
+            axis_equal: value.axis_equal,
             legend_enabled: value.legend_enabled,
+            colorbar_enabled: value.colorbar_enabled,
+            colormap: format!("{:?}", value.colormap),
+            color_limits: value.color_limits.map(|(a, b)| [a, b]),
             title_style: value.title_style.into(),
             x_label_style: value.x_label_style.into(),
             y_label_style: value.y_label_style.into(),
@@ -500,11 +526,20 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             x_label: value.x_label,
             y_label: value.y_label,
             z_label: value.z_label,
+            x_limits: value.x_limits.map(|[a, b]| (a, b)),
+            y_limits: value.y_limits.map(|[a, b]| (a, b)),
+            z_limits: value.z_limits.map(|[a, b]| (a, b)),
             x_log: value.x_log,
             y_log: value.y_log,
             view_azimuth_deg: value.view_azimuth_deg,
             view_elevation_deg: value.view_elevation_deg,
+            grid_enabled: value.grid_enabled,
+            box_enabled: value.box_enabled,
+            axis_equal: value.axis_equal,
             legend_enabled: value.legend_enabled,
+            colorbar_enabled: value.colorbar_enabled,
+            colormap: parse_colormap_name(&value.colormap),
+            color_limits: value.color_limits.map(|[a, b]| (a, b)),
             title_style: value.title_style.into(),
             x_label_style: value.x_label_style.into(),
             y_label_style: value.y_label_style.into(),
@@ -1004,6 +1039,29 @@ fn parse_line_style_name(name: &str) -> crate::plots::line::LineStyle {
     }
 }
 
+fn parse_colormap_name(name: &str) -> crate::plots::surface::ColorMap {
+    match name.trim().to_ascii_lowercase().as_str() {
+        "viridis" => crate::plots::surface::ColorMap::Viridis,
+        "plasma" => crate::plots::surface::ColorMap::Plasma,
+        "inferno" => crate::plots::surface::ColorMap::Inferno,
+        "magma" => crate::plots::surface::ColorMap::Magma,
+        "turbo" => crate::plots::surface::ColorMap::Turbo,
+        "jet" => crate::plots::surface::ColorMap::Jet,
+        "hot" => crate::plots::surface::ColorMap::Hot,
+        "cool" => crate::plots::surface::ColorMap::Cool,
+        "spring" => crate::plots::surface::ColorMap::Spring,
+        "summer" => crate::plots::surface::ColorMap::Summer,
+        "autumn" => crate::plots::surface::ColorMap::Autumn,
+        "winter" => crate::plots::surface::ColorMap::Winter,
+        "gray" | "grey" => crate::plots::surface::ColorMap::Gray,
+        "bone" => crate::plots::surface::ColorMap::Bone,
+        "copper" => crate::plots::surface::ColorMap::Copper,
+        "pink" => crate::plots::surface::ColorMap::Pink,
+        "lines" => crate::plots::surface::ColorMap::Lines,
+        _ => crate::plots::surface::ColorMap::Parula,
+    }
+}
+
 fn vec4_to_rgba(value: Vec4) -> [f32; 4] {
     [value.x, value.y, value.z, value.w]
 }
@@ -1147,6 +1205,34 @@ mod tests {
         assert_eq!(line3.x_data, vec![0.0, 1.0]);
         assert_eq!(line3.z_data, vec![2.0, 3.0]);
         assert_eq!(line3.label.as_deref(), Some("Trajectory"));
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_axes_local_limits_and_colormap_state() {
+        let mut figure = Figure::new().with_subplot_grid(1, 2);
+        figure.set_axes_limits(1, Some((1.0, 2.0)), Some((3.0, 4.0)));
+        figure.set_axes_z_limits(1, Some((5.0, 6.0)));
+        figure.set_axes_grid_enabled(1, false);
+        figure.set_axes_box_enabled(1, false);
+        figure.set_axes_axis_equal(1, true);
+        figure.set_axes_colorbar_enabled(1, true);
+        figure.set_axes_colormap(1, ColorMap::Hot);
+        figure.set_axes_color_limits(1, Some((0.0, 10.0)));
+        figure.set_active_axes_index(1);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+        let meta = rebuilt.axes_metadata(1).unwrap();
+        assert_eq!(meta.x_limits, Some((1.0, 2.0)));
+        assert_eq!(meta.y_limits, Some((3.0, 4.0)));
+        assert_eq!(meta.z_limits, Some((5.0, 6.0)));
+        assert!(!meta.grid_enabled);
+        assert!(!meta.box_enabled);
+        assert!(meta.axis_equal);
+        assert!(meta.colorbar_enabled);
+        assert_eq!(format!("{:?}", meta.colormap), "Hot");
+        assert_eq!(meta.color_limits, Some((0.0, 10.0)));
     }
 
     #[test]

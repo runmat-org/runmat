@@ -123,11 +123,20 @@ pub struct AxesMetadata {
     pub x_label: Option<String>,
     pub y_label: Option<String>,
     pub z_label: Option<String>,
+    pub x_limits: Option<(f64, f64)>,
+    pub y_limits: Option<(f64, f64)>,
+    pub z_limits: Option<(f64, f64)>,
     pub x_log: bool,
     pub y_log: bool,
     pub view_azimuth_deg: Option<f32>,
     pub view_elevation_deg: Option<f32>,
+    pub grid_enabled: bool,
+    pub box_enabled: bool,
+    pub axis_equal: bool,
     pub legend_enabled: bool,
+    pub colorbar_enabled: bool,
+    pub colormap: ColorMap,
+    pub color_limits: Option<(f64, f64)>,
     pub title_style: TextStyle,
     pub x_label_style: TextStyle,
     pub y_label_style: TextStyle,
@@ -216,7 +225,16 @@ impl Figure {
             plot_axes_indices: Vec::new(),
             active_axes_index: 0,
             axes_metadata: vec![AxesMetadata {
+                x_limits: None,
+                y_limits: None,
+                z_limits: None,
+                grid_enabled: true,
+                box_enabled: true,
+                axis_equal: false,
                 legend_enabled: true,
+                colorbar_enabled: false,
+                colormap: ColorMap::Parula,
+                color_limits: None,
                 ..Default::default()
             }],
         }
@@ -225,7 +243,16 @@ impl Figure {
     fn ensure_axes_metadata_capacity(&mut self, min_len: usize) {
         while self.axes_metadata.len() < min_len.max(1) {
             self.axes_metadata.push(AxesMetadata {
+                x_limits: None,
+                y_limits: None,
+                z_limits: None,
+                grid_enabled: true,
+                box_enabled: true,
+                axis_equal: false,
                 legend_enabled: true,
+                colorbar_enabled: false,
+                colormap: ColorMap::Parula,
+                color_limits: None,
                 ..Default::default()
             });
         }
@@ -238,9 +265,18 @@ impl Figure {
             self.x_label = meta.x_label;
             self.y_label = meta.y_label;
             self.z_label = meta.z_label;
+            self.x_limits = meta.x_limits;
+            self.y_limits = meta.y_limits;
+            self.z_limits = meta.z_limits;
             self.x_log = meta.x_log;
             self.y_log = meta.y_log;
+            self.grid_enabled = meta.grid_enabled;
+            self.box_enabled = meta.box_enabled;
+            self.axis_equal = meta.axis_equal;
             self.legend_enabled = meta.legend_enabled;
+            self.colorbar_enabled = meta.colorbar_enabled;
+            self.colormap = meta.colormap;
+            self.color_limits = meta.color_limits;
         }
     }
 
@@ -435,7 +471,18 @@ impl Figure {
     }
 
     pub fn set_grid(&mut self, enabled: bool) {
-        self.grid_enabled = enabled;
+        self.set_axes_grid_enabled(self.active_axes_index, enabled);
+        self.dirty = true;
+    }
+
+    pub fn set_axes_grid_enabled(&mut self, axes_index: usize, enabled: bool) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.grid_enabled = enabled;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
         self.dirty = true;
     }
 
@@ -460,19 +507,29 @@ impl Figure {
     }
 
     pub fn set_axis_equal(&mut self, enabled: bool) {
-        self.axis_equal = enabled;
+        self.set_axes_axis_equal(self.active_axes_index, enabled);
+        self.dirty = true;
+    }
+    pub fn set_axes_axis_equal(&mut self, axes_index: usize, enabled: bool) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.axis_equal = enabled;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
         self.dirty = true;
     }
     pub fn with_colormap(mut self, cmap: ColorMap) -> Self {
-        self.colormap = cmap;
+        self.set_axes_colormap(self.active_axes_index, cmap);
         self
     }
     pub fn with_colorbar(mut self, enabled: bool) -> Self {
-        self.colorbar_enabled = enabled;
+        self.set_axes_colorbar_enabled(self.active_axes_index, enabled);
         self
     }
     pub fn with_color_limits(mut self, limits: Option<(f64, f64)>) -> Self {
-        self.color_limits = limits;
+        self.set_axes_color_limits(self.active_axes_index, limits);
         self
     }
 
@@ -525,17 +582,100 @@ impl Figure {
 
     /// Set color limits and propagate to existing surface plots
     pub fn set_color_limits(&mut self, limits: Option<(f64, f64)>) {
-        self.color_limits = limits;
-        for plot in &mut self.plots {
-            if let PlotElement::Surface(s) = plot {
-                s.set_color_limits(limits);
-            }
-        }
+        self.set_axes_color_limits(self.active_axes_index, limits);
         self.dirty = true;
     }
 
     pub fn set_z_limits(&mut self, limits: Option<(f64, f64)>) {
-        self.z_limits = limits;
+        self.set_axes_z_limits(self.active_axes_index, limits);
+        self.dirty = true;
+    }
+
+    pub fn set_axes_limits(
+        &mut self,
+        axes_index: usize,
+        x: Option<(f64, f64)>,
+        y: Option<(f64, f64)>,
+    ) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.x_limits = x;
+            meta.y_limits = y;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_z_limits(&mut self, axes_index: usize, limits: Option<(f64, f64)>) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.z_limits = limits;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_box_enabled(&mut self, axes_index: usize, enabled: bool) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.box_enabled = enabled;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_colorbar_enabled(&mut self, axes_index: usize, enabled: bool) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.colorbar_enabled = enabled;
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_colormap(&mut self, axes_index: usize, cmap: ColorMap) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.colormap = cmap;
+        }
+        for (idx, plot) in self.plots.iter_mut().enumerate() {
+            if self.plot_axes_indices.get(idx).copied().unwrap_or(0) != axes_index {
+                continue;
+            }
+            if let PlotElement::Surface(surface) = plot {
+                *surface = surface.clone().with_colormap(cmap);
+            }
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
+        self.dirty = true;
+    }
+
+    pub fn set_axes_color_limits(&mut self, axes_index: usize, limits: Option<(f64, f64)>) {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.color_limits = limits;
+        }
+        for (idx, plot) in self.plots.iter_mut().enumerate() {
+            if self.plot_axes_indices.get(idx).copied().unwrap_or(0) != axes_index {
+                continue;
+            }
+            if let PlotElement::Surface(surface) = plot {
+                surface.set_color_limits(limits);
+            }
+        }
+        if axes_index == self.active_axes_index {
+            self.sync_legacy_fields_from_active_axes();
+        }
         self.dirty = true;
     }
 
@@ -793,14 +933,15 @@ impl Figure {
         gpu: Option<&GpuPackContext<'_>>,
     ) -> Vec<RenderData> {
         let mut out = Vec::new();
-        for p in self.plots.iter_mut() {
+        for (plot_idx, p) in self.plots.iter_mut().enumerate() {
             if !p.is_visible() {
                 continue;
             }
-            // Apply figure-level color limits to surfaces before generating
+            let axes_index = self.plot_axes_indices.get(plot_idx).copied().unwrap_or(0);
             if let PlotElement::Surface(s) = p {
-                if self.color_limits.is_some() {
-                    s.set_color_limits(self.color_limits);
+                if let Some(meta) = self.axes_metadata.get(axes_index) {
+                    s.set_color_limits(meta.color_limits);
+                    *s = s.clone().with_colormap(meta.colormap);
                 }
             }
 
@@ -1537,5 +1678,30 @@ mod tests {
         assert_eq!(bounds.max.z, 4.0);
         let entries = figure.legend_entries_for_axes(0);
         assert_eq!(entries[0].plot_type, PlotType::Line3);
+    }
+
+    #[test]
+    fn subplot_sensitive_axes_state_is_isolated_per_subplot() {
+        let mut figure = Figure::new();
+        figure.set_subplot_grid(1, 2);
+        figure.set_axes_limits(1, Some((1.0, 2.0)), Some((3.0, 4.0)));
+        figure.set_axes_z_limits(1, Some((5.0, 6.0)));
+        figure.set_axes_grid_enabled(1, false);
+        figure.set_axes_box_enabled(1, false);
+        figure.set_axes_axis_equal(1, true);
+        figure.set_axes_colorbar_enabled(1, true);
+        figure.set_axes_colormap(1, ColorMap::Hot);
+        figure.set_axes_color_limits(1, Some((0.0, 10.0)));
+
+        let left = figure.axes_metadata(0).unwrap();
+        let right = figure.axes_metadata(1).unwrap();
+        assert_eq!(left.x_limits, None);
+        assert_eq!(right.x_limits, Some((1.0, 2.0)));
+        assert!(!right.grid_enabled);
+        assert!(!right.box_enabled);
+        assert!(right.axis_equal);
+        assert!(right.colorbar_enabled);
+        assert_eq!(format!("{:?}", right.colormap), "Hot");
+        assert_eq!(right.color_limits, Some((0.0, 10.0)));
     }
 }

@@ -30,6 +30,8 @@ pub fn get_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::plotting::isgraphics::isgraphics_builtin;
+    use crate::builtins::plotting::ishandle::ishandle_builtin;
     use crate::builtins::plotting::legend::legend_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::title::title_builtin;
@@ -144,5 +146,111 @@ mod tests {
         .unwrap();
         let box_value = get_builtin(vec![Value::Num(legend), Value::String("Box".into())]).unwrap();
         assert_eq!(box_value, Value::Bool(false));
+    }
+
+    #[test]
+    fn get_reads_axes_local_limit_and_scale_properties() {
+        let _guard = setup();
+        let ax = crate::builtins::plotting::subplot::subplot_builtin(
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(2.0),
+        )
+        .unwrap();
+        crate::builtins::plotting::set::set_builtin(vec![
+            Value::Num(ax),
+            Value::String("XLim".into()),
+            Value::Tensor(runmat_builtins::Tensor {
+                rows: 1,
+                cols: 2,
+                shape: vec![1, 2],
+                data: vec![1.0, 5.0],
+                dtype: runmat_builtins::NumericDType::F64,
+            }),
+            Value::String("XScale".into()),
+            Value::String("log".into()),
+            Value::String("Grid".into()),
+            Value::Bool(false),
+        ])
+        .unwrap();
+        let xlim = get_builtin(vec![Value::Num(ax), Value::String("XLim".into())]).unwrap();
+        let scale = get_builtin(vec![Value::Num(ax), Value::String("XScale".into())]).unwrap();
+        let grid = get_builtin(vec![Value::Num(ax), Value::String("Grid".into())]).unwrap();
+        assert_eq!(
+            runmat_builtins::Tensor::try_from(&xlim).unwrap().data,
+            vec![1.0, 5.0]
+        );
+        assert_eq!(scale, Value::String("log".into()));
+        assert_eq!(grid, Value::Bool(false));
+    }
+
+    #[test]
+    fn get_reads_figure_properties() {
+        let _guard = setup();
+        let fig =
+            crate::builtins::plotting::figure::figure_builtin(vec![Value::Num(1234.0)]).unwrap();
+        let ax = crate::builtins::plotting::subplot::subplot_builtin(
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(2.0),
+        )
+        .unwrap();
+        let value = get_builtin(vec![Value::Num(fig)]).unwrap();
+        let Value::Struct(st) = value else {
+            panic!("expected struct");
+        };
+        assert_eq!(st.fields.get("Number"), Some(&Value::Num(1234.0)));
+        assert_eq!(st.fields.get("Type"), Some(&Value::String("figure".into())));
+        assert_eq!(st.fields.get("CurrentAxes"), Some(&Value::Num(ax)));
+        assert!(matches!(st.fields.get("Children"), Some(Value::Tensor(_))));
+        let parent = st.fields.get("Parent").expect("parent property");
+        let Value::Num(v) = parent else {
+            panic!("expected numeric parent");
+        };
+        assert!(v.is_nan());
+    }
+
+    #[test]
+    fn hierarchy_and_query_semantics_exist() {
+        let _guard = setup();
+        let fig =
+            crate::builtins::plotting::figure::figure_builtin(vec![Value::Num(5555.0)]).unwrap();
+        let ax = crate::builtins::plotting::subplot::subplot_builtin(
+            Value::Num(1.0),
+            Value::Num(1.0),
+            Value::Num(1.0),
+        )
+        .unwrap();
+        let title =
+            crate::builtins::plotting::title::title_builtin(vec![Value::String("Signal".into())])
+                .unwrap();
+
+        let axes_value = get_builtin(vec![Value::Num(ax)]).unwrap();
+        let Value::Struct(axes_struct) = axes_value else {
+            panic!("expected struct");
+        };
+        assert_eq!(
+            axes_struct.fields.get("Type"),
+            Some(&Value::String("axes".into()))
+        );
+        assert_eq!(axes_struct.fields.get("Parent"), Some(&Value::Num(fig)));
+        assert!(matches!(
+            axes_struct.fields.get("Children"),
+            Some(Value::Tensor(_))
+        ));
+
+        let text_value = get_builtin(vec![Value::Num(title)]).unwrap();
+        let Value::Struct(text_struct) = text_value else {
+            panic!("expected struct");
+        };
+        assert_eq!(
+            text_struct.fields.get("Type"),
+            Some(&Value::String("text".into()))
+        );
+        assert_eq!(text_struct.fields.get("Parent"), Some(&Value::Num(ax)));
+
+        assert!(ishandle_builtin(vec![Value::Num(fig)]).unwrap());
+        assert!(isgraphics_builtin(vec![Value::Num(ax)]).unwrap());
+        assert!(!ishandle_builtin(vec![Value::Num(-1.0)]).unwrap());
     }
 }

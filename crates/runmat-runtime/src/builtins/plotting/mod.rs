@@ -56,6 +56,10 @@ pub mod hist;
 pub(crate) mod hold;
 #[path = "ops/imagesc.rs"]
 pub(crate) mod imagesc;
+#[path = "ops/isgraphics.rs"]
+pub(crate) mod isgraphics;
+#[path = "ops/ishandle.rs"]
+pub(crate) mod ishandle;
 #[path = "ops/legend.rs"]
 pub(crate) mod legend;
 #[path = "ops/loglog.rs"]

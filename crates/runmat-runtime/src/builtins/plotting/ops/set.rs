@@ -168,6 +168,61 @@ mod tests {
     }
 
     #[test]
+    fn set_updates_axes_local_properties() {
+        let _guard = setup();
+        let ax = crate::builtins::plotting::subplot::subplot_builtin(
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(2.0),
+        )
+        .unwrap();
+        set_builtin(vec![
+            Value::Num(ax),
+            Value::String("YLim".into()),
+            Value::Tensor(runmat_builtins::Tensor {
+                rows: 1,
+                cols: 2,
+                shape: vec![1, 2],
+                data: vec![2.0, 8.0],
+                dtype: runmat_builtins::NumericDType::F64,
+            }),
+            Value::String("Colorbar".into()),
+            Value::Bool(true),
+            Value::String("Colormap".into()),
+            Value::String("hot".into()),
+        ])
+        .unwrap();
+
+        let fig = clone_figure(crate::builtins::plotting::current_figure_handle()).unwrap();
+        let meta = fig.axes_metadata(1).unwrap();
+        assert_eq!(meta.y_limits, Some((2.0, 8.0)));
+        assert!(meta.colorbar_enabled);
+        assert_eq!(format!("{:?}", meta.colormap), "Hot");
+    }
+
+    #[test]
+    fn set_updates_figure_current_axes() {
+        let _guard = setup();
+        let fig =
+            crate::builtins::plotting::figure::figure_builtin(vec![Value::Num(4321.0)]).unwrap();
+        let ax = crate::builtins::plotting::subplot::subplot_builtin(
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(2.0),
+        )
+        .unwrap();
+        set_builtin(vec![
+            Value::Num(fig),
+            Value::String("CurrentAxes".into()),
+            Value::Num(ax),
+        ])
+        .unwrap();
+        let current =
+            get_builtin(vec![Value::Num(fig), Value::String("CurrentAxes".into())]).unwrap();
+        assert_eq!(current, Value::Num(ax));
+    }
+
+    #[test]
     fn set_rejects_invalid_property_assignments() {
         let _guard = setup();
         let h = title_builtin(vec![Value::String("Signal".into())]).unwrap();
