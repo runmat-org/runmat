@@ -141,8 +141,13 @@ impl Line3Plot {
         let vertex_count = self
             .gpu_vertex_count
             .unwrap_or_else(|| self.generate_vertices().len());
+        let thick = self.line_width > 1.0;
         RenderData {
-            pipeline_type: PipelineType::Lines,
+            pipeline_type: if thick {
+                PipelineType::Triangles
+            } else {
+                PipelineType::Lines
+            },
             vertices: if self.gpu_vertices.is_some() {
                 Vec::new()
             } else {
@@ -272,7 +277,7 @@ mod tests {
         .unwrap()
         .with_style(Vec4::ONE, 3.0, crate::plots::line::LineStyle::Dashed);
         let render = plot.render_data();
-        assert_eq!(render.pipeline_type, PipelineType::Lines);
+        assert_eq!(render.pipeline_type, PipelineType::Triangles);
         assert!(!render.vertices.is_empty());
         assert!(render.draw_calls[0].vertex_count >= 2);
     }

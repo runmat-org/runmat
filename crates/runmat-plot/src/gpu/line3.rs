@@ -18,6 +18,8 @@ pub struct Line3GpuInputs {
 
 pub struct Line3GpuParams {
     pub color: Vec4,
+    pub half_width_data: f32,
+    pub thick: bool,
     pub line_style: LineStyle,
 }
 
@@ -26,8 +28,10 @@ pub struct Line3GpuParams {
 struct Line3Uniforms {
     color: [f32; 4],
     count: u32,
+    half_width_data: f32,
     line_style: u32,
-    _pad: [u32; 2],
+    thick: u32,
+    _pad: u32,
 }
 
 pub fn pack_vertices_from_xyz(
@@ -40,7 +44,8 @@ pub fn pack_vertices_from_xyz(
         return Err("plot3: line inputs must contain at least two points".to_string());
     }
     let segments = inputs.len - 1;
-    let max_vertices = segments as u64 * 2;
+    let vertices_per_segment = if params.thick { 6u64 } else { 2u64 };
+    let max_vertices = segments as u64 * vertices_per_segment;
     let workgroup_size = tuning::effective_workgroup_size();
     let shader = compile_shader(device, workgroup_size, inputs.scalar);
 
@@ -78,8 +83,10 @@ pub fn pack_vertices_from_xyz(
     let uniforms = Line3Uniforms {
         color: params.color.to_array(),
         count: inputs.len,
+        half_width_data: params.half_width_data.max(0.0001),
         line_style: line_style_code(params.line_style),
-        _pad: [0, 0],
+        thick: if params.thick { 1 } else { 0 },
+        _pad: 0,
     };
     let uniform_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("line3-pack-uniforms"),

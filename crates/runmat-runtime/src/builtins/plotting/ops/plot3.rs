@@ -82,13 +82,10 @@ pub async fn plot3_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
             .take()
             .unwrap_or_else(|| format!("Series {}", series_idx + 1));
         if let Some((xg, yg, zg)) = plan.data.gpu_handles() {
-            if plan.appearance.line_width <= 1.0 {
-                if let Ok(plot) =
-                    build_line3_gpu_plot_async(xg, yg, zg, &label, &plan.appearance).await
-                {
-                    plots.push(plot);
-                    continue;
-                }
+            if let Ok(plot) = build_line3_gpu_plot_async(xg, yg, zg, &label, &plan.appearance).await
+            {
+                plots.push(plot);
+                continue;
             }
         }
         let (x, y, z) = plan.data.into_tensors_async(BUILTIN_NAME).await?;
@@ -284,6 +281,8 @@ async fn build_line3_gpu_plot_async(
         &inputs,
         &runmat_plot::gpu::line3::Line3GpuParams {
             color: appearance.color,
+            half_width_data: appearance.line_width.max(1.0) * 0.01,
+            thick: appearance.line_width > 1.0,
             line_style: appearance.line_style,
         },
     )
@@ -291,7 +290,7 @@ async fn build_line3_gpu_plot_async(
     let bounds = gpu_xyz_bounds_async(x, y, z, BUILTIN_NAME).await?;
     Ok(Line3Plot::from_gpu_buffer(
         buffer,
-        ((x_ref.len - 1) * 2) as usize,
+        ((x_ref.len - 1) * if appearance.line_width > 1.0 { 6 } else { 2 }) as usize,
         appearance.color,
         appearance.line_width,
         appearance.line_style,
