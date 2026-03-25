@@ -27,8 +27,8 @@ jobs:
         include:
           - runner: ["self-hosted", "linux", "gpu"]
             name: linux-x86_64
-#          - runner: ["self-hosted", "windows", "gpu"]
-#            name: windows-x86_64
+          - runner: ["self-hosted", "windows", "GCP"]
+            name: windows-x86_64
           - runner: macos-latest
             name: macos-universal
     runs-on: ${{ matrix.runner }}
