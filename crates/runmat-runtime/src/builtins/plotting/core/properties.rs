@@ -15,16 +15,20 @@ use crate::builtins::plotting::op_common::limits::limit_value;
 use crate::builtins::plotting::op_common::value_as_text_string;
 use crate::BuiltinResult;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum PlotHandle {
     Figure(FigureHandle),
     Axes(FigureHandle, usize),
     Text(FigureHandle, usize, PlotObjectKind),
     Legend(FigureHandle, usize),
+    Histogram(f64),
 }
 
 pub fn resolve_plot_handle(value: &Value, builtin: &'static str) -> BuiltinResult<PlotHandle> {
     let scalar = handle_scalar(value, builtin)?;
+    if super::state::plot_child_handle_snapshot(scalar).is_ok() {
+        return Ok(PlotHandle::Histogram(scalar));
+    }
     if let Ok((handle, axes_index, kind)) = decode_plot_object_handle(scalar) {
         if axes_handle_exists(handle, axes_index) {
             return Ok(match kind {
@@ -68,6 +72,7 @@ pub fn get_properties(
             get_legend_property(handle, axes_index, property, builtin)
         }
         PlotHandle::Figure(handle) => get_figure_property(handle, property, builtin),
+        PlotHandle::Histogram(handle) => get_histogram_property(handle, property, builtin),
     }
 }
 
@@ -129,6 +134,13 @@ pub fn set_properties(
             }
             set_legend_for_axes(handle, axes_index, enabled, labels.as_deref(), Some(style))
                 .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        PlotHandle::Histogram(handle) => {
+            for pair in args.chunks_exact(2) {
+                let key = property_name(&pair[0], builtin)?;
+                apply_histogram_property(handle, &key, &pair[1], builtin)?;
+            }
             Ok(())
         }
     }
@@ -969,6 +981,93 @@ fn apply_figure_property(
     }
 }
 
+fn get_histogram_property(
+    handle: f64,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let state = super::state::plot_child_handle_snapshot(handle)
+        .map_err(|err| map_figure_error(builtin, err))?;
+    let super::state::PlotChildHandleState::Histogram(hist) = state;
+    let normalized =
+        apply_histogram_normalization(&hist.raw_counts, &hist.bin_edges, &hist.normalization);
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st = StructValue::new();
+            st.insert("Type", Value::String("histogram".into()));
+            st.insert(
+                "Parent",
+                Value::Num(super::state::encode_axes_handle(
+                    hist.figure,
+                    hist.axes_index,
+                )),
+            );
+            st.insert("Children", handles_value(Vec::new()));
+            st.insert("BinEdges", tensor_from_vec(hist.bin_edges));
+            st.insert("BinCounts", tensor_from_vec(normalized));
+            st.insert("Normalization", Value::String(hist.normalization));
+            st.insert("NumBins", Value::Num(hist.raw_counts.len() as f64));
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("histogram".into())),
+        Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
+            hist.figure,
+            hist.axes_index,
+        ))),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("binedges") => Ok(tensor_from_vec(hist.bin_edges)),
+        Some("bincounts") => Ok(tensor_from_vec(normalized)),
+        Some("normalization") => Ok(Value::String(hist.normalization)),
+        Some("numbins") => Ok(Value::Num(hist.raw_counts.len() as f64)),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported histogram property `{other}`"),
+        )),
+    }
+}
+
+fn apply_histogram_property(
+    handle: f64,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let state = super::state::plot_child_handle_snapshot(handle)
+        .map_err(|err| map_figure_error(builtin, err))?;
+    let super::state::PlotChildHandleState::Histogram(hist) = state;
+    match key {
+        "normalization" => {
+            let norm = value_as_string(value)
+                .ok_or_else(|| {
+                    plotting_error(
+                        builtin,
+                        format!("{builtin}: Normalization must be a string"),
+                    )
+                })?
+                .trim()
+                .to_ascii_lowercase();
+            validate_histogram_normalization(&norm, builtin)?;
+            let normalized =
+                apply_histogram_normalization(&hist.raw_counts, &hist.bin_edges, &norm);
+            let labels = histogram_labels_from_edges(&hist.bin_edges);
+            super::state::update_histogram_plot_data(
+                hist.figure,
+                hist.plot_index,
+                labels,
+                normalized,
+            )
+            .map_err(|err| map_figure_error(builtin, err))?;
+            super::state::update_histogram_handle(handle, norm, hist.raw_counts)
+                .map_err(|err| map_figure_error(builtin, err))?;
+            Ok(())
+        }
+        other => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported histogram property `{other}`"),
+        )),
+    }
+}
+
 fn limits_from_optional_value(
     value: &Value,
     builtin: &'static str,
@@ -1123,6 +1222,89 @@ fn handles_value(handles: Vec<f64>) -> Value {
         data: handles,
         dtype: runmat_builtins::NumericDType::F64,
     })
+}
+
+fn tensor_from_vec(data: Vec<f64>) -> Value {
+    Value::Tensor(runmat_builtins::Tensor {
+        rows: 1,
+        cols: data.len(),
+        shape: vec![1, data.len()],
+        data,
+        dtype: runmat_builtins::NumericDType::F64,
+    })
+}
+
+fn histogram_labels_from_edges(edges: &[f64]) -> Vec<String> {
+    edges
+        .windows(2)
+        .map(|pair| format!("[{:.3}, {:.3})", pair[0], pair[1]))
+        .collect()
+}
+
+fn validate_histogram_normalization(norm: &str, builtin: &'static str) -> BuiltinResult<()> {
+    match norm {
+        "count" | "probability" | "countdensity" | "pdf" | "cumcount" | "cdf" => Ok(()),
+        other => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported histogram normalization `{other}`"),
+        )),
+    }
+}
+
+fn apply_histogram_normalization(raw_counts: &[f64], edges: &[f64], norm: &str) -> Vec<f64> {
+    let widths: Vec<f64> = edges.windows(2).map(|pair| pair[1] - pair[0]).collect();
+    let total: f64 = raw_counts.iter().sum();
+    match norm {
+        "count" => raw_counts.to_vec(),
+        "probability" => {
+            if total > 0.0 {
+                raw_counts.iter().map(|&c| c / total).collect()
+            } else {
+                vec![0.0; raw_counts.len()]
+            }
+        }
+        "countdensity" => raw_counts
+            .iter()
+            .zip(widths.iter())
+            .map(|(&c, &w)| if w > 0.0 { c / w } else { 0.0 })
+            .collect(),
+        "pdf" => {
+            if total > 0.0 {
+                raw_counts
+                    .iter()
+                    .zip(widths.iter())
+                    .map(|(&c, &w)| if w > 0.0 { c / (total * w) } else { 0.0 })
+                    .collect()
+            } else {
+                vec![0.0; raw_counts.len()]
+            }
+        }
+        "cumcount" => {
+            let mut acc = 0.0;
+            raw_counts
+                .iter()
+                .map(|&c| {
+                    acc += c;
+                    acc
+                })
+                .collect()
+        }
+        "cdf" => {
+            if total > 0.0 {
+                let mut acc = 0.0;
+                raw_counts
+                    .iter()
+                    .map(|&c| {
+                        acc += c;
+                        acc / total
+                    })
+                    .collect()
+            } else {
+                vec![0.0; raw_counts.len()]
+            }
+        }
+        _ => raw_counts.to_vec(),
+    }
 }
 
 fn color_to_short_name(color: glam::Vec4) -> String {

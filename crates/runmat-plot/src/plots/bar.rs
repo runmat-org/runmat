@@ -130,6 +130,25 @@ impl BarChart {
         }
     }
 
+    pub fn set_data(&mut self, labels: Vec<String>, values: Vec<f64>) -> Result<(), String> {
+        if labels.len() != values.len() || labels.is_empty() {
+            return Err(
+                "Bar data must be non-empty and label/value lengths must match".to_string(),
+            );
+        }
+        self.labels = labels;
+        self.value_count = values.len();
+        self.values = Some(values);
+        self.vertices = None;
+        self.indices = None;
+        self.bounds = None;
+        self.gpu_vertices = None;
+        self.gpu_vertex_count = None;
+        self.gpu_bounds = None;
+        self.dirty = true;
+        Ok(())
+    }
+
     fn invalidate_gpu_data(&mut self) {
         self.gpu_vertices = None;
         self.gpu_vertex_count = None;

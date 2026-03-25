@@ -1,6 +1,8 @@
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::BarChart;
+use std::cell::RefCell;
+use std::rc::Rc;
 
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -54,7 +56,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     type_resolver(hist_type),
     builtin_path = "crate::builtins::plotting::histogram"
 )]
-pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
+pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (target_axes, data, rest) = parse_histogram_call(args)?;
     let (histcounts_args, style_args) = split_histogram_args(&rest);
     let eval = crate::builtins::stats::hist::histcounts::evaluate(data, &histcounts_args)
@@ -88,7 +90,10 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> 
     };
 
     let mut chart_opt = Some(chart);
-    render_active_plot(
+    let plot_index_out = Rc::new(RefCell::new(None));
+    let plot_index_slot = Rc::clone(&plot_index_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(
         BUILTIN_NAME,
         PlotRenderOptions {
             title: "Histogram",
@@ -98,14 +103,33 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> 
         },
         move |figure, axes| {
             let axes = target_axes.unwrap_or(axes);
-            figure.add_bar_chart_on_axes(
+            let plot_index = figure.add_bar_chart_on_axes(
                 chart_opt.take().expect("histogram chart consumed once"),
                 axes,
             );
+            *plot_index_slot.borrow_mut() = Some((axes, plot_index));
             Ok(())
         },
-    )?;
-    Ok(counts_value)
+    );
+    let Some((axes, plot_index)) = *plot_index_out.borrow() else {
+        return render_result.map(|_| f64::NAN);
+    };
+    let handle = crate::builtins::plotting::state::register_histogram_handle(
+        figure_handle,
+        axes,
+        plot_index,
+        edges.data.clone(),
+        counts.data.clone(),
+        normalization.clone(),
+    );
+    if let Err(err) = render_result {
+        let lower = err.to_string().to_lowercase();
+        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+            return Ok(handle);
+        }
+        return Err(err);
+    }
+    Ok(handle)
 }
 
 fn parse_histogram_call(
@@ -195,6 +219,8 @@ fn value_as_string(value: &Value) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::plotting::get::get_builtin;
+    use crate::builtins::plotting::set::set_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
@@ -227,8 +253,11 @@ mod tests {
                 dtype: runmat_builtins::NumericDType::F64,
             }),
         ]));
-        let out = out.unwrap_or_else(|_| Value::Tensor(tensor_from(&[3.0, 1.0])));
-        let counts = Tensor::try_from(&out).unwrap();
+        let out = out.unwrap();
+        let counts = Tensor::try_from(
+            &get_builtin(vec![Value::Num(out), Value::String("BinCounts".into())]).unwrap(),
+        )
+        .unwrap();
         assert_eq!(counts.data, vec![3.0, 1.0]);
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert!(matches!(fig.plots().next().unwrap(), PlotElement::Bar(_)));
@@ -247,8 +276,11 @@ mod tests {
             Value::String("Normalization".into()),
             Value::String("cdf".into()),
         ]));
-        let out = out.unwrap_or_else(|_| Value::Tensor(tensor_from(&[1.0 / 3.0, 2.0 / 3.0, 1.0])));
-        let counts = Tensor::try_from(&out).unwrap();
+        let out = out.unwrap();
+        let counts = Tensor::try_from(
+            &get_builtin(vec![Value::Num(out), Value::String("BinCounts".into())]).unwrap(),
+        )
+        .unwrap();
         assert_eq!(counts.data.last().copied().unwrap_or_default(), 1.0);
     }
 
@@ -282,8 +314,11 @@ mod tests {
                 dtype: runmat_builtins::NumericDType::F64,
             }),
         ]))
-        .unwrap_or_else(|_| Value::Tensor(tensor_from(&[1.0, 1.0, 1.0])));
-        let counts = Tensor::try_from(&out).unwrap();
+        .unwrap();
+        let counts = Tensor::try_from(
+            &get_builtin(vec![Value::Num(out), Value::String("BinCounts".into())]).unwrap(),
+        )
+        .unwrap();
         assert_eq!(counts.data, vec![1.0, 1.0, 1.0]);
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert_eq!(fig.plot_axes_indices()[0], 1);
@@ -302,9 +337,39 @@ mod tests {
             Value::String("Normalization".into()),
             Value::String("countdensity".into()),
         ]))
-        .unwrap_or_else(|_| Value::Tensor(tensor_from(&[0.0])));
-        let counts = Tensor::try_from(&out).unwrap();
+        .unwrap();
+        let counts = Tensor::try_from(
+            &get_builtin(vec![Value::Num(out), Value::String("BinCounts".into())]).unwrap(),
+        )
+        .unwrap();
         assert!(!counts.data.is_empty());
         assert!(counts.data.iter().all(|v| v.is_finite()));
+    }
+
+    #[test]
+    fn histogram_returns_object_handle_with_get_set_semantics() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let handle =
+            futures::executor::block_on(histogram_builtin(vec![Value::Tensor(tensor_from(&[
+                1.0, 2.0, 3.0,
+            ]))]))
+            .unwrap();
+        let ty = get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap();
+        assert_eq!(ty, Value::String("histogram".into()));
+        set_builtin(vec![
+            Value::Num(handle),
+            Value::String("Normalization".into()),
+            Value::String("cdf".into()),
+        ])
+        .unwrap();
+        let norm = get_builtin(vec![
+            Value::Num(handle),
+            Value::String("Normalization".into()),
+        ])
+        .unwrap();
+        assert_eq!(norm, Value::String("cdf".into()));
     }
 }

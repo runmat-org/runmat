@@ -183,6 +183,23 @@ struct PlotRegistry {
     current: FigureHandle,
     next_handle: FigureHandle,
     figures: HashMap<FigureHandle, FigureState>,
+    next_plot_child_handle: u64,
+    plot_children: HashMap<u64, PlotChildHandleState>,
+}
+
+#[derive(Clone)]
+pub struct HistogramHandleState {
+    pub figure: FigureHandle,
+    pub axes_index: usize,
+    pub plot_index: usize,
+    pub bin_edges: Vec<f64>,
+    pub raw_counts: Vec<f64>,
+    pub normalization: String,
+}
+
+#[derive(Clone)]
+pub enum PlotChildHandleState {
+    Histogram(HistogramHandleState),
 }
 
 impl Default for PlotRegistry {
@@ -191,6 +208,8 @@ impl Default for PlotRegistry {
             current: FigureHandle::default(),
             next_handle: FigureHandle::default().next(),
             figures: HashMap::new(),
+            next_plot_child_handle: 1u64 << 40,
+            plot_children: HashMap::new(),
         }
     }
 }
@@ -667,12 +686,22 @@ pub fn clear_current_axes() {
     let (handle, figure_clone) = {
         let mut reg = registry();
         let handle = reg.current;
-        let state = get_state_mut(&mut reg, handle);
-        let axes_index = state.active_axes;
-        state.figure.clear_axes(axes_index);
-        state.reset_cycle(axes_index);
-        state.revision = state.revision.wrapping_add(1);
-        (handle, state.figure.clone())
+        let axes_index = {
+            let state = get_state_mut(&mut reg, handle);
+            let axes_index = state.active_axes;
+            state.figure.clear_axes(axes_index);
+            state.reset_cycle(axes_index);
+            state.revision = state.revision.wrapping_add(1);
+            axes_index
+        };
+        purge_plot_children_for_axes(&mut reg, handle, axes_index);
+        let figure_clone = reg
+            .figures
+            .get(&handle)
+            .expect("figure exists")
+            .figure
+            .clone();
+        (handle, figure_clone)
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 }
@@ -929,6 +958,97 @@ pub fn decode_plot_object_handle(
     }
     let axes_index = (base & AXES_INDEX_MASK) as usize;
     Ok((FigureHandle::from(figure_id as u32), axes_index, kind))
+}
+
+pub fn register_histogram_handle(
+    figure: FigureHandle,
+    axes_index: usize,
+    plot_index: usize,
+    bin_edges: Vec<f64>,
+    raw_counts: Vec<f64>,
+    normalization: String,
+) -> f64 {
+    let mut reg = registry();
+    let id = reg.next_plot_child_handle;
+    reg.next_plot_child_handle += 1;
+    reg.plot_children.insert(
+        id,
+        PlotChildHandleState::Histogram(HistogramHandleState {
+            figure,
+            axes_index,
+            plot_index,
+            bin_edges,
+            raw_counts,
+            normalization,
+        }),
+    );
+    id as f64
+}
+
+pub fn plot_child_handle_snapshot(handle: f64) -> Result<PlotChildHandleState, FigureError> {
+    if !handle.is_finite() || handle <= 0.0 {
+        return Err(FigureError::InvalidPlotObjectHandle);
+    }
+    let reg = registry();
+    reg.plot_children
+        .get(&(handle.round() as u64))
+        .cloned()
+        .ok_or(FigureError::InvalidPlotObjectHandle)
+}
+
+pub fn update_histogram_handle(
+    handle: f64,
+    normalization: String,
+    raw_counts: Vec<f64>,
+) -> Result<(), FigureError> {
+    let mut reg = registry();
+    let state = reg
+        .plot_children
+        .get_mut(&(handle.round() as u64))
+        .ok_or(FigureError::InvalidPlotObjectHandle)?;
+    match state {
+        PlotChildHandleState::Histogram(hist) => {
+            hist.normalization = normalization;
+            hist.raw_counts = raw_counts;
+            Ok(())
+        }
+    }
+}
+
+pub fn update_histogram_plot_data(
+    figure_handle: FigureHandle,
+    plot_index: usize,
+    labels: Vec<String>,
+    values: Vec<f64>,
+) -> Result<(), FigureError> {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, figure_handle);
+    let plot = state
+        .figure
+        .get_plot_mut(plot_index)
+        .ok_or(FigureError::InvalidPlotObjectHandle)?;
+    match plot {
+        runmat_plot::plots::figure::PlotElement::Bar(bar) => {
+            bar.set_data(labels, values)
+                .map_err(|_| FigureError::InvalidPlotObjectHandle)?;
+            Ok(())
+        }
+        _ => Err(FigureError::InvalidPlotObjectHandle),
+    }
+}
+
+fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) {
+    reg.plot_children.retain(|_, state| match state {
+        PlotChildHandleState::Histogram(hist) => hist.figure != handle,
+    });
+}
+
+fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, axes_index: usize) {
+    reg.plot_children.retain(|_, state| match state {
+        PlotChildHandleState::Histogram(hist) => {
+            !(hist.figure == handle && hist.axes_index == axes_index)
+        }
+    });
 }
 
 #[allow(dead_code)]
@@ -1274,12 +1394,20 @@ pub fn import_figure(figure: Figure) -> FigureHandle {
 pub fn clear_figure(target: Option<FigureHandle>) -> Result<FigureHandle, FigureError> {
     let mut reg = registry();
     let handle = target.unwrap_or(reg.current);
-    let state = reg
+    {
+        let state = reg
+            .figures
+            .get_mut(&handle)
+            .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
+        *state = FigureState::new(handle);
+    }
+    purge_plot_children_for_figure(&mut reg, handle);
+    let figure_clone = reg
         .figures
-        .get_mut(&handle)
-        .ok_or(FigureError::InvalidHandle(handle.as_u32()))?;
-    *state = FigureState::new(handle);
-    let figure_clone = state.figure.clone();
+        .get(&handle)
+        .expect("figure exists")
+        .figure
+        .clone();
     drop(reg);
     notify_with_figure(handle, &figure_clone, FigureEventKind::Cleared);
     Ok(handle)
@@ -1292,6 +1420,7 @@ pub fn close_figure(target: Option<FigureHandle>) -> Result<FigureHandle, Figure
     if existed.is_none() {
         return Err(FigureError::InvalidHandle(handle.as_u32()));
     }
+    purge_plot_children_for_figure(&mut reg, handle);
 
     if reg.current == handle {
         if let Some((&next_handle, _)) = reg.figures.iter().next() {
@@ -1392,32 +1521,45 @@ where
     let (handle, figure_clone) = {
         let mut reg = registry();
         let handle = reg.current;
-        let state = get_state_mut(&mut reg, handle);
-        let axes_index = state.active_axes;
-        state.figure.set_active_axes_index(axes_index);
-
-        if !state.hold() {
-            state.figure.clear_axes(axes_index);
-            state.reset_cycle(axes_index);
+        let axes_index = { get_state_mut(&mut reg, handle).active_axes };
+        let should_clear = { !get_state_mut(&mut reg, handle).hold() };
+        {
+            let state = get_state_mut(&mut reg, handle);
+            state.figure.set_active_axes_index(axes_index);
+            if should_clear {
+                state.figure.clear_axes(axes_index);
+                state.reset_cycle(axes_index);
+            }
         }
-
-        if !opts.title.is_empty() {
-            state.figure.set_axes_title(axes_index, opts.title);
+        if should_clear {
+            purge_plot_children_for_axes(&mut reg, handle, axes_index);
         }
-        state
+        {
+            let state = get_state_mut(&mut reg, handle);
+            if !opts.title.is_empty() {
+                state.figure.set_axes_title(axes_index, opts.title);
+            }
+            state
+                .figure
+                .set_axes_labels(axes_index, opts.x_label, opts.y_label);
+            state.figure.set_grid(opts.grid);
+            state.figure.set_axis_equal(opts.axis_equal);
+
+            let _axes_context = AxesContextGuard::install(state, axes_index);
+            apply(&mut state.figure, axes_index)
+                .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
+
+            // Increment revision after a successful mutation so surfaces can avoid
+            // re-rendering unchanged figures when "presenting" an already-loaded handle.
+            state.revision = state.revision.wrapping_add(1);
+        }
+        let figure_clone = reg
+            .figures
+            .get(&handle)
+            .expect("figure exists")
             .figure
-            .set_axes_labels(axes_index, opts.x_label, opts.y_label);
-        state.figure.set_grid(opts.grid);
-        state.figure.set_axis_equal(opts.axis_equal);
-
-        let _axes_context = AxesContextGuard::install(state, axes_index);
-        apply(&mut state.figure, axes_index)
-            .map_err(|flow| map_control_flow_with_builtin(flow, builtin))?;
-
-        // Increment revision after a successful mutation so surfaces can avoid
-        // re-rendering unchanged figures when "presenting" an already-loaded handle.
-        state.revision = state.revision.wrapping_add(1);
-        (handle, state.figure.clone())
+            .clone();
+        (handle, figure_clone)
     };
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
 
