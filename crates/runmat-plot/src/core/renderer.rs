@@ -205,6 +205,19 @@ impl DirectUniforms {
     }
 }
 
+pub fn marker_shape_code(style: crate::plots::scatter::MarkerStyle) -> u32 {
+    match style {
+        crate::plots::scatter::MarkerStyle::Circle => 0,
+        crate::plots::scatter::MarkerStyle::Square => 1,
+        crate::plots::scatter::MarkerStyle::Triangle => 2,
+        crate::plots::scatter::MarkerStyle::Diamond => 3,
+        crate::plots::scatter::MarkerStyle::Plus => 4,
+        crate::plots::scatter::MarkerStyle::Cross => 5,
+        crate::plots::scatter::MarkerStyle::Star => 6,
+        crate::plots::scatter::MarkerStyle::Hexagon => 7,
+    }
+}
+
 /// Rendering pipeline types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PipelineType {

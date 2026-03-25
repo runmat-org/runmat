@@ -1,7 +1,8 @@
 //! Stem plot implementation.
 
 use crate::core::{
-    AlphaMode, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData, Vertex,
+    marker_shape_code, AlphaMode, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType,
+    RenderData, Vertex,
 };
 use crate::plots::line::{LineMarkerAppearance, LineStyle};
 use glam::{Vec3, Vec4};
@@ -206,13 +207,16 @@ impl StemPlot {
                 return None;
             }
             return Some(RenderData {
-                pipeline_type: PipelineType::Triangles,
+                pipeline_type: PipelineType::Points,
                 vertices: Vec::new(),
                 indices: None,
                 gpu_vertices: Some(gpu_vertices),
                 bounds: None,
                 material: Material {
                     albedo: marker.face_color,
+                    emissive: marker.edge_color,
+                    roughness: 1.0,
+                    metallic: marker_shape_code(marker.kind) as f32,
                     alpha_mode: if marker.face_color.w < 0.999 {
                         AlphaMode::Blend
                     } else {
@@ -231,7 +235,6 @@ impl StemPlot {
             });
         }
         if self.marker_dirty || self.marker_vertices.is_none() {
-            let size = (marker.size.max(1.0) * 0.005).max(0.005);
             let mut vertices = Vec::new();
             for (&x, &y) in self.x.iter().zip(self.y.iter()) {
                 let x = x as f32;
@@ -239,7 +242,12 @@ impl StemPlot {
                 if !x.is_finite() || !y.is_finite() {
                     continue;
                 }
-                vertices.extend(square_marker(x, y, size, marker.face_color));
+                vertices.push(Vertex {
+                    position: [x, y, 0.0],
+                    color: marker.face_color.to_array(),
+                    normal: [0.0, 0.0, marker.size],
+                    tex_coords: [0.0, 0.0],
+                });
             }
             self.marker_vertices = Some(vertices);
             self.marker_dirty = false;
@@ -249,13 +257,16 @@ impl StemPlot {
             return None;
         }
         Some(RenderData {
-            pipeline_type: PipelineType::Triangles,
+            pipeline_type: PipelineType::Points,
             vertices: vertices.clone(),
             indices: None,
             gpu_vertices: None,
             bounds: None,
             material: Material {
                 albedo: marker.face_color,
+                emissive: marker.edge_color,
+                roughness: 1.0,
+                metallic: marker_shape_code(marker.kind) as f32,
                 alpha_mode: if marker.face_color.w < 0.999 {
                     AlphaMode::Blend
                 } else {
@@ -355,17 +366,6 @@ fn include_segment(index: usize, style: LineStyle) -> bool {
             m < 2 || m == 3
         }
     }
-}
-
-fn square_marker(x: f32, y: f32, half: f32, color: Vec4) -> [Vertex; 6] {
-    [
-        Vertex::new(Vec3::new(x - half, y - half, 0.0), color),
-        Vertex::new(Vec3::new(x + half, y - half, 0.0), color),
-        Vertex::new(Vec3::new(x + half, y + half, 0.0), color),
-        Vertex::new(Vec3::new(x - half, y - half, 0.0), color),
-        Vertex::new(Vec3::new(x + half, y + half, 0.0), color),
-        Vertex::new(Vec3::new(x - half, y + half, 0.0), color),
-    ]
 }
 
 #[cfg(test)]
