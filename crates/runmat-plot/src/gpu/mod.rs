@@ -2,6 +2,7 @@ pub mod axis;
 pub mod bar;
 pub mod contour;
 pub mod contour_fill;
+pub mod errorbar;
 pub mod histogram;
 pub mod line;
 pub mod line3;

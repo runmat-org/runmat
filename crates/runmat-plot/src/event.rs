@@ -81,9 +81,20 @@ pub enum ScenePlot {
         err_low: Vec<f64>,
         #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         err_high: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
+        x_err_low: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
+        x_err_high: Vec<f64>,
+        orientation: String,
         color_rgba: [f32; 4],
         line_width: f32,
+        line_style: String,
         cap_width: f32,
+        marker_style: Option<String>,
+        marker_size: Option<f32>,
+        marker_face_color: Option<[f32; 4]>,
+        marker_edge_color: Option<[f32; 4]>,
+        marker_filled: Option<bool>,
         axes_index: u32,
         label: Option<String>,
         visible: bool,
@@ -605,11 +616,20 @@ impl ScenePlot {
             PlotElement::ErrorBar(error) => Self::ErrorBar {
                 x: error.x.clone(),
                 y: error.y.clone(),
-                err_low: error.err_low.clone(),
-                err_high: error.err_high.clone(),
+                err_low: error.y_neg.clone(),
+                err_high: error.y_pos.clone(),
+                x_err_low: error.x_neg.clone(),
+                x_err_high: error.x_pos.clone(),
+                orientation: format!("{:?}", error.orientation),
                 color_rgba: vec4_to_rgba(error.color),
                 line_width: error.line_width,
-                cap_width: error.cap_width,
+                line_style: format!("{:?}", error.line_style),
+                cap_width: error.cap_size,
+                marker_style: error.marker.as_ref().map(|m| format!("{:?}", m.kind)),
+                marker_size: error.marker.as_ref().map(|m| m.size),
+                marker_face_color: error.marker.as_ref().map(|m| vec4_to_rgba(m.face_color)),
+                marker_edge_color: error.marker.as_ref().map(|m| vec4_to_rgba(m.edge_color)),
+                marker_filled: error.marker.as_ref().map(|m| m.filled),
                 axes_index,
                 label: error.label.clone(),
                 visible: error.visible,
@@ -757,17 +777,46 @@ impl ScenePlot {
                 y,
                 err_low,
                 err_high,
+                x_err_low,
+                x_err_high,
+                orientation,
                 color_rgba,
                 line_width,
+                line_style,
                 cap_width,
+                marker_style,
+                marker_size,
+                marker_face_color,
+                marker_edge_color,
+                marker_filled,
                 axes_index,
                 label,
                 visible,
             } => {
-                let mut error = ErrorBar::new(x, y, err_low, err_high)?;
-                error.color = rgba_to_vec4(color_rgba);
-                error.line_width = line_width;
-                error.cap_width = cap_width;
+                let mut error = if orientation.eq_ignore_ascii_case("Both") {
+                    ErrorBar::new_both(x, y, x_err_low, x_err_high, err_low, err_high)?
+                } else {
+                    ErrorBar::new_vertical(x, y, err_low, err_high)?
+                }
+                .with_style(
+                    rgba_to_vec4(color_rgba),
+                    line_width,
+                    parse_line_style_name(&line_style),
+                    cap_width,
+                );
+                if let Some(size) = marker_size {
+                    error.set_marker(Some(crate::plots::line::LineMarkerAppearance {
+                        kind: parse_marker_style(marker_style.as_deref().unwrap_or("Circle")),
+                        size,
+                        edge_color: marker_edge_color
+                            .map(rgba_to_vec4)
+                            .unwrap_or(rgba_to_vec4(color_rgba)),
+                        face_color: marker_face_color
+                            .map(rgba_to_vec4)
+                            .unwrap_or(rgba_to_vec4(color_rgba)),
+                        filled: marker_filled.unwrap_or(false),
+                    }));
+                }
                 error.label = label;
                 error.set_visible(visible);
                 figure.add_errorbar_on_axes(error, axes_index as usize);
@@ -1278,6 +1327,72 @@ mod tests {
         assert!(!stem.baseline_visible);
         assert!(stem.marker.as_ref().map(|m| m.filled).unwrap_or(false));
         assert_eq!(stem.marker.as_ref().map(|m| m.size), Some(8.0));
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_errorbar_style_surface() {
+        let mut figure = Figure::new();
+        let mut error = ErrorBar::new_vertical(
+            vec![0.0, 1.0],
+            vec![1.0, 2.0],
+            vec![0.1, 0.2],
+            vec![0.2, 0.3],
+        )
+        .unwrap()
+        .with_style(
+            Vec4::new(1.0, 0.0, 0.0, 1.0),
+            2.0,
+            crate::plots::line::LineStyle::Dashed,
+            10.0,
+        )
+        .with_label("Err");
+        error.set_marker(Some(crate::plots::line::LineMarkerAppearance {
+            kind: crate::plots::scatter::MarkerStyle::Triangle,
+            size: 8.0,
+            edge_color: Vec4::new(0.0, 0.0, 0.0, 1.0),
+            face_color: Vec4::new(1.0, 0.0, 0.0, 1.0),
+            filled: true,
+        }));
+        figure.add_errorbar(error);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+        let PlotElement::ErrorBar(error) = rebuilt.plots().next().unwrap() else {
+            panic!("expected errorbar")
+        };
+        assert_eq!(error.line_width, 2.0);
+        assert_eq!(error.cap_size, 10.0);
+        assert_eq!(error.label.as_deref(), Some("Err"));
+        assert_eq!(error.line_style, crate::plots::line::LineStyle::Dashed);
+        assert!(error.marker.as_ref().map(|m| m.filled).unwrap_or(false));
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_errorbar_both_direction() {
+        let mut figure = Figure::new();
+        let error = ErrorBar::new_both(
+            vec![1.0, 2.0],
+            vec![3.0, 4.0],
+            vec![0.1, 0.2],
+            vec![0.2, 0.3],
+            vec![0.3, 0.4],
+            vec![0.4, 0.5],
+        )
+        .unwrap();
+        figure.add_errorbar(error);
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+        let PlotElement::ErrorBar(error) = rebuilt.plots().next().unwrap() else {
+            panic!("expected errorbar")
+        };
+        assert_eq!(
+            error.orientation,
+            crate::plots::errorbar::ErrorBarOrientation::Both
+        );
+        assert_eq!(error.x_neg, vec![0.1, 0.2]);
+        assert_eq!(error.x_pos, vec![0.2, 0.3]);
     }
 
     #[test]

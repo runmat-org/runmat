@@ -23,6 +23,7 @@ pub enum PlotHandle {
     Legend(FigureHandle, usize),
     Histogram(f64),
     Stem(f64),
+    ErrorBar(f64),
 }
 
 pub fn resolve_plot_handle(value: &Value, builtin: &'static str) -> BuiltinResult<PlotHandle> {
@@ -31,6 +32,7 @@ pub fn resolve_plot_handle(value: &Value, builtin: &'static str) -> BuiltinResul
         return Ok(match state {
             super::state::PlotChildHandleState::Histogram(_) => PlotHandle::Histogram(scalar),
             super::state::PlotChildHandleState::Stem(_) => PlotHandle::Stem(scalar),
+            super::state::PlotChildHandleState::ErrorBar(_) => PlotHandle::ErrorBar(scalar),
         });
     }
     if let Ok((handle, axes_index, kind)) = decode_plot_object_handle(scalar) {
@@ -78,6 +80,7 @@ pub fn get_properties(
         PlotHandle::Figure(handle) => get_figure_property(handle, property, builtin),
         PlotHandle::Histogram(handle) => get_histogram_property(handle, property, builtin),
         PlotHandle::Stem(handle) => get_stem_property(handle, property, builtin),
+        PlotHandle::ErrorBar(handle) => get_errorbar_property(handle, property, builtin),
     }
 }
 
@@ -152,6 +155,13 @@ pub fn set_properties(
             for pair in args.chunks_exact(2) {
                 let key = property_name(&pair[0], builtin)?;
                 apply_stem_property(handle, &key, &pair[1], builtin)?;
+            }
+            Ok(())
+        }
+        PlotHandle::ErrorBar(handle) => {
+            for pair in args.chunks_exact(2) {
+                let key = property_name(&pair[0], builtin)?;
+                apply_errorbar_property(handle, &key, &pair[1], builtin)?;
             }
             Ok(())
         }
@@ -1148,6 +1158,90 @@ fn get_stem_property(
     }
 }
 
+fn get_errorbar_property(
+    handle: f64,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let state = super::state::plot_child_handle_snapshot(handle)
+        .map_err(|err| map_figure_error(builtin, err))?;
+    let super::state::PlotChildHandleState::ErrorBar(error_handle) = state else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid errorbar handle"),
+        ));
+    };
+    let figure = super::state::clone_figure(error_handle.figure)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid errorbar figure")))?;
+    let plot = figure
+        .plots()
+        .nth(error_handle.plot_index)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid errorbar handle")))?;
+    let runmat_plot::plots::figure::PlotElement::ErrorBar(errorbar) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid errorbar handle"),
+        ));
+    };
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st = StructValue::new();
+            st.insert("Type", Value::String("errorbar".into()));
+            st.insert(
+                "Parent",
+                Value::Num(super::state::encode_axes_handle(
+                    error_handle.figure,
+                    error_handle.axes_index,
+                )),
+            );
+            st.insert("Children", handles_value(Vec::new()));
+            st.insert("LineWidth", Value::Num(errorbar.line_width as f64));
+            st.insert(
+                "LineStyle",
+                Value::String(line_style_name(errorbar.line_style).into()),
+            );
+            st.insert("Color", Value::String(color_to_short_name(errorbar.color)));
+            st.insert("CapSize", Value::Num(errorbar.cap_size as f64));
+            if let Some(marker) = &errorbar.marker {
+                st.insert(
+                    "Marker",
+                    Value::String(marker_style_name(marker.kind).into()),
+                );
+                st.insert("MarkerSize", Value::Num(marker.size as f64));
+            }
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("errorbar".into())),
+        Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
+            error_handle.figure,
+            error_handle.axes_index,
+        ))),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("linewidth") => Ok(Value::Num(errorbar.line_width as f64)),
+        Some("linestyle") => Ok(Value::String(line_style_name(errorbar.line_style).into())),
+        Some("color") => Ok(Value::String(color_to_short_name(errorbar.color))),
+        Some("capsize") => Ok(Value::Num(errorbar.cap_size as f64)),
+        Some("marker") => Ok(Value::String(
+            errorbar
+                .marker
+                .as_ref()
+                .map(|m| marker_style_name(m.kind).to_string())
+                .unwrap_or("none".into()),
+        )),
+        Some("markersize") => Ok(Value::Num(
+            errorbar
+                .marker
+                .as_ref()
+                .map(|m| m.size as f64)
+                .unwrap_or(0.0),
+        )),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported errorbar property `{other}`"),
+        )),
+    }
+}
+
 fn apply_histogram_property(
     handle: f64,
     key: &str,
@@ -1275,6 +1369,61 @@ fn apply_stem_property(
             _ => {}
         },
     )
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn apply_errorbar_property(
+    handle: f64,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let state = super::state::plot_child_handle_snapshot(handle)
+        .map_err(|err| map_figure_error(builtin, err))?;
+    let super::state::PlotChildHandleState::ErrorBar(error_handle) = state else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid errorbar handle"),
+        ));
+    };
+    super::state::update_errorbar_plot(error_handle.figure, error_handle.plot_index, |errorbar| {
+        match key {
+            "linewidth" => {
+                if let Some(v) = value_as_f64(value) {
+                    errorbar.line_width = v as f32;
+                }
+            }
+            "linestyle" => {
+                if let Some(s) = value_as_string(value) {
+                    errorbar.line_style = parse_line_style_name_for_props(&s);
+                }
+            }
+            "color" => {
+                if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
+                    errorbar.color = c;
+                }
+            }
+            "capsize" => {
+                if let Some(v) = value_as_f64(value) {
+                    errorbar.cap_size = v as f32;
+                }
+            }
+            "marker" => {
+                if let Some(s) = value_as_string(value) {
+                    errorbar.marker = marker_from_name(&s, errorbar.marker.clone());
+                }
+            }
+            "markersize" => {
+                if let Some(v) = value_as_f64(value) {
+                    if let Some(marker) = &mut errorbar.marker {
+                        marker.size = v as f32;
+                    }
+                }
+            }
+            _ => {}
+        }
+    })
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
 }

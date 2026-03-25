@@ -42,6 +42,8 @@ pub(crate) mod contour;
 pub(crate) mod contourf;
 #[path = "ops/drawnow.rs"]
 pub(crate) mod drawnow;
+#[path = "ops/errorbar.rs"]
+pub(crate) mod errorbar;
 #[path = "ops/figure.rs"]
 pub(crate) mod figure;
 #[path = "ops/gca.rs"]

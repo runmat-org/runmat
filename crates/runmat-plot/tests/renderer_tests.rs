@@ -821,14 +821,16 @@ mod new_plots_tests {
         assert_eq!(rd.pipeline_type, runmat_plot::core::PipelineType::Triangles);
         assert!(!rd.indices.as_ref().unwrap().is_empty());
     }
+    #[test]
     fn test_errorbar_geometry_with_caps() {
         let x = vec![0.0, 1.0, 2.0];
         let y = vec![1.0, 2.0, 1.5];
         let el = vec![0.2, 0.1, 0.3];
         let eu = vec![0.3, 0.4, 0.2];
-        let mut eb = ErrorBar::new(x, y, el, eu).unwrap().with_style(
+        let mut eb = ErrorBar::new_vertical(x, y, el, eu).unwrap().with_style(
             glam::Vec4::new(0.0, 0.0, 0.0, 1.0),
             1.5,
+            LineStyle::Solid,
             0.2,
         );
         let vertices = eb.generate_vertices();
@@ -836,6 +838,31 @@ mod new_plots_tests {
         assert!(vertices.len() >= 6);
         let rd = eb.render_data();
         assert_eq!(rd.pipeline_type, runmat_plot::core::PipelineType::Lines);
+        let marker = eb.marker_render_data().expect("marker render data");
+        assert_eq!(
+            marker.pipeline_type,
+            runmat_plot::core::PipelineType::Points
+        );
+    }
+
+    #[test]
+    fn test_errorbar_both_direction_bounds() {
+        let x = vec![1.0, 2.0];
+        let y = vec![3.0, 4.0];
+        let mut eb = ErrorBar::new_both(
+            x,
+            y,
+            vec![0.1, 0.2],
+            vec![0.2, 0.3],
+            vec![0.3, 0.4],
+            vec![0.4, 0.5],
+        )
+        .unwrap();
+        let bounds = eb.bounds();
+        assert!(bounds.min.x < 1.0);
+        assert!(bounds.max.x > 2.0);
+        assert!(bounds.min.y < 3.0);
+        assert!(bounds.max.y > 4.0);
     }
 
     #[test]
@@ -1183,7 +1210,9 @@ mod export_parity_more_tests {
         let x = vec![0.0, 1.0, 2.0, 3.0];
         let y = vec![1.0, 2.0, 1.5, 2.2];
         let e = vec![0.1, 0.2, 0.15, 0.1];
-        let eb = ErrorBar::new(x, y, e.clone(), e).unwrap().with_label("Err");
+        let eb = ErrorBar::new_vertical(x, y, e.clone(), e)
+            .unwrap()
+            .with_label("Err");
         let mut fig = Figure::new().with_title("ErrorBar");
         fig.add_errorbar(eb);
         let path = export_png(&mut fig, "errorbar_basic").await.unwrap();

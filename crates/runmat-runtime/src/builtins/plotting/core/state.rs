@@ -205,9 +205,17 @@ pub struct StemHandleState {
 }
 
 #[derive(Clone)]
+pub struct ErrorBarHandleState {
+    pub figure: FigureHandle,
+    pub axes_index: usize,
+    pub plot_index: usize,
+}
+
+#[derive(Clone)]
 pub enum PlotChildHandleState {
     Histogram(HistogramHandleState),
     Stem(StemHandleState),
+    ErrorBar(ErrorBarHandleState),
 }
 
 impl Default for PlotRegistry {
@@ -1008,6 +1016,21 @@ pub fn register_stem_handle(figure: FigureHandle, axes_index: usize, plot_index:
     id as f64
 }
 
+pub fn register_errorbar_handle(figure: FigureHandle, axes_index: usize, plot_index: usize) -> f64 {
+    let mut reg = registry();
+    let id = reg.next_plot_child_handle;
+    reg.next_plot_child_handle += 1;
+    reg.plot_children.insert(
+        id,
+        PlotChildHandleState::ErrorBar(ErrorBarHandleState {
+            figure,
+            axes_index,
+            plot_index,
+        }),
+    );
+    id as f64
+}
+
 pub fn plot_child_handle_snapshot(handle: f64) -> Result<PlotChildHandleState, FigureError> {
     if !handle.is_finite() || handle <= 0.0 {
         return Err(FigureError::InvalidPlotObjectHandle);
@@ -1036,6 +1059,27 @@ pub fn update_histogram_handle(
             Ok(())
         }
         PlotChildHandleState::Stem(_) => Err(FigureError::InvalidPlotObjectHandle),
+        PlotChildHandleState::ErrorBar(_) => Err(FigureError::InvalidPlotObjectHandle),
+    }
+}
+
+pub fn update_errorbar_plot(
+    figure_handle: FigureHandle,
+    plot_index: usize,
+    updater: impl FnOnce(&mut runmat_plot::plots::ErrorBar),
+) -> Result<(), FigureError> {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, figure_handle);
+    let plot = state
+        .figure
+        .get_plot_mut(plot_index)
+        .ok_or(FigureError::InvalidPlotObjectHandle)?;
+    match plot {
+        runmat_plot::plots::figure::PlotElement::ErrorBar(errorbar) => {
+            updater(errorbar);
+            Ok(())
+        }
+        _ => Err(FigureError::InvalidPlotObjectHandle),
     }
 }
 
@@ -1085,6 +1129,7 @@ fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) 
     reg.plot_children.retain(|_, state| match state {
         PlotChildHandleState::Histogram(hist) => hist.figure != handle,
         PlotChildHandleState::Stem(stem) => stem.figure != handle,
+        PlotChildHandleState::ErrorBar(err) => err.figure != handle,
     });
 }
 
@@ -1095,6 +1140,9 @@ fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, ax
         }
         PlotChildHandleState::Stem(stem) => {
             !(stem.figure == handle && stem.axes_index == axes_index)
+        }
+        PlotChildHandleState::ErrorBar(err) => {
+            !(err.figure == handle && err.axes_index == axes_index)
         }
     });
 }
