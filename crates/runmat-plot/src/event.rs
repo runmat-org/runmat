@@ -1,7 +1,7 @@
 use crate::plots::{
     AreaPlot, AxesMetadata, ColorMap, ErrorBar, Figure, LegendEntry, LegendStyle, Line3Plot,
-    LinePlot, MarkerStyle, PlotElement, PlotType, Scatter3Plot, ScatterPlot, ShadingMode,
-    StairsPlot, StemPlot, SurfacePlot, TextStyle,
+    LinePlot, MarkerStyle, PlotElement, PlotType, QuiverPlot, Scatter3Plot, ScatterPlot,
+    ShadingMode, StairsPlot, StemPlot, SurfacePlot, TextStyle,
 };
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
@@ -134,9 +134,28 @@ pub enum ScenePlot {
         x: Vec<f64>,
         #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
         y: Vec<f64>,
+        #[serde(default, deserialize_with = "deserialize_option_vec_f64_lossy")]
+        lower_y: Option<Vec<f64>>,
         #[serde(deserialize_with = "deserialize_f64_lossy")]
         baseline: f64,
         color_rgba: [f32; 4],
+        axes_index: u32,
+        label: Option<String>,
+        visible: bool,
+    },
+    Quiver {
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
+        x: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
+        y: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
+        u: Vec<f64>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
+        v: Vec<f64>,
+        color_rgba: [f32; 4],
+        line_width: f32,
+        scale: f32,
+        head_size: f32,
         axes_index: u32,
         label: Option<String>,
         visible: bool,
@@ -153,6 +172,10 @@ pub enum ScenePlot {
         wireframe: bool,
         alpha: f32,
         flatten_z: bool,
+        #[serde(default)]
+        image_mode: bool,
+        #[serde(default)]
+        color_grid_rgba: Option<Vec<Vec<[f32; 4]>>>,
         #[serde(default, deserialize_with = "deserialize_option_pair_f64_lossy")]
         color_limits: Option<[f64; 2]>,
         axes_index: u32,
@@ -667,11 +690,25 @@ impl ScenePlot {
             PlotElement::Area(area) => Self::Area {
                 x: area.x.clone(),
                 y: area.y.clone(),
+                lower_y: area.lower_y.clone(),
                 baseline: area.baseline,
                 color_rgba: vec4_to_rgba(area.color),
                 axes_index,
                 label: area.label.clone(),
                 visible: area.visible,
+            },
+            PlotElement::Quiver(quiver) => Self::Quiver {
+                x: quiver.x.clone(),
+                y: quiver.y.clone(),
+                u: quiver.u.clone(),
+                v: quiver.v.clone(),
+                color_rgba: vec4_to_rgba(quiver.color),
+                line_width: quiver.line_width,
+                scale: quiver.scale,
+                head_size: quiver.head_size,
+                axes_index,
+                label: quiver.label.clone(),
+                visible: quiver.visible,
             },
             PlotElement::Surface(surface) => Self::Surface {
                 x: surface.x_data.clone(),
@@ -682,6 +719,12 @@ impl ScenePlot {
                 wireframe: surface.wireframe,
                 alpha: surface.alpha,
                 flatten_z: surface.flatten_z,
+                image_mode: surface.image_mode,
+                color_grid_rgba: surface.color_grid.as_ref().map(|grid| {
+                    grid.iter()
+                        .map(|row| row.iter().map(|color| vec4_to_rgba(*color)).collect())
+                        .collect()
+                }),
                 color_limits: surface.color_limits.map(|(lo, hi)| [lo, hi]),
                 axes_index,
                 label: surface.label.clone(),
@@ -878,6 +921,7 @@ impl ScenePlot {
             ScenePlot::Area {
                 x,
                 y,
+                lower_y,
                 baseline,
                 color_rgba,
                 axes_index,
@@ -885,11 +929,33 @@ impl ScenePlot {
                 visible,
             } => {
                 let mut area = AreaPlot::new(x, y)?;
+                if let Some(lower_y) = lower_y {
+                    area = area.with_lower_curve(lower_y);
+                }
                 area.baseline = baseline;
                 area.color = rgba_to_vec4(color_rgba);
                 area.label = label;
                 area.set_visible(visible);
                 figure.add_area_plot_on_axes(area, axes_index as usize);
+            }
+            ScenePlot::Quiver {
+                x,
+                y,
+                u,
+                v,
+                color_rgba,
+                line_width,
+                scale,
+                head_size,
+                axes_index,
+                label,
+                visible,
+            } => {
+                let mut quiver = QuiverPlot::new(x, y, u, v)?
+                    .with_style(rgba_to_vec4(color_rgba), line_width, scale, head_size)
+                    .with_label(label.unwrap_or_else(|| "Data".to_string()));
+                quiver.set_visible(visible);
+                figure.add_quiver_plot_on_axes(quiver, axes_index as usize);
             }
             ScenePlot::Surface {
                 x,
@@ -900,6 +966,8 @@ impl ScenePlot {
                 wireframe,
                 alpha,
                 flatten_z,
+                image_mode,
+                color_grid_rgba,
                 color_limits,
                 axes_index,
                 label,
@@ -911,6 +979,12 @@ impl ScenePlot {
                 surface.wireframe = wireframe;
                 surface.alpha = alpha.clamp(0.0, 1.0);
                 surface.flatten_z = flatten_z;
+                surface.image_mode = image_mode;
+                surface.color_grid = color_grid_rgba.map(|grid| {
+                    grid.into_iter()
+                        .map(|row| row.into_iter().map(rgba_to_vec4).collect())
+                        .collect()
+                });
                 surface.color_limits = color_limits.map(|[lo, hi]| (lo, hi));
                 surface.label = label;
                 surface.visible = visible;
@@ -1171,6 +1245,19 @@ where
         .collect())
 }
 
+fn deserialize_option_vec_f64_lossy<'de, D>(deserializer: D) -> Result<Option<Vec<f64>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let values = Option::<Vec<Option<f64>>>::deserialize(deserializer)?;
+    Ok(values.map(|items| {
+        items
+            .into_iter()
+            .map(|value| value.unwrap_or(f64::NAN))
+            .collect()
+    }))
+}
+
 fn deserialize_matrix_f64_lossy<'de, D>(deserializer: D) -> Result<Vec<Vec<f64>>, D::Error>
 where
     D: serde::Deserializer<'de>,
@@ -1393,6 +1480,85 @@ mod tests {
         );
         assert_eq!(error.x_neg, vec![0.1, 0.2]);
         assert_eq!(error.x_pos, vec![0.2, 0.3]);
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_quiver_plot() {
+        let mut figure = Figure::new();
+        let quiver = QuiverPlot::new(
+            vec![0.0, 1.0],
+            vec![1.0, 2.0],
+            vec![0.5, -0.5],
+            vec![1.0, 0.25],
+        )
+        .unwrap()
+        .with_style(Vec4::new(0.2, 0.3, 0.4, 1.0), 2.0, 1.5, 0.2)
+        .with_label("Field");
+        figure.add_quiver_plot(quiver);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+        let PlotElement::Quiver(quiver) = rebuilt.plots().next().unwrap() else {
+            panic!("expected quiver")
+        };
+        assert_eq!(quiver.u, vec![0.5, -0.5]);
+        assert_eq!(quiver.v, vec![1.0, 0.25]);
+        assert_eq!(quiver.line_width, 2.0);
+        assert_eq!(quiver.scale, 1.5);
+        assert_eq!(quiver.head_size, 0.2);
+        assert_eq!(quiver.label.as_deref(), Some("Field"));
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_image_surface_mode_and_color_grid() {
+        let mut figure = Figure::new();
+        let surface = SurfacePlot::new(
+            vec![0.0, 1.0],
+            vec![0.0, 1.0],
+            vec![vec![0.0, 0.0], vec![0.0, 0.0]],
+        )
+        .unwrap()
+        .with_flatten_z(true)
+        .with_image_mode(true)
+        .with_color_grid(vec![
+            vec![Vec4::new(1.0, 0.0, 0.0, 1.0), Vec4::new(0.0, 1.0, 0.0, 1.0)],
+            vec![Vec4::new(0.0, 0.0, 1.0, 1.0), Vec4::new(1.0, 1.0, 1.0, 1.0)],
+        ]);
+        figure.add_surface_plot(surface);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+        let PlotElement::Surface(surface) = rebuilt.plots().next().unwrap() else {
+            panic!("expected surface")
+        };
+        assert!(surface.flatten_z);
+        assert!(surface.image_mode);
+        assert!(surface.color_grid.is_some());
+        assert_eq!(
+            surface.color_grid.as_ref().unwrap()[0][0],
+            Vec4::new(1.0, 0.0, 0.0, 1.0)
+        );
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_area_lower_curve() {
+        let mut figure = Figure::new();
+        let area = AreaPlot::new(vec![1.0, 2.0], vec![2.0, 3.0])
+            .unwrap()
+            .with_lower_curve(vec![0.5, 1.0])
+            .with_label("Stacked");
+        figure.add_area_plot(area);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+        let PlotElement::Area(area) = rebuilt.plots().next().unwrap() else {
+            panic!("expected area")
+        };
+        assert_eq!(area.lower_y, Some(vec![0.5, 1.0]));
+        assert_eq!(area.label.as_deref(), Some("Stacked"));
     }
 
     #[test]

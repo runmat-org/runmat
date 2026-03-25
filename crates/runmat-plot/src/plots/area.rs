@@ -8,6 +8,7 @@ pub struct AreaPlot {
     pub x: Vec<f64>,
     pub y: Vec<f64>,
     pub baseline: f64,
+    pub lower_y: Option<Vec<f64>>,
     pub color: Vec4,
     pub label: Option<String>,
     pub visible: bool,
@@ -26,6 +27,7 @@ impl AreaPlot {
             x,
             y,
             baseline: 0.0,
+            lower_y: None,
             color: Vec4::new(0.0, 0.5, 1.0, 0.4),
             label: None,
             visible: true,
@@ -38,6 +40,11 @@ impl AreaPlot {
     pub fn with_style(mut self, color: Vec4, baseline: f64) -> Self {
         self.color = color;
         self.baseline = baseline;
+        self.dirty = true;
+        self
+    }
+    pub fn with_lower_curve(mut self, lower_y: Vec<f64>) -> Self {
+        self.lower_y = Some(lower_y);
         self.dirty = true;
         self
     }
@@ -56,7 +63,11 @@ impl AreaPlot {
             for i in 0..self.x.len() {
                 let xi = self.x[i] as f32;
                 let yi = self.y[i] as f32;
-                let b = self.baseline as f32;
+                let b = self
+                    .lower_y
+                    .as_ref()
+                    .and_then(|vals| vals.get(i).copied())
+                    .unwrap_or(self.baseline) as f32;
                 if !xi.is_finite() || !yi.is_finite() {
                     continue;
                 }
@@ -81,15 +92,20 @@ impl AreaPlot {
         if self.dirty || self.bounds.is_none() {
             let mut min = Vec3::new(f32::INFINITY, f32::INFINITY, 0.0);
             let mut max = Vec3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, 0.0);
-            for (&x, &y) in self.x.iter().zip(self.y.iter()) {
+            for (idx, (&x, &y)) in self.x.iter().zip(self.y.iter()).enumerate() {
                 let (x, y) = (x as f32, y as f32);
+                let lower = self
+                    .lower_y
+                    .as_ref()
+                    .and_then(|vals| vals.get(idx).copied())
+                    .unwrap_or(self.baseline) as f32;
                 if !x.is_finite() || !y.is_finite() {
                     continue;
                 }
                 min.x = min.x.min(x);
                 max.x = max.x.max(x);
-                min.y = min.y.min(y.min(self.baseline as f32));
-                max.y = max.y.max(y.max(self.baseline as f32));
+                min.y = min.y.min(y.min(lower));
+                max.y = max.y.max(y.max(lower));
             }
             if !min.x.is_finite() {
                 min = Vec3::ZERO;

@@ -1,4 +1,4 @@
-use runmat_builtins::{StringArray, StructValue, Value};
+use runmat_builtins::{StringArray, StructValue, Tensor, Value};
 use runmat_plot::plots::{LegendStyle, TextStyle};
 
 use super::state::{
@@ -24,6 +24,9 @@ pub enum PlotHandle {
     Histogram(f64),
     Stem(f64),
     ErrorBar(f64),
+    Quiver(f64),
+    Image(f64),
+    Area(f64),
 }
 
 pub fn resolve_plot_handle(value: &Value, builtin: &'static str) -> BuiltinResult<PlotHandle> {
@@ -33,6 +36,9 @@ pub fn resolve_plot_handle(value: &Value, builtin: &'static str) -> BuiltinResul
             super::state::PlotChildHandleState::Histogram(_) => PlotHandle::Histogram(scalar),
             super::state::PlotChildHandleState::Stem(_) => PlotHandle::Stem(scalar),
             super::state::PlotChildHandleState::ErrorBar(_) => PlotHandle::ErrorBar(scalar),
+            super::state::PlotChildHandleState::Quiver(_) => PlotHandle::Quiver(scalar),
+            super::state::PlotChildHandleState::Image(_) => PlotHandle::Image(scalar),
+            super::state::PlotChildHandleState::Area(_) => PlotHandle::Area(scalar),
         });
     }
     if let Ok((handle, axes_index, kind)) = decode_plot_object_handle(scalar) {
@@ -81,6 +87,9 @@ pub fn get_properties(
         PlotHandle::Histogram(handle) => get_histogram_property(handle, property, builtin),
         PlotHandle::Stem(handle) => get_stem_property(handle, property, builtin),
         PlotHandle::ErrorBar(handle) => get_errorbar_property(handle, property, builtin),
+        PlotHandle::Quiver(handle) => get_quiver_property(handle, property, builtin),
+        PlotHandle::Image(handle) => get_image_property(handle, property, builtin),
+        PlotHandle::Area(handle) => get_area_property(handle, property, builtin),
     }
 }
 
@@ -162,6 +171,27 @@ pub fn set_properties(
             for pair in args.chunks_exact(2) {
                 let key = property_name(&pair[0], builtin)?;
                 apply_errorbar_property(handle, &key, &pair[1], builtin)?;
+            }
+            Ok(())
+        }
+        PlotHandle::Quiver(handle) => {
+            for pair in args.chunks_exact(2) {
+                let key = property_name(&pair[0], builtin)?;
+                apply_quiver_property(handle, &key, &pair[1], builtin)?;
+            }
+            Ok(())
+        }
+        PlotHandle::Image(handle) => {
+            for pair in args.chunks_exact(2) {
+                let key = property_name(&pair[0], builtin)?;
+                apply_image_property(handle, &key, &pair[1], builtin)?;
+            }
+            Ok(())
+        }
+        PlotHandle::Area(handle) => {
+            for pair in args.chunks_exact(2) {
+                let key = property_name(&pair[0], builtin)?;
+                apply_area_property(handle, &key, &pair[1], builtin)?;
             }
             Ok(())
         }
@@ -1242,6 +1272,201 @@ fn get_errorbar_property(
     }
 }
 
+fn get_quiver_property(
+    handle: f64,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let state = super::state::plot_child_handle_snapshot(handle)
+        .map_err(|err| map_figure_error(builtin, err))?;
+    let super::state::PlotChildHandleState::Quiver(quiver_handle) = state else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid quiver handle"),
+        ));
+    };
+    let figure = super::state::clone_figure(quiver_handle.figure)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid quiver figure")))?;
+    let plot = figure
+        .plots()
+        .nth(quiver_handle.plot_index)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid quiver handle")))?;
+    let runmat_plot::plots::figure::PlotElement::Quiver(quiver) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid quiver handle"),
+        ));
+    };
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st = StructValue::new();
+            st.insert("Type", Value::String("quiver".into()));
+            st.insert(
+                "Parent",
+                Value::Num(super::state::encode_axes_handle(
+                    quiver_handle.figure,
+                    quiver_handle.axes_index,
+                )),
+            );
+            st.insert("Children", handles_value(Vec::new()));
+            st.insert("Color", Value::String(color_to_short_name(quiver.color)));
+            st.insert("LineWidth", Value::Num(quiver.line_width as f64));
+            st.insert("AutoScaleFactor", Value::Num(quiver.scale as f64));
+            st.insert("MaxHeadSize", Value::Num(quiver.head_size as f64));
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("quiver".into())),
+        Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
+            quiver_handle.figure,
+            quiver_handle.axes_index,
+        ))),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("color") => Ok(Value::String(color_to_short_name(quiver.color))),
+        Some("linewidth") => Ok(Value::Num(quiver.line_width as f64)),
+        Some("autoscalefactor") => Ok(Value::Num(quiver.scale as f64)),
+        Some("maxheadsize") => Ok(Value::Num(quiver.head_size as f64)),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported quiver property `{other}`"),
+        )),
+    }
+}
+
+fn get_image_property(
+    handle: f64,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let state = super::state::plot_child_handle_snapshot(handle)
+        .map_err(|err| map_figure_error(builtin, err))?;
+    let super::state::PlotChildHandleState::Image(image_handle) = state else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid image handle"),
+        ));
+    };
+    let figure = super::state::clone_figure(image_handle.figure)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid image figure")))?;
+    let plot = figure
+        .plots()
+        .nth(image_handle.plot_index)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid image handle")))?;
+    let runmat_plot::plots::figure::PlotElement::Surface(surface) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid image handle"),
+        ));
+    };
+    if !surface.image_mode {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: handle does not reference an image plot"),
+        ));
+    }
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st = StructValue::new();
+            st.insert("Type", Value::String("image".into()));
+            st.insert(
+                "Parent",
+                Value::Num(super::state::encode_axes_handle(
+                    image_handle.figure,
+                    image_handle.axes_index,
+                )),
+            );
+            st.insert("Children", handles_value(Vec::new()));
+            st.insert("XData", tensor_from_vec(surface.x_data.clone()));
+            st.insert("YData", tensor_from_vec(surface.y_data.clone()));
+            st.insert(
+                "CDataMapping",
+                Value::String(if surface.color_grid.is_some() {
+                    "direct".into()
+                } else {
+                    "scaled".into()
+                }),
+            );
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("image".into())),
+        Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
+            image_handle.figure,
+            image_handle.axes_index,
+        ))),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("xdata") => Ok(tensor_from_vec(surface.x_data.clone())),
+        Some("ydata") => Ok(tensor_from_vec(surface.y_data.clone())),
+        Some("cdatamapping") => Ok(Value::String(if surface.color_grid.is_some() {
+            "direct".into()
+        } else {
+            "scaled".into()
+        })),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported image property `{other}`"),
+        )),
+    }
+}
+
+fn get_area_property(
+    handle: f64,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let state = super::state::plot_child_handle_snapshot(handle)
+        .map_err(|err| map_figure_error(builtin, err))?;
+    let super::state::PlotChildHandleState::Area(area_handle) = state else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid area handle"),
+        ));
+    };
+    let figure = super::state::clone_figure(area_handle.figure)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid area figure")))?;
+    let plot = figure
+        .plots()
+        .nth(area_handle.plot_index)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid area handle")))?;
+    let runmat_plot::plots::figure::PlotElement::Area(area) = plot else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid area handle"),
+        ));
+    };
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st = StructValue::new();
+            st.insert("Type", Value::String("area".into()));
+            st.insert(
+                "Parent",
+                Value::Num(super::state::encode_axes_handle(
+                    area_handle.figure,
+                    area_handle.axes_index,
+                )),
+            );
+            st.insert("Children", handles_value(Vec::new()));
+            st.insert("XData", tensor_from_vec(area.x.clone()));
+            st.insert("YData", tensor_from_vec(area.y.clone()));
+            st.insert("BaseValue", Value::Num(area.baseline));
+            st.insert("Color", Value::String(color_to_short_name(area.color)));
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("area".into())),
+        Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
+            area_handle.figure,
+            area_handle.axes_index,
+        ))),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("xdata") => Ok(tensor_from_vec(area.x.clone())),
+        Some("ydata") => Ok(tensor_from_vec(area.y.clone())),
+        Some("basevalue") => Ok(Value::Num(area.baseline)),
+        Some("color") => Ok(Value::String(color_to_short_name(area.color))),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported area property `{other}`"),
+        )),
+    }
+}
+
 fn apply_histogram_property(
     handle: f64,
     key: &str,
@@ -1424,6 +1649,125 @@ fn apply_errorbar_property(
             _ => {}
         }
     })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn apply_quiver_property(
+    handle: f64,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let state = super::state::plot_child_handle_snapshot(handle)
+        .map_err(|err| map_figure_error(builtin, err))?;
+    let super::state::PlotChildHandleState::Quiver(quiver_handle) = state else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid quiver handle"),
+        ));
+    };
+    super::state::update_quiver_plot(quiver_handle.figure, quiver_handle.plot_index, |quiver| {
+        match key {
+            "color" => {
+                if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
+                    quiver.color = c;
+                }
+            }
+            "linewidth" => {
+                if let Some(v) = value_as_f64(value) {
+                    quiver.line_width = v as f32;
+                }
+            }
+            "autoscalefactor" => {
+                if let Some(v) = value_as_f64(value) {
+                    quiver.scale = v as f32;
+                }
+            }
+            "maxheadsize" => {
+                if let Some(v) = value_as_f64(value) {
+                    quiver.head_size = v as f32;
+                }
+            }
+            _ => {}
+        }
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn apply_image_property(
+    handle: f64,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let state = super::state::plot_child_handle_snapshot(handle)
+        .map_err(|err| map_figure_error(builtin, err))?;
+    let super::state::PlotChildHandleState::Image(image_handle) = state else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid image handle"),
+        ));
+    };
+    super::state::update_image_plot(image_handle.figure, image_handle.plot_index, |surface| {
+        match key {
+            "xdata" => {
+                if let Ok(tensor) = Tensor::try_from(value) {
+                    surface.x_data = tensor.data;
+                }
+            }
+            "ydata" => {
+                if let Ok(tensor) = Tensor::try_from(value) {
+                    surface.y_data = tensor.data;
+                }
+            }
+            "cdatamapping" => {
+                if let Some(text) = value_as_string(value) {
+                    if text.trim().eq_ignore_ascii_case("direct") {
+                        surface.image_mode = true;
+                    }
+                }
+            }
+            _ => {}
+        }
+    })
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
+}
+
+fn apply_area_property(
+    handle: f64,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let state = super::state::plot_child_handle_snapshot(handle)
+        .map_err(|err| map_figure_error(builtin, err))?;
+    let super::state::PlotChildHandleState::Area(area_handle) = state else {
+        return Err(plotting_error(
+            builtin,
+            format!("{builtin}: invalid area handle"),
+        ));
+    };
+    super::state::update_area_plot(
+        area_handle.figure,
+        area_handle.plot_index,
+        |area| match key {
+            "color" => {
+                if let Ok(c) = parse_color_value(&LineStyleParseOptions::generic(builtin), value) {
+                    area.color = c;
+                }
+            }
+            "basevalue" => {
+                if let Some(v) = value_as_f64(value) {
+                    area.baseline = v;
+                    area.lower_y = None;
+                }
+            }
+            _ => {}
+        },
+    )
     .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
 }

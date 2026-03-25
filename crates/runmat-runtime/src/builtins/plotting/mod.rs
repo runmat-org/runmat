@@ -26,6 +26,8 @@ pub(crate) mod type_resolvers;
 
 #[path = "ops/bar.rs"]
 pub(crate) mod bar;
+#[path = "ops/area.rs"]
+pub(crate) mod area;
 #[path = "ops/caxis.rs"]
 pub(crate) mod caxis;
 #[path = "ops/clf.rs"]
@@ -60,6 +62,8 @@ pub(crate) mod histogram;
 pub(crate) mod hold;
 #[path = "ops/imagesc.rs"]
 pub(crate) mod imagesc;
+#[path = "ops/image.rs"]
+pub(crate) mod image;
 #[path = "ops/isgraphics.rs"]
 pub(crate) mod isgraphics;
 #[path = "ops/ishandle.rs"]
@@ -80,6 +84,8 @@ pub(crate) mod pie;
 pub(crate) mod plot;
 #[path = "ops/plot3.rs"]
 pub(crate) mod plot3;
+#[path = "ops/quiver.rs"]
+pub(crate) mod quiver;
 #[path = "ops/scatter.rs"]
 pub(crate) mod scatter;
 #[path = "ops/scatter3.rs"]

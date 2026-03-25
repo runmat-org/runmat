@@ -960,7 +960,19 @@ impl Figure {
                         out.push(marker_data);
                     }
                 }
+                PlotElement::ErrorBar(plot) => {
+                    out.push(plot.render_data());
+                    if let Some(marker_data) = plot.marker_render_data() {
+                        out.push(marker_data);
+                    }
+                }
                 PlotElement::Stairs(plot) => {
+                    out.push(plot.render_data());
+                    if let Some(marker_data) = plot.marker_render_data() {
+                        out.push(marker_data);
+                    }
+                }
+                PlotElement::Stem(plot) => {
                     out.push(plot.render_data());
                     if let Some(marker_data) = plot.marker_render_data() {
                         out.push(marker_data);
@@ -1678,6 +1690,48 @@ mod tests {
         assert_eq!(bounds.max.z, 4.0);
         let entries = figure.legend_entries_for_axes(0);
         assert_eq!(entries[0].plot_type, PlotType::Line3);
+    }
+
+    #[test]
+    fn stem_render_data_includes_marker_pass() {
+        let mut figure = Figure::new();
+        figure.add_stem_plot(StemPlot::new(vec![0.0, 1.0], vec![1.0, 2.0]).unwrap());
+
+        let render_data = figure.render_data();
+        assert_eq!(render_data.len(), 2);
+        assert_eq!(
+            render_data[0].pipeline_type,
+            crate::core::PipelineType::Lines
+        );
+        assert_eq!(
+            render_data[1].pipeline_type,
+            crate::core::PipelineType::Points
+        );
+    }
+
+    #[test]
+    fn errorbar_render_data_includes_marker_pass() {
+        let mut figure = Figure::new();
+        figure.add_errorbar(
+            ErrorBar::new_vertical(
+                vec![0.0, 1.0],
+                vec![1.0, 2.0],
+                vec![0.1, 0.2],
+                vec![0.1, 0.2],
+            )
+            .unwrap(),
+        );
+
+        let render_data = figure.render_data();
+        assert_eq!(render_data.len(), 2);
+        assert_eq!(
+            render_data[0].pipeline_type,
+            crate::core::PipelineType::Lines
+        );
+        assert_eq!(
+            render_data[1].pipeline_type,
+            crate::core::PipelineType::Points
+        );
     }
 
     #[test]

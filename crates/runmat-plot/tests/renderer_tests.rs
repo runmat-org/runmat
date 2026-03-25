@@ -890,7 +890,7 @@ mod new_plots_tests {
         let marker = sm.marker_render_data().expect("marker render data");
         assert_eq!(
             marker.pipeline_type,
-            runmat_plot::core::PipelineType::Triangles
+            runmat_plot::core::PipelineType::Points
         );
     }
 

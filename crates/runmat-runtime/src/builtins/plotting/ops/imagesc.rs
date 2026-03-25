@@ -15,7 +15,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 const BUILTIN_NAME: &str = "imagesc";
 
@@ -53,10 +53,10 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "imagesc,plotting,image,colormap",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::imagesc"
 )]
-pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
+pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (x, y, c, rest) = parse_surface_call_args(args, BUILTIN_NAME)?;
     let c_input = SurfaceDataInput::from_value(c, BUILTIN_NAME)?;
     let (rows, cols) = c_input.grid_shape(BUILTIN_NAME)?;
@@ -108,6 +108,9 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
     }
     surface.colormap = style.colormap;
     let mut surface = Some(surface);
+    let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
     let opts = PlotRenderOptions {
         title: "Image",
         x_label: "X",
@@ -115,12 +118,24 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
         axis_equal: true,
         ..Default::default()
     };
-    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let surface = surface.take().expect("imagesc plot consumed once");
-        figure.add_surface_plot_on_axes(surface, axes);
+        let plot_index = figure.add_surface_plot_on_axes(surface, axes);
+        *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())
-    })?;
-    Ok(rendered)
+    });
+    let Some((axes, plot_index)) = *plot_index_out.borrow() else {
+        return render_result.map(|_| f64::NAN);
+    };
+    let handle = crate::builtins::plotting::state::register_image_handle(figure_handle, axes, plot_index);
+    if let Err(err) = render_result {
+        let lower = err.to_string().to_lowercase();
+        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+            return Ok(handle);
+        }
+        return Err(err);
+    }
+    Ok(handle)
 }
 
 async fn build_imagesc_cpu(

@@ -212,10 +212,34 @@ pub struct ErrorBarHandleState {
 }
 
 #[derive(Clone)]
+pub struct QuiverHandleState {
+    pub figure: FigureHandle,
+    pub axes_index: usize,
+    pub plot_index: usize,
+}
+
+#[derive(Clone)]
+pub struct ImageHandleState {
+    pub figure: FigureHandle,
+    pub axes_index: usize,
+    pub plot_index: usize,
+}
+
+#[derive(Clone)]
+pub struct AreaHandleState {
+    pub figure: FigureHandle,
+    pub axes_index: usize,
+    pub plot_index: usize,
+}
+
+#[derive(Clone)]
 pub enum PlotChildHandleState {
     Histogram(HistogramHandleState),
     Stem(StemHandleState),
     ErrorBar(ErrorBarHandleState),
+    Quiver(QuiverHandleState),
+    Image(ImageHandleState),
+    Area(AreaHandleState),
 }
 
 impl Default for PlotRegistry {
@@ -1031,6 +1055,51 @@ pub fn register_errorbar_handle(figure: FigureHandle, axes_index: usize, plot_in
     id as f64
 }
 
+pub fn register_quiver_handle(figure: FigureHandle, axes_index: usize, plot_index: usize) -> f64 {
+    let mut reg = registry();
+    let id = reg.next_plot_child_handle;
+    reg.next_plot_child_handle += 1;
+    reg.plot_children.insert(
+        id,
+        PlotChildHandleState::Quiver(QuiverHandleState {
+            figure,
+            axes_index,
+            plot_index,
+        }),
+    );
+    id as f64
+}
+
+pub fn register_image_handle(figure: FigureHandle, axes_index: usize, plot_index: usize) -> f64 {
+    let mut reg = registry();
+    let id = reg.next_plot_child_handle;
+    reg.next_plot_child_handle += 1;
+    reg.plot_children.insert(
+        id,
+        PlotChildHandleState::Image(ImageHandleState {
+            figure,
+            axes_index,
+            plot_index,
+        }),
+    );
+    id as f64
+}
+
+pub fn register_area_handle(figure: FigureHandle, axes_index: usize, plot_index: usize) -> f64 {
+    let mut reg = registry();
+    let id = reg.next_plot_child_handle;
+    reg.next_plot_child_handle += 1;
+    reg.plot_children.insert(
+        id,
+        PlotChildHandleState::Area(AreaHandleState {
+            figure,
+            axes_index,
+            plot_index,
+        }),
+    );
+    id as f64
+}
+
 pub fn plot_child_handle_snapshot(handle: f64) -> Result<PlotChildHandleState, FigureError> {
     if !handle.is_finite() || handle <= 0.0 {
         return Err(FigureError::InvalidPlotObjectHandle);
@@ -1060,6 +1129,9 @@ pub fn update_histogram_handle(
         }
         PlotChildHandleState::Stem(_) => Err(FigureError::InvalidPlotObjectHandle),
         PlotChildHandleState::ErrorBar(_) => Err(FigureError::InvalidPlotObjectHandle),
+        PlotChildHandleState::Quiver(_) => Err(FigureError::InvalidPlotObjectHandle),
+        PlotChildHandleState::Image(_) => Err(FigureError::InvalidPlotObjectHandle),
+        PlotChildHandleState::Area(_) => Err(FigureError::InvalidPlotObjectHandle),
     }
 }
 
@@ -1125,11 +1197,74 @@ pub fn update_stem_plot(
     }
 }
 
+pub fn update_quiver_plot(
+    figure_handle: FigureHandle,
+    plot_index: usize,
+    updater: impl FnOnce(&mut runmat_plot::plots::QuiverPlot),
+) -> Result<(), FigureError> {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, figure_handle);
+    let plot = state
+        .figure
+        .get_plot_mut(plot_index)
+        .ok_or(FigureError::InvalidPlotObjectHandle)?;
+    match plot {
+        runmat_plot::plots::figure::PlotElement::Quiver(quiver) => {
+            updater(quiver);
+            Ok(())
+        }
+        _ => Err(FigureError::InvalidPlotObjectHandle),
+    }
+}
+
+pub fn update_image_plot(
+    figure_handle: FigureHandle,
+    plot_index: usize,
+    updater: impl FnOnce(&mut runmat_plot::plots::SurfacePlot),
+) -> Result<(), FigureError> {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, figure_handle);
+    let plot = state
+        .figure
+        .get_plot_mut(plot_index)
+        .ok_or(FigureError::InvalidPlotObjectHandle)?;
+    match plot {
+        runmat_plot::plots::figure::PlotElement::Surface(surface) if surface.image_mode => {
+            updater(surface);
+            Ok(())
+        }
+        _ => Err(FigureError::InvalidPlotObjectHandle),
+    }
+}
+
+pub fn update_area_plot(
+    figure_handle: FigureHandle,
+    plot_index: usize,
+    updater: impl FnOnce(&mut runmat_plot::plots::AreaPlot),
+) -> Result<(), FigureError> {
+    let mut reg = registry();
+    let state = get_state_mut(&mut reg, figure_handle);
+    let plot = state
+        .figure
+        .get_plot_mut(plot_index)
+        .ok_or(FigureError::InvalidPlotObjectHandle)?;
+    match plot {
+        runmat_plot::plots::figure::PlotElement::Area(area) => {
+            updater(area);
+            Ok(())
+        }
+        _ => Err(FigureError::InvalidPlotObjectHandle),
+    }
+}
+
 fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) {
     reg.plot_children.retain(|_, state| match state {
         PlotChildHandleState::Histogram(hist) => hist.figure != handle,
         PlotChildHandleState::Stem(stem) => stem.figure != handle,
         PlotChildHandleState::ErrorBar(err) => err.figure != handle,
+        PlotChildHandleState::Quiver(quiver) => quiver.figure != handle,
+        PlotChildHandleState::Image(image) => image.figure != handle,
+        PlotChildHandleState::Area(area) => area.figure != handle,
     });
 }
 
@@ -1143,6 +1278,15 @@ fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, ax
         }
         PlotChildHandleState::ErrorBar(err) => {
             !(err.figure == handle && err.axes_index == axes_index)
+        }
+        PlotChildHandleState::Quiver(quiver) => {
+            !(quiver.figure == handle && quiver.axes_index == axes_index)
+        }
+        PlotChildHandleState::Image(image) => {
+            !(image.figure == handle && image.axes_index == axes_index)
+        }
+        PlotChildHandleState::Area(area) => {
+            !(area.figure == handle && area.axes_index == axes_index)
         }
     });
 }
