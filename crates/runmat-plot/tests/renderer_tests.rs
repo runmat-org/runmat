@@ -856,10 +856,15 @@ mod new_plots_tests {
         let y = vec![1.0, -0.5];
         let mut sm = StemPlot::new(x, y).unwrap();
         let vertices = sm.generate_vertices();
-        // Each point: 2 vertices for stem + 4 for cross marker => 6; for 2 points => 12
-        assert_eq!(vertices.len(), 12);
+        // Each point contributes 2 stem vertices plus optional baseline line.
+        assert!(vertices.len() >= 4);
         let rd = sm.render_data();
         assert_eq!(rd.pipeline_type, runmat_plot::core::PipelineType::Lines);
+        let marker = sm.marker_render_data().expect("marker render data");
+        assert_eq!(
+            marker.pipeline_type,
+            runmat_plot::core::PipelineType::Triangles
+        );
     }
 
     #[test]

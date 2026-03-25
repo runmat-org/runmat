@@ -62,7 +62,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::plotting::stem"
 )]
 pub fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
-    let (x, y, rest) = parse_stem_args(args)?;
+    let (target_axes, x, y, rest) = parse_stem_args(args)?;
     let parsed = parse_stem_style_args(&rest)?;
     let mut x_input = Some(NumericInput::from_value(x, BUILTIN_NAME)?);
     let mut y_input = Some(NumericInput::from_value(y, BUILTIN_NAME)?);
@@ -79,7 +79,7 @@ pub fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
         if let (Some(x_gpu), Some(y_gpu)) = (x_arg.gpu_handle(), y_arg.gpu_handle()) {
             match build_stem_gpu_plot(BUILTIN_NAME, x_gpu, y_gpu, &parsed, &label) {
                 Ok(plot) => {
-                    figure.add_stem_plot_on_axes(plot, axes);
+                    figure.add_stem_plot_on_axes(plot, target_axes.unwrap_or(axes));
                     return Ok(());
                 }
                 Err(err) => log::warn!("stem GPU path unavailable: {err}"),
@@ -89,7 +89,7 @@ pub fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
         let y = y_arg.into_tensor(BUILTIN_NAME)?;
         let (x, y) = numeric_pair(x, y, BUILTIN_NAME)?;
         let plot = build_stem_plot(x, y, &parsed, &label)?;
-        figure.add_stem_plot_on_axes(plot, axes);
+        figure.add_stem_plot_on_axes(plot, target_axes.unwrap_or(axes));
         Ok(())
     })
 }
@@ -111,6 +111,20 @@ fn build_stem_plot(
         .with_baseline_style(parsed.appearance.color, parsed.baseline_visible)
         .with_label(label);
     if let Some(marker) = parsed.marker.clone() {
+        let mut marker = marker;
+        if parsed.filled {
+            marker.filled = true;
+        }
+        plot.set_marker(Some(marker));
+    } else if parsed.filled {
+        let mut marker = plot.marker.clone().unwrap_or(LineMarkerAppearance {
+            kind: runmat_plot::plots::scatter::MarkerStyle::Circle,
+            size: 6.0,
+            edge_color: parsed.appearance.color,
+            face_color: parsed.appearance.color,
+            filled: true,
+        });
+        marker.filled = true;
         plot.set_marker(Some(marker));
     }
     Ok(plot)
@@ -190,6 +204,43 @@ fn build_stem_gpu_plot(
     )
     .with_label(label);
     if let Some(marker) = parsed.marker.clone() {
+        let mut marker = marker;
+        if parsed.filled {
+            marker.filled = true;
+        }
+        let marker_gpu = line::pack_marker_vertices_from_xy(
+            &context.device,
+            &context.queue,
+            &MarkerGpuInputs {
+                x_buffer: x_ref.buffer.clone(),
+                y_buffer: y_ref.buffer.clone(),
+                len: x_ref.len as u32,
+                scalar,
+            },
+            &MarkerGpuParams {
+                color: marker.face_color,
+                half_width_data: 0.0,
+                thick: false,
+                line_style: runmat_plot::plots::LineStyle::Solid,
+                marker_size: marker.size,
+            },
+        )
+        .map_err(|e| {
+            plotting_error(
+                name,
+                format!("{name}: failed to build marker vertices: {e}"),
+            )
+        })?;
+        plot.set_marker(Some(marker));
+        plot.set_marker_gpu_vertices(Some(marker_gpu));
+    } else if parsed.filled {
+        let marker = LineMarkerAppearance {
+            kind: runmat_plot::plots::scatter::MarkerStyle::Circle,
+            size: 6.0,
+            edge_color: parsed.appearance.color,
+            face_color: parsed.appearance.color,
+            filled: true,
+        };
         let marker_gpu = line::pack_marker_vertices_from_xy(
             &context.device,
             &context.queue,
@@ -225,47 +276,59 @@ struct ParsedStemStyle {
     label: Option<String>,
     baseline: f64,
     baseline_visible: bool,
+    filled: bool,
 }
 
 fn parse_stem_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedStemStyle> {
-    let parsed = parse_line_style_args(args, &LineStyleParseOptions::generic(BUILTIN_NAME))?;
-    let marker = marker_metadata_from_appearance(&parsed.appearance);
+    let mut filtered = Vec::new();
+    let mut filled = false;
     let mut baseline = 0.0;
     let mut baseline_visible = true;
     let mut idx = 0usize;
-    while idx + 1 < args.len() {
-        if let Some(key) = super::style::value_as_string(&args[idx]) {
-            let lower = key.trim().to_ascii_lowercase();
-            match lower.as_str() {
-                "basevalue" => {
+    while idx < args.len() {
+        if let Some(text) = super::style::value_as_string(&args[idx]) {
+            let trimmed = text.trim();
+            if trimmed.eq_ignore_ascii_case("filled") {
+                filled = true;
+                idx += 1;
+                continue;
+            }
+            if (trimmed.eq_ignore_ascii_case("basevalue")
+                || trimmed.eq_ignore_ascii_case("baseline"))
+                && idx + 1 < args.len()
+            {
+                if trimmed.eq_ignore_ascii_case("basevalue") {
                     baseline = super::style::value_as_f64(&args[idx + 1]).ok_or_else(|| {
                         plotting_error(BUILTIN_NAME, "stem: BaseValue must be numeric")
                     })?;
-                }
-                "baseline" => {
+                } else {
                     baseline_visible =
                         super::style::value_as_bool(&args[idx + 1]).ok_or_else(|| {
                             plotting_error(BUILTIN_NAME, "stem: BaseLine must be logical")
                         })?;
                 }
-                "filled" => {
-                    // accepted for compatibility through marker face handling
-                }
-                _ => {}
+                idx += 2;
+                continue;
             }
         }
-        idx += 2;
+        filtered.push(args[idx].clone());
+        idx += 1;
     }
+    let parsed = parse_line_style_args(&filtered, &LineStyleParseOptions::generic(BUILTIN_NAME))?;
+    let marker = marker_metadata_from_appearance(&parsed.appearance);
     Ok(ParsedStemStyle {
         appearance: parsed.appearance,
         marker,
         label: parsed.label,
         baseline,
         baseline_visible,
+        filled,
     })
 }
 
-fn parse_stem_args(args: Vec<Value>) -> crate::BuiltinResult<(Value, Value, Vec<Value>)> {
+fn parse_stem_args(
+    args: Vec<Value>,
+) -> crate::BuiltinResult<(Option<usize>, Value, Value, Vec<Value>)> {
     if args.is_empty() {
         return Err(plotting_error(
             BUILTIN_NAME,
@@ -273,7 +336,22 @@ fn parse_stem_args(args: Vec<Value>) -> crate::BuiltinResult<(Value, Value, Vec<
         ));
     }
     let mut it = args.into_iter();
+    let mut target_axes = None;
     let first = it.next().unwrap();
+    let first = if let Ok(handle) =
+        crate::builtins::plotting::properties::resolve_plot_handle(&first, BUILTIN_NAME)
+    {
+        if let crate::builtins::plotting::properties::PlotHandle::Axes(_, axes) = handle {
+            target_axes = Some(axes);
+            it.next().ok_or_else(|| {
+                plotting_error(BUILTIN_NAME, "stem: expected data after axes handle")
+            })?
+        } else {
+            first
+        }
+    } else {
+        first
+    };
     let Some(second) = it.next() else {
         let y = first;
         let y_tensor =
@@ -286,7 +364,7 @@ fn parse_stem_args(args: Vec<Value>) -> crate::BuiltinResult<(Value, Value, Vec<
             cols: 1,
             dtype: runmat_builtins::NumericDType::F64,
         });
-        return Ok((x, y, Vec::new()));
+        return Ok((target_axes, x, y, Vec::new()));
     };
     if matches!(second, Value::String(_) | Value::CharArray(_)) {
         let y = first;
@@ -302,14 +380,15 @@ fn parse_stem_args(args: Vec<Value>) -> crate::BuiltinResult<(Value, Value, Vec<
         });
         let mut rest = vec![second];
         rest.extend(it);
-        return Ok((x, y, rest));
+        return Ok((target_axes, x, y, rest));
     }
-    Ok((first, second, it.collect()))
+    Ok((target_axes, first, second, it.collect()))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::plotting::subplot::subplot_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{
         clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
@@ -335,5 +414,36 @@ mod tests {
         let _ = stem_builtin(vec![Value::Tensor(tensor_from(&[1.0, 2.0, 3.0]))]);
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert!(matches!(fig.plots().next().unwrap(), PlotElement::Stem(_)));
+    }
+
+    #[test]
+    fn stem_supports_axes_target_and_filled_option() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let ax = subplot_builtin(Value::Num(1.0), Value::Num(2.0), Value::Num(2.0)).unwrap();
+        let result = stem_builtin(vec![
+            Value::Num(ax),
+            Value::Tensor(tensor_from(&[1.0, 2.0])),
+            Value::Tensor(tensor_from(&[3.0, 4.0])),
+            Value::String("DisplayName".into()),
+            Value::String("Impulse".into()),
+            Value::String("BaseValue".into()),
+            Value::Num(-1.0),
+            Value::String("filled".into()),
+        ]);
+        if let Err(err) = &result {
+            let msg = err.to_string().to_lowercase();
+            assert!(msg.contains("plotting is unavailable") || msg.contains("non-main thread"));
+        }
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        assert_eq!(fig.plot_axes_indices()[0], 1);
+        let PlotElement::Stem(stem) = fig.plots().next().unwrap() else {
+            panic!("expected stem");
+        };
+        assert_eq!(stem.baseline, -1.0);
+        assert_eq!(stem.label.as_deref(), Some("Impulse"));
+        assert!(stem.marker.as_ref().map(|m| m.filled).unwrap_or(false));
     }
 }
