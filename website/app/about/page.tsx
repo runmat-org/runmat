@@ -138,6 +138,7 @@ export default function AboutPage() {
         }}
       />
       <div className="container mx-auto px-4 md:px-6 lg:px-8 pt-12 md:pt-16 lg:pt-20 pb-16 md:pb-24 lg:pb-32">
+        <h1 className="sr-only">About RunMat</h1>
         {/* Who We Are */}
         <section className="pb-12 md:pb-16 lg:pb-20">
           <div className="grid gap-10 lg:grid-cols-2 lg:items-center">

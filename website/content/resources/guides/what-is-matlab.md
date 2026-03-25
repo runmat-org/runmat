@@ -206,7 +206,7 @@ What’s already strongly covered:
 - MATLAB-style indexing and slicing: including `end` arithmetic and logical masks.
 - Many “hard” language features: `classdef` OOP, operator overloading, imports/name resolution.
 
-For a detailed feature-by-feature status, see [Language Coverage](../LANGUAGE_COVERAGE.md).
+For a detailed feature-by-feature status, see [Language Coverage](/docs/language-coverage).
 
 What to expect in practice:
 

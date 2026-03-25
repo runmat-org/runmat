@@ -348,7 +348,7 @@ export default function MatlabOnlinePage() {
                   <div>
                     <h3 className="text-xl font-semibold text-foreground">MATLAB Online has friction</h3>
                     <p className="text-lg text-muted-foreground mt-2">
-                      MathWorks&apos; official browser-based MATLAB requires an account, and your code runs on their cloud servers. Engineers and students hit these limits regularly:
+                      MATLAB Online runs your code on MathWorks&apos; servers, requires an account, and caps free usage at 20 hours/month with 15-minute idle timeouts. Engineers and students hit these limits regularly:
                     </p>
                   </div>
                 </div>
@@ -626,7 +626,7 @@ export default function MatlabOnlinePage() {
         <section className="py-16 md:py-24 lg:py-32">
           <div className="mx-auto max-w-5xl text-center mb-10 space-y-3">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground">RunMat vs. MATLAB Online</h2>
-            <p className="text-muted-foreground text-lg">A clear comparison of capabilities and requirements.</p>
+            <p className="text-muted-foreground text-lg">RunMat runs client-side with GPU acceleration and no account. MATLAB Online requires a license, runs on MathWorks&apos; servers, and caps free usage.</p>
           </div>
           <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-2">
             <Card className="border border-purple-500/30 bg-[#0E1421] shadow-lg">
