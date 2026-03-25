@@ -1,6 +1,8 @@
 //! Stem plot implementation.
 
-use crate::core::{AlphaMode, BoundingBox, DrawCall, Material, PipelineType, RenderData, Vertex};
+use crate::core::{
+    AlphaMode, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData, Vertex,
+};
 use crate::plots::line::{LineMarkerAppearance, LineStyle};
 use glam::{Vec3, Vec4};
 
@@ -20,7 +22,11 @@ pub struct StemPlot {
     vertices: Option<Vec<Vertex>>,
     bounds: Option<BoundingBox>,
     dirty: bool,
+    gpu_vertices: Option<GpuVertexBuffer>,
+    gpu_vertex_count: Option<usize>,
+    gpu_bounds: Option<BoundingBox>,
     marker_vertices: Option<Vec<Vertex>>,
+    marker_gpu_vertices: Option<GpuVertexBuffer>,
     marker_dirty: bool,
 }
 
@@ -50,9 +56,48 @@ impl StemPlot {
             vertices: None,
             bounds: None,
             dirty: true,
+            gpu_vertices: None,
+            gpu_vertex_count: None,
+            gpu_bounds: None,
             marker_vertices: None,
+            marker_gpu_vertices: None,
             marker_dirty: true,
         })
+    }
+
+    pub fn from_gpu_buffer(
+        color: Vec4,
+        line_width: f32,
+        line_style: LineStyle,
+        baseline: f64,
+        baseline_color: Vec4,
+        baseline_visible: bool,
+        buffer: GpuVertexBuffer,
+        vertex_count: usize,
+        bounds: BoundingBox,
+    ) -> Self {
+        Self {
+            x: Vec::new(),
+            y: Vec::new(),
+            baseline,
+            color,
+            line_width,
+            line_style,
+            baseline_color,
+            baseline_visible,
+            marker: None,
+            label: None,
+            visible: true,
+            vertices: None,
+            bounds: None,
+            dirty: false,
+            gpu_vertices: Some(buffer),
+            gpu_vertex_count: Some(vertex_count),
+            gpu_bounds: Some(bounds),
+            marker_vertices: None,
+            marker_gpu_vertices: None,
+            marker_dirty: true,
+        }
     }
 
     pub fn with_style(
@@ -67,6 +112,11 @@ impl StemPlot {
         self.line_style = line_style;
         self.baseline = baseline;
         self.dirty = true;
+        self.marker_dirty = true;
+        self.gpu_vertices = None;
+        self.gpu_vertex_count = None;
+        self.gpu_bounds = None;
+        self.marker_gpu_vertices = None;
         self
     }
 
@@ -91,10 +141,25 @@ impl StemPlot {
         self.marker_dirty = true;
         if self.marker.is_none() {
             self.marker_vertices = None;
+            self.marker_gpu_vertices = None;
+        }
+    }
+
+    pub fn set_marker_gpu_vertices(&mut self, buffer: Option<GpuVertexBuffer>) {
+        let has_gpu = buffer.is_some();
+        self.marker_gpu_vertices = buffer;
+        if has_gpu {
+            self.marker_vertices = None;
         }
     }
 
     pub fn generate_vertices(&mut self) -> &Vec<Vertex> {
+        if self.gpu_vertices.is_some() {
+            if self.vertices.is_none() {
+                self.vertices = Some(Vec::new());
+            }
+            return self.vertices.as_ref().unwrap();
+        }
         if self.dirty || self.vertices.is_none() {
             let mut vertices = Vec::new();
             let finite_x: Vec<f32> = self
@@ -135,6 +200,36 @@ impl StemPlot {
 
     pub fn marker_render_data(&mut self) -> Option<RenderData> {
         let marker = self.marker.clone()?;
+        if let Some(gpu_vertices) = self.marker_gpu_vertices.clone() {
+            let vertex_count = gpu_vertices.vertex_count;
+            if vertex_count == 0 {
+                return None;
+            }
+            return Some(RenderData {
+                pipeline_type: PipelineType::Triangles,
+                vertices: Vec::new(),
+                indices: None,
+                gpu_vertices: Some(gpu_vertices),
+                bounds: None,
+                material: Material {
+                    albedo: marker.face_color,
+                    alpha_mode: if marker.face_color.w < 0.999 {
+                        AlphaMode::Blend
+                    } else {
+                        AlphaMode::Opaque
+                    },
+                    ..Default::default()
+                },
+                draw_calls: vec![DrawCall {
+                    vertex_offset: 0,
+                    vertex_count,
+                    index_offset: None,
+                    index_count: None,
+                    instance_count: 1,
+                }],
+                image: None,
+            });
+        }
         if self.marker_dirty || self.marker_vertices.is_none() {
             let size = (marker.size.max(1.0) * 0.005).max(0.005);
             let mut vertices = Vec::new();
@@ -180,6 +275,9 @@ impl StemPlot {
     }
 
     pub fn bounds(&mut self) -> BoundingBox {
+        if let Some(bounds) = self.gpu_bounds {
+            return bounds;
+        }
         if self.dirty || self.bounds.is_none() {
             let mut min = Vec3::new(f32::INFINITY, f32::INFINITY, 0.0);
             let mut max = Vec3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, 0.0);
@@ -203,12 +301,22 @@ impl StemPlot {
     }
 
     pub fn render_data(&mut self) -> RenderData {
-        let vertices = self.generate_vertices().clone();
+        let (vertices, vertex_count, gpu_vertices) = if self.gpu_vertices.is_some() {
+            (
+                Vec::new(),
+                self.gpu_vertex_count.unwrap_or(0),
+                self.gpu_vertices.clone(),
+            )
+        } else {
+            let vertices = self.generate_vertices().clone();
+            let count = vertices.len();
+            (vertices, count, None)
+        };
         RenderData {
             pipeline_type: PipelineType::Lines,
-            vertices: vertices.clone(),
+            vertices,
             indices: None,
-            gpu_vertices: None,
+            gpu_vertices,
             bounds: None,
             material: Material {
                 albedo: self.color,
@@ -217,7 +325,7 @@ impl StemPlot {
             },
             draw_calls: vec![DrawCall {
                 vertex_offset: 0,
-                vertex_count: vertices.len(),
+                vertex_count,
                 index_offset: None,
                 index_count: None,
                 instance_count: 1,

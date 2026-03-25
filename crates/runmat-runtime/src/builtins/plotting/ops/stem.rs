@@ -1,5 +1,10 @@
 use runmat_builtins::{Tensor, Value};
 use runmat_macros::runtime_builtin;
+use runmat_plot::gpu::line::{
+    self, LineGpuInputs as MarkerGpuInputs, LineGpuParams as MarkerGpuParams,
+};
+use runmat_plot::gpu::stem::{StemGpuInputs, StemGpuParams};
+use runmat_plot::gpu::ScalarType;
 use runmat_plot::plots::{LineMarkerAppearance, StemPlot};
 
 use crate::builtins::common::spec::{
@@ -9,6 +14,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::plotting::type_resolvers::string_type;
 
 use super::common::numeric_pair;
+use super::gpu_helpers::gpu_xy_bounds;
 use super::op_common::line_inputs::NumericInput;
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
@@ -67,31 +73,150 @@ pub fn stem_builtin(args: Vec<Value>) -> crate::BuiltinResult<String> {
         ..Default::default()
     };
     render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
-        let x = x_input
-            .take()
-            .expect("stem x consumed once")
-            .into_tensor(BUILTIN_NAME)?;
-        let y = y_input
-            .take()
-            .expect("stem y consumed once")
-            .into_tensor(BUILTIN_NAME)?;
-        let (x, y) = numeric_pair(x, y, BUILTIN_NAME)?;
-        let mut plot = StemPlot::new(x, y)
-            .map_err(|e| plotting_error(BUILTIN_NAME, format!("stem: {e}")))?
-            .with_style(
-                parsed.appearance.color,
-                parsed.appearance.line_width,
-                parsed.appearance.line_style,
-                parsed.baseline,
-            )
-            .with_baseline_style(parsed.appearance.color, parsed.baseline_visible)
-            .with_label(parsed.label.clone().unwrap_or_else(|| "Data".into()));
-        if let Some(marker) = parsed.marker.clone() {
-            plot.set_marker(Some(marker));
+        let label = parsed.label.clone().unwrap_or_else(|| "Data".into());
+        let x_arg = x_input.take().expect("stem x consumed once");
+        let y_arg = y_input.take().expect("stem y consumed once");
+        if let (Some(x_gpu), Some(y_gpu)) = (x_arg.gpu_handle(), y_arg.gpu_handle()) {
+            match build_stem_gpu_plot(BUILTIN_NAME, x_gpu, y_gpu, &parsed, &label) {
+                Ok(plot) => {
+                    figure.add_stem_plot_on_axes(plot, axes);
+                    return Ok(());
+                }
+                Err(err) => log::warn!("stem GPU path unavailable: {err}"),
+            }
         }
+        let x = x_arg.into_tensor(BUILTIN_NAME)?;
+        let y = y_arg.into_tensor(BUILTIN_NAME)?;
+        let (x, y) = numeric_pair(x, y, BUILTIN_NAME)?;
+        let plot = build_stem_plot(x, y, &parsed, &label)?;
         figure.add_stem_plot_on_axes(plot, axes);
         Ok(())
     })
+}
+
+fn build_stem_plot(
+    x: Vec<f64>,
+    y: Vec<f64>,
+    parsed: &ParsedStemStyle,
+    label: &str,
+) -> crate::BuiltinResult<StemPlot> {
+    let mut plot = StemPlot::new(x, y)
+        .map_err(|e| plotting_error(BUILTIN_NAME, format!("stem: {e}")))?
+        .with_style(
+            parsed.appearance.color,
+            parsed.appearance.line_width,
+            parsed.appearance.line_style,
+            parsed.baseline,
+        )
+        .with_baseline_style(parsed.appearance.color, parsed.baseline_visible)
+        .with_label(label);
+    if let Some(marker) = parsed.marker.clone() {
+        plot.set_marker(Some(marker));
+    }
+    Ok(plot)
+}
+
+fn build_stem_gpu_plot(
+    name: &'static str,
+    x: &runmat_accelerate_api::GpuTensorHandle,
+    y: &runmat_accelerate_api::GpuTensorHandle,
+    parsed: &ParsedStemStyle,
+    label: &str,
+) -> crate::BuiltinResult<StemPlot> {
+    let context = super::gpu_helpers::ensure_shared_wgpu_context(name)?;
+    let x_ref = runmat_accelerate_api::export_wgpu_buffer(x)
+        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU X data")))?;
+    let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
+        .ok_or_else(|| plotting_error(name, format!("{name}: unable to export GPU Y data")))?;
+    if x_ref.len != y_ref.len {
+        return Err(plotting_error(
+            name,
+            format!("{name}: X and Y inputs must have identical lengths"),
+        ));
+    }
+    if x_ref.precision != y_ref.precision {
+        return Err(plotting_error(
+            name,
+            format!("{name}: X and Y gpuArrays must share the same precision"),
+        ));
+    }
+    let scalar =
+        ScalarType::from_is_f64(x_ref.precision == runmat_accelerate_api::ProviderPrecision::F64);
+    let xy_bounds = gpu_xy_bounds(x, y, name)?;
+    let min_x = xy_bounds.min.x;
+    let max_x = xy_bounds.max.x;
+    let bounds = runmat_plot::core::BoundingBox::new(
+        glam::Vec3::new(
+            xy_bounds.min.x,
+            xy_bounds.min.y.min(parsed.baseline as f32),
+            0.0,
+        ),
+        glam::Vec3::new(
+            xy_bounds.max.x,
+            xy_bounds.max.y.max(parsed.baseline as f32),
+            0.0,
+        ),
+    );
+    let gpu_vertices = runmat_plot::gpu::stem::pack_vertices_from_xy(
+        &context.device,
+        &context.queue,
+        &StemGpuInputs {
+            x_buffer: x_ref.buffer.clone(),
+            y_buffer: y_ref.buffer.clone(),
+            len: x_ref.len as u32,
+            scalar,
+        },
+        &StemGpuParams {
+            color: parsed.appearance.color,
+            baseline_color: parsed.appearance.color,
+            baseline: parsed.baseline as f32,
+            baseline_visible: parsed.baseline_visible,
+            min_x,
+            max_x,
+            line_style: parsed.appearance.line_style,
+        },
+    )
+    .map_err(|e| plotting_error(name, format!("{name}: failed to build GPU vertices: {e}")))?;
+    let mut plot = StemPlot::from_gpu_buffer(
+        parsed.appearance.color,
+        parsed.appearance.line_width,
+        parsed.appearance.line_style,
+        parsed.baseline,
+        parsed.appearance.color,
+        parsed.baseline_visible,
+        gpu_vertices,
+        (if parsed.baseline_visible { 2 } else { 0 }) + (x_ref.len as usize * 2),
+        bounds,
+    )
+    .with_label(label);
+    if let Some(marker) = parsed.marker.clone() {
+        let marker_gpu = line::pack_marker_vertices_from_xy(
+            &context.device,
+            &context.queue,
+            &MarkerGpuInputs {
+                x_buffer: x_ref.buffer.clone(),
+                y_buffer: y_ref.buffer.clone(),
+                len: x_ref.len as u32,
+                scalar,
+            },
+            &MarkerGpuParams {
+                color: marker.face_color,
+                half_width_data: 0.0,
+                thick: false,
+                line_style: runmat_plot::plots::LineStyle::Solid,
+                marker_size: marker.size,
+            },
+        )
+        .map_err(|e| {
+            plotting_error(
+                name,
+                format!("{name}: failed to build marker vertices: {e}"),
+            )
+        })?;
+        plot.set_marker(Some(marker));
+        plot.set_marker_gpu_vertices(Some(marker_gpu));
+    }
+    Ok(plot)
 }
 
 struct ParsedStemStyle {

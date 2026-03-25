@@ -7,6 +7,7 @@ pub mod line3;
 pub mod scatter2;
 pub mod scatter3;
 pub mod stairs;
+pub mod stem;
 pub mod surface;
 pub mod vertex;
 

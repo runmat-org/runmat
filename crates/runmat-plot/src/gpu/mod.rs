@@ -9,6 +9,7 @@ pub mod scatter2;
 pub mod scatter3;
 pub mod shaders;
 pub mod stairs;
+pub mod stem;
 pub mod surface;
 pub mod tuning;
 pub mod util;
