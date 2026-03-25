@@ -52,6 +52,8 @@ pub(crate) mod gcf;
 pub(crate) mod get;
 #[path = "ops/hist.rs"]
 pub mod hist;
+#[path = "ops/histogram.rs"]
+pub(crate) mod histogram;
 #[path = "ops/hold.rs"]
 pub(crate) mod hold;
 #[path = "ops/imagesc.rs"]
