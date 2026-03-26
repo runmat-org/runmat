@@ -3,22 +3,22 @@
   "category": "plotting",
   "keywords": [
     "hist",
-    "histogram",
-    "frequency",
-    "gpuArray"
+    "legacy histogram",
+    "bin centers",
+    "distribution plot",
+    "matlab hist",
+    "hist vs histogram"
   ],
-  "summary": "Render MATLAB-compatible histograms using automatic or user-specified bin counts.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/hist.html"
-  ],
+  "summary": "Create legacy center-based histograms for quick distribution plots and MATLAB `hist` workflows.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [
-      "single"
+      "single",
+      "double"
     ],
     "broadcasting": "none",
-    "notes": "Single-precision gpuArray inputs stay on the device and feed the shared WebGPU renderer; other data gathers automatically."
+    "notes": "`hist` supports GPU-aware histogram computation where applicable, but it remains the legacy center-based histogram workflow rather than the object-based `histogram` API."
   },
   "fusion": {
     "elementwise": false,
@@ -30,66 +30,34 @@
   "tested": {
     "unit": "builtins::plotting::hist::tests"
   },
-  "description": "`hist(data, nbins)` counts the number of observations that fall into equally spaced bins spanning the data range. When `nbins` is omitted, MATLAB (and RunMat) default to `floor(sqrt(numel(data)))` bins. The resulting frequencies are displayed as a bar chart.",
+  "description": "`hist` is the legacy histogram builtin that uses MATLAB `hist` semantics. The most important distinction from `histogram` is that when you pass a vector as the second argument, `hist` interprets that vector as bin centers rather than bin edges. In RunMat, `hist` remains useful for center-based legacy workflows, while `histogram` is the newer object-style histogram API with bin-edge semantics and handle-based property workflows.",
   "behaviors": [
-    "Inputs must be numeric vectors. Empty inputs return a figure with zero-height bins.",
-    "`nbins` may be provided as a numeric scalar or a vector of equally spaced bin centers. Non-positive or non-finite values raise MATLAB-style errors.",
-    "A `'BinEdges'` name-value pair accepts a strictly increasing vector of edges (uniform or non-uniform). When the edges are evenly spaced the gpuArray path remains zero-copy; other cases fall back to the CPU implementation automatically.",
-    "Normalization can be supplied either as the second positional argument or via the `'Normalization'` name-value pair. Supported values are `\"count\"`, `\"probability\"`, and `\"pdf\"`.",
-    "Single-precision gpuArray inputs stay on the device: bin counts are computed by a compute shader and bar vertices are emitted directly into the shared WebGPU context whenever the bins are uniform. Other cases gather automatically (full normalization semantics still apply in either path)."
+    "`hist(data)` uses a default number of bins based on the input size, following MATLAB-style legacy behavior.",
+    "`hist(data, v)` interprets `v` as bin centers, not bin edges. This is the key semantic difference from `histogram`.",
+    "`hist` is a plotting-style histogram command, while `histogram` returns a first-class histogram object handle.",
+    "Normalization and bin-control workflows are supported, but the builtin should still be documented and used as the legacy center-based histogram path rather than as an alias of `histogram`.",
+    "GPU-aware computation is used where supported, but semantics stay aligned with legacy MATLAB `hist` behavior."
   ],
   "examples": [
     {
-      "description": "",
-      "input": "data = randn(1, 1000);\nhist(data, 20)"
+      "description": "Create a default legacy histogram",
+      "input": "data = randn(1, 1000);\nhist(data);"
+    },
+    {
+      "description": "Pass explicit bin centers",
+      "input": "data = randn(1, 500);\ncenters = -3:0.5:3;\nhist(data, centers);",
+      "output": "% Here the second argument is interpreted as bin centers, not edges"
+    },
+    {
+      "description": "Compare legacy hist semantics with modern histogram intent",
+      "input": "data = randn(1, 300);\nhist(data, -2:0.5:2);",
+      "output": "% Use histogram(...) instead when you want bin-edge semantics and an object handle"
     }
   ],
-  "faqs": [],
   "links": [
-    {
-      "label": "bar",
-      "url": "./bar"
-    },
-    {
-      "label": "contour",
-      "url": "./contour"
-    },
-    {
-      "label": "contourf",
-      "url": "./contourf"
-    },
-    {
-      "label": "mesh",
-      "url": "./mesh"
-    },
-    {
-      "label": "meshc",
-      "url": "./meshc"
-    },
-    {
-      "label": "plot",
-      "url": "./plot"
-    },
-    {
-      "label": "scatter",
-      "url": "./scatter"
-    },
-    {
-      "label": "scatter3",
-      "url": "./scatter3"
-    },
-    {
-      "label": "stairs",
-      "url": "./stairs"
-    },
-    {
-      "label": "surf",
-      "url": "./surf"
-    },
-    {
-      "label": "surfc",
-      "url": "./surfc"
-    }
+    { "label": "histogram", "url": "./histogram" },
+    { "label": "bar", "url": "./bar" },
+    { "label": "pie", "url": "./pie" }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/hist.rs`",

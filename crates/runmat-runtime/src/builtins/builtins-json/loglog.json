@@ -1,0 +1,48 @@
+{
+  "title": "loglog",
+  "category": "plotting",
+  "keywords": [
+    "loglog",
+    "log-log plot",
+    "power law plot",
+    "matlab loglog",
+    "scaling analysis"
+  ],
+  "summary": "Plot data on logarithmic x and y axes for power laws, scaling analysis, and MATLAB `loglog` comparisons.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::loglog::tests"
+  },
+  "description": "`loglog` builds line objects through the shared RunMat line-plot path and then marks both axes as logarithmic. It is useful for power-law relationships, spectrum-style plots, and any comparison where both dimensions span multiple decades in the MATLAB `loglog` style.",
+  "behaviors": [
+    "The returned value is a numeric line handle.",
+    "Both x and y axes are switched to log scale on the active axes.",
+    "Axes scale state remains subplot-local.",
+    "Logarithmic axes are meaningful for positive-domain data on both x and y."
+  ],
+  "examples": [
+    {
+      "description": "Plot a power-law curve on logarithmic axes",
+      "input": "x = logspace(0, 3, 200);\nloglog(x, x.^(-1.5));"
+    },
+    {
+      "description": "Compare multiple scaling laws",
+      "input": "x = logspace(0, 3, 200);\nh1 = loglog(x, x.^(-1));\nset(h1, 'DisplayName', 'x^{-1}');\nhold on;\nh2 = loglog(x, x.^(-2));\nset(h2, 'DisplayName', 'x^{-2}');\nlegend;"
+    },
+    {
+      "description": "Inspect both axes after plotting",
+      "input": "x = logspace(0, 2, 50);\nloglog(x, x.^2);\nax = gca;\n[get(ax, 'XScale'), get(ax, 'YScale')]",
+      "output": "% Both axes report 'log'"
+    }
+  ],
+  "links": [
+    { "label": "plot", "url": "./plot" },
+    { "label": "semilogx", "url": "./semilogx" },
+    { "label": "semilogy", "url": "./semilogy" },
+    { "label": "axis", "url": "./axis" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/loglog.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/loglog.rs"
+  }
+}

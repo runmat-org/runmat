@@ -1,0 +1,44 @@
+{
+  "title": "colormap",
+  "category": "plotting",
+  "keywords": [
+    "colormap",
+    "color palette",
+    "heatmap palette",
+    "surface palette",
+    "matlab colormap"
+  ],
+  "summary": "Set colormaps for images, surfaces, contours, and MATLAB `colormap` workflows.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::cmds"
+  },
+  "description": "`colormap` sets the active color palette for the current plotting context. In RunMat it affects colormap-driven visualizations such as `imagesc`, `surf`, `surfc`, `contourf`, and related scalar-field plots while remaining scoped to the active axes state.",
+  "behaviors": [
+    "Supported colormap names include `parula`, `viridis`, `plasma`, `inferno`, `magma`, `turbo`, `jet`, `hot`, `cool`, `spring`, `summer`, `autumn`, `winter`, `gray`, `bone`, `copper`, `pink`, and `lines`.",
+    "Unknown colormap names raise errors rather than silently falling back.",
+    "Colormap state composes naturally with `colorbar`, `imagesc`, `surf`, and filled contour plots.",
+    "Colormap changes apply to the current axes context in the plotting state model."
+  ],
+  "examples": [
+    {
+      "description": "Apply a palette to a scaled image",
+      "input": "imagesc(peaks(60));\ncolormap('jet');\ncolorbar;"
+    },
+    {
+      "description": "Compare palettes across subplots",
+      "input": "subplot(1, 2, 1);\nsurf(peaks(40));\ncolormap('parula');\nsubplot(1, 2, 2);\ncontourf(peaks(40));\ncolormap('turbo');"
+    }
+  ],
+  "links": [
+    { "label": "colorbar", "url": "./colorbar" },
+    { "label": "imagesc", "url": "./imagesc" },
+    { "label": "image", "url": "./image" },
+    { "label": "surf", "url": "./surf" },
+    { "label": "contourf", "url": "./contourf" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs"
+  }
+}

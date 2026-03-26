@@ -4,19 +4,21 @@
   "keywords": [
     "surf",
     "surface plot",
-    "3-D plotting",
-    "gpuArray"
+    "3-D surface",
+    "height map",
+    "matlab surf",
+    "gpu surface rendering"
   ],
-  "summary": "Render MATLAB-compatible 3-D surface plots.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/surf.html"
-  ],
+  "summary": "Create shaded 3-D surface plots from grids or mesh coordinates with GPU-backed rendering and MATLAB `surf` semantics.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": [],
+    "precisions": [
+      "single",
+      "double"
+    ],
     "broadcasting": "none",
-    "notes": "Single-precision gpuArray height maps render zero-copy via the shared WebGPU context; other inputs are gathered before plotting."
+    "notes": "`surf` uses the shared surface pipeline. GPU-friendly inputs can stay resident through the rendering path when the plotting device is available."
   },
   "fusion": {
     "elementwise": false,
@@ -26,73 +28,48 @@
   },
   "requires_feature": null,
   "tested": {
-    "unit": "builtins::plotting::surf::tests"
+    "unit": "builtins::plotting::surf::tests",
+    "integration": "runmat-plot/tests/renderer_tests.rs"
   },
-  "description": "`surf(X, Y, Z)` draws a shaded surface where `X` and `Y` provide axis coordinates and `Z` provides heights. RunMat accepts either (1) vector axes `X` and `Y` plus a grid `Z` with `numel(X) * numel(Y)` elements stored in column-major order, or (2) meshgrid-style coordinate matrices `X`/`Y` that match the shape of `Z`. When `Z` is a single-precision gpuArray and the shared WebGPU renderer is active, the surface geometry stays on the device and feeds a compute shader that emits renderer-ready vertices.",
+  "description": "`surf` creates shaded 3-D surface plots from either vector axes plus a height grid or meshgrid-style coordinate matrices. In RunMat it returns a surface handle, participates in the same graphics-object system as other plotting builtins, and uses the shared surface rendering path that also underpins image and composite surface workflows.",
   "behaviors": [
-    "Axis vectors must be non-empty and `Z` must contain exactly `length(X) * length(Y)` elements.",
-    "Single-precision gpuArray height maps stream directly into the renderer; other precisions gather to host memory before plotting.",
-    "Surfaces default to the Parula colormap with smooth shading and lighting enabled."
+    "`surf(Z)` uses implicit axes, while `surf(X, Y, Z)` accepts either vector axes or meshgrid-style coordinate matrices, following MATLAB `surf` call forms.",
+    "The returned value is a surface handle that can be inspected and updated through `get` and `set`.",
+    "Surface plots naturally interact with `view`, `zlabel`, `colorbar`, `colormap`, and `shading` because they all operate on the same subplot-local axes state.",
+    "GPU-backed surface rendering is the preferred path when exported buffers and the shared plotting device are available; otherwise RunMat gathers once and renders the same surface semantics on the host path.",
+    "`surf` is the shaded/fill-oriented member of the surface family, while `mesh` emphasizes wireframe rendering and `surfc` adds contour overlays."
   ],
   "examples": [
     {
-      "description": "",
-      "input": "x = linspace(-2, 2, 50);\ny = linspace(-2, 2, 50);\nz = meshgrid(x, y);\nsurf(x, y, sin(x)' * cos(y))"
+      "description": "Create a shaded surface from a height grid",
+      "input": "[X, Y] = meshgrid(linspace(-2, 2, 80), linspace(-2, 2, 80));\nZ = sin(X.^2 + Y.^2) ./ (1 + X.^2 + Y.^2);\nsurf(X, Y, Z);"
     },
     {
-      "description": "Wave interference from 8 point sources",
-      "input": "N = 300;\nx = linspace(-10, 10, N);\ny = linspace(-10, 10, N);\n[X, Y] = meshgrid(single(x), single(y));\n\n% Gaussian envelope — smoothly damps the surface toward the edges\nenvelope = exp(-(X.^2 + Y.^2) / 25);\n\nfor t = 1:80\n    Z = zeros(N, N, 'single');\n\n    % Superpose 8 wave sources equally spaced around a circle\n    for k = 1:8\n        a = 2 * pi * k / 8;\n        cx = 6 * cos(a);\n        cy = 6 * sin(a);\n        r = sqrt((X - cx).^2 + (Y - cy).^2) + 0.1;\n\n        Z = Z + sin(5 * r - t * 0.2 + k * 0.8) ./ (1 + r);\n    end\n\n    Z = Z .* envelope;\n    surf(x, y, Z);\n    colormap(\"jet\");\n    shading(\"interp\");\n    drawnow;\nend"
+      "description": "Pair surf with colormap, shading, and colorbar",
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 100), linspace(-3, 3, 100));\nZ = cos(X) .* sin(Y);\nsurf(X, Y, Z);\ncolormap('jet');\nshading interp;\ncolorbar;"
+    },
+    {
+      "description": "Adjust camera state and z-axis labeling for a surface",
+      "input": "[X, Y] = meshgrid(linspace(-2, 2, 60), linspace(-2, 2, 60));\nZ = X .* exp(-X.^2 - Y.^2);\nh = surf(X, Y, Z);\nzlabel('Height');\nview(45, 30);\nget(h, 'Type')",
+      "output": "ans =\n    'surface'"
     }
   ],
-  "faqs": [],
   "links": [
-    {
-      "label": "bar",
-      "url": "./bar"
-    },
-    {
-      "label": "contour",
-      "url": "./contour"
-    },
-    {
-      "label": "contourf",
-      "url": "./contourf"
-    },
-    {
-      "label": "hist",
-      "url": "./hist"
-    },
-    {
-      "label": "mesh",
-      "url": "./mesh"
-    },
-    {
-      "label": "meshc",
-      "url": "./meshc"
-    },
-    {
-      "label": "plot",
-      "url": "./plot"
-    },
-    {
-      "label": "scatter",
-      "url": "./scatter"
-    },
-    {
-      "label": "scatter3",
-      "url": "./scatter3"
-    },
-    {
-      "label": "stairs",
-      "url": "./stairs"
-    },
-    {
-      "label": "surfc",
-      "url": "./surfc"
-    }
+    { "label": "mesh", "url": "./mesh" },
+    { "label": "surfc", "url": "./surfc" },
+    { "label": "view", "url": "./view" },
+    { "label": "zlabel", "url": "./zlabel" },
+    { "label": "colormap", "url": "./colormap" },
+    { "label": "shading", "url": "./shading" },
+    { "label": "colorbar", "url": "./colorbar" }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/surf.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/surf.rs"
-  }
+  },
+  "gpu_residency": "`surf` preserves GPU residency on the happy path through the shared surface rendering pipeline. When a direct GPU render path is not available for the active input combination, RunMat gathers once and builds the same surface plot semantics on the fallback path.",
+  "gpu_behavior": [
+    "The surface pipeline is shared across multiple plot families, which keeps `surf` aligned with image, contour-composite, and surface-style rendering behavior.",
+    "Surface color limits and subplot-local metadata stay consistent regardless of whether the geometry is emitted from GPU buffers or host tensors."
+  ]
 }

@@ -3,20 +3,22 @@
   "category": "plotting",
   "keywords": [
     "scatter",
+    "scatter plot",
     "2-D scatter",
     "marker plot",
-    "gpuArray"
+    "matlab scatter",
+    "point cloud visualization"
   ],
-  "summary": "Render MATLAB-compatible 2-D scatter plots.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/scatter.html"
-  ],
+  "summary": "Create 2-D scatter plots for point clouds, size/color encoding, and MATLAB `scatter` workflows.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": [],
+    "precisions": [
+      "single",
+      "double"
+    ],
     "broadcasting": "none",
-    "notes": "Single-precision gpuArray inputs render zero-copy via the shared WebGPU context; other data is gathered to the host."
+    "notes": "`scatter` is a rendering sink. GPU-resident inputs can stay on device when the shared plotting path can consume exported point buffers directly."
   },
   "fusion": {
     "elementwise": false,
@@ -26,70 +28,45 @@
   },
   "requires_feature": null,
   "tested": {
-    "unit": "builtins::plotting::scatter::tests"
+    "unit": "builtins::plotting::scatter::tests",
+    "integration": "runmat-plot/tests/renderer_tests.rs"
   },
-  "description": "`scatter(x, y)` plots paired points in 2-D space. The RunMat implementation mirrors MATLAB's default styling—circular markers, grid enabled, and axis labels applied to the active figure. Positional size/color arguments (`S`, `C`), the `'filled'` flag, and name-value pairs for marker appearance are supported.",
+  "description": "`scatter` creates 2-D marker plots from paired x and y coordinates. In RunMat it returns a scatter handle, participates in the shared plotting property system, and supports the MATLAB `scatter(x, y, s, c, 'filled')` style of workflows for marker size, marker color, and display-name driven chart composition.",
   "behaviors": [
-    "Inputs must contain the same number of elements. Row and column vectors are both accepted.",
-    "Single-precision gpuArray inputs stay on the device when the shared WebGPU renderer is active, so browser and native builds avoid a gather step. Other tensors automatically fall back to the host path.",
-    "Positional size/color inputs plus `'Marker*'` name-value pairs match MATLAB semantics. Per-point size/color vectors currently force the CPU path until the scatter GPU shaders consume those attributes directly (tracked separately)."
+    "`scatter(x, y)` requires the same element count in both inputs.",
+    "The returned value is a scatter-handle object that can be inspected and updated through `get` and `set`.",
+    "Marker size, marker face color, marker edge color, and display name all flow through the shared plotting handle model.",
+    "Scatter plots integrate naturally with `subplot` and `legend`, so series labels and axes-local state stay scoped to the active axes.",
+    "GPU-resident point buffers can be rendered directly on the happy path; unsupported combinations fall back to host materialization while preserving the same visible result."
   ],
   "examples": [
     {
-      "description": "",
-      "input": "t = linspace(0, 2*pi, 100);\nscatter(cos(t), sin(t))"
+      "description": "Create a basic 2-D scatter plot",
+      "input": "t = linspace(0, 2*pi, 100);\nscatter(cos(t), sin(t));"
+    },
+    {
+      "description": "Use marker sizing and color-style workflows",
+      "input": "x = linspace(0, 1, 25);\ny = x.^2;\nh = scatter(x, y);\nset(h, 'SizeData', 12, 'MarkerFaceColor', 'r', 'Marker', 'o');"
+    },
+    {
+      "description": "Drive the legend from scatter object display names",
+      "input": "x = 1:10;\nh1 = scatter(x, x);\nset(h1, 'DisplayName', 'linear');\nhold on;\nh2 = scatter(x, x.^2);\nset(h2, 'DisplayName', 'quadratic');\nlegend;"
     }
   ],
-  "faqs": [],
   "links": [
-    {
-      "label": "bar",
-      "url": "./bar"
-    },
-    {
-      "label": "contour",
-      "url": "./contour"
-    },
-    {
-      "label": "contourf",
-      "url": "./contourf"
-    },
-    {
-      "label": "hist",
-      "url": "./hist"
-    },
-    {
-      "label": "mesh",
-      "url": "./mesh"
-    },
-    {
-      "label": "meshc",
-      "url": "./meshc"
-    },
-    {
-      "label": "plot",
-      "url": "./plot"
-    },
-    {
-      "label": "scatter3",
-      "url": "./scatter3"
-    },
-    {
-      "label": "stairs",
-      "url": "./stairs"
-    },
-    {
-      "label": "surf",
-      "url": "./surf"
-    },
-    {
-      "label": "surfc",
-      "url": "./surfc"
-    }
+    { "label": "plot", "url": "./plot" },
+    { "label": "scatter3", "url": "./scatter3" },
+    { "label": "legend", "url": "./legend" },
+    { "label": "get", "url": "./get" },
+    { "label": "set", "url": "./set" }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/scatter.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/scatter.rs"
   },
-  "gpu_residency": "`scatter` terminates fusion graphs. If the inputs are `single` gpuArrays and the shared plotter device is active, their buffers are consumed zero-copy by the renderer. Otherwise the tensors are gathered before plotting, matching MATLAB semantics."
+  "gpu_residency": "`scatter` preserves GPU residency when the plotting path can consume exported point buffers directly. If the active marker/style combination cannot use the direct path, RunMat gathers once and renders the same plot semantics on the fallback path.",
+  "gpu_behavior": [
+    "The direct path keeps point buffers on the device and avoids an unnecessary host round-trip for supported scatter workflows.",
+    "Marker styling and legend/display-name behavior stay consistent across GPU and host fallback rendering."
+  ]
 }

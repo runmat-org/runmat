@@ -1,0 +1,48 @@
+{
+  "title": "semilogy",
+  "category": "plotting",
+  "keywords": [
+    "semilogy",
+    "logarithmic y-axis",
+    "semilog plot",
+    "matlab semilogy",
+    "exponential plot"
+  ],
+  "summary": "Plot data with a logarithmic y-axis for exponential trends, decay curves, and MATLAB `semilogy` workflows.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::semilogy::tests"
+  },
+  "description": "`semilogy` uses the standard RunMat line-plot path and then marks the active y-axis as logarithmic. It is a natural fit for exponential decay, growth curves, and magnitude data that spans orders of magnitude along Y while preserving MATLAB `semilogy` call forms.",
+  "behaviors": [
+    "The returned value is a numeric line handle.",
+    "Only the y-axis is switched to log scale; the x-axis remains linear.",
+    "Y log-mode state is subplot-local and does not leak into other subplot axes.",
+    "Positive y-values are the meaningful domain for a logarithmic y-axis."
+  ],
+  "examples": [
+    {
+      "description": "Plot an exponential decay on a logarithmic y-axis",
+      "input": "t = linspace(0, 10, 200);\nsemilogy(t, exp(-t));"
+    },
+    {
+      "description": "Compare multiple decays on the same axes",
+      "input": "t = linspace(0, 10, 200);\nh1 = semilogy(t, exp(-t));\nset(h1, 'DisplayName', 'exp(-t)');\nhold on;\nh2 = semilogy(t, exp(-0.3*t));\nset(h2, 'DisplayName', 'exp(-0.3t)');\nlegend;"
+    },
+    {
+      "description": "Inspect the y-axis scale after plotting",
+      "input": "t = 0:0.1:4;\nsemilogy(t, exp(t));\nax = gca;\nget(ax, 'YScale')",
+      "output": "ans =\n    'log'"
+    }
+  ],
+  "links": [
+    { "label": "plot", "url": "./plot" },
+    { "label": "semilogx", "url": "./semilogx" },
+    { "label": "loglog", "url": "./loglog" },
+    { "label": "axis", "url": "./axis" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/semilogy.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/semilogy.rs"
+  }
+}

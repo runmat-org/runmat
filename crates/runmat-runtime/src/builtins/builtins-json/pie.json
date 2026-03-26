@@ -1,0 +1,48 @@
+{
+  "title": "pie",
+  "category": "plotting",
+  "keywords": [
+    "pie",
+    "pie chart",
+    "exploded pie chart",
+    "slice labels",
+    "matlab pie"
+  ],
+  "summary": "Create pie charts for part-to-whole comparisons, exploded slices, and MATLAB `pie` workflows.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::pie::tests",
+    "integration": "runmat-plot/tests/renderer_tests.rs"
+  },
+  "description": "`pie` creates part-to-whole charts from numeric slice values. In RunMat it returns a pie handle, supports slice metadata and labels, and uses the shared plotting/replay/export stack so labels, explode state, and figure overlays stay consistent across interactive rendering and export paths.",
+  "behaviors": [
+    "Slice values determine the relative angular extent of each wedge.",
+    "Explode-style workflows and slice labels are part of the pie rendering path.",
+    "The returned value is a pie-handle object participating in the same broader plotting handle model used across the plotting stack.",
+    "Pie labels and overlay semantics survive replay/export because they are part of the shared event/scene path.",
+    "Pie charts are especially useful as the part-to-whole complement to bar and histogram-style quantitative plots."
+  ],
+  "examples": [
+    {
+      "description": "Create a basic pie chart",
+      "input": "pie([2 3 5]);"
+    },
+    {
+      "description": "Create an exploded pie chart",
+      "input": "values = [4 2 3 1];\nexplode = [1 0 1 0];\npie(values, explode);"
+    },
+    {
+      "description": "Use labels for slice names",
+      "input": "values = [5 3 2];\nlabels = {'compute', 'io', 'render'};\npie(values, labels);"
+    }
+  ],
+  "links": [
+    { "label": "bar", "url": "./bar" },
+    { "label": "histogram", "url": "./histogram" },
+    { "label": "legend", "url": "./legend" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/pie.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/pie.rs"
+  }
+}

@@ -1,0 +1,48 @@
+{
+  "title": "set",
+  "category": "plotting",
+  "keywords": [
+    "set",
+    "graphics handle",
+    "plot properties",
+    "matlab set",
+    "update plotting state"
+  ],
+  "summary": "Update figure, axes, and plot-object properties through RunMat’s graphics handles and MATLAB-style `set` workflows.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::set::tests"
+  },
+  "description": "`set` applies property/value pairs to plotting handles. In RunMat, it is the public write path for the shared graphics object model: you can update text handles, legend handles, axes handles, and plot-child handles such as lines, stems, error bars, histograms, images, contour objects, and more through a MATLAB-style `set(h, 'Property', value)` interface.",
+  "behaviors": [
+    "`set` requires a plotting handle followed by one or more property/value pairs.",
+    "Different handle families accept different properties, and unsupported properties raise plotting errors rather than silently succeeding.",
+    "Axes-local state such as limits, log modes, and legend visibility can be updated through axes handles.",
+    "Plot-child properties such as line width, display names, marker styling, and selected object semantics are updated in place through the returned plot handles.",
+    "Legend and text objects participate in the same property path, so figure annotation workflows stay consistent with the rest of the handle model."
+  ],
+  "examples": [
+    {
+      "description": "Style a line after plotting",
+      "input": "h = plot(0:0.1:1, (0:0.1:1).^2);\nset(h, 'Color', 'r', 'LineWidth', 2, 'DisplayName', 'quadratic');"
+    },
+    {
+      "description": "Update axes-local state through an axes handle",
+      "input": "ax = subplot(1, 2, 2);\nplot(1:5, [2 3 5 4 1]);\nset(ax, 'XScale', 'log', 'Grid', false);"
+    },
+    {
+      "description": "Change a legend after it has been created",
+      "input": "plot(1:5, 1:5);\nlg = legend('series');\nset(lg, 'Location', 'southwest', 'Orientation', 'horizontal');"
+    }
+  ],
+  "links": [
+    { "label": "get", "url": "./get" },
+    { "label": "legend", "url": "./legend" },
+    { "label": "subplot", "url": "./subplot" },
+    { "label": "plot", "url": "./plot" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/set.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/set.rs"
+  }
+}

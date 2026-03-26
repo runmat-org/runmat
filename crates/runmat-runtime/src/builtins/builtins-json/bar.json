@@ -4,21 +4,21 @@
   "keywords": [
     "bar",
     "bar chart",
-    "categories",
-    "gpuArray"
+    "grouped bar chart",
+    "stacked bar chart",
+    "matlab bar",
+    "categorical comparison"
   ],
-  "summary": "Render MATLAB-compatible bar charts.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/bar.html"
-  ],
+  "summary": "Create bar charts for categorical comparisons, grouped series, stacked values, and MATLAB `bar` workflows.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [
-      "single"
+      "single",
+      "double"
     ],
     "broadcasting": "none",
-    "notes": "Single-precision gpuArray vectors stay on the device and feed the shared WebGPU renderer; other inputs gather automatically."
+    "notes": "`bar` uses the modern bar/surface-style rendering path, including GPU-backed paths for supported input combinations."
   },
   "fusion": {
     "elementwise": false,
@@ -28,70 +28,44 @@
   },
   "requires_feature": null,
   "tested": {
-    "unit": "builtins::plotting::bar::tests"
+    "unit": "builtins::plotting::bar::tests",
+    "integration": "runmat-plot/tests/renderer_tests.rs"
   },
-  "description": "`bar(y)` plots the values of `y` as vertical bars with MATLAB-compatible defaults. RunMat matches MATLAB's behaviour for 1-D inputs: categories are labelled `1,2,...,n`, grid lines are enabled, and the current figure receives a descriptive title and axis labels.",
+  "description": "`bar` creates vertical bar charts from vectors or matrix-style inputs. In RunMat it returns a bar handle, supports the common MATLAB `bar(y)` workflows as well as grouped and stacked behaviors, and integrates with the shared handle/property system.",
   "behaviors": [
-    "Inputs must be numeric vectors. Scalars produce a single bar; empty inputs raise MATLAB-style errors.",
-    "Single-precision gpuArray inputs stay on the device and stream directly into the shared renderer for zero-copy plotting when WebGPU is available. Other data gathers automatically.",
-    "Future work will add grouped/stacked variants; this initial builtin focuses on the common `bar(y)` form used throughout the standard library tests."
+    "Vector inputs create a single bar series with implicit category positions.",
+    "Matrix inputs support grouped and stacked bar-style rendering workflows.",
+    "The returned value is a bar handle that can be queried and updated through `get` and `set`.",
+    "Display names, bar width, and face color participate in the shared plotting object/property model.",
+    "RunMat prefers GPU-backed rendering when supported input/layout combinations are present, while preserving the same bar semantics on fallback paths."
   ],
   "examples": [
     {
-      "description": "",
-      "input": "values = [3 5 2 9];\nbar(values)"
+      "description": "Create a basic bar chart from a vector",
+      "input": "values = [3 5 2 9];\nbar(values);"
+    },
+    {
+      "description": "Create grouped bars from a matrix",
+      "input": "Y = [3 5 2; 4 6 1; 5 4 3];\nbar(Y);"
+    },
+    {
+      "description": "Style a bar object and label it for the legend",
+      "input": "h = bar([2 4 1 5]);\nset(h, 'FaceColor', 'g', 'DisplayName', 'counts');\nlegend;"
     }
   ],
-  "faqs": [],
   "links": [
-    {
-      "label": "contour",
-      "url": "./contour"
-    },
-    {
-      "label": "contourf",
-      "url": "./contourf"
-    },
-    {
-      "label": "hist",
-      "url": "./hist"
-    },
-    {
-      "label": "mesh",
-      "url": "./mesh"
-    },
-    {
-      "label": "meshc",
-      "url": "./meshc"
-    },
-    {
-      "label": "plot",
-      "url": "./plot"
-    },
-    {
-      "label": "scatter",
-      "url": "./scatter"
-    },
-    {
-      "label": "scatter3",
-      "url": "./scatter3"
-    },
-    {
-      "label": "stairs",
-      "url": "./stairs"
-    },
-    {
-      "label": "surf",
-      "url": "./surf"
-    },
-    {
-      "label": "surfc",
-      "url": "./surfc"
-    }
+    { "label": "hist", "url": "./hist" },
+    { "label": "histogram", "url": "./histogram" },
+    { "label": "pie", "url": "./pie" },
+    { "label": "legend", "url": "./legend" },
+    { "label": "set", "url": "./set" }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/bar.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/bar.rs"
   },
-  "gpu_residency": "`bar` terminates fusion graphs. Single-precision gpuArray vectors reuse provider buffers via the shared WebGPU context; other precisions gather to the host before plotting."
+  "gpu_residency": "`bar` preserves GPU residency where the bar geometry pipeline can consume exported buffers directly. Fallback rendering gathers once and preserves the same grouping/stacking semantics.",
+  "gpu_behavior": [
+    "Bar rendering shares the same plotting architecture as the rest of the plotting stack."
+  ]
 }

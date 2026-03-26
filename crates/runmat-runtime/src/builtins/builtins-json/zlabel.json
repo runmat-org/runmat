@@ -1,0 +1,48 @@
+{
+  "title": "zlabel",
+  "category": "plotting",
+  "keywords": [
+    "zlabel",
+    "z-axis label",
+    "3-D axis label",
+    "matlab zlabel",
+    "surface axis labeling"
+  ],
+  "summary": "Set z-axis labels for 3-D plots, surfaces, and MATLAB `zlabel` workflows.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::zlabel::tests"
+  },
+  "description": "`zlabel` sets or updates the z-axis label for the current axes or an explicit axes handle. In RunMat it returns a text handle, stores the label as subplot-local axes metadata, and supports the same multiline/property workflows as the other shared text builtins used for titles and axis labels.",
+  "behaviors": [
+    "The returned value is a text handle that can be queried and updated through `get` and `set`.",
+    "String scalars, string arrays, and cell arrays can all be used to build multiline z-axis labels in MATLAB-style workflows.",
+    "Font and text styling properties flow through the shared plotting text-property system, so `get` and `set` work on the returned handle.",
+    "Z-axis labels are subplot-local and stay attached to the axes they were created for."
+  ],
+  "examples": [
+    {
+      "description": "Add a z-axis label to a surface plot",
+      "input": "surf(peaks(50));\nzlabel('Height');"
+    },
+    {
+      "description": "Create a multiline z-axis label and style it",
+      "input": "h = zlabel([\"Depth\", \"(km)\"]);\nset(h, 'FontWeight', 'bold');"
+    },
+    {
+      "description": "Target a specific subplot axes",
+      "input": "subplot(1, 2, 1);\nsurf(peaks(30));\nax = subplot(1, 2, 2);\nplot3(cos(0:0.1:5), sin(0:0.1:5), 0:0.1:5);\nzlabel(ax, 'Trajectory Height');"
+    }
+  ],
+  "links": [
+    { "label": "view", "url": "./view" },
+    { "label": "plot3", "url": "./plot3" },
+    { "label": "surf", "url": "./surf" },
+    { "label": "get", "url": "./get" },
+    { "label": "set", "url": "./set" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/zlabel.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/zlabel.rs"
+  }
+}

@@ -3,22 +3,21 @@
   "category": "plotting",
   "keywords": [
     "mesh",
-    "wireframe",
-    "3-D plotting",
-    "gpuArray"
+    "wireframe plot",
+    "wireframe surface",
+    "matlab mesh",
+    "3-D grid visualization"
   ],
-  "summary": "Render MATLAB-compatible mesh (wireframe) plots.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/mesh.html"
-  ],
+  "summary": "Create wireframe surface plots for grids, height fields, and MATLAB `mesh` style visualization.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [
-      "single"
+      "single",
+      "double"
     ],
     "broadcasting": "none",
-    "notes": "Single-precision gpuArray height maps stream directly into the shared WebGPU renderer; other inputs gather before plotting."
+    "notes": "`mesh` reuses the shared surface pipeline with wireframe-oriented rendering semantics."
   },
   "fusion": {
     "elementwise": false,
@@ -30,59 +29,35 @@
   "tested": {
     "unit": "builtins::plotting::mesh::tests"
   },
-  "description": "`mesh(X, Y, Z)` draws a wireframe surface. RunMat reuses the `SurfacePlot` renderer with wireframe mode enabled and no fill, matching MATLAB's default mesh aesthetics.",
+  "description": "`mesh` creates wireframe surface plots from vector axes or meshgrid-style coordinates plus a height grid. In RunMat it shares the same surface/object infrastructure as `surf`, but presents the data as a wireframe-style surface rather than a shaded filled surface, matching MATLAB `mesh` expectations.",
   "behaviors": [
-    "`X` and `Y` are axis vectors; `Z` must contain `length(X) * length(Y)` values in column-major order.",
-    "Surfaces default to a Turbo colormap with `wireframe = true` and faceted shading.",
-    "Single-precision gpuArray height maps stream directly into the shared WebGPU renderer; other inputs gather automatically."
+    "`mesh(Z)` uses implicit axes, while `mesh(X, Y, Z)` accepts vector axes or meshgrid-style coordinate matrices.",
+    "The builtin returns a surface handle, so mesh plots can still be inspected through the graphics-object system.",
+    "`mesh` is the wireframe-oriented companion to `surf`; for combined wireframe plus contour overlays, use `meshc`.",
+    "RunMat uses the shared surface pipeline for mesh rendering, so view, z-axis labeling, and subplot-local state behave consistently across the surface family.",
+    "GPU-backed rendering is preferred when the plotting device can consume exported buffers directly."
   ],
-  "examples": [],
-  "faqs": [],
-  "links": [
+  "examples": [
     {
-      "label": "bar",
-      "url": "./bar"
+      "description": "Create a wireframe mesh from a height field",
+      "input": "[X, Y] = meshgrid(linspace(-2, 2, 60), linspace(-2, 2, 60));\nZ = sin(X.^2 + Y.^2);\nmesh(X, Y, Z);"
     },
     {
-      "label": "contour",
-      "url": "./contour"
+      "description": "Compare wireframe presentation with subplot-local state",
+      "input": "subplot(1, 2, 1);\n[X, Y] = meshgrid(linspace(-2, 2, 40), linspace(-2, 2, 40));\nZ = cos(X) .* sin(Y);\nmesh(X, Y, Z);\nview(3);\nsubplot(1, 2, 2);\nsurf(X, Y, Z);\nview(3);"
     },
     {
-      "label": "contourf",
-      "url": "./contourf"
-    },
-    {
-      "label": "hist",
-      "url": "./hist"
-    },
-    {
-      "label": "meshc",
-      "url": "./meshc"
-    },
-    {
-      "label": "plot",
-      "url": "./plot"
-    },
-    {
-      "label": "scatter",
-      "url": "./scatter"
-    },
-    {
-      "label": "scatter3",
-      "url": "./scatter3"
-    },
-    {
-      "label": "stairs",
-      "url": "./stairs"
-    },
-    {
-      "label": "surf",
-      "url": "./surf"
-    },
-    {
-      "label": "surfc",
-      "url": "./surfc"
+      "description": "Inspect the returned surface handle from mesh",
+      "input": "[X, Y] = meshgrid(1:20, 1:20);\nZ = X + Y;\nh = mesh(X, Y, Z);\nget(h, 'Type')",
+      "output": "ans =\n    'surface'"
     }
+  ],
+  "links": [
+    { "label": "surf", "url": "./surf" },
+    { "label": "meshc", "url": "./meshc" },
+    { "label": "view", "url": "./view" },
+    { "label": "zlabel", "url": "./zlabel" },
+    { "label": "colormap", "url": "./colormap" }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/mesh.rs`",

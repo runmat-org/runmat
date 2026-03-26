@@ -1,0 +1,51 @@
+{
+  "title": "view",
+  "category": "plotting",
+  "keywords": [
+    "view",
+    "3-D camera",
+    "azimuth elevation",
+    "matlab view",
+    "rotate 3-D plot"
+  ],
+  "summary": "Control 3-D camera angles for surfaces and spatial plots using azimuth/elevation views and MATLAB `view` semantics.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::view::tests"
+  },
+  "description": "`view` reads or updates the camera orientation for the current axes or an explicit axes handle. In RunMat it stores subplot-local azimuth and elevation state, supports MATLAB `view(2)`, `view(3)`, `view([az el])`, and `view(az, el)` call forms, and integrates with the same handle/property system used by `get` and `set`.",
+  "behaviors": [
+    "`view` with no angle arguments queries the current `[az el]` pair.",
+    "`view(2)` selects the standard top-down 2-D camera and `view(3)` restores the standard 3-D camera preset.",
+    "Explicit azimuth/elevation values can be passed as two scalars or as a two-element vector.",
+    "View state is subplot-local and does not leak across different axes in a subplot grid.",
+    "Axes handles can be passed explicitly so camera changes target a specific subplot rather than whichever axes happens to be current."
+  ],
+  "examples": [
+    {
+      "description": "Set an explicit 3-D camera angle",
+      "input": "[X, Y] = meshgrid(linspace(-2, 2, 60), linspace(-2, 2, 60));\nZ = sin(X.^2 + Y.^2);\nsurf(X, Y, Z);\nview(45, 30);"
+    },
+    {
+      "description": "Use MATLAB-style view presets",
+      "input": "surf(peaks(40));\nview(2);\nview(3);"
+    },
+    {
+      "description": "Query a subplot-local camera",
+      "input": "ax = subplot(1, 2, 2);\nplot3(cos(0:0.1:5), sin(0:0.1:5), 0:0.1:5);\nview(ax, [60 20]);\nget(ax, 'View')",
+      "output": "% Returns a 1x2 vector [60 20]"
+    }
+  ],
+  "links": [
+    { "label": "plot3", "url": "./plot3" },
+    { "label": "scatter3", "url": "./scatter3" },
+    { "label": "surf", "url": "./surf" },
+    { "label": "zlabel", "url": "./zlabel" },
+    { "label": "get", "url": "./get" },
+    { "label": "set", "url": "./set" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/view.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/view.rs"
+  }
+}

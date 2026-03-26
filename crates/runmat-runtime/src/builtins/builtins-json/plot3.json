@@ -1,0 +1,71 @@
+{
+  "title": "plot3",
+  "category": "plotting",
+  "keywords": [
+    "plot3",
+    "3-D line plot",
+    "trajectory plot",
+    "parametric curve",
+    "matlab plot3",
+    "spatial path"
+  ],
+  "summary": "Create 3-D line plots for trajectories, parametric curves, and spatial paths with MATLAB `plot3` semantics.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`plot3` uses the dedicated 3-D line rendering path and can keep plotting-compatible GPU inputs resident on device."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::plot3::tests"
+  },
+  "description": "`plot3` creates line plots in 3-D space from matching x, y, and z inputs. In RunMat it returns a line3 handle, participates in the graphics-object system, and supports both host and GPU-backed inputs through the dedicated 3-D line pipeline.",
+  "behaviors": [
+    "`plot3(x, y, z)` requires matching element counts in all three inputs.",
+    "The builtin returns a 3-D line handle that can be inspected and updated through `get` and `set`.",
+    "Multiple 3-D series in one call create multiple line objects and return the handle for the first created series.",
+    "`plot3` is camera-aware and naturally pairs with `view` and `zlabel` in the subplot-local 3-D state model.",
+    "GPU-backed 3-D line rendering is used when the shared plotting device can consume exported buffers directly."
+  ],
+  "examples": [
+    {
+      "description": "Create a 3-D helix",
+      "input": "t = linspace(0, 6*pi, 300);\nplot3(cos(t), sin(t), t);"
+    },
+    {
+      "description": "Plot multiple 3-D trajectories and label them",
+      "input": "t = linspace(0, 4*pi, 200);\nh1 = plot3(cos(t), sin(t), t);\nset(h1, 'DisplayName', 'helix A');\nhold on;\nh2 = plot3(cos(t), sin(t), -t);\nset(h2, 'DisplayName', 'helix B');\nlegend;"
+    },
+    {
+      "description": "Control the camera and z-axis after plotting",
+      "input": "t = linspace(0, 4*pi, 150);\nh = plot3(cos(t), sin(t), t);\nzlabel('Height');\nview(45, 20);\nget(h, 'Type')",
+      "output": "ans =\n    'line'"
+    }
+  ],
+  "links": [
+    { "label": "scatter3", "url": "./scatter3" },
+    { "label": "view", "url": "./view" },
+    { "label": "zlabel", "url": "./zlabel" },
+    { "label": "legend", "url": "./legend" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/plot3.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/plot3.rs"
+  },
+  "gpu_residency": "`plot3` preserves GPU residency when the 3-D line pipeline can consume exported coordinate buffers directly. Fallback rendering gathers once while preserving the same handle and axes semantics.",
+  "gpu_behavior": [
+    "The dedicated 3-D line pipeline is separate from 2-D `plot`, which keeps camera-aware rendering and bounds handling explicit.",
+    "Subview state, labels, and line object behavior remain identical across GPU and host fallback paths."
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "title": "colorbar",
+  "category": "plotting",
+  "keywords": [
+    "colorbar",
+    "color scale",
+    "image colorbar",
+    "surface colorbar",
+    "matlab colorbar"
+  ],
+  "summary": "Show or hide colorbars for images, surfaces, contours, and MATLAB `colorbar` workflows.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::cmds"
+  },
+  "description": "`colorbar` toggles the visibility of the color scale associated with the current axes. In RunMat it is subplot-local and is most often used with `imagesc`, `image`, `surf`, `contourf`, and related colormap-driven visualizations.",
+  "behaviors": [
+    "`colorbar on` enables the colorbar for the current axes.",
+    "`colorbar off` disables the colorbar for the current axes.",
+    "Calling `colorbar` with no argument toggles the current colorbar state.",
+    "Colorbar visibility is subplot-local and does not automatically affect other axes."
+  ],
+  "examples": [
+    {
+      "description": "Show a colorbar for a scaled image",
+      "input": "imagesc(peaks(60));\ncolorbar on;"
+    },
+    {
+      "description": "Use colorbars independently across subplots",
+      "input": "subplot(1, 2, 1);\ncontourf(peaks(40));\ncolorbar on;\nsubplot(1, 2, 2);\nsurf(peaks(40));\ncolorbar off;"
+    }
+  ],
+  "links": [
+    { "label": "colormap", "url": "./colormap" },
+    { "label": "imagesc", "url": "./imagesc" },
+    { "label": "surf", "url": "./surf" },
+    { "label": "contourf", "url": "./contourf" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs"
+  }
+}
