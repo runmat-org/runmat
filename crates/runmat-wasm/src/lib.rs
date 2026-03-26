@@ -2077,6 +2077,7 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
             "InvalidSubplotIndex"
         }
         FigureError::InvalidAxesHandle => "InvalidAxesHandle",
+        FigureError::InvalidPlotObjectHandle => "InvalidPlotObjectHandle",
         FigureError::RenderFailure { source } => {
             let details = source.to_string();
             let _ = Reflect::set(
