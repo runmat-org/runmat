@@ -149,7 +149,8 @@ pub async fn surf_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let Some((axes, plot_index)) = *plot_index_out.borrow() else {
         return render_result.map(|_| f64::NAN);
     };
-    let handle = crate::builtins::plotting::state::register_surface_handle(figure_handle, axes, plot_index);
+    let handle =
+        crate::builtins::plotting::state::register_surface_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
         let lower = err.to_string().to_lowercase();
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {

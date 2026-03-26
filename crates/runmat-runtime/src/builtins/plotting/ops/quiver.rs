@@ -16,6 +16,8 @@ use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_line_style_args, value_as_f64, LineStyleParseOptions};
 
 const BUILTIN_NAME: &str = "quiver";
+type QuiverArgs = (Option<usize>, Value, Value, Value, Value, Vec<Value>);
+type QuiverComponents = (Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>);
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::quiver")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -114,7 +116,8 @@ pub async fn quiver_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let Some((axes, plot_index)) = *plot_index_out.borrow() else {
         return render_result.map(|_| f64::NAN);
     };
-    let handle = crate::builtins::plotting::state::register_quiver_handle(figure_handle, axes, plot_index);
+    let handle =
+        crate::builtins::plotting::state::register_quiver_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
         let lower = err.to_string().to_lowercase();
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
@@ -143,7 +146,10 @@ fn build_quiver_gpu_plot(
     let v_ref = runmat_accelerate_api::export_wgpu_buffer(v)
         .ok_or_else(|| plotting_error(BUILTIN_NAME, "quiver: unable to export GPU V data"))?;
     if u_ref.len != v_ref.len || u_ref.precision != v_ref.precision {
-        return Err(plotting_error(BUILTIN_NAME, "quiver: U and V GPU inputs must match"));
+        return Err(plotting_error(
+            BUILTIN_NAME,
+            "quiver: U and V GPU inputs must match",
+        ));
     }
     let scalar = runmat_plot::gpu::ScalarType::from_is_f64(
         u_ref.precision == runmat_accelerate_api::ProviderPrecision::F64,
@@ -165,7 +171,7 @@ fn build_quiver_gpu_plot(
         .map(|_| ())
         .err()
         .map(|_| (0.0, 0.0))
-        .unwrap_or_else(|| if xy_mode == 0 { super::gpu_helpers::axis_bounds(x, BUILTIN_NAME).unwrap_or((0.0, 0.0)) } else { super::gpu_helpers::axis_bounds(x, BUILTIN_NAME).unwrap_or((0.0, 0.0)) });
+        .unwrap_or_else(|| super::gpu_helpers::axis_bounds(x, BUILTIN_NAME).unwrap_or((0.0, 0.0)));
     let (min_y, max_y) = super::gpu_helpers::axis_bounds(y, BUILTIN_NAME).unwrap_or((0.0, 0.0));
     let (min_u, max_u) = super::gpu_helpers::axis_bounds(u, BUILTIN_NAME).unwrap_or((0.0, 0.0));
     let (min_v, max_v) = super::gpu_helpers::axis_bounds(v, BUILTIN_NAME).unwrap_or((0.0, 0.0));
@@ -201,7 +207,12 @@ fn build_quiver_gpu_plot(
             head_size: parsed.head_size,
         },
     )
-    .map_err(|e| plotting_error(BUILTIN_NAME, format!("quiver: failed to build GPU vertices: {e}")))?;
+    .map_err(|e| {
+        plotting_error(
+            BUILTIN_NAME,
+            format!("quiver: failed to build GPU vertices: {e}"),
+        )
+    })?;
     let mut plot = QuiverPlot::from_gpu_buffer(
         parsed.color,
         parsed.line_width,
@@ -268,9 +279,7 @@ fn parse_quiver_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedQuiverS
     })
 }
 
-fn parse_quiver_args(
-    args: Vec<Value>,
-) -> crate::BuiltinResult<(Option<usize>, Value, Value, Value, Value, Vec<Value>)> {
+fn parse_quiver_args(args: Vec<Value>) -> crate::BuiltinResult<QuiverArgs> {
     if args.len() < 2 {
         return Err(plotting_error(
             BUILTIN_NAME,
@@ -280,17 +289,13 @@ fn parse_quiver_args(
     let mut it = args.into_iter();
     let mut target_axes = None;
     let first = it.next().unwrap();
-    let first = if let Ok(handle) =
+    let first = if let Ok(crate::builtins::plotting::properties::PlotHandle::Axes(_, axes)) =
         crate::builtins::plotting::properties::resolve_plot_handle(&first, BUILTIN_NAME)
     {
-        if let crate::builtins::plotting::properties::PlotHandle::Axes(_, axes) = handle {
-            target_axes = Some(axes);
-            it.next().ok_or_else(|| {
-                plotting_error(BUILTIN_NAME, "quiver: expected data after axes handle")
-            })?
-        } else {
-            first
-        }
+        target_axes = Some(axes);
+        it.next().ok_or_else(|| {
+            plotting_error(BUILTIN_NAME, "quiver: expected data after axes handle")
+        })?
     } else {
         first
     };
@@ -300,9 +305,18 @@ fn parse_quiver_args(
     match (third, fourth) {
         (None, _) => {
             let (x, y) = default_quiver_grid_from_values(&first, &second, BUILTIN_NAME)?;
-            Ok((target_axes, Value::Tensor(x), Value::Tensor(y), first, second, Vec::new()))
+            Ok((
+                target_axes,
+                Value::Tensor(x),
+                Value::Tensor(y),
+                first,
+                second,
+                Vec::new(),
+            ))
         }
-        (Some(third), Some(fourth)) => Ok((target_axes, first, second, third, fourth, it.collect())),
+        (Some(third), Some(fourth)) => {
+            Ok((target_axes, first, second, third, fourth, it.collect()))
+        }
         _ => Err(plotting_error(
             BUILTIN_NAME,
             "quiver: expected U,V or X,Y,U,V inputs",
@@ -376,7 +390,7 @@ fn materialize_quiver_components(
     u: Tensor,
     v: Tensor,
     builtin: &'static str,
-) -> crate::BuiltinResult<(Vec<f64>, Vec<f64>, Vec<f64>, Vec<f64>)> {
+) -> crate::BuiltinResult<QuiverComponents> {
     if u.rows != v.rows || u.cols != v.cols || u.data.len() != v.data.len() {
         return Err(plotting_error(
             builtin,
@@ -487,7 +501,11 @@ mod tests {
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert_eq!(fig.plot_axes_indices()[0], 1);
         assert_eq!(
-            get_builtin(vec![Value::Num(handle), Value::String("AutoScaleFactor".into())]).unwrap(),
+            get_builtin(vec![
+                Value::Num(handle),
+                Value::String("AutoScaleFactor".into())
+            ])
+            .unwrap(),
             Value::Num(2.5)
         );
         set_builtin(vec![

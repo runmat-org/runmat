@@ -1,6 +1,8 @@
 # GPU Plotting and Rendering Math
 
-Plotting begins with numerical data, but a plotted figure is not a direct display of raw arrays. Between data and image lies a sequence of mathematical constructions. Values are interpreted as samples over a domain, converted into geometric structure, normalized by axes state, assigned visible color, transformed by the current view, and finally rendered. The resulting figure is therefore a derived object: a visual representation built from data through geometry and transformation.
+Plotting begins with numerical data, but a plotted figure is not a direct display of raw arrays. Between data and image lies a sequence of mathematical constructions. Values are interpreted as samples over a domain, converted into geometric structure, normalized by axes state, assigned visible color, transformed by the current view, and finally rendered. 
+
+The resulting figure is therefore a derived object: a visual representation built from data through geometry and transformation onto a 2-D image plane.
 
 A sampled scalar field may be written as
 

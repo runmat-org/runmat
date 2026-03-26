@@ -81,7 +81,7 @@ pub fn set_properties(
     args: &[Value],
     builtin: &'static str,
 ) -> BuiltinResult<()> {
-    if args.is_empty() || args.len() % 2 != 0 {
+    if args.is_empty() || !args.len().is_multiple_of(2) {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: property/value arguments must come in pairs"),
@@ -150,7 +150,7 @@ pub fn parse_text_style_pairs(builtin: &'static str, args: &[Value]) -> BuiltinR
     if args.is_empty() {
         return Ok(TextStyle::default());
     }
-    if args.len() % 2 != 0 {
+    if !args.len().is_multiple_of(2) {
         return Err(plotting_error(
             builtin,
             format!("{builtin}: property/value arguments must come in pairs"),
@@ -1996,7 +1996,6 @@ fn apply_stem_property(
             "basevalue" => {
                 if let Some(v) = value_as_f64(value) {
                     stem.baseline = v;
-                    stem.color = stem.color;
                 }
             }
             "baseline" => {

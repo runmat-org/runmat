@@ -359,17 +359,12 @@ fn parse_stem_args(
     let mut it = args.into_iter();
     let mut target_axes = None;
     let first = it.next().unwrap();
-    let first = if let Ok(handle) =
+    let first = if let Ok(crate::builtins::plotting::properties::PlotHandle::Axes(_, axes)) =
         crate::builtins::plotting::properties::resolve_plot_handle(&first, BUILTIN_NAME)
     {
-        if let crate::builtins::plotting::properties::PlotHandle::Axes(_, axes) = handle {
-            target_axes = Some(axes);
-            it.next().ok_or_else(|| {
-                plotting_error(BUILTIN_NAME, "stem: expected data after axes handle")
-            })?
-        } else {
-            first
-        }
+        target_axes = Some(axes);
+        it.next()
+            .ok_or_else(|| plotting_error(BUILTIN_NAME, "stem: expected data after axes handle"))?
     } else {
         first
     };

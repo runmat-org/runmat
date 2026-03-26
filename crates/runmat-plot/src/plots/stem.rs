@@ -66,6 +66,7 @@ impl StemPlot {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub fn from_gpu_buffer(
         color: Vec4,
         line_width: f32,
@@ -360,7 +361,7 @@ fn include_segment(index: usize, style: LineStyle) -> bool {
     match style {
         LineStyle::Solid => true,
         LineStyle::Dashed => (index % 4) < 2,
-        LineStyle::Dotted => (index % 4) == 0,
+        LineStyle::Dotted => index.is_multiple_of(4),
         LineStyle::DashDot => {
             let m = index % 6;
             m < 2 || m == 3

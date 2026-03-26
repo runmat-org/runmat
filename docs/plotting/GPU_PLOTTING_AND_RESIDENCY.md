@@ -1,26 +1,28 @@
 # GPU Plotting and Residency
 
-GPU plotting begins with device-resident numerical data, but a rendered figure requires more than tensors. It requires interpreted structure: geometry, color, view state, and a finite image to display. Plotting therefore sits at the boundary between computation and observation. The numerical side of the system operates on arrays. The rendering side operates on scene data derived from those arrays.
+Plotting sits at the boundary between computation and observation. The numerical side of the system operates on arrays. The rendering side operates on scene data derived from those arrays.
 
-This distinction is the foundation of GPU plotting in RunMat. A tensor on the GPU is not yet a plot. A plot is a scene representation built from numerical data and axes-local state. The central questions are therefore not only whether data is on the GPU, but also what form that data is in, when it changes representation, and what work must be repeated as the scene changes.
+This distinction is the foundation of GPU plotting in RunMat. A tensor on the GPU is not yet a plot. A plot is a scene representation built from numerical data and axes-local state. The central questions are therefore: whether data is on the GPU, what form that data is in, when it changes representation, and what work must be repeated as the scene changes.
 
 ## Numeric arrays versus renderable scene data
 
 Numerical tensors and renderable plots are different kinds of objects. A tensor stores values in a form suited to array algebra, elementwise kernels, reductions, and fused numerical computation. A plot stores a visual interpretation of values: points, lines, surfaces, image cells, contour segments, colors, limits, and view-dependent state.
 
-This means that plotting is not simply another tensor operation with a picture attached at the end. A tensor answers questions such as value, shape, and dtype. A plot answers questions such as geometry, visibility, color mapping, and viewpoint. The same source samples may therefore lead to very different plot representations depending on whether they are interpreted as a line, a surface, an image, a contour field, or a vector field.
+A tensor answers questions such as value, shape, and dtype. A plot answers questions such as geometry, visibility, color mapping, and viewpoint. The same source samples may therefore lead to very different plot representations depending on how they are interpreted.
 
 ## What residency means in plotting
 
 Residency in plotting refers to where the relevant data lives at each stage of the pipeline. Source samples may remain in device memory. Derived geometry may also remain in device-oriented form. Render buffers may then be prepared for drawing without first becoming a host-side numerical structure. These are related but distinct kinds of residency.
 
-For that reason, "stays on the GPU" is not a complete description. The important question is what remains on the GPU, in what representation, and for what stage of the pipeline. Source residency concerns the original numerical tensors. Derived residency concerns plot-specific geometry or image data. Render-buffer residency concerns the packed representation consumed by the renderer.
+For that reason, "stays on the GPU" is not a complete description. The important question is: what remains on the GPU, in what representation, and for what stage of the pipeline? Source residency concerns the original numerical tensors. Derived residency concerns plot-specific geometry or image data. Render-buffer residency concerns the packed representation consumed by the renderer.
 
-## The plotting boundary: why plotting terminates fusion
+## The plotting boundary: how plotting terminates fusion graphs
 
-Fusion is designed for chains of numerical tensor operations. As long as a computation remains an array computation, materialization can be delayed and operations can be combined. Plotting crosses a different boundary. A plotting call does not produce another tensor. It produces a scene.
+Fusion is designed to take chains of numerical tensor operations, and combine them into a single GPU kernel to save memory and reduce launch overhead. As long as a computation remains an array computation, materialization can be delayed and operations can be combined. Plotting crosses a different boundary. A plotting call does not produce another tensor. It produces a scene.
 
 That boundary is fundamental rather than accidental. A rendered plot requires axes state, geometry generation, style resolution, view configuration, and a render target. A fused numerical graph can remain abstract while it still represents algebra on arrays. A plotting call cannot remain only an array computation, because its output is no longer an array in the same semantic sense. Plotting therefore terminates ordinary numeric fusion and begins scene construction.
+
+This marks a point in the fusion graph where a tensor is required to represent the scene. This tensor is a scene representation built from numerical data and axes-local state.
 
 ## The stages of GPU plotting
 
@@ -198,4 +200,8 @@ The rendering-math model explains what transformations plotting performs. The re
 
 ## See also
 
-This page pairs naturally with `GPU_PLOTTING_AND_RENDERING_MATH.md`, `GRAPHICS_HANDLES.md`, and the plot-family-specific rendering explainers for surfaces, contours, images, vector fields, pie charts, and histograms. The builtin references for `surf`, `mesh`, `image`, `imagesc`, `contour`, `contourf`, `quiver`, `histogram`, `view`, `colormap`, and `shading` describe the user-facing controls that feed into the residency model described here.
+For the math behind plotting, see `GPU_PLOTTING_AND_RENDERING_MATH.md`. 
+
+For the graphics handles that control the plot objects, see `GRAPHICS_HANDLES.md`. 
+
+For the plot-family-specific rendering explainers, see the builtin references for `surf`, `mesh`, `image`, `imagesc`, `contour`, `contourf`, `quiver`, `histogram`, `view`, `colormap`, and `shading`.

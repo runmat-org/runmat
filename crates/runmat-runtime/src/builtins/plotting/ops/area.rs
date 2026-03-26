@@ -16,6 +16,7 @@ use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_line_style_args, value_as_f64, LineStyleParseOptions};
 
 const BUILTIN_NAME: &str = "area";
+type AreaSeries = Vec<(Vec<f64>, Option<Vec<f64>>)>;
 const MATLAB_COLOR_ORDER: [glam::Vec4; 7] = [
     glam::Vec4::new(0.0, 0.447, 0.741, 0.4),
     glam::Vec4::new(0.85, 0.325, 0.098, 0.4),
@@ -314,17 +315,12 @@ fn parse_area_args(
     let mut it = args.into_iter();
     let mut target_axes = None;
     let first = it.next().unwrap();
-    let first = if let Ok(handle) =
+    let first = if let Ok(crate::builtins::plotting::properties::PlotHandle::Axes(_, axes)) =
         crate::builtins::plotting::properties::resolve_plot_handle(&first, BUILTIN_NAME)
     {
-        if let crate::builtins::plotting::properties::PlotHandle::Axes(_, axes) = handle {
-            target_axes = Some(axes);
-            it.next().ok_or_else(|| {
-                plotting_error(BUILTIN_NAME, "area: expected data after axes handle")
-            })?
-        } else {
-            first
-        }
+        target_axes = Some(axes);
+        it.next()
+            .ok_or_else(|| plotting_error(BUILTIN_NAME, "area: expected data after axes handle"))?
     } else {
         first
     };
@@ -373,7 +369,7 @@ fn area_series_from_tensor(
     x: Vec<f64>,
     y: &Tensor,
     builtin: &'static str,
-) -> crate::BuiltinResult<Vec<(Vec<f64>, Option<Vec<f64>>)>> {
+) -> crate::BuiltinResult<AreaSeries> {
     let rows = y.rows.max(1);
     let cols = y.cols.max(1);
     if rows != x.len() {
@@ -382,7 +378,7 @@ fn area_series_from_tensor(
             "area: X length must match the number of rows in Y",
         ));
     }
-    let mut out: Vec<(Vec<f64>, Option<Vec<f64>>)> = Vec::with_capacity(cols);
+    let mut out: AreaSeries = Vec::with_capacity(cols);
     let mut cumulative = vec![0.0; rows];
     for col in 0..cols {
         let mut top = Vec::with_capacity(rows);

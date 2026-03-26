@@ -143,18 +143,16 @@ fn parse_histogram_call(
     }
     let mut it = args.into_iter();
     let first = it.next().unwrap();
-    if let Ok(handle) =
+    if let Ok(crate::builtins::plotting::properties::PlotHandle::Axes(_, axes)) =
         crate::builtins::plotting::properties::resolve_plot_handle(&first, BUILTIN_NAME)
     {
-        if let crate::builtins::plotting::properties::PlotHandle::Axes(_, axes) = handle {
-            let data = it.next().ok_or_else(|| {
-                crate::builtins::plotting::plotting_error(
-                    BUILTIN_NAME,
-                    "histogram: expected data after axes handle",
-                )
-            })?;
-            return Ok((Some(axes), data, it.collect()));
-        }
+        let data = it.next().ok_or_else(|| {
+            crate::builtins::plotting::plotting_error(
+                BUILTIN_NAME,
+                "histogram: expected data after axes handle",
+            )
+        })?;
+        return Ok((Some(axes), data, it.collect()));
     }
     Ok((None, first, it.collect()))
 }

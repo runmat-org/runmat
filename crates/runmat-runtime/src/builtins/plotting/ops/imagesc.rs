@@ -5,9 +5,7 @@ use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode};
 
 use super::common::SurfaceDataInput;
-use super::op_common::surface_inputs::{
-    axis_sources_from_xy_values, parse_surface_call_args,
-};
+use super::op_common::surface_inputs::{axis_sources_from_xy_values, parse_surface_call_args};
 use super::state::{color_limits_snapshot, render_active_plot, PlotRenderOptions};
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use crate::builtins::common::spec::{
@@ -100,7 +98,8 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let Some((axes, plot_index)) = *plot_index_out.borrow() else {
         return render_result.map(|_| f64::NAN);
     };
-    let handle = crate::builtins::plotting::state::register_image_handle(figure_handle, axes, plot_index);
+    let handle =
+        crate::builtins::plotting::state::register_image_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
         let lower = err.to_string().to_lowercase();
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {

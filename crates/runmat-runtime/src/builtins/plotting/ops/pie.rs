@@ -81,11 +81,11 @@ pub async fn pie_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             grid: false,
             x_label: "",
             y_label: "",
-            ..Default::default()
         },
         move |figure, axes| {
             let axes = target_axes.unwrap_or(axes);
-            let plot_index = figure.add_pie_chart_on_axes(chart.take().expect("pie consumed once"), axes);
+            let plot_index =
+                figure.add_pie_chart_on_axes(chart.take().expect("pie consumed once"), axes);
             *plot_index_slot.borrow_mut() = Some((axes, plot_index));
             Ok(())
         },
@@ -93,7 +93,8 @@ pub async fn pie_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let Some((axes, plot_index)) = *plot_index_out.borrow() else {
         return render_result.map(|_| f64::NAN);
     };
-    let handle = crate::builtins::plotting::state::register_pie_handle(figure_handle, axes, plot_index);
+    let handle =
+        crate::builtins::plotting::state::register_pie_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
         let lower = err.to_string().to_lowercase();
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
@@ -162,12 +163,10 @@ fn parse_axes_target(args: Vec<Value>) -> crate::BuiltinResult<(Option<usize>, V
     if args.is_empty() {
         return Ok((None, args));
     }
-    if let Ok(handle) =
+    if let Ok(crate::builtins::plotting::properties::PlotHandle::Axes(_, axes)) =
         crate::builtins::plotting::properties::resolve_plot_handle(&args[0], BUILTIN_NAME)
     {
-        if let crate::builtins::plotting::properties::PlotHandle::Axes(_, axes) = handle {
-            return Ok((Some(axes), args.into_iter().skip(1).collect()));
-        }
+        return Ok((Some(axes), args.into_iter().skip(1).collect()));
     }
     Ok((None, args))
 }
@@ -286,7 +285,7 @@ mod tests {
             }),
         ]));
         let fig = clone_figure(current_figure_handle()).unwrap();
-        assert!(matches!(fig.plots().nth(0).unwrap(), PlotElement::Pie(_)));
+        assert!(matches!(fig.plots().next().unwrap(), PlotElement::Pie(_)));
         assert_eq!(fig.plot_axes_indices()[0], 1);
 
         let err = futures::executor::block_on(pie_builtin(vec![

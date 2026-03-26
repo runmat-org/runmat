@@ -96,10 +96,8 @@ pub async fn image_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             ..Default::default()
         },
         move |figure, axes| {
-            let plot_index = figure.add_surface_plot_on_axes(
-                surface.take().expect("image plot consumed once"),
-                axes,
-            );
+            let plot_index = figure
+                .add_surface_plot_on_axes(surface.take().expect("image plot consumed once"), axes);
             *plot_index_slot.borrow_mut() = Some((axes, plot_index));
             Ok(())
         },
@@ -107,7 +105,8 @@ pub async fn image_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let Some((axes, plot_index)) = *plot_index_out.borrow() else {
         return render_result.map(|_| f64::NAN);
     };
-    let handle = crate::builtins::plotting::state::register_image_handle(figure_handle, axes, plot_index);
+    let handle =
+        crate::builtins::plotting::state::register_image_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
         let lower = err.to_string().to_lowercase();
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
@@ -139,11 +138,16 @@ async fn classify_image_input(
             }
             let rows = handle.shape.first().copied().unwrap_or(0);
             let cols = handle.shape.get(1).copied().unwrap_or(0);
-            Ok((rows, cols, ImageInputKind::TrueColorGpu(handle.clone(), channels as u32)))
+            Ok((
+                rows,
+                cols,
+                ImageInputKind::TrueColorGpu(handle.clone(), channels as u32),
+            ))
         }
         _ => {
-            let tensor = Tensor::try_from(value)
-                .map_err(|e| crate::builtins::plotting::plotting_error(builtin, format!("{builtin}: {e}")))?;
+            let tensor = Tensor::try_from(value).map_err(|e| {
+                crate::builtins::plotting::plotting_error(builtin, format!("{builtin}: {e}"))
+            })?;
             if tensor.shape.len() >= 3 {
                 let (rows, cols) = truecolor_shape(&tensor, builtin)?;
                 Ok((rows, cols, ImageInputKind::TrueColorHost(tensor)))
@@ -165,8 +169,12 @@ fn build_truecolor_image_surface_gpu(
     channels: u32,
 ) -> crate::BuiltinResult<SurfacePlot> {
     let context = super::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
-    let image_ref = runmat_accelerate_api::export_wgpu_buffer(handle)
-        .ok_or_else(|| crate::builtins::plotting::plotting_error(BUILTIN_NAME, "image: unable to export truecolor GPU image"))?;
+    let image_ref = runmat_accelerate_api::export_wgpu_buffer(handle).ok_or_else(|| {
+        crate::builtins::plotting::plotting_error(
+            BUILTIN_NAME,
+            "image: unable to export truecolor GPU image",
+        )
+    })?;
     let scalar = runmat_plot::gpu::ScalarType::from_is_f64(
         image_ref.precision == runmat_accelerate_api::ProviderPrecision::F64,
     );
@@ -174,8 +182,20 @@ fn build_truecolor_image_surface_gpu(
     let mut host_y_f32 = None;
     let mut host_x_f64 = None;
     let mut host_y_f64 = None;
-    let x_data = axis_source_to_gpu_axis(x_axis, scalar, &mut host_x_f32, &mut host_x_f64, BUILTIN_NAME)?;
-    let y_data = axis_source_to_gpu_axis(y_axis, scalar, &mut host_y_f32, &mut host_y_f64, BUILTIN_NAME)?;
+    let x_data = axis_source_to_gpu_axis(
+        x_axis,
+        scalar,
+        &mut host_x_f32,
+        &mut host_x_f64,
+        BUILTIN_NAME,
+    )?;
+    let y_data = axis_source_to_gpu_axis(
+        y_axis,
+        scalar,
+        &mut host_y_f32,
+        &mut host_y_f64,
+        BUILTIN_NAME,
+    )?;
     let gpu_vertices = runmat_plot::gpu::image::pack_truecolor_vertices(
         &context.device,
         &context.queue,
@@ -189,8 +209,14 @@ fn build_truecolor_image_surface_gpu(
             scalar,
         },
     )
-    .map_err(|e| crate::builtins::plotting::plotting_error(BUILTIN_NAME, format!("image: failed to build GPU truecolor vertices: {e}")))?;
-    let (x_host, y_host) = futures::executor::block_on(axis_sources_to_host(x_axis, y_axis, BUILTIN_NAME))?;
+    .map_err(|e| {
+        crate::builtins::plotting::plotting_error(
+            BUILTIN_NAME,
+            format!("image: failed to build GPU truecolor vertices: {e}"),
+        )
+    })?;
+    let (x_host, y_host) =
+        futures::executor::block_on(axis_sources_to_host(x_axis, y_axis, BUILTIN_NAME))?;
     let bounds = runmat_plot::core::BoundingBox::new(
         glam::Vec3::new(
             x_host.first().copied().unwrap_or(0.0) as f32,
@@ -222,18 +248,27 @@ fn axis_source_to_gpu_axis<'a>(
     match source {
         AxisSource::Gpu(handle) => {
             let exported = runmat_accelerate_api::export_wgpu_buffer(handle).ok_or_else(|| {
-                crate::builtins::plotting::plotting_error(builtin, format!("{builtin}: unable to export GPU axis data"))
+                crate::builtins::plotting::plotting_error(
+                    builtin,
+                    format!("{builtin}: unable to export GPU axis data"),
+                )
             })?;
-            Ok(runmat_plot::gpu::axis::AxisData::Buffer(exported.buffer.clone()))
+            Ok(runmat_plot::gpu::axis::AxisData::Buffer(
+                exported.buffer.clone(),
+            ))
         }
         AxisSource::Host(values) => match scalar {
             runmat_plot::gpu::ScalarType::F32 => {
                 *host_f32 = Some(values.iter().map(|v| *v as f32).collect());
-                Ok(runmat_plot::gpu::axis::AxisData::F32(host_f32.as_ref().unwrap()))
+                Ok(runmat_plot::gpu::axis::AxisData::F32(
+                    host_f32.as_ref().unwrap(),
+                ))
             }
             runmat_plot::gpu::ScalarType::F64 => {
                 *host_f64 = Some(values.clone());
-                Ok(runmat_plot::gpu::axis::AxisData::F64(host_f64.as_ref().unwrap()))
+                Ok(runmat_plot::gpu::axis::AxisData::F64(
+                    host_f64.as_ref().unwrap(),
+                ))
             }
         },
     }
@@ -296,7 +331,9 @@ pub(crate) async fn build_indexed_image_surface(
     let (x_host, y_host) = axis_sources_to_host(x_axis, y_axis, BUILTIN_NAME).await?;
     let tensor = match c_input.clone() {
         SurfaceDataInput::Host(tensor) => tensor,
-        SurfaceDataInput::Gpu(handle) => super::common::gather_tensor_from_gpu_async(handle, BUILTIN_NAME).await?,
+        SurfaceDataInput::Gpu(handle) => {
+            super::common::gather_tensor_from_gpu_async(handle, BUILTIN_NAME).await?
+        }
     };
     let grid = tensor_to_surface_grid(tensor, x_host.len(), y_host.len(), BUILTIN_NAME)?;
     Ok(super::surf::build_surface(x_host, y_host, grid)?
@@ -332,7 +369,9 @@ fn build_truecolor_image_surface(
     }
     let z = vec![vec![0.0; cols]; rows];
     Ok(SurfacePlot::new(x_axis, y_axis, z)
-        .map_err(|e| crate::builtins::plotting::plotting_error(BUILTIN_NAME, format!("image: {e}")))?
+        .map_err(|e| {
+            crate::builtins::plotting::plotting_error(BUILTIN_NAME, format!("image: {e}"))
+        })?
         .with_flatten_z(true)
         .with_image_mode(true)
         .with_color_grid(grid)
@@ -344,17 +383,15 @@ mod tests {
     use super::*;
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
-    use crate::builtins::plotting::{clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run};
+    use crate::builtins::plotting::{
+        clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
+    };
     use runmat_builtins::NumericDType;
     use runmat_plot::plots::PlotElement;
 
     fn truecolor_tensor() -> Tensor {
         Tensor {
-            data: vec![
-                1.0, 0.0, 0.0, 1.0,
-                0.0, 1.0, 0.0, 1.0,
-                0.0, 0.0, 1.0, 1.0,
-            ],
+            data: vec![1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 1.0],
             shape: vec![2, 2, 3],
             rows: 2,
             cols: 2,
@@ -368,7 +405,9 @@ mod tests {
         ensure_plot_test_env();
         reset_hold_state_for_run();
         let _ = clear_figure(None);
-        let handle = futures::executor::block_on(image_builtin(vec![Value::Tensor(truecolor_tensor())])).unwrap();
+        let handle =
+            futures::executor::block_on(image_builtin(vec![Value::Tensor(truecolor_tensor())]))
+                .unwrap();
         let fig = clone_figure(current_figure_handle()).unwrap();
         let PlotElement::Surface(surface) = fig.plots().next().unwrap() else {
             panic!("expected surface");

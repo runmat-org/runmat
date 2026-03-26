@@ -1,6 +1,6 @@
 # Graphics Handles and Plot Objects
 
-Plotting in RunMat does more than draw pixels on a figure. Each plotting command creates or updates graphics objects such as figures, axes, labels, legends, and plotted series. Those objects have identity, state, and relationships to one another, and RunMat exposes that model through graphics handles.
+Each plotting command in RunMat creates or updates graphics objects such as figures, axes, labels, legends, and plotted series. Those objects have identity, state, and relationships to one another, and RunMat exposes that model through graphics handles.
 
 This document explains how the graphics object model works in practice. It shows what kinds of objects exist, how handles are created, how `get` and `set` interact with those objects, and why axes-local state matters so much in subplot workflows. If you want to understand what a plotting command returns, what object a later command will modify, or how to inspect and restyle an existing plot, this is the right place to start.
 
@@ -10,7 +10,7 @@ A graphics handle is a value that refers to a graphics object after that object 
 
 In practice, a handle is how plotting code stays connected to the figure it built. A line handle refers to a line object, an axes handle refers to a specific axes, and a legend handle refers to the legend attached to an axes. The handle is not the plotted data itself; it is the reference you use to work with the resulting graphics object.
 
-The smallest handle workflow is: create an object, keep the handle, inspect it, and then change it.
+The smallest handle workflow is: create an object, keep the handle, inspect it, and then change it. This is the foundation of the plotting stateful graphics system.
 
 ```matlab
 h = plot(1:5, [1 4 2 5 3]);
@@ -26,7 +26,7 @@ RunMat's graphics object model is built around a small number of object families
 
 The most important object families are figures, axes, text objects such as `title` and axis labels, legend objects, and plot objects such as lines, scatter plots, bars, surfaces, contours, images, pie charts, quiver fields, and areas. Different object kinds expose different property sets, but they all participate in the same handle-based model.
 
-For most users, the important categories are:
+The important categories of graphics objects are:
 
 - figure objects
 - axes objects

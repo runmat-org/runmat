@@ -21,6 +21,16 @@ use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{marker_metadata_from_appearance, parse_line_style_args, LineStyleParseOptions};
 
 const BUILTIN_NAME: &str = "errorbar";
+type ErrorBarArgs = (
+    Option<usize>,
+    Value,
+    Value,
+    Option<Value>,
+    Option<Value>,
+    Value,
+    Value,
+    Vec<Value>,
+);
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::errorbar")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -343,18 +353,7 @@ fn parse_errorbar_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedError
     })
 }
 
-fn parse_errorbar_args(
-    args: Vec<Value>,
-) -> crate::BuiltinResult<(
-    Option<usize>,
-    Value,
-    Value,
-    Option<Value>,
-    Option<Value>,
-    Value,
-    Value,
-    Vec<Value>,
-)> {
+fn parse_errorbar_args(args: Vec<Value>) -> crate::BuiltinResult<ErrorBarArgs> {
     if args.len() < 2 {
         return Err(plotting_error(
             BUILTIN_NAME,
@@ -364,17 +363,13 @@ fn parse_errorbar_args(
     let mut it = args.into_iter();
     let mut target_axes = None;
     let first = it.next().unwrap();
-    let first = if let Ok(handle) =
+    let first = if let Ok(crate::builtins::plotting::properties::PlotHandle::Axes(_, axes)) =
         crate::builtins::plotting::properties::resolve_plot_handle(&first, BUILTIN_NAME)
     {
-        if let crate::builtins::plotting::properties::PlotHandle::Axes(_, axes) = handle {
-            target_axes = Some(axes);
-            it.next().ok_or_else(|| {
-                plotting_error(BUILTIN_NAME, "errorbar: expected data after axes handle")
-            })?
-        } else {
-            first
-        }
+        target_axes = Some(axes);
+        it.next().ok_or_else(|| {
+            plotting_error(BUILTIN_NAME, "errorbar: expected data after axes handle")
+        })?
     } else {
         first
     };

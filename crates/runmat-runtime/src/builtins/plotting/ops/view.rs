@@ -12,12 +12,10 @@ fn parse_view_target(
     &[Value],
 )> {
     if let Some(first) = args.first() {
-        if let Ok(handle) =
+        if let Ok(crate::builtins::plotting::properties::PlotHandle::Axes(fig, axes)) =
             crate::builtins::plotting::properties::resolve_plot_handle(first, "view")
         {
-            if let crate::builtins::plotting::properties::PlotHandle::Axes(fig, axes) = handle {
-                return Ok(((fig, axes), &args[1..]));
-            }
+            return Ok(((fig, axes), &args[1..]));
         }
     }
     Ok((current_axes_target(), args))

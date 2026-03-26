@@ -136,7 +136,8 @@ pub async fn scatter3_builtin(
     let Some((axes, plot_index)) = *plot_index_out.borrow() else {
         return render_result.map(|_| f64::NAN);
     };
-    let handle = crate::builtins::plotting::state::register_scatter3_handle(figure_handle, axes, plot_index);
+    let handle =
+        crate::builtins::plotting::state::register_scatter3_handle(figure_handle, axes, plot_index);
     if let Err(err) = render_result {
         let lower = err.to_string().to_lowercase();
         if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {

@@ -21,6 +21,8 @@ use super::{plotting_error, plotting_error_with_source};
 use crate::builtins::common::map_control_flow_with_builtin;
 use crate::{BuiltinResult, RuntimeError};
 
+type AxisLimitSnapshot = (Option<(f64, f64)>, Option<(f64, f64)>);
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct FigureHandle(u32);
 
@@ -657,7 +659,7 @@ pub fn set_axis_limits_for_axes(
     Ok(())
 }
 
-pub fn axis_limits_snapshot() -> (Option<(f64, f64)>, Option<(f64, f64)>) {
+pub fn axis_limits_snapshot() -> AxisLimitSnapshot {
     let mut reg = registry();
     let handle = reg.current;
     let state = get_state_mut(&mut reg, handle);

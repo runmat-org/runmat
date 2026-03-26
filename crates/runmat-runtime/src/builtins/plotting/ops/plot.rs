@@ -654,7 +654,11 @@ pub(crate) mod tests {
             Value::Num(2.5)
         );
         assert_eq!(
-            get_builtin(vec![Value::Num(handle), Value::String("DisplayName".into())]).unwrap(),
+            get_builtin(vec![
+                Value::Num(handle),
+                Value::String("DisplayName".into())
+            ])
+            .unwrap(),
             Value::String("Series A".into())
         );
     }

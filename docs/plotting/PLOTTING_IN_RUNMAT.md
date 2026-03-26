@@ -8,7 +8,7 @@ Figures, axes, legends, labels, plot objects, and handle-based updates all belon
 
 ## The basic plotting workflow
 
-Most plotting sessions follow the same broad pattern.
+Most plotting sessions follow the pattern of:
 
 1. Choose a plot type that matches the structure of the data.
 2. Create or select the axes in which the plot should appear.

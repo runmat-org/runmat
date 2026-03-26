@@ -24,10 +24,10 @@ pub mod web;
 #[path = "type_resolvers.rs"]
 pub(crate) mod type_resolvers;
 
-#[path = "ops/bar.rs"]
-pub(crate) mod bar;
 #[path = "ops/area.rs"]
 pub(crate) mod area;
+#[path = "ops/bar.rs"]
+pub(crate) mod bar;
 #[path = "ops/caxis.rs"]
 pub(crate) mod caxis;
 #[path = "ops/clf.rs"]
@@ -60,10 +60,10 @@ pub mod hist;
 pub(crate) mod histogram;
 #[path = "ops/hold.rs"]
 pub(crate) mod hold;
-#[path = "ops/imagesc.rs"]
-pub(crate) mod imagesc;
 #[path = "ops/image.rs"]
 pub(crate) mod image;
+#[path = "ops/imagesc.rs"]
+pub(crate) mod imagesc;
 #[path = "ops/isgraphics.rs"]
 pub(crate) mod isgraphics;
 #[path = "ops/ishandle.rs"]
