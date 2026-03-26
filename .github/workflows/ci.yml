@@ -25,7 +25,7 @@ jobs:
       max-parallel: 8
       matrix:
         include:
-          - runner: ["self-hosted", "linux", "gpu"]
+          - runner: ["self-hosted", "linux", "GCP"]
             name: linux-x86_64
           - runner: ["self-hosted", "windows", "GCP"]
             name: windows-x86_64
@@ -162,6 +162,10 @@ jobs:
           )
 
           missing=()
+          ldconfig_bin="$(command -v ldconfig || true)"
+          if [[ -z "${ldconfig_bin}" && -x /usr/sbin/ldconfig ]]; then
+            ldconfig_bin=/usr/sbin/ldconfig
+          fi
           for pkg in "${packages[@]}"; do
             if ! dpkg-query -W -f='${Status}\n' "${pkg}" 2>/dev/null | grep -qx 'install ok installed'; then
               missing+=("${pkg}")
@@ -177,10 +181,12 @@ jobs:
           if ! pkg-config --exists libzmq; then
             missing+=('libzmq(pkg-config)')
           fi
-          if ! ldconfig -p | grep -q 'libopenblas\.so'; then
+          if [[ -z "${ldconfig_bin}" ]]; then
+            missing+=('ldconfig(binary)')
+          elif ! "${ldconfig_bin}" -p | grep -q 'libopenblas\.so'; then
             missing+=('libopenblas(runtime)')
           fi
-          if ! ldconfig -p | grep -q 'liblapack\.so'; then
+          if [[ -n "${ldconfig_bin}" ]] && ! "${ldconfig_bin}" -p | grep -q 'liblapack\.so'; then
             missing+=('liblapack(runtime)')
           fi
 
@@ -221,6 +227,9 @@ jobs:
           }
           if (-not (Get-Command pkg-config -ErrorAction SilentlyContinue)) {
             throw "pkg-config was not found on PATH. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+          }
+          if (-not (Get-Command perl -ErrorAction SilentlyContinue)) {
+            throw "Perl was not found on PATH. Provision the runner with scripts/bootstrap-windows-runner.ps1."
           }
 
           $required = @(
@@ -268,6 +277,8 @@ jobs:
       - name: Clippy (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          CARGO_BUILD_JOBS: 1
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       # Verify the binary starts without a stack overflow before running the
@@ -277,6 +288,8 @@ jobs:
       - name: Binary smoke test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          CARGO_BUILD_JOBS: 1
         run: |
           cargo build -p runmat
           & target\debug\runmat.exe --help | Out-Null
@@ -293,6 +306,8 @@ jobs:
       - name: Check (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          CARGO_BUILD_JOBS: 1
         run: cargo check --all-targets --all-features
 
       - name: Test (Unix)
@@ -308,6 +323,8 @@ jobs:
         shell: pwsh
         env:
           RUST_BACKTRACE: 1
+          CARGO_BUILD_JOBS: 1
+          RUST_TEST_THREADS: 1
         run: |
           $ErrorActionPreference = 'Stop'
           cargo test --all-targets --all-features 2>&1 | Tee-Object -FilePath test.log
@@ -395,67 +412,53 @@ jobs:
           brew update
           brew install zeromq
 
-      - name: Validate Windows MSVC runner dependencies
+      - name: Install Windows MSVC dependencies (ZMQ, vcpkg + OpenBLAS/LAPACK)
         if: runner.os == 'Windows' && matrix.platform.target != 'aarch64-pc-windows-gnu'
         shell: pwsh
         run: |
-          $ErrorActionPreference = 'Stop'
+          choco install -y pkgconfiglite strawberryperl
 
-          $target = "${{ matrix.platform.target }}"
-          if ($target -eq "aarch64-pc-windows-msvc") { $triplet = "arm64-windows" } else { $triplet = "x64-windows" }
-          $vcpkgRoot = if ($env:VCPKG_ROOT) { $env:VCPKG_ROOT } else { 'C:\vcpkg' }
-          $prefix = Join-Path $vcpkgRoot "installed\$triplet"
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          Write-Host "Fetching prebuilt ZeroMQ for Windows (MSVC)"
+          curl -L -o libzmq.zip https://github.com/zeromq/libzmq/releases/download/v4.3.5/zeromq-4.3.5.zip
+          Expand-Archive -Path libzmq.zip -DestinationPath zmq
+          # Set env vars for ZMQ include/lib
+          $zmq = Join-Path $pwd "zmq"
+          Add-Content -Path $env:GITHUB_ENV -Value "INCLUDE=$($zmq)\include;$env:INCLUDE"
+          Add-Content -Path $env:GITHUB_ENV -Value "LIB=$($zmq)\lib;$env:LIB"
+          Add-Content -Path $env:GITHUB_ENV -Value "ZMQ_PATH=$($zmq)"
+          Add-Content -Path $env:GITHUB_ENV -Value "PKG_CONFIG_PATH=$($zmq)\lib\pkgconfig"
 
-          if (-not (Test-Path $vswhere)) {
-            throw "vswhere.exe was not found. Provision the runner with scripts/bootstrap-windows-runner.ps1."
-          }
-          $vsInstall = & $vswhere `
-            -latest `
-            -products * `
-            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
-            -property installationPath
-          if (-not $vsInstall) {
-            throw "Visual Studio C++ Build Tools were not detected. Provision the runner with scripts/bootstrap-windows-runner.ps1."
-          }
-          if (-not (Get-Command pkg-config -ErrorAction SilentlyContinue)) {
-            throw "pkg-config was not found on PATH. Provision the runner with scripts/bootstrap-windows-runner.ps1."
-          }
+          Write-Host "Cloning vcpkg and installing OpenBLAS/LAPACK"
+          $vcpkgRoot = Join-Path $pwd "vcpkg"
+          git clone https://github.com/microsoft/vcpkg.git $vcpkgRoot
+          & "$vcpkgRoot\bootstrap-vcpkg.bat"
 
-          $required = @(
-            (Join-Path $vcpkgRoot 'vcpkg.exe'),
-            (Join-Path $prefix 'include\zmq.h'),
-            (Join-Path $prefix 'lib\openblas.lib'),
-            (Join-Path $prefix 'lib\lapack.lib'),
-            (Join-Path $prefix 'lib\pkgconfig\libzmq.pc')
-          )
-          foreach ($path in $required) {
-            if (-not (Test-Path $path)) {
-              throw "Missing required Windows dependency artifact: $path. Provision the runner with scripts/bootstrap-windows-runner.ps1."
-            }
-          }
-          $zmqImportLibs = Get-ChildItem -Path (Join-Path $prefix 'lib') -Filter '*zmq*.lib' -ErrorAction SilentlyContinue
-          if (-not $zmqImportLibs) {
-            throw "Missing required ZeroMQ import library under $prefix\lib. Provision the runner with scripts/bootstrap-windows-runner.ps1."
-          }
+          # Compute vcpkg triplet based on target
+          if (Test-Path env:MatrixPlatformTarget) { Remove-Item env:MatrixPlatformTarget }
+          $env:MatrixPlatformTarget = "${{ matrix.platform.target }}"
+          if ($env:MatrixPlatformTarget -eq "aarch64-pc-windows-msvc") { $triplet = "arm64-windows" } else { $triplet = "x64-windows" }
 
+          # Ensure triplet in env
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=$vcpkgRoot"
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_DEFAULT_TRIPLET=$triplet"
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=$triplet"
+
+          # Install OpenBLAS and LAPACK provider; on arm64-windows use --allow-unsupported for gfortran
+          & "$vcpkgRoot\vcpkg.exe" install "openblas:$triplet"
+          if ($triplet -eq "arm64-windows") {
+            & "$vcpkgRoot\vcpkg.exe" install "lapack-reference:$triplet" --allow-unsupported
+          } else {
+            & "$vcpkgRoot\vcpkg.exe" install "lapack-reference:$triplet"
+          }
           Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_DYNAMIC=1"
-          Add-Content -Path $env:GITHUB_ENV -Value "INCLUDE=$prefix\include;$env:INCLUDE"
-          Add-Content -Path $env:GITHUB_ENV -Value "LIB=$prefix\lib;$env:LIB"
-          Add-Content -Path $env:GITHUB_ENV -Value "ZMQ_PATH=$prefix"
-          Add-Content -Path $env:GITHUB_ENV -Value "ZMQ_INCLUDE_DIR=$prefix\include"
-          Add-Content -Path $env:GITHUB_ENV -Value "ZMQ_LIB_DIR=$prefix\lib"
-          Add-Content -Path $env:GITHUB_ENV -Value "PKG_CONFIG_PATH=$prefix\lib\pkgconfig"
-          Add-Content -Path $env:GITHUB_PATH -Value $vcpkgRoot
-          Add-Content -Path $env:GITHUB_PATH -Value "$prefix\bin"
-          Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIB_DIR=$prefix\lib"
+          Add-Content -Path $env:GITHUB_PATH -Value "$vcpkgRoot\installed\$triplet\bin"
+
+          # Hint BLAS/LAPACK discovery for blas-sys/lapack-sys
+          Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
           Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIBS=openblas"
-          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIB_DIR=$prefix\lib"
+          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIB_DIR=$vcpkgRoot\installed\$triplet\lib"
           Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;openblas"
-          Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$prefix"
+          Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$vcpkgRoot\installed\$triplet"
 
       - name: Cross build (linux-x86_64)
         if: matrix.platform.target == 'x86_64-unknown-linux-gnu'
