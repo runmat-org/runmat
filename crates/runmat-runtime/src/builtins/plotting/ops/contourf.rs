@@ -201,4 +201,25 @@ pub(crate) mod tests {
         .expect("contourf should return handle");
         assert!(handle.is_finite());
     }
+
+    #[test]
+    fn contourf_accepts_explicit_axes_and_scalar_level_count() {
+        setup_plot_tests();
+        let handle = contourf_builtin(
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            vec![
+                Value::Tensor(tensor_from(&[0.0, 1.0])),
+                Value::Tensor(Tensor {
+                    data: vec![0.0, 1.0, 1.0, 0.0],
+                    shape: vec![2, 2],
+                    rows: 2,
+                    cols: 2,
+                    dtype: runmat_builtins::NumericDType::F64,
+                }),
+                Value::Num(12.0),
+            ],
+        )
+        .expect("contourf should accept scalar level counts with explicit axes");
+        assert!(handle.is_finite());
+    }
 }

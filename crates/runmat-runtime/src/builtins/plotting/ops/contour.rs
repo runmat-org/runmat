@@ -138,27 +138,27 @@ pub(crate) fn parse_contour_args(
         1 => from_implicit_args(name, first, Some(rest[0].clone()), &rest[1..]),
         2 => from_explicit_args(
             name,
+            first,
             rest[0].clone(),
             rest[1].clone(),
-            first,
             None,
             &rest[2..],
         ),
         3 => from_explicit_args(
             name,
+            first,
             rest[0].clone(),
             rest[1].clone(),
-            rest[2].clone(),
-            None,
+            Some(rest[2].clone()),
             &rest[3..],
         ),
         _ => from_explicit_args(
             name,
+            first,
             rest[0].clone(),
             rest[1].clone(),
-            rest[2].clone(),
-            Some(rest[3].clone()),
-            &rest[4..],
+            Some(rest[2].clone()),
+            &rest[3..],
         ),
     }
 }
@@ -1298,6 +1298,22 @@ pub(crate) mod tests {
         let args = parse_contour_args("contour", z, Vec::new()).unwrap();
         assert_eq!(args.x_axis, vec![1.0, 2.0]);
         assert_eq!(args.y_axis, vec![1.0, 2.0]);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn explicit_axes_plus_scalar_level_count_parse_correctly() {
+        setup_plot_tests();
+        let x = Value::Tensor(tensor_from(&[0.0, 1.0], 2, 1));
+        let y = Value::Tensor(tensor_from(&[0.0, 1.0], 2, 1));
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 1.0, 0.0], 2, 2));
+        let args = parse_contour_args("contour", x, vec![y, z, Value::Num(12.0)]).unwrap();
+        assert_eq!(args.x_axis, vec![0.0, 1.0]);
+        assert_eq!(args.y_axis, vec![0.0, 1.0]);
+        match args.level_spec {
+            ContourLevelSpec::Count(count) => assert_eq!(count, 12),
+            other => panic!("expected scalar level count, found {other:?}"),
+        }
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
