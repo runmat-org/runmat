@@ -114,7 +114,8 @@ jobs:
           & $rustup which --toolchain $toolchain cargo | Out-Null
           $installedComponents = & $rustup component list --toolchain $toolchain --installed
           foreach ($component in $components) {
-            if ($installedComponents -notmatch "^$component-") {
+            $componentPattern = '^{0}-' -f [regex]::Escape($component)
+            if (-not ($installedComponents | Select-String -Pattern $componentPattern -Quiet)) {
               throw "Missing Rust component '$component' for toolchain $toolchain. Provision the runner with scripts/bootstrap-windows-runner.ps1."
             }
           }
