@@ -25,18 +25,6 @@
 
 <p align="center"><em>Status: Pre-release (v0.3) — core runtime and GPU engine pass thousands of tests. Expect a few rough edges.</em></p>
 
-### 🎬 Sandbox 3D Plotting Demo
-
-![RunMat sandbox 3D plotting demo](.github/assets/runmat-sandbox-3d-plotting.gif)
-
-<p align="center">
-  <a href=".github/assets/runmat-sandbox-3d-plotting.gif"><strong>Open GIF directly</strong></a>
-</p>
-
-<p align="center">
-  <a href="https://runmat.com/sandbox"><strong>Try it live in the browser →</strong></a>
-</p>
-
 ---
 
 ## What is RunMat?
@@ -160,6 +148,14 @@ team management.<br/><br/>
   - Interactive 2D and 3D plots  
   - Line, scatter, and surface plots supported today  
   - Some advanced plot types (box plots, violin plots) are still in progress  
+
+  Open-source plotting engine demo (works in CLI and in the browser sandbox):
+
+  ![RunMat open-source 3D plotting demo](.github/assets/runmat-sandbox-3d-plotting.gif)
+
+  <p align="center">
+    <a href=".github/assets/runmat-sandbox-3d-plotting.gif"><strong>Open GIF directly</strong></a> · <a href="https://runmat.com/sandbox"><strong>Try it in browser sandbox →</strong></a>
+  </p>
 
 - **Open-source runtime**
 
