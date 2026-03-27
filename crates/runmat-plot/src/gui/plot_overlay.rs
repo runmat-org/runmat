@@ -77,6 +77,14 @@ pub struct PlotMargins {
     pub bottom: f32,
 }
 
+#[derive(Debug, Clone, Copy)]
+struct PanelLayout {
+    plot_rect: Rect,
+    title_rect: Rect,
+    x_label_rect: Rect,
+    y_label_rect: Rect,
+}
+
 impl Default for OverlayConfig {
     fn default() -> Self {
         Self {
@@ -147,6 +155,102 @@ impl PlotOverlay {
 
     pub fn set_theme_config(&mut self, theme: PlotThemeConfig) {
         self.theme = theme;
+    }
+
+    fn measure_text_size(&self, ui: &egui::Ui, text: &str, font: FontId) -> egui::Vec2 {
+        ui.fonts(|fonts| {
+            fonts
+                .layout_no_wrap(text.to_owned(), font, self.theme_text_color())
+                .size()
+        })
+    }
+
+    fn layout_2d_panel(
+        &self,
+        ui: &egui::Ui,
+        outer: Rect,
+        title: Option<&str>,
+        x_label: Option<&str>,
+        y_label: Option<&str>,
+        scale: f32,
+    ) -> PanelLayout {
+        let scale = scale.max(0.75);
+        let pad = 8.0 * scale;
+        let title_h = title
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| {
+                self.measure_text_size(ui, s, FontId::proportional(16.0 * scale))
+                    .y
+                    + pad * 1.25
+            })
+            .unwrap_or(0.0);
+        let x_h = x_label
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| {
+                self.measure_text_size(ui, s, FontId::proportional(14.0 * scale))
+                    .y
+                    + pad * 1.75
+            })
+            .unwrap_or(0.0);
+        let y_w = y_label
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| {
+                self.measure_text_size(ui, s, FontId::proportional(14.0 * scale))
+                    .x
+                    + pad * 1.2
+            })
+            .unwrap_or(0.0);
+
+        let plot_rect = Rect::from_min_max(
+            egui::pos2(outer.min.x + y_w, outer.min.y + title_h),
+            egui::pos2(outer.max.x, outer.max.y - x_h),
+        );
+        let title_rect = Rect::from_min_max(
+            egui::pos2(plot_rect.min.x, outer.min.y),
+            egui::pos2(plot_rect.max.x, plot_rect.min.y),
+        );
+        let x_label_rect = Rect::from_min_max(
+            egui::pos2(plot_rect.min.x, plot_rect.max.y),
+            egui::pos2(plot_rect.max.x, outer.max.y),
+        );
+        let y_label_rect = Rect::from_min_max(
+            egui::pos2(outer.min.x, plot_rect.min.y),
+            egui::pos2(plot_rect.min.x, plot_rect.max.y),
+        );
+        PanelLayout {
+            plot_rect,
+            title_rect,
+            x_label_rect,
+            y_label_rect,
+        }
+    }
+
+    fn layout_3d_panel(
+        &self,
+        ui: &egui::Ui,
+        outer: Rect,
+        title: Option<&str>,
+        scale: f32,
+    ) -> PanelLayout {
+        let scale = scale.max(0.75);
+        let pad = 8.0 * scale;
+        let title_h = title
+            .filter(|s| !s.trim().is_empty())
+            .map(|s| {
+                self.measure_text_size(ui, s, FontId::proportional(16.0 * scale))
+                    .y
+                    + pad
+            })
+            .unwrap_or(0.0);
+        let plot_rect =
+            Rect::from_min_max(egui::pos2(outer.min.x, outer.min.y + title_h), outer.max);
+        let title_rect = Rect::from_min_max(outer.min, egui::pos2(outer.max.x, plot_rect.min.y));
+        PanelLayout {
+            plot_rect,
+            title_rect,
+            x_label_rect: plot_rect,
+            y_label_rect: plot_rect,
+        }
     }
 
     fn theme_text_color(&self) -> Color32 {
@@ -464,42 +568,156 @@ impl PlotOverlay {
 
         // Use full available rectangular plot area (do not force square);
         // camera fitting and axis_equal settings will control aspect.
-        let centered_plot_rect = plot_rect;
+        let plot_area_rect = plot_rect;
 
         if rows * cols > 1 {
-            let rects = self.compute_subplot_rects(centered_plot_rect, rows, cols, 8.0, 8.0);
-            for (i, r) in rects.iter().enumerate() {
+            let rects = self.compute_subplot_rects(plot_area_rect, rows, cols, 8.0, 8.0);
+            for (i, cell_rect) in rects.iter().enumerate() {
                 let cam = plot_renderer
                     .axes_camera(i)
                     .unwrap_or_else(|| plot_renderer.camera());
+                let panel_layout = if matches!(
+                    cam.projection,
+                    crate::core::camera::ProjectionType::Perspective { .. }
+                ) {
+                    self.layout_3d_panel(
+                        ui,
+                        *cell_rect,
+                        plot_renderer.overlay_title_for_axes(i).map(|s| s.as_str()),
+                        config.font_scale,
+                    )
+                } else {
+                    self.layout_2d_panel(
+                        ui,
+                        *cell_rect,
+                        plot_renderer.overlay_title_for_axes(i).map(|s| s.as_str()),
+                        plot_renderer
+                            .overlay_x_label_for_axes(i)
+                            .map(|s| s.as_str()),
+                        plot_renderer
+                            .overlay_y_label_for_axes(i)
+                            .map(|s| s.as_str()),
+                        config.font_scale,
+                    )
+                };
+                let r = panel_layout.plot_rect;
                 if matches!(
                     cam.projection,
                     crate::core::camera::ProjectionType::Perspective { .. }
                 ) {
-                    self.draw_3d_orientation_gizmo(ui, *r, plot_renderer, i, config.font_scale);
-                    self.draw_3d_origin_axis_ticks(ui, *r, plot_renderer, i, config.font_scale);
+                    if config.show_title {
+                        if let Some(title) = plot_renderer.overlay_title_for_axes(i) {
+                            self.draw_title_in_rect(
+                                ui,
+                                panel_layout.title_rect,
+                                title,
+                                config.font_scale,
+                            );
+                        }
+                    }
+                    self.draw_3d_orientation_gizmo(ui, r, plot_renderer, i, config.font_scale);
+                    self.draw_3d_origin_axis_ticks(ui, r, plot_renderer, i, config.font_scale);
+                    self.draw_projected_world_texts(ui, r, plot_renderer, i, config.font_scale);
+                    for (label, pos) in plot_renderer.pie_labels_for_axes(i) {
+                        self.draw_pie_label(ui, r, &label, pos, config.font_scale);
+                    }
+                    if plot_renderer.overlay_show_legend_for_axes(i) {
+                        let entries = plot_renderer.overlay_legend_entries_for_axes(i);
+                        self.draw_legend(ui, r, &entries);
+                    }
                     continue;
                 }
                 // Frame (2D only; 3D uses the axes cube instead)
-                if plot_renderer.overlay_show_box() {
+                if plot_renderer.overlay_show_box_for_axes(i) {
                     let axis_color = self.theme_axis_color();
                     ui.painter()
-                        .rect_stroke(*r, 0.0, Stroke::new(1.5, axis_color));
+                        .rect_stroke(r, 0.0, Stroke::new(1.5, axis_color));
                 }
 
                 // Grid (2D)
-                if config.show_grid {
+                if config.show_grid && plot_renderer.overlay_show_grid_for_axes(i) {
                     let b = plot_renderer.view_bounds_for_axes(i);
-                    self.draw_grid(ui, *r, plot_renderer, b);
+                    self.draw_grid(ui, r, plot_renderer, b, Some(i));
                 }
                 // Axes (2D)
                 if config.show_axes {
                     let b = plot_renderer.view_bounds_for_axes(i);
-                    self.draw_axes(ui, *r, plot_renderer, config, b);
+                    self.draw_axes(ui, r, plot_renderer, config, b, Some(i));
+                }
+
+                if config.show_title {
+                    if let Some(title) = plot_renderer.overlay_title_for_axes(i) {
+                        self.draw_title_in_rect(
+                            ui,
+                            panel_layout.title_rect,
+                            title,
+                            config.font_scale,
+                        );
+                    }
+                }
+                if !matches!(
+                    cam.projection,
+                    crate::core::camera::ProjectionType::Perspective { .. }
+                ) {
+                    if let Some(x_label) = plot_renderer.overlay_x_label_for_axes(i) {
+                        self.draw_x_label_in_rect(
+                            ui,
+                            panel_layout.x_label_rect,
+                            x_label,
+                            config.font_scale,
+                        );
+                    }
+                }
+                if !matches!(
+                    cam.projection,
+                    crate::core::camera::ProjectionType::Perspective { .. }
+                ) {
+                    if let Some(y_label) = plot_renderer.overlay_y_label_for_axes(i) {
+                        self.draw_y_label_in_rect(
+                            ui,
+                            panel_layout.y_label_rect,
+                            y_label,
+                            config.font_scale,
+                        );
+                    }
+                }
+                self.draw_projected_world_texts(ui, r, plot_renderer, i, config.font_scale);
+                for (label, pos) in plot_renderer.pie_labels_for_axes(i) {
+                    self.draw_pie_label(ui, r, &label, pos, config.font_scale);
+                }
+                if plot_renderer.overlay_show_legend_for_axes(i) {
+                    let entries = plot_renderer.overlay_legend_entries_for_axes(i);
+                    self.draw_legend(ui, r, &entries);
                 }
             }
         } else {
             let cam = plot_renderer.camera();
+            let panel_layout = if matches!(
+                cam.projection,
+                crate::core::camera::ProjectionType::Perspective { .. }
+            ) {
+                self.layout_3d_panel(
+                    ui,
+                    plot_area_rect,
+                    config.title.as_deref(),
+                    config.font_scale,
+                )
+            } else {
+                self.layout_2d_panel(
+                    ui,
+                    plot_area_rect,
+                    config.title.as_deref(),
+                    config.x_label.as_deref(),
+                    config.y_label.as_deref(),
+                    config.font_scale,
+                )
+            };
+            let centered_plot_rect = panel_layout.plot_rect;
+            if config.show_title {
+                if let Some(title) = &config.title {
+                    self.draw_title_in_rect(ui, panel_layout.title_rect, title, config.font_scale);
+                }
+            }
             if matches!(
                 cam.projection,
                 crate::core::camera::ProjectionType::Perspective { .. }
@@ -518,6 +736,13 @@ impl PlotOverlay {
                     0,
                     config.font_scale,
                 );
+                self.draw_projected_world_texts(
+                    ui,
+                    centered_plot_rect,
+                    plot_renderer,
+                    0,
+                    config.font_scale,
+                );
             } else {
                 // Draw plot frame (2D only; 3D uses the axes cube instead)
                 if plot_renderer.overlay_show_box() {
@@ -527,12 +752,12 @@ impl PlotOverlay {
                 }
                 // Draw grid if enabled
                 if config.show_grid {
-                    self.draw_grid(ui, centered_plot_rect, plot_renderer, None);
+                    self.draw_grid(ui, centered_plot_rect, plot_renderer, None, None);
                 }
 
                 // Draw axes if enabled
                 if config.show_axes {
-                    self.draw_axes(ui, centered_plot_rect, plot_renderer, config, None);
+                    self.draw_axes(ui, centered_plot_rect, plot_renderer, config, None, None);
                     // Emphasize zero baseline if within data range
                     if let Some((x_min, x_max, y_min, y_max)) = plot_renderer
                         .view_bounds()
@@ -566,147 +791,69 @@ impl PlotOverlay {
                         }
                     }
                 }
+                if let Some(x_label) = &config.x_label {
+                    self.draw_x_label_in_rect(
+                        ui,
+                        panel_layout.x_label_rect,
+                        x_label,
+                        config.font_scale,
+                    );
+                }
+                if let Some(y_label) = &config.y_label {
+                    self.draw_y_label_in_rect(
+                        ui,
+                        panel_layout.y_label_rect,
+                        y_label,
+                        config.font_scale,
+                    );
+                }
+                self.draw_projected_world_texts(
+                    ui,
+                    centered_plot_rect,
+                    plot_renderer,
+                    0,
+                    config.font_scale,
+                );
             }
         }
-
-        // Draw title if enabled (single global title)
-        if config.show_title {
-            if let Some(title) = &config.title {
-                self.draw_title(ui, centered_plot_rect, title, config.font_scale);
+        let centered_plot_rect = if rows * cols <= 1 {
+            if has_3d_axes {
+                self.layout_3d_panel(
+                    ui,
+                    plot_area_rect,
+                    config.title.as_deref(),
+                    config.font_scale,
+                )
+                .plot_rect
+            } else {
+                self.layout_2d_panel(
+                    ui,
+                    plot_area_rect,
+                    config.title.as_deref(),
+                    config.x_label.as_deref(),
+                    config.y_label.as_deref(),
+                    config.font_scale,
+                )
+                .plot_rect
             }
-        }
-
-        if let Some(x_label) = &config.x_label {
-            self.draw_x_label(ui, centered_plot_rect, x_label, config.font_scale);
-        }
-        if let Some(y_label) = &config.y_label {
-            self.draw_y_label(ui, centered_plot_rect, y_label, config.font_scale);
-        }
-        if has_3d_axes {
-            if let Some(z_label) = plot_renderer.overlay_z_label() {
-                self.draw_z_label(ui, centered_plot_rect, z_label, config.font_scale);
-            }
-        }
-        for (label, pos) in plot_renderer.active_axes_pie_labels() {
+        } else {
+            plot_area_rect
+        };
+        for (label, pos) in if rows * cols <= 1 {
+            plot_renderer.active_axes_pie_labels()
+        } else {
+            Vec::new()
+        } {
             self.draw_pie_label(ui, centered_plot_rect, &label, pos, config.font_scale);
         }
 
         // Draw legend if enabled and entries available
-        if plot_renderer.overlay_show_legend() {
-            let theme = plot_renderer.theme.build_theme();
-            let bg = theme.get_background_color();
-            let text = theme.get_text_color();
-            let bg_luma = 0.2126 * bg.x + 0.7152 * bg.y + 0.0722 * bg.z;
-            let legend_bg = if bg_luma > 0.62 {
-                Color32::from_rgba_premultiplied(255, 255, 255, 170)
-            } else {
-                Color32::from_rgba_premultiplied(0, 0, 0, 128)
-            };
-            let legend_text = Color32::from_rgb(
-                (text.x.clamp(0.0, 1.0) * 255.0) as u8,
-                (text.y.clamp(0.0, 1.0) * 255.0) as u8,
-                (text.z.clamp(0.0, 1.0) * 255.0) as u8,
+        if rows * cols <= 1 && plot_renderer.overlay_show_legend() {
+            self.draw_legend(
+                ui,
+                centered_plot_rect,
+                plot_renderer.overlay_legend_entries(),
             );
-            let legend_stroke = if bg_luma > 0.62 {
-                Color32::from_rgb(55, 55, 55)
-            } else {
-                Color32::BLACK
-            };
-            let entries = plot_renderer.overlay_legend_entries();
-            if !entries.is_empty() {
-                let pad = 6.0;
-                let mut y = centered_plot_rect.min.y + pad + 4.0;
-                let x = centered_plot_rect.max.x - 140.0; // legend box width approx
-                                                          // Background
-                let legend_rect = Rect::from_min_max(
-                    egui::pos2(x - pad, centered_plot_rect.min.y + pad),
-                    egui::pos2(
-                        centered_plot_rect.max.x - pad,
-                        y + entries.len() as f32 * 18.0 + pad,
-                    ),
-                );
-                ui.painter().rect_filled(legend_rect, 4.0, legend_bg);
-                y += 12.0;
-                // Entries
-                for e in entries {
-                    let c = Color32::from_rgb(
-                        (e.color.x * 255.0) as u8,
-                        (e.color.y * 255.0) as u8,
-                        (e.color.z * 255.0) as u8,
-                    );
-                    let swatch_rect =
-                        Rect::from_min_size(egui::pos2(x, y - 6.0), egui::vec2(16.0, 8.0));
-                    // Draw a small symbol representative of plot type
-                    match e.plot_type {
-                        crate::plots::figure::PlotType::Line
-                        | crate::plots::figure::PlotType::Line3
-                        | crate::plots::figure::PlotType::Contour => {
-                            // Line: horizontal segment
-                            let ymid = swatch_rect.center().y;
-                            ui.painter().line_segment(
-                                [
-                                    Pos2::new(swatch_rect.min.x, ymid),
-                                    Pos2::new(swatch_rect.max.x, ymid),
-                                ],
-                                Stroke::new(2.0, c),
-                            );
-                        }
-                        crate::plots::figure::PlotType::Scatter
-                        | crate::plots::figure::PlotType::Scatter3 => {
-                            // Marker: small filled circle with edge
-                            let center = swatch_rect.center();
-                            ui.painter().circle_filled(center, 3.5, c);
-                            ui.painter().circle_stroke(
-                                center,
-                                3.5,
-                                Stroke::new(1.0, legend_stroke),
-                            );
-                        }
-                        crate::plots::figure::PlotType::Bar
-                        | crate::plots::figure::PlotType::Area
-                        | crate::plots::figure::PlotType::Surface
-                        | crate::plots::figure::PlotType::Pie
-                        | crate::plots::figure::PlotType::ContourFill => {
-                            // Filled rect
-                            ui.painter().rect_filled(swatch_rect, 2.0, c);
-                            ui.painter().rect_stroke(
-                                swatch_rect,
-                                2.0,
-                                Stroke::new(1.0, legend_stroke),
-                            );
-                        }
-                        crate::plots::figure::PlotType::ErrorBar
-                        | crate::plots::figure::PlotType::Stairs
-                        | crate::plots::figure::PlotType::Stem
-                        | crate::plots::figure::PlotType::Quiver => {
-                            // Generic: line + small tick/arrow
-                            let ymid = swatch_rect.center().y;
-                            ui.painter().line_segment(
-                                [
-                                    Pos2::new(swatch_rect.min.x, ymid),
-                                    Pos2::new(swatch_rect.max.x - 4.0, ymid),
-                                ],
-                                Stroke::new(1.5, c),
-                            );
-                            ui.painter().line_segment(
-                                [
-                                    Pos2::new(swatch_rect.max.x - 4.0, ymid - 3.0),
-                                    Pos2::new(swatch_rect.max.x, ymid),
-                                ],
-                                Stroke::new(1.0, c),
-                            );
-                        }
-                    }
-                    ui.painter().text(
-                        egui::pos2(x + 22.0, y),
-                        Align2::LEFT_CENTER,
-                        &e.label,
-                        FontId::proportional(12.0),
-                        legend_text,
-                    );
-                    y += 18.0;
-                }
-            }
         }
 
         // Draw colorbar if enabled
@@ -797,6 +944,7 @@ impl PlotOverlay {
         plot_rect: Rect,
         plot_renderer: &PlotRenderer,
         view_bounds_override: Option<(f64, f64, f64, f64)>,
+        axes_index: Option<usize>,
     ) {
         if let Some(data_bounds) = view_bounds_override
             .or_else(|| plot_renderer.view_bounds())
@@ -809,19 +957,26 @@ impl PlotOverlay {
             let y_range = y_max - y_min;
 
             // Calculate tick intervals
-            let x_tick_interval = if plot_renderer.overlay_x_log() {
+            let x_log = axes_index
+                .map(|idx| plot_renderer.overlay_x_log_for_axes(idx))
+                .unwrap_or_else(|| plot_renderer.overlay_x_log());
+            let y_log = axes_index
+                .map(|idx| plot_renderer.overlay_y_log_for_axes(idx))
+                .unwrap_or_else(|| plot_renderer.overlay_y_log());
+
+            let x_tick_interval = if x_log {
                 0.0
             } else {
                 plot_utils::calculate_tick_interval(x_range)
             };
-            let y_tick_interval = if plot_renderer.overlay_y_log() {
+            let y_tick_interval = if y_log {
                 0.0
             } else {
                 plot_utils::calculate_tick_interval(y_range)
             };
 
             // Draw vertical grid lines (linear vs log)
-            if plot_renderer.overlay_x_log() {
+            if x_log {
                 // Decades within [x_min, x_max]
                 let start_decade = x_min.log10().floor() as i32;
                 let end_decade = x_max.log10().ceil() as i32;
@@ -862,7 +1017,7 @@ impl PlotOverlay {
             }
 
             // Draw horizontal grid lines (linear vs log)
-            if plot_renderer.overlay_y_log() {
+            if y_log {
                 let start_decade = y_min.log10().floor() as i32;
                 let end_decade = y_max.log10().ceil() as i32;
                 for d in start_decade..=end_decade {
@@ -911,6 +1066,7 @@ impl PlotOverlay {
         plot_renderer: &PlotRenderer,
         config: &OverlayConfig,
         view_bounds_override: Option<(f64, f64, f64, f64)>,
+        axes_index: Option<usize>,
     ) {
         if let Some(data_bounds) = view_bounds_override
             .or_else(|| plot_renderer.view_bounds())
@@ -926,12 +1082,23 @@ impl PlotOverlay {
             let axis_color = self.theme_axis_color();
             let label_color = self.theme_text_color();
 
-            let x_log = plot_renderer.overlay_x_log();
-            let y_log = plot_renderer.overlay_y_log();
+            let x_log = axes_index
+                .map(|idx| plot_renderer.overlay_x_log_for_axes(idx))
+                .unwrap_or_else(|| plot_renderer.overlay_x_log());
+            let y_log = axes_index
+                .map(|idx| plot_renderer.overlay_y_log_for_axes(idx))
+                .unwrap_or_else(|| plot_renderer.overlay_y_log());
 
             // Categorical axis support
             let (mut cat_x, mut cat_y) = (false, false);
-            if let Some((is_x, labels)) = plot_renderer.overlay_categorical_labels() {
+            if let Some((is_x, labels)) = axes_index
+                .and_then(|idx| plot_renderer.overlay_categorical_labels_for_axes(idx))
+                .or_else(|| {
+                    plot_renderer
+                        .overlay_categorical_labels()
+                        .map(|(is_x, labels)| (is_x, labels.clone()))
+                })
+            {
                 if is_x {
                     cat_x = true;
                 } else {
@@ -939,8 +1106,8 @@ impl PlotOverlay {
                 }
                 if is_x {
                     // Draw X categorical labels at integer positions (1..n)
-                    for (idx, label) in labels.iter().enumerate() {
-                        let x_val = (idx + 1) as f64;
+                    for (label_idx, label) in labels.iter().enumerate() {
+                        let x_val = (label_idx + 1) as f64;
                         if x_val < x_min || x_val > x_max {
                             continue;
                         }
@@ -966,8 +1133,8 @@ impl PlotOverlay {
                     }
                 } else {
                     // Draw Y categorical labels at integer positions (1..n)
-                    for (idx, label) in labels.iter().enumerate() {
-                        let y_val = (idx + 1) as f64;
+                    for (label_idx, label) in labels.iter().enumerate() {
+                        let y_val = (label_idx + 1) as f64;
                         if y_val < y_min || y_val > y_max {
                             continue;
                         }
@@ -1285,6 +1452,40 @@ impl PlotOverlay {
         let col_y = Color32::from_rgb(90, 220, 120);
         let col_z = Color32::from_rgb(90, 160, 255);
 
+        if let Some(pos) = project(Vec3::X * axis_len * 1.10) {
+            if let Some(label) = plot_renderer.overlay_x_label_for_axes(axes_index) {
+                painter.text(
+                    pos + egui::vec2(10.0 * scale, 0.0),
+                    Align2::LEFT_CENTER,
+                    label,
+                    FontId::proportional(16.0 * scale),
+                    col_x,
+                );
+            }
+        }
+        if let Some(pos) = project(Vec3::Y * axis_len * 1.10) {
+            if let Some(label) = plot_renderer.overlay_y_label_for_axes(axes_index) {
+                painter.text(
+                    pos + egui::vec2(10.0 * scale, 0.0),
+                    Align2::LEFT_CENTER,
+                    label,
+                    FontId::proportional(16.0 * scale),
+                    col_y,
+                );
+            }
+        }
+        if let Some(pos) = project(Vec3::Z * axis_len * 1.10) {
+            if let Some(label) = plot_renderer.overlay_z_label_for_axes(axes_index) {
+                painter.text(
+                    pos + egui::vec2(8.0 * scale, -8.0 * scale),
+                    Align2::LEFT_BOTTOM,
+                    label,
+                    FontId::proportional(16.0 * scale),
+                    col_z,
+                );
+            }
+        }
+
         let draw_axis = |axis: Vec3, color: Color32| {
             for i in 1..=6 {
                 let t = (i as f32) * (major_step as f32);
@@ -1309,12 +1510,11 @@ impl PlotOverlay {
         draw_axis(Vec3::Z, col_z);
     }
 
-    /// Draw plot title
-    fn draw_title(&self, ui: &mut egui::Ui, plot_rect: Rect, title: &str, scale: f32) {
+    fn draw_title_in_rect(&self, ui: &mut egui::Ui, rect: Rect, title: &str, scale: f32) {
         let scale = scale.max(0.75);
         let text_color = self.theme_text_color();
         ui.painter().text(
-            Pos2::new(plot_rect.center().x, plot_rect.min.y - 20.0 * scale),
+            rect.center(),
             Align2::CENTER_CENTER,
             title,
             FontId::proportional(16.0 * scale),
@@ -1322,12 +1522,116 @@ impl PlotOverlay {
         );
     }
 
-    /// Draw X-axis label
-    fn draw_x_label(&self, ui: &mut egui::Ui, plot_rect: Rect, label: &str, scale: f32) {
+    fn draw_legend(
+        &self,
+        ui: &mut egui::Ui,
+        plot_rect: Rect,
+        entries: &[crate::plots::figure::LegendEntry],
+    ) {
+        if entries.is_empty() {
+            return;
+        }
+        let theme = self.theme.build_theme();
+        let bg = theme.get_background_color();
+        let text = theme.get_text_color();
+        let legend_text = Color32::from_rgb(
+            (text.x.clamp(0.0, 1.0) * 255.0) as u8,
+            (text.y.clamp(0.0, 1.0) * 255.0) as u8,
+            (text.z.clamp(0.0, 1.0) * 255.0) as u8,
+        );
+        let bg_luma = 0.2126 * bg.x + 0.7152 * bg.y + 0.0722 * bg.z;
+        let legend_bg = if bg_luma > 0.62 {
+            Color32::from_rgba_premultiplied(255, 255, 255, 170)
+        } else {
+            Color32::from_rgba_premultiplied(0, 0, 0, 128)
+        };
+        let legend_stroke = if bg_luma > 0.62 {
+            Color32::from_rgb(55, 55, 55)
+        } else {
+            Color32::BLACK
+        };
+        let pad = 6.0;
+        let mut y = plot_rect.min.y + pad + 4.0;
+        let x = plot_rect.max.x - 140.0;
+        let legend_rect = Rect::from_min_max(
+            egui::pos2(x - pad, plot_rect.min.y + pad),
+            egui::pos2(plot_rect.max.x - pad, y + entries.len() as f32 * 18.0 + pad),
+        );
+        ui.painter().rect_filled(legend_rect, 4.0, legend_bg);
+        y += 12.0;
+        for e in entries {
+            let c = Color32::from_rgb(
+                (e.color.x * 255.0) as u8,
+                (e.color.y * 255.0) as u8,
+                (e.color.z * 255.0) as u8,
+            );
+            let swatch_rect = Rect::from_min_size(egui::pos2(x, y - 6.0), egui::vec2(16.0, 8.0));
+            match e.plot_type {
+                crate::plots::figure::PlotType::Line
+                | crate::plots::figure::PlotType::Line3
+                | crate::plots::figure::PlotType::Contour => {
+                    let ymid = swatch_rect.center().y;
+                    ui.painter().line_segment(
+                        [
+                            Pos2::new(swatch_rect.min.x, ymid),
+                            Pos2::new(swatch_rect.max.x, ymid),
+                        ],
+                        Stroke::new(2.0, c),
+                    );
+                }
+                crate::plots::figure::PlotType::Scatter
+                | crate::plots::figure::PlotType::Scatter3 => {
+                    let center = swatch_rect.center();
+                    ui.painter().circle_filled(center, 3.5, c);
+                    ui.painter()
+                        .circle_stroke(center, 3.5, Stroke::new(1.0, legend_stroke));
+                }
+                crate::plots::figure::PlotType::Bar
+                | crate::plots::figure::PlotType::Area
+                | crate::plots::figure::PlotType::Surface
+                | crate::plots::figure::PlotType::Pie
+                | crate::plots::figure::PlotType::ContourFill => {
+                    ui.painter().rect_filled(swatch_rect, 2.0, c);
+                    ui.painter()
+                        .rect_stroke(swatch_rect, 2.0, Stroke::new(1.0, legend_stroke));
+                }
+                crate::plots::figure::PlotType::ErrorBar
+                | crate::plots::figure::PlotType::Stairs
+                | crate::plots::figure::PlotType::Stem
+                | crate::plots::figure::PlotType::Quiver => {
+                    let ymid = swatch_rect.center().y;
+                    ui.painter().line_segment(
+                        [
+                            Pos2::new(swatch_rect.min.x, ymid),
+                            Pos2::new(swatch_rect.max.x - 4.0, ymid),
+                        ],
+                        Stroke::new(1.5, c),
+                    );
+                    ui.painter().line_segment(
+                        [
+                            Pos2::new(swatch_rect.max.x - 4.0, ymid - 3.0),
+                            Pos2::new(swatch_rect.max.x, ymid),
+                        ],
+                        Stroke::new(1.0, c),
+                    );
+                }
+            }
+            ui.painter().text(
+                egui::pos2(x + 22.0, y),
+                Align2::LEFT_CENTER,
+                &e.label,
+                FontId::proportional(12.0),
+                legend_text,
+            );
+            y += 18.0;
+        }
+    }
+
+    fn draw_x_label_in_rect(&self, ui: &mut egui::Ui, rect: Rect, label: &str, scale: f32) {
         let scale = scale.max(0.75);
         let text_color = self.theme_text_color();
         ui.painter().text(
-            Pos2::new(plot_rect.center().x, plot_rect.max.y + 40.0 * scale),
+            rect.center(),
             Align2::CENTER_CENTER,
             label,
             FontId::proportional(14.0 * scale),
@@ -1335,29 +1639,98 @@ impl PlotOverlay {
         );
     }
 
-    /// Draw Y-axis label
-    fn draw_y_label(&self, ui: &mut egui::Ui, plot_rect: Rect, label: &str, scale: f32) {
+    fn draw_y_label_in_rect(&self, ui: &mut egui::Ui, rect: Rect, label: &str, scale: f32) {
         let scale = scale.max(0.75);
         let text_color = self.theme_text_color();
-        ui.painter().text(
-            Pos2::new(plot_rect.min.x - 40.0 * scale, plot_rect.center().y),
-            Align2::CENTER_CENTER,
-            label,
-            FontId::proportional(14.0 * scale),
-            text_color,
-        );
+        ui.fonts(|fonts| {
+            let galley = fonts.layout_no_wrap(
+                label.to_owned(),
+                FontId::proportional(13.0 * scale),
+                text_color,
+            );
+            let size = galley.size();
+            let center = rect.center();
+            let pos = Pos2::new(center.x - size.y * 0.5, center.y + size.x * 0.5);
+            let mut shape = egui::epaint::TextShape::new(pos, galley, text_color);
+            shape.angle = -std::f32::consts::FRAC_PI_2;
+            shape.override_text_color = Some(text_color);
+            ui.painter().add(shape);
+        });
     }
 
-    fn draw_z_label(&self, ui: &mut egui::Ui, plot_rect: Rect, label: &str, scale: f32) {
-        let scale = scale.max(0.75);
-        let text_color = self.theme_text_color();
-        ui.painter().text(
-            Pos2::new(plot_rect.max.x + 40.0 * scale, plot_rect.center().y),
-            Align2::CENTER_CENTER,
-            label,
-            FontId::proportional(14.0 * scale),
-            text_color,
-        );
+    fn project_world_to_screen(
+        &self,
+        plot_rect: Rect,
+        camera: &crate::core::Camera,
+        point: glam::Vec3,
+    ) -> Option<Pos2> {
+        let mut cam = camera.clone();
+        let clip = cam.view_proj_matrix() * point.extend(1.0);
+        if !clip.x.is_finite() || !clip.y.is_finite() || !clip.z.is_finite() || !clip.w.is_finite()
+        {
+            return None;
+        }
+        if clip.w.abs() < 1.0e-6 {
+            return None;
+        }
+        let ndc = clip.truncate() / clip.w;
+        if ndc.z < -1.1 || ndc.z > 1.1 {
+            return None;
+        }
+        if clip.w <= 0.0
+            && matches!(
+                camera.projection,
+                crate::core::camera::ProjectionType::Perspective { .. }
+            )
+        {
+            return None;
+        }
+        let x = plot_rect.min.x + (ndc.x + 1.0) * 0.5 * plot_rect.width();
+        let y = plot_rect.min.y + (1.0 - (ndc.y + 1.0) * 0.5) * plot_rect.height();
+        Some(Pos2::new(x, y))
+    }
+
+    fn draw_projected_world_texts(
+        &self,
+        ui: &mut egui::Ui,
+        plot_rect: Rect,
+        plot_renderer: &PlotRenderer,
+        axes_index: usize,
+        scale: f32,
+    ) {
+        let Some(camera) = plot_renderer
+            .axes_camera(axes_index)
+            .or_else(|| Some(plot_renderer.camera()))
+        else {
+            return;
+        };
+        let annotations = plot_renderer.world_text_annotations_for_axes(axes_index);
+        for (position, text, style) in annotations {
+            if !style.visible || text.trim().is_empty() {
+                continue;
+            }
+            let Some(screen) = self.project_world_to_screen(plot_rect, camera, position) else {
+                continue;
+            };
+            let color = style
+                .color
+                .map(|c| {
+                    Color32::from_rgb(
+                        (c.x.clamp(0.0, 1.0) * 255.0) as u8,
+                        (c.y.clamp(0.0, 1.0) * 255.0) as u8,
+                        (c.z.clamp(0.0, 1.0) * 255.0) as u8,
+                    )
+                })
+                .unwrap_or_else(|| self.theme_text_color());
+            let font_size = style.font_size.unwrap_or(14.0) * scale.max(0.75);
+            ui.painter().text(
+                screen,
+                Align2::CENTER_CENTER,
+                text,
+                FontId::proportional(font_size),
+                color,
+            );
+        }
     }
 
     fn draw_pie_label(

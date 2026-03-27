@@ -335,7 +335,7 @@ impl ImageExporter {
                 .cloned()
                 .unwrap_or_else(|| plot_renderer.camera().clone());
             plot_renderer
-                .render_camera_to_viewport(&mut encoder, &color_view, viewport, &cfg, &cam)
+                .render_camera_to_viewport(&mut encoder, &color_view, viewport, &cfg, &cam, 0, true)
                 .map_err(|e| format!("render failed: {e}"))?;
         }
 

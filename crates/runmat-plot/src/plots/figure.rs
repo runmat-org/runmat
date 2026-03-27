@@ -142,6 +142,14 @@ pub struct AxesMetadata {
     pub y_label_style: TextStyle,
     pub z_label_style: TextStyle,
     pub legend_style: LegendStyle,
+    pub world_text_annotations: Vec<TextAnnotation>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TextAnnotation {
+    pub position: glam::Vec3,
+    pub text: String,
+    pub style: TextStyle,
 }
 
 /// A plot element that can be any type of plot
@@ -360,6 +368,91 @@ impl Figure {
             self.sync_legacy_fields_from_active_axes();
         }
         self.dirty = true;
+    }
+
+    pub fn add_axes_text_annotation<S: Into<String>>(
+        &mut self,
+        axes_index: usize,
+        position: glam::Vec3,
+        text: S,
+        style: TextStyle,
+    ) -> usize {
+        self.ensure_axes_metadata_capacity(axes_index + 1);
+        let Some(meta) = self.axes_metadata.get_mut(axes_index) else {
+            return 0;
+        };
+        meta.world_text_annotations.push(TextAnnotation {
+            position,
+            text: text.into(),
+            style,
+        });
+        self.dirty = true;
+        meta.world_text_annotations.len() - 1
+    }
+
+    pub fn axes_text_annotation(
+        &self,
+        axes_index: usize,
+        annotation_index: usize,
+    ) -> Option<&TextAnnotation> {
+        self.axes_metadata
+            .get(axes_index)
+            .and_then(|meta| meta.world_text_annotations.get(annotation_index))
+    }
+
+    pub fn set_axes_text_annotation_text<S: Into<String>>(
+        &mut self,
+        axes_index: usize,
+        annotation_index: usize,
+        text: S,
+    ) {
+        if let Some(annotation) = self
+            .axes_metadata
+            .get_mut(axes_index)
+            .and_then(|meta| meta.world_text_annotations.get_mut(annotation_index))
+        {
+            annotation.text = text.into();
+            self.dirty = true;
+        }
+    }
+
+    pub fn set_axes_text_annotation_position(
+        &mut self,
+        axes_index: usize,
+        annotation_index: usize,
+        position: glam::Vec3,
+    ) {
+        if let Some(annotation) = self
+            .axes_metadata
+            .get_mut(axes_index)
+            .and_then(|meta| meta.world_text_annotations.get_mut(annotation_index))
+        {
+            annotation.position = position;
+            self.dirty = true;
+        }
+    }
+
+    pub fn set_axes_text_annotation_style(
+        &mut self,
+        axes_index: usize,
+        annotation_index: usize,
+        style: TextStyle,
+    ) {
+        if let Some(annotation) = self
+            .axes_metadata
+            .get_mut(axes_index)
+            .and_then(|meta| meta.world_text_annotations.get_mut(annotation_index))
+        {
+            annotation.style = style;
+            self.dirty = true;
+        }
+    }
+
+    pub fn axes_text_annotations(&self, axes_index: usize) -> &[TextAnnotation] {
+        self.axes_metadata
+            .get(axes_index)
+            .map(|meta| meta.world_text_annotations.as_slice())
+            .unwrap_or(&[])
     }
 
     pub fn set_axes_labels<S: Into<String>>(&mut self, axes_index: usize, x_label: S, y_label: S) {
@@ -852,6 +945,9 @@ impl Figure {
             }
         }
         self.ensure_axes_metadata_capacity(axes_index + 1);
+        if let Some(meta) = self.axes_metadata.get_mut(axes_index) {
+            meta.world_text_annotations.clear();
+        }
         self.dirty = true;
     }
 
@@ -932,14 +1028,26 @@ impl Figure {
         viewport_px: Option<(u32, u32)>,
         gpu: Option<&GpuPackContext<'_>>,
     ) -> Vec<RenderData> {
+        self.render_data_with_axes_with_viewport_and_gpu(viewport_px, gpu)
+            .into_iter()
+            .map(|(_, render_data)| render_data)
+            .collect()
+    }
+
+    pub fn render_data_with_axes_with_viewport_and_gpu(
+        &mut self,
+        viewport_px: Option<(u32, u32)>,
+        gpu: Option<&GpuPackContext<'_>>,
+    ) -> Vec<(usize, RenderData)> {
         fn push_with_optional_markers(
-            out: &mut Vec<RenderData>,
+            out: &mut Vec<(usize, RenderData)>,
+            axes_index: usize,
             render_data: RenderData,
             marker_data: Option<RenderData>,
         ) {
-            out.push(render_data);
+            out.push((axes_index, render_data));
             if let Some(marker_data) = marker_data {
-                out.push(marker_data);
+                out.push((axes_index, marker_data));
             }
         }
 
@@ -968,6 +1076,7 @@ impl Figure {
                     );
                     push_with_optional_markers(
                         &mut out,
+                        axes_index,
                         plot.render_data_with_viewport_gpu(viewport_px, gpu),
                         plot.marker_render_data(),
                     );
@@ -975,6 +1084,7 @@ impl Figure {
                 PlotElement::ErrorBar(plot) => {
                     push_with_optional_markers(
                         &mut out,
+                        axes_index,
                         plot.render_data(),
                         plot.marker_render_data(),
                     );
@@ -982,6 +1092,7 @@ impl Figure {
                 PlotElement::Stairs(plot) => {
                     push_with_optional_markers(
                         &mut out,
+                        axes_index,
                         plot.render_data(),
                         plot.marker_render_data(),
                     );
@@ -989,11 +1100,12 @@ impl Figure {
                 PlotElement::Stem(plot) => {
                     push_with_optional_markers(
                         &mut out,
+                        axes_index,
                         plot.render_data(),
                         plot.marker_render_data(),
                     );
                 }
-                _ => out.push(p.render_data()),
+                _ => out.push((axes_index, p.render_data())),
             }
         }
         out
@@ -1137,6 +1249,23 @@ impl Figure {
     /// false means Y is categorical (horizontal bars).
     pub fn categorical_axis_labels(&self) -> Option<(bool, Vec<String>)> {
         for plot in &self.plots {
+            if let PlotElement::Bar(b) = plot {
+                let is_x = matches!(b.orientation, crate::plots::bar::Orientation::Vertical);
+                return Some((is_x, b.labels.clone()));
+            }
+        }
+        None
+    }
+
+    pub fn categorical_axis_labels_for_axes(
+        &self,
+        axes_index: usize,
+    ) -> Option<(bool, Vec<String>)> {
+        for (plot_idx, plot) in self.plots.iter().enumerate() {
+            let plot_axes = *self.plot_axes_indices.get(plot_idx).unwrap_or(&0);
+            if plot_axes != axes_index {
+                continue;
+            }
             if let PlotElement::Bar(b) = plot {
                 let is_x = matches!(b.orientation, crate::plots::bar::Orientation::Vertical);
                 return Some((is_x, b.labels.clone()));

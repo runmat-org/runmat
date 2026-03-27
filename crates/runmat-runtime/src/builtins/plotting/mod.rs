@@ -106,6 +106,8 @@ pub(crate) mod subplot;
 pub(crate) mod surf;
 #[path = "ops/surfc.rs"]
 pub(crate) mod surfc;
+#[path = "ops/text.rs"]
+pub(crate) mod text;
 #[path = "ops/title.rs"]
 pub(crate) mod title;
 #[path = "ops/view.rs"]

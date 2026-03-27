@@ -454,7 +454,15 @@ impl NativeSurfaceRenderContext {
                 cfg.height = vh.max(1);
                 let cam = self.renderer.camera().clone();
                 self.renderer
-                    .render_camera_to_viewport(encoder, target_view, (vx, vy, vw, vh), &cfg, &cam)
+                    .render_camera_to_viewport(
+                        encoder,
+                        target_view,
+                        (vx, vy, vw, vh),
+                        &cfg,
+                        &cam,
+                        0,
+                        true,
+                    )
                     .map_err(|err| format!("native surface viewport render failed: {err}"))?;
             }
 

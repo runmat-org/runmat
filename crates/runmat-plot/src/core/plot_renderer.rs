@@ -6,7 +6,7 @@
 
 use crate::core::renderer::Vertex;
 use crate::core::{Camera, ClipPolicy, DepthMode, Scene, WgpuRenderer};
-use crate::plots::figure::LegendEntry;
+use crate::plots::figure::{LegendEntry, TextStyle};
 use crate::plots::surface::ColorMap;
 use crate::plots::Figure;
 use glam::{Mat4, Vec3, Vec4};
@@ -323,7 +323,16 @@ impl PlotRenderer {
         self.needs_update = true;
 
         // Recompute bounds and fit camera immediately (only once per initial dataset).
-        if self.camera_auto_fit && self.fit_camera_to_data() {
+        let fit_applied = if self.camera_auto_fit {
+            if num_axes > 1 {
+                self.fit_cameras_to_axes_data()
+            } else {
+                self.fit_camera_to_data()
+            }
+        } else {
+            false
+        };
+        if self.camera_auto_fit && fit_applied {
             // Freeze the initial fit (CAD-like): don't re-fit as data updates (e.g. animations)
             // unless the user explicitly asks (Fit Extents / Reset View) or we change plot mode.
             self.camera_auto_fit = false;
@@ -346,16 +355,11 @@ impl PlotRenderer {
             queue: &self.wgpu_renderer.queue,
         };
         let render_data_list =
-            figure.render_data_with_viewport_and_gpu(Some(viewport_px), Some(&gpu));
-        let axes_map: Vec<usize> = figure.plot_axes_indices().to_vec();
+            figure.render_data_with_axes_with_viewport_and_gpu(Some(viewport_px), Some(&gpu));
         let (rows, cols) = figure.axes_grid();
 
-        for (node_id_counter, render_data) in render_data_list.into_iter().enumerate() {
-            let axes_index = axes_map
-                .get(node_id_counter)
-                .copied()
-                .unwrap_or(0)
-                .min(rows * cols - 1);
+        for (node_id_counter, (axes_index, render_data)) in render_data_list.into_iter().enumerate() {
+            let axes_index = axes_index.min(rows * cols - 1);
             // Create scene node for this plot element
             let node = SceneNode {
                 id: node_id_counter as u64,
@@ -423,6 +427,82 @@ impl PlotRenderer {
                 }
             }
         }
+    }
+
+    fn display_bounds_for_axes(&self, axes_index: usize) -> Option<(f64, f64, f64, f64)> {
+        let base = self.axes_bounds(axes_index)?;
+        let mut x_min = base.min.x as f64;
+        let mut x_max = base.max.x as f64;
+        let mut y_min = base.min.y as f64;
+        let mut y_max = base.max.y as f64;
+
+        if let Some(fig) = self.last_figure.as_ref() {
+            if let Some(meta) = fig.axes_metadata(axes_index) {
+                if let Some((xl, xr)) = meta.x_limits {
+                    x_min = xl;
+                    x_max = xr;
+                }
+                if let Some((yl, yr)) = meta.y_limits {
+                    y_min = yl;
+                    y_max = yr;
+                }
+                if meta.axis_equal {
+                    let cx = (x_min + x_max) * 0.5;
+                    let cy = (y_min + y_max) * 0.5;
+                    let size = (x_max - x_min).abs().max((y_max - y_min).abs()).max(0.1);
+                    x_min = cx - size * 0.5;
+                    x_max = cx + size * 0.5;
+                    y_min = cy - size * 0.5;
+                    y_max = cy + size * 0.5;
+                }
+            }
+        }
+
+        Some((x_min, x_max, y_min, y_max))
+    }
+
+    fn fit_cameras_to_axes_data(&mut self) -> bool {
+        let mut applied = false;
+        for idx in 0..self.axes_cameras.len() {
+            if self.figure_has_3d {
+                let Some(bounds) = self.axes_bounds(idx) else {
+                    continue;
+                };
+                let center = (bounds.min + bounds.max) * 0.5;
+                let mut cam = Camera::new();
+                cam.target = center;
+                cam.up = Vec3::Z;
+                cam.position = center + Vec3::new(1.0, -1.0, 1.0);
+                cam.fit_bounds(bounds.min, bounds.max);
+                self.axes_cameras[idx] = cam;
+                applied = true;
+                continue;
+            }
+
+            let Some((x_min, x_max, y_min, y_max)) = self.display_bounds_for_axes(idx) else {
+                continue;
+            };
+            let mut cam = Self::create_default_camera();
+            if let crate::core::camera::ProjectionType::Orthographic {
+                ref mut left,
+                ref mut right,
+                ref mut bottom,
+                ref mut top,
+                ..
+            } = cam.projection
+            {
+                *left = x_min as f32;
+                *right = x_max as f32;
+                *bottom = y_min as f32;
+                *top = y_max as f32;
+            }
+            cam.position.z = 1.0;
+            cam.target.z = 0.0;
+            cam.mark_dirty();
+            self.axes_cameras[idx] = cam;
+            applied = true;
+        }
+        applied
     }
 
     /// Calculate data bounds from scene
@@ -548,7 +628,11 @@ impl PlotRenderer {
 
     /// Explicit "Fit Extents" action (CAD-like). Fits the camera to current data once.
     pub fn fit_extents(&mut self) {
-        let _ = self.fit_camera_to_data();
+        let _ = if self.figure_axes_grid().0 * self.figure_axes_grid().1 > 1 {
+            self.fit_cameras_to_axes_data()
+        } else {
+            self.fit_camera_to_data()
+        };
         self.camera_auto_fit = false;
         self.needs_update = true;
     }
@@ -560,16 +644,16 @@ impl PlotRenderer {
     /// For 2D, this is equivalent to Fit Extents (since "home" without data bounds is rarely useful).
     pub fn reset_camera_position(&mut self) {
         if self.figure_has_3d {
-            let data_center = self
-                .last_figure
-                .as_mut()
-                .map(|f| {
-                    let b = f.bounds();
-                    (b.min + b.max) * 0.5
-                })
-                .unwrap_or_else(|| Vec3::ZERO);
             let dir = Vec3::new(1.0, -1.0, 1.0).normalize_or_zero();
-            for c in self.axes_cameras.iter_mut() {
+            let data_centers: Vec<Vec3> = (0..self.axes_cameras.len())
+                .map(|idx| {
+                    self.axes_bounds(idx)
+                        .map(|b| (b.min + b.max) * 0.5)
+                        .unwrap_or_else(|| self.axes_cameras[idx].target)
+                })
+                .collect();
+            for (idx, c) in self.axes_cameras.iter_mut().enumerate() {
+                let data_center = data_centers.get(idx).copied().unwrap_or(c.target);
                 let dist = (c.position - c.target).length().max(0.1);
                 c.target = data_center;
                 c.up = Vec3::Z;
@@ -1097,6 +1181,8 @@ impl PlotRenderer {
         viewport_scissor: (u32, u32, u32, u32),
         config: &PlotRenderConfig,
         camera: &Camera,
+        axes_index: usize,
+        clear_background: bool,
     ) -> Result<RenderResult, Box<dyn std::error::Error>> {
         let start_time = Instant::now();
 
@@ -1132,7 +1218,7 @@ impl PlotRenderer {
         }
         let view_proj_matrix = cam.view_proj_matrix();
         self.wgpu_renderer
-            .update_uniforms(view_proj_matrix, Mat4::IDENTITY);
+            .update_uniforms_for_axes(axes_index, view_proj_matrix, Mat4::IDENTITY);
 
         let (mut sx, mut sy, mut sw, mut sh) = viewport_scissor;
         let target_w = self.wgpu_renderer.surface_config.width.max(1);
@@ -1326,7 +1412,7 @@ impl PlotRenderer {
 
             // Procedural XY grid plane (depth-tested, no depth writes). This avoids far-plane
             // popping and keeps line density stable via shader derivatives.
-            if self.figure_show_grid {
+            if self.overlay_show_grid_for_axes(axes_index) {
                 let theme = self.theme.build_theme();
                 let bg = theme.get_background_color();
                 let grid = theme.get_grid_color();
@@ -1347,7 +1433,7 @@ impl PlotRenderer {
                 }
                 self.wgpu_renderer.ensure_grid_plane_pipeline();
                 self.wgpu_renderer
-                    .update_grid_uniforms(crate::core::renderer::GridUniforms {
+                    .update_grid_uniforms_for_axes(axes_index, crate::core::renderer::GridUniforms {
                         major_step: major_step as f32,
                         minor_step: minor_step as f32,
                         fade_start: (0.60 * dx.max(dy)).max(major_step as f32),
@@ -1513,10 +1599,11 @@ impl PlotRenderer {
         // Precompute optional grid geometry and uniforms so we can draw it under data
         // Grid is drawn only when enabled and in 2D orthographic
         let mut grid_vb_opt: Option<wgpu::Buffer> = None;
-        if is_2d && self.figure_show_grid {
-            if let Some((l, r, b, t)) = self.view_bounds() {
+        if is_2d && self.overlay_show_grid_for_axes(axes_index) {
+            if let Some((l, r, b, t)) = self.view_bounds_for_axes(axes_index) {
                 // Update direct uniforms mapping for viewport
-                self.wgpu_renderer.update_direct_uniforms(
+                self.wgpu_renderer.update_direct_uniforms_for_axes(
+                    axes_index,
                     [l as f32, b as f32],
                     [r as f32, t as f32],
                     [-1.0, -1.0],
@@ -1559,20 +1646,26 @@ impl PlotRenderer {
         }
 
         // Before the pass: configure direct uniforms and ensure pipelines
-        let bounds_opt = if is_2d { self.data_bounds } else { None };
+        let bounds_opt = if is_2d {
+            match cam.projection {
+                crate::core::camera::ProjectionType::Orthographic {
+                    left,
+                    right,
+                    bottom,
+                    top,
+                    ..
+                } => Some((left as f64, right as f64, bottom as f64, top as f64)),
+                _ => self.data_bounds,
+            }
+        } else {
+            None
+        };
         if is_2d {
-            if let Some((l, r, b, t)) = self.view_bounds() {
-                self.wgpu_renderer.update_direct_uniforms(
+            if let Some((l, r, b, t)) = bounds_opt {
+                self.wgpu_renderer.update_direct_uniforms_for_axes(
+                    axes_index,
                     [l as f32, b as f32],
                     [r as f32, t as f32],
-                    [-1.0, -1.0],
-                    [1.0, 1.0],
-                    [sw.max(1) as f32, sh.max(1) as f32],
-                );
-            } else if let Some((x_min, x_max, y_min, y_max)) = bounds_opt {
-                self.wgpu_renderer.update_direct_uniforms(
-                    [x_min as f32, y_min as f32],
-                    [x_max as f32, y_max as f32],
                     [-1.0, -1.0],
                     [1.0, 1.0],
                     [sw.max(1) as f32, sh.max(1) as f32],
@@ -1624,7 +1717,7 @@ impl PlotRenderer {
                     view: msaa_view_opt.as_ref().unwrap_or(target_view),
                     resolve_target: if use_msaa { Some(target_view) } else { None },
                     ops: wgpu::Operations {
-                        load: if use_msaa {
+                        load: if clear_background {
                             wgpu::LoadOp::Clear(wgpu::Color {
                                 r: config.background_color.x as f64,
                                 g: config.background_color.y as f64,
@@ -1667,7 +1760,7 @@ impl PlotRenderer {
                     render_pass.set_pipeline(pipeline);
                     render_pass.set_bind_group(
                         0,
-                        &self.wgpu_renderer.direct_uniform_bind_group,
+                        self.wgpu_renderer.get_direct_uniform_bind_group_for_axes(axes_index),
                         &[],
                     );
                     render_pass.set_vertex_buffer(0, vb_grid.slice(..));
@@ -1744,7 +1837,9 @@ impl PlotRenderer {
                             direct_point_pipeline.unwrap().as_ref().unwrap()
                         }
                     };
-                    let uniform_bg = &self.wgpu_renderer.direct_uniform_bind_group;
+                    let uniform_bg = self
+                        .wgpu_renderer
+                        .get_direct_uniform_bind_group_for_axes(axes_index);
                     render_pass.set_pipeline(pipeline_ref);
                     render_pass.set_bind_group(0, uniform_bg, &[]);
                 } else if is_textured {
@@ -1754,7 +1849,7 @@ impl PlotRenderer {
                     render_pass.set_pipeline(pipeline);
                     render_pass.set_bind_group(
                         0,
-                        &self.wgpu_renderer.direct_uniform_bind_group,
+                        self.wgpu_renderer.get_direct_uniform_bind_group_for_axes(axes_index),
                         &[],
                     );
                     if let Some(ref bg) = image_bind_groups[idx] {
@@ -1763,7 +1858,11 @@ impl PlotRenderer {
                 } else {
                     let pipeline = self.wgpu_renderer.get_pipeline(render_data.pipeline_type);
                     render_pass.set_pipeline(pipeline);
-                    render_pass.set_bind_group(0, self.wgpu_renderer.get_uniform_bind_group(), &[]);
+                    render_pass.set_bind_group(
+                        0,
+                        self.wgpu_renderer.get_uniform_bind_group_for_axes(axes_index),
+                        &[],
+                    );
                 }
 
                 if is_points && use_direct {
@@ -1797,8 +1896,16 @@ impl PlotRenderer {
             if let Some((ref vb, ref ib)) = grid_plane_buffers {
                 if let Some(pipeline) = self.wgpu_renderer.grid_plane_pipeline() {
                     render_pass.set_pipeline(pipeline);
-                    render_pass.set_bind_group(0, self.wgpu_renderer.get_uniform_bind_group(), &[]);
-                    render_pass.set_bind_group(1, &self.wgpu_renderer.grid_uniform_bind_group, &[]);
+                    render_pass.set_bind_group(
+                        0,
+                        self.wgpu_renderer.get_uniform_bind_group_for_axes(axes_index),
+                        &[],
+                    );
+                    render_pass.set_bind_group(
+                        1,
+                        self.wgpu_renderer.get_grid_uniform_bind_group_for_axes(axes_index),
+                        &[],
+                    );
                     render_pass.set_vertex_buffer(0, vb.slice(..));
                     render_pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
                     render_pass.draw_indexed(0..6, 0, 0..1);
@@ -1861,6 +1968,8 @@ impl PlotRenderer {
         if self.axes_cameras.is_empty() {
             self.axes_cameras.push(Self::create_default_camera());
         }
+        self.wgpu_renderer
+            .ensure_axes_uniform_capacity(axes_viewports.len().max(1));
 
         // Pre-collect all node ids
         let all_ids: Vec<crate::core::scene::NodeId> = self
@@ -1900,8 +2009,20 @@ impl PlotRenderer {
             let mut cfg = base_config.clone();
             cfg.width = viewport.2;
             cfg.height = viewport.3;
-            cfg.msaa_samples = msaa_samples;
-            let _ = self.render_camera_to_viewport(encoder, target_view, *viewport, &cfg, &cam)?;
+            // Subplot passes render into one shared target. Using per-pass MSAA resolve here
+            // would resolve the whole intermediate texture each time and overwrite earlier panels.
+            // Keep subplot viewport rendering single-sampled for correctness.
+            let _ = msaa_samples;
+            cfg.msaa_samples = 1;
+            let _ = self.render_camera_to_viewport(
+                encoder,
+                target_view,
+                *viewport,
+                &cfg,
+                &cam,
+                ax_idx,
+                false,
+            )?;
 
             // Restore hidden nodes visibility
             for id in hidden_ids {
@@ -1981,20 +2102,58 @@ impl PlotRenderer {
     pub fn overlay_show_grid(&self) -> bool {
         self.figure_show_grid
     }
+    pub fn overlay_show_grid_for_axes(&self, axes_index: usize) -> bool {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| m.grid_enabled)
+            .unwrap_or(self.figure_show_grid)
+    }
     pub fn overlay_show_box(&self) -> bool {
         self.figure_show_box
+    }
+    pub fn overlay_show_box_for_axes(&self, axes_index: usize) -> bool {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| m.box_enabled)
+            .unwrap_or(self.figure_show_box)
     }
     pub fn overlay_title(&self) -> Option<&String> {
         self.figure_title.as_ref()
     }
+    pub fn overlay_title_for_axes(&self, axes_index: usize) -> Option<&String> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .and_then(|m| m.title.as_ref())
+    }
     pub fn overlay_x_label(&self) -> Option<&String> {
         self.figure_x_label.as_ref()
+    }
+    pub fn overlay_x_label_for_axes(&self, axes_index: usize) -> Option<&String> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .and_then(|m| m.x_label.as_ref())
     }
     pub fn overlay_y_label(&self) -> Option<&String> {
         self.figure_y_label.as_ref()
     }
+    pub fn overlay_y_label_for_axes(&self, axes_index: usize) -> Option<&String> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .and_then(|m| m.y_label.as_ref())
+    }
     pub fn overlay_z_label(&self) -> Option<&String> {
         self.figure_z_label.as_ref()
+    }
+    pub fn overlay_z_label_for_axes(&self, axes_index: usize) -> Option<&String> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .and_then(|m| m.z_label.as_ref())
     }
     pub fn active_axes_pie_labels(&self) -> Vec<(String, glam::Vec2)> {
         let Some(fig) = self.last_figure.as_ref() else {
@@ -2005,17 +2164,118 @@ impl PlotRenderer {
             .map(|entry| (entry.label, entry.position))
             .collect()
     }
+    pub fn pie_labels_for_axes(&self, axes_index: usize) -> Vec<(String, glam::Vec2)> {
+        let Some(fig) = self.last_figure.as_ref() else {
+            return Vec::new();
+        };
+        fig.pie_labels_for_axes(axes_index)
+            .into_iter()
+            .map(|entry| (entry.label, entry.position))
+            .collect()
+    }
+
+    pub fn world_text_annotations_for_axes(
+        &self,
+        axes_index: usize,
+    ) -> Vec<(glam::Vec3, String, TextStyle)> {
+        self.last_figure
+            .as_ref()
+            .map(|f| {
+                f.axes_text_annotations(axes_index)
+                    .iter()
+                    .map(|annotation| {
+                        (
+                            annotation.position,
+                            annotation.text.clone(),
+                            annotation.style.clone(),
+                        )
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    pub fn world_axis_label_annotations_for_axes(
+        &self,
+        axes_index: usize,
+    ) -> Vec<(glam::Vec3, String, TextStyle)> {
+        let Some(fig) = self.last_figure.as_ref() else {
+            return Vec::new();
+        };
+        let Some(meta) = fig.axes_metadata(axes_index) else {
+            return Vec::new();
+        };
+        let Some(bounds) = self.axes_bounds(axes_index) else {
+            return Vec::new();
+        };
+        let dx = (bounds.max.x - bounds.min.x).abs().max(1.0e-3);
+        let dy = (bounds.max.y - bounds.min.y).abs().max(1.0e-3);
+        let dz = (bounds.max.z - bounds.min.z).abs().max(1.0e-3);
+        let camera = self
+            .axes_camera(axes_index)
+            .or_else(|| Some(self.camera()))
+            .expect("plot renderer must always have a camera");
+        let center = (bounds.min + bounds.max) * 0.5;
+        let cam_delta = camera.position - center;
+        let sx = if cam_delta.x >= 0.0 { 1.0 } else { -1.0 };
+        let sy = if cam_delta.y >= 0.0 { 1.0 } else { -1.0 };
+        let sz = if cam_delta.z >= 0.0 { 1.0 } else { -1.0 };
+        let x_anchor = glam::Vec3::new(bounds.min.x + dx * 0.82, bounds.min.y, bounds.min.z)
+            + glam::Vec3::new(0.0, -sy * dy * 0.10, -sz * dz * 0.08);
+        let y_anchor = glam::Vec3::new(bounds.min.x, bounds.min.y + dy * 0.82, bounds.min.z)
+            + glam::Vec3::new(-sx * dx * 0.10, 0.0, -sz * dz * 0.08);
+        let z_anchor = glam::Vec3::new(bounds.min.x, bounds.min.y, bounds.min.z + dz * 0.82)
+            + glam::Vec3::new(-sx * dx * 0.08, -sy * dy * 0.08, 0.0);
+        let mut out = Vec::new();
+        if let Some(label) = meta.x_label.clone().filter(|s| !s.is_empty()) {
+            out.push((x_anchor, label, meta.x_label_style.clone()));
+        }
+        if let Some(label) = meta.y_label.clone().filter(|s| !s.is_empty()) {
+            out.push((y_anchor, label, meta.y_label_style.clone()));
+        }
+        if let Some(label) = meta.z_label.clone().filter(|s| !s.is_empty()) {
+            out.push((z_anchor, label, meta.z_label_style.clone()));
+        }
+        out
+    }
     pub fn overlay_show_legend(&self) -> bool {
         self.figure_show_legend
+    }
+    pub fn overlay_show_legend_for_axes(&self, axes_index: usize) -> bool {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| m.legend_enabled)
+            .unwrap_or(self.figure_show_legend)
     }
     pub fn overlay_legend_entries(&self) -> &Vec<LegendEntry> {
         &self.legend_entries
     }
+    pub fn overlay_legend_entries_for_axes(&self, axes_index: usize) -> Vec<LegendEntry> {
+        self.last_figure
+            .as_ref()
+            .map(|f| f.legend_entries_for_axes(axes_index))
+            .unwrap_or_default()
+    }
     pub fn overlay_x_log(&self) -> bool {
         self.figure_x_log
     }
+    pub fn overlay_x_log_for_axes(&self, axes_index: usize) -> bool {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| m.x_log)
+            .unwrap_or(self.figure_x_log)
+    }
     pub fn overlay_y_log(&self) -> bool {
         self.figure_y_log
+    }
+    pub fn overlay_y_log_for_axes(&self, axes_index: usize) -> bool {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| m.y_log)
+            .unwrap_or(self.figure_y_log)
     }
     pub fn overlay_colormap(&self) -> ColorMap {
         self.figure_colormap
@@ -2040,6 +2300,12 @@ impl PlotRenderer {
         } else {
             None
         }
+    }
+
+    pub fn overlay_categorical_labels_for_axes(&self, axes_index: usize) -> Option<(bool, Vec<String>)> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.categorical_axis_labels_for_axes(axes_index))
     }
 
     /// Get bounds used for display (manual axis limits override data bounds when provided)

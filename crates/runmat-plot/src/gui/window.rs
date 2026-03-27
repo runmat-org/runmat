@@ -49,6 +49,8 @@ pub struct PlotWindow<'window> {
     pub pixels_per_point: f32,
     /// Whether left mouse button is currently down
     pub mouse_left_down: bool,
+    /// Which subplot axes is currently captured for drag interactions, if any.
+    pub active_drag_axes: Option<usize>,
     /// Optional signal that lets external callers request window shutdown.
     pub close_signal: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 }

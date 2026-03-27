@@ -151,7 +151,7 @@ pub fn parse_legend_command(builtin: &'static str, args: &[Value]) -> BuiltinRes
     })
 }
 
-fn split_axes_target<'a>(
+pub(crate) fn split_axes_target<'a>(
     builtin: &'static str,
     args: &'a [Value],
 ) -> BuiltinResult<((FigureHandle, usize), &'a [Value])> {

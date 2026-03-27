@@ -242,6 +242,13 @@ pub struct AreaHandleState {
 }
 
 #[derive(Clone, Debug)]
+pub struct TextAnnotationHandleState {
+    pub figure: FigureHandle,
+    pub axes_index: usize,
+    pub annotation_index: usize,
+}
+
+#[derive(Clone, Debug)]
 pub enum PlotChildHandleState {
     Histogram(HistogramHandleState),
     Line(SimplePlotHandleState),
@@ -259,6 +266,7 @@ pub enum PlotChildHandleState {
     Contour(SimplePlotHandleState),
     ContourFill(SimplePlotHandleState),
     Pie(SimplePlotHandleState),
+    Text(TextAnnotationHandleState),
 }
 
 impl Default for PlotRegistry {
@@ -584,6 +592,56 @@ pub fn set_zlabel_for_axes(
         state.figure.set_axes_zlabel(axes_index, label.to_string());
         state.figure.set_axes_zlabel_style(axes_index, style);
         encode_plot_object_handle(handle, axes_index, PlotObjectKind::ZLabel)
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(object_handle)
+}
+
+pub fn add_text_annotation_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    position: glam::Vec3,
+    text: &str,
+    style: TextStyle,
+) -> Result<f64, FigureError> {
+    let (annotation_index, figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        state
+            .figure
+            .add_axes_text_annotation(axes_index, position, text.to_string(), style)
+    })?;
+    notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
+    Ok(register_text_annotation_handle(
+        handle,
+        axes_index,
+        annotation_index,
+    ))
+}
+
+pub fn set_text_annotation_properties_for_axes(
+    handle: FigureHandle,
+    axes_index: usize,
+    annotation_index: usize,
+    text: Option<String>,
+    position: Option<glam::Vec3>,
+    style: Option<TextStyle>,
+) -> Result<f64, FigureError> {
+    let (object_handle, figure_clone) = with_axes_target_mut(handle, axes_index, |state| {
+        if let Some(text) = text {
+            state
+                .figure
+                .set_axes_text_annotation_text(axes_index, annotation_index, text);
+        }
+        if let Some(position) = position {
+            state
+                .figure
+                .set_axes_text_annotation_position(axes_index, annotation_index, position);
+        }
+        if let Some(style) = style {
+            state
+                .figure
+                .set_axes_text_annotation_style(axes_index, annotation_index, style);
+        }
+        register_text_annotation_handle(handle, axes_index, annotation_index)
     })?;
     notify_with_figure(handle, &figure_clone, FigureEventKind::Updated);
     Ok(object_handle)
@@ -1183,6 +1241,25 @@ pub fn register_pie_handle(figure: FigureHandle, axes_index: usize, plot_index: 
     register_simple_plot_handle(figure, axes_index, plot_index, PlotChildHandleState::Pie)
 }
 
+pub fn register_text_annotation_handle(
+    figure: FigureHandle,
+    axes_index: usize,
+    annotation_index: usize,
+) -> f64 {
+    let mut reg = registry();
+    let id = reg.next_plot_child_handle;
+    reg.next_plot_child_handle += 1;
+    reg.plot_children.insert(
+        id,
+        PlotChildHandleState::Text(TextAnnotationHandleState {
+            figure,
+            axes_index,
+            annotation_index,
+        }),
+    );
+    id as f64
+}
+
 pub fn plot_child_handle_snapshot(handle: f64) -> Result<PlotChildHandleState, FigureError> {
     if !handle.is_finite() || handle <= 0.0 {
         return Err(FigureError::InvalidPlotObjectHandle);
@@ -1373,6 +1450,7 @@ fn purge_plot_children_for_figure(reg: &mut PlotRegistry, handle: FigureHandle) 
         PlotChildHandleState::Quiver(quiver) => quiver.figure != handle,
         PlotChildHandleState::Image(image) => image.figure != handle,
         PlotChildHandleState::Area(area) => area.figure != handle,
+        PlotChildHandleState::Text(text) => text.figure != handle,
     });
 }
 
@@ -1407,6 +1485,9 @@ fn purge_plot_children_for_axes(reg: &mut PlotRegistry, handle: FigureHandle, ax
         }
         PlotChildHandleState::Area(area) => {
             !(area.figure == handle && area.axes_index == axes_index)
+        }
+        PlotChildHandleState::Text(text) => {
+            !(text.figure == handle && text.axes_index == axes_index)
         }
     });
 }

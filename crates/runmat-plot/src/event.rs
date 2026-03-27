@@ -527,6 +527,16 @@ pub struct SerializedAxesMetadata {
     pub y_label_style: SerializedTextStyle,
     pub z_label_style: SerializedTextStyle,
     pub legend_style: SerializedLegendStyle,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub world_text_annotations: Vec<SerializedTextAnnotation>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerializedTextAnnotation {
+    pub position: [f32; 3],
+    pub text: String,
+    pub style: SerializedTextStyle,
 }
 
 impl From<AxesMetadata> for SerializedAxesMetadata {
@@ -555,6 +565,11 @@ impl From<AxesMetadata> for SerializedAxesMetadata {
             y_label_style: value.y_label_style.into(),
             z_label_style: value.z_label_style.into(),
             legend_style: value.legend_style.into(),
+            world_text_annotations: value
+                .world_text_annotations
+                .into_iter()
+                .map(Into::into)
+                .collect(),
         }
     }
 }
@@ -585,6 +600,31 @@ impl From<SerializedAxesMetadata> for AxesMetadata {
             y_label_style: value.y_label_style.into(),
             z_label_style: value.z_label_style.into(),
             legend_style: value.legend_style.into(),
+            world_text_annotations: value
+                .world_text_annotations
+                .into_iter()
+                .map(Into::into)
+                .collect(),
+        }
+    }
+}
+
+impl From<crate::plots::figure::TextAnnotation> for SerializedTextAnnotation {
+    fn from(value: crate::plots::figure::TextAnnotation) -> Self {
+        Self {
+            position: value.position.to_array(),
+            text: value.text,
+            style: value.style.into(),
+        }
+    }
+}
+
+impl From<SerializedTextAnnotation> for crate::plots::figure::TextAnnotation {
+    fn from(value: SerializedTextAnnotation) -> Self {
+        Self {
+            position: glam::Vec3::from_array(value.position),
+            text: value.text,
+            style: value.style.into(),
         }
     }
 }

@@ -5,7 +5,8 @@ use super::state::{
     axes_handle_exists, axes_handles_for_figure, axes_metadata_snapshot, axes_state_snapshot,
     current_axes_handle_for_figure, decode_axes_handle, decode_plot_object_handle,
     figure_handle_exists, legend_entries_snapshot, select_axes_for_figure, set_legend_for_axes,
-    set_text_properties_for_axes, FigureHandle, PlotObjectKind,
+    set_text_annotation_properties_for_axes, set_text_properties_for_axes, FigureHandle,
+    PlotObjectKind,
 };
 use super::style::{
     parse_color_value, value_as_bool, value_as_f64, value_as_string, LineStyleParseOptions,
@@ -1073,6 +1074,9 @@ fn get_plot_child_property(
             get_contour_fill_property(plot, property, builtin)
         }
         super::state::PlotChildHandleState::Pie(plot) => get_pie_property(plot, property, builtin),
+        super::state::PlotChildHandleState::Text(text) => {
+            get_world_text_property(text, property, builtin)
+        }
     }
 }
 
@@ -1131,6 +1135,9 @@ fn apply_plot_child_property(
         super::state::PlotChildHandleState::Pie(plot) => {
             apply_pie_property(plot, key, value, builtin)
         }
+        super::state::PlotChildHandleState::Text(text) => {
+            apply_world_text_property(text, key, value, builtin)
+        }
     }
 }
 
@@ -1144,6 +1151,136 @@ fn child_base_struct(kind: &str, figure: FigureHandle, axes_index: usize) -> Str
     st.insert("Parent", child_parent_handle(figure, axes_index));
     st.insert("Children", handles_value(Vec::new()));
     st
+}
+
+fn text_position_value(position: glam::Vec3) -> Value {
+    Value::Tensor(Tensor {
+        rows: 1,
+        cols: 3,
+        shape: vec![1, 3],
+        data: vec![position.x as f64, position.y as f64, position.z as f64],
+        dtype: runmat_builtins::NumericDType::F64,
+    })
+}
+
+fn parse_text_position(value: &Value, builtin: &'static str) -> BuiltinResult<glam::Vec3> {
+    match value {
+        Value::Tensor(t) if t.data.len() == 2 || t.data.len() == 3 => Ok(glam::Vec3::new(
+            t.data[0] as f32,
+            t.data[1] as f32,
+            t.data.get(2).copied().unwrap_or(0.0) as f32,
+        )),
+        _ => Err(plotting_error(
+            builtin,
+            format!("{builtin}: Position must be a 2-element or 3-element vector"),
+        )),
+    }
+}
+
+fn get_world_text_property(
+    handle: &super::state::TextAnnotationHandleState,
+    property: Option<&str>,
+    builtin: &'static str,
+) -> BuiltinResult<Value> {
+    let figure = super::state::clone_figure(handle.figure)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid text figure")))?;
+    let annotation = figure
+        .axes_text_annotation(handle.axes_index, handle.annotation_index)
+        .cloned()
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid text handle")))?;
+    match property.map(canonical_property_name) {
+        None => {
+            let mut st = child_base_struct("text", handle.figure, handle.axes_index);
+            st.insert("String", Value::String(annotation.text.clone()));
+            st.insert("Position", text_position_value(annotation.position));
+            if let Some(weight) = annotation.style.font_weight.clone() {
+                st.insert("FontWeight", Value::String(weight));
+            }
+            if let Some(angle) = annotation.style.font_angle.clone() {
+                st.insert("FontAngle", Value::String(angle));
+            }
+            if let Some(interpreter) = annotation.style.interpreter.clone() {
+                st.insert("Interpreter", Value::String(interpreter));
+            }
+            if let Some(color) = annotation.style.color {
+                st.insert("Color", Value::String(color_to_short_name(color)));
+            }
+            if let Some(font_size) = annotation.style.font_size {
+                st.insert("FontSize", Value::Num(font_size as f64));
+            }
+            st.insert("Visible", Value::Bool(annotation.style.visible));
+            Ok(Value::Struct(st))
+        }
+        Some("type") => Ok(Value::String("text".into())),
+        Some("parent") => Ok(child_parent_handle(handle.figure, handle.axes_index)),
+        Some("children") => Ok(handles_value(Vec::new())),
+        Some("string") => Ok(Value::String(annotation.text)),
+        Some("position") => Ok(text_position_value(annotation.position)),
+        Some("fontweight") => Ok(annotation
+            .style
+            .font_weight
+            .map(Value::String)
+            .unwrap_or_else(|| Value::String(String::new()))),
+        Some("fontangle") => Ok(annotation
+            .style
+            .font_angle
+            .map(Value::String)
+            .unwrap_or_else(|| Value::String(String::new()))),
+        Some("interpreter") => Ok(annotation
+            .style
+            .interpreter
+            .map(Value::String)
+            .unwrap_or_else(|| Value::String(String::new()))),
+        Some("color") => Ok(annotation
+            .style
+            .color
+            .map(|c| Value::String(color_to_short_name(c)))
+            .unwrap_or_else(|| Value::String(String::new()))),
+        Some("fontsize") => Ok(Value::Num(
+            annotation.style.font_size.unwrap_or_default() as f64
+        )),
+        Some("visible") => Ok(Value::Bool(annotation.style.visible)),
+        Some(other) => Err(plotting_error(
+            builtin,
+            format!("{builtin}: unsupported text property `{other}`"),
+        )),
+    }
+}
+
+fn apply_world_text_property(
+    handle: &super::state::TextAnnotationHandleState,
+    key: &str,
+    value: &Value,
+    builtin: &'static str,
+) -> BuiltinResult<()> {
+    let figure = super::state::clone_figure(handle.figure)
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid text figure")))?;
+    let annotation = figure
+        .axes_text_annotation(handle.axes_index, handle.annotation_index)
+        .cloned()
+        .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid text handle")))?;
+    let mut text = None;
+    let mut position = None;
+    let mut style = annotation.style;
+    match canonical_property_name(key) {
+        "string" => {
+            text = Some(value_as_text_string(value).ok_or_else(|| {
+                plotting_error(builtin, format!("{builtin}: String must be text"))
+            })?);
+        }
+        "position" => position = Some(parse_text_position(value, builtin)?),
+        other => apply_text_property(&mut text, &mut style, other, value, builtin)?,
+    }
+    set_text_annotation_properties_for_axes(
+        handle.figure,
+        handle.axes_index,
+        handle.annotation_index,
+        text,
+        position,
+        Some(style),
+    )
+    .map_err(|err| map_figure_error(builtin, err))?;
+    Ok(())
 }
 
 fn get_simple_plot(

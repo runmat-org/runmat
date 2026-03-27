@@ -20,6 +20,33 @@ use std::sync::Arc;
 use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop, window::WindowBuilder};
 #[cfg(feature = "gui")]
 impl<'window> PlotWindow<'window> {
+    fn update_subplot_camera_aspects_for_rect(&mut self, plot_rect: egui::Rect) {
+        let (rows, cols) = self.plot_renderer.figure_axes_grid();
+        if rows * cols <= 1 {
+            let plot_width = plot_rect.width();
+            let plot_height = plot_rect.height();
+            if plot_width > 0.0 && plot_height > 0.0 {
+                self.plot_renderer
+                    .camera_mut()
+                    .update_aspect_ratio(plot_width / plot_height);
+            }
+            return;
+        }
+
+        let rects = self
+            .plot_overlay
+            .compute_subplot_rects(plot_rect, rows, cols, 8.0, 8.0);
+        for (i, r) in rects.iter().enumerate() {
+            let w = r.width();
+            let h = r.height();
+            if w > 0.0 && h > 0.0 {
+                if let Some(cam) = self.plot_renderer.axes_camera_mut(i) {
+                    cam.update_aspect_ratio(w / h);
+                }
+            }
+        }
+    }
+
     /// Create a new interactive plot window
     pub async fn new(config: WindowConfig) -> Result<Self, Box<dyn std::error::Error>> {
         // Create a new EventLoop (assumes this is the only EventLoop creation)
@@ -160,6 +187,7 @@ impl<'window> PlotWindow<'window> {
             needs_initial_redraw: true,
             pixels_per_point: 1.0,
             mouse_left_down: false,
+            active_drag_axes: None,
             close_signal: None,
         })
     }
@@ -520,10 +548,16 @@ impl<'window> PlotWindow<'window> {
             .depth_texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
-        // Update camera aspect ratio
-        self.plot_renderer
-            .camera_mut()
-            .update_aspect_ratio(width as f32 / height as f32);
+        let (rows, cols) = self.plot_renderer.figure_axes_grid();
+        if rows * cols > 1 {
+            if let Some(plot_rect) = self.plot_overlay.plot_area() {
+                self.update_subplot_camera_aspects_for_rect(plot_rect);
+            }
+        } else {
+            self.plot_renderer
+                .camera_mut()
+                .update_aspect_ratio(width as f32 / height as f32);
+        }
     }
 
     /// Render a frame
@@ -550,7 +584,11 @@ impl<'window> PlotWindow<'window> {
 
         // Get UI data before borrowing
         let scene_stats = self.plot_renderer.scene.statistics();
-        let _camera_pos = self.plot_renderer.camera().position;
+        let _camera_pos = self
+            .plot_renderer
+            .axes_camera(0)
+            .unwrap_or_else(|| self.plot_renderer.camera())
+            .position;
 
         // Track the plot area for WGPU rendering
         let mut plot_area: Option<egui::Rect> = None;
@@ -614,7 +652,11 @@ impl<'window> PlotWindow<'window> {
         if let Some(show) = toggle_grid_opt {
             // mutate last_figure and overlay flag
             if let Some(mut fig) = self.plot_renderer.last_figure.clone() {
-                fig.grid_enabled = show;
+                let (rows, cols) = fig.axes_grid();
+                let axes_count = (rows * cols).max(1);
+                for idx in 0..axes_count {
+                    fig.set_axes_grid_enabled(idx, show);
+                }
                 self.plot_renderer.set_figure(fig);
             }
         }
@@ -699,14 +741,8 @@ impl<'window> PlotWindow<'window> {
 
         // Now we have the plot area, update camera and WGPU rendering accordingly
         if let Some(plot_rect) = plot_area {
-            // Update camera aspect ratio to match the plot area
-            let plot_width = plot_rect.width();
-            let plot_height = plot_rect.height();
-            if plot_width > 0.0 && plot_height > 0.0 {
-                self.plot_renderer
-                    .camera_mut()
-                    .update_aspect_ratio(plot_width / plot_height);
-            }
+            // Update subplot-aware camera aspect ratios to match the visible plot rectangles.
+            self.update_subplot_camera_aspects_for_rect(plot_rect);
         }
 
         self.egui_state
@@ -876,6 +912,8 @@ impl<'window> PlotWindow<'window> {
                     scissor,
                     &cfg,
                     &cam,
+                    0,
+                    true,
                 );
             }
         }
@@ -932,6 +970,7 @@ impl<'window> PlotWindow<'window> {
             (MouseButton::Left, ElementState::Pressed) => {
                 // Only start panning if press occurs inside the plot area (or a subplot rect)
                 self.is_mouse_over_plot = false;
+                self.active_drag_axes = None;
                 if let Some(plot_rect) = self.plot_overlay.plot_area() {
                     let mx = self.mouse_position.x;
                     let my = self.mouse_position.y;
@@ -941,13 +980,14 @@ impl<'window> PlotWindow<'window> {
                         let rects = self
                             .plot_overlay
                             .compute_subplot_rects(plot_rect, rows, cols, 8.0, 8.0);
-                        for r in rects {
+                        for (i, r) in rects.into_iter().enumerate() {
                             let rx = r.min.x * self.pixels_per_point;
                             let ry = r.min.y * self.pixels_per_point;
                             let rw = r.width() * self.pixels_per_point;
                             let rh = r.height() * self.pixels_per_point;
                             if mx >= rx && mx <= rx + rw && my >= ry && my <= ry + rh {
                                 self.is_mouse_over_plot = true;
+                                self.active_drag_axes = Some(i);
                                 break;
                             }
                         }
@@ -961,11 +1001,15 @@ impl<'window> PlotWindow<'window> {
                             && mx <= px_min_x + px_w
                             && my >= px_min_y
                             && my <= px_min_y + px_h;
+                        if self.is_mouse_over_plot {
+                            self.active_drag_axes = Some(0);
+                        }
                     }
                 }
             }
             (MouseButton::Left, ElementState::Released) => {
                 self.is_mouse_over_plot = false;
+                self.active_drag_axes = None;
             }
             _ => {}
         }
@@ -986,20 +1030,14 @@ impl<'window> PlotWindow<'window> {
             if let Some(plot_rect) = self.plot_overlay.plot_area() {
                 let (rows, cols) = self.plot_renderer.figure_axes_grid();
                 if rows * cols > 1 {
-                    // Determine hovered subplot and pan its camera
-                    let rects = self
-                        .plot_overlay
-                        .compute_subplot_rects(plot_rect, rows, cols, 8.0, 8.0);
-                    for (i, r) in rects.iter().enumerate() {
-                        let rx = r.min.x * self.pixels_per_point;
-                        let ry = r.min.y * self.pixels_per_point;
-                        let rw = r.width() * self.pixels_per_point;
-                        let rh = r.height() * self.pixels_per_point;
-                        if self.mouse_position.x >= rx
-                            && self.mouse_position.x <= rx + rw
-                            && self.mouse_position.y >= ry
-                            && self.mouse_position.y <= ry + rh
-                        {
+                    // Pan only the subplot captured on mouse-down.
+                    if let Some(i) = self.active_drag_axes {
+                        let rects = self
+                            .plot_overlay
+                            .compute_subplot_rects(plot_rect, rows, cols, 8.0, 8.0);
+                        if let Some(r) = rects.get(i) {
+                            let rw = r.width() * self.pixels_per_point;
+                            let rh = r.height() * self.pixels_per_point;
                             if let Some(cam) = self.plot_renderer.axes_camera_mut(i) {
                                 if let crate::core::camera::ProjectionType::Orthographic {
                                     left,
@@ -1027,7 +1065,6 @@ impl<'window> PlotWindow<'window> {
                                     cam.mark_dirty();
                                 }
                             }
-                            break;
                         }
                     }
                 } else {

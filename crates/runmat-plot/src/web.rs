@@ -851,6 +851,8 @@ impl WebRenderer {
                             (vx, vy, vw, vh),
                             &cfg,
                             &cam,
+                            0,
+                            true,
                         )
                         .map_err(|err| WebRendererError::Render(err.to_string()))?;
                 }
