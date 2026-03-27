@@ -1,6 +1,6 @@
 ---
-title: "GPU in MATLAB: Setup, Performance Traps & a Toolbox-Free Option"
-description: "NVIDIA setup, gpuArray patterns, and the performance traps that silently erase your speedups. Plus: how to get GPU acceleration without the Parallel Computing Toolbox or CUDA."
+title: "How to Use NVIDIA GPUs in MATLAB: Setup, Traps & a Toolbox-Free Option"
+description: "Step-by-step NVIDIA GPU setup for MATLAB: prerequisites, gpuArray patterns, performance traps that silently kill your speedups, and how to get GPU acceleration without the Parallel Computing Toolbox."
 date: "2026-01-28"
 dateModified: "2026-02-20"
 authors:
@@ -10,14 +10,14 @@ readTime: "14 min read"
 slug: "how-to-use-gpu-in-matlab"
 tags: ["matlab", "gpu", "nvidia", "gpuArray", "scientific-computing", "parallel-computing-toolbox"]
 collections: ["guides"]
-keywords: "matlab gpu without parallel computing toolbox, free matlab gpu, matlab gpu alternative, matlab gpu performance traps, matlab gpu setup, gpuArray tutorial, matlab gpu acceleration, MATLAB GPU, gpuArray, NVIDIA GPU"
+keywords: "matlab gpu without parallel computing toolbox, free matlab gpu, matlab gpu alternative, matlab gpu performance traps, matlab gpu setup, gpuArray tutorial, matlab gpu acceleration, MATLAB GPU, gpuArray, NVIDIA GPU, how to use nvidia gpu in matlab, speed up matlab with gpu, which matlab functions support gpuarray, gpuarray indexing, matlab parallel computing gpu, can matlab use gpu"
 excerpt: "A complete guide to GPU acceleration in MATLAB: prerequisites, gpuArray setup, GPU-enabled functions, performance traps, benchmarking, and an alternative that works on any GPU without manual device management."
 ogType: "article"
-ogTitle: "GPU in MATLAB: Setup, Performance Traps & a Toolbox-Free Option"
-ogDescription: "NVIDIA setup, gpuArray patterns, and the performance traps that silently erase your speedups. Plus: how to get GPU acceleration without the Parallel Computing Toolbox or CUDA."
+ogTitle: "How to Use NVIDIA GPUs in MATLAB: Setup, Traps & a Toolbox-Free Option"
+ogDescription: "Step-by-step NVIDIA GPU setup for MATLAB: prerequisites, gpuArray patterns, performance traps that silently kill your speedups, and how to get GPU acceleration without the Parallel Computing Toolbox."
 twitterCard: "summary_large_image"
-twitterTitle: "GPU in MATLAB: Setup, Performance Traps & a Toolbox-Free Option"
-twitterDescription: "NVIDIA setup, gpuArray patterns, and the performance traps that silently erase your speedups. Plus: GPU acceleration without the Parallel Computing Toolbox."
+twitterTitle: "How to Use NVIDIA GPUs in MATLAB: Setup, Traps & a Toolbox-Free Option"
+twitterDescription: "Step-by-step NVIDIA GPU setup for MATLAB: prerequisites, gpuArray patterns, performance traps that kill your speedups, and GPU acceleration without the Parallel Computing Toolbox."
 image: "https://web.runmatstatic.com/MATLAB-NVIDIA.png"
 imageAlt: "How to use GPUs in MATLAB: setup and optimization guide"
 canonical: "https://runmat.com/blog/how-to-use-gpu-in-matlab"
@@ -41,7 +41,7 @@ jsonLd:
 
     - "@type": "TechArticle"
       "@id": "https://runmat.com/blog/how-to-use-gpu-in-matlab#article"
-      headline: "How to Use GPUs in MATLAB: Complete NVIDIA Setup & Optimization Guide"
+      headline: "How to Use NVIDIA GPUs in MATLAB: Setup, Traps & a Toolbox-Free Option"
       alternativeHeadline: "MATLAB GPU acceleration: gpuArray setup, optimization, and cross-platform alternatives"
       description: "Step-by-step guide to GPU acceleration in MATLAB: system requirements, Parallel Computing Toolbox setup, gpuArray patterns, performance traps, and a cross-platform alternative."
       datePublished: "2026-01-28T00:00:00Z"
@@ -154,7 +154,7 @@ jsonLd:
           text: "Time the same calculation on CPU vs GPU at large size (millions of elements) to confirm the GPU path is active and faster."
 ---
 
-MATLAB GPU acceleration is powerful but brittle: one misplaced `gather` or an array that's too small and the speedup disappears. For the right workloads — large, vectorized array math — you can see 10x to 100x gains. This guide walks through setup, the core patterns, and the traps that erase those gains, so you can get GPU working in MATLAB and know when it will (and won't) help.
+MATLAB GPU acceleration is powerful but brittle: one misplaced `gather` or an array that's too small and the speedup disappears. For the right workloads — large, vectorized array math — you can see 10x to 100x gains. This guide walks through setup, the core patterns, and the traps that erase those gains, so you can speed up MATLAB with GPU acceleration and know when it will (and won't) help.
 
 If you want GPU acceleration on any hardware without manual device management, skip ahead to [the RunMat section](#beyond-nvidia-gpu-acceleration-on-any-hardware).
 
@@ -162,16 +162,16 @@ If you want GPU acceleration on any hardware without manual device management, s
 
 - MATLAB GPU acceleration requires the Parallel Computing Toolbox and a CUDA-capable NVIDIA GPU.
 - The core performance pattern is: `gpuArray` once, run vectorized GPU-enabled operations, then `gather` once.
-- Most slowdowns come from small arrays, too many tiny kernels, and frequent CPU-GPU transfers.
+- Most slowdowns come from undersized arrays and frequent CPU-GPU transfers.
 - Start with `single` precision unless your numerics require `double`.
 - If you want automatic CPU/GPU routing without manual device management, RunMat is a cross-platform alternative.
 ---
 
-## **Prerequisites: what you need for MATLAB GPU acceleration**
+## **Prerequisites: what you need for NVIDIA GPU acceleration in MATLAB**
 
 Before writing any GPU code, you need three things in place: compatible hardware, the right MATLAB toolbox, and a working CUDA driver.
 
-### Hardware requirements
+### Which GPUs are supported for MATLAB's Parallel Computing Toolbox?
 
 MATLAB GPU acceleration requires an **NVIDIA GPU with CUDA compute capability 3.5 or higher**. This includes most NVIDIA GPUs from the Kepler architecture (2012) onward: GeForce GTX 780+, Tesla K40+, Quadro K5000+, and all RTX-series cards. Check your GPU's compute capability on [NVIDIA's CUDA GPUs page](https://developer.nvidia.com/cuda-gpus).
 
@@ -179,9 +179,9 @@ MATLAB's GPU support is built entirely on CUDA, which rules out AMD, Intel, and 
 
 ### Software requirements
 
-- **MATLAB R2023a or newer** (recommended). Older versions work but have fewer GPU-enabled functions.
-- **Parallel Computing Toolbox** — this is a paid add-on (separate from the base MATLAB license). Without it, `gpuArray` and GPU-enabled functions are not available.
-- **NVIDIA CUDA driver** — MATLAB bundles a CUDA toolkit, but your system needs a compatible NVIDIA driver. See MathWorks' [GPU support requirements](https://www.mathworks.com/help/parallel-computing/gpu-support-by-release.html) for the version matrix.
+- MATLAB R2023a or newer (recommended). Older versions work but have fewer GPU-enabled functions.
+- Parallel Computing Toolbox, a paid add-on separate from the base MATLAB license. Without it, `gpuArray` and GPU-enabled functions are not available.
+- NVIDIA CUDA driver. MATLAB bundles a CUDA toolkit, but your system needs a compatible NVIDIA driver. See MathWorks' [GPU support requirements](https://www.mathworks.com/help/parallel-computing/gpu-support-by-release.html) for the version matrix.
 
 ### Verifying GPU detection
 
@@ -202,10 +202,10 @@ gpuDevice
 
 If `gpuDeviceCount` returns 0, check these common causes:
 
-- **Driver mismatch.** Update your NVIDIA driver to the version required by your MATLAB release.
-- **Toolbox not installed.** Run `ver` and confirm "Parallel Computing Toolbox" appears in the list.
-- **Wrong GPU.** Integrated Intel/AMD graphics won't appear — only discrete NVIDIA GPUs with CUDA support.
-- **Multi-GPU systems.** Use `gpuDevice(n)` to select a specific GPU by index.
+- Driver mismatch: update your NVIDIA driver to the version required by your MATLAB release.
+- Toolbox not installed: run `ver` and confirm "Parallel Computing Toolbox" appears in the list.
+- Wrong GPU: integrated Intel/AMD graphics won't appear. Only discrete NVIDIA GPUs with CUDA support show up.
+- Multi-GPU systems: use `gpuDevice(n)` to select a specific GPU by index.
 
 ---
 
@@ -215,9 +215,9 @@ The core pattern in MATLAB is straightforward: upload data once, compute many st
 
 Here's the step-by-step:
 
-1. **Put data on the GPU.** Wrap your input with `gpuArray()` — e.g. `x = gpuArray.rand(N, 1, 'single');` — or convert an existing array with `gpuArray(x)`.
-2. **Run vectorized operations.** Use GPU-enabled functions (`sin`, `.*`, `mean`, etc.); they dispatch to the GPU automatically while `x` is a `gpuArray`.
-3. **Gather only at the end.** Call `gather()` once when you need a result on the CPU (e.g. for `fprintf` or further CPU work). Avoid calling `gather` inside loops.
+1. Put data on the GPU. Wrap your input with `gpuArray()`, e.g. `x = gpuArray.rand(N, 1, 'single');`, or convert an existing array with `gpuArray(x)`.
+2. Run vectorized operations. Use GPU-enabled functions (`sin`, `.*`, `mean`, etc.); they dispatch to the GPU automatically while `x` is a `gpuArray`.
+3. Gather only at the end. Call `gather()` once when you need a result on the CPU (e.g. for `fprintf` or further CPU work). Avoid calling `gather` inside loops.
 
 ```matlab:runnable
 % MATLAB gpuArray pattern: upload once, compute, gather once
@@ -250,7 +250,7 @@ This isn't "wrong," but it changes the performance profile: you're measuring dev
 
 ## **What NVIDIA GPUs accelerate in MATLAB (and what they don't)**
 
-NVIDIA GPUs are throughput machines. They're great at applying the same operations across huge arrays: elementwise transforms (`sin`, `exp`, `.*`, `./`), reductions (`sum`, `mean`, `std`), and big matrix operations. That's why GPU acceleration tends to shine in image pipelines, Monte Carlo simulation, signal processing, and dense linear algebra. Those workloads naturally operate over millions of values.
+NVIDIA GPUs are throughput machines. They're great at applying the same operations across huge arrays: elementwise transforms (`sin`, `exp`, `.*`, `./`), reductions (`sum`, `mean`, `std`), FFTs, and big matrix operations. That's why GPU acceleration tends to shine in image pipelines, Monte Carlo simulation, signal processing, and dense linear algebra. Those workloads naturally operate over millions of values.
 
 Where GPUs lose is when the workload is fragmented: lots of tiny arrays, lots of small kernels, heavy scalar control flow, or frequent CPU-GPU transfers. In those cases, the GPU spends more time being managed than computing.
 
@@ -290,7 +290,7 @@ Use the flowchart above to see where your code sits; if you're in "Refactor firs
 
 ---
 
-## **GPU-enabled functions in MATLAB**
+## **Which MATLAB functions support gpuArray?**
 
 Not every MATLAB function supports `gpuArray` inputs. Here are the most commonly used GPU-enabled functions by category:
 
@@ -307,7 +307,38 @@ Not every MATLAB function supports `gpuArray` inputs. Here are the most commonly
 
 For the full list, see MathWorks' [GPU-enabled functions reference](https://www.mathworks.com/help/parallel-computing/run-built-in-functions-on-a-gpu.html).
 
-The pattern is dense, array-level work: elementwise ops, reductions, linear algebra, FFTs. What's missing is anything that leans on per-element branching or sparse indexing — those paths either aren't implemented for GPU or force a gather. If a function doesn't support `gpuArray`, MATLAB will either error or silently `gather` the data to CPU, which can introduce a hidden transfer penalty. When chaining operations, check that every function in the pipeline is GPU-enabled to keep data on the device.
+The pattern is dense, array-level work: elementwise ops, reductions, linear algebra, FFTs. What's missing is anything that leans on per-element branching or sparse indexing. If a function doesn't support `gpuArray`, MATLAB will either error or silently `gather` the data to CPU, which can introduce a hidden transfer penalty. When chaining operations, check that every function in the pipeline is GPU-enabled to keep data on the device.
+
+### Allocating directly on the GPU
+
+When you need standard arrays on the device, create them there instead of uploading from CPU:
+
+```matlab:runnable
+I = gpuArray.eye(4096, 'single');
+Z = gpuArray.zeros(1024, 1024, 'single');
+r = gpuArray.rand(10_000_000, 1, 'single');
+```
+
+### gpuArray indexing
+
+Logical and subscript indexing both work on `gpuArray` data, and the result stays on the GPU:
+
+```matlab:runnable
+x = gpuArray.rand(1_000_000, 1, 'single');
+mask = x > 0.5;
+y = x(mask);           % logical indexing — result is a gpuArray
+z = x(1:1000);         % subscript range — also stays on GPU
+```
+
+You can also use a `gpuArray` of indices to index into another `gpuArray`:
+
+```matlab:runnable
+x = gpuArray.rand(1_000_000, 1, 'single');
+idx = gpuArray(int32([1; 100; 5000]));
+vals = x(idx);         % gpuArray indices into gpuArray data
+```
+
+Where indexing gets expensive is when the pattern forces non-contiguous memory access or when MATLAB can't keep the result on the device. Repeated scalar indexing inside a loop, or indexing that triggers an implicit `gather`, will introduce the same transfer overhead covered in the performance traps section below.
 
 ---
 
@@ -319,7 +350,7 @@ Most disappointing GPU results come from a small set of patterns. You don't have
 
 Transfers are expensive and they often force synchronization. In MATLAB, that's usually an accidental `gather` (or a CPU-only function that forces one). Touching intermediate results can pull you back to the host.
 
-Keeping data *resident* on the GPU — rather than bouncing it back to the CPU — avoids transfer overhead.
+Keeping data *resident* on the GPU, rather than bouncing it back to the CPU, avoids transfer overhead.
 
 ```matlab:runnable
 % MATLAB anti-pattern: forcing a download mid-pipeline
@@ -356,11 +387,11 @@ acc2 = sum(sin(X) .* X + 0.5, 'all');
 
 Precision should be driven by two things: what your **calculation actually needs**, and what your **GPU path supports**.
 
-**What the backends support.** Not every GPU abstraction offers full double-precision (FP64). For example, Metal (Apple's GPU API) provides strong FP32 support but no FP64. In MATLAB with an NVIDIA GPU, the Parallel Computing Toolbox supports both single and double; performance on double then depends on the GPU's FP64 capability and memory bandwidth. Consumer GPUs (GeForce) typically have much weaker FP64 throughput than data-center GPUs (Tesla, A100).
+Not every GPU abstraction offers full double-precision (FP64). Metal (Apple's GPU API) provides strong FP32 support but no FP64. In MATLAB with an NVIDIA GPU, the Parallel Computing Toolbox supports both single and double; performance on double then depends on the GPU's FP64 capability and memory bandwidth. Consumer GPUs (GeForce) typically have much weaker FP64 throughput than data-center GPUs (Tesla, A100).
 
-**What you need.** For many workloads, [single precision (FP32) is enough](https://en.wikipedia.org/wiki/Single-precision_floating-point_format) — you get plenty of significant digits for a wide range of scientific and numerical tasks. When your problem genuinely requires double (e.g. certain accumulations or legacy requirements), you accept the performance cost.
+For many workloads, [single precision (FP32) is enough](https://en.wikipedia.org/wiki/Single-precision_floating-point_format). You get plenty of significant digits for a wide range of scientific and numerical tasks. When your problem genuinely requires double (e.g. certain accumulations or legacy requirements), you accept the performance cost.
 
-**Practical takeaway:** If you're testing whether GPU acceleration is working, start with `single` unless you have a clear reason to need `double`.
+If you're testing whether GPU acceleration is working, start with `single` unless you have a clear reason to need `double`.
 
 ### 4) Hidden sync points (printing, plotting, inspection)
 
@@ -421,7 +452,7 @@ MATLAB's GPU path is locked to NVIDIA hardware and the Parallel Computing Toolbo
 - The Parallel Computing Toolbox is a separate license on top of MATLAB.
 - Every script becomes a residency and transfer exercise: `gpuArray` here, `gather` there, and you must check that every function in the pipeline is GPU-enabled.
 
-[RunMat](https://runmat.com) takes a different approach. It runs MATLAB-syntax code and handles GPU acceleration automatically — no explicit device arrays, no vendor lock-in, and no extra license.
+[RunMat](https://runmat.com) takes a different approach. It runs MATLAB-syntax code and handles GPU acceleration automatically, without explicit device arrays or vendor lock-in and without an extra license.
 
 The same computation from earlier, without any device management:
 
@@ -433,11 +464,11 @@ m = mean(y, 'all');
 fprintf("m = %.6f\n", double(m));
 ```
 
-Under the hood, RunMat uses *fusion* — combining multiple array operations into one GPU kernel — to reduce overhead and keep the GPU busy. This happens automatically when the computation is contiguous. For more detail, see the [RunMat Fusion guide](/docs/fusion-guide).
+Under the hood, RunMat uses *fusion*, combining multiple array operations into one GPU kernel to reduce overhead and keep the GPU busy. This happens automatically when the computation is contiguous. For more detail, see the [RunMat Fusion guide](/docs/fusion-guide).
 
 ### How automatic routing works
 
-RunMat's runtime examines the shape of your computation — array sizes, operation types, data dependencies — and decides per-operation whether to run on CPU or GPU. Large, contiguous elementwise chains get fused into a single GPU kernel. Small or irregular work stays on CPU. You don't need to annotate anything.
+RunMat's runtime examines the shape of your computation (array sizes, operation types, data dependencies) and decides per-operation whether to run on CPU or GPU. Large, contiguous elementwise chains get fused into a single GPU kernel. Small or irregular work stays on CPU. You don't need to annotate anything.
 
 This is the same "GPU-shaped" intuition from earlier in this guide, except the runtime applies it for you instead of requiring you to manually wrap arrays in `gpuArray`.
 
@@ -445,10 +476,10 @@ This is the same "GPU-shaped" intuition from earlier in this guide, except the r
 
 RunMat uses [wgpu](https://wgpu.rs/) (the WebGPU standard) to target multiple GPU backends:
 
-- **Metal** on macOS (M1/M2/M3/M4 Apple Silicon)
-- **DirectX 12** on Windows
-- **Vulkan** on Linux
-- **WebGPU** in the browser (Chrome 113+, Edge 113+, Safari 18+, Firefox 139+)
+- Metal on macOS (M1/M2/M3/M4 Apple Silicon)
+- DirectX 12 on Windows
+- Vulkan on Linux
+- WebGPU in the browser (Chrome 113+, Edge 113+, Safari 18+, Firefox 139+)
 
 RunMat targets these backends directly, so you don't need the CUDA toolkit or an NVIDIA card.
 
@@ -476,7 +507,7 @@ For benchmarks comparing RunMat's fusion engine against MATLAB, PyTorch, and Num
 
 ### GPU-resident visualization
 
-The "avoid transfers" principle extends to plotting. In most tools, visualizing GPU-computed data means gathering it back to CPU and handing it to a separate rendering system — which introduces exactly the kind of transfer overhead this guide warns against. RunMat's plotting renders directly from GPU memory, with zero copy between the computation and the visualization. The plot is just a few more matrix operations (camera transforms, projections) at the end of the same GPU pipeline that computed the data.
+The "avoid transfers" principle extends to plotting. In most tools, visualizing GPU-computed data means gathering it back to CPU and handing it to a separate rendering system, which introduces exactly the kind of transfer overhead this guide warns against. RunMat's plotting renders directly from GPU memory, with zero copy between the computation and the visualization. The plot is just a few more matrix operations (camera transforms, projections) at the end of the same GPU pipeline that computed the data.
 
 ### Where to run RunMat
 
@@ -496,7 +527,7 @@ Usually the arrays are too small, you're doing many tiny steps, or you're transf
 
 **What GPU do I need for MATLAB?**
 
-NVIDIA only, with CUDA compute capability 3.5+. See [Prerequisites](#prerequisites-what-you-need-for-matlab-gpu-acceleration) and [NVIDIA's CUDA GPUs page](https://developer.nvidia.com/cuda-gpus).
+NVIDIA only, with CUDA compute capability 3.5+. See [Prerequisites](#prerequisites-what-you-need-for-nvidia-gpu-acceleration-in-matlab) and [NVIDIA's CUDA GPUs page](https://developer.nvidia.com/cuda-gpus).
 
 **How much faster is GPU vs CPU for MATLAB?**
 
@@ -528,4 +559,4 @@ Fusion combines multiple array ops into one GPU kernel instead of one kernel per
 
 **What's the simplest rule to remember?**
 
-Make the work big, make it contiguous, and avoid transfers.
+Make the work big and contiguous, and avoid transfers.

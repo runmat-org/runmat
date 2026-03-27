@@ -25,6 +25,14 @@
 
 <p align="center"><em>Status: Pre-release (v0.3) — core runtime and GPU engine pass thousands of tests. Expect a few rough edges.</em></p>
 
+### 🎬 Sandbox 3D Plotting Demo
+
+![RunMat sandbox 3D plotting demo](https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.gif)
+
+<p align="center">
+  <a href="https://runmat.com/sandbox"><strong>Try it live in the browser →</strong></a>
+</p>
+
 ---
 
 ## What is RunMat?
