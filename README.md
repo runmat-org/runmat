@@ -29,14 +29,14 @@
 
 <p align="center">
   <img
-    src="https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.gif"
+    src="https://web.runmatstatic.com/video/3dinteractive-plotting-runmat.gif?v=20260327-1"
     alt="RunMat sandbox 3D plotting demo"
     width="960"
   />
 </p>
 
 <p align="center">
-  <a href="https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.gif"><strong>Open GIF directly</strong></a>
+  <a href="https://web.runmatstatic.com/video/3dinteractive-plotting-runmat.gif?v=20260327-1"><strong>Open GIF directly</strong></a>
 </p>
 
 <p align="center">
