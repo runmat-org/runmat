@@ -27,7 +27,17 @@
 
 ### 🎬 Sandbox 3D Plotting Demo
 
-![RunMat sandbox 3D plotting demo](https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.gif)
+<p align="center">
+  <img
+    src="https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.gif"
+    alt="RunMat sandbox 3D plotting demo"
+    width="960"
+  />
+</p>
+
+<p align="center">
+  <a href="https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.gif"><strong>Open GIF directly</strong></a>
+</p>
 
 <p align="center">
   <a href="https://runmat.com/sandbox"><strong>Try it live in the browser →</strong></a>
