@@ -277,8 +277,8 @@ jobs:
       - name: Clippy (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        env:
-          CARGO_BUILD_JOBS: 3
+#        env:
+#          CARGO_BUILD_JOBS: 3
         run: cargo clippy --all-targets --all-features -- -D warnings
 
       # Verify the binary starts without a stack overflow before running the
@@ -288,8 +288,8 @@ jobs:
       - name: Binary smoke test (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
-        env:
-          CARGO_BUILD_JOBS: 3
+#        env:
+#          CARGO_BUILD_JOBS: 3
         run: |
           cargo build -p runmat
           & target\debug\runmat.exe --help | Out-Null
@@ -325,7 +325,7 @@ jobs:
         shell: pwsh
         env:
           RUST_BACKTRACE: 1
-          CARGO_BUILD_JOBS: 3
+#          CARGO_BUILD_JOBS: 3
           RUST_TEST_THREADS: 1
         run: |
           $ErrorActionPreference = 'Stop'
