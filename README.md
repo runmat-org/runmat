@@ -27,16 +27,10 @@
 
 ### 🎬 Sandbox 3D Plotting Demo
 
-<p align="center">
-  <img
-    src="https://web.runmatstatic.com/video/3dinteractive-plotting-runmat.gif?v=20260327-1"
-    alt="RunMat sandbox 3D plotting demo"
-    width="960"
-  />
-</p>
+![RunMat sandbox 3D plotting demo](.github/assets/runmat-sandbox-3d-plotting.gif)
 
 <p align="center">
-  <a href="https://web.runmatstatic.com/video/3dinteractive-plotting-runmat.gif?v=20260327-1"><strong>Open GIF directly</strong></a>
+  <a href=".github/assets/runmat-sandbox-3d-plotting.gif"><strong>Open GIF directly</strong></a>
 </p>
 
 <p align="center">
