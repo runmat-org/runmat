@@ -1,0 +1,72 @@
+{
+  "version": "0.1.0",
+  "last_updated": "2026-03-27",
+  "runtime_version": "current",
+  "matlab_target": "R2024b core language",
+  "summary": "High-performance runtime for MATLAB-syntax code with automatic GPU acceleration. Supports ~95% of core MATLAB language syntax, 300+ built-in functions, and full classdef OOP.",
+  "language_coverage": {
+    "overall": "~95% of core syntax",
+    "variables_and_types": "full",
+    "operators": "full",
+    "control_flow": "full",
+    "functions": "full",
+    "indexing_and_slicing": "full",
+    "oop_classdef": "full",
+    "packages_and_imports": "full",
+    "scripting_and_syntax": "full",
+    "exceptions": "full"
+  },
+  "builtin_functions": {
+    "count": 309,
+    "categories": {
+      "math": "full",
+      "linear_algebra": "full",
+      "array_creation": "full",
+      "plotting_2d": "full",
+      "plotting_3d": "full",
+      "string_operations": "full",
+      "file_io": "partial",
+      "statistics": "partial"
+    }
+  },
+  "plotting": {
+    "chart_types_2d": ["plot", "scatter", "bar", "histogram", "hist", "area", "stairs", "stem", "errorbar", "pie", "contour", "contourf", "image", "imagesc", "quiver"],
+    "chart_types_3d": ["plot3", "surf", "surfc", "mesh", "meshc", "scatter3"],
+    "log_scale": ["semilogx", "semilogy", "loglog"],
+    "figure_management": ["figure", "subplot", "hold", "clf", "cla", "close", "title", "xlabel", "ylabel", "zlabel", "legend", "colorbar", "colormap", "axis", "grid", "box", "shading", "view", "drawnow", "pause"],
+    "handle_graphics": ["get", "set"],
+    "rendering": "GPU-first via WebGPU/Metal/Vulkan/DX12",
+    "interactive_3d": true,
+    "scene_persistence": true,
+    "not_yet_supported": ["polar", "heatmap", "geobubble", "wordcloud", "stackedplot", "swarmchart", "annotation objects"]
+  },
+  "toolbox_coverage": {
+    "simulink": "none",
+    "signal_processing": "none",
+    "control_system": "none",
+    "image_processing": "none",
+    "statistics_ml": "none",
+    "optimization": "none",
+    "symbolic_math": "none"
+  },
+  "gpu_acceleration": {
+    "supported": true,
+    "automatic": true,
+    "vendors": ["NVIDIA", "AMD", "Intel", "Apple"],
+    "apis": ["Metal", "Vulkan", "DirectX 12", "WebGPU"]
+  },
+  "compatibility_modes": {
+    "runmat": "Default. Accepts MATLAB command syntax with RunMat error namespaces.",
+    "matlab": "Same as runmat but error identifiers use MATLAB: prefix.",
+    "strict": "Disables command-style implicit forms; explicit parenthesized calls only."
+  },
+  "platforms": ["browser", "macOS", "Linux", "Windows"],
+  "license": "MIT",
+  "urls": {
+    "compatibility_page": "https://runmat.com/docs/compatibility",
+    "language_coverage": "https://runmat.com/docs/language-coverage",
+    "function_reference": "https://runmat.com/docs/matlab-function-reference",
+    "benchmarks": "https://runmat.com/benchmarks",
+    "sandbox": "https://runmat.com/sandbox"
+  }
+}
