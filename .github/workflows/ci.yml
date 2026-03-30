@@ -93,8 +93,9 @@ jobs:
 
           $toolchain = $env:RUST_TOOLCHAIN
           $components = $env:RUST_COMPONENTS.Split(' ')
-          $cargoHome = if ($env:CARGO_HOME) { $env:CARGO_HOME } else { 'C:\Rust\.cargo' }
-          $rustupHome = if ($env:RUSTUP_HOME) { $env:RUSTUP_HOME } else { 'C:\Rust\.rustup' }
+          $userProfile = [Environment]::GetFolderPath('UserProfile')
+          $cargoHome = Join-Path $userProfile '.cargo'
+          $rustupHome = Join-Path $userProfile '.rustup'
           $cargoBin = Join-Path $cargoHome 'bin'
           $rustup = Join-Path $cargoBin 'rustup.exe'
           $cargo = Join-Path $cargoBin 'cargo.exe'
@@ -104,6 +105,14 @@ jobs:
           }
           if (-not (Test-Path $cargo)) {
             throw "Missing cargo at $cargo. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+          }
+          $unexpectedCargoHome = [Environment]::GetEnvironmentVariable('CARGO_HOME', 'Machine')
+          if ($unexpectedCargoHome -and $unexpectedCargoHome -ne $cargoHome) {
+            throw "Machine CARGO_HOME is '$unexpectedCargoHome', but the runner account Rust install must live at $cargoHome."
+          }
+          $unexpectedRustupHome = [Environment]::GetEnvironmentVariable('RUSTUP_HOME', 'Machine')
+          if ($unexpectedRustupHome -and $unexpectedRustupHome -ne $rustupHome) {
+            throw "Machine RUSTUP_HOME is '$unexpectedRustupHome', but the runner account Rust install must live at $rustupHome."
           }
 
           Add-Content -Path $env:GITHUB_ENV -Value "CARGO_HOME=$cargoHome"
