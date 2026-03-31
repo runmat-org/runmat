@@ -40,6 +40,7 @@ PACKAGES=(
   libxrandr-dev
   libzmq3-dev
   pkg-config
+  unzip
 )
 
 echo "Installing Linux system packages used by the self-hosted build-and-test job"
