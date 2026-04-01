@@ -138,6 +138,7 @@ jobs:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
+        if: runner.os == 'macOS'
 
       - name: Validate Linux runner dependencies
         if: runner.os == 'Linux'
