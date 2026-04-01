@@ -176,17 +176,35 @@ if (-not (Test-Path (Join-Path $cargoBin 'rustup.exe'))) {
     throw "rustup.exe was not installed to $(Join-Path $cargoBin 'rustup.exe')."
 }
 & (Join-Path $cargoBin 'rustup.exe') component add --toolchain $RustToolchain rustfmt clippy
+if ($LASTEXITCODE -ne 0) {
+    throw "rustup component add failed with exit code $LASTEXITCODE"
+}
 
 Write-Host 'Cloning and bootstrapping vcpkg'
 if (-not (Test-Path $VcpkgRoot)) {
     git clone https://github.com/microsoft/vcpkg.git $VcpkgRoot
+    if ($LASTEXITCODE -ne 0) {
+        throw "git clone of vcpkg failed with exit code $LASTEXITCODE"
+    }
 }
 & (Join-Path $VcpkgRoot 'bootstrap-vcpkg.bat') -disableMetrics
+if ($LASTEXITCODE -ne 0) {
+    throw "bootstrap-vcpkg.bat failed with exit code $LASTEXITCODE"
+}
 
 Write-Host 'Installing vcpkg packages used by Windows CI'
 & (Join-Path $VcpkgRoot 'vcpkg.exe') install "openblas:$Triplet"
+if ($LASTEXITCODE -ne 0) {
+    throw "vcpkg install openblas failed with exit code $LASTEXITCODE"
+}
 & (Join-Path $VcpkgRoot 'vcpkg.exe') install "lapack-reference:$Triplet"
+if ($LASTEXITCODE -ne 0) {
+    throw "vcpkg install lapack-reference failed with exit code $LASTEXITCODE"
+}
 & (Join-Path $VcpkgRoot 'vcpkg.exe') install "zeromq:$Triplet"
+if ($LASTEXITCODE -ne 0) {
+    throw "vcpkg install zeromq failed with exit code $LASTEXITCODE"
+}
 
 Write-Host 'Writing machine-wide environment variables'
 [Environment]::SetEnvironmentVariable('VCPKG_ROOT', $VcpkgRoot, 'Machine')
@@ -212,9 +230,20 @@ $env:Path = "$perlBin;$VcpkgRoot;$(Join-Path $vcpkgInstalled 'bin');C:\Program F
 
 Write-Host 'Validating installed toolchain'
 & (Join-Path $cargoBin 'rustc.exe') -V
+if ($LASTEXITCODE -ne 0) { throw "rustc -V failed with exit code $LASTEXITCODE" }
 & (Join-Path $cargoBin 'cargo.exe') -V
+if ($LASTEXITCODE -ne 0) { throw "cargo -V failed with exit code $LASTEXITCODE" }
 & (Join-Path $cargoBin 'rustup.exe') --version
+if ($LASTEXITCODE -ne 0) { throw "rustup --version failed with exit code $LASTEXITCODE" }
 & (Join-Path $VcpkgRoot 'vcpkg.exe') version
+if ($LASTEXITCODE -ne 0) { throw "vcpkg version failed with exit code $LASTEXITCODE" }
+
+foreach ($component in @('rustfmt', 'clippy')) {
+    $componentExe = Join-Path $cargoBin "$component.exe"
+    if (-not (Test-Path $componentExe)) {
+        throw "Rust component '$component' was not found at $componentExe after rustup component add."
+    }
+}
 if (-not (Test-Path $perlExe)) {
     throw "Perl executable was not found at $perlExe after installation."
 }
