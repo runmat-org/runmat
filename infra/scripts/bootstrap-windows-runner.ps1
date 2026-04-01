@@ -128,8 +128,13 @@ $vsProcess = Start-Process -FilePath $vsInstaller -ArgumentList @(
     '--includeRecommended'
 ) -Wait -NoNewWindow -PassThru
 
-if ($vsProcess.ExitCode -ne 0) {
+# Exit code 3010 (ERROR_SUCCESS_REBOOT_REQUIRED) means installation succeeded but a reboot is
+# pending. This is common on fresh Windows VMs and is not a failure.
+if ($vsProcess.ExitCode -ne 0 -and $vsProcess.ExitCode -ne 3010) {
     throw "Visual Studio Build Tools installer failed with exit code $($vsProcess.ExitCode). Check the Visual Studio installer logs under $env:TEMP and %ProgramData%\Microsoft\VisualStudio\Packages\_Instances."
+}
+if ($vsProcess.ExitCode -eq 3010) {
+    Write-Host 'Visual Studio Build Tools installed successfully (exit code 3010: a reboot is required before use).'
 }
 
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
