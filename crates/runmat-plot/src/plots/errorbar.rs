@@ -384,6 +384,7 @@ impl ErrorBar {
     }
 
     pub fn render_data(&mut self) -> RenderData {
+        let bounds = self.bounds();
         let (vertices, vertex_count, gpu_vertices) = if self.gpu_vertices.is_some() {
             (
                 Vec::new(),
@@ -400,7 +401,7 @@ impl ErrorBar {
             vertices,
             indices: None,
             gpu_vertices,
-            bounds: None,
+            bounds: Some(bounds),
             material: Material {
                 albedo: self.color,
                 roughness: self.line_width,

@@ -41,6 +41,7 @@ rayon = "1.0"
 # Runtime environment detection
 atty = "0.2"
 log = "0.4"
+tracing = "0.1"
 once_cell = "1.19"
 
 # Web browser integration

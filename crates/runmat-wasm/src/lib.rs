@@ -69,6 +69,7 @@ use runmat_runtime::builtins::plotting::{
     fit_surface_extents as runtime_fit_surface_extents,
     get_surface_camera_state as runtime_get_surface_camera_state,
     handle_plot_surface_event as runtime_handle_plot_surface_event,
+    invalidate_surface_revisions as runtime_invalidate_surface_revisions,
     install_figure_observer as runtime_install_figure_observer,
     install_surface as runtime_install_surface, new_figure_handle as runtime_new_figure_handle,
     present_figure_on_surface as runtime_present_figure_on_surface,
@@ -76,6 +77,7 @@ use runmat_runtime::builtins::plotting::{
     render_current_scene as runtime_render_current_scene,
     render_figure_snapshot as runtime_render_figure_snapshot,
     reset_hold_state_for_run as runtime_reset_hold_state_for_run,
+    reset_plot_state as runtime_reset_plot_state,
     reset_surface_camera as runtime_reset_surface_camera, resize_surface as runtime_resize_surface,
     select_figure as runtime_select_figure, set_hold as runtime_set_hold,
     set_plot_theme_config as runtime_set_plot_theme_config,
@@ -583,6 +585,8 @@ impl RunMatWasm {
         }
         let mut slot = self.session.borrow_mut();
         *slot = session;
+        runtime_reset_plot_state();
+        runtime_invalidate_surface_revisions();
         Ok(())
     }
 

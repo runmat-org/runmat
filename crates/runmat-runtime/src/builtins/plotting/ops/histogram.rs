@@ -76,6 +76,7 @@ pub async fn histogram_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let mut chart = BarChart::new(labels, counts.data.clone()).map_err(|e| {
         crate::builtins::plotting::plotting_error(BUILTIN_NAME, format!("histogram: {e}"))
     })?;
+    chart.set_histogram_bin_edges(edges.data.clone());
     apply_bar_style(&mut chart, &style, HIST_DEFAULT_LABEL);
 
     let normalization = infer_normalization(&histcounts_args);

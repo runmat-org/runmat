@@ -173,6 +173,7 @@ impl StairsPlot {
     }
     pub fn render_data(&mut self) -> RenderData {
         let using_gpu = self.gpu_vertices.is_some();
+        let bounds = self.bounds();
         let (vertices, vertex_count, gpu_vertices) = if using_gpu {
             (
                 Vec::new(),
@@ -200,7 +201,7 @@ impl StairsPlot {
             vertices,
             indices: None,
             gpu_vertices,
-            bounds: None,
+            bounds: Some(bounds),
             material,
             draw_calls: vec![draw_call],
             image: None,

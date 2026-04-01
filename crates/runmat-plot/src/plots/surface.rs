@@ -550,6 +550,7 @@ impl SurfacePlot {
         );
 
         let using_gpu = self.gpu_vertices.is_some();
+        let bounds = self.bounds();
         let vertices = if using_gpu {
             Vec::new()
         } else {
@@ -596,7 +597,7 @@ impl SurfacePlot {
             indices: Some(indices),
 
             gpu_vertices: self.gpu_vertices.clone(),
-            bounds: None,
+            bounds: Some(bounds),
             material,
             draw_calls: vec![draw_call],
             image: None,

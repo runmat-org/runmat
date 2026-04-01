@@ -43,6 +43,7 @@ pub struct BarChart {
     /// Metadata
     pub label: Option<String>,
     pub visible: bool,
+    histogram_bin_edges: Option<Vec<f64>>,
 
     /// Generated rendering data (cached)
     vertices: Option<Vec<Vertex>>,
@@ -55,6 +56,27 @@ pub struct BarChart {
 }
 
 impl BarChart {
+    fn histogram_slot_geometry(&self, index: usize) -> Option<(f32, f32)> {
+        let edges = self.histogram_bin_edges.as_ref()?;
+        let left = *edges.get(index)? as f32;
+        let right = *edges.get(index + 1)? as f32;
+        if !(left.is_finite() && right.is_finite()) {
+            return None;
+        }
+        let bin_width = (right - left).abs().max(f32::EPSILON);
+        let direction = if right >= left { 1.0 } else { -1.0 };
+        let available_width = bin_width * self.bar_width.clamp(0.1, 1.0);
+        let per_group_width = (available_width / self.group_count.max(1) as f32).max(0.0);
+        let start = left + direction * ((bin_width - available_width) * 0.5);
+        let bar_start = start + direction * (per_group_width * self.group_index as f32);
+        let bar_end = bar_start + direction * per_group_width;
+        Some(if direction >= 0.0 {
+            (bar_start.min(bar_end), bar_start.max(bar_end))
+        } else {
+            (bar_end.min(bar_start), bar_end.max(bar_start))
+        })
+    }
+
     /// Create a new bar chart with labels and values
     pub fn new(labels: Vec<String>, values: Vec<f64>) -> Result<Self, String> {
         if labels.len() != values.len() {
@@ -84,6 +106,7 @@ impl BarChart {
             stack_offsets: None,
             label: None,
             visible: true,
+            histogram_bin_edges: None,
             vertices: None,
             indices: None,
             bounds: None,
@@ -119,6 +142,7 @@ impl BarChart {
             stack_offsets: None,
             label: None,
             visible: true,
+            histogram_bin_edges: None,
             vertices: None,
             indices: None,
             bounds: Some(bounds),
@@ -180,6 +204,24 @@ impl BarChart {
 
     pub fn bar_count(&self) -> usize {
         self.value_count
+    }
+
+    pub fn values(&self) -> Option<&[f64]> {
+        self.values.as_deref()
+    }
+
+    pub fn stack_offsets(&self) -> Option<&[f64]> {
+        self.stack_offsets.as_deref()
+    }
+
+    pub fn histogram_bin_edges(&self) -> Option<&[f64]> {
+        self.histogram_bin_edges.as_deref()
+    }
+
+    pub fn set_histogram_bin_edges(&mut self, edges: Vec<f64>) {
+        if edges.len() == self.value_count + 1 {
+            self.histogram_bin_edges = Some(edges);
+        }
     }
 
     pub fn set_per_bar_colors(&mut self, colors: Vec<Vec4>) {
@@ -380,11 +422,15 @@ impl BarChart {
                         continue;
                     }
                     let color = self.color_for_bar(i);
-                    let x_center = (i as f32) + 1.0;
-                    let center = x_center + local_offset;
-                    let half = per_group_width * 0.5;
-                    let left = center - half;
-                    let right = center + half;
+                    let (left, right) = if self.histogram_bin_edges.is_some() {
+                        self.histogram_slot_geometry(i)
+                            .unwrap_or(((i as f32) + 0.6, (i as f32) + 1.4))
+                    } else {
+                        let x_center = (i as f32) + 1.0;
+                        let center = x_center + local_offset;
+                        let half = per_group_width * 0.5;
+                        (center - half, center + half)
+                    };
                     let base = self
                         .stack_offsets
                         .as_ref()
@@ -412,11 +458,15 @@ impl BarChart {
                         continue;
                     }
                     let color = self.color_for_bar(i);
-                    let y_center = (i as f32) + 1.0;
-                    let center = y_center + local_offset;
-                    let half = per_group_width * 0.5;
-                    let bottom = center - half;
-                    let top = center + half;
+                    let (bottom, top) = if self.histogram_bin_edges.is_some() {
+                        self.histogram_slot_geometry(i)
+                            .unwrap_or(((i as f32) + 0.6, (i as f32) + 1.4))
+                    } else {
+                        let y_center = (i as f32) + 1.0;
+                        let center = y_center + local_offset;
+                        let half = per_group_width * 0.5;
+                        (center - half, center + half)
+                    };
                     let base = self
                         .stack_offsets
                         .as_ref()
@@ -472,9 +522,29 @@ impl BarChart {
 
             match self.orientation {
                 Orientation::Vertical => {
-                    // X spans category centers at 1..n with half-bar padding
-                    let min_x = 1.0 - self.bar_width * 0.5;
-                    let max_x = num_bars as f32 + self.bar_width * 0.5;
+                    let (min_x, max_x) = if self.histogram_bin_edges.is_some() {
+                        let mut min_x = f32::INFINITY;
+                        let mut max_x = f32::NEG_INFINITY;
+                        for i in 0..num_bars {
+                            if let Some((left, right)) = self.histogram_slot_geometry(i) {
+                                min_x = min_x.min(left);
+                                max_x = max_x.max(right);
+                            }
+                        }
+                        if !min_x.is_finite() || !max_x.is_finite() {
+                            (
+                                1.0 - self.bar_width * 0.5,
+                                num_bars as f32 + self.bar_width * 0.5,
+                            )
+                        } else {
+                            (min_x, max_x)
+                        }
+                    } else {
+                        (
+                            1.0 - self.bar_width * 0.5,
+                            num_bars as f32 + self.bar_width * 0.5,
+                        )
+                    };
                     // Y spans min/max of values and optional stack offsets
                     let (mut min_y, mut max_y) = (0.0f32, 0.0f32);
                     if let Some(offsets) = &self.stack_offsets {
@@ -503,9 +573,29 @@ impl BarChart {
                     ));
                 }
                 Orientation::Horizontal => {
-                    // Y spans category centers at 1..n with half-bar padding
-                    let min_y = 1.0 - self.bar_width * 0.5;
-                    let max_y = num_bars as f32 + self.bar_width * 0.5;
+                    let (min_y, max_y) = if self.histogram_bin_edges.is_some() {
+                        let mut min_y = f32::INFINITY;
+                        let mut max_y = f32::NEG_INFINITY;
+                        for i in 0..num_bars {
+                            if let Some((bottom, top)) = self.histogram_slot_geometry(i) {
+                                min_y = min_y.min(bottom);
+                                max_y = max_y.max(top);
+                            }
+                        }
+                        if !min_y.is_finite() || !max_y.is_finite() {
+                            (
+                                1.0 - self.bar_width * 0.5,
+                                num_bars as f32 + self.bar_width * 0.5,
+                            )
+                        } else {
+                            (min_y, max_y)
+                        }
+                    } else {
+                        (
+                            1.0 - self.bar_width * 0.5,
+                            num_bars as f32 + self.bar_width * 0.5,
+                        )
+                    };
                     // X spans min/max of values and optional stack offsets
                     let (mut min_x, mut max_x) = (0.0f32, 0.0f32);
                     if let Some(offsets) = &self.stack_offsets {
@@ -542,6 +632,7 @@ impl BarChart {
     pub fn render_data(&mut self) -> RenderData {
         let using_gpu = self.gpu_vertices.is_some();
         let gpu_vertices = self.gpu_vertices.clone();
+        let bounds = self.bounds();
         let (vertices, indices, vertex_count) = if using_gpu {
             let count = self
                 .gpu_vertex_count
@@ -571,7 +662,7 @@ impl BarChart {
             vertices,
             indices,
             gpu_vertices,
-            bounds: None,
+            bounds: Some(bounds),
             material,
             draw_calls: vec![draw_call],
             image: None,
@@ -765,6 +856,31 @@ mod tests {
         assert_eq!(render_data.vertices.len(), 4); // One rectangle
         assert!(render_data.indices.is_some());
         assert_eq!(render_data.indices.as_ref().unwrap().len(), 6); // Two triangles
+        let bounds = render_data.bounds.expect("bar render data bounds");
+        assert_eq!(bounds.min.x, 0.6);
+        assert_eq!(bounds.max.x, 1.4);
+        assert_eq!(bounds.min.y, 0.0);
+        assert_eq!(bounds.max.y, 10.0);
+    }
+
+    #[test]
+    fn histogram_edges_drive_bar_geometry_and_bounds() {
+        let labels = vec!["bin1".to_string(), "bin2".to_string()];
+        let values = vec![2.0, 3.0];
+
+        let mut chart = BarChart::new(labels, values).unwrap();
+        chart.set_histogram_bin_edges(vec![0.0, 0.5, 1.0]);
+        chart.set_bar_width(1.0);
+
+        let bounds = chart.bounds();
+        assert_eq!(bounds.min.x, 0.0);
+        assert_eq!(bounds.max.x, 1.0);
+
+        let (vertices, _) = chart.generate_vertices();
+        assert_eq!(vertices[0].position[0], 0.0);
+        assert_eq!(vertices[1].position[0], 0.5);
+        assert_eq!(vertices[4].position[0], 0.5);
+        assert_eq!(vertices[5].position[0], 1.0);
     }
 
     #[test]

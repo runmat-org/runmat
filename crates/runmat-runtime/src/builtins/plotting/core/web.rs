@@ -391,6 +391,15 @@ pub(crate) mod wasm {
         Ok(())
     }
 
+    pub fn invalidate_surface_revisions() {
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            for entry in map.values_mut() {
+                entry.last_revision = None;
+            }
+        });
+    }
+
     // expose type to outer module
     pub(super) use runmat_plot::web::WebRenderer as RendererType;
 }
@@ -428,6 +437,8 @@ pub(crate) mod wasm {
     pub fn render_current_scene(_handle: u32) -> BuiltinResult<()> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
+
+    pub fn invalidate_surface_revisions() {}
 
     pub(super) fn bind_surface_to_figure_impl(_surface_id: u32, _handle: u32) -> BuiltinResult<()> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
@@ -472,6 +483,7 @@ pub(crate) mod wasm {
     }
 }
 
+pub use wasm::invalidate_surface_revisions;
 pub use wasm::render_current_scene;
 pub use wasm::web_renderer_ready;
 

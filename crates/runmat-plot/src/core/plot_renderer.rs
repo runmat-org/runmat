@@ -65,11 +65,11 @@ pub struct PlotRenderer {
     /// Last surface extent (in pixels) that was used to build viewport-dependent geometry.
     /// Used so we can rebuild the scene after the canvas is resized (common on wasm).
     last_scene_viewport_px: Option<(u32, u32)>,
+    /// Last per-axes plot viewport sizes used to build viewport-dependent geometry.
+    last_axes_plot_sizes_px: Option<Vec<(u32, u32)>>,
 
     /// If false, do not auto-fit camera when the figure updates (user has interacted).
     camera_auto_fit: bool,
-    /// Cached flag: whether the current figure contains 3D plots (surf/scatter3).
-    figure_has_3d: bool,
     /// Per-node GPU buffer cache for stable interactive redraws.
     scene_buffer_cache: RefCell<HashMap<u64, CachedSceneBuffers>>,
 }
@@ -253,10 +253,33 @@ impl PlotRenderer {
             axes_cameras: vec![Self::create_default_camera()],
             last_figure: None,
             last_scene_viewport_px: None,
+            last_axes_plot_sizes_px: None,
             camera_auto_fit: true,
-            figure_has_3d: false,
             scene_buffer_cache: RefCell::new(HashMap::new()),
         })
+    }
+
+    fn plot_element_is_3d(plot: &crate::plots::figure::PlotElement) -> bool {
+        match plot {
+            crate::plots::figure::PlotElement::Surface(surface) => !surface.image_mode,
+            crate::plots::figure::PlotElement::Line3(_) => true,
+            crate::plots::figure::PlotElement::Scatter3(_) => true,
+            _ => false,
+        }
+    }
+
+    pub fn axes_has_3d_content(&self, axes_index: usize) -> bool {
+        self.last_figure
+            .as_ref()
+            .map(|figure| {
+                figure
+                    .plots()
+                    .zip(figure.plot_axes_indices().iter().copied())
+                    .any(|(plot, plot_axes_index)| {
+                        plot_axes_index == axes_index && Self::plot_element_is_3d(plot)
+                    })
+            })
+            .unwrap_or(false)
     }
 
     /// Mark that the user has interacted with the camera (disable auto-fit-on-update).
@@ -274,46 +297,38 @@ impl PlotRenderer {
         self.scene_buffer_cache.borrow_mut().clear();
 
         // Convert figure to scene nodes
-        let prev_has_3d = self.figure_has_3d;
-        let next_has_3d = figure.plots().any(|plot| match plot {
-            crate::plots::figure::PlotElement::Surface(surface) => !surface.image_mode,
-            crate::plots::figure::PlotElement::Line3(_) => true,
-            crate::plots::figure::PlotElement::Scatter3(_) => true,
-            _ => false,
-        });
-        self.figure_has_3d = next_has_3d;
-
-        // If the plot "mode" changed (2D <-> 3D), reset auto-fit so the new mode gets a sensible
-        // initial camera. Otherwise, switching from a previously-interacted 2D plot could leave us
-        // stuck in an orthographic camera for a 3D surface.
-        if prev_has_3d != next_has_3d {
-            self.camera_auto_fit = true;
-        }
-        // Also, if we are about to render a 3D plot but the current camera is still orthographic,
-        // force a one-time auto-fit to bootstrap the perspective camera.
-        if next_has_3d
-            && matches!(
-                self.camera().projection,
-                crate::core::camera::ProjectionType::Orthographic { .. }
-            )
-        {
-            self.camera_auto_fit = true;
-        }
-
         self.cache_figure_meta(&figure);
         self.last_figure = Some(figure.clone());
+        self.last_axes_plot_sizes_px = None;
         // Initialize axes cameras for subplot grid
         let (rows, cols) = figure.axes_grid();
         let num_axes = rows.max(1) * cols.max(1);
-        // Ensure per-axes cameras exist and match the plot mode (2D vs 3D).
-        // Subplot rendering prefers `axes_cameras`, so these must be initialized correctly.
-        if self.axes_cameras.len() != num_axes || prev_has_3d != next_has_3d {
-            if next_has_3d {
-                self.axes_cameras = (0..num_axes).map(|_| Camera::new()).collect();
-            } else {
-                self.axes_cameras = (0..num_axes)
-                    .map(|_| Self::create_default_camera())
-                    .collect();
+
+        if self.axes_cameras.len() != num_axes {
+            self.axes_cameras
+                .resize_with(num_axes, Self::create_default_camera);
+            self.camera_auto_fit = true;
+        }
+
+        for axes_index in 0..num_axes {
+            let wants_3d = self.axes_has_3d_content(axes_index);
+            let has_3d_camera = self
+                .axes_cameras
+                .get(axes_index)
+                .map(|cam| {
+                    matches!(
+                        cam.projection,
+                        crate::core::camera::ProjectionType::Perspective { .. }
+                    )
+                })
+                .unwrap_or(false);
+            if wants_3d != has_3d_camera {
+                self.axes_cameras[axes_index] = if wants_3d {
+                    Camera::new()
+                } else {
+                    Self::create_default_camera()
+                };
+                self.camera_auto_fit = true;
             }
         }
 
@@ -341,7 +356,15 @@ impl PlotRenderer {
     }
 
     /// Add a figure to the current scene
-    fn add_figure_to_scene(&mut self, mut figure: Figure) {
+    fn add_figure_to_scene(&mut self, figure: Figure) {
+        self.add_figure_to_scene_with_axes_plot_sizes(figure, None);
+    }
+
+    fn add_figure_to_scene_with_axes_plot_sizes(
+        &mut self,
+        mut figure: Figure,
+        axes_plot_sizes_px: Option<&[(u32, u32)]>,
+    ) {
         use crate::core::SceneNode;
 
         // Convert figure to render data first, then create scene nodes
@@ -354,11 +377,15 @@ impl PlotRenderer {
             device: &self.wgpu_renderer.device,
             queue: &self.wgpu_renderer.queue,
         };
-        let render_data_list =
-            figure.render_data_with_axes_with_viewport_and_gpu(Some(viewport_px), Some(&gpu));
+        let render_data_list = figure.render_data_with_axes_with_viewport_and_gpu(
+            Some(viewport_px),
+            axes_plot_sizes_px,
+            Some(&gpu),
+        );
         let (rows, cols) = figure.axes_grid();
 
-        for (node_id_counter, (axes_index, render_data)) in render_data_list.into_iter().enumerate() {
+        for (node_id_counter, (axes_index, render_data)) in render_data_list.into_iter().enumerate()
+        {
             let axes_index = axes_index.min(rows * cols - 1);
             // Create scene node for this plot element
             let node = SceneNode {
@@ -383,6 +410,118 @@ impl PlotRenderer {
             let _ = axes_index;
             let _ = rows;
             let _ = cols;
+        }
+    }
+
+    pub fn ensure_scene_viewport_dependent_geometry_for_axes(
+        &mut self,
+        axes_plot_sizes_px: &[(u32, u32)],
+    ) {
+        let normalized: Vec<(u32, u32)> = axes_plot_sizes_px
+            .iter()
+            .map(|&(w, h)| (w.max(1), h.max(1)))
+            .collect();
+        if self.last_axes_plot_sizes_px.as_ref() == Some(&normalized) {
+            return;
+        }
+        let Some(figure) = self.last_figure.clone() else {
+            self.last_axes_plot_sizes_px = Some(normalized);
+            return;
+        };
+        self.scene.clear();
+        self.scene_buffer_cache.borrow_mut().clear();
+        self.add_figure_to_scene_with_axes_plot_sizes(figure, Some(&normalized));
+        log::debug!(
+            target: "runmat_plot.viewport_rebuild",
+            "rebuilt viewport-dependent scene geometry axes_count={} viewport_sizes={:?}",
+            normalized.len(),
+            normalized
+        );
+        self.refit_2d_cameras_to_scene_bounds();
+        self.last_axes_plot_sizes_px = Some(normalized);
+        self.needs_update = true;
+    }
+
+    fn refit_2d_cameras_to_scene_bounds(&mut self) {
+        for idx in 0..self.axes_cameras.len() {
+            if self.axes_has_3d_content(idx) {
+                continue;
+            }
+            let Some((x_min, x_max, y_min, y_max)) = self.display_bounds_for_axes(idx) else {
+                continue;
+            };
+            let geometry_bounds = self.axes_bounds(idx);
+            let Some(cam) = self.axes_cameras.get_mut(idx) else {
+                continue;
+            };
+            if let crate::core::camera::ProjectionType::Orthographic {
+                ref mut left,
+                ref mut right,
+                ref mut bottom,
+                ref mut top,
+                ..
+            } = cam.projection
+            {
+                *left = x_min as f32;
+                *right = x_max as f32;
+                *bottom = y_min as f32;
+                *top = y_max as f32;
+                let camera_left = *left;
+                let camera_right = *right;
+                let camera_bottom = *bottom;
+                let camera_top = *top;
+                cam.position.z = 1.0;
+                cam.target.z = 0.0;
+                cam.mark_dirty();
+                if let Some(bounds) = geometry_bounds {
+                    log::debug!(
+                        target: "runmat_plot.camera_refit",
+                        "refit 2d camera to rebuilt scene bounds axes_index={} geometry=({}, {})..({}, {}) camera=({}, {})..({}, {}) margins=top:{} bottom:{} left:{} right:{}",
+                        idx,
+                        bounds.min.x,
+                        bounds.min.y,
+                        bounds.max.x,
+                        bounds.max.y,
+                        camera_left,
+                        camera_bottom,
+                        camera_right,
+                        camera_top,
+                        camera_top - bounds.max.y,
+                        bounds.min.y - camera_bottom,
+                        bounds.min.x - camera_left,
+                        camera_right - bounds.max.x
+                    );
+                } else {
+                    log::debug!(
+                        target: "runmat_plot.camera_refit",
+                        "refit 2d camera without geometry bounds axes_index={} camera=({}, {})..({}, {})",
+                        idx,
+                        camera_left,
+                        camera_bottom,
+                        camera_right,
+                        camera_top
+                    );
+                }
+                if let Some(display_bounds) = self.display_bounds_for_axes(idx) {
+                    log::debug!(
+                        target: "runmat_plot.bounds_chain",
+                        "bounds chain axes_index={} axes_bounds=({}, {})..({}, {}) display_bounds=({}, {})..({}, {}) camera_bounds=({}, {})..({}, {})",
+                        idx,
+                        geometry_bounds.map(|b| b.min.x as f64).unwrap_or(f64::NAN),
+                        geometry_bounds.map(|b| b.min.y as f64).unwrap_or(f64::NAN),
+                        geometry_bounds.map(|b| b.max.x as f64).unwrap_or(f64::NAN),
+                        geometry_bounds.map(|b| b.max.y as f64).unwrap_or(f64::NAN),
+                        display_bounds.0,
+                        display_bounds.2,
+                        display_bounds.1,
+                        display_bounds.3,
+                        camera_left,
+                        camera_bottom,
+                        camera_right,
+                        camera_top
+                    );
+                }
+            }
         }
     }
 
@@ -417,10 +556,13 @@ impl PlotRenderer {
         let Some(fig) = self.last_figure.as_ref() else {
             return;
         };
-        if !self.figure_has_3d {
-            return;
-        }
         for (idx, cam) in self.axes_cameras.iter_mut().enumerate() {
+            if !matches!(
+                cam.projection,
+                crate::core::camera::ProjectionType::Perspective { .. }
+            ) {
+                continue;
+            }
             if let Some(meta) = fig.axes_metadata(idx) {
                 if let (Some(az), Some(el)) = (meta.view_azimuth_deg, meta.view_elevation_deg) {
                     cam.set_view_angles_deg(az, el);
@@ -435,16 +577,20 @@ impl PlotRenderer {
         let mut x_max = base.max.x as f64;
         let mut y_min = base.min.y as f64;
         let mut y_max = base.max.y as f64;
+        let mut explicit_x_limits = false;
+        let mut explicit_y_limits = false;
 
         if let Some(fig) = self.last_figure.as_ref() {
             if let Some(meta) = fig.axes_metadata(axes_index) {
                 if let Some((xl, xr)) = meta.x_limits {
                     x_min = xl;
                     x_max = xr;
+                    explicit_x_limits = true;
                 }
                 if let Some((yl, yr)) = meta.y_limits {
                     y_min = yl;
                     y_max = yr;
+                    explicit_y_limits = true;
                 }
                 if meta.axis_equal {
                     let cx = (x_min + x_max) * 0.5;
@@ -458,13 +604,24 @@ impl PlotRenderer {
             }
         }
 
+        if !explicit_x_limits {
+            let pad = 0.0;
+            x_min -= pad;
+            x_max += pad;
+        }
+        if !explicit_y_limits {
+            let pad = 0.0;
+            y_min -= pad;
+            y_max += pad;
+        }
+
         Some((x_min, x_max, y_min, y_max))
     }
 
     fn fit_cameras_to_axes_data(&mut self) -> bool {
         let mut applied = false;
         for idx in 0..self.axes_cameras.len() {
-            if self.figure_has_3d {
+            if self.axes_has_3d_content(idx) {
                 let Some(bounds) = self.axes_bounds(idx) else {
                     continue;
                 };
@@ -514,7 +671,7 @@ impl PlotRenderer {
 
         for node in self.scene.get_visible_nodes() {
             if let Some(render_data) = &node.render_data {
-                if let Some(bounds) = render_data.bounds.as_ref() {
+                if let Some(bounds) = render_data.bounds {
                     min_x = min_x.min(bounds.min.x as f64);
                     max_x = max_x.max(bounds.max.x as f64);
                     min_y = min_y.min(bounds.min.y as f64);
@@ -533,11 +690,12 @@ impl PlotRenderer {
         }
 
         if min_x != f64::INFINITY && max_x != f64::NEG_INFINITY {
-            // Add 10% margin around data for better visualization
+            // Add a small margin around data for readability without making
+            // the plotted curve appear to exceed the labeled axis range.
             let x_range = (max_x - min_x).max(0.1);
             let y_range = (max_y - min_y).max(0.1);
-            let x_margin = x_range * 0.1;
-            let y_margin = y_range * 0.1;
+            let x_margin = x_range * 0.04;
+            let y_margin = y_range * 0.04;
 
             let bounds = (
                 min_x - x_margin,
@@ -559,48 +717,33 @@ impl PlotRenderer {
     ///
     /// Returns `true` if a fit was applied (i.e. bounds existed).
     pub fn fit_camera_to_data(&mut self) -> bool {
-        if self.figure_has_3d {
-            let Some(fig) = self.last_figure.as_mut() else {
+        if self.axes_cameras.len() > 1 {
+            return self.fit_cameras_to_axes_data();
+        }
+
+        if self.axes_has_3d_content(0) {
+            let Some(bounds) = self.axes_bounds(0) else {
                 return false;
             };
-            let bounds = fig.bounds();
-            let min = bounds.min;
-            let max = bounds.max;
-            // Seed a non-axis-aligned view direction (MATLAB-like az/el) before fitting.
-            let center = (min + max) * 0.5;
+            let center = (bounds.min + bounds.max) * 0.5;
             let mut cam = Camera::new();
             cam.target = center;
-            // Z-up default (CAD-like). This must match `Camera::new()`; otherwise auto-fit
-            // will override the user's expected default orientation.
             cam.up = Vec3::Z;
-            // Direction roughly (az=-37.5°, el=30°): angled in X/Y with positive Z.
             cam.position = center + Vec3::new(1.0, -1.0, 1.0);
-            cam.fit_bounds(min, max);
-
-            for c in self.axes_cameras.iter_mut() {
-                *c = cam.clone();
+            cam.fit_bounds(bounds.min, bounds.max);
+            if let Some(axis_cam) = self.axes_cameras.get_mut(0) {
+                *axis_cam = cam;
             }
             return true;
         }
 
-        if let Some((x_min, x_max, y_min, y_max)) = self.calculate_data_bounds() {
+        if let Some((x_min, x_max, y_min, y_max)) = self.display_bounds_for_axes(0) {
             // Match the camera bounds exactly to data bounds to align with overlay grid
             let mut cam = Self::create_default_camera();
-            let mut l = x_min as f32;
-            let mut r = x_max as f32;
-            let mut b = y_min as f32;
-            let mut t = y_max as f32;
-            if self.figure_axis_equal {
-                let cx = (l + r) * 0.5;
-                let cy = (b + t) * 0.5;
-                let width = (r - l).abs();
-                let height = (t - b).abs();
-                let size = width.max(height);
-                l = cx - size * 0.5;
-                r = cx + size * 0.5;
-                b = cy - size * 0.5;
-                t = cy + size * 0.5;
-            }
+            let l = x_min as f32;
+            let r = x_max as f32;
+            let b = y_min as f32;
+            let t = y_max as f32;
             if let crate::core::camera::ProjectionType::Orthographic {
                 ref mut left,
                 ref mut right,
@@ -618,8 +761,8 @@ impl PlotRenderer {
             cam.target.z = 0.0;
             cam.mark_dirty();
 
-            for c in self.axes_cameras.iter_mut() {
-                *c = cam.clone();
+            if let Some(axis_cam) = self.axes_cameras.get_mut(0) {
+                *axis_cam = cam;
             }
             return true;
         }
@@ -643,25 +786,48 @@ impl PlotRenderer {
     /// while preserving the current zoom distance.
     /// For 2D, this is equivalent to Fit Extents (since "home" without data bounds is rarely useful).
     pub fn reset_camera_position(&mut self) {
-        if self.figure_has_3d {
-            let dir = Vec3::new(1.0, -1.0, 1.0).normalize_or_zero();
-            let data_centers: Vec<Vec3> = (0..self.axes_cameras.len())
-                .map(|idx| {
-                    self.axes_bounds(idx)
-                        .map(|b| (b.min + b.max) * 0.5)
-                        .unwrap_or_else(|| self.axes_cameras[idx].target)
-                })
-                .collect();
-            for (idx, c) in self.axes_cameras.iter_mut().enumerate() {
+        let dir = Vec3::new(1.0, -1.0, 1.0).normalize_or_zero();
+        let data_centers: Vec<Vec3> = (0..self.axes_cameras.len())
+            .map(|idx| {
+                self.axes_bounds(idx)
+                    .map(|b| (b.min + b.max) * 0.5)
+                    .unwrap_or_else(|| self.axes_cameras[idx].target)
+            })
+            .collect();
+        let display_bounds: Vec<Option<(f64, f64, f64, f64)>> = (0..self.axes_cameras.len())
+            .map(|idx| self.display_bounds_for_axes(idx))
+            .collect();
+        for (idx, c) in self.axes_cameras.iter_mut().enumerate() {
+            if matches!(
+                c.projection,
+                crate::core::camera::ProjectionType::Perspective { .. }
+            ) {
                 let data_center = data_centers.get(idx).copied().unwrap_or(c.target);
                 let dist = (c.position - c.target).length().max(0.1);
                 c.target = data_center;
                 c.up = Vec3::Z;
                 c.position = data_center + dir * dist;
                 c.mark_dirty();
+            } else if let Some((x_min, x_max, y_min, y_max)) = display_bounds[idx] {
+                let mut cam = Self::create_default_camera();
+                if let crate::core::camera::ProjectionType::Orthographic {
+                    ref mut left,
+                    ref mut right,
+                    ref mut bottom,
+                    ref mut top,
+                    ..
+                } = cam.projection
+                {
+                    *left = x_min as f32;
+                    *right = x_max as f32;
+                    *bottom = y_min as f32;
+                    *top = y_max as f32;
+                }
+                cam.position.z = 1.0;
+                cam.target.z = 0.0;
+                cam.mark_dirty();
+                *c = cam;
             }
-        } else {
-            self.fit_extents();
         }
         self.camera_auto_fit = false;
         self.needs_update = true;
@@ -1184,6 +1350,45 @@ impl PlotRenderer {
         axes_index: usize,
         clear_background: bool,
     ) -> Result<RenderResult, Box<dyn std::error::Error>> {
+        let use_msaa = config.msaa_samples.max(1) > 1;
+        let _ = self.wgpu_renderer.ensure_msaa(config.msaa_samples);
+        let msaa_view_keepalive = if use_msaa {
+            Some(self.wgpu_renderer.ensure_msaa_color_view())
+        } else {
+            None
+        };
+        let render_target = if let Some(msaa_view) = msaa_view_keepalive.as_ref() {
+            RenderTarget {
+                view: msaa_view.as_ref(),
+                resolve_target: Some(target_view),
+            }
+        } else {
+            RenderTarget {
+                view: target_view,
+                resolve_target: None,
+            }
+        };
+        self.render_camera_to_target_viewport(
+            encoder,
+            render_target,
+            viewport_scissor,
+            config,
+            camera,
+            axes_index,
+            clear_background,
+        )
+    }
+
+    fn render_camera_to_target_viewport(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        target: RenderTarget<'_>,
+        viewport_scissor: (u32, u32, u32, u32),
+        config: &PlotRenderConfig,
+        camera: &Camera,
+        axes_index: usize,
+        clear_background: bool,
+    ) -> Result<RenderResult, Box<dyn std::error::Error>> {
         let start_time = Instant::now();
 
         // Apply MSAA preference into pipelines
@@ -1240,6 +1445,44 @@ impl PlotRenderer {
             cam.projection,
             crate::core::camera::ProjectionType::Orthographic { .. }
         );
+        match cam.projection {
+            crate::core::camera::ProjectionType::Orthographic {
+                left,
+                right,
+                bottom,
+                top,
+                ..
+            } => {
+                log::debug!(
+                    target: "runmat_plot.draw_camera",
+                    "draw camera axes_index={} is_2d=true viewport=({}, {}, {}, {}) bounds=({}, {})..({}, {}) cfg_wh=({}, {})",
+                    axes_index,
+                    sx,
+                    sy,
+                    sw,
+                    sh,
+                    left,
+                    bottom,
+                    right,
+                    top,
+                    config.width,
+                    config.height
+                );
+            }
+            crate::core::camera::ProjectionType::Perspective { .. } => {
+                log::debug!(
+                    target: "runmat_plot.draw_camera",
+                    "draw camera axes_index={} is_2d=false viewport=({}, {}, {}, {}) cfg_wh=({}, {})",
+                    axes_index,
+                    sx,
+                    sy,
+                    sw,
+                    sh,
+                    config.width,
+                    config.height
+                );
+            }
+        }
 
         // Prepare render items outside the pass
         let mut owned_render_data: Vec<Box<crate::core::RenderData>> = Vec::new();
@@ -1249,6 +1492,19 @@ impl PlotRenderer {
         let mut total_triangles = 0usize;
         for node in self.scene.get_visible_nodes() {
             if let Some(render_data) = &node.render_data {
+                if node.axes_index == axes_index {
+                    log::debug!(
+                        target: "runmat_plot.draw_item",
+                        "draw item axes_index={} node_axes_index={} pipeline={:?} vertex_count={} has_indices={} has_bounds={} gpu_vertices={}",
+                        axes_index,
+                        node.axes_index,
+                        render_data.pipeline_type,
+                        render_data.vertex_count(),
+                        render_data.indices.is_some(),
+                        render_data.bounds.is_some(),
+                        render_data.gpu_vertices.is_some()
+                    );
+                }
                 if let Some((vb, ib)) = self.prepare_buffers_for_render_data(node.id, render_data) {
                     self.wgpu_renderer
                         .ensure_pipeline(render_data.pipeline_type);
@@ -1335,8 +1591,8 @@ impl PlotRenderer {
             // Expand a bit so grid lines don't pop at edges.
             let dx = (max_x - min_x).abs().max(1e-3);
             let dy = (max_y - min_y).abs().max(1e-3);
-            let margin_x = dx * 0.10;
-            let margin_y = dy * 0.10;
+            let margin_x = dx * 0.04;
+            let margin_y = dy * 0.04;
             min_x -= margin_x;
             max_x += margin_x;
             min_y -= margin_y;
@@ -1432,8 +1688,9 @@ impl PlotRenderer {
                     minor_alpha = minor_alpha.max(0.12);
                 }
                 self.wgpu_renderer.ensure_grid_plane_pipeline();
-                self.wgpu_renderer
-                    .update_grid_uniforms_for_axes(axes_index, crate::core::renderer::GridUniforms {
+                self.wgpu_renderer.update_grid_uniforms_for_axes(
+                    axes_index,
+                    crate::core::renderer::GridUniforms {
                         major_step: major_step as f32,
                         minor_step: minor_step as f32,
                         fade_start: (0.60 * dx.max(dy)).max(major_step as f32),
@@ -1444,7 +1701,8 @@ impl PlotRenderer {
                         _pad1: 0.0,
                         major_color: [major_rgb[0], major_rgb[1], major_rgb[2], major_alpha],
                         minor_color: [minor_rgb[0], minor_rgb[1], minor_rgb[2], minor_alpha],
-                    });
+                    },
+                );
 
                 let quad_vertices = [
                     Vertex::new(Vec3::new(min_x, min_y, z_grid), Vec4::ONE),
@@ -1688,34 +1946,12 @@ impl PlotRenderer {
         {
             // Prepare MSAA render target if enabled
             let use_msaa = self.wgpu_renderer.msaa_sample_count > 1;
-            let msaa_view_opt = if use_msaa {
-                let tex = self
-                    .wgpu_renderer
-                    .device
-                    .create_texture(&wgpu::TextureDescriptor {
-                        label: Some("runmat_msaa_color_direct"),
-                        size: wgpu::Extent3d {
-                            width: self.wgpu_renderer.surface_config.width,
-                            height: self.wgpu_renderer.surface_config.height,
-                            depth_or_array_layers: 1,
-                        },
-                        mip_level_count: 1,
-                        sample_count: self.wgpu_renderer.msaa_sample_count,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: self.wgpu_renderer.surface_config.format,
-                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                        view_formats: &[],
-                    });
-                Some(tex.create_view(&wgpu::TextureViewDescriptor::default()))
-            } else {
-                None
-            };
 
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Plot Camera Viewport Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: msaa_view_opt.as_ref().unwrap_or(target_view),
-                    resolve_target: if use_msaa { Some(target_view) } else { None },
+                    view: target.view,
+                    resolve_target: if use_msaa { target.resolve_target } else { None },
                     ops: wgpu::Operations {
                         load: if clear_background {
                             wgpu::LoadOp::Clear(wgpu::Color {
@@ -1760,7 +1996,8 @@ impl PlotRenderer {
                     render_pass.set_pipeline(pipeline);
                     render_pass.set_bind_group(
                         0,
-                        self.wgpu_renderer.get_direct_uniform_bind_group_for_axes(axes_index),
+                        self.wgpu_renderer
+                            .get_direct_uniform_bind_group_for_axes(axes_index),
                         &[],
                     );
                     render_pass.set_vertex_buffer(0, vb_grid.slice(..));
@@ -1849,7 +2086,8 @@ impl PlotRenderer {
                     render_pass.set_pipeline(pipeline);
                     render_pass.set_bind_group(
                         0,
-                        self.wgpu_renderer.get_direct_uniform_bind_group_for_axes(axes_index),
+                        self.wgpu_renderer
+                            .get_direct_uniform_bind_group_for_axes(axes_index),
                         &[],
                     );
                     if let Some(ref bg) = image_bind_groups[idx] {
@@ -1860,7 +2098,8 @@ impl PlotRenderer {
                     render_pass.set_pipeline(pipeline);
                     render_pass.set_bind_group(
                         0,
-                        self.wgpu_renderer.get_uniform_bind_group_for_axes(axes_index),
+                        self.wgpu_renderer
+                            .get_uniform_bind_group_for_axes(axes_index),
                         &[],
                     );
                 }
@@ -1898,12 +2137,14 @@ impl PlotRenderer {
                     render_pass.set_pipeline(pipeline);
                     render_pass.set_bind_group(
                         0,
-                        self.wgpu_renderer.get_uniform_bind_group_for_axes(axes_index),
+                        self.wgpu_renderer
+                            .get_uniform_bind_group_for_axes(axes_index),
                         &[],
                     );
                     render_pass.set_bind_group(
                         1,
-                        self.wgpu_renderer.get_grid_uniform_bind_group_for_axes(axes_index),
+                        self.wgpu_renderer
+                            .get_grid_uniform_bind_group_for_axes(axes_index),
                         &[],
                     );
                     render_pass.set_vertex_buffer(0, vb.slice(..));
@@ -1932,29 +2173,6 @@ impl PlotRenderer {
         msaa_samples: u32,
         base_config: &PlotRenderConfig,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        {
-            let clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("runmat-subplot-clear"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target_view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: base_config.background_color.x as f64,
-                            g: base_config.background_color.y as f64,
-                            b: base_config.background_color.z as f64,
-                            a: base_config.background_color.w as f64,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: None,
-                timestamp_writes: None,
-                occlusion_query_set: None,
-            });
-            drop(clear_pass);
-        }
-
         // Build map axes_index -> node ids
         let mut axes_to_nodes: std::collections::HashMap<usize, Vec<crate::core::scene::NodeId>> =
             std::collections::HashMap::new();
@@ -1978,6 +2196,21 @@ impl PlotRenderer {
             .into_iter()
             .map(|n| n.id)
             .collect();
+        let active_axes: Vec<usize> = axes_viewports
+            .iter()
+            .enumerate()
+            .filter_map(|(ax_idx, _)| axes_to_nodes.get(&ax_idx).filter(|ids| !ids.is_empty()).map(|_| ax_idx))
+            .collect();
+        if active_axes.is_empty() {
+            return Ok(());
+        }
+
+        self.wgpu_renderer.ensure_msaa(msaa_samples.max(1));
+        let shared_msaa_view = if self.wgpu_renderer.msaa_sample_count > 1 {
+            Some(self.wgpu_renderer.ensure_msaa_color_view())
+        } else {
+            None
+        };
 
         for (ax_idx, viewport) in axes_viewports.iter().enumerate() {
             let ids_for_axes = axes_to_nodes.get(&ax_idx).cloned().unwrap_or_default();
@@ -2009,19 +2242,28 @@ impl PlotRenderer {
             let mut cfg = base_config.clone();
             cfg.width = viewport.2;
             cfg.height = viewport.3;
-            // Subplot passes render into one shared target. Using per-pass MSAA resolve here
-            // would resolve the whole intermediate texture each time and overwrite earlier panels.
-            // Keep subplot viewport rendering single-sampled for correctness.
-            let _ = msaa_samples;
-            cfg.msaa_samples = 1;
-            let _ = self.render_camera_to_viewport(
+            cfg.msaa_samples = msaa_samples.max(1);
+            let is_first_axes = Some(&ax_idx) == active_axes.first();
+            let is_last_axes = Some(&ax_idx) == active_axes.last();
+            let render_target = if let Some(ref msaa_view) = shared_msaa_view {
+                RenderTarget {
+                    view: msaa_view.as_ref(),
+                    resolve_target: if is_last_axes { Some(target_view) } else { None },
+                }
+            } else {
+                RenderTarget {
+                    view: target_view,
+                    resolve_target: None,
+                }
+            };
+            let _ = self.render_camera_to_target_viewport(
                 encoder,
-                target_view,
+                render_target,
                 *viewport,
                 &cfg,
                 &cam,
                 ax_idx,
-                false,
+                is_first_axes,
             )?;
 
             // Restore hidden nodes visibility
@@ -2302,10 +2544,27 @@ impl PlotRenderer {
         }
     }
 
-    pub fn overlay_categorical_labels_for_axes(&self, axes_index: usize) -> Option<(bool, Vec<String>)> {
+    pub fn overlay_categorical_labels_for_axes(
+        &self,
+        axes_index: usize,
+    ) -> Option<(bool, Vec<String>)> {
         self.last_figure
             .as_ref()
             .and_then(|f| f.categorical_axis_labels_for_axes(axes_index))
+    }
+
+    pub fn overlay_histogram_edges_for_axes(&self, axes_index: usize) -> Option<(bool, Vec<f64>)> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.histogram_axis_edges_for_axes(axes_index))
+    }
+
+    /// Get stable display bounds for an axes (data/explicit limits), excluding transient pan/zoom.
+    pub fn overlay_display_bounds_for_axes(
+        &self,
+        axes_index: usize,
+    ) -> Option<(f64, f64, f64, f64)> {
+        self.display_bounds_for_axes(axes_index)
     }
 
     /// Get bounds used for display (manual axis limits override data bounds when provided)
@@ -2360,7 +2619,7 @@ impl PlotRenderer {
             let Some(render_data) = &node.render_data else {
                 continue;
             };
-            if let Some(bounds) = render_data.bounds.as_ref() {
+            if let Some(bounds) = render_data.bounds {
                 min = min.min(bounds.min);
                 max = max.max(bounds.max);
                 saw_any = true;
@@ -2408,6 +2667,42 @@ impl PlotRenderer {
 
 /// High-level plotting utilities that use the unified renderer
 pub mod plot_utils {
+    pub fn generate_major_ticks(min: f64, max: f64) -> Vec<f64> {
+        if !(min.is_finite() && max.is_finite()) || max <= min {
+            return Vec::new();
+        }
+        let range = (max - min).max(1e-9);
+        let step = calculate_tick_interval(range);
+        if !(step.is_finite() && step > 0.0) {
+            return Vec::new();
+        }
+
+        let mut ticks = Vec::new();
+        let mut value = (min / step).ceil() * step;
+        let epsilon = range * 1e-6 + step * 1e-6;
+        while value <= max + epsilon {
+            let snapped = if value.abs() < epsilon { 0.0 } else { value };
+            ticks.push(snapped);
+            value += step;
+            if ticks.len() > 64 {
+                break;
+            }
+        }
+
+        let endpoint_tol = step * 0.18;
+        let near_min = ticks.iter().any(|t| (*t - min).abs() <= endpoint_tol);
+        let near_max = ticks.iter().any(|t| (*t - max).abs() <= endpoint_tol);
+        if !near_min {
+            ticks.insert(0, min);
+        }
+        if !near_max {
+            ticks.push(max);
+        }
+
+        ticks.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        ticks.dedup_by(|a, b| (*a - *b).abs() <= endpoint_tol * 0.5);
+        ticks
+    }
 
     /// Calculate nice tick intervals for axis labeling
     pub fn calculate_tick_interval(range: f64) -> f64 {
@@ -2429,12 +2724,32 @@ pub mod plot_utils {
 
     /// Format a tick label value for display
     pub fn format_tick_label(value: f64) -> String {
+        fn trim_fixed(mut s: String) -> String {
+            if s.contains('.') {
+                while s.ends_with('0') {
+                    s.pop();
+                }
+                if s.ends_with('.') {
+                    s.pop();
+                }
+            }
+            if s == "-0" {
+                "0".to_string()
+            } else {
+                s
+            }
+        }
+
         if value.abs() < 0.001 {
             "0".to_string()
-        } else if value.abs() >= 1000.0 || value.fract().abs() < 0.001 {
+        } else if value.abs() >= 1000.0 || value.fract().abs() < 0.0005 {
             format!("{value:.0}")
+        } else if value.abs() < 0.1 {
+            trim_fixed(format!("{value:.3}"))
+        } else if value.abs() < 10.0 {
+            trim_fixed(format!("{value:.2}"))
         } else {
-            format!("{value:.1}")
+            trim_fixed(format!("{value:.1}"))
         }
     }
 

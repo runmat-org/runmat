@@ -769,7 +769,7 @@ impl WebRenderer {
 
                 // Determine plot viewport from overlay, defaulting to full canvas.
                 let ppp = self.pixels_per_point.max(0.5);
-                let (vx, vy, vw, vh) = if let Some(rect) = plot_area_points {
+                let (_vx, _vy, vw, vh) = if let Some(rect) = plot_area_points {
                     let vx = (rect.min.x * ppp).round().max(0.0) as u32;
                     let vy = (rect.min.y * ppp).round().max(0.0) as u32;
                     let vw = (rect.width() * ppp).round().max(1.0) as u32;
@@ -793,27 +793,46 @@ impl WebRenderer {
 
                 // Render plot content into the plot area viewport(s) using the camera-to-viewport path.
                 let (rows, cols) = self.plot_renderer.figure_axes_grid();
-                if rows * cols > 1 {
-                    let rect_points = plot_area_points.unwrap_or_else(|| {
-                        egui::Rect::from_min_size(
-                            egui::Pos2::new(0.0, 0.0),
-                            egui::Vec2::new(
-                                (self.surface_config.width.max(1) as f32) / ppp,
-                                (self.surface_config.height.max(1) as f32) / ppp,
-                            ),
+                let rect_points = plot_area_points.unwrap_or_else(|| {
+                    egui::Rect::from_min_size(
+                        egui::Pos2::new(0.0, 0.0),
+                        egui::Vec2::new(
+                            (self.surface_config.width.max(1) as f32) / ppp,
+                            (self.surface_config.height.max(1) as f32) / ppp,
+                        ),
+                    )
+                });
+                let axes_plot_rects = if rows * cols > 1 {
+                    if overlay.plot_overlay.axes_plot_rects().len() == rows * cols {
+                        overlay.plot_overlay.axes_plot_rects().to_vec()
+                    } else {
+                        overlay.plot_overlay.compute_subplot_plot_rects_snapped(
+                            rect_points,
+                            &self.plot_renderer,
+                            1.0,
+                            ppp,
                         )
-                    });
-                    let rects = overlay.plot_overlay.compute_subplot_rects(
-                        rect_points,
-                        rows,
-                        cols,
-                        8.0,
-                        8.0,
-                    );
+                    }
+                } else {
+                    vec![PlotOverlay::snap_rect_to_pixels(rect_points, ppp)]
+                };
+                let axes_plot_sizes_px: Vec<(u32, u32)> = axes_plot_rects
+                    .iter()
+                    .map(|r| {
+                        (
+                            (r.width() * ppp).round().max(1.0) as u32,
+                            (r.height() * ppp).round().max(1.0) as u32,
+                        )
+                    })
+                    .collect();
+                self.plot_renderer
+                    .ensure_scene_viewport_dependent_geometry_for_axes(&axes_plot_sizes_px);
+                if rows * cols > 1 {
                     let sw = self.surface_config.width as f32;
                     let sh = self.surface_config.height as f32;
-                    let mut viewports: Vec<(u32, u32, u32, u32)> = Vec::with_capacity(rects.len());
-                    for r in rects {
+                    let mut viewports: Vec<(u32, u32, u32, u32)> =
+                        Vec::with_capacity(axes_plot_rects.len());
+                    for (axes_index, r) in axes_plot_rects.into_iter().enumerate() {
                         let rx = (r.min.x * ppp).round().max(0.0);
                         let ry = (r.min.y * ppp).round().max(0.0);
                         let mut rw = (r.width() * ppp).round().max(1.0);
@@ -824,6 +843,20 @@ impl WebRenderer {
                         if ry + rh > sh {
                             rh = (sh - ry).max(1.0);
                         }
+                        log::debug!(
+                            target: "runmat_plot.axes_viewport_web",
+                            "prepared web subplot viewport axes_index={} viewport=({}, {}, {}, {}) content=({}, {})..({}, {}) ppp={}",
+                            axes_index,
+                            rx as u32,
+                            ry as u32,
+                            rw as u32,
+                            rh as u32,
+                            r.min.x,
+                            r.min.y,
+                            r.max.x,
+                            r.max.y,
+                            ppp
+                        );
                         viewports.push((rx as u32, ry as u32, rw as u32, rh as u32));
                     }
                     self.last_axes_viewports_px = viewports.clone();
@@ -837,10 +870,28 @@ impl WebRenderer {
                         )
                         .map_err(|err| WebRendererError::Render(err.to_string()))?;
                 } else {
-                    self.last_axes_viewports_px = vec![(vx, vy, vw.max(1), vh.max(1))];
+                    let r = axes_plot_rects.first().copied().unwrap_or(rect_points);
+                    let rvx = (r.min.x * ppp).round().max(0.0) as u32;
+                    let rvy = (r.min.y * ppp).round().max(0.0) as u32;
+                    let rvw = (r.width() * ppp).round().max(1.0) as u32;
+                    let rvh = (r.height() * ppp).round().max(1.0) as u32;
+                    log::debug!(
+                        target: "runmat_plot.axes_viewport_web",
+                        "prepared web single-axes viewport axes_index=0 viewport=({}, {}, {}, {}) content=({}, {})..({}, {}) ppp={}",
+                        rvx,
+                        rvy,
+                        rvw,
+                        rvh,
+                        r.min.x,
+                        r.min.y,
+                        r.max.x,
+                        r.max.y,
+                        ppp
+                    );
+                    self.last_axes_viewports_px = vec![(rvx, rvy, rvw, rvh)];
                     let mut cfg = self.render_config.clone();
-                    cfg.width = vw.max(1);
-                    cfg.height = vh.max(1);
+                    cfg.width = rvw.max(1);
+                    cfg.height = rvh.max(1);
                     cfg.msaa_samples = requested_samples;
                     let cam = self.plot_renderer.camera().clone();
                     let _ = self
@@ -848,7 +899,7 @@ impl WebRenderer {
                         .render_camera_to_viewport(
                             &mut encoder,
                             &frame_view,
-                            (vx, vy, vw, vh),
+                            (rvx, rvy, rvw, rvh),
                             &cfg,
                             &cam,
                             0,

@@ -46,6 +46,7 @@ pub fn contourf_builtin(first: Value, rest: Vec<Value>) -> crate::BuiltinResult<
             z_input,
             level_spec,
             line_color,
+            line_width: _,
         } = args.take().expect("contourf args consumed once");
         let color_map = ColorMap::Parula;
         let base_z = 0.0;
@@ -163,6 +164,20 @@ pub(crate) mod tests {
         }
     }
 
+    fn assert_flat_finite_triangles(vertices: &[runmat_plot::core::Vertex]) {
+        assert!(!vertices.is_empty());
+        assert_eq!(vertices.len() % 3, 0);
+        for tri in vertices.chunks_exact(3) {
+            for vertex in tri {
+                assert!(vertex.position[0].is_finite());
+                assert!(vertex.position[1].is_finite());
+                assert!(vertex.position[2].is_finite());
+            }
+            assert_eq!(tri[0].color, tri[1].color);
+            assert_eq!(tri[1].color, tri[2].color);
+        }
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn contourf_requires_matching_grid() {
@@ -221,5 +236,68 @@ pub(crate) mod tests {
         )
         .expect("contourf should accept scalar level counts with explicit axes");
         assert!(handle.is_finite());
+    }
+
+    #[test]
+    fn contourf_fill_cells_use_flat_band_colors() {
+        let grid = vec![vec![0.0, 0.0], vec![1.0, 1.0]];
+        let plot = build_contour_fill_plot(
+            "contourf",
+            &[0.0, 1.0],
+            &[0.0, 1.0],
+            &grid,
+            ColorMap::Parula,
+            0.0,
+            &super::super::contour::ContourLevelSpec::Count(4),
+        )
+        .expect("filled contour plot");
+        let mut plot = plot;
+        let render = plot.render_data();
+        assert_flat_finite_triangles(&render.vertices);
+    }
+
+    #[test]
+    fn contourf_nonuniform_axes_fixture_emits_flat_finite_triangles() {
+        let grid = vec![
+            vec![0.0, 0.2, 0.8, 1.2],
+            vec![-0.3, 0.1, 0.6, 1.0],
+            vec![-0.7, -0.2, 0.3, 0.9],
+            vec![-0.9, -0.4, 0.0, 0.5],
+        ];
+        let plot = build_contour_fill_plot(
+            "contourf",
+            &[-3.0, -1.0, 0.5, 2.0],
+            &[-2.0, -0.25, 1.5, 3.0],
+            &grid,
+            ColorMap::Parula,
+            0.0,
+            &super::super::contour::ContourLevelSpec::Values(vec![-0.5, 0.0, 0.5, 1.0]),
+        )
+        .expect("filled contour plot");
+        let mut plot = plot;
+        let render = plot.render_data();
+        assert_flat_finite_triangles(&render.vertices);
+    }
+
+    #[test]
+    fn contourf_saddle_fixture_emits_flat_finite_triangles() {
+        let grid = vec![
+            vec![1.0, -1.0, 1.0],
+            vec![-1.0, 1.0, -1.0],
+            vec![1.0, -1.0, 1.0],
+        ];
+        let plot = build_contour_fill_plot(
+            "contourf",
+            &[0.0, 1.0, 2.0],
+            &[0.0, 1.0, 2.0],
+            &grid,
+            ColorMap::Parula,
+            0.0,
+            &super::super::contour::ContourLevelSpec::Values(vec![-0.5, 0.0, 0.5]),
+        )
+        .expect("filled contour plot");
+        let mut plot = plot;
+        let render = plot.render_data();
+        assert_flat_finite_triangles(&render.vertices);
     }
 }

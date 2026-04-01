@@ -1028,7 +1028,7 @@ impl Figure {
         viewport_px: Option<(u32, u32)>,
         gpu: Option<&GpuPackContext<'_>>,
     ) -> Vec<RenderData> {
-        self.render_data_with_axes_with_viewport_and_gpu(viewport_px, gpu)
+        self.render_data_with_axes_with_viewport_and_gpu(viewport_px, None, gpu)
             .into_iter()
             .map(|(_, render_data)| render_data)
             .collect()
@@ -1037,6 +1037,7 @@ impl Figure {
     pub fn render_data_with_axes_with_viewport_and_gpu(
         &mut self,
         viewport_px: Option<(u32, u32)>,
+        axes_viewports_px: Option<&[(u32, u32)]>,
         gpu: Option<&GpuPackContext<'_>>,
     ) -> Vec<(usize, RenderData)> {
         fn push_with_optional_markers(
@@ -1077,7 +1078,12 @@ impl Figure {
                     push_with_optional_markers(
                         &mut out,
                         axes_index,
-                        plot.render_data_with_viewport_gpu(viewport_px, gpu),
+                        plot.render_data_with_viewport_gpu(
+                            axes_viewports_px
+                                .and_then(|viewports| viewports.get(axes_index).copied())
+                                .or(viewport_px),
+                            gpu,
+                        ),
                         plot.marker_render_data(),
                     );
                 }
@@ -1250,6 +1256,9 @@ impl Figure {
     pub fn categorical_axis_labels(&self) -> Option<(bool, Vec<String>)> {
         for plot in &self.plots {
             if let PlotElement::Bar(b) = plot {
+                if b.histogram_bin_edges().is_some() {
+                    continue;
+                }
                 let is_x = matches!(b.orientation, crate::plots::bar::Orientation::Vertical);
                 return Some((is_x, b.labels.clone()));
             }
@@ -1267,8 +1276,27 @@ impl Figure {
                 continue;
             }
             if let PlotElement::Bar(b) = plot {
+                if b.histogram_bin_edges().is_some() {
+                    continue;
+                }
                 let is_x = matches!(b.orientation, crate::plots::bar::Orientation::Vertical);
                 return Some((is_x, b.labels.clone()));
+            }
+        }
+        None
+    }
+
+    pub fn histogram_axis_edges_for_axes(&self, axes_index: usize) -> Option<(bool, Vec<f64>)> {
+        for (plot_idx, plot) in self.plots.iter().enumerate() {
+            let plot_axes = *self.plot_axes_indices.get(plot_idx).unwrap_or(&0);
+            if plot_axes != axes_index {
+                continue;
+            }
+            if let PlotElement::Bar(b) = plot {
+                if let Some(edges) = b.histogram_bin_edges() {
+                    let is_x = matches!(b.orientation, crate::plots::bar::Orientation::Vertical);
+                    return Some((is_x, edges.to_vec()));
+                }
             }
         }
         None
@@ -1820,6 +1848,32 @@ mod tests {
         assert_eq!(entries.len(), 2);
         assert_eq!(entries[0].label, "A");
         assert_eq!(entries[1].label, "B");
+    }
+
+    #[test]
+    fn histogram_bars_do_not_use_categorical_axis_labels() {
+        let mut figure = Figure::new();
+        let mut bar = BarChart::new(vec!["a".into(), "b".into()], vec![2.0, 3.0]).unwrap();
+        bar.set_histogram_bin_edges(vec![0.0, 0.5, 1.0]);
+        figure.add_bar_chart(bar);
+
+        assert!(figure.categorical_axis_labels().is_none());
+        assert_eq!(
+            figure.histogram_axis_edges_for_axes(0),
+            Some((true, vec![0.0, 0.5, 1.0]))
+        );
+    }
+
+    #[test]
+    fn plain_bar_charts_keep_categorical_axis_labels() {
+        let mut figure = Figure::new();
+        let bar = BarChart::new(vec!["A".into(), "B".into()], vec![1.0, 2.0]).unwrap();
+        figure.add_bar_chart(bar);
+
+        assert_eq!(
+            figure.categorical_axis_labels(),
+            Some((true, vec!["A".to_string(), "B".to_string()]))
+        );
     }
 
     #[test]

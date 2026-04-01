@@ -1617,6 +1617,14 @@ pub fn reset_recent_figures() {
     RECENT_FIGURES.with(|set| set.borrow_mut().clear());
 }
 
+pub fn reset_plot_state() {
+    {
+        let mut reg = registry();
+        *reg = PlotRegistry::default();
+    }
+    reset_recent_figures();
+}
+
 pub fn take_recent_figures() -> Vec<FigureHandle> {
     RECENT_FIGURES.with(|set| set.borrow_mut().drain().collect())
 }

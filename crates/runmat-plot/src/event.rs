@@ -1,7 +1,8 @@
+use crate::core::{BoundingBox, Vertex};
 use crate::plots::{
-    AreaPlot, AxesMetadata, ColorMap, ErrorBar, Figure, LegendEntry, LegendStyle, Line3Plot,
-    LinePlot, MarkerStyle, PlotElement, PlotType, QuiverPlot, Scatter3Plot, ScatterPlot,
-    ShadingMode, StairsPlot, StemPlot, SurfacePlot, TextStyle,
+    AreaPlot, AxesMetadata, BarChart, ColorMap, ContourFillPlot, ContourPlot, ErrorBar, Figure,
+    LegendEntry, LegendStyle, Line3Plot, LinePlot, MarkerStyle, PlotElement, PlotType, QuiverPlot,
+    Scatter3Plot, ScatterPlot, ShadingMode, StairsPlot, StemPlot, SurfacePlot, TextStyle,
 };
 use glam::{Vec3, Vec4};
 use serde::{Deserialize, Serialize};
@@ -68,6 +69,26 @@ pub enum ScenePlot {
         color_rgba: [f32; 4],
         marker_size: f32,
         marker_style: String,
+        axes_index: u32,
+        label: Option<String>,
+        visible: bool,
+    },
+    Bar {
+        labels: Vec<String>,
+        #[serde(deserialize_with = "deserialize_vec_f64_lossy")]
+        values: Vec<f64>,
+        #[serde(default, deserialize_with = "deserialize_option_vec_f64_lossy")]
+        histogram_bin_edges: Option<Vec<f64>>,
+        color_rgba: [f32; 4],
+        #[serde(default)]
+        outline_color_rgba: Option<[f32; 4]>,
+        bar_width: f32,
+        outline_width: f32,
+        orientation: String,
+        group_index: u32,
+        group_count: u32,
+        #[serde(default, deserialize_with = "deserialize_option_vec_f64_lossy")]
+        stack_offsets: Option<Vec<f64>>,
         axes_index: u32,
         label: Option<String>,
         visible: bool,
@@ -201,6 +222,24 @@ pub enum ScenePlot {
         colors_rgba: Vec<[f32; 4]>,
         point_size: f32,
         point_sizes: Option<Vec<f32>>,
+        axes_index: u32,
+        label: Option<String>,
+        visible: bool,
+    },
+    Contour {
+        vertices: Vec<SerializedVertex>,
+        bounds_min: [f32; 3],
+        bounds_max: [f32; 3],
+        base_z: f32,
+        line_width: f32,
+        axes_index: u32,
+        label: Option<String>,
+        visible: bool,
+    },
+    ContourFill {
+        vertices: Vec<SerializedVertex>,
+        bounds_min: [f32; 3],
+        bounds_max: [f32; 3],
         axes_index: u32,
         label: Option<String>,
         visible: bool,
@@ -676,6 +715,22 @@ impl ScenePlot {
                 label: scatter.label.clone(),
                 visible: scatter.visible,
             },
+            PlotElement::Bar(bar) => Self::Bar {
+                labels: bar.labels.clone(),
+                values: bar.values().unwrap_or(&[]).to_vec(),
+                histogram_bin_edges: bar.histogram_bin_edges().map(|edges| edges.to_vec()),
+                color_rgba: vec4_to_rgba(bar.color),
+                outline_color_rgba: bar.outline_color.map(vec4_to_rgba),
+                bar_width: bar.bar_width,
+                outline_width: bar.outline_width,
+                orientation: format!("{:?}", bar.orientation),
+                group_index: bar.group_index as u32,
+                group_count: bar.group_count as u32,
+                stack_offsets: bar.stack_offsets().map(|offsets| offsets.to_vec()),
+                axes_index,
+                label: bar.label.clone(),
+                visible: bar.visible,
+            },
             PlotElement::ErrorBar(error) => Self::ErrorBar {
                 x: error.x.clone(),
                 y: error.y.clone(),
@@ -798,6 +853,36 @@ impl ScenePlot {
                 label: scatter3.label.clone(),
                 visible: scatter3.visible,
             },
+            PlotElement::Contour(contour) => Self::Contour {
+                vertices: contour
+                    .cpu_vertices()
+                    .unwrap_or(&[])
+                    .iter()
+                    .cloned()
+                    .map(Into::into)
+                    .collect(),
+                bounds_min: vec3_to_xyz(contour.bounds().min),
+                bounds_max: vec3_to_xyz(contour.bounds().max),
+                base_z: contour.base_z,
+                line_width: contour.line_width,
+                axes_index,
+                label: contour.label.clone(),
+                visible: contour.visible,
+            },
+            PlotElement::ContourFill(fill) => Self::ContourFill {
+                vertices: fill
+                    .cpu_vertices()
+                    .unwrap_or(&[])
+                    .iter()
+                    .cloned()
+                    .map(Into::into)
+                    .collect(),
+                bounds_min: vec3_to_xyz(fill.bounds().min),
+                bounds_max: vec3_to_xyz(fill.bounds().max),
+                axes_index,
+                label: fill.label.clone(),
+                visible: fill.visible,
+            },
             PlotElement::Pie(pie) => Self::Pie {
                 values: pie.values.clone(),
                 colors_rgba: pie.colors.iter().map(|c| vec4_to_rgba(*c)).collect(),
@@ -807,12 +892,6 @@ impl ScenePlot {
                 axes_index,
                 label: pie.label.clone(),
                 visible: pie.visible,
-            },
-            _ => Self::Unsupported {
-                plot_kind: PlotKind::from(plot.plot_type()),
-                axes_index,
-                label: plot.label(),
-                visible: plot.is_visible(),
             },
         }
     }
@@ -854,6 +933,39 @@ impl ScenePlot {
                 scatter.label = label;
                 scatter.set_visible(visible);
                 figure.add_scatter_plot_on_axes(scatter, axes_index as usize);
+            }
+            ScenePlot::Bar {
+                labels,
+                values,
+                histogram_bin_edges,
+                color_rgba,
+                outline_color_rgba,
+                bar_width,
+                outline_width,
+                orientation,
+                group_index,
+                group_count,
+                stack_offsets,
+                axes_index,
+                label,
+                visible,
+            } => {
+                let mut bar = BarChart::new(labels, values)?
+                    .with_style(rgba_to_vec4(color_rgba), bar_width)
+                    .with_orientation(parse_bar_orientation(&orientation))
+                    .with_group(group_index as usize, group_count as usize);
+                if let Some(edges) = histogram_bin_edges {
+                    bar.set_histogram_bin_edges(edges);
+                }
+                if let Some(offsets) = stack_offsets {
+                    bar = bar.with_stack_offsets(offsets);
+                }
+                if let Some(outline) = outline_color_rgba {
+                    bar = bar.with_outline(rgba_to_vec4(outline), outline_width);
+                }
+                bar.label = label;
+                bar.set_visible(visible);
+                figure.add_bar_chart_on_axes(bar, axes_index as usize);
             }
             ScenePlot::ErrorBar {
                 x,
@@ -1072,6 +1184,42 @@ impl ScenePlot {
                 scatter3.visible = visible;
                 figure.add_scatter3_plot_on_axes(scatter3, axes_index as usize);
             }
+            ScenePlot::Contour {
+                vertices,
+                bounds_min,
+                bounds_max,
+                base_z,
+                line_width,
+                axes_index,
+                label,
+                visible,
+            } => {
+                let mut contour = ContourPlot::from_vertices(
+                    vertices.into_iter().map(Into::into).collect(),
+                    base_z,
+                    serialized_bounds(bounds_min, bounds_max),
+                )
+                .with_line_width(line_width);
+                contour.label = label;
+                contour.set_visible(visible);
+                figure.add_contour_plot_on_axes(contour, axes_index as usize);
+            }
+            ScenePlot::ContourFill {
+                vertices,
+                bounds_min,
+                bounds_max,
+                axes_index,
+                label,
+                visible,
+            } => {
+                let mut fill = ContourFillPlot::from_vertices(
+                    vertices.into_iter().map(Into::into).collect(),
+                    serialized_bounds(bounds_min, bounds_max),
+                );
+                fill.label = label;
+                fill.set_visible(visible);
+                figure.add_contour_fill_plot_on_axes(fill, axes_index as usize);
+            }
             ScenePlot::Pie {
                 values,
                 colors_rgba,
@@ -1107,6 +1255,13 @@ fn parse_line_style(value: &str) -> crate::plots::LineStyle {
         "Dotted" => crate::plots::LineStyle::Dotted,
         "DashDot" => crate::plots::LineStyle::DashDot,
         _ => crate::plots::LineStyle::Solid,
+    }
+}
+
+fn parse_bar_orientation(value: &str) -> crate::plots::bar::Orientation {
+    match value {
+        "Horizontal" => crate::plots::bar::Orientation::Horizontal,
+        _ => crate::plots::bar::Orientation::Vertical,
     }
 }
 
@@ -1161,12 +1316,47 @@ fn xyz_to_vec3(value: [f32; 3]) -> Vec3 {
     Vec3::new(value[0], value[1], value[2])
 }
 
+fn serialized_bounds(min: [f32; 3], max: [f32; 3]) -> BoundingBox {
+    BoundingBox::new(xyz_to_vec3(min), xyz_to_vec3(max))
+}
+
 fn vec3_to_xyz(value: Vec3) -> [f32; 3] {
     [value.x, value.y, value.z]
 }
 
 fn rgba_to_vec4(value: [f32; 4]) -> Vec4 {
     Vec4::new(value[0], value[1], value[2], value[3])
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SerializedVertex {
+    position: [f32; 3],
+    color_rgba: [f32; 4],
+    normal: [f32; 3],
+    tex_coords: [f32; 2],
+}
+
+impl From<Vertex> for SerializedVertex {
+    fn from(value: Vertex) -> Self {
+        Self {
+            position: value.position,
+            color_rgba: value.color,
+            normal: value.normal,
+            tex_coords: value.tex_coords,
+        }
+    }
+}
+
+impl From<SerializedVertex> for Vertex {
+    fn from(value: SerializedVertex) -> Self {
+        Self {
+            position: value.position,
+            color: value.color_rgba,
+            normal: value.normal,
+            tex_coords: value.tex_coords,
+        }
+    }
 }
 
 /// Serialized legend entry for frontend rendering.
@@ -1421,6 +1611,36 @@ mod tests {
     }
 
     #[test]
+    fn figure_scene_roundtrip_preserves_contour_and_fill_plots() {
+        let mut figure = Figure::new();
+        let bounds = BoundingBox::new(Vec3::new(-1.0, -2.0, 0.0), Vec3::new(3.0, 4.0, 0.0));
+        let vertices = vec![Vertex {
+            position: [0.0, 0.0, 0.0],
+            color: [1.0, 0.0, 0.0, 1.0],
+            normal: [0.0, 0.0, 1.0],
+            tex_coords: [0.0, 0.0],
+        }];
+        let fill = ContourFillPlot::from_vertices(vertices.clone(), bounds).with_label("fill");
+        let contour = ContourPlot::from_vertices(vertices, 0.0, bounds)
+            .with_label("lines")
+            .with_line_width(2.0);
+        figure.add_contour_fill_plot(fill);
+        figure.add_contour_plot(contour);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+        assert!(matches!(
+            rebuilt.plots().next(),
+            Some(PlotElement::ContourFill(_))
+        ));
+        let Some(PlotElement::Contour(contour)) = rebuilt.plots().nth(1) else {
+            panic!("expected contour")
+        };
+        assert_eq!(contour.line_width, 2.0);
+    }
+
+    #[test]
     fn figure_scene_roundtrip_preserves_stem_style_surface() {
         let mut figure = Figure::new();
         let mut stem = StemPlot::new(vec![0.0, 1.0], vec![1.0, 2.0])
@@ -1454,6 +1674,48 @@ mod tests {
         assert!(!stem.baseline_visible);
         assert!(stem.marker.as_ref().map(|m| m.filled).unwrap_or(false));
         assert_eq!(stem.marker.as_ref().map(|m| m.size), Some(8.0));
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_bar_plot() {
+        let mut figure = Figure::new();
+        let bar = BarChart::new(vec!["A".into(), "B".into()], vec![2.0, 3.5])
+            .unwrap()
+            .with_style(Vec4::new(0.2, 0.4, 0.8, 1.0), 0.95)
+            .with_outline(Vec4::new(0.1, 0.1, 0.1, 1.0), 1.5)
+            .with_label("Histogram")
+            .with_stack_offsets(vec![1.0, 0.5]);
+        figure.add_bar_chart(bar);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+        let PlotElement::Bar(bar) = rebuilt.plots().next().unwrap() else {
+            panic!("expected bar")
+        };
+        assert_eq!(bar.labels, vec!["A", "B"]);
+        assert_eq!(bar.values().unwrap_or(&[]), &[2.0, 3.5]);
+        assert_eq!(bar.bar_width, 0.95);
+        assert_eq!(bar.outline_width, 1.5);
+        assert_eq!(bar.label.as_deref(), Some("Histogram"));
+        assert_eq!(bar.stack_offsets().unwrap_or(&[]), &[1.0, 0.5]);
+        assert!(bar.histogram_bin_edges().is_none());
+    }
+
+    #[test]
+    fn figure_scene_roundtrip_preserves_histogram_bin_edges() {
+        let mut figure = Figure::new();
+        let mut bar = BarChart::new(vec!["bin1".into(), "bin2".into()], vec![4.0, 5.0]).unwrap();
+        bar.set_histogram_bin_edges(vec![0.0, 0.5, 1.0]);
+        figure.add_bar_chart(bar);
+
+        let rebuilt = FigureScene::capture(&figure)
+            .into_figure()
+            .expect("scene restore should succeed");
+        let PlotElement::Bar(bar) = rebuilt.plots().next().unwrap() else {
+            panic!("expected bar")
+        };
+        assert_eq!(bar.histogram_bin_edges().unwrap_or(&[]), &[0.0, 0.5, 1.0]);
     }
 
     #[test]

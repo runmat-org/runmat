@@ -1,7 +1,7 @@
 //! Implementation methods for the GUI plot window
 
 #[cfg(feature = "gui")]
-use super::plot_overlay::{OverlayConfig, OverlayMetrics};
+use super::plot_overlay::{OverlayConfig, OverlayMetrics, PlotOverlay};
 #[cfg(feature = "gui")]
 use super::{PlotWindow, WindowConfig};
 #[cfg(feature = "gui")]
@@ -16,6 +16,8 @@ use runmat_time::Instant;
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(feature = "gui")]
 use std::sync::Arc;
+#[cfg(feature = "gui")]
+use tracing::debug;
 #[cfg(feature = "gui")]
 use winit::{dpi::PhysicalSize, event::Event, event_loop::EventLoop, window::WindowBuilder};
 #[cfg(feature = "gui")]
@@ -32,10 +34,12 @@ impl<'window> PlotWindow<'window> {
             }
             return;
         }
-
-        let rects = self
-            .plot_overlay
-            .compute_subplot_rects(plot_rect, rows, cols, 8.0, 8.0);
+        let rects: Vec<egui::Rect> = if self.plot_overlay.axes_plot_rects().len() == rows * cols {
+            self.plot_overlay.axes_plot_rects().to_vec()
+        } else {
+            self.plot_overlay
+                .compute_subplot_plot_rects(plot_rect, &self.plot_renderer, 1.0)
+        };
         for (i, r) in rects.iter().enumerate() {
             let w = r.width();
             let h = r.height();
@@ -775,10 +779,37 @@ impl<'window> PlotWindow<'window> {
         if let Some(plot_rect) = plot_area {
             // Use egui's pixels-per-point for exact device pixel mapping
             let ppp = self.pixels_per_point.max(0.5);
-            let vx = (plot_rect.min.x * ppp).round();
-            let vy = (plot_rect.min.y * ppp).round();
-            let vw = (plot_rect.width() * ppp).round().max(1.0);
-            let vh = (plot_rect.height() * ppp).round().max(1.0);
+            let (rows, cols) = self.plot_renderer.figure_axes_grid();
+            let axes_plot_rects = if rows * cols > 1 {
+                if self.plot_overlay.axes_plot_rects().len() == rows * cols {
+                    self.plot_overlay.axes_plot_rects().to_vec()
+                } else {
+                    self.plot_overlay.compute_subplot_plot_rects_snapped(
+                        plot_rect,
+                        &self.plot_renderer,
+                        1.0,
+                        ppp,
+                    )
+                }
+            } else {
+                vec![PlotOverlay::snap_rect_to_pixels(plot_rect, ppp)]
+            };
+            let axes_plot_sizes_px: Vec<(u32, u32)> = axes_plot_rects
+                .iter()
+                .map(|r| {
+                    (
+                        (r.width() * ppp).round().max(1.0) as u32,
+                        (r.height() * ppp).round().max(1.0) as u32,
+                    )
+                })
+                .collect();
+            self.plot_renderer
+                .ensure_scene_viewport_dependent_geometry_for_axes(&axes_plot_sizes_px);
+            let primary_rect = axes_plot_rects.first().copied().unwrap_or(plot_rect);
+            let vx = (primary_rect.min.x * ppp).round();
+            let vy = (primary_rect.min.y * ppp).round();
+            let vw = (primary_rect.width() * ppp).round().max(1.0);
+            let vh = (primary_rect.height() * ppp).round().max(1.0);
 
             // Clamp to surface dimensions
             let sw = self.config.width as f32;
@@ -826,17 +857,12 @@ impl<'window> PlotWindow<'window> {
             }
 
             // If this figure has a subplot grid > 1, split into axes rectangles and render each
-            let (rows, cols) = self.plot_renderer.figure_axes_grid();
             if rows * cols > 1 {
-                // compute subplot rects in UI points first, then convert to pixels
-                let rects = self
-                    .plot_overlay
-                    .compute_subplot_rects(plot_rect, rows, cols, 8.0, 8.0);
                 let mut viewports: Vec<(u32, u32, u32, u32)> = Vec::new();
                 let mut hovered_axes: Option<usize> = None;
                 // Detect hovered subplot for camera interaction
                 let mouse_pos = self.mouse_position;
-                for (i, r) in rects.iter().enumerate() {
+                for (i, r) in axes_plot_rects.iter().enumerate() {
                     let rx = (r.min.x * ppp).round();
                     let ry = (r.min.y * ppp).round();
                     let rw = (r.width() * ppp).round().max(1.0);
@@ -852,6 +878,20 @@ impl<'window> PlotWindow<'window> {
                     if svy + svh > sh {
                         svh = (sh - svy).max(1.0);
                     }
+                    debug!(
+                        target: "runmat_plot.axes_viewport_native",
+                        axes_index = i,
+                        viewport_x = svx as u32,
+                        viewport_y = svy as u32,
+                        viewport_w = svw as u32,
+                        viewport_h = svh as u32,
+                        content_min_x = r.min.x,
+                        content_min_y = r.min.y,
+                        content_max_x = r.max.x,
+                        content_max_y = r.max.y,
+                        pixels_per_point = ppp,
+                        "prepared native subplot viewport"
+                    );
                     viewports.push((svx as u32, svy as u32, svw as u32, svh as u32));
 
                     if hovered_axes.is_none() {
@@ -892,6 +932,20 @@ impl<'window> PlotWindow<'window> {
                     &subplot_cfg,
                 );
             } else {
+                debug!(
+                    target: "runmat_plot.axes_viewport_native",
+                    axes_index = 0,
+                    viewport_x = scissor.0,
+                    viewport_y = scissor.1,
+                    viewport_w = scissor.2,
+                    viewport_h = scissor.3,
+                    content_min_x = primary_rect.min.x,
+                    content_min_y = primary_rect.min.y,
+                    content_max_x = primary_rect.max.x,
+                    content_max_y = primary_rect.max.y,
+                    pixels_per_point = ppp,
+                    "prepared native single-axes viewport"
+                );
                 // Single axes fallback: Render into the scissored viewport using camera path
                 let cfg = crate::core::plot_renderer::PlotRenderConfig {
                     width: scissor.2,
@@ -976,10 +1030,11 @@ impl<'window> PlotWindow<'window> {
                     let my = self.mouse_position.y;
                     let (rows, cols) = self.plot_renderer.figure_axes_grid();
                     if rows * cols > 1 {
-                        // Check sub-rects
-                        let rects = self
-                            .plot_overlay
-                            .compute_subplot_rects(plot_rect, rows, cols, 8.0, 8.0);
+                        let rects = self.plot_overlay.compute_subplot_plot_rects(
+                            plot_rect,
+                            &self.plot_renderer,
+                            1.0,
+                        );
                         for (i, r) in rects.into_iter().enumerate() {
                             let rx = r.min.x * self.pixels_per_point;
                             let ry = r.min.y * self.pixels_per_point;
@@ -1032,9 +1087,11 @@ impl<'window> PlotWindow<'window> {
                 if rows * cols > 1 {
                     // Pan only the subplot captured on mouse-down.
                     if let Some(i) = self.active_drag_axes {
-                        let rects = self
-                            .plot_overlay
-                            .compute_subplot_rects(plot_rect, rows, cols, 8.0, 8.0);
+                        let rects = self.plot_overlay.compute_subplot_plot_rects(
+                            plot_rect,
+                            &self.plot_renderer,
+                            1.0,
+                        );
                         if let Some(r) = rects.get(i) {
                             let rw = r.width() * self.pixels_per_point;
                             let rh = r.height() * self.pixels_per_point;
@@ -1105,9 +1162,11 @@ impl<'window> PlotWindow<'window> {
         if let Some(plot_rect) = self.plot_overlay.plot_area() {
             let (rows, cols) = self.plot_renderer.figure_axes_grid();
             if rows * cols > 1 {
-                let rects = self
-                    .plot_overlay
-                    .compute_subplot_rects(plot_rect, rows, cols, 8.0, 8.0);
+                let rects = self.plot_overlay.compute_subplot_plot_rects(
+                    plot_rect,
+                    &self.plot_renderer,
+                    1.0,
+                );
                 for (i, r) in rects.iter().enumerate() {
                     let rx = r.min.x * self.pixels_per_point;
                     let ry = r.min.y * self.pixels_per_point;

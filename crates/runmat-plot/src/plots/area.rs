@@ -153,6 +153,7 @@ impl AreaPlot {
     }
     pub fn render_data(&mut self) -> RenderData {
         let using_gpu = self.gpu_vertices.is_some();
+        let bounds = self.bounds();
         let (vertices, indices) = if using_gpu {
             (Vec::new(), Vec::new())
         } else {
@@ -177,7 +178,7 @@ impl AreaPlot {
             material,
             draw_calls: vec![draw_call],
             gpu_vertices: self.gpu_vertices.clone(),
-            bounds: None,
+            bounds: Some(bounds),
             image: None,
         }
     }

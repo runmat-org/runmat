@@ -12,7 +12,7 @@ use runmat_plot::plots::contour::contour_bounds;
 use runmat_plot::plots::{ColorMap, ContourFillPlot, ContourPlot};
 
 use super::common::{numeric_vector, tensor_to_surface_grid, value_as_f64, SurfaceDataInput};
-use super::op_common::surface_inputs::AxisSource;
+use super::op_common::surface_inputs::{extract_meshgrid_axes_from_xy_matrices, AxisSource};
 use super::style::{parse_color_value, value_as_string, LineStyleParseOptions};
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
@@ -121,6 +121,7 @@ pub(crate) struct ContourArgs {
     pub z_input: SurfaceDataInput,
     pub level_spec: ContourLevelSpec,
     pub line_color: ContourLineColor,
+    pub line_width: f32,
 }
 
 pub(crate) fn parse_contour_args(
@@ -190,6 +191,7 @@ fn from_implicit_args(
         z_input,
         level_spec,
         line_color: ContourLineColor::default(),
+        line_width: 1.0,
     };
     apply_contour_options(&mut args, options)?;
     Ok(args)
@@ -216,16 +218,25 @@ fn from_explicit_args(
             Tensor::try_from(&y_value).map_err(|e| plotting_error(name, format!("{name}: {e}")))?
         }
     };
-    let x_axis = numeric_vector(x_tensor);
-    let y_axis = numeric_vector(y_tensor);
-    if x_axis.len() < 2 || y_axis.len() < 2 {
-        return Err(plotting_error(
-            name,
-            format!("{name}: axis vectors must contain at least two elements"),
-        ));
-    }
     let z_input = SurfaceDataInput::from_value(z_value, name)?;
     let (rows, cols) = z_input.grid_shape(name)?;
+    let (x_axis, y_axis) = if x_tensor.rows == rows
+        && x_tensor.cols == cols
+        && y_tensor.rows == rows
+        && y_tensor.cols == cols
+    {
+        extract_meshgrid_axes_from_xy_matrices(&x_tensor, &y_tensor, rows, cols, name)?
+    } else {
+        let x_axis = numeric_vector(x_tensor);
+        let y_axis = numeric_vector(y_tensor);
+        if x_axis.len() < 2 || y_axis.len() < 2 {
+            return Err(plotting_error(
+                name,
+                format!("{name}: axis vectors must contain at least two elements"),
+            ));
+        }
+        (x_axis, y_axis)
+    };
     if rows != x_axis.len() || cols != y_axis.len() {
         return Err(plotting_error(
             name,
@@ -247,6 +258,7 @@ fn from_explicit_args(
         z_input,
         level_spec,
         line_color: ContourLineColor::default(),
+        line_width: 1.0,
     };
     apply_contour_options(&mut args, options)?;
     Ok(args)
@@ -361,6 +373,7 @@ impl ContourCall {
             z_input,
             level_spec,
             line_color,
+            line_width,
         } = args;
 
         if matches!(line_color, ContourLineColor::None) {
@@ -379,7 +392,7 @@ impl ContourCall {
                 &line_color,
             ) {
                 Ok(contour) => {
-                    figure.add_contour_plot_on_axes(contour, axes);
+                    figure.add_contour_plot_on_axes(contour.with_line_width(line_width), axes);
                     return Ok(());
                 }
                 Err(err) => {
@@ -402,7 +415,8 @@ impl ContourCall {
             base_z,
             &level_spec,
             &line_color,
-        )?;
+        )?
+        .with_line_width(line_width);
         figure.add_contour_plot_on_axes(contour, axes);
         Ok(())
     }
@@ -455,6 +469,9 @@ fn parse_tensor_levels(tensor: Tensor, context: &str) -> BuiltinResult<ContourLe
     }
     if tensor.data.len() == 1 {
         return parse_scalar_level_count(tensor.data[0], context);
+    }
+    if tensor.data.iter().all(|value| *value == tensor.data[0]) {
+        return Ok(ContourLevelSpec::Values(vec![tensor.data[0]]));
     }
     for pair in tensor.data.windows(2) {
         if pair[1] <= pair[0] {
@@ -511,6 +528,21 @@ fn apply_contour_options(args: &mut ContourArgs, options: &[Value]) -> BuiltinRe
             }
             "linecolor" => {
                 args.line_color = parse_line_color_option(&opts, &pair[1])?;
+            }
+            "linewidth" => {
+                let width = value_as_f64(&pair[1]).ok_or_else(|| {
+                    plotting_error(
+                        args.name,
+                        format!("{}: LineWidth must be numeric", args.name),
+                    )
+                })?;
+                if !width.is_finite() || width <= 0.0 {
+                    return Err(plotting_error(
+                        args.name,
+                        format!("{}: LineWidth must be a positive, finite number", args.name),
+                    ));
+                }
+                args.line_width = width as f32;
             }
             "levellistmode" => {
                 let Some(mode) = value_as_string(&pair[1]) else {
@@ -588,7 +620,7 @@ fn is_option_token(value: &Value) -> bool {
 fn is_contour_option_name(token: &str) -> bool {
     matches!(
         token.trim().to_ascii_lowercase().as_str(),
-        "levellist" | "levels" | "levelstep" | "linecolor" | "levellistmode"
+        "levellist" | "levels" | "levelstep" | "linecolor" | "linewidth" | "levellistmode"
     )
 }
 
@@ -904,36 +936,44 @@ pub(crate) fn build_contour_fill_plot(
         ));
     }
 
-    let mut vertices = Vec::with_capacity((nx - 1) * (ny - 1) * 6);
+    let band_count = levels.len() - 1;
+    let mut vertices = Vec::with_capacity((nx - 1) * (ny - 1) * band_count * 12);
     for col in 0..ny - 1 {
         for row in 0..nx - 1 {
-            let z00 = grid[row][col] as f32;
-            let z10 = grid[row + 1][col] as f32;
-            let z11 = grid[row + 1][col + 1] as f32;
-            let z01 = grid[row][col + 1] as f32;
-
-            let colors = [
-                fill_color(z00, &levels, &palette),
-                fill_color(z10, &levels, &palette),
-                fill_color(z11, &levels, &palette),
-                fill_color(z01, &levels, &palette),
-            ];
-
-            let p0 = Vec3::new(x_axis[row] as f32, y_axis[col] as f32, base_z);
-            let p1 = Vec3::new(x_axis[row + 1] as f32, y_axis[col] as f32, base_z);
-            let p2 = Vec3::new(x_axis[row + 1] as f32, y_axis[col + 1] as f32, base_z);
-            let p3 = Vec3::new(x_axis[row] as f32, y_axis[col + 1] as f32, base_z);
-
-            push_fill_triangle(
-                &mut vertices,
-                [p0, p1, p2],
-                [colors[0], colors[1], colors[2]],
-            );
-            push_fill_triangle(
-                &mut vertices,
-                [p0, p2, p3],
-                [colors[0], colors[2], colors[3]],
-            );
+            let p0 = ScalarPoint2 {
+                pos: Vec2::new(x_axis[row] as f32, y_axis[col] as f32),
+                value: grid[row][col] as f32,
+            };
+            let p1 = ScalarPoint2 {
+                pos: Vec2::new(x_axis[row + 1] as f32, y_axis[col] as f32),
+                value: grid[row + 1][col] as f32,
+            };
+            let p2 = ScalarPoint2 {
+                pos: Vec2::new(x_axis[row + 1] as f32, y_axis[col + 1] as f32),
+                value: grid[row + 1][col + 1] as f32,
+            };
+            let p3 = ScalarPoint2 {
+                pos: Vec2::new(x_axis[row] as f32, y_axis[col + 1] as f32),
+                value: grid[row][col + 1] as f32,
+            };
+            for band_idx in 0..band_count {
+                let lo = levels[band_idx];
+                let hi = levels[band_idx + 1];
+                let include_hi = band_idx + 1 == band_count;
+                let color = palette[band_idx.min(palette.len() - 1)];
+                let cell_tris = [[p0, p1, p2], [p0, p2, p3]];
+                for tri in cell_tris {
+                    triangulate_band_triangle(
+                        tri,
+                        lo,
+                        hi,
+                        include_hi,
+                        color,
+                        base_z,
+                        &mut vertices,
+                    );
+                }
+            }
         }
     }
 
@@ -1085,46 +1125,14 @@ fn march_cells(
                     &mut segments,
                     &mut segment_count,
                 ),
-                5 => {
-                    add_segment(
-                        3,
-                        2,
-                        &corners,
-                        &values,
-                        level,
-                        &mut segments,
-                        &mut segment_count,
-                    );
-                    add_segment(
-                        0,
-                        1,
-                        &corners,
-                        &values,
-                        level,
-                        &mut segments,
-                        &mut segment_count,
-                    );
-                }
-                10 => {
-                    add_segment(
-                        0,
-                        1,
-                        &corners,
-                        &values,
-                        level,
-                        &mut segments,
-                        &mut segment_count,
-                    );
-                    add_segment(
-                        3,
-                        2,
-                        &corners,
-                        &values,
-                        level,
-                        &mut segments,
-                        &mut segment_count,
-                    );
-                }
+                5 | 10 => add_ambiguous_segments(
+                    case_index,
+                    &corners,
+                    &values,
+                    level,
+                    &mut segments,
+                    &mut segment_count,
+                ),
                 6 | 9 => add_segment(
                     0,
                     2,
@@ -1173,6 +1181,34 @@ fn add_segment(
     *io_count += 1;
 }
 
+fn add_ambiguous_segments(
+    case_index: u32,
+    corners: &[Vec2; 4],
+    values: &[f32; 4],
+    level: f32,
+    io_segments: &mut [Vec2; 4],
+    io_count: &mut u32,
+) {
+    let f00 = values[0] - level;
+    let f10 = values[1] - level;
+    let f11 = values[2] - level;
+    let f01 = values[3] - level;
+    let q = f00 * f11 - f10 * f01;
+
+    let use_default = q > 0.0 || (q.abs() <= 1e-6 && case_index == 5);
+    match (case_index, use_default) {
+        (5, true) | (10, true) => {
+            add_segment(3, 2, corners, values, level, io_segments, io_count);
+            add_segment(0, 1, corners, values, level, io_segments, io_count);
+        }
+        (5, false) | (10, false) => {
+            add_segment(3, 0, corners, values, level, io_segments, io_count);
+            add_segment(1, 2, corners, values, level, io_segments, io_count);
+        }
+        _ => {}
+    }
+}
+
 fn interpolate_edge(edge: u32, corners: &[Vec2; 4], values: &[f32; 4], level: f32) -> Vec2 {
     let (a_idx, b_idx) = match edge {
         0 => (0, 1),
@@ -1184,8 +1220,12 @@ fn interpolate_edge(edge: u32, corners: &[Vec2; 4], values: &[f32; 4], level: f3
     let b = corners[b_idx];
     let va = values[a_idx];
     let vb = values[b_idx];
-    let denom = (vb - va).abs().max(1e-6);
-    let t = ((level - va) / denom).clamp(0.0, 1.0);
+    let delta = vb - va;
+    let t = if delta.abs() <= 1e-6 {
+        0.5
+    } else {
+        ((level - va) / delta).clamp(0.0, 1.0)
+    };
     a + (b - a) * t
 }
 
@@ -1231,17 +1271,6 @@ fn palette_size(levels: &[f32]) -> usize {
     levels.len().saturating_sub(1).max(1)
 }
 
-fn fill_color(value: f32, levels: &[f32], palette: &[Vec4]) -> Vec4 {
-    if palette.is_empty() {
-        return Vec4::new(1.0, 1.0, 1.0, 1.0);
-    }
-    let mut idx = 0usize;
-    while idx + 1 < levels.len() && value >= levels[idx + 1] {
-        idx += 1;
-    }
-    palette[idx.min(palette.len() - 1)]
-}
-
 fn push_fill_triangle(vertices: &mut Vec<Vertex>, positions: [Vec3; 3], colors: [Vec4; 3]) {
     let normal = Vec3::new(0.0, 0.0, 1.0);
     for i in 0..3 {
@@ -1251,6 +1280,88 @@ fn push_fill_triangle(vertices: &mut Vec<Vertex>, positions: [Vec3; 3], colors: 
             normal: normal.to_array(),
             tex_coords: [0.0, 0.0],
         });
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ScalarPoint2 {
+    pos: Vec2,
+    value: f32,
+}
+
+fn interpolate_scalar_point(a: ScalarPoint2, b: ScalarPoint2, threshold: f32) -> ScalarPoint2 {
+    let delta = b.value - a.value;
+    let t = if delta.abs() <= 1e-6 {
+        0.5
+    } else {
+        ((threshold - a.value) / delta).clamp(0.0, 1.0)
+    };
+    ScalarPoint2 {
+        pos: a.pos + (b.pos - a.pos) * t,
+        value: threshold,
+    }
+}
+
+fn clip_polygon_lower(poly: &[ScalarPoint2], threshold: f32) -> Vec<ScalarPoint2> {
+    clip_polygon(poly, |v| v >= threshold, threshold)
+}
+
+fn clip_polygon_upper(poly: &[ScalarPoint2], threshold: f32, inclusive: bool) -> Vec<ScalarPoint2> {
+    if inclusive {
+        clip_polygon(poly, |v| v <= threshold, threshold)
+    } else {
+        clip_polygon(poly, |v| v < threshold, threshold)
+    }
+}
+
+fn clip_polygon<F>(poly: &[ScalarPoint2], inside: F, threshold: f32) -> Vec<ScalarPoint2>
+where
+    F: Fn(f32) -> bool,
+{
+    if poly.is_empty() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut prev = *poly.last().unwrap();
+    let mut prev_inside = inside(prev.value);
+    for &curr in poly {
+        let curr_inside = inside(curr.value);
+        if curr_inside != prev_inside {
+            out.push(interpolate_scalar_point(prev, curr, threshold));
+        }
+        if curr_inside {
+            out.push(curr);
+        }
+        prev = curr;
+        prev_inside = curr_inside;
+    }
+    out
+}
+
+fn triangulate_band_triangle(
+    tri: [ScalarPoint2; 3],
+    lo: f32,
+    hi: f32,
+    include_hi: bool,
+    color: Vec4,
+    base_z: f32,
+    out: &mut Vec<Vertex>,
+) {
+    let poly = clip_polygon_upper(&clip_polygon_lower(&tri, lo), hi, include_hi);
+    if poly.len() < 3 {
+        return;
+    }
+    let p0 = poly[0].pos;
+    for idx in 1..poly.len() - 1 {
+        push_fill_triangle(
+            out,
+            [
+                Vec3::new(p0.x, p0.y, base_z),
+                Vec3::new(poly[idx].pos.x, poly[idx].pos.y, base_z),
+                Vec3::new(poly[idx + 1].pos.x, poly[idx + 1].pos.y, base_z),
+            ],
+            [color, color, color],
+        );
     }
 }
 
@@ -1276,6 +1387,21 @@ pub(crate) mod tests {
             rows,
             cols,
             dtype: NumericDType::F64,
+        }
+    }
+
+    fn assert_contour_vertices_within_bounds(vertices: &[Vertex], x_axis: &[f64], y_axis: &[f64]) {
+        assert_eq!(vertices.len() % 2, 0);
+        let min_x = x_axis.iter().copied().fold(f64::INFINITY, f64::min) as f32;
+        let max_x = x_axis.iter().copied().fold(f64::NEG_INFINITY, f64::max) as f32;
+        let min_y = y_axis.iter().copied().fold(f64::INFINITY, f64::min) as f32;
+        let max_y = y_axis.iter().copied().fold(f64::NEG_INFINITY, f64::max) as f32;
+        for vertex in vertices {
+            assert!(vertex.position[0].is_finite());
+            assert!(vertex.position[1].is_finite());
+            assert!(vertex.position[2].is_finite());
+            assert!(vertex.position[0] >= min_x - 1e-4 && vertex.position[0] <= max_x + 1e-4);
+            assert!(vertex.position[1] >= min_y - 1e-4 && vertex.position[1] <= max_y + 1e-4);
         }
     }
 
@@ -1318,10 +1444,107 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn explicit_meshgrid_axes_parse_correctly() {
+        setup_plot_tests();
+        let x = Value::Tensor(tensor_from(&[10.0, 10.0, 20.0, 20.0], 2, 2));
+        let y = Value::Tensor(tensor_from(&[1.0, 2.0, 1.0, 2.0], 2, 2));
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 1.0, 0.0], 2, 2));
+        let args = parse_contour_args("contour", x, vec![y, z]).unwrap();
+        assert_eq!(args.x_axis, vec![1.0, 2.0]);
+        assert_eq!(args.y_axis, vec![10.0, 20.0]);
+    }
+
+    #[test]
+    fn interpolate_edge_handles_descending_values() {
+        let corners = [
+            Vec2::new(0.0, 0.0),
+            Vec2::new(2.0, 0.0),
+            Vec2::new(2.0, 1.0),
+            Vec2::new(0.0, 1.0),
+        ];
+        let values = [2.0, 0.0, 0.0, 2.0];
+        let point = interpolate_edge(0, &corners, &values, 1.0);
+        assert!((point.x - 1.0).abs() < 1e-6);
+        assert!(point.y.abs() < 1e-6);
+    }
+
+    #[test]
+    fn ambiguous_case_uses_asymptotic_decider() {
+        let corners = [
+            Vec2::new(0.0, 0.0),
+            Vec2::new(1.0, 0.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::new(0.0, 1.0),
+        ];
+        let values = [2.0, 0.8, 2.0, 0.0];
+        let mut segments = [Vec2::ZERO; 4];
+        let mut count = 0;
+        add_ambiguous_segments(5, &corners, &values, 1.0, &mut segments, &mut count);
+        assert_eq!(count, 2);
+        assert!(segments[0].x.abs() < 1e-6 || (segments[0].y - 1.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn contour_cpu_matrix_handles_nonuniform_axes_fixture() {
+        let x_axis = vec![-3.0, -1.0, 0.5, 2.0];
+        let y_axis = vec![-2.0, -0.25, 1.5, 3.0];
+        let grid = vec![
+            vec![0.0, 0.3, 0.9, 1.2],
+            vec![-0.4, 0.2, 0.8, 1.0],
+            vec![-0.8, -0.1, 0.4, 0.9],
+            vec![-1.0, -0.5, 0.1, 0.6],
+        ];
+        let mut plot = build_contour_plot(
+            "contour",
+            &x_axis,
+            &y_axis,
+            &grid,
+            ColorMap::Parula,
+            0.0,
+            &ContourLevelSpec::Values(vec![-0.5, 0.0, 0.5, 1.0]),
+            &ContourLineColor::Auto,
+        )
+        .expect("contour plot");
+        let render = plot.render_data();
+        assert!(!render.vertices.is_empty());
+        assert_contour_vertices_within_bounds(&render.vertices, &x_axis, &y_axis);
+    }
+
+    #[test]
+    fn contour_cpu_saddle_fixture_emits_finite_segments() {
+        let x_axis = vec![0.0, 1.0, 2.0];
+        let y_axis = vec![0.0, 1.0, 2.0];
+        let grid = vec![
+            vec![1.0, -1.0, 1.0],
+            vec![-1.0, 1.0, -1.0],
+            vec![1.0, -1.0, 1.0],
+        ];
+        let mut plot = build_contour_plot(
+            "contour",
+            &x_axis,
+            &y_axis,
+            &grid,
+            ColorMap::Parula,
+            0.0,
+            &ContourLevelSpec::Values(vec![0.0]),
+            &ContourLineColor::Auto,
+        )
+        .expect("contour plot");
+        let render = plot.render_data();
+        assert!(!render.vertices.is_empty());
+        assert_contour_vertices_within_bounds(&render.vertices, &x_axis, &y_axis);
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn level_vector_must_increase() {
         setup_plot_tests();
         let bad_levels = Value::Tensor(tensor_from(&[0.0, 0.0], 1, 2));
-        assert!(parse_level_spec(bad_levels, "contour").is_err());
+        let repeated = parse_level_spec(bad_levels, "contour").unwrap();
+        match repeated {
+            ContourLevelSpec::Values(values) => assert_eq!(values, vec![0.0]),
+            other => panic!("expected repeated single contour level, found {other:?}"),
+        }
 
         let good_levels = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0], 1, 3));
         let spec = parse_level_spec(good_levels, "contour").unwrap();
@@ -1366,6 +1589,20 @@ pub(crate) mod tests {
             }
             other => panic!("expected explicit color, found {other:?}"),
         }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn linewidth_option_parses() {
+        setup_plot_tests();
+        let z = Value::Tensor(tensor_from(&[0.0, 1.0, 2.0, 3.0], 2, 2));
+        let args = parse_contour_args(
+            "contour",
+            z,
+            vec![Value::String("LineWidth".into()), Value::Num(2.0)],
+        )
+        .unwrap();
+        assert!((args.line_width - 2.0).abs() < f32::EPSILON);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

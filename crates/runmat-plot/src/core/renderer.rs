@@ -340,29 +340,35 @@ impl WgpuRenderer {
     pub fn ensure_axes_uniform_capacity(&mut self, axes_count: usize) {
         while self.axes_uniform_buffers.len() < axes_count {
             let idx = self.axes_uniform_buffers.len();
-            let buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("Axes Uniform Buffer {idx}")),
-                contents: bytemuck::cast_slice(&[Uniforms::new()]),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
-            let bind_group =
-                self.create_uniform_bind_group_for_buffer(&buffer, &format!("axes_uniform_bind_group_{idx}"));
+            let buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("Axes Uniform Buffer {idx}")),
+                    contents: bytemuck::cast_slice(&[Uniforms::new()]),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+            let bind_group = self.create_uniform_bind_group_for_buffer(
+                &buffer,
+                &format!("axes_uniform_bind_group_{idx}"),
+            );
             self.axes_uniform_buffers.push(buffer);
             self.axes_uniform_bind_groups.push(bind_group);
         }
         while self.axes_direct_uniform_buffers.len() < axes_count {
             let idx = self.axes_direct_uniform_buffers.len();
-            let buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("Axes Direct Uniform Buffer {idx}")),
-                contents: bytemuck::cast_slice(&[DirectUniforms::new(
-                    [0.0, 0.0],
-                    [1.0, 1.0],
-                    [-1.0, -1.0],
-                    [1.0, 1.0],
-                    [1.0, 1.0],
-                )]),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
+            let buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("Axes Direct Uniform Buffer {idx}")),
+                    contents: bytemuck::cast_slice(&[DirectUniforms::new(
+                        [0.0, 0.0],
+                        [1.0, 1.0],
+                        [-1.0, -1.0],
+                        [1.0, 1.0],
+                        [1.0, 1.0],
+                    )]),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
             let bind_group = self.create_direct_uniform_bind_group_for_buffer(
                 &buffer,
                 &format!("axes_direct_uniform_bind_group_{idx}"),
@@ -372,13 +378,17 @@ impl WgpuRenderer {
         }
         while self.axes_grid_uniform_buffers.len() < axes_count {
             let idx = self.axes_grid_uniform_buffers.len();
-            let buffer = self.device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some(&format!("Axes Grid Uniform Buffer {idx}")),
-                contents: bytemuck::cast_slice(&[GridUniforms::default()]),
-                usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            });
-            let bind_group =
-                self.create_grid_uniform_bind_group_for_buffer(&buffer, &format!("axes_grid_uniform_bind_group_{idx}"));
+            let buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("Axes Grid Uniform Buffer {idx}")),
+                    contents: bytemuck::cast_slice(&[GridUniforms::default()]),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+            let bind_group = self.create_grid_uniform_bind_group_for_buffer(
+                &buffer,
+                &format!("axes_grid_uniform_bind_group_{idx}"),
+            );
             self.axes_grid_uniform_buffers.push(buffer);
             self.axes_grid_uniform_bind_groups.push(bind_group);
         }
@@ -1593,7 +1603,8 @@ impl WgpuRenderer {
         viewport_px: [f32; 2],
     ) {
         self.ensure_axes_uniform_capacity(axes_index + 1);
-        let uniforms = DirectUniforms::new(data_min, data_max, viewport_min, viewport_max, viewport_px);
+        let uniforms =
+            DirectUniforms::new(data_min, data_max, viewport_min, viewport_max, viewport_px);
         self.queue.write_buffer(
             &self.axes_direct_uniform_buffers[axes_index],
             0,

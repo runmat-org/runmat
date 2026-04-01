@@ -129,18 +129,18 @@ pub use perf::{set_scatter_target_points, set_surface_vertex_budget};
 pub use state::{
     clear_figure, clone_figure, close_figure, configure_subplot, current_axes_state,
     current_figure_handle, figure_handles, import_figure, install_figure_observer,
-    new_figure_handle, reset_hold_state_for_run, reset_recent_figures, select_figure, set_hold,
-    take_recent_figures, FigureAxesState, FigureError, FigureEventKind, FigureEventView,
-    FigureHandle, HoldMode,
+    new_figure_handle, reset_hold_state_for_run, reset_plot_state, reset_recent_figures,
+    select_figure, set_hold, take_recent_figures, FigureAxesState, FigureError,
+    FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use web::present_figure_on_surface as web_present_figure_on_surface;
 pub use web::{
     bind_surface_to_figure, detach_surface, fit_surface_extents, get_surface_camera_state,
-    install_surface, present_surface, render_current_scene, reset_surface_camera, resize_surface,
-    set_plot_theme_config, set_surface_camera_state, web_renderer_ready, PlotCameraProjection,
-    PlotCameraState, PlotSurfaceCameraState,
+    install_surface, invalidate_surface_revisions, present_surface, render_current_scene,
+    reset_surface_camera, resize_surface, set_plot_theme_config, set_surface_camera_state,
+    web_renderer_ready, PlotCameraProjection, PlotCameraState, PlotSurfaceCameraState,
 };
 
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
