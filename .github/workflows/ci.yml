@@ -121,7 +121,9 @@ jobs:
           Add-Content -Path $env:GITHUB_PATH -Value $cargoBin
 
           & $rustup which --toolchain $toolchain cargo | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "rustup which failed (exit $LASTEXITCODE) — toolchain $toolchain may not be installed." }
           $installedComponents = & $rustup component list --toolchain $toolchain --installed
+          if ($LASTEXITCODE -ne 0) { throw "rustup component list failed (exit $LASTEXITCODE)." }
           foreach ($component in $components) {
             $componentPattern = '^{0}-' -f [regex]::Escape($component)
             if (-not ($installedComponents | Select-String -Pattern $componentPattern -Quiet)) {
@@ -129,7 +131,9 @@ jobs:
             }
           }
           & $cargo -V
+          if ($LASTEXITCODE -ne 0) { throw "cargo -V failed (exit $LASTEXITCODE) — toolchain may be broken." }
           & (Join-Path $cargoBin 'rustc.exe') -V
+          if ($LASTEXITCODE -ne 0) { throw "rustc -V failed (exit $LASTEXITCODE) — toolchain may be broken." }
 
       - uses: actions-rs/toolchain@v1
         if: runner.os == 'macOS'
