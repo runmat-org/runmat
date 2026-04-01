@@ -1091,7 +1091,11 @@ impl Figure {
                     push_with_optional_markers(
                         &mut out,
                         axes_index,
-                        plot.render_data(),
+                        plot.render_data_with_viewport(
+                            axes_viewports_px
+                                .and_then(|viewports| viewports.get(axes_index).copied())
+                                .or(viewport_px),
+                        ),
                         plot.marker_render_data(),
                     );
                 }
@@ -1099,7 +1103,11 @@ impl Figure {
                     push_with_optional_markers(
                         &mut out,
                         axes_index,
-                        plot.render_data(),
+                        plot.render_data_with_viewport(
+                            axes_viewports_px
+                                .and_then(|viewports| viewports.get(axes_index).copied())
+                                .or(viewport_px),
+                        ),
                         plot.marker_render_data(),
                     );
                 }
@@ -1107,10 +1115,22 @@ impl Figure {
                     push_with_optional_markers(
                         &mut out,
                         axes_index,
-                        plot.render_data(),
+                        plot.render_data_with_viewport(
+                            axes_viewports_px
+                                .and_then(|viewports| viewports.get(axes_index).copied())
+                                .or(viewport_px),
+                        ),
                         plot.marker_render_data(),
                     );
                 }
+                PlotElement::Contour(plot) => out.push((
+                    axes_index,
+                    plot.render_data_with_viewport(
+                        axes_viewports_px
+                            .and_then(|viewports| viewports.get(axes_index).copied())
+                            .or(viewport_px),
+                    ),
+                )),
                 _ => out.push((axes_index, p.render_data())),
             }
         }

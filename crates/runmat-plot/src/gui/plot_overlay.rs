@@ -285,7 +285,7 @@ impl PlotOverlay {
 
         let y_tick_zone = label_offset + max_label_width * 0.5 + 4.0 * scale;
         let y_label_zone = if has_y_label {
-            14.0 * scale
+            11.0 * scale
         } else {
             4.0 * scale
         };
@@ -2050,7 +2050,7 @@ impl PlotOverlay {
             )
         });
         let size = galley.size();
-        let center = Pos2::new(rect.min.x + rect.width() * 0.40, rect.center().y);
+        let center = Pos2::new(rect.min.x + rect.width() * 0.32, rect.center().y);
         let pos = Pos2::new(center.x - size.y * 0.5, center.y + size.x * 0.5);
         let mut shape = egui::epaint::TextShape::new(pos, galley, text_color);
         shape.angle = -std::f32::consts::FRAC_PI_2;

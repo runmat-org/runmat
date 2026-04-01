@@ -1450,8 +1450,8 @@ pub(crate) mod tests {
         let y = Value::Tensor(tensor_from(&[1.0, 2.0, 1.0, 2.0], 2, 2));
         let z = Value::Tensor(tensor_from(&[0.0, 1.0, 1.0, 0.0], 2, 2));
         let args = parse_contour_args("contour", x, vec![y, z]).unwrap();
-        assert_eq!(args.x_axis, vec![1.0, 2.0]);
-        assert_eq!(args.y_axis, vec![10.0, 20.0]);
+        assert_eq!(args.x_axis, vec![10.0, 20.0]);
+        assert_eq!(args.y_axis, vec![1.0, 2.0]);
     }
 
     #[test]

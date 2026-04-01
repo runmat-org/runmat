@@ -218,9 +218,12 @@ pub enum ScenePlot {
         visible: bool,
     },
     Scatter3 {
+        #[serde(deserialize_with = "deserialize_vec_xyz_f32_lossy")]
         points: Vec<[f32; 3]>,
+        #[serde(default, deserialize_with = "deserialize_vec_rgba_f32_lossy")]
         colors_rgba: Vec<[f32; 4]>,
         point_size: f32,
+        #[serde(default, deserialize_with = "deserialize_option_vec_f32_lossy")]
         point_sizes: Option<Vec<f32>>,
         axes_index: u32,
         label: Option<String>,
@@ -1511,6 +1514,54 @@ where
     Ok(value.map(|pair| [pair[0].unwrap_or(f64::NAN), pair[1].unwrap_or(f64::NAN)]))
 }
 
+fn deserialize_option_vec_f32_lossy<'de, D>(deserializer: D) -> Result<Option<Vec<f32>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let values = Option::<Vec<Option<f32>>>::deserialize(deserializer)?;
+    Ok(values.map(|items| {
+        items
+            .into_iter()
+            .map(|value| value.unwrap_or(f32::NAN))
+            .collect()
+    }))
+}
+
+fn deserialize_vec_xyz_f32_lossy<'de, D>(deserializer: D) -> Result<Vec<[f32; 3]>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let values = Vec::<[Option<f32>; 3]>::deserialize(deserializer)?;
+    Ok(values
+        .into_iter()
+        .map(|xyz| {
+            [
+                xyz[0].unwrap_or(f32::NAN),
+                xyz[1].unwrap_or(f32::NAN),
+                xyz[2].unwrap_or(f32::NAN),
+            ]
+        })
+        .collect())
+}
+
+fn deserialize_vec_rgba_f32_lossy<'de, D>(deserializer: D) -> Result<Vec<[f32; 4]>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let values = Vec::<[Option<f32>; 4]>::deserialize(deserializer)?;
+    Ok(values
+        .into_iter()
+        .map(|rgba| {
+            [
+                rgba[0].unwrap_or(f32::NAN),
+                rgba[1].unwrap_or(f32::NAN),
+                rgba[2].unwrap_or(f32::NAN),
+                rgba[3].unwrap_or(f32::NAN),
+            ]
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2096,5 +2147,45 @@ mod tests {
         };
         assert!(x[1].is_nan());
         assert!(z[0][1].is_nan());
+    }
+
+    #[test]
+    fn scene_plot_deserialize_maps_null_scatter3_components_to_nan() {
+        let json = r#"{
+          "schemaVersion": 1,
+          "layout": { "axesRows": 1, "axesCols": 1, "axesIndices": [0] },
+          "metadata": {
+            "gridEnabled": true,
+            "legendEnabled": false,
+            "colorbarEnabled": false,
+            "axisEqual": false,
+            "backgroundRgba": [1,1,1,1],
+            "legendEntries": []
+          },
+          "plots": [
+            {
+              "kind": "scatter3",
+              "points": [[0.0, 1.0, null], [1.0, null, 2.0]],
+              "colors_rgba": [[0.2, 0.4, 0.6, 1.0], [0.1, 0.2, 0.3, 1.0]],
+              "point_size": 6.0,
+              "point_sizes": [3.0, null],
+              "axes_index": 0,
+              "label": null,
+              "visible": true
+            }
+          ]
+        }"#;
+        let scene: FigureScene = serde_json::from_str(json).expect("scene should deserialize");
+        let ScenePlot::Scatter3 {
+            points,
+            point_sizes,
+            ..
+        } = &scene.plots[0]
+        else {
+            panic!("expected scatter3 plot");
+        };
+        assert!(points[0][2].is_nan());
+        assert!(points[1][1].is_nan());
+        assert!(point_sizes.as_ref().unwrap()[1].is_nan());
     }
 }

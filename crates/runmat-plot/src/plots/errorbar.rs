@@ -1,8 +1,8 @@
 //! Error bar plot implementation.
 
 use crate::core::{
-    marker_shape_code, AlphaMode, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType,
-    RenderData, Vertex,
+    marker_shape_code, vertex_utils, AlphaMode, BoundingBox, DrawCall, GpuVertexBuffer, Material,
+    PipelineType, RenderData, Vertex,
 };
 use crate::plots::line::{LineMarkerAppearance, LineStyle};
 use glam::{Vec3, Vec4};
@@ -418,6 +418,55 @@ impl ErrorBar {
         }
     }
 
+    pub fn render_data_with_viewport(&mut self, viewport_px: Option<(u32, u32)>) -> RenderData {
+        if self.gpu_vertices.is_some() {
+            return self.render_data();
+        }
+
+        let bounds = self.bounds();
+        let (vertices, vertex_count, pipeline_type) = if self.line_width > 1.0 {
+            let viewport_px = viewport_px.unwrap_or((600, 400));
+            let data_per_px = crate::core::data_units_per_px(&bounds, viewport_px);
+            let width_data = self.line_width.max(0.1) * data_per_px;
+            let verts = self.generate_vertices().clone();
+            let mut thick = Vec::new();
+            for segment in verts.chunks_exact(2) {
+                let x = [segment[0].position[0] as f64, segment[1].position[0] as f64];
+                let y = [segment[0].position[1] as f64, segment[1].position[1] as f64];
+                let color = Vec4::from_array(segment[0].color);
+                thick.extend(vertex_utils::create_thick_polyline(
+                    &x, &y, color, width_data,
+                ));
+            }
+            let count = thick.len();
+            (thick, count, PipelineType::Triangles)
+        } else {
+            let verts = self.generate_vertices().clone();
+            let count = verts.len();
+            (verts, count, PipelineType::Lines)
+        };
+        RenderData {
+            pipeline_type,
+            vertices,
+            indices: None,
+            gpu_vertices: None,
+            bounds: Some(bounds),
+            material: Material {
+                albedo: self.color,
+                roughness: self.line_width.max(0.0),
+                ..Default::default()
+            },
+            draw_calls: vec![DrawCall {
+                vertex_offset: 0,
+                vertex_count,
+                index_offset: None,
+                index_count: None,
+                instance_count: 1,
+            }],
+            image: None,
+        }
+    }
+
     pub fn estimated_memory_usage(&self) -> usize {
         self.vertices
             .as_ref()
@@ -458,5 +507,20 @@ mod tests {
         let bounds = plot.bounds();
         assert!(bounds.max.x > 1.0);
         assert!(bounds.min.x < 0.0);
+    }
+
+    #[test]
+    fn thick_errorbar_use_viewport_aware_triangles() {
+        let mut plot = ErrorBar::new_vertical(
+            vec![0.0, 1.0],
+            vec![1.0, 2.0],
+            vec![0.5, 0.5],
+            vec![0.5, 0.5],
+        )
+        .unwrap()
+        .with_style(Vec4::ONE, 2.0, LineStyle::Solid, 6.0);
+        let render = plot.render_data_with_viewport(Some((600, 400)));
+        assert_eq!(render.pipeline_type, PipelineType::Triangles);
+        assert!(!render.vertices.is_empty());
     }
 }

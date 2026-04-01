@@ -269,5 +269,5 @@ pub fn extract_meshgrid_axes_from_xy_matrices(
     for row in 0..rows {
         y_vec.push(y.data[row]);
     }
-    Ok((y_vec, x_vec))
+    Ok((x_vec, y_vec))
 }

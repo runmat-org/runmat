@@ -81,6 +81,60 @@ impl ContourPlot {
         self.vertices.as_deref()
     }
 
+    pub fn render_data_with_viewport(&mut self, viewport_px: Option<(u32, u32)>) -> RenderData {
+        if self.gpu_vertices.is_some() {
+            return self.render_data();
+        }
+
+        let bounds = self.bounds();
+        let (vertices, vertex_count, pipeline_type) = if self.line_width > 1.0 {
+            let viewport_px = viewport_px.unwrap_or((600, 400));
+            let data_per_px = crate::core::data_units_per_px(&bounds, viewport_px);
+            let width_data = self.line_width.max(0.1) * data_per_px;
+            let verts = self.vertices().clone();
+            let mut thick = Vec::new();
+            for segment in verts.chunks_exact(2) {
+                let x = [segment[0].position[0] as f64, segment[1].position[0] as f64];
+                let y = [segment[0].position[1] as f64, segment[1].position[1] as f64];
+                let color = Vec4::from_array(segment[0].color);
+                thick.extend(vertex_utils::create_thick_polyline(
+                    &x, &y, color, width_data,
+                ));
+            }
+            let count = thick.len();
+            (thick, count, PipelineType::Triangles)
+        } else {
+            let verts = self.vertices().clone();
+            let count = verts.len();
+            (verts, count, PipelineType::Lines)
+        };
+
+        let material = Material {
+            albedo: Vec4::ONE,
+            roughness: self.line_width.max(0.0),
+            ..Default::default()
+        };
+
+        let draw_call = DrawCall {
+            vertex_offset: 0,
+            vertex_count,
+            index_offset: None,
+            index_count: None,
+            instance_count: 1,
+        };
+
+        RenderData {
+            pipeline_type,
+            vertices,
+            indices: None,
+            gpu_vertices: None,
+            bounds: Some(bounds),
+            material,
+            draw_calls: vec![draw_call],
+            image: None,
+        }
+    }
+
     pub fn render_data(&mut self) -> RenderData {
         let using_gpu = self.gpu_vertices.is_some();
         let bounds = self.bounds();
