@@ -341,7 +341,8 @@ impl NativeSurfaceRenderContext {
                     if let Some(textmark) = self.textmark.as_deref() {
                         let screen = ctx.screen_rect();
                         let anchor = egui::pos2(screen.max.x - 8.0, screen.max.y - 6.0);
-                        let font = egui::FontId::proportional(11.0 * overlay_config.font_scale.max(0.8));
+                        let font =
+                            egui::FontId::proportional(11.0 * overlay_config.font_scale.max(0.8));
                         let layer = egui::LayerId::new(
                             egui::Order::Foreground,
                             egui::Id::new("runmat_export_textmark"),

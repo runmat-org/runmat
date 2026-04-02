@@ -167,6 +167,7 @@ impl PlotOverlay {
             .unwrap_or(false)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn paint_styled_text(
         painter: &egui::Painter,
         pos: Pos2,
@@ -207,6 +208,7 @@ impl PlotOverlay {
         ((estimated_label_width / slot_width).ceil().max(1.0)) as usize
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn draw_histogram_axis_ticks(
         &self,
         ui: &mut egui::Ui,
@@ -344,6 +346,7 @@ impl PlotOverlay {
         (y_tick_zone + y_label_zone).max(24.0 * scale)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn layout_2d_panel(
         &self,
         outer: Rect,

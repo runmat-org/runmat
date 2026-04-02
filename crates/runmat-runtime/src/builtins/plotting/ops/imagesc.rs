@@ -5,7 +5,9 @@ use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode};
 
 use super::common::SurfaceDataInput;
-use super::op_common::surface_inputs::{image_axis_sources_from_xy_values, parse_surface_call_args};
+use super::op_common::surface_inputs::{
+    image_axis_sources_from_xy_values, parse_surface_call_args,
+};
 use super::state::{color_limits_snapshot, render_active_plot, PlotRenderOptions};
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use crate::builtins::common::spec::{
@@ -57,7 +59,8 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (x, y, c, rest) = parse_surface_call_args(args, BUILTIN_NAME)?;
     let c_input = SurfaceDataInput::from_value(c, BUILTIN_NAME)?;
     let (rows, cols) = c_input.grid_shape(BUILTIN_NAME)?;
-    let (x_axis, y_axis) = image_axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME).await?;
+    let (x_axis, y_axis) =
+        image_axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME).await?;
 
     let defaults =
         SurfaceStyleDefaults::new(ColorMap::Parula, ShadingMode::None, false, 1.0, true, false);
@@ -216,6 +219,9 @@ mod tests {
             panic!("expected surface")
         };
         assert_eq!(surface.x_data, vec![10.0, 15.0, 20.0]);
-        assert_eq!(surface.y_data, vec![1.0, 2.333333333333333, 3.6666666666666665, 5.0]);
+        assert_eq!(
+            surface.y_data,
+            vec![1.0, 2.333333333333333, 3.6666666666666665, 5.0]
+        );
     }
 }

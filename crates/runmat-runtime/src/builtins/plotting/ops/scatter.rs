@@ -24,9 +24,9 @@ use crate::builtins::common::spec::{
 use std::convert::TryFrom;
 
 use super::common::{gather_tensor_from_gpu, numeric_pair};
-use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::gpu_helpers::axis_bounds;
 use super::op_common::line_inputs::NumericInput as ScatterInput;
+use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::perf::scatter_target_points;
 use super::plotting_error;
 use super::point::{
@@ -85,7 +85,9 @@ pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Bui
     let (axes_target, mut args) = split_leading_axes_handle(args, BUILTIN_NAME)?;
     apply_axes_target(axes_target, BUILTIN_NAME)?;
     if args.len() < 2 {
-        return Err(scatter_err("scatter: expected X and Y data after axes handle"));
+        return Err(scatter_err(
+            "scatter: expected X and Y data after axes handle",
+        ));
     }
     let x = args.remove(0);
     let y = args.remove(0);
@@ -573,17 +575,17 @@ pub(crate) mod tests {
         ParsedLineStyle,
     };
     use super::*;
-    use runmat_plot::plots::PlotElement;
     use crate::builtins::plotting::state::current_axes_handle_for_figure;
+    use crate::builtins::plotting::tests::ensure_plot_test_env;
     use crate::builtins::plotting::{
         clear_figure, clone_figure, configure_subplot, current_figure_handle,
         reset_hold_state_for_run,
     };
-    use crate::builtins::plotting::tests::ensure_plot_test_env;
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_builtins::Value;
     use runmat_builtins::{ResolveContext, Type};
+    use runmat_plot::plots::PlotElement;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();

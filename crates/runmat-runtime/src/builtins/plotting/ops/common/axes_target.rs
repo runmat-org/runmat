@@ -5,10 +5,13 @@ use crate::builtins::plotting::state::{select_axes_for_figure, FigureHandle};
 use crate::builtins::plotting::{plotting_error, plotting_error_with_source};
 use crate::BuiltinResult;
 
+pub type AxesTarget = Option<(FigureHandle, usize)>;
+pub type SplitAxesArgs = (AxesTarget, Vec<Value>);
+
 pub fn split_leading_axes_handle(
     args: Vec<Value>,
     builtin: &'static str,
-) -> BuiltinResult<(Option<(FigureHandle, usize)>, Vec<Value>)> {
+) -> BuiltinResult<SplitAxesArgs> {
     let mut iter = args.into_iter();
     let Some(first) = iter.next() else {
         return Ok((None, Vec::new()));

@@ -647,7 +647,7 @@ impl WebRenderer {
                             BackgroundPolicy::Explicit(_) => "explicit",
                         }
                     );
-                    let _ = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    let clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("runmat-plot-web-clear"),
                         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                             view: &frame_view,
@@ -666,6 +666,7 @@ impl WebRenderer {
                         timestamp_writes: None,
                         occlusion_query_set: None,
                     });
+                    drop(clear_pass);
                 }
 
                 let Some(overlay) = self.overlay.as_mut() else {

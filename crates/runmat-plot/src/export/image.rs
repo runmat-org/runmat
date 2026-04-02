@@ -1,5 +1,5 @@
 //! Image export (PNG and raw RGBA).
-//! 
+//!
 //! This module routes through `export::native_surface` to produce static image
 //! output that matches interactive/webgpu composition (scene + overlay layout).
 

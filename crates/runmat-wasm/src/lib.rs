@@ -69,9 +69,10 @@ use runmat_runtime::builtins::plotting::{
     fit_surface_extents as runtime_fit_surface_extents,
     get_surface_camera_state as runtime_get_surface_camera_state,
     handle_plot_surface_event as runtime_handle_plot_surface_event,
-    invalidate_surface_revisions as runtime_invalidate_surface_revisions,
     install_figure_observer as runtime_install_figure_observer,
-    install_surface as runtime_install_surface, new_figure_handle as runtime_new_figure_handle,
+    install_surface as runtime_install_surface,
+    invalidate_surface_revisions as runtime_invalidate_surface_revisions,
+    new_figure_handle as runtime_new_figure_handle,
     present_figure_on_surface as runtime_present_figure_on_surface,
     present_surface as runtime_present_surface,
     render_current_scene as runtime_render_current_scene,
@@ -1363,14 +1364,10 @@ pub async fn wasm_render_figure_image(
 ) -> Result<Uint8Array, JsValue> {
     let _ = shared_webgpu_context();
     let target = parse_optional_handle(handle)?.unwrap_or_else(runtime_current_figure_handle);
-    let bytes = runtime_render_figure_snapshot(
-        target,
-        width.unwrap_or(0),
-        height.unwrap_or(0),
-        textmark,
-    )
-    .await
-    .map_err(runtime_flow_to_js)?;
+    let bytes =
+        runtime_render_figure_snapshot(target, width.unwrap_or(0), height.unwrap_or(0), textmark)
+            .await
+            .map_err(runtime_flow_to_js)?;
     Ok(Uint8Array::from(bytes.as_slice()))
 }
 

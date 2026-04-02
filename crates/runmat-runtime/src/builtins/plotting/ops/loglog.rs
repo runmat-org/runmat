@@ -62,9 +62,9 @@ pub async fn loglog_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::plotting::state::current_axes_handle_for_figure;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{clear_figure, clone_figure, reset_hold_state_for_run};
-    use crate::builtins::plotting::state::current_axes_handle_for_figure;
     use crate::builtins::plotting::{configure_subplot, current_figure_handle};
     use runmat_builtins::{NumericDType, Tensor};
 

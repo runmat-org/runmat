@@ -1340,6 +1340,7 @@ impl PlotRenderer {
 
     /// Render using the camera-based pipeline into a viewport region with a scissor rectangle.
     /// This preserves existing contents (Load) and draws only inside the viewport rectangle.
+    #[allow(clippy::too_many_arguments)]
     pub fn render_camera_to_viewport(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -1351,7 +1352,7 @@ impl PlotRenderer {
         clear_background: bool,
     ) -> Result<RenderResult, Box<dyn std::error::Error>> {
         let use_msaa = config.msaa_samples.max(1) > 1;
-        let _ = self.wgpu_renderer.ensure_msaa(config.msaa_samples);
+        self.wgpu_renderer.ensure_msaa(config.msaa_samples);
         let msaa_view_keepalive = if use_msaa {
             Some(self.wgpu_renderer.ensure_msaa_color_view())
         } else {
@@ -1379,6 +1380,7 @@ impl PlotRenderer {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_camera_to_target_viewport(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -1951,7 +1953,11 @@ impl PlotRenderer {
                 label: Some("Plot Camera Viewport Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: target.view,
-                    resolve_target: if use_msaa { target.resolve_target } else { None },
+                    resolve_target: if use_msaa {
+                        target.resolve_target
+                    } else {
+                        None
+                    },
                     ops: wgpu::Operations {
                         load: if clear_background {
                             wgpu::LoadOp::Clear(wgpu::Color {
@@ -2199,7 +2205,12 @@ impl PlotRenderer {
         let active_axes: Vec<usize> = axes_viewports
             .iter()
             .enumerate()
-            .filter_map(|(ax_idx, _)| axes_to_nodes.get(&ax_idx).filter(|ids| !ids.is_empty()).map(|_| ax_idx))
+            .filter_map(|(ax_idx, _)| {
+                axes_to_nodes
+                    .get(&ax_idx)
+                    .filter(|ids| !ids.is_empty())
+                    .map(|_| ax_idx)
+            })
             .collect();
         if active_axes.is_empty() {
             return Ok(());
@@ -2248,7 +2259,11 @@ impl PlotRenderer {
             let render_target = if let Some(ref msaa_view) = shared_msaa_view {
                 RenderTarget {
                     view: msaa_view.as_ref(),
-                    resolve_target: if is_last_axes { Some(target_view) } else { None },
+                    resolve_target: if is_last_axes {
+                        Some(target_view)
+                    } else {
+                        None
+                    },
                 }
             } else {
                 RenderTarget {

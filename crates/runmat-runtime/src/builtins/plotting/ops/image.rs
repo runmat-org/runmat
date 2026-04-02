@@ -61,7 +61,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
 pub async fn image_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (x, y, c, rest) = parse_surface_call_args(args, BUILTIN_NAME)?;
     let (rows, cols, kind) = classify_image_input(&c, BUILTIN_NAME).await?;
-    let (x_axis, y_axis) = image_axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME).await?;
+    let (x_axis, y_axis) =
+        image_axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME).await?;
     let defaults =
         SurfaceStyleDefaults::new(ColorMap::Parula, ShadingMode::None, false, 1.0, true, false);
     let style = Arc::new(parse_surface_style_args(BUILTIN_NAME, &rest, defaults)?);
@@ -456,6 +457,9 @@ mod tests {
             panic!("expected surface")
         };
         assert_eq!(surface.x_data, vec![10.0, 15.0, 20.0]);
-        assert_eq!(surface.y_data, vec![1.0, 2.333333333333333, 3.6666666666666665, 5.0]);
+        assert_eq!(
+            surface.y_data,
+            vec![1.0, 2.333333333333333, 3.6666666666666665, 5.0]
+        );
     }
 }

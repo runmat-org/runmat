@@ -124,7 +124,10 @@ mod tests {
             panic!("expected host Y axis")
         };
         assert_eq!(x_vals, vec![10.0, 15.0, 20.0]);
-        assert_eq!(y_vals, vec![1.0, 2.333333333333333, 3.6666666666666665, 5.0]);
+        assert_eq!(
+            y_vals,
+            vec![1.0, 2.333333333333333, 3.6666666666666665, 5.0]
+        );
     }
 }
 

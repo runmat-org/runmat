@@ -13,8 +13,8 @@ use crate::builtins::common::spec::{
 };
 
 use super::common::numeric_pair;
-use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::op_common::line_inputs::NumericInput;
+use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::plotting_error;
 use super::state::{
     current_axes_state, current_hold_enabled, next_line_style_for_axes, render_active_plot,

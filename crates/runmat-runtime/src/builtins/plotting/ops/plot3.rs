@@ -11,9 +11,9 @@ use crate::builtins::common::spec::{
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 use super::common::numeric_triplet;
-use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::gpu_helpers::gpu_xyz_bounds_async;
 use super::op_common::line_inputs::NumericInput;
+use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_line_style_args, LineAppearance, LineStyleParseOptions};
@@ -324,8 +324,8 @@ async fn build_line3_gpu_plot_async(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::state::current_axes_handle_for_figure;
+    use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{
         clear_figure, clone_figure, configure_subplot, current_figure_handle,
         reset_hold_state_for_run,

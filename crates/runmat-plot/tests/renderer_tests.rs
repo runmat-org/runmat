@@ -913,10 +913,10 @@ mod new_plots_tests {
 #[cfg(test)]
 mod image_export_tests {
     #![allow(unused_imports)]
+    use glam::Vec3;
     use runmat_plot::core::{BoundingBox, Vertex};
     use runmat_plot::plots::surface::ColorMap;
     use runmat_plot::plots::{ContourFillPlot, ContourPlot, Figure};
-    use glam::Vec3;
     use std::path::PathBuf;
 
     // Helper to write PNG via headless exporter
@@ -989,12 +989,42 @@ mod image_export_tests {
         let color_a = [0.1, 0.3, 0.9, 1.0];
         let color_b = [0.9, 0.2, 0.2, 1.0];
         let vertices = vec![
-            Vertex { position: [-1.5, -1.5, 0.0], color: color_a, normal: [0.0, 0.0, 1.0], tex_coords: [0.0, 0.0] },
-            Vertex { position: [0.0, -1.5, 0.0], color: color_a, normal: [0.0, 0.0, 1.0], tex_coords: [0.0, 0.0] },
-            Vertex { position: [-0.75, 0.0, 0.0], color: color_a, normal: [0.0, 0.0, 1.0], tex_coords: [0.0, 0.0] },
-            Vertex { position: [0.0, 0.0, 0.0], color: color_b, normal: [0.0, 0.0, 1.0], tex_coords: [0.0, 0.0] },
-            Vertex { position: [1.5, 0.0, 0.0], color: color_b, normal: [0.0, 0.0, 1.0], tex_coords: [0.0, 0.0] },
-            Vertex { position: [0.75, 1.5, 0.0], color: color_b, normal: [0.0, 0.0, 1.0], tex_coords: [0.0, 0.0] },
+            Vertex {
+                position: [-1.5, -1.5, 0.0],
+                color: color_a,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [0.0, -1.5, 0.0],
+                color: color_a,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [-0.75, 0.0, 0.0],
+                color: color_a,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [0.0, 0.0, 0.0],
+                color: color_b,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [1.5, 0.0, 0.0],
+                color: color_b,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [0.75, 1.5, 0.0],
+                color: color_b,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
         ];
         let fill = ContourFillPlot::from_vertices(vertices, bounds).with_label("Filled Contours");
         let mut fig = Figure::new();
@@ -1013,10 +1043,30 @@ mod image_export_tests {
         let bounds = BoundingBox::new(Vec3::new(-2.0, -2.0, 0.0), Vec3::new(2.0, 2.0, 0.0));
         let line_color = [0.95, 0.95, 0.95, 1.0];
         let vertices = vec![
-            Vertex { position: [-1.5, -1.0, 0.0], color: line_color, normal: [0.0, 0.0, 1.0], tex_coords: [0.0, 0.0] },
-            Vertex { position: [1.5, 1.0, 0.0], color: line_color, normal: [0.0, 0.0, 1.0], tex_coords: [0.0, 0.0] },
-            Vertex { position: [-1.5, 1.0, 0.0], color: line_color, normal: [0.0, 0.0, 1.0], tex_coords: [0.0, 0.0] },
-            Vertex { position: [1.5, -1.0, 0.0], color: line_color, normal: [0.0, 0.0, 1.0], tex_coords: [0.0, 0.0] },
+            Vertex {
+                position: [-1.5, -1.0, 0.0],
+                color: line_color,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [1.5, 1.0, 0.0],
+                color: line_color,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [-1.5, 1.0, 0.0],
+                color: line_color,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [1.5, -1.0, 0.0],
+                color: line_color,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
         ];
         let contour = ContourPlot::from_vertices(vertices, 0.0, bounds).with_label("Contours");
         let mut fig = Figure::new();

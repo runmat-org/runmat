@@ -1107,7 +1107,10 @@ pub(crate) mod tests {
         match result {
             Value::StringArray(arr) => {
                 assert_eq!(arr.shape, vec![1, 3]);
-                assert_eq!(arr.data, vec!["wn = ".to_string(), "6".to_string(), " rad/s".to_string()]);
+                assert_eq!(
+                    arr.data,
+                    vec!["wn = ".to_string(), "6".to_string(), " rad/s".to_string()]
+                );
             }
             other => panic!("expected string array, got {other:?}"),
         }
