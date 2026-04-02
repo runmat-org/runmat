@@ -9,7 +9,6 @@ use crate::builtins::plotting::type_resolvers::get_type;
     category = "plotting",
     summary = "Get properties from plotting handles.",
     keywords = "get,plotting,handle,property",
-    suppress_auto_output = true,
     type_resolver(get_type),
     builtin_path = "crate::builtins::plotting::get"
 )]

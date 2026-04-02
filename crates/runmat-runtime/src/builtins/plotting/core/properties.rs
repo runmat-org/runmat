@@ -418,6 +418,8 @@ fn get_axes_property(
         Some("yscale") => Ok(Value::String(
             if meta.y_log { "log" } else { "linear" }.into(),
         )),
+        Some("type") => Ok(Value::String("axes".into())),
+        Some("parent") => Ok(Value::Num(handle.as_u32() as f64)),
         Some("legendvisible") => Ok(Value::Bool(meta.legend_enabled)),
         Some("children") => Ok(handles_value(vec![
             super::state::encode_plot_object_handle(handle, axes_index, PlotObjectKind::Title),
@@ -562,6 +564,11 @@ fn get_legend_property(
         Some("visible") => Ok(Value::Bool(
             meta.legend_enabled && meta.legend_style.visible,
         )),
+        Some("type") => Ok(Value::String("legend".into())),
+        Some("parent") => Ok(Value::Num(super::state::encode_axes_handle(
+            handle, axes_index,
+        ))),
+        Some("children") => Ok(handles_value(Vec::new())),
         Some("string") => Ok(legend_labels_value(
             entries.into_iter().map(|e| e.label).collect(),
         )),
