@@ -1878,16 +1878,8 @@ pub fn close_figure(target: Option<FigureHandle>) -> Result<FigureHandle, Figure
             let default = FigureHandle::default();
             reg.current = default;
             reg.next_handle = default.next();
-            reg.figures.insert(default, FigureState::new(default));
-            let figure_clone = reg
-                .figures
-                .get(&default)
-                .expect("default figure inserted")
-                .figure
-                .clone();
             drop(reg);
             notify_without_figure(handle, FigureEventKind::Closed);
-            notify_with_figure(default, &figure_clone, FigureEventKind::Created);
             return Ok(handle);
         }
     }
@@ -2083,4 +2075,34 @@ pub fn next_line_style_for_axes(axes_index: usize) -> LineStyle {
     let handle = reg.current;
     let state = get_state_mut(&mut reg, handle);
     state.cycle_for_axes_mut(axes_index).next()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::builtins::plotting::tests::ensure_plot_test_env;
+
+    #[cfg(test)]
+    pub(crate) fn reset_for_tests() {
+        let mut reg = registry();
+        reg.figures.clear();
+        reg.current = FigureHandle::default();
+        reg.next_handle = FigureHandle::default().next();
+    }
+
+    #[test]
+    fn closing_last_figure_leaves_no_visible_figures() {
+        ensure_plot_test_env();
+        reset_for_tests();
+
+        let handle = new_figure_handle();
+        assert_eq!(figure_handles(), vec![handle]);
+
+        close_figure(Some(handle)).expect("close figure");
+
+        assert!(
+            figure_handles().is_empty(),
+            "closing the last figure should not recreate a default visible figure"
+        );
+    }
 }

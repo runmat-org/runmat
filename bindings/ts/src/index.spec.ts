@@ -760,6 +760,25 @@ describe("ExecuteResult passthroughs", () => {
     expect(result.stdinRequested).toEqual(request);
     expect(result.stdinRequested?.waitingMs).toBe(1500);
   });
+
+  it("preserves clear-screen stdout control entries from the native session", async () => {
+    const native: NativeModule = {
+      default: async () => {},
+      registerFsProvider: () => {},
+      initRunMat: async () =>
+        createMockNativeSession({
+          execute: () => ({
+            ...baseExecuteResult,
+            stdout: [{ stream: "clear", text: "", timestampMs: 123 }]
+          })
+        })
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    const session = await initRunMat({ snapshot: { bytes: new Uint8Array([1]) }, enableGpu: false });
+    const result = await session.execute("clc;");
+    expect(result.stdout).toEqual([{ stream: "clear", text: "", timestampMs: 123 }]);
+  });
 });
 
 describe("workspace hover provider", () => {

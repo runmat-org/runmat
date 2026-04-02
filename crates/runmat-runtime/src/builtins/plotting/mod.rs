@@ -138,10 +138,11 @@ use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use web::present_figure_on_surface as web_present_figure_on_surface;
 pub use web::{
-    bind_surface_to_figure, detach_surface, fit_surface_extents, get_surface_camera_state,
-    install_surface, invalidate_surface_revisions, present_surface, render_current_scene,
-    reset_surface_camera, resize_surface, set_plot_theme_config, set_surface_camera_state,
-    web_renderer_ready, PlotCameraProjection, PlotCameraState, PlotSurfaceCameraState,
+    bind_surface_to_figure, clear_closed_figure_surfaces, detach_surface, fit_surface_extents,
+    get_surface_camera_state, install_surface, invalidate_surface_revisions, present_surface,
+    render_current_scene, reset_surface_camera, resize_surface, set_plot_theme_config,
+    set_surface_camera_state, web_renderer_ready, PlotCameraProjection, PlotCameraState,
+    PlotSurfaceCameraState,
 };
 
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]

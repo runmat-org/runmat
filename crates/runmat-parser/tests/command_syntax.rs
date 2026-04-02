@@ -91,6 +91,32 @@ fn colorbar_without_arg_allowed() {
 }
 
 #[test]
+fn close_all_stringifies_bare_word_arg() {
+    let program = parse_with_options("close all", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::FuncCall(name, args, _), false, _) => {
+            assert_eq!(name, "close");
+            assert_eq!(args.len(), 1);
+            assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"all\""));
+        }
+        _ => panic!("expected close all to become close(\"all\")"),
+    }
+}
+
+#[test]
+fn clear_all_stringifies_bare_word_arg() {
+    let program = parse_with_options("clear all", ParserOptions::new(CompatMode::Matlab)).unwrap();
+    match &program.body[0] {
+        Stmt::ExprStmt(Expr::FuncCall(name, args, _), false, _) => {
+            assert_eq!(name, "clear");
+            assert_eq!(args.len(), 1);
+            assert!(matches!(args[0], Expr::String(ref s, _) if s == "\"all\""));
+        }
+        _ => panic!("expected clear all to become clear(\"all\")"),
+    }
+}
+
+#[test]
 fn invalid_keyword_rejected() {
     let err = parse_with_options("grid maybe", ParserOptions::new(CompatMode::Matlab));
     assert!(err.is_err());

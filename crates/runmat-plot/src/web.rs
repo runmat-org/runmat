@@ -129,6 +129,7 @@ pub struct WebRenderer {
     last_axes_viewports_px: Vec<(u32, u32, u32, u32)>,
     last_pointer_position: glam::Vec2,
     background_policy: BackgroundPolicy,
+    has_active_figure: bool,
     #[cfg(feature = "egui-overlay")]
     overlay: Option<WebOverlayState>,
 }
@@ -310,6 +311,7 @@ impl WebRenderer {
             last_axes_viewports_px: vec![(0, 0, width.max(1), height.max(1))],
             last_pointer_position: glam::Vec2::ZERO,
             background_policy: BackgroundPolicy::ThemeDriven,
+            has_active_figure: false,
             #[cfg(feature = "egui-overlay")]
             overlay,
         };
@@ -509,7 +511,24 @@ impl WebRenderer {
             BackgroundPolicy::Explicit(bg)
         };
         self.apply_background_policy();
+        self.has_active_figure = true;
         self.plot_renderer.set_figure(figure);
+        self.render_current_scene()
+    }
+
+    /// Clear the canvas to the themed background and remove any bound plot scene.
+    pub fn clear_surface(&mut self) -> Result<(), WebRendererError> {
+        self.background_policy = BackgroundPolicy::ThemeDriven;
+        self.apply_background_policy();
+        self.has_active_figure = false;
+        self.last_axes_viewports_px = vec![(
+            0,
+            0,
+            self.surface_config.width.max(1),
+            self.surface_config.height.max(1),
+        )];
+        self.plot_renderer
+            .set_figure(Figure::new().with_grid(false).with_legend(false));
         self.render_current_scene()
     }
 
@@ -591,6 +610,31 @@ impl WebRenderer {
         self.render_config.width = self.surface_config.width.max(1);
         self.render_config.height = self.surface_config.height.max(1);
         self.render_config.msaa_samples = self.options.msaa_samples.max(1);
+
+        if !self.has_active_figure {
+            let _ = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("runmat-plot-web-clear-empty"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &frame_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: self.render_config.background_color.x as f64,
+                            g: self.render_config.background_color.y as f64,
+                            b: self.render_config.background_color.z as f64,
+                            a: self.render_config.background_color.w as f64,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            self.queue.submit(Some(encoder.finish()));
+            frame.present();
+            return Ok(());
+        }
 
         if !use_overlay {
             // Existing fast path: full-surface render (clears).
