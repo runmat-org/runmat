@@ -108,3 +108,12 @@ Both package kinds show up identically to users: functions appear in the namespa
 - “How do I add a builtin?” Add a Rust function with `#[runtime_builtin(...)]`, specify metadata, test it, and publish. The docs and search will automatically include it.
 
 RunMat is for people who want a fast, pleasant MATLAB-style environment that evolves like a modern open-source system. If that sounds like you, welcome.
+
+---
+
+## Related
+
+- [High-Level Architecture](/docs/architecture) -- RunMat's V8-inspired execution model and subsystems.
+- [Package Manager](/docs/package-manager) -- the package system for extending RunMat.
+- [Introduction to RunMat Fusion](/docs/accelerate/fusion-intro) -- GPU data residency and fusion.
+- [Language Reference](/docs/language) -- compatibility modes and MATLAB syntax support.

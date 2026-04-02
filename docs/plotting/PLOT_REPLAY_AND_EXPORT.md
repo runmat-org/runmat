@@ -121,3 +121,12 @@ Together, these documents separate three important layers: source computation, s
 ## See also
 
 Read `PLOTTING_IN_RUNMAT.md` for the broader plotting overview, `GRAPHICS_HANDLES.md` for the object model behind figures and axes, `GPU_PLOTTING_AND_RENDERING_MATH.md` for the geometric and observational model of rendering, and `GPU_PLOTTING_AND_RESIDENCY.md` for the computational model of scene construction and render execution. The reference pages for `subplot`, `view`, `legend`, `colormap`, `colorbar`, `get`, and `set` describe the builtin-level controls that shape replayable figure state.
+
+---
+
+## Related
+
+- [Plotting in RunMat](/docs/plotting/plotting-in-runmat): the plotting workflow from first command to finished figure.
+- [Graphics Handles](/docs/plotting/graphics-handles): inspect and update plot objects with handles.
+- [Large Dataset Persistence](/docs/large-dataset-persistence): chunked, content-addressed storage for large arrays.
+- [GPU Residency and Precision](/docs/accelerate/gpu-behavior): when data moves to and from the GPU.

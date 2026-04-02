@@ -18,6 +18,7 @@ export const metadata: Metadata = {
     title: "RunMat Pricing | Hobby, Pro, Team, and Enterprise",
     description:
       "Free runtime, $0 Hobby cloud tier. Pro from $30/mo per user, Team from $100/mo per user. RunMat Enterprise for on-prem and air-gapped deployment.",
+    url: "https://runmat.com/pricing",
   },
   twitter: {
     card: "summary_large_image",

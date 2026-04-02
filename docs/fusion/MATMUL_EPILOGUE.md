@@ -33,3 +33,12 @@ Matmul epilogue is a common pattern in linear algebra and statistics. It shows u
 - **Precision issues:** GPU matmul epilogues follow the provider’s precision. If you request `double` on a device without FP64, RunMat will fall back to the CPU path.
 
 If a workload should fuse but does not, enable `RUNMAT_DEBUG_FUSION=1` to have the planner print why a node was rejected, then compare against the criteria above.
+
+---
+
+## Related
+
+- [Introduction to RunMat Fusion](/docs/accelerate/fusion-intro) -- how RunMat manages GPU data residency.
+- [GPU Residency and Precision](/docs/accelerate/gpu-behavior) -- residency rules and precision guarantees.
+- [Explained Variance](/docs/fusion/explained-variance) -- keeping diag(Q' * G * Q) diagnostics on GPU.
+- [Centered Gram / Covariance](/docs/fusion/centered-gram) -- fused mean-centering and covariance computation.

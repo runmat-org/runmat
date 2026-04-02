@@ -305,3 +305,12 @@ You can pattern-match on `err.code` reliably across runtime and server-backed ex
 - **Typed and linted.** Compile-time schema inference catches shape mismatches, unknown arrays, and unsafe patterns before your code runs.
 - **Built for collaboration.** Concurrent writers get explicit conflict signals, not silent overwrites or corrupted files.
 - **Integrated with plotting.** Large 3D scenes reference dataset chunks instead of embedding payloads, keeping scene descriptors small and replay fast.
+
+---
+
+## Related
+
+- [Versioning and History](/docs/versioning) -- automatic versioning, snapshots, and git export.
+- [Filesystem](/docs/filesystem) -- storage backends and the virtual filesystem.
+- [Plot Replay and Export](/docs/plotting/plot-replay-and-export) -- persist, replay, and export figures.
+- [Collaboration and Teams](/docs/collaboration) -- shared projects and real-time sync.

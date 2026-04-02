@@ -13,7 +13,7 @@ This keeps semantics clean for modelling/physics code while unlocking smooth GPU
 ## 3D depth + clipping
 
 For details on depth modes (standard vs reversed‑Z), clip plane policies, and the 3D grid helper,
-see `docs/PLOTTING_DEPTH.md`.
+see the internal depth and clipping notes (not yet published as a standalone page).
 
 ## Semantics: state vs presentation
 
@@ -173,3 +173,12 @@ Background fill now follows an explicit policy:
 
 This policy is applied consistently across Web/WASM and native-surface render paths to
 avoid dark-default leakage during first render and theme switches.
+
+---
+
+## Related
+
+- [Plotting in RunMat](/docs/plotting/plotting-in-runmat) -- the plotting workflow from first command to finished figure.
+- [Plot Replay and Export](/docs/plotting/plot-replay-and-export) -- persist, replay, and export figures.
+- [Graphics Handles](/docs/plotting/graphics-handles) -- inspect and update plot objects with handles.
+- [GPU Residency and Precision](/docs/accelerate/gpu-behavior) -- when data moves to and from the GPU.

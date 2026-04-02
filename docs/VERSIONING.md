@@ -179,3 +179,11 @@ Rules:
 - **Git when you need it.** Export for audit, archive, or CI -- not as a daily workflow tax.
 - **Smart about large data.** Version the manifest, not the terabytes.
 - **Works offline.** The entire system runs on local Postgres and storage. No cloud required.
+
+---
+
+## Related
+
+- [Filesystem](/docs/filesystem) -- storage backends and the virtual filesystem.
+- [Large Dataset Persistence](/docs/large-dataset-persistence) -- chunked, content-addressed storage for large arrays.
+- [Collaboration and Teams](/docs/collaboration) -- shared projects and real-time sync.

@@ -212,3 +212,12 @@ The easiest way to stay oriented is to ask three questions. What object do I hav
 ## See also
 
 For syntax-level details, see the reference pages for `subplot`, `get`, `set`, `legend`, `title`, `xlabel`, `ylabel`, `zlabel`, `axis`, and `view`. For a broader conceptual overview of plotting workflows, pair this page with the general plotting guide.
+
+---
+
+## Related
+
+- [Plotting in RunMat](/docs/plotting/plotting-in-runmat): the plotting workflow from first command to finished figure.
+- [Styling Plots and Axes](/docs/plotting/styling-plots-and-axes): labels, legends, colormaps, and coordinated styling.
+- [Plot Replay and Export](/docs/plotting/plot-replay-and-export): persist, replay, and export figures.
+- [Builtin Function Reference](/docs/matlab-function-reference): full list of supported MATLAB functions.

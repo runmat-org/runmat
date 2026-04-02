@@ -507,7 +507,7 @@ For benchmarks comparing RunMat's fusion engine against MATLAB, PyTorch, and Num
 
 ### GPU-resident visualization
 
-The "avoid transfers" principle extends to plotting. In most tools, visualizing GPU-computed data means gathering it back to CPU and handing it to a separate rendering system, which introduces exactly the kind of transfer overhead this guide warns against. RunMat's plotting renders directly from GPU memory, with zero copy between the computation and the visualization. The plot is just a few more matrix operations (camera transforms, projections) at the end of the same GPU pipeline that computed the data.
+The "avoid transfers" principle extends to plotting. In most tools, visualizing GPU-computed data means gathering it back to CPU and handing it to a separate rendering system, which introduces exactly the kind of transfer overhead this guide warns against. RunMat's plotting renders directly from GPU memory, with zero copy between the computation and the visualization. The plot is just a few more matrix operations (camera transforms, projections) at the end of the same GPU pipeline that computed the data. For a hands-on walkthrough with runnable examples, see the [MATLAB plotting guide](/blog/matlab-plotting-guide).
 
 ### Where to run RunMat
 

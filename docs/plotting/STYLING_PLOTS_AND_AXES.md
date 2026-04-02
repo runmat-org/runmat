@@ -102,7 +102,8 @@ When color carries quantitative meaning, colormap choice and colorbar visibility
 Different colormaps emphasize different structure. Some make level changes easy to see. Others make gradual variation easier to follow. In all cases, the colormap should support reading of the field rather than calling attention only to itself.
 
 ```matlab
-imagesc(peaks(40));
+[X, Y] = meshgrid(linspace(-3, 3, 40));
+imagesc(sin(X.^2 + Y.^2) .* cos(X - Y));
 colormap("turbo");
 colorbar;
 title("Scalar field");
@@ -115,7 +116,10 @@ For 3-D plots, view is both a styling choice and an interpretive choice. The sam
 If the chosen view hides important geometry, the figure may be technically correct but analytically weak.
 
 ```matlab
-surf(peaks(40));
+[X, Y] = meshgrid(linspace(-3, 3, 40));
+R = sqrt(X.^2 + Y.^2) + 0.01;
+Z = sin(3*R) ./ R;
+surf(X, Y, Z);
 shading interp;
 colormap("parula");
 colorbar;
@@ -201,3 +205,12 @@ The deeper object model behind these operations is described in `GRAPHICS_HANDLE
 ## See also
 
 Read `PLOTTING_IN_RUNMAT.md` for the broader plotting overview, `CHOOSING_THE_RIGHT_PLOT_TYPE.md` for guidance on plot-family selection, and `GRAPHICS_HANDLES.md` for the underlying handle and object model. The rendering-math and GPU-residency documents provide deeper conceptual background for view, color, geometry, and computational behavior.
+
+---
+
+## Related
+
+- [Plotting in RunMat](/docs/plotting/plotting-in-runmat): the plotting workflow from first command to finished figure.
+- [Choosing the Right Plot Type](/docs/plotting/choosing-the-right-plot-type): match plot families to the structure of your data.
+- [Graphics Handles](/docs/plotting/graphics-handles): inspect and update plot objects with handles.
+- [Plot Replay and Export](/docs/plotting/plot-replay-and-export): persist, replay, and export figures.
