@@ -49,6 +49,18 @@ The first analytical choice in plotting is usually the plot family. Different pl
 
 The right choice depends on what the reader should notice. If continuity matters, use a plot that makes continuity visible. If values live on a grid, decide whether the reader should see cells, level sets, or height. If direction matters, use a representation that preserves direction.
 
+### Generating test surfaces
+
+MATLAB's `peaks()` function is not yet available in RunMat. To generate a similar test surface for `surf`, `contour`, or `imagesc` examples, use explicit math over a meshgrid:
+
+```matlab
+[X, Y] = meshgrid(linspace(-3, 3, 60));
+R = sqrt(X.^2 + Y.^2) + 0.01;
+Z = sin(3*R) ./ R;
+```
+
+This produces a damped radial ripple that works well as a drop-in replacement wherever `peaks()` appears in MATLAB tutorials.
+
 ## Common plot families at a glance
 
 The following table is a practical starting point.
@@ -120,7 +132,8 @@ set(h1, "DisplayName", "sine");
 legend();
 
 ax2 = subplot(1, 2, 2);
-imagesc(peaks(40));
+[X2, Y2] = meshgrid(linspace(-3, 3, 40));
+imagesc(sin(X2.^2 + Y2.^2) .* cos(X2 - Y2));
 title("Scalar field");
 colorbar;
 set(ax2, "XLim", [1 40], "YLim", [1 40]);
@@ -138,3 +151,13 @@ This overview is the entry point to the broader plotting documentation.
 - Read `GPU_PLOTTING_AND_RESIDENCY.md` for the computational story of device residency, scene construction, and render execution.
 
 Together, these pages describe plotting in RunMat as both a practical workflow and a coherent graphics system.
+
+---
+
+## Related
+
+- [Choosing the Right Plot Type](/docs/plotting/choosing-the-right-plot-type) -- match plot families to the structure of your data.
+- [Styling Plots and Axes](/docs/plotting/styling-plots-and-axes) -- labels, legends, colormaps, and coordinated styling.
+- [Graphics Handles](/docs/plotting/graphics-handles) -- inspect and update plot objects with handles.
+- [Plot Replay and Export](/docs/plotting/plot-replay-and-export) -- persist, replay, and export figures.
+- [GPU Residency and Precision](/docs/accelerate/gpu-behavior) -- when data moves to and from the GPU.

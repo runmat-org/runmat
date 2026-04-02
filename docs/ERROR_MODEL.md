@@ -74,3 +74,11 @@ MATLAB compatibility is required at the **language surface** only:
 RunMat’s error model prioritizes **typed, structured diagnostics** internally and preserves MATLAB
 semantics only at the final boundary. This unlocks **Rust‑style clarity and attribution** while
 remaining fully compatible with existing MATLAB code at the user surface.
+
+---
+
+## Related
+
+- [Language Reference](/docs/language) -- compatibility modes and MATLAB syntax support.
+- [Library Reference](/docs/library) -- how RunMat's built-in MATLAB functions are organized.
+- [Design Philosophy](/docs/design-philosophy) -- RunMat's slim core and extension model.

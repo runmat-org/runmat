@@ -20,3 +20,11 @@ Reduction is a common pattern in linear algebra and statistics. It shows up in c
 - Host-only reductions, e.g. when the input tensor already lives on the CPU or the provider rejects double precision.
 
 If a workload should fuse but does not, enable `RUNMAT_DEBUG_FUSION=1` to have the planner print why a node was rejected, then compare against the criteria above.
+
+---
+
+## Related
+
+- [Introduction to RunMat Fusion](/docs/accelerate/fusion-intro) -- how RunMat manages GPU data residency.
+- [GPU Residency and Precision](/docs/accelerate/gpu-behavior) -- residency rules and precision guarantees.
+- [Centered Gram / Covariance](/docs/fusion/centered-gram) -- fused mean-centering and covariance computation.

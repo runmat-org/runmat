@@ -325,6 +325,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
       title: post.frontmatter.ogTitle || post.frontmatter.title,
       description: post.frontmatter.ogDescription || post.frontmatter.description,
       type: 'article',
+      url: `https://runmat.com/blog/${slug}`,
       publishedTime: post.frontmatter.date,
       modifiedTime: post.frontmatter.dateModified || post.frontmatter.date,
       authors: authorNames,

@@ -218,6 +218,19 @@ export default function HomePage() {
               </Link>
             </div>
           </div>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center flex-wrap text-center mt-8">
+            <Link href="/blog/matlab-plotting-guide" className="text-sm text-muted-foreground hover:text-foreground underline">
+              Plotting guide
+            </Link>
+            <span className="hidden sm:inline text-muted-foreground">•</span>
+            <Link href="/docs/plotting" className="text-sm text-muted-foreground hover:text-foreground underline">
+              Plotting documentation
+            </Link>
+            <span className="hidden sm:inline text-muted-foreground">•</span>
+            <Link href="/docs/matlab-function-reference#plotting" className="text-sm text-muted-foreground hover:text-foreground underline">
+              Plotting function reference
+            </Link>
+          </div>
         </div>
       </section>
 
@@ -235,12 +248,18 @@ export default function HomePage() {
           <div className="flex justify-center w-full">
             <MatlabCodeCard />
           </div>
-          <div className="mt-8 text-center">
-            <Link className="underline" href="/docs/language-coverage">Language guide</Link>
-            <span className="hidden sm:inline text-muted-foreground"> • </span>
-            <Link className="underline" href="/docs/matlab-function-reference">Built-in function reference</Link>
-            <span className="hidden sm:inline text-muted-foreground"> • </span>
-            <Link className="underline" href="/blog/in-defense-of-matlab-whiteboard-style-code">Why whiteboard-style code still matters</Link>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center flex-wrap text-center mt-8">
+            <Link href="/docs/language-coverage" className="text-sm text-muted-foreground hover:text-foreground underline">
+              Language guide
+            </Link>
+            <span className="hidden sm:inline text-muted-foreground">•</span>
+            <Link href="/docs/matlab-function-reference" className="text-sm text-muted-foreground hover:text-foreground underline">
+              Built-in function reference
+            </Link>
+            <span className="hidden sm:inline text-muted-foreground">•</span>
+            <Link href="/blog/in-defense-of-matlab-whiteboard-style-code" className="text-sm text-muted-foreground hover:text-foreground underline">
+              Why whiteboard-style code still matters
+            </Link>
           </div>
         </div>
       </section>
@@ -262,11 +281,11 @@ export default function HomePage() {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center flex-wrap text-center mt-8">
-            <Link href="/docs/accelerate/fusion-intro" className="text-sm hover:text-foreground text-muted-foreground transition-colors underline">
+            <Link href="/docs/accelerate/fusion-intro" className="text-sm text-muted-foreground hover:text-foreground underline">
               How fusion works
             </Link>
             <span className="hidden sm:inline text-muted-foreground">•</span>
-            <Link href="/benchmarks" className="text-sm hover:text-foreground text-muted-foreground transition-colors underline">
+            <Link href="/benchmarks" className="text-sm text-muted-foreground hover:text-foreground underline">
               See the benchmarks
             </Link>
           </div>

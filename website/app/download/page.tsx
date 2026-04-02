@@ -17,6 +17,10 @@ import Link from "next/link";
 export const metadata: Metadata = {
   title: "Download RunMat",
   description: "Download RunMat for your platform. Fast, free, and open source MATLAB-compatible runtime with V8-inspired performance.",
+  alternates: { canonical: "https://runmat.com/download" },
+  openGraph: {
+    url: "https://runmat.com/download",
+  },
 };
 
 export default function DownloadPage() {

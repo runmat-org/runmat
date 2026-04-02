@@ -236,3 +236,12 @@ Most of these mistakes come from choosing a plot by appearance rather than by st
 ## See also
 
 The builtin references for `plot`, `scatter`, `stairs`, `stem`, `errorbar`, `bar`, `hist`, `histogram`, `image`, `imagesc`, `contour`, `contourf`, `surf`, `mesh`, `surfc`, `meshc`, `quiver`, `plot3`, `scatter3`, and `pie` provide syntax-level details. The conceptual documents on graphics handles, rendering math, and GPU plotting explain how these plot families behave once chosen.
+
+---
+
+## Related
+
+- [Plotting in RunMat](/docs/plotting/plotting-in-runmat) -- the plotting workflow from first command to finished figure.
+- [Styling Plots and Axes](/docs/plotting/styling-plots-and-axes) -- labels, legends, colormaps, and coordinated styling.
+- [Graphics Handles](/docs/plotting/graphics-handles) -- inspect and update plot objects with handles.
+- [Builtin Function Reference](/docs/matlab-function-reference) -- full list of supported MATLAB functions.
