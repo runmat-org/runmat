@@ -1335,14 +1335,25 @@ fn workspace_clear() -> Result<(), String> {
 }
 
 fn workspace_remove(name: &str) -> Result<(), String> {
+    let vars_ptr = WORKSPACE_VARS.with(|slot| *slot.borrow());
+    let Some(vars_ptr) = vars_ptr else {
+        return Err("clear: workspace state unavailable".to_string());
+    };
+    let vars = unsafe { &mut *vars_ptr };
+
     WORKSPACE_STATE.with(|state| {
         let mut state_mut = state.borrow_mut();
         let Some(ws) = state_mut.as_mut() else {
             return Err("clear: workspace state unavailable".to_string());
         };
         if let Some(idx) = ws.names.remove(name) {
+            if idx < vars.len() {
+                vars[idx] = Value::Num(0.0);
+            }
             ws.assigned.remove(name);
             ws.idx_to_name.remove(&idx);
+            ws.data_ptr = vars.as_ptr();
+            ws.len = vars.len();
         }
         Ok(())
     })
@@ -11726,40 +11737,6 @@ fn map_slice_plan_error(context: &str, err: RuntimeError) -> RuntimeError {
     }
 }
 
-#[cfg(test)]
-mod scalar_index_tests {
-    use super::*;
-
-    #[test]
-    fn linear_false_bool_index_is_empty() {
-        let indices =
-            futures::executor::block_on(indices_from_value_linear(&Value::Bool(false), 4))
-                .expect("false logical index should be empty");
-        assert!(indices.is_empty());
-    }
-
-    #[test]
-    fn linear_true_bool_index_selects_first() {
-        let indices = futures::executor::block_on(indices_from_value_linear(&Value::Bool(true), 4))
-            .expect("true logical index should select first element");
-        assert_eq!(indices, vec![1]);
-    }
-
-    #[test]
-    fn dim_false_bool_selector_is_empty() {
-        let selector = futures::executor::block_on(selector_from_value_dim(&Value::Bool(false), 4))
-            .expect("false logical selector should be empty");
-        match selector {
-            SliceSelector::Indices(indices) => assert!(indices.is_empty()),
-            SliceSelector::Scalar(_)
-            | SliceSelector::Colon
-            | SliceSelector::LinearIndices { .. } => {
-                panic!("expected empty indices selector")
-            }
-        }
-    }
-}
-
 /// Interpret bytecode with default variable initialization
 pub async fn interpret(bytecode: &Bytecode) -> Result<Vec<Value>, RuntimeError> {
     let mut vars = vec![Value::Num(0.0); bytecode.var_count];
@@ -12001,4 +11978,38 @@ async fn interpret_function_with_counts(
         }
     }
     Ok(res)
+}
+
+#[cfg(test)]
+mod scalar_index_tests {
+    use super::*;
+
+    #[test]
+    fn linear_false_bool_index_is_empty() {
+        let indices =
+            futures::executor::block_on(indices_from_value_linear(&Value::Bool(false), 4))
+                .expect("false logical index should be empty");
+        assert!(indices.is_empty());
+    }
+
+    #[test]
+    fn linear_true_bool_index_selects_first() {
+        let indices = futures::executor::block_on(indices_from_value_linear(&Value::Bool(true), 4))
+            .expect("true logical index should select first element");
+        assert_eq!(indices, vec![1]);
+    }
+
+    #[test]
+    fn dim_false_bool_selector_is_empty() {
+        let selector = futures::executor::block_on(selector_from_value_dim(&Value::Bool(false), 4))
+            .expect("false logical selector should be empty");
+        match selector {
+            SliceSelector::Indices(indices) => assert!(indices.is_empty()),
+            SliceSelector::Scalar(_)
+            | SliceSelector::Colon
+            | SliceSelector::LinearIndices { .. } => {
+                panic!("expected empty indices selector")
+            }
+        }
+    }
 }
