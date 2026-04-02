@@ -1,0 +1,67 @@
+{
+  "title": "histogram",
+  "category": "plotting",
+  "keywords": [
+    "histogram",
+    "histogram object",
+    "bin edges",
+    "normalized histogram",
+    "matlab histogram",
+    "distribution analysis"
+  ],
+  "summary": "Create histogram objects with bin-edge semantics, normalization controls, and MATLAB `histogram` workflows.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`histogram` uses histogram evaluation with a handle-based plotting object interface."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::histogram::tests"
+  },
+  "description": "`histogram` is the object-style histogram builtin in RunMat. Unlike legacy `hist`, it uses bin-edge semantics, supports normalization workflows through the histogram evaluation path, and returns a histogram handle that works with `get` and `set` as part of the plotting object model.",
+  "behaviors": [
+    "`histogram(data)` creates a histogram object handle.",
+    "When you pass explicit bins through histogram-style arguments, they are treated as bin edges rather than bin centers.",
+    "Normalization modes such as count, probability, percentage, density-style variants, and cumulative forms are part of the evaluation path.",
+    "The returned histogram handle exposes properties like bin edges, counts, and normalization through `get` and accepts updates through `set` where supported.",
+    "This is the preferred histogram API for new code; use `hist` only when you intentionally want legacy center-based MATLAB semantics."
+  ],
+  "examples": [
+    {
+      "description": "Create a histogram object from data",
+      "input": "data = randn(1, 1000);\nh = histogram(data);",
+      "output": "% h is a histogram object handle"
+    },
+    {
+      "description": "Use explicit bin edges and inspect the handle",
+      "input": "data = randn(1, 500);\nedges = -3:0.25:3;\nh = histogram(data, 'BinEdges', edges);\nget(h, 'BinEdges');"
+    },
+    {
+      "description": "Apply normalization through histogram semantics",
+      "input": "data = randn(1, 500);\nh = histogram(data, 'Normalization', 'probability');\nget(h, 'Normalization')",
+      "output": "ans =\n    'probability'"
+    }
+  ],
+  "links": [
+    { "label": "hist", "url": "./hist" },
+    { "label": "bar", "url": "./bar" },
+    { "label": "get", "url": "./get" },
+    { "label": "set", "url": "./set" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/histogram.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/histogram.rs"
+  }
+}

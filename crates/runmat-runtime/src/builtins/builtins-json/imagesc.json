@@ -1,0 +1,66 @@
+{
+  "title": "imagesc",
+  "category": "plotting",
+  "keywords": [
+    "imagesc",
+    "scaled image",
+    "heatmap",
+    "matrix visualization",
+    "matlab imagesc",
+    "colormap image"
+  ],
+  "summary": "Display scaled matrix images for heatmaps, colormaps, and MATLAB `imagesc` style visualization.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`imagesc` uses the same modern image/surface path as `image`, but applies scaled color-mapped visualization semantics for matrix data."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::imagesc::tests",
+    "integration": "runmat-plot/tests/renderer_tests.rs"
+  },
+  "description": "`imagesc` is the scaled-image member of the modern image family. In RunMat it is ideal for matrix heatmaps and value-driven raster visualization because the matrix is interpreted through colormap and color-limit semantics rather than through direct truecolor object semantics. The returned handle is still an image-handle object, but the visual meaning differs from `image` because `imagesc` is specifically about scaled matrix visualization.",
+  "behaviors": [
+    "`imagesc(C)` displays a matrix using implicit axes and scaled color mapping.",
+    "`imagesc(X, Y, C)` places the scaled image explicitly on the axes using the provided coordinate extents.",
+    "Unlike `image`, `imagesc` is fundamentally about colormap-driven value visualization rather than direct indexed/truecolor graphics-object placement.",
+    "The returned value is still an image-handle object in the shared plotting handle system.",
+    "`imagesc` works naturally with `colormap`, `colorbar`, `caxis`, and subplot-local axes state."
+  ],
+  "examples": [
+    {
+      "description": "Display a matrix as a heatmap-style scaled image",
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 60), linspace(-3, 3, 60));\nA = sin(X) .* cos(Y);\nimagesc(A);\ncolorbar;"
+    },
+    {
+      "description": "Place a scaled image on explicit axes",
+      "input": "A = reshape(1:100, 10, 10);\nimagesc([-5 5], [0 1], A);\ncolormap('parula');"
+    },
+    {
+      "description": "Use subplot-local color workflows",
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 40), linspace(-3, 3, 40));\nZ = sin(X) .* cos(Y);\nsubplot(1, 2, 1);\nimagesc(Z);\ncolormap('jet');\ncolorbar;\nsubplot(1, 2, 2);\nimagesc(magic(20));\ncolormap('gray');"
+    }
+  ],
+  "links": [
+    { "label": "image", "url": "./image" },
+    { "label": "colorbar", "url": "./colorbar" },
+    { "label": "colormap", "url": "./colormap" },
+    { "label": "axis", "url": "./axis" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/imagesc.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/imagesc.rs"
+  }
+}

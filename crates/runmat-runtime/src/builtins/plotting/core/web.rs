@@ -201,6 +201,10 @@ pub(crate) mod wasm {
         })
     }
 
+    pub(super) fn current_theme_config_impl() -> PlotThemeConfig {
+        ACTIVE_THEME.with(|slot| slot.borrow().clone())
+    }
+
     pub(super) fn present_figure_on_surface_impl(
         surface_id: u32,
         handle: u32,
@@ -408,6 +412,15 @@ pub(crate) mod wasm {
         Ok(())
     }
 
+    pub fn invalidate_surface_revisions() {
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            for entry in map.values_mut() {
+                entry.last_revision = None;
+            }
+        });
+    }
+
     // expose type to outer module
     pub(super) use runmat_plot::web::WebRenderer as RendererType;
 }
@@ -450,6 +463,8 @@ pub(crate) mod wasm {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
 
+    pub fn invalidate_surface_revisions() {}
+
     pub(super) fn bind_surface_to_figure_impl(_surface_id: u32, _handle: u32) -> BuiltinResult<()> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
@@ -491,8 +506,13 @@ pub(crate) mod wasm {
     ) -> BuiltinResult<()> {
         Err(web_error(ERR_PLOTTING_UNAVAILABLE))
     }
+
+    pub(super) fn current_theme_config_impl() -> runmat_plot::styling::PlotThemeConfig {
+        runmat_plot::styling::PlotThemeConfig::default()
+    }
 }
 
+pub use wasm::invalidate_surface_revisions;
 pub use wasm::render_current_scene;
 pub use wasm::web_renderer_ready;
 
@@ -558,6 +578,10 @@ pub fn set_surface_camera_state(
 
 pub fn set_plot_theme_config(theme: runmat_plot::styling::PlotThemeConfig) -> BuiltinResult<()> {
     wasm::set_theme_config_impl(theme)
+}
+
+pub fn current_plot_theme_config() -> runmat_plot::styling::PlotThemeConfig {
+    wasm::current_theme_config_impl()
 }
 
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]

@@ -3,22 +3,21 @@
   "category": "plotting",
   "keywords": [
     "meshc",
-    "mesh",
-    "contour",
-    "gpuArray"
+    "mesh with contour",
+    "wireframe contour plot",
+    "composite mesh plot",
+    "matlab meshc"
   ],
-  "summary": "Render a wireframe surface with contour lines projected onto the base plane.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/meshc.html"
-  ],
+  "summary": "Create composite wireframe-and-contour plots for scalar fields with MATLAB `meshc` semantics and contour overlays.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [
-      "single"
+      "single",
+      "double"
     ],
     "broadcasting": "none",
-    "notes": "Single-precision gpuArrays reuse the shared WebGPU context; other inputs gather."
+    "notes": "`meshc` combines the shared wireframe surface path with the modern contour path instead of using a parallel legacy composite implementation."
   },
   "fusion": {
     "elementwise": false,
@@ -30,62 +29,38 @@
   "tested": {
     "unit": "builtins::plotting::meshc::tests"
   },
-  "description": "`meshc(X, Y, Z)` draws a wireframe mesh and overlays contour lines on the XY plane.",
-  "behaviors": [],
-  "examples": [],
-  "faqs": [],
-  "links": [
+  "description": "`meshc` combines a `mesh`-style wireframe surface with contour lines projected onto the base plane. In RunMat the returned handle is the primary surface handle for the wireframe component, while the contour overlay is attached as the secondary composite plot content.",
+  "behaviors": [
+    "`meshc` shares the same wireframe surface semantics as `mesh` for the primary surface object.",
+    "The returned handle is the surface handle for the wireframe component of the composite.",
+    "Contour overlays are produced through the shared contour path.",
+    "View state, colormaps, and subplot-local metadata all flow through the shared axes model.",
+    "GPU-aware execution applies where supported to both the surface and contour sides of the composite."
+  ],
+  "examples": [
     {
-      "label": "bar",
-      "url": "./bar"
+      "description": "Create a wireframe surface with contour overlays",
+      "input": "[X, Y] = meshgrid(linspace(-2, 2, 50), linspace(-2, 2, 50));\nZ = sin(X.^2 + Y.^2);\nmeshc(X, Y, Z);"
     },
     {
-      "label": "contour",
-      "url": "./contour"
+      "description": "Compare wireframe/composite behavior with camera controls",
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 60), linspace(-3, 3, 60));\nZ = cos(X) .* sin(Y);\nh = meshc(X, Y, Z);\nview(3);\ncolormap('parula');"
     },
     {
-      "label": "contourf",
-      "url": "./contourf"
-    },
-    {
-      "label": "hist",
-      "url": "./hist"
-    },
-    {
-      "label": "mesh",
-      "url": "./mesh"
-    },
-    {
-      "label": "plot",
-      "url": "./plot"
-    },
-    {
-      "label": "scatter",
-      "url": "./scatter"
-    },
-    {
-      "label": "scatter3",
-      "url": "./scatter3"
-    },
-    {
-      "label": "stairs",
-      "url": "./stairs"
-    },
-    {
-      "label": "surf",
-      "url": "./surf"
-    },
-    {
-      "label": "surfc",
-      "url": "./surfc"
+      "description": "Inspect the returned primary surface handle",
+      "input": "[X, Y] = meshgrid(1:20, 1:20);\nZ = X - Y;\nh = meshc(X, Y, Z);\nget(h, 'Type')",
+      "output": "ans =\n    'surface'"
     }
+  ],
+  "links": [
+    { "label": "mesh", "url": "./mesh" },
+    { "label": "surfc", "url": "./surfc" },
+    { "label": "contour", "url": "./contour" },
+    { "label": "contourf", "url": "./contourf" },
+    { "label": "view", "url": "./view" }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/meshc.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/meshc.rs"
-  },
-  "gpu_behavior": [
-    "Single-precision gpuArrays stream directly into the shared WebGPU renderer.",
-    "Double precision falls back to host gathers until SHADER_F64 is available."
-  ]
+  }
 }

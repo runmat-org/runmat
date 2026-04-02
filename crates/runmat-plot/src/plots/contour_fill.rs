@@ -56,7 +56,12 @@ impl ContourFillPlot {
         self.bounds
     }
 
+    pub fn cpu_vertices(&self) -> Option<&[Vertex]> {
+        self.vertices.as_deref()
+    }
+
     pub fn render_data(&mut self) -> RenderData {
+        let bounds = self.bounds();
         let material = Material {
             albedo: Vec4::ONE,
             ..Default::default()
@@ -81,7 +86,7 @@ impl ContourFillPlot {
             vertices,
             indices: None,
             gpu_vertices,
-            bounds: None,
+            bounds: Some(bounds),
             material,
             draw_calls: vec![draw_call],
             image: None,

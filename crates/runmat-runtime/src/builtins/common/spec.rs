@@ -80,6 +80,7 @@ pub enum GpuOpKind {
     Reduction,
     MatMul,
     Transpose,
+    PlotRender,
     Custom(&'static str),
 }
 

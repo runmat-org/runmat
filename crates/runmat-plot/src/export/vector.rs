@@ -171,6 +171,18 @@ impl VectorExporter {
                     cx, cy, cx, cy, xml_escape(lbl)
                 ).map_err(|e| format!("SVG write error: {e}"))?;
             }
+            for pie_label in figure.pie_labels_for_axes(ax) {
+                let radius = vp.2.min(vp.3) * 0.4;
+                let screen_x = vp.0 + vp.2 * 0.5 + pie_label.position.x * radius;
+                let screen_y = vp.1 + vp.3 * 0.5 - pie_label.position.y * radius;
+                writeln!(
+                    &mut svg,
+                    "  <text x=\"{}\" y=\"{}\" text-anchor=\"middle\" font-size=\"12\" fill=\"#000000\" font-family=\"sans-serif\">{}</text>",
+                    screen_x,
+                    screen_y,
+                    xml_escape(&pie_label.label)
+                ).map_err(|e| format!("SVG write error: {e}"))?;
+            }
             self.add_render_data_to_svg_viewport(&mut svg, rd, vp)?;
         }
 

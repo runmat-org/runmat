@@ -4,21 +4,20 @@
   "keywords": [
     "stairs",
     "step plot",
-    "2-D plotting",
-    "gpuArray"
+    "stair plot",
+    "sampled signal",
+    "matlab stairs"
   ],
-  "summary": "Render MATLAB-compatible stairs (step) plots.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/stairs.html"
-  ],
+  "summary": "Create step plots for sampled signals, piecewise-constant data, and MATLAB `stairs` workflows.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [
-      "single"
+      "single",
+      "double"
     ],
     "broadcasting": "none",
-    "notes": "Single-precision gpuArray vectors stay on the device when a shared WebGPU renderer is available; other inputs gather first."
+    "notes": "`stairs` can use a direct GPU-backed geometry path when plotting-compatible buffers are available."
   },
   "fusion": {
     "elementwise": false,
@@ -30,64 +29,34 @@
   "tested": {
     "unit": "builtins::plotting::stairs::tests"
   },
-  "description": "`stairs(x, y)` draws a stairstep graph of the data in `y` versus the points in `x`, matching MATLAB's default styling. Each successive pair of points generates a horizontal segment followed by a vertical jump.",
+  "description": "`stairs` creates staircase-style line plots for sampled or piecewise-constant data. In RunMat it returns a plot handle, supports MATLAB `stairs(y)` and `stairs(x, y)` style workflows, and reuses the shared line/marker property model so step plots behave consistently with the rest of the plotting stack.",
   "behaviors": [
-    "Inputs must be real vectors of matching, non-zero length.",
-    "With `single` precision gpuArrays and the shared WebGPU renderer active, RunMat packs the vertex buffer directly on the GPU. Other data falls back to the CPU path automatically.",
-    "Like MATLAB, repeated calls append to the current axes when `hold on` is enabled."
+    "`stairs(y)` uses implicit x-values `1:n`, while `stairs(x, y)` uses explicit paired coordinates.",
+    "The returned value is a plot handle that works with `get` and `set`.",
+    "Marker styling and display names can be updated through the same handle/property system used by line plots.",
+    "Step-plot rendering is subplot-local and respects current axes state just like `plot` and `scatter`.",
+    "GPU-backed geometry is preferred when exported buffers and the shared plotting device are available."
   ],
   "examples": [
     {
-      "description": "",
-      "input": "t = 0:5;\nstairs(t, cumsum(rand(size(t))))"
+      "description": "Plot a sampled staircase signal",
+      "input": "t = 0:5;\nstairs(t, cumsum([1 -1 2 -2 1 0]));"
+    },
+    {
+      "description": "Use MATLAB-style y-only shorthand",
+      "input": "stairs([3 1 4 1 5 9]);"
+    },
+    {
+      "description": "Style a stairs object and label it for the legend",
+      "input": "h = stairs(0:4, [1 2 2 3 5]);\nset(h, 'Color', 'm', 'LineWidth', 2, 'DisplayName', 'sampled signal');\nlegend;"
     }
   ],
-  "faqs": [],
   "links": [
-    {
-      "label": "bar",
-      "url": "./bar"
-    },
-    {
-      "label": "contour",
-      "url": "./contour"
-    },
-    {
-      "label": "contourf",
-      "url": "./contourf"
-    },
-    {
-      "label": "hist",
-      "url": "./hist"
-    },
-    {
-      "label": "mesh",
-      "url": "./mesh"
-    },
-    {
-      "label": "meshc",
-      "url": "./meshc"
-    },
-    {
-      "label": "plot",
-      "url": "./plot"
-    },
-    {
-      "label": "scatter",
-      "url": "./scatter"
-    },
-    {
-      "label": "scatter3",
-      "url": "./scatter3"
-    },
-    {
-      "label": "surf",
-      "url": "./surf"
-    },
-    {
-      "label": "surfc",
-      "url": "./surfc"
-    }
+    { "label": "plot", "url": "./plot" },
+    { "label": "stem", "url": "./stem" },
+    { "label": "scatter", "url": "./scatter" },
+    { "label": "legend", "url": "./legend" },
+    { "label": "set", "url": "./set" }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/stairs.rs`",

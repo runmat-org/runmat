@@ -595,7 +595,7 @@ impl LinePlot {
             return self.render_data();
         }
 
-        let (vertices, vertex_count, pipeline) = if self.line_width > 1.0 {
+        let (vertices, vertex_count, pipeline, bounds) = if self.line_width > 1.0 {
             let bounds = self.bounds();
             let viewport_px = viewport_px.unwrap_or((600, 400));
             let data_per_px = crate::core::data_units_per_px(&bounds, viewport_px);
@@ -636,11 +636,11 @@ impl LinePlot {
                 }
             };
             let count = tris.len();
-            (tris, count, PipelineType::Triangles)
+            (tris, count, PipelineType::Triangles, self.bounds())
         } else {
             let verts = self.generate_vertices().clone();
             let count = verts.len();
-            (verts, count, PipelineType::Lines)
+            (verts, count, PipelineType::Lines, self.bounds())
         };
 
         let style_code = match self.line_style {
@@ -681,7 +681,7 @@ impl LinePlot {
             vertices,
             indices: None,
             gpu_vertices: None,
-            bounds: Some(self.bounds()),
+            bounds: Some(bounds),
             material,
             draw_calls: vec![draw_call],
             image: None,
@@ -710,7 +710,7 @@ impl LinePlot {
                 vertices: Vec::new(),
                 indices: None,
                 gpu_vertices: Some(gpu_vertices),
-                bounds: None,
+                bounds: Some(self.bounds()),
                 material,
                 draw_calls: vec![draw_call],
                 image: None,
@@ -734,7 +734,7 @@ impl LinePlot {
             vertices: vertices.to_vec(),
             indices: None,
             gpu_vertices: None,
-            bounds: None,
+            bounds: Some(self.bounds()),
             material,
             draw_calls: vec![draw_call],
             image: None,

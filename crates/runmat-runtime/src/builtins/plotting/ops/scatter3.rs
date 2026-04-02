@@ -1,10 +1,11 @@
 //! MATLAB-compatible `scatter3` builtin.
 
-use futures::executor::block_on;
 use glam::{Vec3, Vec4};
 use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
-use runmat_builtins::{Tensor, Value};
+#[cfg(test)]
+use runmat_builtins::Tensor;
+use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 use runmat_plot::core::BoundingBox;
 use runmat_plot::gpu::scatter2::{ScatterAttributeBuffer, ScatterColorBuffer};
@@ -14,17 +15,17 @@ use runmat_plot::plots::surface::ColorMap;
 use runmat_plot::plots::LineStyle;
 use runmat_plot::plots::Scatter3Plot;
 
-use crate::builtins::common::map_control_flow_with_builtin;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::gather_if_needed_async;
 use crate::{BuiltinResult, RuntimeError};
 use std::convert::TryFrom;
 
-use super::common::numeric_triplet;
+use super::common::{gather_tensor_from_gpu, numeric_triplet};
 use super::gpu_helpers::axis_bounds;
+use super::op_common::line_inputs::NumericInput as ScatterInput;
+use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::perf::scatter3_lod_stride;
 use super::plotting_error;
 use super::point::{
@@ -34,14 +35,14 @@ use super::point::{
 };
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::LineStyleParseOptions;
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 const BUILTIN_NAME: &str = "scatter3";
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::scatter3")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "scatter3",
-    op_kind: GpuOpKind::Custom("plot-render"),
+    op_kind: GpuOpKind::PlotRender,
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
@@ -73,7 +74,7 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "scatter3,plotting,3d,pointcloud",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::scatter3"
 )]
 pub async fn scatter3_builtin(
@@ -81,11 +82,24 @@ pub async fn scatter3_builtin(
     y: Value,
     z: Value,
     rest: Vec<Value>,
-) -> crate::BuiltinResult<String> {
+) -> crate::BuiltinResult<f64> {
+    let mut args = vec![x, y, z];
+    args.extend(rest);
+    let (axes_target, mut args) = split_leading_axes_handle(args, BUILTIN_NAME)?;
+    apply_axes_target(axes_target, BUILTIN_NAME)?;
+    if args.len() < 3 {
+        return Err(scatter3_err(
+            "scatter3: expected X, Y, and Z data after axes handle",
+        ));
+    }
+    let x = args.remove(0);
+    let y = args.remove(0);
+    let z = args.remove(0);
+    let rest = args;
     let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter3())?;
-    let mut x_input = Some(ScatterInput::from_value(x)?);
-    let mut y_input = Some(ScatterInput::from_value(y)?);
-    let mut z_input = Some(ScatterInput::from_value(z)?);
+    let mut x_input = Some(ScatterInput::from_value(x, BUILTIN_NAME)?);
+    let mut y_input = Some(ScatterInput::from_value(y, BUILTIN_NAME)?);
+    let mut z_input = Some(ScatterInput::from_value(z, BUILTIN_NAME)?);
     let opts = PlotRenderOptions {
         title: "3-D Scatter",
         x_label: "X",
@@ -93,7 +107,10 @@ pub async fn scatter3_builtin(
         axis_equal: true,
         ..Default::default()
     };
-    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+    let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let style_args = style_args.clone();
         let point_count = x_input.as_ref().map(|input| input.len()).unwrap_or(0);
         let mut resolved_style = resolve_scatter3_style(point_count, &style_args, "scatter3")?;
@@ -107,7 +124,8 @@ pub async fn scatter3_builtin(
             if !resolved_style.requires_cpu {
                 match build_scatter3_gpu_plot(x_gpu, y_gpu, z_gpu, &resolved_style) {
                     Ok(plot) => {
-                        figure.add_scatter3_plot_on_axes(plot, axes);
+                        let plot_index = figure.add_scatter3_plot_on_axes(plot, axes);
+                        *plot_index_slot.borrow_mut() = Some((axes, plot_index));
                         return Ok(());
                     }
                     Err(err) => {
@@ -124,10 +142,23 @@ pub async fn scatter3_builtin(
         );
         let (x_vals, y_vals, z_vals) = numeric_triplet(x_tensor, y_tensor, z_tensor, "scatter3")?;
         let scatter = build_scatter3_plot(x_vals, y_vals, z_vals, &mut resolved_style)?;
-        figure.add_scatter3_plot_on_axes(scatter, axes);
+        let plot_index = figure.add_scatter3_plot_on_axes(scatter, axes);
+        *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())
-    })?;
-    Ok(rendered)
+    });
+    let Some((axes, plot_index)) = *plot_index_out.borrow() else {
+        return render_result.map(|_| f64::NAN);
+    };
+    let handle =
+        crate::builtins::plotting::state::register_scatter3_handle(figure_handle, axes, plot_index);
+    if let Err(err) = render_result {
+        let lower = err.to_string().to_lowercase();
+        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+            return Ok(handle);
+        }
+        return Err(err);
+    }
+    Ok(handle)
 }
 
 const DEFAULT_POINT_SIZE: f32 = 6.0;
@@ -278,60 +309,6 @@ fn build_scatter3_plot(
             .map_err(|e| scatter3_err(format!("scatter3: {e}")))?;
     }
     Ok(scatter)
-}
-
-enum ScatterInput {
-    Host(Tensor),
-    Gpu(GpuTensorHandle),
-}
-
-impl ScatterInput {
-    fn from_value(value: Value) -> BuiltinResult<Self> {
-        match value {
-            Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
-            other => {
-                let tensor =
-                    Tensor::try_from(&other).map_err(|e| scatter3_err(format!("scatter3: {e}")))?;
-                Ok(Self::Host(tensor))
-            }
-        }
-    }
-
-    fn gpu_handle(&self) -> Option<&GpuTensorHandle> {
-        match self {
-            Self::Gpu(handle) => Some(handle),
-            Self::Host(_) => None,
-        }
-    }
-
-    fn len(&self) -> usize {
-        match self {
-            Self::Host(tensor) => tensor.data.len(),
-            Self::Gpu(handle) => handle.shape.iter().product(),
-        }
-    }
-
-    fn into_tensor(self, name: &'static str) -> BuiltinResult<Tensor> {
-        match self {
-            Self::Host(t) => Ok(t),
-            Self::Gpu(handle) => gather_tensor_from_gpu(handle, name),
-        }
-    }
-}
-
-async fn gather_tensor_from_gpu_async(
-    handle: GpuTensorHandle,
-    name: &'static str,
-) -> BuiltinResult<Tensor> {
-    let value = Value::GpuTensor(handle);
-    let gathered = gather_if_needed_async(&value)
-        .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, name))?;
-    Tensor::try_from(&gathered).map_err(|e| scatter3_err(format!("{name}: {e}")))
-}
-
-fn gather_tensor_from_gpu(handle: GpuTensorHandle, name: &'static str) -> BuiltinResult<Tensor> {
-    block_on(gather_tensor_from_gpu_async(handle, name))
 }
 
 fn build_scatter3_gpu_plot(
@@ -519,17 +496,25 @@ fn ensure_scatter3_host_metadata(
 pub(crate) mod tests {
     use super::super::style::LineStyleParseOptions;
     use super::*;
+    use crate::builtins::plotting::state::current_axes_handle_for_figure;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use crate::builtins::plotting::{
+        clear_figure, clone_figure, configure_subplot, current_figure_handle,
+        reset_hold_state_for_run,
+    };
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_builtins::Value;
     use runmat_builtins::{ResolveContext, Type};
+    use runmat_plot::plots::PlotElement;
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
     }
 
-    fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> BuiltinResult<String> {
+    fn scatter3_builtin(x: Value, y: Value, z: Value, rest: Vec<Value>) -> BuiltinResult<f64> {
         block_on(super::scatter3_builtin(x, y, z, rest))
     }
 
@@ -621,13 +606,47 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn scatter3_type_is_string() {
+    fn scatter3_type_is_numeric_handle() {
         assert_eq!(
-            string_type(
+            handle_scalar_type(
                 &[Type::tensor(), Type::tensor(), Type::tensor()],
                 &ResolveContext::new(Vec::new())
             ),
-            Type::String
+            Type::Num
         );
+    }
+
+    #[test]
+    fn scatter3_accepts_leading_axes_handle() {
+        let _guard = crate::builtins::plotting::tests::lock_plot_registry();
+        setup_plot_tests();
+        configure_subplot(1, 2, 1).unwrap();
+        let fig_handle = current_figure_handle();
+        let ax = current_axes_handle_for_figure(fig_handle).unwrap();
+        let _ = scatter3_builtin(
+            Value::Num(ax),
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[1.0, 2.0])),
+            vec![Value::Tensor(tensor_from(&[2.0, 3.0]))],
+        );
+        let fig = clone_figure(fig_handle).unwrap();
+        assert_eq!(fig.plot_axes_indices(), &[1]);
+    }
+
+    #[test]
+    fn scatter3_accepts_scalar_point() {
+        let _guard = crate::builtins::plotting::tests::lock_plot_registry();
+        setup_plot_tests();
+        let _ = scatter3_builtin(
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(3.0),
+            Vec::new(),
+        );
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::Scatter3(plot) = fig.plots().next().unwrap() else {
+            panic!("expected scatter3")
+        };
+        assert_eq!(plot.points, vec![glam::Vec3::new(1.0, 2.0, 3.0)]);
     }
 }

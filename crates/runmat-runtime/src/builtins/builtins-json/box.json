@@ -1,0 +1,42 @@
+{
+  "title": "box",
+  "category": "plotting",
+  "keywords": [
+    "box",
+    "axes box",
+    "box on",
+    "box off",
+    "matlab box"
+  ],
+  "summary": "Toggle axes box outlines for chart framing, presentation, and MATLAB `box on` / `box off` workflows.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::cmds"
+  },
+  "description": "`box` controls whether the current axes draw their outer frame. Like MATLAB, RunMat supports `box on`, `box off`, and bare `box` toggling. This is mainly a presentation/state command, so it is usually used alongside `axis`, `grid`, and subplot-specific styling.",
+  "behaviors": [
+    "`box on` enables the axes frame on the current axes.",
+    "`box off` disables the axes frame on the current axes.",
+    "Calling `box` with no argument toggles the current state.",
+    "Box state is subplot-local and applies to the currently active axes."
+  ],
+  "examples": [
+    {
+      "description": "Turn the axes frame on for a chart",
+      "input": "plot(1:5, [1 4 2 5 3]);\nbox on;"
+    },
+    {
+      "description": "Style subplots independently",
+      "input": "subplot(1, 2, 1);\nplot(1:5, 1:5);\nbox off;\nsubplot(1, 2, 2);\nplot(1:5, [5 4 3 2 1]);\nbox on;"
+    }
+  ],
+  "links": [
+    { "label": "axis", "url": "./axis" },
+    { "label": "grid", "url": "./grid" },
+    { "label": "subplot", "url": "./subplot" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs"
+  }
+}

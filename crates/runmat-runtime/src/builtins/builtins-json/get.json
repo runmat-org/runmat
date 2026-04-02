@@ -1,0 +1,49 @@
+{
+  "title": "get",
+  "category": "plotting",
+  "keywords": [
+    "get",
+    "graphics handle",
+    "plot properties",
+    "matlab get",
+    "inspect plotting state"
+  ],
+  "summary": "Inspect figure, axes, and plot-object properties through RunMat’s graphics handles and MATLAB-style `get` workflows.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::get::tests"
+  },
+  "description": "`get` reads properties from plotting handles such as figures, axes, titles, legends, and plot objects. In RunMat, it is the public read path for the expanded plotting object system: line handles, image handles, histogram handles, contour handles, and other plotting objects can all be queried through a single MATLAB-style property interface.",
+  "behaviors": [
+    "`get(h)` returns a struct of known properties for the handle `h`.",
+    "`get(h, 'PropertyName')` returns a single property value.",
+    "The supported property set depends on the handle family: figure, axes, text, legend, and child plot objects each expose different fields.",
+    "RunMat uses `get` to surface subplot-local state such as limits, scale modes, legend visibility, and text metadata.",
+    "The handle families covered by `get` now extend across the major plot families rather than just the most recently added plotting builtins."
+  ],
+  "examples": [
+    {
+      "description": "Inspect the full property struct for a line handle",
+      "input": "h = plot(1:5, [1 4 2 5 3]);\nprops = get(h);"
+    },
+    {
+      "description": "Read an axes-local property",
+      "input": "ax = subplot(1, 2, 2);\nsemilogx(logspace(0, 2, 50), logspace(0, 2, 50));\nget(ax, 'XScale')",
+      "output": "ans =\n    'log'"
+    },
+    {
+      "description": "Inspect a legend handle after creation",
+      "input": "plot(1:5, 1:5);\nlg = legend('series');\nget(lg, 'Orientation')"
+    }
+  ],
+  "links": [
+    { "label": "set", "url": "./set" },
+    { "label": "legend", "url": "./legend" },
+    { "label": "subplot", "url": "./subplot" },
+    { "label": "plot", "url": "./plot" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/get.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/get.rs"
+  }
+}

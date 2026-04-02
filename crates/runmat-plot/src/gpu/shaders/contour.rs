@@ -79,9 +79,32 @@ fn interpolate_edge(edge: u32, corners: array<vec2<f32>, 4>, values: array<f32, 
         case 2u: { a = corners[2u]; b = corners[3u]; va = values[2u]; vb = values[3u]; }
         default: { a = corners[3u]; b = corners[0u]; va = values[3u]; vb = values[0u]; }
     }
-    let denom = max(abs(vb - va), 1e-6);
-    let t = clamp((level - va) / denom, 0.0, 1.0);
+    let delta = vb - va;
+    let t = if (abs(delta) <= 1e-6) { 0.5 } else { clamp((level - va) / delta, 0.0, 1.0) };
     return mix(a, b, t);
+}
+
+fn add_ambiguous_segments(
+    case_index: u32,
+    corners: array<vec2<f32>, 4>,
+    values: array<f32, 4>,
+    level: f32,
+    io_segments: ptr<function, array<vec2<f32>, 4>>,
+    io_count: ptr<function, u32>,
+) {
+    let f00 = values[0u] - level;
+    let f10 = values[1u] - level;
+    let f11 = values[2u] - level;
+    let f01 = values[3u] - level;
+    let q = f00 * f11 - f10 * f01;
+    let use_default = q > 0.0 || (abs(q) <= 1e-6 && case_index == 5u);
+    if (use_default) {
+        add_segment(3u, 2u, corners, values, level, io_segments, io_count);
+        add_segment(0u, 1u, corners, values, level, io_segments, io_count);
+    } else {
+        add_segment(3u, 0u, corners, values, level, io_segments, io_count);
+        add_segment(1u, 2u, corners, values, level, io_segments, io_count);
+    }
 }
 
 fn write_vertex_range(base_index: u32, segment_points: array<vec2<f32>, 4>, segment_count: u32, color: vec4<f32>) {
@@ -170,14 +193,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         case 2u, 13u: { add_segment(0u, 1u, corners, values, level, &segments, &segment_count); }
         case 3u, 12u: { add_segment(3u, 1u, corners, values, level, &segments, &segment_count); }
         case 4u, 11u: { add_segment(1u, 2u, corners, values, level, &segments, &segment_count); }
-        case 5u: {
-            add_segment(3u, 2u, corners, values, level, &segments, &segment_count);
-            add_segment(0u, 1u, corners, values, level, &segments, &segment_count);
-        }
-        case 10u: {
-            add_segment(0u, 1u, corners, values, level, &segments, &segment_count);
-            add_segment(3u, 2u, corners, values, level, &segments, &segment_count);
-        }
+        case 5u, 10u: { add_ambiguous_segments(case_index, corners, values, level, &segments, &segment_count); }
         case 6u, 9u: { add_segment(0u, 2u, corners, values, level, &segments, &segment_count); }
         case 7u, 8u: { add_segment(3u, 2u, corners, values, level, &segments, &segment_count); }
     }
@@ -270,9 +286,32 @@ fn interpolate_edge(edge: u32, corners: array<vec2<f32>, 4>, values: array<f32, 
         case 2u: { a = corners[2u]; b = corners[3u]; va = values[2u]; vb = values[3u]; }
         default: { a = corners[3u]; b = corners[0u]; va = values[3u]; vb = values[0u]; }
     }
-    let denom = max(abs(vb - va), 1e-6);
-    let t = clamp((level - va) / denom, 0.0, 1.0);
+    let delta = vb - va;
+    let t = if (abs(delta) <= 1e-6) { 0.5 } else { clamp((level - va) / delta, 0.0, 1.0) };
     return mix(a, b, t);
+}
+
+fn add_ambiguous_segments(
+    case_index: u32,
+    corners: array<vec2<f32>, 4>,
+    values: array<f32, 4>,
+    level: f32,
+    io_segments: ptr<function, array<vec2<f32>, 4>>,
+    io_count: ptr<function, u32>,
+) {
+    let f00 = values[0u] - level;
+    let f10 = values[1u] - level;
+    let f11 = values[2u] - level;
+    let f01 = values[3u] - level;
+    let q = f00 * f11 - f10 * f01;
+    let use_default = q > 0.0 || (abs(q) <= 1e-6 && case_index == 5u);
+    if (use_default) {
+        add_segment(3u, 2u, corners, values, level, io_segments, io_count);
+        add_segment(0u, 1u, corners, values, level, io_segments, io_count);
+    } else {
+        add_segment(3u, 0u, corners, values, level, io_segments, io_count);
+        add_segment(1u, 2u, corners, values, level, io_segments, io_count);
+    }
 }
 
 fn write_vertex_range(base_index: u32, segment_points: array<vec2<f32>, 4>, segment_count: u32, color: vec4<f32>) {
@@ -361,14 +400,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         case 2u, 13u: { add_segment(0u, 1u, corners, values, level, &segments, &segment_count); }
         case 3u, 12u: { add_segment(3u, 1u, corners, values, level, &segments, &segment_count); }
         case 4u, 11u: { add_segment(1u, 2u, corners, values, level, &segments, &segment_count); }
-        case 5u: {
-            add_segment(3u, 2u, corners, values, level, &segments, &segment_count);
-            add_segment(0u, 1u, corners, values, level, &segments, &segment_count);
-        }
-        case 10u: {
-            add_segment(0u, 1u, corners, values, level, &segments, &segment_count);
-            add_segment(3u, 2u, corners, values, level, &segments, &segment_count);
-        }
+        case 5u, 10u: { add_ambiguous_segments(case_index, corners, values, level, &segments, &segment_count); }
         case 6u, 9u: { add_segment(0u, 2u, corners, values, level, &segments, &segment_count); }
         case 7u, 8u: { add_segment(3u, 2u, corners, values, level, &segments, &segment_count); }
     }

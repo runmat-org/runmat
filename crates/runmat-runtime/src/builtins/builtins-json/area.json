@@ -1,0 +1,77 @@
+{
+  "title": "area",
+  "category": "plotting",
+  "keywords": [
+    "area",
+    "area plot",
+    "filled area chart",
+    "stacked area chart",
+    "matlab area",
+    "cumulative area visualization"
+  ],
+  "summary": "Create filled area plots for cumulative totals, stacked series, and MATLAB `area` workflows.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`area` uses a GPU-backed geometry path, including stacked-series geometry generation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::area::tests",
+    "integration": "runmat-plot/src/gpu/area.rs::tests"
+  },
+  "description": "`area` creates filled area plots from vector or matrix-style inputs. In RunMat it returns an area-handle object, supports baseline-based and stacked-series workflows, and uses GPU-backed geometry generation together with the shared plotting object and rendering systems.",
+  "behaviors": [
+    "`area(y)` uses implicit x-values `1:n`, while `area(x, y)` uses explicit x coordinates.",
+    "Matrix-style `y` inputs create stacked area series in the MATLAB style.",
+    "The returned value is an area-handle object that works with `get` and `set`.",
+    "Baseline and color workflows flow through the shared plotting property model.",
+    "Stacked-series geometry can be emitted directly from GPU buffers on the happy path."
+  ],
+  "options": [
+    "`'BaseValue'` sets the baseline used by area filling.",
+    "Color and display-name workflows are available through the returned handle and the shared plotting property path."
+  ],
+  "examples": [
+    {
+      "description": "Create a basic filled area plot",
+      "input": "x = 0:0.1:1;\narea(x, x.^2);"
+    },
+    {
+      "description": "Create stacked area series from a matrix",
+      "input": "x = 1:5;\nY = [1 2 1; 2 1 2; 3 2 1; 2 3 2; 1 2 3];\narea(x, Y);"
+    },
+    {
+      "description": "Change the baseline and label the series through the handle",
+      "input": "x = 0:0.2:2;\nh = area(x, sin(x) + 2);\nset(h, 'BaseValue', 1, 'DisplayName', 'offset area');\nlegend;"
+    }
+  ],
+  "links": [
+    { "label": "quiver", "url": "./quiver" },
+    { "label": "bar", "url": "./bar" },
+    { "label": "plot", "url": "./plot" },
+    { "label": "legend", "url": "./legend" },
+    { "label": "get", "url": "./get" },
+    { "label": "set", "url": "./set" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/area.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/area.rs"
+  },
+  "gpu_residency": "`area` preserves GPU residency on the direct path, including stacked-series geometry generation. Fallback rendering still preserves the same visible semantics and handle behavior when a direct GPU path is not available.",
+  "gpu_behavior": [
+    "The direct area path emits filled geometry from GPU data on the happy path.",
+    "Baseline semantics, stacked-series behavior, and handle/property workflows remain aligned across GPU and fallback paths."
+  ]
+}

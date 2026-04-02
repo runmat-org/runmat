@@ -9,6 +9,7 @@ import {
     readFileSync,
     readdirSync,
     statSync,
+    unlinkSync,
     writeFileSync
 } from "fs";
 import { basename, dirname, extname, join, resolve } from "path";
@@ -27,7 +28,10 @@ import { fileURLToPath } from "url";
  * @property {string} description
  * @property {string} input
  * @property {string} expectedOutput
+ * @property {boolean} hasExpectedOutput
  * @property {number} exampleIndex
+ * @property {string} category
+ * @property {boolean} isPlotExample
  */
 
 /**
@@ -36,12 +40,15 @@ import { fileURLToPath } from "url";
  * @property {string} stdoutText
  * @property {string} valueText
  * @property {string} errorText
+ * @property {string} [figurePngBase64]
+ * @property {string} [figureImageError]
  */
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const repoRoot = findRepoRoot(scriptDir);
 const builtinsDir = join(repoRoot, "crates", "runmat-runtime", "src", "builtins", "builtins-json");
 const outputDir = join(repoRoot, "scripts", "example-output-reports");
+const imageOutputDir = join(outputDir, "plot-example-images");
 const reportPath = join(outputDir, "example-output-report.html");
 const markdownReportPath = join(outputDir, "example-output-report.md");
 const chromeWrapper = join(repoRoot, "scripts", "chrome-headless.sh");
@@ -57,7 +64,7 @@ if (!existsSync(wasmModule) || !existsSync(wasmBinary)) {
 
 const cases = collectCases(builtinsDir);
 if (cases.length === 0) {
-    console.log("No examples with output fields found.");
+    console.log("No examples found to run.");
     process.exit(0);
 }
 
@@ -78,34 +85,44 @@ const results = await runHeadlessChrome({
 });
 
 const resultsById = new Map(results.map((result) => [result.id, result]));
-const debugCase = cases.find(
-    (testCase) => testCase.builtin === "cellfun" && testCase.exampleIndex === 0
-);
-if (debugCase) {
-    const result = resultsById.get(debugCase.id);
-    const info = result && typeof result.debugInfo === "string" ? result.debugInfo : "";
-    const err = result && typeof result.debugError === "string" ? result.debugError : "";
-    const debugLine = `[debug] exist('make_handle','builtin') => "${info}" error="${err}"\n`;
-    console.log(debugLine.trimEnd());
-    try {
-        writeFileSync("/tmp/runmat-debug.txt", debugLine, "utf8");
-    } catch (e) {}
-}
 
 mkdirSync(outputDir, { recursive: true });
+mkdirSync(imageOutputDir, { recursive: true });
 
 const rows = cases.map((testCase) => {
     const result = resultsById.get(testCase.id);
     const wasmOutput = formatWasmOutput(result);
     const normalizedExpected = normalizeOutput(testCase.expectedOutput);
     const normalizedWasm = normalizeOutput(wasmOutput);
+    const imageRelPath = writePlotImageArtifact(imageOutputDir, testCase, result);
+    const captureError = result && typeof result.figureImageError === "string" ? result.figureImageError : "";
+    const executionError = result && typeof result.errorText === "string" ? result.errorText : "";
+    const imageError = captureError || (executionError ? "image capture skipped because example execution returned an error" : "");
+    const hasExecutionError = Boolean(result && typeof result.errorText === "string" && result.errorText.trim().length > 0);
     return {
         testCase,
         normalizedExpected,
         normalizedWasm,
-        matches: normalizedExpected === normalizedWasm
+        imageRelPath,
+        imageError,
+        matches: testCase.hasExpectedOutput ? normalizedExpected === normalizedWasm : !hasExecutionError
     };
 });
+
+const plotImageErrors = rows
+    .filter((row) => row.testCase.isPlotExample && !row.imageRelPath)
+    .map((row) => {
+        const why = row.imageError && row.imageError.trim().length > 0 ? row.imageError.trim() : "(no error message)";
+        return `#${row.testCase.id} ${row.testCase.file} example ${row.testCase.exampleIndex + 1}\n${why}`;
+    });
+if (plotImageErrors.length > 0) {
+    writeFileSync(join(outputDir, "plot-image-capture-errors.txt"), `${plotImageErrors.join("\n\n")}\n`, "utf8");
+} else {
+    const captureErrorsPath = join(outputDir, "plot-image-capture-errors.txt");
+    if (existsSync(captureErrorsPath)) {
+        unlinkSync(captureErrorsPath);
+    }
+}
 
 const reportRows = filterReportRows(rows, reportMode);
 const reportHtml = buildReportHtml(rows, reportRows, reportMode);
@@ -157,10 +174,15 @@ function collectCases(dir) {
         const examples = Array.isArray(parsed.examples) ? parsed.examples : [];
         for (let i = 0; i < examples.length; i += 1) {
             const example = examples[i];
-            if (!example || typeof example.output !== "string") {
+            if (!example || typeof example.input !== "string" || example.input.trim().length === 0) {
                 continue;
             }
-            if (is_comment_only_output(example.output)) {
+            const isPlotExample = is_plot_example(category);
+            const hasExpectedOutput = typeof example.output === "string";
+            if (!hasExpectedOutput && !isPlotExample) {
+                continue;
+            }
+            if (hasExpectedOutput && is_comment_only_output(example.output)) {
                 continue;
             }
             const description = typeof example.description === "string" && example.description.trim().length > 0
@@ -171,14 +193,55 @@ function collectCases(dir) {
                 builtin: parsed.title ?? basename(file, ".json"),
                 file,
                 description,
-                input: example.input ?? "",
-                expectedOutput: example.output,
-                exampleIndex: i
+                input: example.input,
+                expectedOutput: hasExpectedOutput ? example.output : "",
+                hasExpectedOutput,
+                exampleIndex: i,
+                category,
+                isPlotExample
             });
         }
     }
 
-    return cases;
+    const filtered = applyCaseFilter(cases);
+    return applyCaseLimit(filtered);
+}
+
+/**
+ * @param {ExampleCase[]} cases
+ */
+function applyCaseFilter(cases) {
+    const raw = process.env.RUNMAT_EXAMPLE_FILTER;
+    if (!raw || raw.trim().length === 0) {
+        return cases;
+    }
+    const needle = raw.toLowerCase();
+    return cases.filter((testCase) => {
+        const hay = `${testCase.builtin}\n${testCase.file}\n${testCase.description}\n${testCase.input}\n${testCase.category}`.toLowerCase();
+        return hay.includes(needle);
+    });
+}
+
+/**
+ * @param {ExampleCase[]} cases
+ */
+function applyCaseLimit(cases) {
+    const raw = process.env.RUNMAT_EXAMPLE_LIMIT;
+    if (!raw) {
+        return cases;
+    }
+    const n = Number.parseInt(raw, 10);
+    if (!Number.isFinite(n) || n <= 0) {
+        return cases;
+    }
+    return cases.slice(0, n);
+}
+
+/**
+ * @param {string} category
+ */
+function is_plot_example(category) {
+    return category === "plotting" || category.startsWith("plotting/");
 }
 
 /**
@@ -371,8 +434,9 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "  let stdoutText = \"\";",
         "  let valueText = \"\";",
         "  let errorText = \"\";",
-        "  let debugInfo = \"\";",
-        "  let debugError = \"\";",
+        "  let figurePngBase64 = \"\";",
+        "  let figureImageError = \"\";",
+        "  let plotSurfaceId = null;",
         "  const normalizeErrorText = (errorValue) => {",
         "    if (typeof errorValue === \"string\") return errorValue;",
         "    if (!errorValue || typeof errorValue !== \"object\") return String(errorValue || \"\");",
@@ -385,7 +449,30 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "      return String(errorValue);",
         "    }",
         "  };",
+        "  const patchWebGpuRequestDevice = () => {",
+        "    if (typeof navigator !== \"object\" || !navigator || !navigator.gpu) return;",
+        "    const ctor = typeof GPUAdapter === \"function\" ? GPUAdapter : null;",
+        "    const proto = ctor && ctor.prototype ? ctor.prototype : null;",
+        "    if (!proto) return;",
+        "    const current = proto.requestDevice;",
+        "    if (typeof current !== \"function\" || current.__runmatPatched) return;",
+        "    const wrapped = function(descriptor) {",
+        "      if (!descriptor || typeof descriptor !== \"object\") {",
+        "        return current.call(this, descriptor);",
+        "      }",
+        "      const safeDescriptor = { ...descriptor };",
+        "      if (safeDescriptor.requiredLimits && typeof safeDescriptor.requiredLimits === \"object\") {",
+        "        const limits = { ...safeDescriptor.requiredLimits };",
+        "        delete limits.maxInterStageShaderComponents;",
+        "        safeDescriptor.requiredLimits = limits;",
+        "      }",
+        "      return current.call(this, safeDescriptor);",
+        "    };",
+        "    wrapped.__runmatPatched = true;",
+        "    proto.requestDevice = wrapped;",
+        "  };",
         "  try {",
+        "    patchWebGpuRequestDevice();",
         "    if (typeof self.process !== \"object\" || !self.process) {",
         "      self.process = { env: {} };",
         "    }",
@@ -442,20 +529,20 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "      fsProvider: fsProvider || undefined",
         "    });",
         "    try {",
+        "      if (typeof OffscreenCanvas !== \"undefined\" && typeof module.createPlotSurface === \"function\") {",
+        "        const bootstrapCanvas = new OffscreenCanvas(16, 16);",
+        "        plotSurfaceId = await Promise.resolve(module.createPlotSurface(bootstrapCanvas));",
+        "        if (typeof module.resizePlotSurface === \"function\" && typeof plotSurfaceId === \"number\") {",
+        "          await Promise.resolve(module.resizePlotSurface(plotSurfaceId, 16, 16, 1));",
+        "        }",
+        "      }",
+        "    } catch (_surfaceErr) {",
+        "      plotSurfaceId = null;",
+        "    }",
+        "    try {",
         "      try {",
         "        await Promise.resolve(session.execute(\"cd('/')\"));",
         "      } catch (err) {}",
-        "      try {",
-        "        const check = await Promise.resolve(session.execute(\"exist('make_handle','builtin')\"));",
-        "        if (check && typeof check.valueText === \"string\") {",
-        "          debugInfo = check.valueText;",
-        "        }",
-        "        if (check && check.error != null) {",
-        "          debugError = normalizeErrorText(check.error);",
-        "        }",
-        "      } catch (err) {",
-        "        debugError = err instanceof Error ? err.message : String(err);",
-        "      }",
         "      const execResult = await Promise.resolve(session.execute(testCase.input));",
         "      if (execResult && Array.isArray(execResult.stdout)) {",
         "        stdoutText = execResult.stdout.map((entry) => entry.text || \"\").join(\"\\n\");",
@@ -466,7 +553,40 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "      if (execResult && execResult.error != null) {",
         "        errorText = normalizeErrorText(execResult.error);",
         "      }",
+        "      if (testCase.isPlotExample === true) {",
+        "        try {",
+        "          if (typeof module.renderFigureImage === \"function\") {",
+        "            const handle = typeof module.currentFigureHandle === \"function\" ? await Promise.resolve(module.currentFigureHandle()) : undefined;",
+        "            const numericHandle = typeof handle === \"number\" && Number.isFinite(handle) ? handle : undefined;",
+        "            if (typeof plotSurfaceId === \"number\" && Number.isFinite(plotSurfaceId) && typeof numericHandle === \"number\" && typeof module.presentFigureOnSurface === \"function\") {",
+        "              try { await Promise.resolve(module.presentFigureOnSurface(plotSurfaceId, numericHandle)); } catch (_presentErr) {}",
+        "            }",
+        "            const pngBytes = await Promise.resolve(module.renderFigureImage(numericHandle, 1280, 720));",
+        "            const bytes = pngBytes instanceof Uint8Array ? pngBytes : new Uint8Array(pngBytes || []);",
+        "            if (bytes.length > 0) {",
+        "              let binary = \"\";",
+        "              const chunkSize = 0x8000;",
+        "              for (let offset = 0; offset < bytes.length; offset += chunkSize) {",
+        "                const chunk = bytes.subarray(offset, Math.min(offset + chunkSize, bytes.length));",
+        "                binary += String.fromCharCode(...chunk);",
+        "              }",
+        "              figurePngBase64 = btoa(binary);",
+        "            } else {",
+        "              figureImageError = \"renderFigureImage returned no bytes\";",
+        "            }",
+        "          }",
+        "        } catch (err) {",
+        "          let extra = \"\";",
+        "          try { extra = JSON.stringify(err); } catch (_e) {}",
+        "          figureImageError = normalizeErrorText(err) + (extra ? ` :: ${extra}` : \"\");",
+        "        }",
+        "      }",
         "    } finally {",
+        "      try {",
+        "        if (typeof plotSurfaceId === \"number\" && Number.isFinite(plotSurfaceId) && typeof module.destroyPlotSurface === \"function\") {",
+        "          module.destroyPlotSurface(plotSurfaceId);",
+        "        }",
+        "      } catch (_destroyErr) {}",
         "      if (typeof session.dispose === \"function\") {",
         "        session.dispose();",
         "      }",
@@ -474,7 +594,7 @@ function createRunnerHtml(timeoutMs, concurrency, logIntervalMs) {
         "  } catch (err) {",
         "    errorText = err instanceof Error ? err.message : String(err);",
         "  }",
-        "  self.postMessage({ id: testCase.id, stdoutText, valueText, errorText, debugInfo, debugError });",
+        "  self.postMessage({ id: testCase.id, stdoutText, valueText, errorText, figurePngBase64, figureImageError });",
         "};"
     ].join("\n");
     return `<!doctype html>
@@ -985,7 +1105,7 @@ function formatWasmOutput(result) {
  * @param {ExampleCase} testCase
  */
 /**
- * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, matches: boolean }[]} rows
+ * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, imageRelPath: string, imageError: string, matches: boolean }[]} rows
  */
 function buildReportHtml(allRows, reportRows, reportMode) {
     const title = "RunMat Builtins Example Output Report";
@@ -1002,8 +1122,13 @@ function buildReportHtml(allRows, reportRows, reportMode) {
             `${row.testCase.file} (example ${row.testCase.exampleIndex + 1})`
         );
         const input = escapeHtml(row.testCase.input ?? "");
-        const expected = escapeHtml(row.normalizedExpected);
+        const expected = escapeHtml(row.testCase.hasExpectedOutput ? row.normalizedExpected : "(execution-only: no expected output)");
         const actual = escapeHtml(row.normalizedWasm);
+        const imageCell = row.testCase.isPlotExample
+            ? row.imageRelPath
+                ? `<a href="${escapeHtml(row.imageRelPath)}" target="_blank" rel="noopener"><img src="${escapeHtml(row.imageRelPath)}" alt="${escapeHtml(row.testCase.builtin)} plot image" class="plot-preview" /></a>`
+                : `<div class="meta">No image captured</div>${row.imageError ? `<pre>${escapeHtml(row.imageError)}</pre>` : ""}`
+            : `<div class="meta">N/A</div>`;
         return `<tr>
       <td>
         <div class="status ${statusClass}" title="${statusLabel}">${statusSymbol}</div>
@@ -1013,6 +1138,7 @@ function buildReportHtml(allRows, reportRows, reportMode) {
       </td>
       <td><pre>${expected}</pre></td>
       <td><pre>${actual}</pre></td>
+      <td>${imageCell}</td>
     </tr>`;
     }).join("");
 
@@ -1073,6 +1199,13 @@ function buildReportHtml(allRows, reportRows, reportMode) {
         font-family: "SFMono-Regular", Menlo, Consolas, "Liberation Mono", monospace;
         font-size: 13px;
       }
+      .plot-preview {
+        width: 100%;
+        max-width: 360px;
+        border: 1px solid #ddd;
+        border-radius: 6px;
+        background: #fff;
+      }
     </style>
   </head>
   <body>
@@ -1092,6 +1225,7 @@ function buildReportHtml(allRows, reportRows, reportMode) {
           <th>Input</th>
           <th>Normalized JSON Output</th>
           <th>Normalized WASM Output</th>
+          <th>Plot Image</th>
         </tr>
       </thead>
       <tbody>
@@ -1104,8 +1238,8 @@ function buildReportHtml(allRows, reportRows, reportMode) {
 }
 
 /**
- * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, matches: boolean }[]} allRows
- * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, matches: boolean }[]} reportRows
+ * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, imageRelPath: string, imageError: string, matches: boolean }[]} allRows
+ * @param {{ testCase: ExampleCase, normalizedExpected: string, normalizedWasm: string, imageRelPath: string, imageError: string, matches: boolean }[]} reportRows
  * @param {"all" | "errors-only"} reportMode
  */
 function buildReportMarkdown(allRows, reportRows, reportMode) {
@@ -1116,17 +1250,25 @@ function buildReportMarkdown(allRows, reportRows, reportMode) {
     const summary = reportMode === "errors-only"
         ? `Showing ${reportRows.length} mismatch(es) out of ${totalCount} example(s).`
         : `Showing all ${reportRows.length} example(s).`;
-    const tableHeader = "| Status | Description / Input | Expected | Actual |\n| :--- | :--- | :--- | :--- |\n";
+    const tableHeader = "| Status | Description / Input | Expected | Actual | Plot Image |\n| :--- | :--- | :--- | :--- | :--- |\n";
     const tableRows = reportRows.map((row) => {
         const status = row.matches ? "✅" : "❌";
         const description = row.testCase.description;
         const sourceInfo = `${row.testCase.file} (example ${row.testCase.exampleIndex + 1})`;
         // Escape pipe characters in markdown cells and use <br> for newlines in table cells
         const input = (row.testCase.input ?? "").replace(/\|/g, "\\|").replace(/\n/g, "<br>");
-        const expected = row.normalizedExpected.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+        const expectedRaw = row.testCase.hasExpectedOutput ? row.normalizedExpected : "(execution-only: no expected output)";
+        const expected = expectedRaw.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
         const actual = row.normalizedWasm.replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+        const imageCell = row.testCase.isPlotExample
+            ? row.imageRelPath
+                ? `[image](${row.imageRelPath.replace(/\|/g, "\\|")})`
+                : row.imageError
+                    ? `(no image captured: ${row.imageError.replace(/\|/g, "\\|")})`
+                    : "(no image captured)"
+            : "N/A";
 
-        return `| ${status} | **${description}**<br>${sourceInfo}<br>\`${input}\` | \`${expected}\` | \`${actual}\` |`;
+        return `| ${status} | **${description}**<br>${sourceInfo}<br>\`${input}\` | \`${expected}\` | \`${actual}\` | ${imageCell} |`;
     }).join("\n");
 
     const header = `Results: ${successCount}/${totalCount} succeeded (${successPercent}%).\n${summary}\n\n`;
@@ -1146,6 +1288,37 @@ function escapeHtml(value) {
         .replace(/>/g, "&gt;")
         .replace(/"/g, "&quot;")
         .replace(/'/g, "&#39;");
+}
+
+/**
+ * @param {string} outDir
+ * @param {ExampleCase} testCase
+ * @param {RunnerResult | undefined} result
+ */
+function writePlotImageArtifact(outDir, testCase, result) {
+    if (!testCase.isPlotExample || !result || typeof result.figurePngBase64 !== "string" || result.figurePngBase64.length === 0) {
+        return "";
+    }
+    try {
+        const stem = `${String(testCase.id).padStart(4, "0")}-${sanitizeFileStem(testCase.builtin)}-ex${testCase.exampleIndex + 1}`;
+        const fileName = `${stem}.png`;
+        const absPath = join(outDir, fileName);
+        writeFileSync(absPath, Buffer.from(result.figurePngBase64, "base64"));
+        return join("plot-example-images", fileName).replace(/\\/g, "/");
+    } catch (_err) {
+        return "";
+    }
+}
+
+/**
+ * @param {string} value
+ */
+function sanitizeFileStem(value) {
+    return String(value)
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 60) || "plot";
 }
 
 /**

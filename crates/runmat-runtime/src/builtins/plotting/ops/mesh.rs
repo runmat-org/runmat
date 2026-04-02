@@ -1,7 +1,9 @@
 //! MATLAB-compatible `mesh` builtin.
 
 use log::warn;
-use runmat_builtins::{Tensor, Value};
+#[cfg(test)]
+use runmat_builtins::Tensor;
+use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode, SurfacePlot};
 
@@ -10,12 +12,14 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 
-use super::common::{numeric_vector, tensor_to_surface_grid, SurfaceDataInput};
+use super::common::{tensor_to_surface_grid, SurfaceDataInput};
+use super::op_common::surface_inputs::{
+    axis_sources_from_xy_values, axis_sources_to_host, parse_surface_call_args, AxisSource,
+};
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
-use super::surf::{extract_meshgrid_axes_from_xy_matrices, is_vector_like_shape, AxisSource};
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::BuiltinResult;
 use std::sync::Arc;
 
@@ -24,7 +28,7 @@ const BUILTIN_NAME: &str = "mesh";
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::mesh")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "mesh",
-    op_kind: GpuOpKind::Custom("plot-render"),
+    op_kind: GpuOpKind::PlotRender,
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
@@ -57,61 +61,17 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     keywords = "mesh,wireframe,surface,plotting",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::mesh"
 )]
-pub async fn mesh_builtin(
-    x: Value,
-    y: Value,
-    z: Value,
-    rest: Vec<Value>,
-) -> crate::BuiltinResult<String> {
+pub async fn mesh_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+    let (x, y, z, rest) = parse_surface_call_args(args, BUILTIN_NAME)?;
     let z_input = SurfaceDataInput::from_value(z, "mesh")?;
     let (rows, cols) = z_input.grid_shape(BUILTIN_NAME)?;
 
     // Match surf semantics: keep vector-like gpuArray axes on-device when possible; otherwise
     // gather to validate meshgrid matrix inputs and extract axis vectors.
-    let (x_axis, y_axis) = match (x, y) {
-        (Value::GpuTensor(xh), Value::GpuTensor(yh))
-            if is_vector_like_shape(&xh.shape) && is_vector_like_shape(&yh.shape) =>
-        {
-            (AxisSource::Gpu(xh), AxisSource::Gpu(yh))
-        }
-        (x_val, y_val) => {
-            let x_tensor = match x_val {
-                Value::GpuTensor(handle) => {
-                    super::common::gather_tensor_from_gpu_async(handle, BUILTIN_NAME).await?
-                }
-                other => Tensor::try_from(&other)
-                    .map_err(|e| plotting_error(BUILTIN_NAME, format!("mesh: {e}")))?,
-            };
-            let y_tensor = match y_val {
-                Value::GpuTensor(handle) => {
-                    super::common::gather_tensor_from_gpu_async(handle, BUILTIN_NAME).await?
-                }
-                other => Tensor::try_from(&other)
-                    .map_err(|e| plotting_error(BUILTIN_NAME, format!("mesh: {e}")))?,
-            };
-
-            if x_tensor.data.is_empty() || y_tensor.data.is_empty() {
-                return Err(plotting_error(
-                    BUILTIN_NAME,
-                    "mesh: axis vectors must be non-empty",
-                ));
-            }
-
-            if x_tensor.rows == 1 || x_tensor.cols == 1 {
-                (
-                    AxisSource::Host(numeric_vector(x_tensor)),
-                    AxisSource::Host(numeric_vector(y_tensor)),
-                )
-            } else {
-                let (x_vec, y_vec) =
-                    extract_meshgrid_axes_from_xy_matrices(&x_tensor, &y_tensor, rows, cols)?;
-                (AxisSource::Host(x_vec), AxisSource::Host(y_vec))
-            }
-        }
-    };
+    let (x_axis, y_axis) = axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME).await?;
 
     let style = Arc::new(parse_surface_style_args(
         "mesh",
@@ -170,12 +130,28 @@ pub async fn mesh_builtin(
     style.apply_to_plot(&mut surface);
 
     let mut surface_opt = Some(surface);
-    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
+    let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes| {
         let surface = surface_opt.take().expect("mesh plot consumed exactly once");
-        figure.add_surface_plot_on_axes(surface, axes);
+        let plot_index = figure.add_surface_plot_on_axes(surface, axes);
+        *plot_index_slot.borrow_mut() = Some((axes, plot_index));
         Ok(())
-    })?;
-    Ok(rendered)
+    });
+    let Some((axes, plot_index)) = *plot_index_out.borrow() else {
+        return render_result.map(|_| f64::NAN);
+    };
+    let handle =
+        crate::builtins::plotting::state::register_surface_handle(figure_handle, axes, plot_index);
+    if let Err(err) = render_result {
+        let lower = err.to_string().to_lowercase();
+        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+            return Ok(handle);
+        }
+        return Err(err);
+    }
+    Ok(handle)
 }
 
 async fn build_mesh_cpu(
@@ -183,20 +159,7 @@ async fn build_mesh_cpu(
     x_axis: &AxisSource,
     y_axis: &AxisSource,
 ) -> BuiltinResult<SurfacePlot> {
-    let x_host = match x_axis {
-        AxisSource::Host(v) => v.clone(),
-        AxisSource::Gpu(h) => {
-            let t = super::common::gather_tensor_from_gpu_async(h.clone(), BUILTIN_NAME).await?;
-            numeric_vector(t)
-        }
-    };
-    let y_host = match y_axis {
-        AxisSource::Host(v) => v.clone(),
-        AxisSource::Gpu(h) => {
-            let t = super::common::gather_tensor_from_gpu_async(h.clone(), BUILTIN_NAME).await?;
-            numeric_vector(t)
-        }
-    };
+    let (x_host, y_host) = axis_sources_to_host(x_axis, y_axis, BUILTIN_NAME).await?;
     let z_tensor = match z_input {
         SurfaceDataInput::Host(t) => t.clone(),
         SurfaceDataInput::Gpu(h) => {
@@ -251,7 +214,7 @@ pub(crate) mod tests {
     #[test]
     fn mesh_requires_matching_grid() {
         setup_plot_tests();
-        let res = futures::executor::block_on(mesh_builtin(
+        let res = futures::executor::block_on(mesh_builtin(vec![
             Value::Tensor(tensor_from(&[0.0])),
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(Tensor {
@@ -261,19 +224,18 @@ pub(crate) mod tests {
                 cols: 1,
                 dtype: runmat_builtins::NumericDType::F64,
             }),
-            Vec::new(),
-        ));
+        ]));
         assert!(res.is_err());
     }
 
     #[test]
-    fn mesh_type_is_string() {
+    fn mesh_type_is_numeric_handle() {
         assert_eq!(
-            string_type(
+            handle_scalar_type(
                 &[Type::tensor(), Type::tensor(), Type::tensor()],
                 &ResolveContext::new(Vec::new())
             ),
-            Type::String
+            Type::Num
         );
     }
 }

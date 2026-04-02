@@ -1453,6 +1453,59 @@ fn string_array_literal_concat_index_and_compare() {
 }
 
 #[test]
+fn string_literal_and_num2str_horzcat_promotes_and_runs() {
+    let program = r#"
+        wn = 6;
+        label = ["wn = ", num2str(wn), " rad/s"];
+    "#;
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    let mut saw_label = false;
+    for value in vars {
+        if let runmat_builtins::Value::StringArray(sa) = value {
+            if sa.shape == vec![1, 3] && sa.data == vec!["wn = ", "6", " rad/s"] {
+                saw_label = true;
+            }
+        }
+    }
+    assert!(saw_label, "expected label string-array concat to succeed");
+}
+
+#[test]
+fn computed_integer_indices_work_for_column_slice_read_and_assign() {
+    let program = r#"
+        A = [1, 2, 3; 4, 5, 6];
+        j = length(1:2);
+        c = A(:, j);
+
+        B = zeros(2, 3);
+        B(:, j) = [7; 9];
+        d = B(:, j);
+    "#;
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+
+    let mut saw_read = false;
+    let mut saw_assign = false;
+    for value in vars {
+        if let runmat_builtins::Value::Tensor(t) = value {
+            if t.shape == vec![2, 1] && t.data == vec![2.0, 5.0] {
+                saw_read = true;
+            }
+            if t.shape == vec![2, 1] && t.data == vec![7.0, 9.0] {
+                saw_assign = true;
+            }
+        }
+    }
+
+    assert!(saw_read, "expected computed integer slice read to succeed");
+    assert!(
+        saw_assign,
+        "expected computed integer slice assign to succeed"
+    );
+}
+
+#[test]
 fn import_deep_multiseg_package_specific_vs_wildcard() {
     // Specific nested beats wildcard from another nested package
     let program = r#"
