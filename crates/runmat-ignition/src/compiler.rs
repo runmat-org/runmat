@@ -77,8 +77,7 @@ fn range_end_offset(expr: &HirExpr) -> Option<i64> {
     match &end.kind {
         HirExprKind::End => Some(0),
         HirExprKind::Binary(left, op, right)
-            if matches!(op, runmat_parser::BinOp::Sub)
-                && matches!(left.kind, HirExprKind::End) =>
+            if matches!(op, runmat_parser::BinOp::Sub) && matches!(left.kind, HirExprKind::End) =>
         {
             match &right.kind {
                 HirExprKind::Number(s) => Some(s.parse::<i64>().unwrap_or(0)),
