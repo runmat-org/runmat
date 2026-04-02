@@ -11712,7 +11712,11 @@ mod scalar_index_tests {
             .expect("false logical selector should be empty");
         match selector {
             SliceSelector::Indices(indices) => assert!(indices.is_empty()),
-            other => panic!("expected empty indices, found {other:?}"),
+            SliceSelector::Scalar(_)
+            | SliceSelector::Colon
+            | SliceSelector::LinearIndices { .. } => {
+                panic!("expected empty indices selector")
+            }
         }
     }
 }

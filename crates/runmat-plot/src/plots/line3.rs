@@ -109,7 +109,11 @@ impl Line3Plot {
                 .zip(self.z_data.iter())
                 .map(|((&x, &y), &z)| Vec3::new(x as f32, y as f32, z as f32))
                 .collect();
-            let vertices = if self.line_width > 1.0 {
+            let vertices = if points.len() == 1 {
+                let mut vertex = Vertex::new(points[0], self.color);
+                vertex.normal[2] = (self.line_width.max(1.0) * 4.0).max(6.0);
+                vec![vertex]
+            } else if self.line_width > 1.0 {
                 create_thick_polyline3_dashed(&points, self.color, self.line_width, self.line_style)
             } else {
                 create_line3_vertices_dashed(&points, self.color, self.line_style)
@@ -138,12 +142,15 @@ impl Line3Plot {
     }
 
     pub fn render_data(&mut self) -> RenderData {
+        let single_point = self.x_data.len() == 1 || self.gpu_vertex_count == Some(1);
         let vertex_count = self
             .gpu_vertex_count
             .unwrap_or_else(|| self.generate_vertices().len());
-        let thick = self.line_width > 1.0;
+        let thick = self.line_width > 1.0 && !single_point;
         RenderData {
-            pipeline_type: if thick {
+            pipeline_type: if single_point {
+                PipelineType::Scatter3
+            } else if thick {
                 PipelineType::Triangles
             } else {
                 PipelineType::Lines
@@ -280,5 +287,16 @@ mod tests {
         assert_eq!(render.pipeline_type, PipelineType::Triangles);
         assert!(!render.vertices.is_empty());
         assert!(render.draw_calls[0].vertex_count >= 2);
+    }
+
+    #[test]
+    fn line3_single_point_uses_scatter_pipeline() {
+        let mut plot = Line3Plot::new(vec![1.0], vec![2.0], vec![3.0])
+            .unwrap()
+            .with_style(Vec4::ONE, 2.0, crate::plots::line::LineStyle::Solid);
+        let render = plot.render_data();
+        assert_eq!(render.pipeline_type, PipelineType::Scatter3);
+        assert_eq!(render.vertices.len(), 1);
+        assert!(render.vertices[0].normal[2] >= 6.0);
     }
 }

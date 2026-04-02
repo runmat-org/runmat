@@ -278,11 +278,30 @@ async fn build_line3_gpu_plot_async(
         .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot3: unable to export GPU Y data"))?;
     let z_ref = runmat_accelerate_api::export_wgpu_buffer(z)
         .ok_or_else(|| plotting_error(BUILTIN_NAME, "plot3: unable to export GPU Z data"))?;
-    if x_ref.len < 2 || x_ref.len != y_ref.len || x_ref.len != z_ref.len {
+    if x_ref.len == 0 || x_ref.len != y_ref.len || x_ref.len != z_ref.len {
         return Err(plotting_error(
             BUILTIN_NAME,
-            "plot3: X, Y, and Z inputs must have identical lengths of at least 2",
+            "plot3: X, Y, and Z inputs must have identical non-empty lengths",
         ));
+    }
+    if x_ref.len == 1 {
+        let x = crate::builtins::plotting::common::gather_tensor_from_gpu_async(
+            x.clone(),
+            BUILTIN_NAME,
+        )
+        .await?;
+        let y = crate::builtins::plotting::common::gather_tensor_from_gpu_async(
+            y.clone(),
+            BUILTIN_NAME,
+        )
+        .await?;
+        let z = crate::builtins::plotting::common::gather_tensor_from_gpu_async(
+            z.clone(),
+            BUILTIN_NAME,
+        )
+        .await?;
+        let (x, y, z) = numeric_triplet(x, y, z, BUILTIN_NAME)?;
+        return build_line3_plot(x, y, z, label, appearance);
     }
     if x_ref.precision != y_ref.precision || x_ref.precision != z_ref.precision {
         return Err(plotting_error(
