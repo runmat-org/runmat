@@ -97,6 +97,35 @@ mod tests {
             Tensor::try_from(&z).unwrap().data
         );
     }
+
+    #[tokio::test]
+    async fn image_axis_sources_expand_two_element_extents() {
+        let x = Value::Tensor(Tensor {
+            data: vec![10.0, 20.0],
+            shape: vec![2],
+            rows: 2,
+            cols: 1,
+            dtype: runmat_builtins::NumericDType::F64,
+        });
+        let y = Value::Tensor(Tensor {
+            data: vec![1.0, 5.0],
+            shape: vec![2],
+            rows: 2,
+            cols: 1,
+            dtype: runmat_builtins::NumericDType::F64,
+        });
+        let (x_axis, y_axis) = image_axis_sources_from_xy_values(x, y, 3, 4, "image")
+            .await
+            .unwrap();
+        let AxisSource::Host(x_vals) = x_axis else {
+            panic!("expected host X axis")
+        };
+        let AxisSource::Host(y_vals) = y_axis else {
+            panic!("expected host Y axis")
+        };
+        assert_eq!(x_vals, vec![10.0, 15.0, 20.0]);
+        assert_eq!(y_vals, vec![1.0, 2.333333333333333, 3.6666666666666665, 5.0]);
+    }
 }
 
 #[derive(Clone)]
@@ -186,6 +215,20 @@ pub async fn axis_sources_from_xy_values(
     }
 }
 
+pub async fn image_axis_sources_from_xy_values(
+    x: Value,
+    y: Value,
+    rows: usize,
+    cols: usize,
+    builtin: &'static str,
+) -> BuiltinResult<(AxisSource, AxisSource)> {
+    let (x_axis, y_axis) = axis_sources_from_xy_values(x, y, rows, cols, builtin).await?;
+    Ok((
+        normalize_image_axis_source(x_axis, rows, builtin, "X").await?,
+        normalize_image_axis_source(y_axis, cols, builtin, "Y").await?,
+    ))
+}
+
 pub async fn axis_sources_to_host(
     x: &AxisSource,
     y: &AxisSource,
@@ -204,6 +247,76 @@ pub async fn axis_sources_to_host(
         }
     };
     Ok((x_vec, y_vec))
+}
+
+async fn normalize_image_axis_source(
+    source: AxisSource,
+    expected_len: usize,
+    builtin: &'static str,
+    axis_name: &str,
+) -> BuiltinResult<AxisSource> {
+    match source {
+        AxisSource::Host(values) => Ok(AxisSource::Host(normalize_image_axis_values(
+            values,
+            expected_len,
+            builtin,
+            axis_name,
+        )?)),
+        AxisSource::Gpu(handle) => {
+            let len = vector_len_from_shape(&handle.shape);
+            if len == expected_len {
+                Ok(AxisSource::Gpu(handle))
+            } else if len == 2 {
+                let values = numeric_vector(gather_tensor_from_gpu_async(handle, builtin).await?);
+                Ok(AxisSource::Host(normalize_image_axis_values(
+                    values,
+                    expected_len,
+                    builtin,
+                    axis_name,
+                )?))
+            } else {
+                Err(plotting_error(
+                    builtin,
+                    format!(
+                        "{builtin}: {axis_name} axis must have length {expected_len} or 2 for image extents"
+                    ),
+                ))
+            }
+        }
+    }
+}
+
+fn normalize_image_axis_values(
+    values: Vec<f64>,
+    expected_len: usize,
+    builtin: &'static str,
+    axis_name: &str,
+) -> BuiltinResult<Vec<f64>> {
+    if values.len() == expected_len {
+        return Ok(values);
+    }
+    if values.len() == 2 {
+        return Ok(expand_image_axis_extent(values[0], values[1], expected_len));
+    }
+    Err(plotting_error(
+        builtin,
+        format!(
+            "{builtin}: {axis_name} axis must have length {expected_len} or 2 for image extents"
+        ),
+    ))
+}
+
+fn expand_image_axis_extent(start: f64, end: f64, len: usize) -> Vec<f64> {
+    match len {
+        0 => Vec::new(),
+        1 => vec![(start + end) * 0.5],
+        _ => (0..len)
+            .map(|idx| {
+                let t = idx as f64 / (len as f64 - 1.0);
+                start + (end - start) * t
+            })
+            .collect(),
+    }
 }
 
 fn matrix_rows_are_identical(tensor: &Tensor) -> bool {

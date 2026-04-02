@@ -21,6 +21,7 @@ use crate::builtins::common::spec::{
 use super::common::numeric_pair;
 use super::gpu_helpers::gpu_xy_bounds;
 use super::op_common::line_inputs::NumericInput as StairsInput;
+use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::plotting_error;
 use super::state::{render_active_plot, PlotRenderOptions};
 use super::style::{
@@ -72,6 +73,19 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::plotting::stairs"
 )]
 pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<f64> {
+    let mut args = vec![x, y];
+    args.extend(rest);
+    let (axes_target, mut args) = split_leading_axes_handle(args, BUILTIN_NAME)?;
+    apply_axes_target(axes_target, BUILTIN_NAME)?;
+    if args.len() < 2 {
+        return Err(plotting_error(
+            BUILTIN_NAME,
+            "stairs: expected X and Y data after axes handle",
+        ));
+    }
+    let x = args.remove(0);
+    let y = args.remove(0);
+    let rest = args;
     let parsed_style = parse_line_style_args(&rest, &LineStyleParseOptions::stairs())?;
     let mut x_input = Some(StairsInput::from_value(x, BUILTIN_NAME)?);
     let mut y_input = Some(StairsInput::from_value(y, BUILTIN_NAME)?);
@@ -274,11 +288,18 @@ fn apply_stairs_marker_metadata(plot: &mut StairsPlot, marker_meta: Option<LineM
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::builtins::plotting::state::current_axes_handle_for_figure;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use crate::builtins::plotting::{
+        clear_figure, clone_figure, configure_subplot, current_figure_handle,
+        reset_hold_state_for_run,
+    };
     use runmat_builtins::{ResolveContext, Type};
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
     }
 
     fn tensor_from(data: &[f64]) -> Tensor {
@@ -324,5 +345,20 @@ pub(crate) mod tests {
             ),
             Type::Num
         );
+    }
+
+    #[test]
+    fn stairs_accepts_leading_axes_handle() {
+        setup_plot_tests();
+        configure_subplot(1, 2, 1).unwrap();
+        let fig_handle = current_figure_handle();
+        let ax = current_axes_handle_for_figure(fig_handle).unwrap();
+        let _ = stairs_builtin(
+            Value::Num(ax),
+            Value::Tensor(tensor_from(&[0.0, 1.0, 2.0])),
+            vec![Value::Tensor(tensor_from(&[1.0, 2.0, 1.5]))],
+        );
+        let fig = clone_figure(fig_handle).unwrap();
+        assert_eq!(fig.plot_axes_indices(), &[1]);
     }
 }

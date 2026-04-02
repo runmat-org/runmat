@@ -23,8 +23,8 @@ use crate::builtins::common::spec::{
 };
 use std::convert::TryFrom;
 
-use super::common::gather_tensor_from_gpu;
-use super::common::numeric_pair;
+use super::common::{gather_tensor_from_gpu, numeric_pair};
+use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::gpu_helpers::axis_bounds;
 use super::op_common::line_inputs::NumericInput as ScatterInput;
 use super::perf::scatter_target_points;
@@ -80,6 +80,16 @@ const BUILTIN_NAME: &str = "scatter";
     builtin_path = "crate::builtins::plotting::scatter"
 )]
 pub async fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<f64> {
+    let mut args = vec![x, y];
+    args.extend(rest);
+    let (axes_target, mut args) = split_leading_axes_handle(args, BUILTIN_NAME)?;
+    apply_axes_target(axes_target, BUILTIN_NAME)?;
+    if args.len() < 2 {
+        return Err(scatter_err("scatter: expected X and Y data after axes handle"));
+    }
+    let x = args.remove(0);
+    let y = args.remove(0);
+    let rest = args;
     let style_args = PointArgs::parse(rest, LineStyleParseOptions::scatter())?;
     let mut x_input = Some(ScatterInput::from_value(x, BUILTIN_NAME)?);
     let mut y_input = Some(ScatterInput::from_value(y, BUILTIN_NAME)?);
@@ -563,6 +573,11 @@ pub(crate) mod tests {
         ParsedLineStyle,
     };
     use super::*;
+    use crate::builtins::plotting::state::current_axes_handle_for_figure;
+    use crate::builtins::plotting::{
+        clear_figure, clone_figure, configure_subplot, current_figure_handle,
+        reset_hold_state_for_run,
+    };
     use crate::builtins::plotting::tests::ensure_plot_test_env;
     use crate::RuntimeError;
     use futures::executor::block_on;
@@ -571,6 +586,8 @@ pub(crate) mod tests {
 
     fn setup_plot_tests() {
         ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
     }
 
     fn scatter_builtin(x: Value, y: Value, rest: Vec<Value>) -> BuiltinResult<f64> {
@@ -686,6 +703,21 @@ pub(crate) mod tests {
         let mut style = resolve_scatter_style(2, &args, "scatter").expect("style");
         let plot = build_scatter_plot(vec![0.0, 1.0], vec![0.0, 1.0], &mut style).expect("plot");
         assert_eq!(plot.label.as_deref(), Some("Series A"));
+    }
+
+    #[test]
+    fn scatter_accepts_leading_axes_handle() {
+        setup_plot_tests();
+        configure_subplot(1, 2, 1).unwrap();
+        let fig_handle = current_figure_handle();
+        let ax = current_axes_handle_for_figure(fig_handle).unwrap();
+        let _ = scatter_builtin(
+            Value::Num(ax),
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            vec![Value::Tensor(tensor_from(&[1.0, 2.0]))],
+        );
+        let fig = clone_figure(fig_handle).unwrap();
+        assert_eq!(fig.plot_axes_indices(), &[1]);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

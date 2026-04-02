@@ -283,6 +283,38 @@ export interface FigureImageOptions {
   handle?: number;
   width?: number;
   height?: number;
+  cameraState?: FigureImageCameraState;
+}
+
+export type FigureImageCameraProjectionState =
+  | {
+      kind: "perspective";
+      fov: number;
+      near: number;
+      far: number;
+    }
+  | {
+      kind: "orthographic";
+      left: number;
+      right: number;
+      bottom: number;
+      top: number;
+      near: number;
+      far: number;
+    };
+
+export interface FigureImageAxesCameraState {
+  position: [number, number, number];
+  target: [number, number, number];
+  up: [number, number, number];
+  zoom: number;
+  aspectRatio: number;
+  projection: FigureImageCameraProjectionState;
+}
+
+export interface FigureImageCameraState {
+  activeAxes: number;
+  axes: FigureImageAxesCameraState[];
 }
 
 export interface FigureBindingError extends Error {
@@ -1026,7 +1058,10 @@ export async function renderFigureImage(options: FigureImageOptions = {}): Promi
   const width = options.width ?? 0;
   const height = options.height ?? 0;
   try {
-    const bytes = await native.renderFigureImage(handle, width, height);
+    const bytes =
+      options.cameraState && typeof native.renderFigureImageWithCameraState === "function"
+        ? await native.renderFigureImageWithCameraState(handle, width, height, options.cameraState)
+        : await native.renderFigureImage(handle, width, height);
     if (bytes instanceof Uint8Array) {
       return bytes;
     }

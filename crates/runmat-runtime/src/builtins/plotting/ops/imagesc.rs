@@ -5,7 +5,7 @@ use runmat_macros::runtime_builtin;
 use runmat_plot::plots::{ColorMap, ShadingMode};
 
 use super::common::SurfaceDataInput;
-use super::op_common::surface_inputs::{axis_sources_from_xy_values, parse_surface_call_args};
+use super::op_common::surface_inputs::{image_axis_sources_from_xy_values, parse_surface_call_args};
 use super::state::{color_limits_snapshot, render_active_plot, PlotRenderOptions};
 use super::style::{parse_surface_style_args, SurfaceStyleDefaults};
 use crate::builtins::common::spec::{
@@ -57,7 +57,7 @@ pub async fn imagesc_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (x, y, c, rest) = parse_surface_call_args(args, BUILTIN_NAME)?;
     let c_input = SurfaceDataInput::from_value(c, BUILTIN_NAME)?;
     let (rows, cols) = c_input.grid_shape(BUILTIN_NAME)?;
-    let (x_axis, y_axis) = axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME).await?;
+    let (x_axis, y_axis) = image_axis_sources_from_xy_values(x, y, rows, cols, BUILTIN_NAME).await?;
 
     let defaults =
         SurfaceStyleDefaults::new(ColorMap::Parula, ShadingMode::None, false, 1.0, true, false);
@@ -185,5 +185,37 @@ mod tests {
         assert_eq!(surface.x_data, vec![10.0, 20.0]);
         assert_eq!(surface.y_data, vec![1.0, 2.0]);
         assert_eq!(surface.color_limits, Some((0.0, 10.0)));
+    }
+
+    #[test]
+    fn imagesc_accepts_two_element_extent_vectors() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let _ = futures::executor::block_on(imagesc_builtin(vec![
+            Value::Tensor(Tensor {
+                data: vec![10.0, 20.0],
+                shape: vec![2],
+                rows: 2,
+                cols: 1,
+                dtype: NumericDType::F64,
+            }),
+            Value::Tensor(Tensor {
+                data: vec![1.0, 5.0],
+                shape: vec![2],
+                rows: 2,
+                cols: 1,
+                dtype: NumericDType::F64,
+            }),
+            Value::Tensor(grid_tensor((1..=12).map(|v| v as f64).collect(), 3, 4)),
+        ]))
+        .expect("imagesc with extent vectors should succeed");
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::Surface(surface) = fig.plots().next().unwrap() else {
+            panic!("expected surface")
+        };
+        assert_eq!(surface.x_data, vec![10.0, 15.0, 20.0]);
+        assert_eq!(surface.y_data, vec![1.0, 2.333333333333333, 3.6666666666666665, 5.0]);
     }
 }

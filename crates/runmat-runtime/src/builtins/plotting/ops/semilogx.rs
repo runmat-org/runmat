@@ -67,6 +67,7 @@ mod tests {
         clear_figure, clone_figure, configure_subplot, current_figure_handle,
         reset_hold_state_for_run,
     };
+    use crate::builtins::plotting::state::current_axes_handle_for_figure;
     use runmat_builtins::{NumericDType, Tensor};
 
     fn tensor_from(data: &[f64]) -> Tensor {
@@ -109,5 +110,24 @@ mod tests {
         let fig = clone_figure(current_figure_handle()).unwrap();
         assert!(!fig.axes_metadata(0).unwrap().x_log);
         assert!(fig.axes_metadata(1).unwrap().x_log);
+    }
+
+    #[test]
+    fn semilogx_accepts_leading_axes_handle() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        configure_subplot(1, 2, 1).unwrap();
+        let fig_handle = current_figure_handle();
+        let ax = current_axes_handle_for_figure(fig_handle).unwrap();
+
+        let _ = futures::executor::block_on(semilogx_builtin(vec![
+            Value::Num(ax),
+            Value::Tensor(tensor_from(&[1.0, 10.0])),
+        ]));
+        let fig = clone_figure(fig_handle).unwrap();
+        assert!(fig.axes_metadata(1).unwrap().x_log);
+        assert_eq!(fig.plot_axes_indices(), &[1]);
     }
 }

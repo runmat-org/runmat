@@ -130,9 +130,10 @@ pub use state::{
     clear_figure, clone_figure, close_figure, configure_subplot, current_axes_state,
     current_figure_handle, figure_handles, import_figure, install_figure_observer,
     new_figure_handle, reset_hold_state_for_run, reset_plot_state, reset_recent_figures,
-    select_figure, set_hold, take_recent_figures, FigureAxesState, FigureError,
+    select_axes_for_figure, select_figure, set_hold, take_recent_figures, FigureAxesState, FigureError,
     FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
+pub use properties::resolve_plot_handle;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use web::present_figure_on_surface as web_present_figure_on_surface;
@@ -250,7 +251,7 @@ pub use engine::{
     render_figure_png_bytes, render_figure_png_bytes_with_axes_cameras,
     render_figure_png_bytes_with_camera, render_figure_rgba_bytes,
     render_figure_rgba_bytes_with_axes_cameras, render_figure_rgba_bytes_with_camera,
-    render_figure_snapshot,
+    render_figure_snapshot, render_figure_snapshot_with_camera_state,
 };
 
 pub mod ops {

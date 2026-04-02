@@ -529,7 +529,10 @@ async fn create_headless_context(
     width: u32,
     height: u32,
 ) -> Result<NativeSurfaceRenderContext, String> {
-    let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+    // Export paths provide theme/plot colors in display (sRGB) space, just like interactive
+    // surface rendering on most backends. Using an sRGB attachment here applies an extra
+    // linear->sRGB conversion and visibly washes out captures.
+    let format = wgpu::TextureFormat::Rgba8Unorm;
     if let Some(ctx) = crate::context::shared_wgpu_context() {
         return NativeSurfaceRenderContext::new(ctx.device, ctx.queue, width, height, format).await;
     }
@@ -621,7 +624,12 @@ pub async fn render_figure_rgba_bytes_interactive_and_theme(
 fn encode_png_bytes(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
     use image::{ImageBuffer, ImageFormat, Rgba};
 
-    let image = ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, rgba.to_vec())
+    let mut opaque = rgba.to_vec();
+    for pixel in opaque.chunks_exact_mut(4) {
+        pixel[3] = 255;
+    }
+
+    let image = ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, opaque)
         .ok_or_else(|| "Failed to create image buffer for PNG encoding".to_string())?;
     let mut out = std::io::Cursor::new(Vec::new());
     image

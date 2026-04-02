@@ -13,6 +13,7 @@ use crate::builtins::common::spec::{
 };
 
 use super::common::numeric_pair;
+use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::op_common::line_inputs::NumericInput;
 use super::plotting_error;
 use super::state::{
@@ -72,6 +73,8 @@ const BUILTIN_NAME: &str = "plot";
     builtin_path = "crate::builtins::plotting::plot"
 )]
 pub async fn plot_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+    let (axes_target, args) = split_leading_axes_handle(args, BUILTIN_NAME)?;
+    apply_axes_target(axes_target, BUILTIN_NAME)?;
     let (mut series_plans, line_style_order) = parse_series_specs(args)?;
     let axes = current_axes_state().active_index;
     let hold_enabled = current_hold_enabled();
@@ -545,9 +548,11 @@ pub(crate) mod tests {
     use crate::builtins::plotting::get::get_builtin;
     use crate::builtins::plotting::set::set_builtin;
     use crate::builtins::plotting::state::PlotTestLockGuard;
-    use crate::builtins::plotting::state::{clear_figure, reset_hold_state_for_run};
+    use crate::builtins::plotting::state::{
+        clear_figure, current_axes_handle_for_figure, reset_hold_state_for_run,
+    };
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
-    use crate::builtins::plotting::{clone_figure, current_figure_handle};
+    use crate::builtins::plotting::{clone_figure, configure_subplot, current_figure_handle};
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_builtins::{ResolveContext, Type};
@@ -787,5 +792,21 @@ pub(crate) mod tests {
         };
         assert_eq!(line.x_data, vec![1.0, 2.0, 3.0]);
         assert_eq!(line.y_data, vec![5.0, 6.0, 7.0]);
+    }
+
+    #[test]
+    fn plot_builtin_accepts_leading_axes_handle() {
+        let _guard = setup_plot_tests();
+        configure_subplot(1, 2, 1).unwrap();
+        let fig_handle = current_figure_handle();
+        let ax = current_axes_handle_for_figure(fig_handle).unwrap();
+        block_on(plot_builtin(vec![
+            Value::Num(ax),
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[1.0, 2.0])),
+        ]))
+        .unwrap();
+        let fig = clone_figure(fig_handle).unwrap();
+        assert_eq!(fig.plot_axes_indices(), &[1]);
     }
 }

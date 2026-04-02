@@ -76,6 +76,7 @@ use runmat_runtime::builtins::plotting::{
     present_surface as runtime_present_surface,
     render_current_scene as runtime_render_current_scene,
     render_figure_snapshot as runtime_render_figure_snapshot,
+    render_figure_snapshot_with_camera_state as runtime_render_figure_snapshot_with_camera_state,
     reset_hold_state_for_run as runtime_reset_hold_state_for_run,
     reset_plot_state as runtime_reset_plot_state,
     reset_surface_camera as runtime_reset_surface_camera, resize_surface as runtime_resize_surface,
@@ -1363,6 +1364,28 @@ pub async fn wasm_render_figure_image(
     let bytes = runtime_render_figure_snapshot(target, width.unwrap_or(0), height.unwrap_or(0))
         .await
         .map_err(runtime_flow_to_js)?;
+    Ok(Uint8Array::from(bytes.as_slice()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = renderFigureImageWithCameraState)]
+pub async fn wasm_render_figure_image_with_camera_state(
+    handle: JsValue,
+    width: Option<u32>,
+    height: Option<u32>,
+    camera_state: JsValue,
+) -> Result<Uint8Array, JsValue> {
+    let target = parse_optional_handle(handle)?.unwrap_or_else(runtime_current_figure_handle);
+    let parsed: PlotSurfaceCameraState =
+        serde_wasm_bindgen::from_value(camera_state).map_err(|err| js_error(&err.to_string()))?;
+    let bytes = runtime_render_figure_snapshot_with_camera_state(
+        target,
+        width.unwrap_or(0),
+        height.unwrap_or(0),
+        parsed,
+    )
+    .await
+    .map_err(runtime_flow_to_js)?;
     Ok(Uint8Array::from(bytes.as_slice()))
 }
 

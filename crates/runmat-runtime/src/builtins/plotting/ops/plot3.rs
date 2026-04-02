@@ -11,6 +11,7 @@ use crate::builtins::common::spec::{
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 
 use super::common::numeric_triplet;
+use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::gpu_helpers::gpu_xyz_bounds_async;
 use super::op_common::line_inputs::NumericInput;
 use super::plotting_error;
@@ -57,6 +58,8 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     builtin_path = "crate::builtins::plotting::plot3"
 )]
 pub async fn plot3_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+    let (axes_target, args) = split_leading_axes_handle(args, BUILTIN_NAME)?;
+    apply_axes_target(axes_target, BUILTIN_NAME)?;
     let (mut plans, _line_style_order) = parse_plot3_series_specs(args)?;
 
     let opts = PlotRenderOptions {
@@ -322,8 +325,10 @@ async fn build_line3_gpu_plot_async(
 mod tests {
     use super::*;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
+    use crate::builtins::plotting::state::current_axes_handle_for_figure;
     use crate::builtins::plotting::{
-        clear_figure, clone_figure, current_figure_handle, reset_hold_state_for_run,
+        clear_figure, clone_figure, configure_subplot, current_figure_handle,
+        reset_hold_state_for_run,
     };
     use runmat_builtins::{NumericDType, Tensor};
     use runmat_plot::plots::PlotElement;
@@ -390,5 +395,24 @@ mod tests {
             err.to_string().contains("same number of elements")
                 || err.to_string().contains("Data length mismatch")
         );
+    }
+
+    #[test]
+    fn plot3_accepts_leading_axes_handle() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        configure_subplot(1, 2, 1).unwrap();
+        let fig_handle = current_figure_handle();
+        let ax = current_axes_handle_for_figure(fig_handle).unwrap();
+        let _ = futures::executor::block_on(plot3_builtin(vec![
+            Value::Num(ax),
+            Value::Tensor(vec_tensor(&[0.0, 1.0])),
+            Value::Tensor(vec_tensor(&[1.0, 2.0])),
+            Value::Tensor(vec_tensor(&[2.0, 3.0])),
+        ]));
+        let fig = clone_figure(fig_handle).unwrap();
+        assert_eq!(fig.plot_axes_indices(), &[1]);
     }
 }
