@@ -475,11 +475,11 @@ pub(crate) mod tests {
         };
 
         let (x_axis, y_axis) = crate::builtins::plotting::op_common::surface_inputs::extract_meshgrid_axes_from_xy_matrices(&x, &y, z.rows, z.cols, BUILTIN_NAME).expect("axes");
-        assert_eq!(x_axis.len(), 2);
-        assert_eq!(y_axis.len(), 3);
+        assert_eq!(x_axis.len(), 3);
+        assert_eq!(y_axis.len(), 2);
 
         // With extracted axes, Z should validate and reshape into a surface grid.
-        let grid = tensor_to_surface_grid(z, x_axis.len(), y_axis.len(), BUILTIN_NAME);
+        let grid = tensor_to_surface_grid(z, y_axis.len(), x_axis.len(), BUILTIN_NAME);
         assert!(
             grid.is_ok(),
             "expected Z to be compatible with extracted axes"

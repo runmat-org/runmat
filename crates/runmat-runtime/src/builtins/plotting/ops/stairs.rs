@@ -377,6 +377,7 @@ pub(crate) mod tests {
 
     #[test]
     fn stairs_accepts_leading_axes_handle() {
+        let _guard = crate::builtins::plotting::tests::lock_plot_registry();
         setup_plot_tests();
         configure_subplot(1, 2, 1).unwrap();
         let fig_handle = current_figure_handle();
@@ -392,6 +393,7 @@ pub(crate) mod tests {
 
     #[test]
     fn stairs_ax_y_shorthand_infers_one_based_x_on_target_axes() {
+        let _guard = crate::builtins::plotting::tests::lock_plot_registry();
         setup_plot_tests();
         configure_subplot(1, 2, 1).unwrap();
         let fig_handle = current_figure_handle();
@@ -412,6 +414,7 @@ pub(crate) mod tests {
 
     #[test]
     fn stairs_y_shorthand_infers_one_based_x() {
+        let _guard = crate::builtins::plotting::tests::lock_plot_registry();
         setup_plot_tests();
         let _ = stairs_builtin(vec![Value::Tensor(tensor_from(&[2.0, 4.0, 3.0]))]).unwrap();
         let fig = clone_figure(current_figure_handle()).unwrap();

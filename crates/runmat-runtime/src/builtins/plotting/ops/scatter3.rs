@@ -618,6 +618,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scatter3_accepts_leading_axes_handle() {
+        let _guard = crate::builtins::plotting::tests::lock_plot_registry();
         setup_plot_tests();
         configure_subplot(1, 2, 1).unwrap();
         let fig_handle = current_figure_handle();
@@ -634,6 +635,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scatter3_accepts_scalar_point() {
+        let _guard = crate::builtins::plotting::tests::lock_plot_registry();
         setup_plot_tests();
         let _ = scatter3_builtin(
             Value::Num(1.0),

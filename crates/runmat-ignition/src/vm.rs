@@ -547,12 +547,8 @@ fn index_scalar_from_host_value(value: &Value) -> Option<i64> {
     match value {
         Value::Num(n) => Some(*n as i64),
         Value::Int(int_val) => Some(int_val.to_i64()),
-        Value::Bool(b) => Some(if *b { 1 } else { 0 }),
         Value::Tensor(t) if t.data.len() == 1 && is_scalar_shape(&t.shape) => {
             Some(t.data[0] as i64)
-        }
-        Value::LogicalArray(la) if la.data.len() == 1 && is_scalar_shape(&la.shape) => {
-            Some(if la.data[0] != 0 { 1 } else { 0 })
         }
         _ => None,
     }
@@ -571,6 +567,14 @@ async fn index_scalar_from_value(value: &Value) -> VmResult<Option<i64>> {
 }
 
 async fn indices_from_value_linear(value: &Value, total_len: usize) -> VmResult<Vec<usize>> {
+    if let Value::Bool(b) = value {
+        return Ok(if *b { vec![1] } else { Vec::new() });
+    }
+    if let Value::LogicalArray(la) = value {
+        if la.data.len() == 1 && is_scalar_shape(&la.shape) {
+            return Ok(if la.data[0] != 0 { vec![1] } else { Vec::new() });
+        }
+    }
     if let Some(idx_val) = index_scalar_from_value(value).await? {
         if idx_val < 1 || (idx_val as usize) > total_len {
             return Err(mex("IndexOutOfBounds", "Index out of bounds"));
@@ -11680,6 +11684,36 @@ fn map_slice_plan_error(context: &str, err: RuntimeError) -> RuntimeError {
             builder = builder.with_identifier(identifier.to_string());
         }
         builder.build()
+    }
+}
+
+#[cfg(test)]
+mod scalar_index_tests {
+    use super::*;
+
+    #[test]
+    fn linear_false_bool_index_is_empty() {
+        let indices =
+            futures::executor::block_on(indices_from_value_linear(&Value::Bool(false), 4))
+                .expect("false logical index should be empty");
+        assert!(indices.is_empty());
+    }
+
+    #[test]
+    fn linear_true_bool_index_selects_first() {
+        let indices = futures::executor::block_on(indices_from_value_linear(&Value::Bool(true), 4))
+            .expect("true logical index should select first element");
+        assert_eq!(indices, vec![1]);
+    }
+
+    #[test]
+    fn dim_false_bool_selector_is_empty() {
+        let selector = futures::executor::block_on(selector_from_value_dim(&Value::Bool(false), 4))
+            .expect("false logical selector should be empty");
+        match selector {
+            SliceSelector::Indices(indices) => assert!(indices.is_empty()),
+            other => panic!("expected empty indices, found {other:?}"),
+        }
     }
 }
 

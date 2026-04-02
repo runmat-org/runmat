@@ -577,20 +577,16 @@ impl PlotRenderer {
         let mut x_max = base.max.x as f64;
         let mut y_min = base.min.y as f64;
         let mut y_max = base.max.y as f64;
-        let mut explicit_x_limits = false;
-        let mut explicit_y_limits = false;
 
         if let Some(fig) = self.last_figure.as_ref() {
             if let Some(meta) = fig.axes_metadata(axes_index) {
                 if let Some((xl, xr)) = meta.x_limits {
                     x_min = xl;
                     x_max = xr;
-                    explicit_x_limits = true;
                 }
                 if let Some((yl, yr)) = meta.y_limits {
                     y_min = yl;
                     y_max = yr;
-                    explicit_y_limits = true;
                 }
                 if meta.axis_equal {
                     let cx = (x_min + x_max) * 0.5;
@@ -602,17 +598,6 @@ impl PlotRenderer {
                     y_max = cy + size * 0.5;
                 }
             }
-        }
-
-        if !explicit_x_limits {
-            let pad = 0.0;
-            x_min -= pad;
-            x_max += pad;
-        }
-        if !explicit_y_limits {
-            let pad = 0.0;
-            y_min -= pad;
-            y_max += pad;
         }
 
         Some((x_min, x_max, y_min, y_max))
