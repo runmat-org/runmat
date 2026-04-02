@@ -558,15 +558,6 @@ fn index_scalar_from_host_value(value: &Value) -> Option<i64> {
     }
 }
 
-fn numeric_index_scalar_from_host_value(value: &Value) -> Option<i64> {
-    match value {
-        Value::Num(n) => Some(*n as i64),
-        Value::Int(int_val) => Some(int_val.to_i64()),
-        Value::Tensor(t) if t.data.len() == 1 && is_scalar_shape(&t.shape) => Some(t.data[0] as i64),
-        _ => None,
-    }
-}
-
 async fn index_scalar_from_value(value: &Value) -> VmResult<Option<i64>> {
     if let Value::GpuTensor(handle) = value {
         let total = total_len_from_shape(&handle.shape);
@@ -5118,17 +5109,16 @@ async fn run_interpreter_inner(
                             } else if is_end {
                                 idxs = vec![total];
                             } else if let Some(v) = numeric.first() {
-                                match v {
-                                    value if numeric_index_scalar_from_host_value(value).is_some() => {
-                                        let i = numeric_index_scalar_from_host_value(v).unwrap_or_default();
-                                        if i < 1 {
-                                            vm_bail!(mex(
-                                                "IndexOutOfBounds",
-                                                "Index out of bounds"
-                                            ));
-                                        }
-                                        idxs = vec![i as usize];
+                                if let Some(i) = index_scalar_from_value(v).await? {
+                                    if i < 1 {
+                                        vm_bail!(mex(
+                                            "IndexOutOfBounds",
+                                            "Index out of bounds"
+                                        ));
                                     }
+                                    idxs = vec![i as usize];
+                                } else {
+                                    match v {
                                     Value::Tensor(idx_t) => {
                                         idx_shape = Some(idx_t.shape.clone());
                                         for &val in &idx_t.data {
@@ -5164,6 +5154,7 @@ async fn run_interpreter_inner(
                                         "UnsupportedIndexType",
                                         "Unsupported index type"
                                     )),
+                                }
                                 }
                             } else {
                                 vm_bail!(mex("MissingNumericIndex", "missing numeric index"));
@@ -5210,17 +5201,16 @@ async fn run_interpreter_inner(
                                         "missing numeric index",
                                     ))?;
                                     num_iter += 1;
-                                    match v {
-                                        value if numeric_index_scalar_from_host_value(value).is_some() => {
-                                            let idx = numeric_index_scalar_from_host_value(v).unwrap_or_default();
-                                            if idx < 1 {
-                                                return Err(mex(
-                                                    "IndexOutOfBounds",
-                                                    "Index out of bounds",
-                                                ));
-                                            }
-                                            selectors.push(Sel::Scalar(idx as usize));
+                                    if let Some(idx) = index_scalar_from_value(v).await? {
+                                        if idx < 1 {
+                                            return Err(mex(
+                                                "IndexOutOfBounds",
+                                                "Index out of bounds",
+                                            ));
                                         }
+                                        selectors.push(Sel::Scalar(idx as usize));
+                                    } else {
+                                        match v {
                                         Value::Tensor(idx_t) => {
                                             let dim_len = *t.shape.get(d).unwrap_or(&1);
                                             let len = idx_t.shape.iter().product::<usize>();
@@ -5267,6 +5257,7 @@ async fn run_interpreter_inner(
                                                 "Unsupported index type",
                                             ))
                                         }
+                                    }
                                     }
                                 }
                             }
@@ -5539,17 +5530,16 @@ async fn run_interpreter_inner(
                             } else if is_end {
                                 idxs = vec![total];
                             } else if let Some(v) = numeric.first() {
-                                match v {
-                                    value if numeric_index_scalar_from_host_value(value).is_some() => {
-                                        let i = numeric_index_scalar_from_host_value(v).unwrap_or_default();
-                                        if i < 1 {
-                                            vm_bail!(mex(
-                                                "IndexOutOfBounds",
-                                                "Index out of bounds"
-                                            ));
-                                        }
-                                        idxs = vec![i as usize];
+                                if let Some(i) = index_scalar_from_value(v).await? {
+                                    if i < 1 {
+                                        vm_bail!(mex(
+                                            "IndexOutOfBounds",
+                                            "Index out of bounds"
+                                        ));
                                     }
+                                    idxs = vec![i as usize];
+                                } else {
+                                    match v {
                                     Value::Tensor(idx_t) => {
                                         let len = idx_t.shape.iter().product::<usize>();
                                         if len == total {
@@ -5575,6 +5565,7 @@ async fn run_interpreter_inner(
                                         "UnsupportedIndexType",
                                         "Unsupported index type"
                                     )),
+                                    }
                                 }
                             } else {
                                 vm_bail!(mex("MissingNumericIndex", "missing numeric index"));
@@ -5610,17 +5601,16 @@ async fn run_interpreter_inner(
                                         "missing numeric index",
                                     ))?;
                                     num_iter += 1;
-                                    match v {
-                                        value if numeric_index_scalar_from_host_value(value).is_some() => {
-                                            let idx = numeric_index_scalar_from_host_value(v).unwrap_or_default();
-                                            if idx < 1 {
-                                                return Err(mex(
-                                                    "IndexOutOfBounds",
-                                                    "Index out of bounds",
-                                                ));
-                                            }
-                                            selectors.push(Sel::Scalar(idx as usize));
+                                    if let Some(idx) = index_scalar_from_value(v).await? {
+                                        if idx < 1 {
+                                            return Err(mex(
+                                                "IndexOutOfBounds",
+                                                "Index out of bounds",
+                                            ));
                                         }
+                                        selectors.push(Sel::Scalar(idx as usize));
+                                    } else {
+                                        match v {
                                         Value::Tensor(idx_t) => {
                                             let dim_len = *sa.shape.get(d).unwrap_or(&1);
                                             let len = idx_t.shape.iter().product::<usize>();
@@ -5653,6 +5643,7 @@ async fn run_interpreter_inner(
                                             "UnsupportedIndexType",
                                             "Unsupported index type"
                                         )),
+                                    }
                                     }
                                 }
                             }
@@ -5869,6 +5860,17 @@ async fn run_interpreter_inner(
                 clear_residency(&base);
                 if let Value::GpuTensor(handle) = &base {
                     if let Some(provider) = runmat_accelerate_api::provider() {
+                        let normalized_numeric: Vec<Value> = {
+                            let mut out = Vec::with_capacity(numeric.len());
+                            for value in &numeric {
+                                if let Some(idx) = index_scalar_from_value(value).await? {
+                                    out.push(Value::Int(runmat_builtins::IntValue::I64(idx)));
+                                } else {
+                                    out.push(runmat_runtime::dispatcher::gather_if_needed_async(value).await?);
+                                }
+                            }
+                            out
+                        };
                         let attempt = (|| -> VmResult<(Vec<u32>, Vec<usize>)> {
                             let rank = handle.shape.len();
                             #[derive(Clone)]
@@ -5910,22 +5912,22 @@ async fn run_interpreter_inner(
                                         end_off: off,
                                     });
                                 } else {
-                                    let v = numeric.get(num_iter).ok_or(mex(
+                                    let v = normalized_numeric.get(num_iter).ok_or(mex(
                                         "MissingNumericIndex",
                                         "missing numeric index",
                                     ))?;
                                     num_iter += 1;
-                                    match v {
-                                        value if numeric_index_scalar_from_host_value(value).is_some() => {
-                                            let idx = numeric_index_scalar_from_host_value(v).unwrap_or_default();
-                                            if idx < 1 {
-                                                return Err(mex(
-                                                    "IndexOutOfBounds",
-                                                    "Index out of bounds",
-                                                ));
-                                            }
-                                            selectors.push(Sel::Scalar(idx as usize));
+                                    if let Value::Int(idx_val) = v {
+                                        let idx = idx_val.to_i64();
+                                        if idx < 1 {
+                                            return Err(mex(
+                                                "IndexOutOfBounds",
+                                                "Index out of bounds",
+                                            ));
                                         }
+                                        selectors.push(Sel::Scalar(idx as usize));
+                                    } else {
+                                        match v {
                                         Value::Tensor(idx_t) => {
                                             let dim_len = *full_shape.get(d).unwrap_or(&1);
                                             let len = idx_t.shape.iter().product::<usize>();
@@ -5958,6 +5960,7 @@ async fn run_interpreter_inner(
                                                 "Unsupported index type",
                                             ))
                                         }
+                                    }
                                     }
                                 }
                             }
@@ -6118,17 +6121,16 @@ async fn run_interpreter_inner(
                                     .get(num_iter)
                                     .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
                                 num_iter += 1;
-                                match v {
-                                    value if numeric_index_scalar_from_host_value(value).is_some() => {
-                                        let idx = numeric_index_scalar_from_host_value(v).unwrap_or_default();
-                                        if idx < 1 {
-                                            vm_bail!(mex(
-                                                "IndexOutOfBounds",
-                                                "Index out of bounds"
-                                            ));
-                                        }
-                                        selectors.push(Sel::Scalar(idx as usize));
+                                if let Some(idx) = index_scalar_from_value(v).await? {
+                                    if idx < 1 {
+                                        vm_bail!(mex(
+                                            "IndexOutOfBounds",
+                                            "Index out of bounds"
+                                        ));
                                     }
+                                    selectors.push(Sel::Scalar(idx as usize));
+                                } else {
+                                    match v {
                                     Value::Tensor(idx_t) => {
                                         let dim_len = *t.shape.get(d).unwrap_or(&1);
                                         let len = idx_t.shape.iter().product::<usize>();
@@ -6159,6 +6161,7 @@ async fn run_interpreter_inner(
                                         "UnsupportedIndexType",
                                         "Unsupported index type"
                                     )),
+                                    }
                                 }
                             }
                         }
@@ -6406,17 +6409,16 @@ async fn run_interpreter_inner(
                                     } else if is_end {
                                         idxs = vec![total];
                                     } else if let Some(v) = numeric_vals.first() {
-                                        match v {
-                                            value if numeric_index_scalar_from_host_value(value).is_some() => {
-                                                let i = numeric_index_scalar_from_host_value(v).unwrap_or_default();
-                                                if i < 1 {
-                                                    vm_bail!(mex(
-                                                        "IndexOutOfBounds",
-                                                        "Index out of bounds"
-                                                    ));
-                                                }
-                                                idxs = vec![i as usize];
+                                        if let Some(i) = index_scalar_from_value(v).await? {
+                                            if i < 1 {
+                                                vm_bail!(mex(
+                                                    "IndexOutOfBounds",
+                                                    "Index out of bounds"
+                                                ));
                                             }
+                                            idxs = vec![i as usize];
+                                        } else {
+                                            match v {
                                             Value::Tensor(idx_t) => {
                                                 for &val in &idx_t.data {
                                                     let i = val as isize;
@@ -6451,6 +6453,7 @@ async fn run_interpreter_inner(
                                                 "UnsupportedIndexType",
                                                 "Unsupported index type"
                                             )),
+                                            }
                                         }
                                     } else {
                                         vm_bail!(mex(
@@ -6488,17 +6491,16 @@ async fn run_interpreter_inner(
                                                 "missing numeric index",
                                             ))?;
                                             num_iter += 1;
-                                            match v {
-                                                value if numeric_index_scalar_from_host_value(value).is_some() => {
-                                                    let idx = numeric_index_scalar_from_host_value(v).unwrap_or_default();
-                                                    if idx < 1 {
-                                                        return Err(mex(
-                                                            "IndexOutOfBounds",
-                                                            "Index out of bounds",
-                                                        ));
-                                                    }
-                                                    selectors.push(Sel::Scalar(idx as usize));
+                                            if let Some(idx) = index_scalar_from_value(v).await? {
+                                                if idx < 1 {
+                                                    return Err(mex(
+                                                        "IndexOutOfBounds",
+                                                        "Index out of bounds",
+                                                    ));
                                                 }
+                                                selectors.push(Sel::Scalar(idx as usize));
+                                            } else {
+                                                match v {
                                                 Value::Tensor(idx_t) => {
                                                     let dim_len = *t2.shape.get(d).unwrap_or(&1);
                                                     let len = idx_t.shape.iter().product::<usize>();
@@ -6545,6 +6547,7 @@ async fn run_interpreter_inner(
                                                         "Unsupported index type",
                                                     ))
                                                 }
+                                            }
                                             }
                                         }
                                     }
@@ -7328,17 +7331,16 @@ async fn run_interpreter_inner(
                                 let v = numeric
                                     .first()
                                     .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
-                                match v {
-                                    value if numeric_index_scalar_from_host_value(value).is_some() => {
-                                        let i = numeric_index_scalar_from_host_value(v).unwrap_or_default();
-                                        if i < 1 || (i as usize) > total {
-                                            vm_bail!(mex(
-                                                "IndexOutOfBounds",
-                                                "Index out of bounds"
-                                            ));
-                                        }
-                                        lin_indices.push(i as usize);
+                                if let Some(i) = index_scalar_from_value(v).await? {
+                                    if i < 1 || (i as usize) > total {
+                                        vm_bail!(mex(
+                                            "IndexOutOfBounds",
+                                            "Index out of bounds"
+                                        ));
                                     }
+                                    lin_indices.push(i as usize);
+                                } else {
+                                    match v {
                                     Value::Tensor(idx_t) => {
                                         let len = idx_t.shape.iter().product::<usize>();
                                         if len == total {
@@ -7364,6 +7366,7 @@ async fn run_interpreter_inner(
                                         "UnsupportedIndexType",
                                         "Unsupported index type"
                                     )),
+                                    }
                                 }
                             }
                             // Scatter RHS
@@ -7422,17 +7425,16 @@ async fn run_interpreter_inner(
                                         "missing numeric index",
                                     ))?;
                                     num_iter += 1;
-                                    match v {
-                                        value if numeric_index_scalar_from_host_value(value).is_some() => {
-                                            let idx = numeric_index_scalar_from_host_value(v).unwrap_or_default();
-                                            if idx < 1 {
-                                                vm_bail!(mex(
-                                                    "IndexOutOfBounds",
-                                                    "Index out of bounds"
-                                                ));
-                                            }
-                                            selectors.push(Sel::Scalar(idx as usize));
+                                    if let Some(idx) = index_scalar_from_value(v).await? {
+                                        if idx < 1 {
+                                            vm_bail!(mex(
+                                                "IndexOutOfBounds",
+                                                "Index out of bounds"
+                                            ));
                                         }
+                                        selectors.push(Sel::Scalar(idx as usize));
+                                    } else {
+                                        match v {
                                         Value::Tensor(idx_t) => {
                                             let dim_len = *t.shape.get(d).unwrap_or(&1);
                                             let len = idx_t.shape.iter().product::<usize>();
@@ -7463,6 +7465,7 @@ async fn run_interpreter_inner(
                                             "UnsupportedIndexType",
                                             "Unsupported index type"
                                         )),
+                                        }
                                     }
                                 }
                             }
@@ -8185,14 +8188,13 @@ async fn run_interpreter_inner(
                                 .get(num_iter)
                                 .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
                             num_iter += 1;
-                                    match v {
-                                        value if numeric_index_scalar_from_host_value(value).is_some() => {
-                                            let idx = numeric_index_scalar_from_host_value(v).unwrap_or_default();
-                                            if idx < 1 {
-                                                vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
-                                            }
-                                            selectors.push(Sel::Scalar(idx as usize));
-                                        }
+                            if let Some(idx) = index_scalar_from_value(v).await? {
+                                if idx < 1 {
+                                    vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
+                                }
+                                selectors.push(Sel::Scalar(idx as usize));
+                            } else {
+                                match v {
                                 Value::Tensor(idx_t) => {
                                     let dim_len = *t.shape.get(d).unwrap_or(&1);
                                     let len = idx_t.shape.iter().product::<usize>();
@@ -8212,6 +8214,7 @@ async fn run_interpreter_inner(
                                 _ => {
                                     vm_bail!(mex("UnsupportedIndexType", "Unsupported index type"))
                                 }
+                            }
                             }
                         }
                         // Build index lists and scatter rhs with broadcasting
@@ -8452,14 +8455,13 @@ async fn run_interpreter_inner(
                                 .get(num_iter)
                                 .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
                             num_iter += 1;
-                            match v {
-                                value if numeric_index_scalar_from_host_value(value).is_some() => {
-                                    let idx = numeric_index_scalar_from_host_value(v).unwrap_or_default();
-                                    if idx < 1 {
-                                        vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
-                                    }
-                                    selectors.push(Sel::Scalar(idx as usize));
+                            if let Some(idx) = index_scalar_from_value(v).await? {
+                                if idx < 1 {
+                                    vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
                                 }
+                                selectors.push(Sel::Scalar(idx as usize));
+                            } else {
+                                match v {
                                 Value::Tensor(idx_t) => {
                                     let dim_len = *t.shape.get(d).unwrap_or(&1);
                                     let len = idx_t.shape.iter().product::<usize>();
@@ -8488,6 +8490,7 @@ async fn run_interpreter_inner(
                                 }
                                 _ => {
                                     vm_bail!(mex("UnsupportedIndexType", "Unsupported index type"))
+                                }
                                 }
                             }
                         }
