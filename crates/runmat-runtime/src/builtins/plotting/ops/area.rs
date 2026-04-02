@@ -155,8 +155,7 @@ fn build_area_gpu_plots(
     let context = super::gpu_helpers::ensure_shared_wgpu_context(BUILTIN_NAME)?;
     let y_ref = runmat_accelerate_api::export_wgpu_buffer(y)
         .ok_or_else(|| plotting_error(BUILTIN_NAME, "area: unable to export GPU Y data"))?;
-    let rows = y_ref.shape.first().copied().unwrap_or(y_ref.len).max(1);
-    let cols = y_ref.shape.get(1).copied().unwrap_or(1).max(1);
+    let (rows, cols) = area_shape_from_gpu_shape(&y_ref.shape, y_ref.len);
     let scalar = runmat_plot::gpu::ScalarType::from_is_f64(
         y_ref.precision == runmat_accelerate_api::ProviderPrecision::F64,
     );
@@ -296,11 +295,39 @@ fn parse_area_style_args(args: &[Value]) -> crate::BuiltinResult<ParsedAreaStyle
         idx += 1;
     }
     let parsed = parse_line_style_args(&filtered, &LineStyleParseOptions::generic(BUILTIN_NAME))?;
+    let explicit_color = area_color_was_explicit(&filtered);
     Ok(ParsedAreaStyle {
-        color: Some(parsed.appearance.color),
+        color: explicit_color.then_some(parsed.appearance.color),
         label: parsed.label,
         base_value,
     })
+}
+
+fn area_color_was_explicit(args: &[Value]) -> bool {
+    if let Some(token) = args.first().and_then(super::style::value_as_string) {
+        let mut chars = token.chars().peekable();
+        while let Some(ch) = chars.next() {
+            match ch {
+                'y' | 'm' | 'c' | 'r' | 'g' | 'b' | 'w' | 'k' => return true,
+                '-' | '.' => {
+                    if matches!(chars.peek(), Some('-' | '.')) {
+                        chars.next();
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut idx = 0usize;
+    while idx + 1 < args.len() {
+        if let Some(key) = super::style::value_as_string(&args[idx]) {
+            if key.trim().eq_ignore_ascii_case("Color") {
+                return true;
+            }
+        }
+        idx += 2;
+    }
+    false
 }
 
 fn parse_area_args(
@@ -327,7 +354,7 @@ fn parse_area_args(
     let Some(second) = it.next() else {
         let y = Tensor::try_from(&first)
             .map_err(|e| plotting_error(BUILTIN_NAME, format!("area: {e}")))?;
-        let rows = y.rows.max(1);
+        let (rows, _) = area_shape_from_tensor(&y);
         let x = Tensor {
             data: (1..=rows).map(|i| i as f64).collect(),
             shape: vec![rows],
@@ -340,7 +367,7 @@ fn parse_area_args(
     if matches!(second, Value::String(_) | Value::CharArray(_)) {
         let y = Tensor::try_from(&first)
             .map_err(|e| plotting_error(BUILTIN_NAME, format!("area: {e}")))?;
-        let rows = y.rows.max(1);
+        let (rows, _) = area_shape_from_tensor(&y);
         let x = Tensor {
             data: (1..=rows).map(|i| i as f64).collect(),
             shape: vec![rows],
@@ -365,13 +392,30 @@ fn vector_from_tensor(tensor: &Tensor, builtin: &'static str) -> crate::BuiltinR
     Ok(tensor.data.clone())
 }
 
+fn area_shape_from_tensor(tensor: &Tensor) -> (usize, usize) {
+    if tensor.shape.len() <= 1 || tensor.rows == 1 || tensor.cols == 1 {
+        (tensor.data.len().max(1), 1)
+    } else {
+        (tensor.rows.max(1), tensor.cols.max(1))
+    }
+}
+
+fn area_shape_from_gpu_shape(shape: &[usize], len: usize) -> (usize, usize) {
+    let rows = shape.first().copied().unwrap_or(len).max(1);
+    let cols = shape.get(1).copied().unwrap_or(1).max(1);
+    if shape.len() <= 1 || rows == 1 || cols == 1 {
+        (len.max(1), 1)
+    } else {
+        (rows, cols)
+    }
+}
+
 fn area_series_from_tensor(
     x: Vec<f64>,
     y: &Tensor,
     builtin: &'static str,
 ) -> crate::BuiltinResult<AreaSeries> {
-    let rows = y.rows.max(1);
-    let cols = y.cols.max(1);
+    let (rows, cols) = area_shape_from_tensor(y);
     if rows != x.len() {
         return Err(plotting_error(
             builtin,
@@ -383,7 +427,7 @@ fn area_series_from_tensor(
     for col in 0..cols {
         let mut top = Vec::with_capacity(rows);
         for row in 0..rows {
-            let idx = col * rows + row;
+            let idx = if cols == 1 { row } else { col * rows + row };
             cumulative[row] += y.data.get(idx).copied().unwrap_or(0.0);
             top.push(cumulative[row]);
         }
@@ -443,5 +487,79 @@ mod tests {
             get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap(),
             Value::String("area".into())
         );
+    }
+
+    #[test]
+    fn area_accepts_explicit_x_with_matrix_series() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let handle = area_builtin(vec![
+            Value::Tensor(Tensor {
+                data: vec![1.0, 2.0, 3.0, 4.0, 5.0],
+                shape: vec![5],
+                rows: 5,
+                cols: 1,
+                dtype: runmat_builtins::NumericDType::F64,
+            }),
+            Value::Tensor(matrix_tensor(
+                vec![
+                    1.0, 2.0, 3.0, 2.0, 1.0, 2.0, 1.0, 2.0, 3.0, 2.0, 1.0, 2.0, 1.0, 2.0, 3.0,
+                ],
+                5,
+                3,
+            )),
+        ])
+        .unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        assert_eq!(fig.plots().count(), 3);
+        let colors = fig
+            .plots()
+            .take(3)
+            .map(|plot| match plot {
+                PlotElement::Area(area) => area.color,
+                _ => panic!("expected area"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(colors[0], MATLAB_COLOR_ORDER[0]);
+        assert_eq!(colors[1], MATLAB_COLOR_ORDER[1]);
+        assert_eq!(colors[2], MATLAB_COLOR_ORDER[2]);
+        assert_eq!(
+            get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap(),
+            Value::String("area".into())
+        );
+    }
+
+    #[test]
+    fn area_accepts_explicit_x_with_row_vector_y() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let _ = area_builtin(vec![
+            Value::Tensor(Tensor {
+                data: vec![0.0, 0.2, 0.4, 0.6],
+                shape: vec![4],
+                rows: 4,
+                cols: 1,
+                dtype: runmat_builtins::NumericDType::F64,
+            }),
+            Value::Tensor(Tensor {
+                data: vec![2.0, 2.2, 2.4, 2.6],
+                shape: vec![1, 4],
+                rows: 1,
+                cols: 4,
+                dtype: runmat_builtins::NumericDType::F64,
+            }),
+        ])
+        .unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        assert_eq!(fig.plots().count(), 1);
+        let PlotElement::Area(plot) = fig.plots().next().unwrap() else {
+            panic!("expected area")
+        };
+        assert_eq!(plot.x, vec![0.0, 0.2, 0.4, 0.6]);
+        assert_eq!(plot.y, vec![2.0, 2.2, 2.4, 2.6]);
     }
 }

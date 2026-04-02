@@ -415,4 +415,25 @@ mod tests {
         let fig = clone_figure(fig_handle).unwrap();
         assert_eq!(fig.plot_axes_indices(), &[1]);
     }
+
+    #[test]
+    fn plot3_accepts_scalar_point() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let _ = futures::executor::block_on(plot3_builtin(vec![
+            Value::Num(1.0),
+            Value::Num(2.0),
+            Value::Num(3.0),
+            Value::String("o".into()),
+        ]));
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::Line3(line) = fig.plots().next().unwrap() else {
+            panic!("expected line3")
+        };
+        assert_eq!(line.x_data, vec![1.0]);
+        assert_eq!(line.y_data, vec![2.0]);
+        assert_eq!(line.z_data, vec![3.0]);
+    }
 }

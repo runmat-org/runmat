@@ -42,7 +42,7 @@
   "examples": [
     {
       "description": "Display a matrix as a heatmap-style scaled image",
-      "input": "A = peaks(60);\nimagesc(A);\ncolorbar;"
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 60), linspace(-3, 3, 60));\nA = sin(X) .* cos(Y);\nimagesc(A);\ncolorbar;"
     },
     {
       "description": "Place a scaled image on explicit axes",
@@ -50,7 +50,7 @@
     },
     {
       "description": "Use subplot-local color workflows",
-      "input": "subplot(1, 2, 1);\nimagesc(peaks(40));\ncolormap('jet');\ncolorbar;\nsubplot(1, 2, 2);\nimagesc(magic(20));\ncolormap('gray');"
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 40), linspace(-3, 3, 40));\nZ = sin(X) .* cos(Y);\nsubplot(1, 2, 1);\nimagesc(Z);\ncolormap('jet');\ncolorbar;\nsubplot(1, 2, 2);\nimagesc(magic(20));\ncolormap('gray');"
     }
   ],
   "links": [

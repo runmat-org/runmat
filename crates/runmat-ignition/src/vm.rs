@@ -558,6 +558,15 @@ fn index_scalar_from_host_value(value: &Value) -> Option<i64> {
     }
 }
 
+fn numeric_index_scalar_from_host_value(value: &Value) -> Option<i64> {
+    match value {
+        Value::Num(n) => Some(*n as i64),
+        Value::Int(int_val) => Some(int_val.to_i64()),
+        Value::Tensor(t) if t.data.len() == 1 && is_scalar_shape(&t.shape) => Some(t.data[0] as i64),
+        _ => None,
+    }
+}
+
 async fn index_scalar_from_value(value: &Value) -> VmResult<Option<i64>> {
     if let Value::GpuTensor(handle) = value {
         let total = total_len_from_shape(&handle.shape);
@@ -5110,8 +5119,8 @@ async fn run_interpreter_inner(
                                 idxs = vec![total];
                             } else if let Some(v) = numeric.first() {
                                 match v {
-                                    Value::Num(n) => {
-                                        let i = *n as isize;
+                                    value if numeric_index_scalar_from_host_value(value).is_some() => {
+                                        let i = numeric_index_scalar_from_host_value(v).unwrap_or_default();
                                         if i < 1 {
                                             vm_bail!(mex(
                                                 "IndexOutOfBounds",
@@ -5202,8 +5211,8 @@ async fn run_interpreter_inner(
                                     ))?;
                                     num_iter += 1;
                                     match v {
-                                        Value::Num(n) => {
-                                            let idx = *n as isize;
+                                        value if numeric_index_scalar_from_host_value(value).is_some() => {
+                                            let idx = numeric_index_scalar_from_host_value(v).unwrap_or_default();
                                             if idx < 1 {
                                                 return Err(mex(
                                                     "IndexOutOfBounds",
@@ -5531,8 +5540,8 @@ async fn run_interpreter_inner(
                                 idxs = vec![total];
                             } else if let Some(v) = numeric.first() {
                                 match v {
-                                    Value::Num(n) => {
-                                        let i = *n as isize;
+                                    value if numeric_index_scalar_from_host_value(value).is_some() => {
+                                        let i = numeric_index_scalar_from_host_value(v).unwrap_or_default();
                                         if i < 1 {
                                             vm_bail!(mex(
                                                 "IndexOutOfBounds",
@@ -5602,8 +5611,8 @@ async fn run_interpreter_inner(
                                     ))?;
                                     num_iter += 1;
                                     match v {
-                                        Value::Num(n) => {
-                                            let idx = *n as isize;
+                                        value if numeric_index_scalar_from_host_value(value).is_some() => {
+                                            let idx = numeric_index_scalar_from_host_value(v).unwrap_or_default();
                                             if idx < 1 {
                                                 return Err(mex(
                                                     "IndexOutOfBounds",
@@ -5907,8 +5916,8 @@ async fn run_interpreter_inner(
                                     ))?;
                                     num_iter += 1;
                                     match v {
-                                        Value::Num(n) => {
-                                            let idx = *n as isize;
+                                        value if numeric_index_scalar_from_host_value(value).is_some() => {
+                                            let idx = numeric_index_scalar_from_host_value(v).unwrap_or_default();
                                             if idx < 1 {
                                                 return Err(mex(
                                                     "IndexOutOfBounds",
@@ -6110,8 +6119,8 @@ async fn run_interpreter_inner(
                                     .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
                                 num_iter += 1;
                                 match v {
-                                    Value::Num(n) => {
-                                        let idx = *n as isize;
+                                    value if numeric_index_scalar_from_host_value(value).is_some() => {
+                                        let idx = numeric_index_scalar_from_host_value(v).unwrap_or_default();
                                         if idx < 1 {
                                             vm_bail!(mex(
                                                 "IndexOutOfBounds",
@@ -6398,8 +6407,8 @@ async fn run_interpreter_inner(
                                         idxs = vec![total];
                                     } else if let Some(v) = numeric_vals.first() {
                                         match v {
-                                            Value::Num(n) => {
-                                                let i = *n as isize;
+                                            value if numeric_index_scalar_from_host_value(value).is_some() => {
+                                                let i = numeric_index_scalar_from_host_value(v).unwrap_or_default();
                                                 if i < 1 {
                                                     vm_bail!(mex(
                                                         "IndexOutOfBounds",
@@ -6480,8 +6489,8 @@ async fn run_interpreter_inner(
                                             ))?;
                                             num_iter += 1;
                                             match v {
-                                                Value::Num(n) => {
-                                                    let idx = *n as isize;
+                                                value if numeric_index_scalar_from_host_value(value).is_some() => {
+                                                    let idx = numeric_index_scalar_from_host_value(v).unwrap_or_default();
                                                     if idx < 1 {
                                                         return Err(mex(
                                                             "IndexOutOfBounds",
@@ -7320,8 +7329,8 @@ async fn run_interpreter_inner(
                                     .first()
                                     .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
                                 match v {
-                                    Value::Num(n) => {
-                                        let i = *n as isize;
+                                    value if numeric_index_scalar_from_host_value(value).is_some() => {
+                                        let i = numeric_index_scalar_from_host_value(v).unwrap_or_default();
                                         if i < 1 || (i as usize) > total {
                                             vm_bail!(mex(
                                                 "IndexOutOfBounds",
@@ -7414,8 +7423,8 @@ async fn run_interpreter_inner(
                                     ))?;
                                     num_iter += 1;
                                     match v {
-                                        Value::Num(n) => {
-                                            let idx = *n as isize;
+                                        value if numeric_index_scalar_from_host_value(value).is_some() => {
+                                            let idx = numeric_index_scalar_from_host_value(v).unwrap_or_default();
                                             if idx < 1 {
                                                 vm_bail!(mex(
                                                     "IndexOutOfBounds",
@@ -8176,14 +8185,14 @@ async fn run_interpreter_inner(
                                 .get(num_iter)
                                 .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
                             num_iter += 1;
-                            match v {
-                                Value::Num(n) => {
-                                    let idx = *n as isize;
-                                    if idx < 1 {
-                                        vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
-                                    }
-                                    selectors.push(Sel::Scalar(idx as usize));
-                                }
+                                    match v {
+                                        value if numeric_index_scalar_from_host_value(value).is_some() => {
+                                            let idx = numeric_index_scalar_from_host_value(v).unwrap_or_default();
+                                            if idx < 1 {
+                                                vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
+                                            }
+                                            selectors.push(Sel::Scalar(idx as usize));
+                                        }
                                 Value::Tensor(idx_t) => {
                                     let dim_len = *t.shape.get(d).unwrap_or(&1);
                                     let len = idx_t.shape.iter().product::<usize>();
@@ -8444,8 +8453,8 @@ async fn run_interpreter_inner(
                                 .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
                             num_iter += 1;
                             match v {
-                                Value::Num(n) => {
-                                    let idx = *n as isize;
+                                value if numeric_index_scalar_from_host_value(value).is_some() => {
+                                    let idx = numeric_index_scalar_from_host_value(v).unwrap_or_default();
                                     if idx < 1 {
                                         vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
                                     }

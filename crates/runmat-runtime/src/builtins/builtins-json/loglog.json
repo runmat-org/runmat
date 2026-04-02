@@ -31,7 +31,7 @@
     },
     {
       "description": "Inspect both axes after plotting",
-      "input": "x = logspace(0, 2, 50);\nloglog(x, x.^2);\nax = gca;\n[get(ax, 'XScale'), get(ax, 'YScale')]",
+      "input": "x = logspace(0, 2, 50);\nloglog(x, x.^2);\nax = gca;\nxscale = get(ax, 'XScale');\nyscale = get(ax, 'YScale');",
       "output": "% Both axes report 'log'"
     }
   ],

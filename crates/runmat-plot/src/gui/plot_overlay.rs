@@ -4,6 +4,7 @@
 //! plot content, providing controls, axis labels, grid lines, and titles.
 
 use crate::core::{plot_utils, PlotRenderer};
+use crate::plots::TextStyle;
 use crate::styling::{ModernDarkTheme, PlotThemeConfig, ThemeVariant};
 use egui::{Align2, Color32, Context, FontId, Pos2, Rect, Stroke};
 use glam::{Vec3, Vec4};
@@ -140,6 +141,57 @@ impl Default for PlotOverlay {
 
 impl PlotOverlay {
     const SUBPLOT_GAP_POINTS: f32 = 6.0;
+
+    fn style_color(style: &TextStyle, fallback: Color32) -> Color32 {
+        style
+            .color
+            .map(|c| {
+                Color32::from_rgb(
+                    (c.x.clamp(0.0, 1.0) * 255.0) as u8,
+                    (c.y.clamp(0.0, 1.0) * 255.0) as u8,
+                    (c.z.clamp(0.0, 1.0) * 255.0) as u8,
+                )
+            })
+            .unwrap_or(fallback)
+    }
+
+    fn style_font_size(style: &TextStyle, default_size: f32, scale: f32) -> f32 {
+        style.font_size.unwrap_or(default_size) * scale.max(0.75)
+    }
+
+    fn style_is_bold(style: &TextStyle) -> bool {
+        style
+            .font_weight
+            .as_deref()
+            .map(|weight| weight.eq_ignore_ascii_case("bold"))
+            .unwrap_or(false)
+    }
+
+    fn paint_styled_text(
+        painter: &egui::Painter,
+        pos: Pos2,
+        align: Align2,
+        text: &str,
+        font_size: f32,
+        color: Color32,
+        bold: bool,
+        shadow_alpha: u8,
+    ) {
+        let font = FontId::proportional(font_size);
+        painter.text(
+            pos + egui::vec2(1.0, 1.0),
+            align,
+            text,
+            font.clone(),
+            Color32::from_rgba_premultiplied(0, 0, 0, shadow_alpha),
+        );
+        painter.text(pos, align, text, font.clone(), color);
+        if bold {
+            painter.text(pos + egui::vec2(0.6, 0.0), align, text, font.clone(), color);
+            painter.text(pos + egui::vec2(0.0, 0.6), align, text, font.clone(), color);
+            painter.text(pos + egui::vec2(0.6, 0.6), align, text, font, color);
+        }
+    }
 
     fn label_stride(labels: &[String], axis_span_px: f32, font_size_px: f32) -> usize {
         if labels.len() <= 1 || axis_span_px <= 1.0 {
@@ -1812,59 +1864,59 @@ impl PlotOverlay {
 
         if let Some(pos) = project(Vec3::X * axis_len * 1.10) {
             if let Some(label) = plot_renderer.overlay_x_label_for_axes(axes_index) {
+                let style = plot_renderer
+                    .overlay_x_label_style_for_axes(axes_index)
+                    .cloned()
+                    .unwrap_or_default();
                 let offset = outward_offset(pos, 12.0 * scale) + egui::vec2(4.0 * scale, 0.0);
-                painter.text(
-                    pos + egui::vec2(1.0, 1.0) + offset,
-                    Align2::LEFT_CENTER,
-                    label,
-                    FontId::proportional(12.0 * scale),
-                    Color32::from_rgba_premultiplied(0, 0, 0, 110),
-                );
-                painter.text(
+                Self::paint_styled_text(
+                    painter,
                     pos + offset,
                     Align2::LEFT_CENTER,
                     label,
-                    FontId::proportional(12.0 * scale),
-                    col_x,
+                    Self::style_font_size(&style, 12.0, scale),
+                    Self::style_color(&style, col_x),
+                    Self::style_is_bold(&style),
+                    110,
                 );
             }
         }
         if let Some(pos) = project(Vec3::Y * axis_len * 1.10) {
             if let Some(label) = plot_renderer.overlay_y_label_for_axes(axes_index) {
+                let style = plot_renderer
+                    .overlay_y_label_style_for_axes(axes_index)
+                    .cloned()
+                    .unwrap_or_default();
                 let offset =
                     outward_offset(pos, 12.0 * scale) + egui::vec2(2.0 * scale, -2.0 * scale);
-                painter.text(
-                    pos + egui::vec2(1.0, 1.0) + offset,
-                    Align2::LEFT_CENTER,
-                    label,
-                    FontId::proportional(12.0 * scale),
-                    Color32::from_rgba_premultiplied(0, 0, 0, 110),
-                );
-                painter.text(
+                Self::paint_styled_text(
+                    painter,
                     pos + offset,
                     Align2::LEFT_CENTER,
                     label,
-                    FontId::proportional(12.0 * scale),
-                    col_y,
+                    Self::style_font_size(&style, 12.0, scale),
+                    Self::style_color(&style, col_y),
+                    Self::style_is_bold(&style),
+                    110,
                 );
             }
         }
         if let Some(pos) = project(Vec3::Z * axis_len * 1.10) {
             if let Some(label) = plot_renderer.overlay_z_label_for_axes(axes_index) {
+                let style = plot_renderer
+                    .overlay_z_label_style_for_axes(axes_index)
+                    .cloned()
+                    .unwrap_or_default();
                 let offset = outward_offset(pos, 12.0 * scale) + egui::vec2(0.0, -4.0 * scale);
-                painter.text(
-                    pos + egui::vec2(1.0, 1.0) + offset,
-                    Align2::LEFT_BOTTOM,
-                    label,
-                    FontId::proportional(12.0 * scale),
-                    Color32::from_rgba_premultiplied(0, 0, 0, 110),
-                );
-                painter.text(
+                Self::paint_styled_text(
+                    painter,
                     pos + offset,
                     Align2::LEFT_BOTTOM,
                     label,
-                    FontId::proportional(12.0 * scale),
-                    col_z,
+                    Self::style_font_size(&style, 12.0, scale),
+                    Self::style_color(&style, col_z),
+                    Self::style_is_bold(&style),
+                    110,
                 );
             }
         }
@@ -2113,35 +2165,22 @@ impl PlotOverlay {
             let Some(screen) = self.project_world_to_screen(plot_rect, camera, position) else {
                 continue;
             };
-            let color = style
-                .color
-                .map(|c| {
-                    Color32::from_rgb(
-                        (c.x.clamp(0.0, 1.0) * 255.0) as u8,
-                        (c.y.clamp(0.0, 1.0) * 255.0) as u8,
-                        (c.z.clamp(0.0, 1.0) * 255.0) as u8,
-                    )
-                })
-                .unwrap_or_else(|| self.theme_text_color());
-            let font_size = style.font_size.unwrap_or(14.0) * scale.max(0.75);
+            let color = Self::style_color(&style, self.theme_text_color());
+            let font_size = Self::style_font_size(&style, 14.0, scale);
             let offset = if is_3d {
                 egui::vec2(0.0, -8.0 * scale.max(0.75))
             } else {
                 egui::vec2(0.0, 6.0 * scale.max(0.75))
             };
-            ui.painter().text(
-                screen + offset + egui::vec2(1.0, 1.0),
-                Align2::CENTER_CENTER,
-                &text,
-                FontId::proportional(font_size),
-                Color32::from_rgba_premultiplied(0, 0, 0, if is_3d { 120 } else { 90 }),
-            );
-            ui.painter().text(
+            Self::paint_styled_text(
+                ui.painter(),
                 screen + offset,
                 Align2::CENTER_CENTER,
                 &text,
-                FontId::proportional(font_size),
+                font_size,
                 color,
+                Self::style_is_bold(&style),
+                if is_3d { 120 } else { 90 },
             );
         }
     }

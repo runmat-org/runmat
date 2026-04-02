@@ -23,11 +23,11 @@
   "examples": [
     {
       "description": "Apply interpolated shading to a surface",
-      "input": "surf(peaks(50));\nshading interp;"
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 50), linspace(-3, 3, 50));\nZ = sin(X) .* cos(Y);\nsurf(X, Y, Z);\nshading interp;"
     },
     {
       "description": "Compare flat and faceted shading across subplots",
-      "input": "subplot(1, 2, 1);\nsurf(peaks(40));\nshading flat;\nsubplot(1, 2, 2);\nsurf(peaks(40));\nshading faceted;"
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 40), linspace(-3, 3, 40));\nZ = sin(X) .* cos(Y);\nsubplot(1, 2, 1);\nsurf(X, Y, Z);\nshading flat;\nsubplot(1, 2, 2);\nsurf(X, Y, Z);\nshading faceted;"
     }
   ],
   "links": [

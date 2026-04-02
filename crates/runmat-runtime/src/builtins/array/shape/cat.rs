@@ -473,10 +473,10 @@ fn infer_category(inputs: &[Value]) -> BuiltinResult<CatCategory> {
         }
     }
 
-    if has_string && (has_char || has_cell || has_complex || (has_numeric && !all_logical)) {
+    if has_string && (has_cell || has_complex || (has_numeric && !all_logical)) {
         return Err(cat_err("cat: cannot mix string arrays with other classes"));
     }
-    if has_char && (has_cell || has_complex || has_string) {
+    if has_char && (has_cell || has_complex) {
         return Err(cat_err("cat: cannot mix char arrays with other classes"));
     }
     if has_cell && (has_complex || (has_numeric && !all_logical) || has_string || has_char) {
@@ -963,6 +963,16 @@ fn value_into_string_array(value: Value) -> BuiltinResult<StringArray> {
         Value::String(text) => {
             StringArray::new(vec![text], vec![1, 1]).map_err(|e| cat_err(format!("cat: {e}")))
         }
+        Value::CharArray(chars) => {
+            let mut data = Vec::with_capacity(chars.rows);
+            for row in 0..chars.rows {
+                let start = row * chars.cols;
+                let end = start + chars.cols;
+                let text: String = chars.data[start..end].iter().collect();
+                data.push(text);
+            }
+            StringArray::new(data, vec![chars.rows, 1]).map_err(|e| cat_err(format!("cat: {e}")))
+        }
         other => Err(cat_err(format!(
             "cat: expected string arrays, got {:?}",
             other
@@ -1076,6 +1086,30 @@ pub(crate) mod tests {
                 assert_eq!(text, "RunMat");
             }
             other => panic!("expected char array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn cat_string_and_char_mix_promotes_to_string_array() {
+        let left = StringArray::new(vec!["wn = ".to_string()], vec![1, 1]).unwrap();
+        let mid = CharArray::new_row("6");
+        let right = StringArray::new(vec![" rad/s".to_string()], vec![1, 1]).unwrap();
+        let result = cat_builtin(
+            Value::Int(IntValue::I32(2)),
+            vec![
+                Value::StringArray(left),
+                Value::CharArray(mid),
+                Value::StringArray(right),
+            ],
+        )
+        .expect("cat");
+        match result {
+            Value::StringArray(arr) => {
+                assert_eq!(arr.shape, vec![1, 3]);
+                assert_eq!(arr.data, vec!["wn = ".to_string(), "6".to_string(), " rad/s".to_string()]);
+            }
+            other => panic!("expected string array, got {other:?}"),
         }
     }
 

@@ -475,4 +475,19 @@ mod tests {
         let filled = get_builtin(vec![Value::Num(handle), Value::String("Filled".into())]).unwrap();
         assert_eq!(filled, Value::Bool(false));
     }
+
+    #[test]
+    fn stem_accepts_scalar_point() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let _ = stem_builtin(vec![Value::Num(1.0), Value::Num(2.0)]).unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::Stem(plot) = fig.plots().next().unwrap() else {
+            panic!("expected stem")
+        };
+        assert_eq!(plot.x, vec![1.0]);
+        assert_eq!(plot.y, vec![2.0]);
+    }
 }

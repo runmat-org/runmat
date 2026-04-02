@@ -596,4 +596,19 @@ mod tests {
         let cap = get_builtin(vec![Value::Num(handle), Value::String("CapSize".into())]).unwrap();
         assert_eq!(cap, Value::Num(12.0));
     }
+
+    #[test]
+    fn errorbar_accepts_scalar_point() {
+        let _guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        let _ = errorbar_builtin(vec![Value::Num(1.0), Value::Num(2.0), Value::Num(0.3)]).unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::ErrorBar(plot) = fig.plots().next().unwrap() else {
+            panic!("expected errorbar")
+        };
+        assert_eq!(plot.x, vec![1.0]);
+        assert_eq!(plot.y, vec![2.0]);
+    }
 }

@@ -20,6 +20,7 @@ pub struct NativeSurfaceRenderContext {
     config: PlotRenderConfig,
     pixels_per_point: f32,
     background_policy: BackgroundPolicy,
+    textmark: Option<String>,
     #[cfg(feature = "egui-overlay")]
     overlay: Option<NativeOverlayState>,
 }
@@ -82,6 +83,7 @@ impl NativeSurfaceRenderContext {
             config,
             pixels_per_point: 1.0,
             background_policy: BackgroundPolicy::ThemeDriven,
+            textmark: None,
             #[cfg(feature = "egui-overlay")]
             overlay,
         })
@@ -106,6 +108,13 @@ impl NativeSurfaceRenderContext {
         self.renderer.theme = theme.clone();
         self.config.theme = theme;
         self.apply_background_policy();
+    }
+
+    pub fn set_textmark(&mut self, textmark: Option<&str>) {
+        self.textmark = textmark
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned);
     }
 
     /// Render a figure directly into an externally-owned texture view.
@@ -329,6 +338,30 @@ impl NativeSurfaceRenderContext {
                         &overlay_config,
                         overlay_metrics,
                     );
+                    if let Some(textmark) = self.textmark.as_deref() {
+                        let screen = ctx.screen_rect();
+                        let anchor = egui::pos2(screen.max.x - 8.0, screen.max.y - 6.0);
+                        let font = egui::FontId::proportional(11.0 * overlay_config.font_scale.max(0.8));
+                        let layer = egui::LayerId::new(
+                            egui::Order::Foreground,
+                            egui::Id::new("runmat_export_textmark"),
+                        );
+                        let painter = ctx.layer_painter(layer);
+                        painter.text(
+                            anchor + egui::vec2(1.0, 1.0),
+                            egui::Align2::RIGHT_BOTTOM,
+                            textmark,
+                            font.clone(),
+                            egui::Color32::from_rgba_premultiplied(0, 0, 0, 72),
+                        );
+                        painter.text(
+                            anchor,
+                            egui::Align2::RIGHT_BOTTOM,
+                            textmark,
+                            font,
+                            egui::Color32::from_rgba_premultiplied(226, 234, 245, 96),
+                        );
+                    }
                     plot_area_points = frame_info.plot_area;
                 },
             );
@@ -390,10 +423,16 @@ impl NativeSurfaceRenderContext {
                         ),
                     )
                 });
-                let rects =
-                    overlay
-                        .plot_overlay
-                        .compute_subplot_rects(rect_points, rows, cols, 8.0, 8.0);
+                let rects = if overlay.plot_overlay.axes_plot_rects().len() == rows * cols {
+                    overlay.plot_overlay.axes_plot_rects().to_vec()
+                } else {
+                    overlay.plot_overlay.compute_subplot_plot_rects_snapped(
+                        rect_points,
+                        &self.renderer,
+                        1.0,
+                        ppp,
+                    )
+                };
                 let sw = self.config.width as f32;
                 let sh = self.config.height as f32;
                 let mut viewports: Vec<(u32, u32, u32, u32)> = Vec::with_capacity(rects.len());
@@ -452,7 +491,11 @@ impl NativeSurfaceRenderContext {
                 let mut cfg = self.config.clone();
                 cfg.width = vw.max(1);
                 cfg.height = vh.max(1);
-                let cam = self.renderer.camera().clone();
+                let cam = self
+                    .renderer
+                    .axes_camera(0)
+                    .cloned()
+                    .unwrap_or_else(|| self.renderer.camera().clone());
                 self.renderer
                     .render_camera_to_viewport(
                         encoder,
@@ -657,6 +700,20 @@ pub async fn render_figure_png_bytes_interactive_and_theme(
     encode_png_bytes(width.max(1), height.max(1), &rgba)
 }
 
+pub async fn render_figure_png_bytes_interactive_and_theme_and_textmark(
+    figure: Figure,
+    width: u32,
+    height: u32,
+    theme: PlotThemeConfig,
+    textmark: Option<&str>,
+) -> Result<Vec<u8>, String> {
+    let mut context = create_headless_context(width.max(1), height.max(1)).await?;
+    context.set_theme_config(theme);
+    context.set_textmark(textmark);
+    let rgba = context.render_to_rgba(&figure, None, None).await?;
+    encode_png_bytes(width.max(1), height.max(1), &rgba)
+}
+
 pub async fn render_figure_png_bytes_interactive_with_camera(
     figure: Figure,
     width: u32,
@@ -679,6 +736,21 @@ pub async fn render_figure_png_bytes_interactive_with_camera_and_theme(
         figure, width, height, camera, theme,
     )
     .await?;
+    encode_png_bytes(width.max(1), height.max(1), &rgba)
+}
+
+pub async fn render_figure_png_bytes_interactive_with_camera_and_theme_and_textmark(
+    figure: Figure,
+    width: u32,
+    height: u32,
+    camera: &Camera,
+    theme: PlotThemeConfig,
+    textmark: Option<&str>,
+) -> Result<Vec<u8>, String> {
+    let mut context = create_headless_context(width.max(1), height.max(1)).await?;
+    context.set_theme_config(theme);
+    context.set_textmark(textmark);
+    let rgba = context.render_to_rgba(&figure, Some(camera), None).await?;
     encode_png_bytes(width.max(1), height.max(1), &rgba)
 }
 
@@ -709,5 +781,22 @@ pub async fn render_figure_png_bytes_interactive_with_axes_cameras_and_theme(
         theme,
     )
     .await?;
+    encode_png_bytes(width.max(1), height.max(1), &rgba)
+}
+
+pub async fn render_figure_png_bytes_interactive_with_axes_cameras_and_theme_and_textmark(
+    figure: Figure,
+    width: u32,
+    height: u32,
+    axes_cameras: &[Camera],
+    theme: PlotThemeConfig,
+    textmark: Option<&str>,
+) -> Result<Vec<u8>, String> {
+    let mut context = create_headless_context(width.max(1), height.max(1)).await?;
+    context.set_theme_config(theme);
+    context.set_textmark(textmark);
+    let rgba = context
+        .render_to_rgba(&figure, None, Some(axes_cameras))
+        .await?;
     encode_png_bytes(width.max(1), height.max(1), &rgba)
 }

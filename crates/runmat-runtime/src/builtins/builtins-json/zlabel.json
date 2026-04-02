@@ -23,15 +23,15 @@
   "examples": [
     {
       "description": "Add a z-axis label to a surface plot",
-      "input": "surf(peaks(50));\nzlabel('Height');"
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 50), linspace(-3, 3, 50));\nZ = sin(X) .* cos(Y);\nsurf(X, Y, Z);\nzlabel('Height');"
     },
     {
       "description": "Create a multiline z-axis label and style it",
-      "input": "h = zlabel([\"Depth\", \"(km)\"]);\nset(h, 'FontWeight', 'bold');"
+      "input": "[X, Y] = meshgrid(-2:0.2:2, -2:0.2:2);\nZ = X .* exp(-X.^2 - Y.^2);\nsurf(X, Y, Z);\nh = zlabel([\"Depth\", \"(km)\"]);\nset(h, 'FontWeight', 'bold');"
     },
     {
       "description": "Target a specific subplot axes",
-      "input": "subplot(1, 2, 1);\nsurf(peaks(30));\nax = subplot(1, 2, 2);\nplot3(cos(0:0.1:5), sin(0:0.1:5), 0:0.1:5);\nzlabel(ax, 'Trajectory Height');"
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 30), linspace(-3, 3, 30));\nZ = sin(X) .* cos(Y);\nsubplot(1, 2, 1);\nsurf(X, Y, Z);\nax = subplot(1, 2, 2);\nplot3(cos(0:0.1:5), sin(0:0.1:5), 0:0.1:5);\nzlabel(ax, 'Trajectory Height');"
     }
   ],
   "links": [

@@ -2379,6 +2379,12 @@ impl PlotRenderer {
             .and_then(|f| f.axes_metadata(axes_index))
             .and_then(|m| m.x_label.as_ref())
     }
+    pub fn overlay_x_label_style_for_axes(&self, axes_index: usize) -> Option<&TextStyle> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| &m.x_label_style)
+    }
     pub fn overlay_y_label(&self) -> Option<&String> {
         self.figure_y_label.as_ref()
     }
@@ -2388,6 +2394,12 @@ impl PlotRenderer {
             .and_then(|f| f.axes_metadata(axes_index))
             .and_then(|m| m.y_label.as_ref())
     }
+    pub fn overlay_y_label_style_for_axes(&self, axes_index: usize) -> Option<&TextStyle> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| &m.y_label_style)
+    }
     pub fn overlay_z_label(&self) -> Option<&String> {
         self.figure_z_label.as_ref()
     }
@@ -2396,6 +2408,12 @@ impl PlotRenderer {
             .as_ref()
             .and_then(|f| f.axes_metadata(axes_index))
             .and_then(|m| m.z_label.as_ref())
+    }
+    pub fn overlay_z_label_style_for_axes(&self, axes_index: usize) -> Option<&TextStyle> {
+        self.last_figure
+            .as_ref()
+            .and_then(|f| f.axes_metadata(axes_index))
+            .map(|m| &m.z_label_style)
     }
     pub fn active_axes_pie_labels(&self) -> Vec<(String, glam::Vec2)> {
         let Some(fig) = self.last_figure.as_ref() else {

@@ -494,6 +494,7 @@ fn ensure_scatter3_host_metadata(
 pub(crate) mod tests {
     use super::super::style::LineStyleParseOptions;
     use super::*;
+    use runmat_plot::plots::PlotElement;
     use crate::builtins::plotting::state::current_axes_handle_for_figure;
     use crate::builtins::plotting::{
         clear_figure, clone_figure, configure_subplot, current_figure_handle,
@@ -627,5 +628,16 @@ pub(crate) mod tests {
         );
         let fig = clone_figure(fig_handle).unwrap();
         assert_eq!(fig.plot_axes_indices(), &[1]);
+    }
+
+    #[test]
+    fn scatter3_accepts_scalar_point() {
+        setup_plot_tests();
+        let _ = scatter3_builtin(Value::Num(1.0), Value::Num(2.0), Value::Num(3.0), Vec::new());
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::Scatter3(plot) = fig.plots().next().unwrap() else {
+            panic!("expected scatter3")
+        };
+        assert_eq!(plot.points, vec![glam::Vec3::new(1.0, 2.0, 3.0)]);
     }
 }

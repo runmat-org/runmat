@@ -809,4 +809,23 @@ pub(crate) mod tests {
         let fig = clone_figure(fig_handle).unwrap();
         assert_eq!(fig.plot_axes_indices(), &[1]);
     }
+
+    #[test]
+    fn plot_builtin_accepts_scalar_point_with_style_args() {
+        let _guard = setup_plot_tests();
+        block_on(plot_builtin(vec![
+            Value::Num(0.0),
+            Value::Num(1.5),
+            Value::String("o".into()),
+            Value::String("LineWidth".into()),
+            Value::Num(1.5),
+        ]))
+        .unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::Line(line) = fig.plots().next().unwrap() else {
+            panic!("expected line")
+        };
+        assert_eq!(line.x_data, vec![0.0]);
+        assert_eq!(line.y_data, vec![1.5]);
+    }
 }

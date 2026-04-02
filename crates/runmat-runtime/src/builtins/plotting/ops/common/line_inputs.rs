@@ -15,6 +15,9 @@ impl NumericInput {
     pub fn from_value(value: Value, builtin: &'static str) -> BuiltinResult<Self> {
         match value {
             Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
+            Value::Num(v) => Ok(Self::Host(scalar_tensor(v))),
+            Value::Int(v) => Ok(Self::Host(scalar_tensor(v.to_f64()))),
+            Value::Bool(v) => Ok(Self::Host(scalar_tensor(if v { 1.0 } else { 0.0 }))),
             other => {
                 let tensor = Tensor::try_from(&other)
                     .map_err(|e| plotting_error(builtin, format!("{builtin}: {e}")))?;
@@ -49,5 +52,30 @@ impl NumericInput {
             Self::Host(tensor) => Ok(tensor),
             Self::Gpu(handle) => gather_tensor_from_gpu_async(handle, builtin).await,
         }
+    }
+}
+
+fn scalar_tensor(value: f64) -> Tensor {
+    Tensor {
+        data: vec![value],
+        shape: vec![1],
+        rows: 1,
+        cols: 1,
+        dtype: runmat_builtins::NumericDType::F64,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn numeric_input_wraps_scalar_num() {
+        let NumericInput::Host(tensor) = NumericInput::from_value(Value::Num(2.5), "plot").unwrap()
+        else {
+            panic!("expected host tensor")
+        };
+        assert_eq!(tensor.data, vec![2.5]);
+        assert_eq!(tensor.shape, vec![1]);
     }
 }

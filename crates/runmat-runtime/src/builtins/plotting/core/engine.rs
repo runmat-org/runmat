@@ -277,6 +277,7 @@ pub async fn render_figure_snapshot(
     handle: FigureHandle,
     width: u32,
     height: u32,
+    textmark: Option<String>,
 ) -> BuiltinResult<Vec<u8>> {
     const SNAPSHOT_CONTEXT: &str = "renderFigureImage";
     let figure = clone_figure(handle).ok_or_else(|| {
@@ -285,9 +286,24 @@ pub async fn render_figure_snapshot(
             SNAPSHOT_CONTEXT,
         )
     })?;
-    render_figure_png_bytes(figure, width, height)
-        .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, SNAPSHOT_CONTEXT))
+    let bytes = runmat_plot::export::native_surface::render_figure_png_bytes_interactive_and_theme_and_textmark(
+        figure,
+        width,
+        height,
+        super::web::current_plot_theme_config(),
+        textmark.as_deref(),
+    )
+    .await
+    .map_err(|err| {
+        map_control_flow_with_builtin(
+            engine_error_with_source(
+                format!("Plot export failed: {err}"),
+                PlottingBackendError::ImageExport(err),
+            ),
+            SNAPSHOT_CONTEXT,
+        )
+    })?;
+    Ok(bytes)
 }
 
 #[cfg(feature = "plot-core")]
@@ -296,6 +312,7 @@ pub async fn render_figure_snapshot_with_camera_state(
     width: u32,
     height: u32,
     camera_state: super::web::PlotSurfaceCameraState,
+    textmark: Option<String>,
 ) -> BuiltinResult<Vec<u8>> {
     const SNAPSHOT_CONTEXT: &str = "renderFigureImage";
     let figure = clone_figure(handle).ok_or_else(|| {
@@ -312,14 +329,45 @@ pub async fn render_figure_snapshot_with_camera_state(
         .collect();
 
     if axes_cameras.is_empty() {
-        return render_figure_png_bytes(figure, width, height)
-            .await
-            .map_err(|flow| map_control_flow_with_builtin(flow, SNAPSHOT_CONTEXT));
+        let bytes = runmat_plot::export::native_surface::render_figure_png_bytes_interactive_and_theme_and_textmark(
+            figure,
+            width,
+            height,
+            super::web::current_plot_theme_config(),
+            textmark.as_deref(),
+        )
+        .await
+            .map_err(|err| {
+                map_control_flow_with_builtin(
+                    engine_error_with_source(
+                        format!("Plot export failed: {err}"),
+                        PlottingBackendError::ImageExport(err),
+                    ),
+                    SNAPSHOT_CONTEXT,
+                )
+            })?;
+        return Ok(bytes);
     }
 
-    render_figure_png_bytes_with_axes_cameras(figure, width, height, &axes_cameras)
-        .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, SNAPSHOT_CONTEXT))
+    let bytes = runmat_plot::export::native_surface::render_figure_png_bytes_interactive_with_axes_cameras_and_theme_and_textmark(
+        figure,
+        width,
+        height,
+        &axes_cameras,
+        super::web::current_plot_theme_config(),
+        textmark.as_deref(),
+    )
+    .await
+    .map_err(|err| {
+        map_control_flow_with_builtin(
+            engine_error_with_source(
+                format!("Plot export failed: {err}"),
+                PlottingBackendError::ImageExport(err),
+            ),
+            SNAPSHOT_CONTEXT,
+        )
+    })?;
+    Ok(bytes)
 }
 
 #[cfg(feature = "plot-core")]

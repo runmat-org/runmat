@@ -28,7 +28,7 @@
     },
     {
       "description": "Use MATLAB-style view presets",
-      "input": "surf(peaks(40));\nview(2);\nview(3);"
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 40), linspace(-3, 3, 40));\nZ = sin(X) .* cos(Y);\nsurf(X, Y, Z);\nview(2);\nview(3);"
     },
     {
       "description": "Query a subplot-local camera",

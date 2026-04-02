@@ -2,7 +2,6 @@
 
 use log::warn;
 use runmat_accelerate_api::{self, GpuTensorHandle, ProviderPrecision};
-#[cfg(test)]
 use runmat_builtins::Tensor;
 use runmat_builtins::Value;
 use runmat_macros::runtime_builtin;
@@ -72,20 +71,32 @@ pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
     type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::stairs"
 )]
-pub fn stairs_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<f64> {
-    let mut args = vec![x, y];
-    args.extend(rest);
+pub fn stairs_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     let (axes_target, mut args) = split_leading_axes_handle(args, BUILTIN_NAME)?;
     apply_axes_target(axes_target, BUILTIN_NAME)?;
-    if args.len() < 2 {
-        return Err(plotting_error(
-            BUILTIN_NAME,
-            "stairs: expected X and Y data after axes handle",
-        ));
-    }
-    let x = args.remove(0);
-    let y = args.remove(0);
-    let rest = args;
+
+    let args_len = args.len();
+    let (x, y, rest) = match args_len {
+        0 => {
+            return Err(plotting_error(
+                BUILTIN_NAME,
+                "stairs: expected Y data or X/Y data after optional axes handle",
+            ));
+        }
+        1 => {
+            let y = args.pop().expect("one arg");
+            let x = infer_stairs_x_from_y(&y)?;
+            (x, y, Vec::new())
+        }
+        _ => {
+            let mut iter = args.into_iter();
+            let x = iter.next().expect("x");
+            let y = iter.next().expect("y");
+            let rest = iter.collect();
+            (x, y, rest)
+        }
+    };
+
     let parsed_style = parse_line_style_args(&rest, &LineStyleParseOptions::stairs())?;
     let mut x_input = Some(StairsInput::from_value(x, BUILTIN_NAME)?);
     let mut y_input = Some(StairsInput::from_value(y, BUILTIN_NAME)?);
@@ -175,6 +186,25 @@ fn build_stairs_plot(
         .with_label(label);
     apply_stairs_marker_metadata(&mut plot, marker_meta);
     Ok(plot)
+}
+
+fn infer_stairs_x_from_y(y: &Value) -> BuiltinResult<Value> {
+    let len = match y {
+        Value::GpuTensor(handle) => handle.shape.iter().copied().product::<usize>().max(1),
+        other => {
+            let tensor = Tensor::try_from(other)
+                .map_err(|e| plotting_error(BUILTIN_NAME, format!("stairs: {e}")))?;
+            tensor.data.len().max(1)
+        }
+    };
+    let data = (1..=len).map(|i| i as f64).collect::<Vec<_>>();
+    Ok(Value::Tensor(Tensor {
+        data,
+        shape: vec![len],
+        rows: len,
+        cols: 1,
+        dtype: runmat_builtins::NumericDType::F64,
+    }))
 }
 
 fn build_stairs_gpu_plot(
@@ -316,11 +346,10 @@ pub(crate) mod tests {
     #[test]
     fn stairs_requires_matching_lengths() {
         setup_plot_tests();
-        let res = stairs_builtin(
+        let res = stairs_builtin(vec![
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[0.0])),
-            Vec::new(),
-        );
+        ]);
         assert!(res.is_err());
     }
 
@@ -328,11 +357,10 @@ pub(crate) mod tests {
     #[test]
     fn stairs_requires_minimum_length() {
         setup_plot_tests();
-        let res = stairs_builtin(
+        let res = stairs_builtin(vec![
             Value::Tensor(tensor_from(&[0.0])),
             Value::Tensor(tensor_from(&[1.0])),
-            Vec::new(),
-        );
+        ]);
         assert!(res.is_err());
     }
 
@@ -353,12 +381,45 @@ pub(crate) mod tests {
         configure_subplot(1, 2, 1).unwrap();
         let fig_handle = current_figure_handle();
         let ax = current_axes_handle_for_figure(fig_handle).unwrap();
-        let _ = stairs_builtin(
+        let _ = stairs_builtin(vec![
             Value::Num(ax),
             Value::Tensor(tensor_from(&[0.0, 1.0, 2.0])),
-            vec![Value::Tensor(tensor_from(&[1.0, 2.0, 1.5]))],
-        );
+            Value::Tensor(tensor_from(&[1.0, 2.0, 1.5])),
+        ]);
         let fig = clone_figure(fig_handle).unwrap();
         assert_eq!(fig.plot_axes_indices(), &[1]);
+    }
+
+    #[test]
+    fn stairs_ax_y_shorthand_infers_one_based_x_on_target_axes() {
+        setup_plot_tests();
+        configure_subplot(1, 2, 1).unwrap();
+        let fig_handle = current_figure_handle();
+        let ax = current_axes_handle_for_figure(fig_handle).unwrap();
+        let _ = stairs_builtin(vec![
+            Value::Num(ax),
+            Value::Tensor(tensor_from(&[2.0, 4.0, 3.0])),
+        ])
+        .unwrap();
+        let fig = clone_figure(fig_handle).unwrap();
+        assert_eq!(fig.plot_axes_indices(), &[1]);
+        let runmat_plot::plots::PlotElement::Stairs(plot) = fig.plots().next().unwrap() else {
+            panic!("expected stairs plot")
+        };
+        assert_eq!(plot.x, vec![1.0, 2.0, 3.0]);
+        assert_eq!(plot.y, vec![2.0, 4.0, 3.0]);
+    }
+
+    #[test]
+    fn stairs_y_shorthand_infers_one_based_x() {
+        setup_plot_tests();
+        let _ = stairs_builtin(vec![Value::Tensor(tensor_from(&[2.0, 4.0, 3.0]))]).unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let plot = fig.plots().next().unwrap();
+        let runmat_plot::plots::PlotElement::Stairs(plot) = plot else {
+            panic!("expected stairs plot")
+        };
+        assert_eq!(plot.x, vec![1.0, 2.0, 3.0]);
+        assert_eq!(plot.y, vec![2.0, 4.0, 3.0]);
     }
 }

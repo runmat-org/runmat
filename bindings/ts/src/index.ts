@@ -284,6 +284,7 @@ export interface FigureImageOptions {
   width?: number;
   height?: number;
   cameraState?: FigureImageCameraState;
+  textmark?: string;
 }
 
 export type FigureImageCameraProjectionState =
@@ -706,7 +707,20 @@ interface RunMatNativeModule {
   clearFigure?: (handle: number | null) => number;
   closeFigure?: (handle: number | null) => number;
   currentAxesInfo?: () => AxesInfo;
-  renderFigureImage?: (handle: number | null, width: number, height: number) => Promise<Uint8Array>;
+  renderFigureImage?: (handle: number | undefined, width: number, height: number) => Promise<Uint8Array>;
+  renderFigureImageWithTextmark?: (
+    handle: number | undefined,
+    width: number,
+    height: number,
+    textmark?: string
+  ) => Promise<Uint8Array>;
+  renderFigureImageWithCameraState?: (
+    handle: number | undefined,
+    width: number,
+    height: number,
+    cameraState: FigureImageCameraState,
+    textmark?: string
+  ) => Promise<Uint8Array>;
   subscribeStdout?: (listener: (entry: StdoutEntry) => void) => number;
   unsubscribeStdout?: (id: number) => void;
   subscribeRuntimeLog?: (listener: (entry: RuntimeLogEntry) => void) => number;
@@ -1054,13 +1068,16 @@ export async function currentAxesInfo(): Promise<AxesInfo> {
 export async function renderFigureImage(options: FigureImageOptions = {}): Promise<Uint8Array> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "renderFigureImage");
-  const handle = typeof options.handle === "number" ? options.handle : null;
+  const handle = typeof options.handle === "number" ? options.handle : undefined;
   const width = options.width ?? 0;
   const height = options.height ?? 0;
+  const textmark = typeof options.textmark === "string" ? options.textmark : "";
   try {
     const bytes =
       options.cameraState && typeof native.renderFigureImageWithCameraState === "function"
-        ? await native.renderFigureImageWithCameraState(handle, width, height, options.cameraState)
+        ? await native.renderFigureImageWithCameraState(handle, width, height, options.cameraState, textmark)
+        : typeof native.renderFigureImageWithTextmark === "function"
+          ? await native.renderFigureImageWithTextmark(handle, width, height, textmark)
         : await native.renderFigureImage(handle, width, height);
     if (bytes instanceof Uint8Array) {
       return bytes;
