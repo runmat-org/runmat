@@ -241,7 +241,7 @@ The builtin references for `plot`, `scatter`, `stairs`, `stem`, `errorbar`, `bar
 
 ## Related
 
-- [Plotting in RunMat](/docs/plotting/plotting-in-runmat) -- the plotting workflow from first command to finished figure.
-- [Styling Plots and Axes](/docs/plotting/styling-plots-and-axes) -- labels, legends, colormaps, and coordinated styling.
-- [Graphics Handles](/docs/plotting/graphics-handles) -- inspect and update plot objects with handles.
-- [Builtin Function Reference](/docs/matlab-function-reference) -- full list of supported MATLAB functions.
+- [Plotting in RunMat](/docs/plotting/plotting-in-runmat): the plotting workflow from first command to finished figure.
+- [Styling Plots and Axes](/docs/plotting/styling-plots-and-axes): labels, legends, colormaps, and coordinated styling.
+- [Graphics Handles](/docs/plotting/graphics-handles): inspect and update plot objects with handles.
+- [Builtin Function Reference](/docs/matlab-function-reference): full list of supported MATLAB functions.

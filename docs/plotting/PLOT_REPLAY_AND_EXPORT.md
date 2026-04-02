@@ -126,7 +126,7 @@ Read `PLOTTING_IN_RUNMAT.md` for the broader plotting overview, `GRAPHICS_HANDLE
 
 ## Related
 
-- [Plotting in RunMat](/docs/plotting/plotting-in-runmat) -- the plotting workflow from first command to finished figure.
-- [Graphics Handles](/docs/plotting/graphics-handles) -- inspect and update plot objects with handles.
-- [Large Dataset Persistence](/docs/large-dataset-persistence) -- chunked, content-addressed storage for large arrays.
-- [GPU Residency and Precision](/docs/accelerate/gpu-behavior) -- when data moves to and from the GPU.
+- [Plotting in RunMat](/docs/plotting/plotting-in-runmat): the plotting workflow from first command to finished figure.
+- [Graphics Handles](/docs/plotting/graphics-handles): inspect and update plot objects with handles.
+- [Large Dataset Persistence](/docs/large-dataset-persistence): chunked, content-addressed storage for large arrays.
+- [GPU Residency and Precision](/docs/accelerate/gpu-behavior): when data moves to and from the GPU.

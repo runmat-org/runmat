@@ -156,8 +156,8 @@ Together, these pages describe plotting in RunMat as both a practical workflow a
 
 ## Related
 
-- [Choosing the Right Plot Type](/docs/plotting/choosing-the-right-plot-type) -- match plot families to the structure of your data.
-- [Styling Plots and Axes](/docs/plotting/styling-plots-and-axes) -- labels, legends, colormaps, and coordinated styling.
-- [Graphics Handles](/docs/plotting/graphics-handles) -- inspect and update plot objects with handles.
-- [Plot Replay and Export](/docs/plotting/plot-replay-and-export) -- persist, replay, and export figures.
-- [GPU Residency and Precision](/docs/accelerate/gpu-behavior) -- when data moves to and from the GPU.
+- [Choosing the Right Plot Type](/docs/plotting/choosing-the-right-plot-type): match plot families to the structure of your data.
+- [Styling Plots and Axes](/docs/plotting/styling-plots-and-axes): labels, legends, colormaps, and coordinated styling.
+- [Graphics Handles](/docs/plotting/graphics-handles): inspect and update plot objects with handles.
+- [Plot Replay and Export](/docs/plotting/plot-replay-and-export): persist, replay, and export figures.
+- [GPU Residency and Precision](/docs/accelerate/gpu-behavior): when data moves to and from the GPU.

@@ -210,7 +210,7 @@ Read `PLOTTING_IN_RUNMAT.md` for the broader plotting overview, `CHOOSING_THE_RI
 
 ## Related
 
-- [Plotting in RunMat](/docs/plotting/plotting-in-runmat) -- the plotting workflow from first command to finished figure.
-- [Choosing the Right Plot Type](/docs/plotting/choosing-the-right-plot-type) -- match plot families to the structure of your data.
-- [Graphics Handles](/docs/plotting/graphics-handles) -- inspect and update plot objects with handles.
-- [Plot Replay and Export](/docs/plotting/plot-replay-and-export) -- persist, replay, and export figures.
+- [Plotting in RunMat](/docs/plotting/plotting-in-runmat): the plotting workflow from first command to finished figure.
+- [Choosing the Right Plot Type](/docs/plotting/choosing-the-right-plot-type): match plot families to the structure of your data.
+- [Graphics Handles](/docs/plotting/graphics-handles): inspect and update plot objects with handles.
+- [Plot Replay and Export](/docs/plotting/plot-replay-and-export): persist, replay, and export figures.

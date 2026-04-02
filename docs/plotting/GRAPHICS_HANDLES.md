@@ -217,7 +217,7 @@ For syntax-level details, see the reference pages for `subplot`, `get`, `set`, `
 
 ## Related
 
-- [Plotting in RunMat](/docs/plotting/plotting-in-runmat) -- the plotting workflow from first command to finished figure.
-- [Styling Plots and Axes](/docs/plotting/styling-plots-and-axes) -- labels, legends, colormaps, and coordinated styling.
-- [Plot Replay and Export](/docs/plotting/plot-replay-and-export) -- persist, replay, and export figures.
-- [Builtin Function Reference](/docs/matlab-function-reference) -- full list of supported MATLAB functions.
+- [Plotting in RunMat](/docs/plotting/plotting-in-runmat): the plotting workflow from first command to finished figure.
+- [Styling Plots and Axes](/docs/plotting/styling-plots-and-axes): labels, legends, colormaps, and coordinated styling.
+- [Plot Replay and Export](/docs/plotting/plot-replay-and-export): persist, replay, and export figures.
+- [Builtin Function Reference](/docs/matlab-function-reference): full list of supported MATLAB functions.
