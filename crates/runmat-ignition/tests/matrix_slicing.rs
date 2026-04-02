@@ -107,6 +107,66 @@ fn empty_slice_rows_and_columns() {
 }
 
 #[test]
+fn range_to_plain_end_column_slice() {
+    let program = parse(
+        "
+        M = reshape(1:12, 3, 4);
+        C = M(:, 4:end);
+        ",
+    )
+    .unwrap();
+    let hir = lower(&program).unwrap();
+    let vars = execute(&hir).unwrap();
+    if let Value::Tensor(c) = &vars[1] {
+        assert_eq!(c.rows(), 3);
+        assert_eq!(c.cols(), 1);
+        assert_eq!(c.data, vec![10.0, 11.0, 12.0]);
+    } else {
+        panic!("Expected tensor for M(:, 4:end)");
+    }
+}
+
+#[test]
+fn mixed_end_bounded_and_plain_ranges_gather() {
+    let program = parse(
+        "
+        M = reshape(1:20, 4, 5);
+        S = M(2:end-1, 3:4);
+        ",
+    )
+    .unwrap();
+    let hir = lower(&program).unwrap();
+    let vars = execute(&hir).unwrap();
+    if let Value::Tensor(s) = &vars[1] {
+        assert_eq!(s.rows(), 2);
+        assert_eq!(s.cols(), 2);
+        assert_eq!(s.data, vec![10.0, 11.0, 14.0, 15.0]);
+    } else {
+        panic!("Expected tensor for M(2:end-1, 3:4)");
+    }
+}
+
+#[test]
+fn mixed_end_minus_and_plain_end_ranges_gather() {
+    let program = parse(
+        "
+        M = reshape(1:20, 4, 5);
+        S = M(2:end-1, 4:end);
+        ",
+    )
+    .unwrap();
+    let hir = lower(&program).unwrap();
+    let vars = execute(&hir).unwrap();
+    if let Value::Tensor(s) = &vars[1] {
+        assert_eq!(s.rows(), 2);
+        assert_eq!(s.cols(), 2);
+        assert_eq!(s.data, vec![14.0, 15.0, 18.0, 19.0]);
+    } else {
+        panic!("Expected tensor for M(2:end-1, 4:end)");
+    }
+}
+
+#[test]
 fn linear_index_preserves_numeric_index_shape() {
     let program = parse(
         "

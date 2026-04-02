@@ -567,6 +567,37 @@ describe("renderFigureImage", () => {
     });
     expect(native.renderFigureImage).toHaveBeenCalledWith(77, 640, 480);
   });
+
+  it("throws when cameraState is requested but unsupported", async () => {
+    const native: NativeModule = {
+      default: async () => {},
+      renderFigureImage: vi.fn(async () => new Uint8Array([1]))
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    await expect(
+      renderFigureImage({ cameraState: { projection: "2d", xMin: 0, xMax: 1, yMin: 0, yMax: 1 } })
+    ).rejects.toThrow(/renderFigureImageWithCameraState/);
+    expect(native.renderFigureImage).not.toHaveBeenCalled();
+  });
+
+  it("only uses textmark export when a textmark was explicitly requested", async () => {
+    const native: NativeModule = {
+      default: async () => {},
+      renderFigureImage: vi.fn(async () => new Uint8Array([1, 2, 3])),
+      renderFigureImageWithTextmark: vi.fn(async () => new Uint8Array([9, 9, 9]))
+    } as NativeModule;
+    __internals.setNativeModuleOverride(native);
+
+    const plain = await renderFigureImage();
+    expect(Array.from(plain)).toEqual([1, 2, 3]);
+    expect(native.renderFigureImage).toHaveBeenCalledWith(null, 0, 0);
+    expect(native.renderFigureImageWithTextmark).not.toHaveBeenCalled();
+
+    const marked = await renderFigureImage({ textmark: "draft" });
+    expect(Array.from(marked)).toEqual([9, 9, 9]);
+    expect(native.renderFigureImageWithTextmark).toHaveBeenCalledWith(null, 0, 0, "draft");
+  });
 });
 
 describe("figure scene bindings", () => {

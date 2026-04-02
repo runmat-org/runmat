@@ -70,6 +70,25 @@ fn parse_number(expr: &HirExpr) -> Option<f64> {
     }
 }
 
+fn range_end_offset(expr: &HirExpr) -> Option<i64> {
+    let HirExprKind::Range(_, _, end) = &expr.kind else {
+        return None;
+    };
+    match &end.kind {
+        HirExprKind::End => Some(0),
+        HirExprKind::Binary(left, op, right)
+            if matches!(op, runmat_parser::BinOp::Sub)
+                && matches!(left.kind, HirExprKind::End) =>
+        {
+            match &right.kind {
+                HirExprKind::Number(s) => Some(s.parse::<i64>().unwrap_or(0)),
+                _ => Some(0),
+            }
+        }
+        _ => None,
+    }
+}
+
 fn stochastic_evolution_disabled() -> bool {
     static DISABLE: OnceCell<bool> = OnceCell::new();
     *DISABLE.get_or_init(|| {
@@ -1124,49 +1143,9 @@ impl Compiler {
                                         // If this index is a Range whose end references End (with or without offset),
                                         // skip compiling it here; it will be handled by StoreRangeEnd.
                                         if indices.len() > 1 {
-                                            if let runmat_hir::HirExprKind::Range(
-                                                _start,
-                                                _step,
-                                                end,
-                                            ) = &index.kind
-                                            {
-                                                match &end.kind {
-                                                    runmat_hir::HirExprKind::End => {
-                                                        // offset 0
-                                                        end_offsets.push((numeric_count, 0));
-                                                        continue;
-                                                    }
-                                                    runmat_hir::HirExprKind::Binary(
-                                                        left,
-                                                        op,
-                                                        right,
-                                                    ) => {
-                                                        if matches!(op, runmat_parser::BinOp::Sub)
-                                                            && matches!(
-                                                                left.kind,
-                                                                runmat_hir::HirExprKind::End
-                                                            )
-                                                        {
-                                                            if let runmat_hir::HirExprKind::Number(
-                                                                ref s,
-                                                            ) = right.kind
-                                                            {
-                                                                if let Ok(k) = s.parse::<i64>() {
-                                                                    end_offsets
-                                                                        .push((numeric_count, k));
-                                                                } else {
-                                                                    end_offsets
-                                                                        .push((numeric_count, 0));
-                                                                }
-                                                            } else {
-                                                                end_offsets
-                                                                    .push((numeric_count, 0));
-                                                            }
-                                                            continue;
-                                                        }
-                                                    }
-                                                    _ => {}
-                                                }
+                                            if let Some(off) = range_end_offset(index) {
+                                                end_offsets.push((numeric_count, off));
+                                                continue;
                                             }
                                         }
                                         // Special-case 1-D range with end arithmetic when dims == 1
@@ -1174,56 +1153,39 @@ impl Compiler {
                                             if let runmat_hir::HirExprKind::Range(
                                                 start,
                                                 step,
-                                                end,
+                                                _end,
                                             ) = &index.kind
                                             {
-                                                if let runmat_hir::HirExprKind::Binary(
-                                                    left,
-                                                    op,
-                                                    right,
-                                                ) = &end.kind
-                                                {
-                                                    if matches!(op, runmat_parser::BinOp::Sub)
-                                                        && matches!(
-                                                            left.kind,
-                                                            runmat_hir::HirExprKind::End
-                                                        )
-                                                    {
-                                                        // Emit StoreSlice1DRangeEnd: base and range params evaluated before RHS
-                                                        self.compile_expr(start)?;
-                                                        let mut lvalue_count = 2usize;
-                                                        let has_step = step.is_some();
-                                                        if let Some(st) = step {
-                                                            self.compile_expr(st)?;
-                                                            lvalue_count += 1;
-                                                        }
-                                                        let mut lvalue_temps =
-                                                            Vec::with_capacity(lvalue_count);
-                                                        for _ in 0..lvalue_count {
-                                                            let temp = self.alloc_temp();
-                                                            self.emit(Instr::StoreVar(temp));
-                                                            lvalue_temps.push(temp);
-                                                        }
-                                                        lvalue_temps.reverse();
-                                                        self.compile_expr(rhs)?;
-                                                        let rhs_temp = self.alloc_temp();
-                                                        self.emit(Instr::StoreVar(rhs_temp));
-                                                        for temp in &lvalue_temps {
-                                                            self.emit(Instr::LoadVar(*temp));
-                                                        }
-                                                        self.emit(Instr::LoadVar(rhs_temp));
-                                                        self.emit(Instr::StoreSlice1DRangeEnd {
-                                                            has_step,
-                                                            offset: match right.kind {
-                                                                runmat_hir::HirExprKind::Number(
-                                                                    ref s,
-                                                                ) => s.parse::<i64>().unwrap_or(0),
-                                                                _ => 0,
-                                                            },
-                                                        });
-                                                        lowered_range_end = true;
-                                                        break;
+                                                if let Some(offset) = range_end_offset(index) {
+                                                    // Emit StoreSlice1DRangeEnd: base and range params evaluated before RHS
+                                                    self.compile_expr(start)?;
+                                                    let mut lvalue_count = 2usize;
+                                                    let has_step = step.is_some();
+                                                    if let Some(st) = step {
+                                                        self.compile_expr(st)?;
+                                                        lvalue_count += 1;
                                                     }
+                                                    let mut lvalue_temps =
+                                                        Vec::with_capacity(lvalue_count);
+                                                    for _ in 0..lvalue_count {
+                                                        let temp = self.alloc_temp();
+                                                        self.emit(Instr::StoreVar(temp));
+                                                        lvalue_temps.push(temp);
+                                                    }
+                                                    lvalue_temps.reverse();
+                                                    self.compile_expr(rhs)?;
+                                                    let rhs_temp = self.alloc_temp();
+                                                    self.emit(Instr::StoreVar(rhs_temp));
+                                                    for temp in &lvalue_temps {
+                                                        self.emit(Instr::LoadVar(*temp));
+                                                    }
+                                                    self.emit(Instr::LoadVar(rhs_temp));
+                                                    self.emit(Instr::StoreSlice1DRangeEnd {
+                                                        has_step,
+                                                        offset,
+                                                    });
+                                                    lowered_range_end = true;
+                                                    break;
                                                 }
                                             }
                                         }
@@ -1238,49 +1200,20 @@ impl Compiler {
                                     self.emit(Instr::StoreVar(var_id.0));
                                 } else {
                                     // Push RHS last so VM pops it first
-                                    // Detect any ranges with end arithmetic across dims
+                                    // Detect any ranges whose upper bound depends on `end`.
                                     let mut has_any_range_end = false;
                                     let mut range_dims: Vec<usize> = Vec::new();
                                     let mut range_has_step: Vec<bool> = Vec::new();
                                     let mut end_offs: Vec<i64> = Vec::new();
                                     for (dim, index) in indices.iter().enumerate() {
-                                        if let runmat_hir::HirExprKind::Range(_start, step, end) =
+                                        if let runmat_hir::HirExprKind::Range(_start, step, _end) =
                                             &index.kind
                                         {
-                                            match &end.kind {
-                                                runmat_hir::HirExprKind::End => {
-                                                    has_any_range_end = true;
-                                                    range_dims.push(dim);
-                                                    range_has_step.push(step.is_some());
-                                                    end_offs.push(0);
-                                                }
-                                                runmat_hir::HirExprKind::Binary(
-                                                    left,
-                                                    op,
-                                                    right,
-                                                ) => {
-                                                    if matches!(op, runmat_parser::BinOp::Sub)
-                                                        && matches!(
-                                                            left.kind,
-                                                            runmat_hir::HirExprKind::End
-                                                        )
-                                                    {
-                                                        has_any_range_end = true;
-                                                        range_dims.push(dim);
-                                                        range_has_step.push(step.is_some());
-                                                        if let runmat_hir::HirExprKind::Number(
-                                                            ref s,
-                                                        ) = right.kind
-                                                        {
-                                                            end_offs.push(
-                                                                s.parse::<i64>().unwrap_or(0),
-                                                            );
-                                                        } else {
-                                                            end_offs.push(0);
-                                                        }
-                                                    }
-                                                }
-                                                _ => {}
+                                            if let Some(off) = range_end_offset(index) {
+                                                has_any_range_end = true;
+                                                range_dims.push(dim);
+                                                range_has_step.push(step.is_some());
+                                                end_offs.push(off);
                                             }
                                         }
                                     }
@@ -2568,23 +2501,14 @@ impl Compiler {
                     let mut range_dims: Vec<usize> = Vec::new();
                     let mut range_has_step: Vec<bool> = Vec::new();
                     let mut end_offsets: Vec<i64> = Vec::new();
-                    // First pass: detect any Range with End-Sub on end expression
+                    // First pass: detect any Range whose upper bound depends on `end`.
                     for (dim, index) in indices.iter().enumerate() {
-                        if let HirExprKind::Range(_start, step, end) = &index.kind {
-                            if let HirExprKind::Binary(left, op, right) = &end.kind {
-                                if matches!(op, runmat_parser::BinOp::Sub)
-                                    && matches!(left.kind, HirExprKind::End)
-                                {
-                                    has_any_range_end = true;
-                                    range_dims.push(dim);
-                                    range_has_step.push(step.is_some());
-                                    let off = if let HirExprKind::Number(ref s) = right.kind {
-                                        s.parse::<i64>().unwrap_or(0)
-                                    } else {
-                                        0
-                                    };
-                                    end_offsets.push(off);
-                                }
+                        if let HirExprKind::Range(_start, step, _end) = &index.kind {
+                            if let Some(off) = range_end_offset(index) {
+                                has_any_range_end = true;
+                                range_dims.push(dim);
+                                range_has_step.push(step.is_some());
+                                end_offsets.push(off);
                             }
                         }
                     }
@@ -2611,17 +2535,14 @@ impl Compiler {
                                 HirExprKind::End => {
                                     end_mask |= 1u32 << dim;
                                 }
-                                HirExprKind::Range(_, _, end) => {
-                                    // If this range used end arithmetic, we already handled; otherwise treat as plain numeric idx vector at runtime via VM
-                                    if let HirExprKind::Binary(left, op, _right) = &end.kind {
-                                        if matches!(op, runmat_parser::BinOp::Sub)
-                                            && matches!(left.kind, HirExprKind::End)
-                                        {
-                                            // skip pushing numeric for this dim
-                                            continue;
-                                        }
+                                HirExprKind::Range(_, _, _) => {
+                                    // End-bounded ranges are encoded via `range_dims`; all other
+                                    // ranges still need their compiled selector payload.
+                                    if range_end_offset(index).is_some() {
+                                        continue;
                                     }
-                                    // For non-end ranges, we will resolve via VM range gather; push placeholders via numeric_count == 0 (no need to push indices)
+                                    self.compile_expr(index)?;
+                                    numeric_count += 1;
                                 }
                                 _ => {
                                     self.compile_expr(index)?;

@@ -20,7 +20,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::console::{record_console_output, ConsoleStream};
+use crate::console::{record_console_line, ConsoleStream};
 use crate::output_context::requested_output_count;
 use crate::{build_runtime_error, gather_if_needed_async, make_cell, BuiltinResult, RuntimeError};
 
@@ -355,7 +355,7 @@ fn emit_dir_stdout(records: &[DirRecord]) {
         }
         lines.push(format!("{:<20} {:>10} {}", record.date, size_field, name));
     }
-    record_console_output(ConsoleStream::Stdout, lines.join("\n"));
+    record_console_line(ConsoleStream::Stdout, lines.join("\n"));
 }
 
 fn should_emit_stdout() -> bool {

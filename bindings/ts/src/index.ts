@@ -707,15 +707,15 @@ interface RunMatNativeModule {
   clearFigure?: (handle: number | null) => number;
   closeFigure?: (handle: number | null) => number;
   currentAxesInfo?: () => AxesInfo;
-  renderFigureImage?: (handle: number | undefined, width: number, height: number) => Promise<Uint8Array>;
+  renderFigureImage?: (handle: number | null, width: number, height: number) => Promise<Uint8Array>;
   renderFigureImageWithTextmark?: (
-    handle: number | undefined,
+    handle: number | null,
     width: number,
     height: number,
     textmark?: string
   ) => Promise<Uint8Array>;
   renderFigureImageWithCameraState?: (
-    handle: number | undefined,
+    handle: number | null,
     width: number,
     height: number,
     cameraState: FigureImageCameraState,
@@ -1068,17 +1068,31 @@ export async function currentAxesInfo(): Promise<AxesInfo> {
 export async function renderFigureImage(options: FigureImageOptions = {}): Promise<Uint8Array> {
   const native = await loadNativeModule();
   requireNativeFunction(native, "renderFigureImage");
-  const handle = typeof options.handle === "number" ? options.handle : undefined;
+  const handle = typeof options.handle === "number" ? options.handle : null;
   const width = options.width ?? 0;
   const height = options.height ?? 0;
-  const textmark = typeof options.textmark === "string" ? options.textmark : "";
+  const hasTextmark = typeof options.textmark === "string";
+  const textmark = hasTextmark ? options.textmark : undefined;
   try {
-    const bytes =
-      options.cameraState && typeof native.renderFigureImageWithCameraState === "function"
-        ? await native.renderFigureImageWithCameraState(handle, width, height, options.cameraState, textmark)
-        : typeof native.renderFigureImageWithTextmark === "function"
-          ? await native.renderFigureImageWithTextmark(handle, width, height, textmark)
-        : await native.renderFigureImage(handle, width, height);
+    let bytes: Uint8Array | ArrayLike<number> | null | undefined;
+    if (options.cameraState) {
+        if (typeof native.renderFigureImageWithCameraState !== "function") {
+          throw new Error(
+            "The loaded runmat-wasm module does not support renderFigureImageWithCameraState yet."
+          );
+        }
+        bytes = await native.renderFigureImageWithCameraState(
+          handle,
+          width,
+          height,
+          options.cameraState,
+          textmark
+        );
+    } else if (hasTextmark && typeof native.renderFigureImageWithTextmark === "function") {
+      bytes = await native.renderFigureImageWithTextmark(handle, width, height, textmark);
+    } else {
+      bytes = await native.renderFigureImage(handle, width, height);
+    }
     if (bytes instanceof Uint8Array) {
       return bytes;
     }

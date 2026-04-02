@@ -89,6 +89,22 @@ fn test_fprintf_does_not_print_ans() {
     assert!(stdout.iter().all(|line| !line.contains("ans =")));
 }
 
+#[test]
+fn test_disp_streams_include_line_breaks() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+    let result = block_on(engine.execute("disp('alpha')\ndisp('beta')")).unwrap();
+    let stdout = collect_stdout_stream(&result);
+    assert_eq!(stdout, "alpha\nbeta\n");
+}
+
+#[test]
+fn test_fprintf_streams_remain_exact_chunks() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+    let result = block_on(engine.execute("fprintf('a'); fprintf('b');")).unwrap();
+    let stdout = collect_stdout_stream(&result);
+    assert_eq!(stdout, "ab");
+}
+
 /// Test semicolon suppression with function calls
 #[test]
 fn test_function_call_semicolon_suppression() {
@@ -210,6 +226,15 @@ fn collect_stdout_texts(result: &ExecutionResult) -> Vec<String> {
         .filter(|entry| entry.stream == ExecutionStreamKind::Stdout)
         .map(|entry| entry.text.trim().to_string())
         .collect()
+}
+
+fn collect_stdout_stream(result: &ExecutionResult) -> String {
+    result
+        .streams
+        .iter()
+        .filter(|entry| entry.stream == ExecutionStreamKind::Stdout)
+        .map(|entry| entry.text.as_str())
+        .collect::<String>()
 }
 
 #[test]

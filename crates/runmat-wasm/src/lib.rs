@@ -1714,8 +1714,9 @@ fn extract_line_value(value: &JsValue) -> Option<String> {
 #[cfg(target_arch = "wasm32")]
 async fn install_surface_renderer(surface_id: u32, canvas: WebCanvas) -> Result<(), JsValue> {
     init_logging_once();
+    let enable_overlay = matches!(canvas, WebCanvas::Html(_));
     let options = WebRendererOptions {
-        enable_overlay: true,
+        enable_overlay,
         ..WebRendererOptions::default()
     };
     let canvas_kind = match &canvas {
