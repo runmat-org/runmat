@@ -71,7 +71,7 @@ pub async fn render_figure_png_bytes(
         settings.height = height;
     }
 
-    let exporter = ImageExporter::with_settings(settings)
+    let mut exporter = ImageExporter::with_settings(settings)
         .await
         .map_err(|err| {
             engine_error_with_source(
@@ -79,6 +79,7 @@ pub async fn render_figure_png_bytes(
                 PlottingBackendError::ImageExportInit(err),
             )
         })?;
+    exporter.set_theme_config(super::web::current_plot_theme_config());
     exporter.render_png_bytes(&mut figure).await.map_err(|err| {
         engine_error_with_source(
             "Plot export failed.",
@@ -103,7 +104,7 @@ pub async fn render_figure_rgba_bytes(
         settings.height = height;
     }
 
-    let exporter = ImageExporter::with_settings(settings)
+    let mut exporter = ImageExporter::with_settings(settings)
         .await
         .map_err(|err| {
             engine_error_with_source(
@@ -111,6 +112,7 @@ pub async fn render_figure_rgba_bytes(
                 PlottingBackendError::ImageExportInit(err),
             )
         })?;
+    exporter.set_theme_config(super::web::current_plot_theme_config());
     exporter
         .render_rgba_bytes(&mut figure)
         .await
@@ -139,7 +141,7 @@ pub async fn render_figure_png_bytes_with_camera(
         settings.height = height;
     }
 
-    let exporter = ImageExporter::with_settings(settings)
+    let mut exporter = ImageExporter::with_settings(settings)
         .await
         .map_err(|err| {
             engine_error_with_source(
@@ -147,6 +149,7 @@ pub async fn render_figure_png_bytes_with_camera(
                 PlottingBackendError::ImageExportInit(err),
             )
         })?;
+    exporter.set_theme_config(super::web::current_plot_theme_config());
     exporter
         .render_png_bytes_with_camera(&mut figure, camera)
         .await
@@ -175,7 +178,7 @@ pub async fn render_figure_rgba_bytes_with_camera(
         settings.height = height;
     }
 
-    let exporter = ImageExporter::with_settings(settings)
+    let mut exporter = ImageExporter::with_settings(settings)
         .await
         .map_err(|err| {
             engine_error_with_source(
@@ -183,6 +186,7 @@ pub async fn render_figure_rgba_bytes_with_camera(
                 PlottingBackendError::ImageExportInit(err),
             )
         })?;
+    exporter.set_theme_config(super::web::current_plot_theme_config());
     exporter
         .render_rgba_bytes_with_camera(&mut figure, camera)
         .await
@@ -211,7 +215,7 @@ pub async fn render_figure_png_bytes_with_axes_cameras(
         settings.height = height;
     }
 
-    let exporter = ImageExporter::with_settings(settings)
+    let mut exporter = ImageExporter::with_settings(settings)
         .await
         .map_err(|err| {
             engine_error_with_source(
@@ -219,6 +223,7 @@ pub async fn render_figure_png_bytes_with_axes_cameras(
                 PlottingBackendError::ImageExportInit(err),
             )
         })?;
+    exporter.set_theme_config(super::web::current_plot_theme_config());
     exporter
         .render_png_bytes_with_axes_cameras(&mut figure, axes_cameras)
         .await
@@ -247,7 +252,7 @@ pub async fn render_figure_rgba_bytes_with_axes_cameras(
         settings.height = height;
     }
 
-    let exporter = ImageExporter::with_settings(settings)
+    let mut exporter = ImageExporter::with_settings(settings)
         .await
         .map_err(|err| {
             engine_error_with_source(
@@ -255,6 +260,7 @@ pub async fn render_figure_rgba_bytes_with_axes_cameras(
                 PlottingBackendError::ImageExportInit(err),
             )
         })?;
+    exporter.set_theme_config(super::web::current_plot_theme_config());
     exporter
         .render_rgba_bytes_with_axes_cameras(&mut figure, axes_cameras)
         .await
@@ -271,6 +277,7 @@ pub async fn render_figure_snapshot(
     handle: FigureHandle,
     width: u32,
     height: u32,
+    textmark: Option<String>,
 ) -> BuiltinResult<Vec<u8>> {
     const SNAPSHOT_CONTEXT: &str = "renderFigureImage";
     let figure = clone_figure(handle).ok_or_else(|| {
@@ -279,9 +286,126 @@ pub async fn render_figure_snapshot(
             SNAPSHOT_CONTEXT,
         )
     })?;
-    render_figure_png_bytes(figure, width, height)
+    let bytes = runmat_plot::export::native_surface::render_figure_png_bytes_interactive_and_theme_and_textmark(
+        figure,
+        width,
+        height,
+        super::web::current_plot_theme_config(),
+        textmark.as_deref(),
+    )
+    .await
+    .map_err(|err| {
+        map_control_flow_with_builtin(
+            engine_error_with_source(
+                format!("Plot export failed: {err}"),
+                PlottingBackendError::ImageExport(err),
+            ),
+            SNAPSHOT_CONTEXT,
+        )
+    })?;
+    Ok(bytes)
+}
+
+#[cfg(feature = "plot-core")]
+pub async fn render_figure_snapshot_with_camera_state(
+    handle: FigureHandle,
+    width: u32,
+    height: u32,
+    camera_state: super::web::PlotSurfaceCameraState,
+    textmark: Option<String>,
+) -> BuiltinResult<Vec<u8>> {
+    const SNAPSHOT_CONTEXT: &str = "renderFigureImage";
+    let figure = clone_figure(handle).ok_or_else(|| {
+        map_control_flow_with_builtin(
+            engine_error(format!("figure handle {} does not exist", handle.as_u32())),
+            SNAPSHOT_CONTEXT,
+        )
+    })?;
+
+    let axes_cameras: Vec<runmat_plot::core::Camera> = camera_state
+        .axes
+        .iter()
+        .map(surface_plot_camera_to_core_camera)
+        .collect();
+
+    if axes_cameras.is_empty() {
+        let bytes = runmat_plot::export::native_surface::render_figure_png_bytes_interactive_and_theme_and_textmark(
+            figure,
+            width,
+            height,
+            super::web::current_plot_theme_config(),
+            textmark.as_deref(),
+        )
         .await
-        .map_err(|flow| map_control_flow_with_builtin(flow, SNAPSHOT_CONTEXT))
+            .map_err(|err| {
+                map_control_flow_with_builtin(
+                    engine_error_with_source(
+                        format!("Plot export failed: {err}"),
+                        PlottingBackendError::ImageExport(err),
+                    ),
+                    SNAPSHOT_CONTEXT,
+                )
+            })?;
+        return Ok(bytes);
+    }
+
+    let bytes = runmat_plot::export::native_surface::render_figure_png_bytes_interactive_with_axes_cameras_and_theme_and_textmark(
+        figure,
+        width,
+        height,
+        &axes_cameras,
+        super::web::current_plot_theme_config(),
+        textmark.as_deref(),
+    )
+    .await
+    .map_err(|err| {
+        map_control_flow_with_builtin(
+            engine_error_with_source(
+                format!("Plot export failed: {err}"),
+                PlottingBackendError::ImageExport(err),
+            ),
+            SNAPSHOT_CONTEXT,
+        )
+    })?;
+    Ok(bytes)
+}
+
+#[cfg(feature = "plot-core")]
+fn surface_plot_camera_to_core_camera(
+    state: &super::web::PlotCameraState,
+) -> runmat_plot::core::Camera {
+    let mut camera = runmat_plot::core::Camera::new();
+    camera.position = glam::Vec3::new(state.position[0], state.position[1], state.position[2]);
+    camera.target = glam::Vec3::new(state.target[0], state.target[1], state.target[2]);
+    camera.up = glam::Vec3::new(state.up[0], state.up[1], state.up[2]);
+    camera.zoom = state.zoom;
+    camera.aspect_ratio = state.aspect_ratio.max(0.000_1);
+    camera.projection = match state.projection {
+        super::web::PlotCameraProjection::Perspective { fov, near, far } => {
+            runmat_plot::core::camera::ProjectionType::Perspective {
+                fov,
+                near: near.max(1.0e-6),
+                far: far.max(near + 1.0e-6),
+            }
+        }
+        super::web::PlotCameraProjection::Orthographic {
+            left,
+            right,
+            bottom,
+            top,
+            near,
+            far,
+        } => runmat_plot::core::camera::ProjectionType::Orthographic {
+            left,
+            right,
+            bottom,
+            top,
+            near,
+            far,
+        },
+    };
+    camera.mark_dirty();
+    camera
 }
 
 #[cfg(feature = "gui")]

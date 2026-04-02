@@ -4,20 +4,22 @@
   "keywords": [
     "plot",
     "line plot",
-    "2D",
-    "visualization",
-    "gpuArray"
+    "2-D plotting",
+    "plot x y",
+    "matlab plot",
+    "gpu plotting",
+    "runmat plotting"
   ],
-  "summary": "Draw 2-D line plots that mirror MATLAB's `plot(x, y)` semantics.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/plot.html"
-  ],
+  "summary": "Create 2-D line plots with handle-based styling, multi-series support, and MATLAB `plot(x, y)` semantics.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": [],
+    "precisions": [
+      "single",
+      "double"
+    ],
     "broadcasting": "none",
-    "notes": "Single-precision gpuArray inputs render zero-copy via the shared WebGPU context; other data is gathered to the host."
+    "notes": "Plot is a rendering sink. GPU inputs can remain resident when the shared plotting device is available; otherwise RunMat gathers once before rendering."
   },
   "fusion": {
     "elementwise": false,
@@ -27,71 +29,86 @@
   },
   "requires_feature": null,
   "tested": {
-    "unit": "builtins::plotting::plot::tests"
+    "unit": "builtins::plotting::plot::tests",
+    "integration": "runmat-plot/tests/renderer_tests.rs"
   },
-  "description": "`plot(x, y)` creates a 2-D line plot with MATLAB-compatible styling. Inputs may be real row/column vectors or single-precision gpuArray vectors when a shared WebGPU context is available.",
+  "description": "`plot` is the core RunMat builtin for 2-D line charts. It supports MATLAB-style `plot(y)`, `plot(x, y)`, and multi-series call forms, returns a line handle, and participates in the shared plotting object/property system used by `get` and `set`. In RunMat, `plot` is also GPU-aware: when plotting-compatible GPU buffers are available, line geometry can stay on device through the rendering path rather than being copied back to the host first.",
   "behaviors": [
-    "Both `x` and `y` must contain the same number of elements; mismatched lengths raise errors.",
-    "Default styling mirrors MATLAB: blue solid line with circular markers disabled. Line width matches MATLAB's default (approx. 1 pt) but can be adjusted once the interactive window is open.",
-    "Multiple calls to `plot` append to the current figure when users call `hold on` (future work).",
-    "Single-precision gpuArray vectors stay on the device and feed a zero-copy line packer. Double-precision data or dashed/marker-heavy styles fall back to the CPU path automatically."
+    "`plot(y)` uses `1:n` as the implicit x-axis, matching MATLAB shorthand behavior.",
+    "`plot(x, y)` requires the same element count in both inputs. Row and column vectors are both accepted.",
+    "Multiple data pairs in one call create multiple line objects and return the handle for the first created series, matching common MATLAB plotting conventions.",
+    "The returned handle works with `get` and `set`, so line color, width, display names, and marker properties can be inspected or updated after plotting.",
+    "Plotting is subplot-local. If the active axes come from `subplot`, the line is attached to that subplot rather than globally mutating every axes in the figure.",
+    "RunMat treats `plot` as a rendering sink: fusion stops at the builtin, but GPU residency is preserved on the happy path when the shared plotting device is installed."
+  ],
+  "options": [
+    "Style strings like `'-'`, `'--'`, `':'`, `'o'`, `'x'`, and combined forms such as `'r--o'` are accepted in MATLAB-style plot calls.",
+    "Name/value property updates are typically applied after plotting through `set(h, ...)`, where `h` is the returned line handle.",
+    "Display names set during or after plotting are used by `legend` when labels are not passed explicitly."
   ],
   "examples": [
     {
-      "description": "",
-      "input": "plot(0:0.1:2*pi, sin(0:0.1:2*pi));\ntime = 0:0.1:2*pi;\namplitude = cos(time);\nplot(time, amplitude)"
+      "description": "Plot paired x/y data as a basic line chart",
+      "input": "x = linspace(0, 2*pi, 200);\ny = sin(x);\nh = plot(x, y);",
+      "output": "% h is a numeric handle for the first line object"
+    },
+    {
+      "description": "Use MATLAB-style y-only shorthand",
+      "input": "samples = [1 4 2 5 3];\nplot(samples);",
+      "output": "% RunMat uses 1:length(samples) for the x-axis"
+    },
+    {
+      "description": "Create multiple series and drive the legend from display names",
+      "input": "x = linspace(0, 2*pi, 200);\nh1 = plot(x, sin(x));\nset(h1, 'DisplayName', 'sin(x)', 'LineWidth', 2);\nhold on;\nh2 = plot(x, cos(x));\nset(h2, 'DisplayName', 'cos(x)');\nlegend;",
+      "output": "% The legend uses the line DisplayName properties"
+    },
+    {
+      "description": "Inspect and update a plotted line through handles",
+      "input": "x = 0:0.1:1;\nh = plot(x, x.^2);\nget(h, 'Type')\nset(h, 'Color', 'r', 'Marker', 'o', 'MarkerSize', 6);",
+      "output": "ans =\n    'line'"
     }
   ],
-  "faqs": [],
   "links": [
     {
-      "label": "bar",
-      "url": "./bar"
+      "label": "semilogx",
+      "url": "./semilogx"
     },
     {
-      "label": "contour",
-      "url": "./contour"
+      "label": "semilogy",
+      "url": "./semilogy"
     },
     {
-      "label": "contourf",
-      "url": "./contourf"
-    },
-    {
-      "label": "hist",
-      "url": "./hist"
-    },
-    {
-      "label": "mesh",
-      "url": "./mesh"
-    },
-    {
-      "label": "meshc",
-      "url": "./meshc"
+      "label": "loglog",
+      "url": "./loglog"
     },
     {
       "label": "scatter",
       "url": "./scatter"
     },
     {
-      "label": "scatter3",
-      "url": "./scatter3"
-    },
-    {
       "label": "stairs",
       "url": "./stairs"
     },
     {
-      "label": "surf",
-      "url": "./surf"
+      "label": "legend",
+      "url": "./legend"
     },
     {
-      "label": "surfc",
-      "url": "./surfc"
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
     }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/plot.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/plot.rs"
   },
-  "gpu_residency": "`plot` terminates fusion graphs. If the inputs are `single` gpuArrays and the shared plotter device is active, their buffers are consumed zero-copy by the renderer. Otherwise the tensors are gathered before plotting, matching MATLAB semantics."
+  "gpu_residency": "`plot` preserves GPU residency when the plotting context can consume exported GPU buffers directly. If the active plotting path cannot use the input buffers, RunMat gathers once before rendering while keeping the resulting figure semantics unchanged.",
+  "gpu_behavior": [
+    "On the GPU happy path, RunMat reuses exported plot input buffers and emits renderer-ready line geometry without a full host round-trip.",
+    "Marker-heavy or otherwise unsupported combinations can fall back to host materialization while preserving the same visible result and handle semantics."
+  ]
 }

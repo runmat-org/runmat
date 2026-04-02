@@ -69,15 +69,12 @@ mod export_subplot_tests {
         let xv: Vec<f64> = (1..=cols).map(|i| i as f64).collect();
         let mut yv: Vec<f64> = (1..=rows).map(|i| i as f64).collect();
         yv.reverse();
-        let img = runmat_plot::plots::ImagePlot::from_grayscale(
-            xv,
-            yv,
-            grid,
-            runmat_plot::plots::surface::ColorMap::Parula,
-            None,
-        )
-        .unwrap();
-        let i1 = fig.add_image_plot(img);
+        let img = runmat_plot::plots::SurfacePlot::new(xv, yv, grid)
+            .unwrap()
+            .with_colormap(runmat_plot::plots::surface::ColorMap::Parula)
+            .with_flatten_z(true)
+            .with_image_mode(true);
+        let i1 = fig.add_surface_plot(img);
         let _ = fig.assign_plot_to_axes(i1, 1);
         let x2: Vec<f64> = (0..=20).map(|i| i as f64 * 0.2).collect();
         let y2: Vec<f64> = x2.iter().map(|v| v.sin()).collect();
@@ -155,15 +152,12 @@ mod export_subplot_tests {
         let x: Vec<f64> = (1..=cols).map(|i| i as f64).collect();
         let mut yv: Vec<f64> = (1..=rows).map(|i| i as f64).collect();
         yv.reverse();
-        let img = runmat_plot::plots::ImagePlot::from_grayscale(
-            x.clone(),
-            yv.clone(),
-            grid,
-            runmat_plot::plots::surface::ColorMap::Parula,
-            None,
-        )
-        .unwrap();
-        let i1 = fig.add_image_plot(img);
+        let img = runmat_plot::plots::SurfacePlot::new(x.clone(), yv.clone(), grid)
+            .unwrap()
+            .with_colormap(runmat_plot::plots::surface::ColorMap::Parula)
+            .with_flatten_z(true)
+            .with_image_mode(true);
+        let i1 = fig.add_surface_plot(img);
         let _ = fig.assign_plot_to_axes(i1, 1);
         // Line in (1,0)
         let x2: Vec<f64> = (0..=50).map(|i| i as f64 * 0.2).collect();
@@ -417,32 +411,6 @@ mod svg_aesthetics_tests {
     }
 }
 
-#[cfg(test)]
-mod svg_image_embed_tests {
-    use runmat_plot::export::vector::{VectorExportSettings, VectorExporter};
-    use runmat_plot::plots::surface::ColorMap;
-    use runmat_plot::plots::{image::ImagePlot, Figure};
-
-    #[test]
-    fn test_svg_embeds_png_data_uri_for_imagesc() {
-        // Simple 2x2 grayscale grid
-        let x: Vec<f64> = vec![0.0, 1.0];
-        let y: Vec<f64> = vec![0.0, 1.0];
-        let z: Vec<Vec<f64>> = vec![vec![0.0, 0.5], vec![0.5, 1.0]];
-        let mut fig = Figure::new();
-        let img = ImagePlot::from_grayscale(x, y, z, ColorMap::Parula, None).unwrap();
-        fig.add_image_plot(img);
-
-        let exporter = VectorExporter::with_settings(VectorExportSettings {
-            width: 160.0,
-            height: 120.0,
-            ..Default::default()
-        });
-        let svg = exporter.render_to_svg(&mut fig).unwrap();
-        assert!(svg.contains("<image "));
-        assert!(svg.contains("xlink:href=\"data:image/png;base64,"));
-    }
-}
 #[test]
 fn test_uniform_buffer_layout() {
     // Test that uniforms have the expected memory layout for GPU buffers
@@ -853,14 +821,16 @@ mod new_plots_tests {
         assert_eq!(rd.pipeline_type, runmat_plot::core::PipelineType::Triangles);
         assert!(!rd.indices.as_ref().unwrap().is_empty());
     }
+    #[test]
     fn test_errorbar_geometry_with_caps() {
         let x = vec![0.0, 1.0, 2.0];
         let y = vec![1.0, 2.0, 1.5];
         let el = vec![0.2, 0.1, 0.3];
         let eu = vec![0.3, 0.4, 0.2];
-        let mut eb = ErrorBar::new(x, y, el, eu).unwrap().with_style(
+        let mut eb = ErrorBar::new_vertical(x, y, el, eu).unwrap().with_style(
             glam::Vec4::new(0.0, 0.0, 0.0, 1.0),
             1.5,
+            LineStyle::Solid,
             0.2,
         );
         let vertices = eb.generate_vertices();
@@ -868,6 +838,31 @@ mod new_plots_tests {
         assert!(vertices.len() >= 6);
         let rd = eb.render_data();
         assert_eq!(rd.pipeline_type, runmat_plot::core::PipelineType::Lines);
+        let marker = eb.marker_render_data().expect("marker render data");
+        assert_eq!(
+            marker.pipeline_type,
+            runmat_plot::core::PipelineType::Points
+        );
+    }
+
+    #[test]
+    fn test_errorbar_both_direction_bounds() {
+        let x = vec![1.0, 2.0];
+        let y = vec![3.0, 4.0];
+        let mut eb = ErrorBar::new_both(
+            x,
+            y,
+            vec![0.1, 0.2],
+            vec![0.2, 0.3],
+            vec![0.3, 0.4],
+            vec![0.4, 0.5],
+        )
+        .unwrap();
+        let bounds = eb.bounds();
+        assert!(bounds.min.x < 1.0);
+        assert!(bounds.max.x > 2.0);
+        assert!(bounds.min.y < 3.0);
+        assert!(bounds.max.y > 4.0);
     }
 
     #[test]
@@ -888,10 +883,15 @@ mod new_plots_tests {
         let y = vec![1.0, -0.5];
         let mut sm = StemPlot::new(x, y).unwrap();
         let vertices = sm.generate_vertices();
-        // Each point: 2 vertices for stem + 4 for cross marker => 6; for 2 points => 12
-        assert_eq!(vertices.len(), 12);
+        // Each point contributes 2 stem vertices plus optional baseline line.
+        assert!(vertices.len() >= 4);
         let rd = sm.render_data();
         assert_eq!(rd.pipeline_type, runmat_plot::core::PipelineType::Lines);
+        let marker = sm.marker_render_data().expect("marker render data");
+        assert_eq!(
+            marker.pipeline_type,
+            runmat_plot::core::PipelineType::Points
+        );
     }
 
     #[test]
@@ -913,8 +913,10 @@ mod new_plots_tests {
 #[cfg(test)]
 mod image_export_tests {
     #![allow(unused_imports)]
+    use glam::Vec3;
+    use runmat_plot::core::{BoundingBox, Vertex};
     use runmat_plot::plots::surface::ColorMap;
-    use runmat_plot::plots::{image::ImagePlot, Figure};
+    use runmat_plot::plots::{ContourFillPlot, ContourPlot, Figure};
     use std::path::PathBuf;
 
     // Helper to write PNG via headless exporter
@@ -940,9 +942,13 @@ mod image_export_tests {
             vec![0.25, 0.75, 0.1],
             vec![0.9, 0.2, 0.4],
         ];
-        let img = ImagePlot::from_grayscale(x, y, z, ColorMap::Parula, None).unwrap();
+        let img = runmat_plot::plots::SurfacePlot::new(x, y, z)
+            .unwrap()
+            .with_colormap(ColorMap::Parula)
+            .with_flatten_z(true)
+            .with_image_mode(true);
         let mut fig = Figure::new();
-        fig.add_image_plot(img);
+        fig.add_surface_plot(img);
         let png_path = export_png(&mut fig, "imagesc_gray").await.unwrap();
         assert!(png_path.exists());
         let bytes = std::fs::read(&png_path).unwrap();
@@ -961,13 +967,138 @@ mod image_export_tests {
         grid[0][1] = glam::Vec4::new(0.0, 1.0, 0.0, 1.0);
         grid[1][0] = glam::Vec4::new(0.0, 0.0, 1.0, 1.0);
         grid[1][1] = glam::Vec4::new(1.0, 1.0, 1.0, 1.0);
-        let img = ImagePlot::from_color_grid(x, y, grid).unwrap();
+        let img = runmat_plot::plots::SurfacePlot::new(x, y, vec![vec![0.0, 0.0], vec![0.0, 0.0]])
+            .unwrap()
+            .with_flatten_z(true)
+            .with_image_mode(true)
+            .with_color_grid(grid);
         let mut fig = Figure::new();
-        fig.add_image_plot(img);
+        fig.add_surface_plot(img);
         let png_path = export_png(&mut fig, "imshow_rgb").await.unwrap();
         assert!(png_path.exists());
         let bytes = std::fs::read(&png_path).unwrap();
         assert!(bytes.len() > 1000);
+    }
+
+    #[tokio::test]
+    async fn test_headless_contourf_export() {
+        if super::skip_headless_gpu_test("image_export_tests::test_headless_contourf_export") {
+            return;
+        }
+        let bounds = BoundingBox::new(Vec3::new(-2.0, -2.0, 0.0), Vec3::new(2.0, 2.0, 0.0));
+        let color_a = [0.1, 0.3, 0.9, 1.0];
+        let color_b = [0.9, 0.2, 0.2, 1.0];
+        let vertices = vec![
+            Vertex {
+                position: [-1.5, -1.5, 0.0],
+                color: color_a,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [0.0, -1.5, 0.0],
+                color: color_a,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [-0.75, 0.0, 0.0],
+                color: color_a,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [0.0, 0.0, 0.0],
+                color: color_b,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [1.5, 0.0, 0.0],
+                color: color_b,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [0.75, 1.5, 0.0],
+                color: color_b,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+        ];
+        let fill = ContourFillPlot::from_vertices(vertices, bounds).with_label("Filled Contours");
+        let mut fig = Figure::new();
+        fig.add_contour_fill_plot(fill);
+        let png_path = export_png(&mut fig, "contourf_basic").await.unwrap();
+        assert!(png_path.exists());
+        let bytes = std::fs::read(&png_path).unwrap();
+        assert!(bytes.len() > 1000);
+    }
+
+    #[tokio::test]
+    async fn test_headless_contour_export() {
+        if super::skip_headless_gpu_test("image_export_tests::test_headless_contour_export") {
+            return;
+        }
+        let bounds = BoundingBox::new(Vec3::new(-2.0, -2.0, 0.0), Vec3::new(2.0, 2.0, 0.0));
+        let line_color = [0.95, 0.95, 0.95, 1.0];
+        let vertices = vec![
+            Vertex {
+                position: [-1.5, -1.0, 0.0],
+                color: line_color,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [1.5, 1.0, 0.0],
+                color: line_color,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [-1.5, 1.0, 0.0],
+                color: line_color,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+            Vertex {
+                position: [1.5, -1.0, 0.0],
+                color: line_color,
+                normal: [0.0, 0.0, 1.0],
+                tex_coords: [0.0, 0.0],
+            },
+        ];
+        let contour = ContourPlot::from_vertices(vertices, 0.0, bounds).with_label("Contours");
+        let mut fig = Figure::new();
+        fig.add_contour_plot(contour);
+        let png_path = export_png(&mut fig, "contour_basic").await.unwrap();
+        assert!(png_path.exists());
+        let bytes = std::fs::read(&png_path).unwrap();
+        assert!(bytes.len() > 1000);
+    }
+}
+
+#[cfg(test)]
+mod pie_export_tests {
+    use runmat_plot::export::vector::{VectorExportSettings, VectorExporter};
+    use runmat_plot::plots::{Figure, PieChart};
+
+    #[test]
+    fn test_svg_includes_pie_slice_labels() {
+        let mut fig = Figure::new();
+        let pie = PieChart::new(vec![1.0, 2.0], None)
+            .unwrap()
+            .with_slice_labels(vec!["A".into(), "B".into()]);
+        fig.add_pie_chart(pie);
+
+        let exporter = VectorExporter::with_settings(VectorExportSettings {
+            width: 160.0,
+            height: 120.0,
+            ..Default::default()
+        });
+        let svg = exporter.render_to_svg(&mut fig).unwrap();
+        assert!(svg.contains(">A<"));
+        assert!(svg.contains(">B<"));
     }
 }
 
@@ -1178,7 +1309,9 @@ mod export_parity_more_tests {
         let x = vec![0.0, 1.0, 2.0, 3.0];
         let y = vec![1.0, 2.0, 1.5, 2.2];
         let e = vec![0.1, 0.2, 0.15, 0.1];
-        let eb = ErrorBar::new(x, y, e.clone(), e).unwrap().with_label("Err");
+        let eb = ErrorBar::new_vertical(x, y, e.clone(), e)
+            .unwrap()
+            .with_label("Err");
         let mut fig = Figure::new().with_title("ErrorBar");
         fig.add_errorbar(eb);
         let path = export_png(&mut fig, "errorbar_basic").await.unwrap();

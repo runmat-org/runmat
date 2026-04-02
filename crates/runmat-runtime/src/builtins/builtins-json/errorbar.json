@@ -1,0 +1,71 @@
+{
+  "title": "errorbar",
+  "category": "plotting",
+  "keywords": [
+    "errorbar",
+    "error bars",
+    "uncertainty plot",
+    "confidence interval plot",
+    "matlab errorbar"
+  ],
+  "summary": "Plot data with symmetric or asymmetric error bars for uncertainty, intervals, and MATLAB `errorbar` workflows.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`errorbar` has a dedicated GPU geometry path for supported input combinations and shares the marker path used by other marker-bearing plots."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 6,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::errorbar::tests",
+    "integration": "runmat-plot/tests/renderer_tests.rs"
+  },
+  "description": "`errorbar` visualizes uncertainty around data points using vertical or both-direction error bars. In RunMat it returns a plot handle, supports MATLAB-style symmetric and asymmetric forms, and participates in the same handle/property and marker-rendering system used by line-like plotting builtins.",
+  "behaviors": [
+    "Vertical-only and both-direction error-bar forms are supported through the runtime and replay/render stack.",
+    "The returned value is an error-bar handle that can be queried or updated through `get` and `set`.",
+    "Cap size, line styling, marker appearance, display names, and related properties use the shared plotting object/property system.",
+    "Error bars remain subplot-local and integrate naturally with legends and axes state.",
+    "GPU-backed geometry is used when plotting-compatible buffers are available for the full input set; otherwise RunMat falls back to host plotting while preserving the same visible result."
+  ],
+  "examples": [
+    {
+      "description": "Plot symmetric vertical error bars",
+      "input": "x = 1:5;\ny = [2 3 2.5 4 3.5];\nerr = [0.2 0.3 0.1 0.4 0.2];\nerrorbar(x, y, err, err);"
+    },
+    {
+      "description": "Plot asymmetric both-direction error bars",
+      "input": "x = 1:4;\ny = [3 4 2 5];\nxn = [0.1 0.2 0.1 0.3];\nxp = [0.2 0.3 0.2 0.4];\nyn = [0.3 0.2 0.4 0.2];\nyp = [0.4 0.3 0.5 0.3];\nerrorbar(x, y, xn, xp, yn, yp);"
+    },
+    {
+      "description": "Style an error-bar object and label it for the legend",
+      "input": "x = 1:5;\ny = [1 2 1.5 3 2.5];\nh = errorbar(x, y, 0.2*ones(size(x)), 0.2*ones(size(x)));\nset(h, 'LineWidth', 2, 'DisplayName', 'measurement');\nlegend;"
+    }
+  ],
+  "links": [
+    { "label": "stem", "url": "./stem" },
+    { "label": "plot", "url": "./plot" },
+    { "label": "legend", "url": "./legend" },
+    { "label": "get", "url": "./get" },
+    { "label": "set", "url": "./set" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/errorbar.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/errorbar.rs"
+  },
+  "gpu_residency": "`errorbar` preserves GPU residency when the direct error-bar packer path is available for the full input set. Marker rendering stays aligned with the shared marker path.",
+  "gpu_behavior": [
+    "Dedicated GPU geometry generation covers supported vertical and both-direction error-bar workflows.",
+    "Markers continue to use the shared marker path so line/marker styling stays consistent with the rest of the plotting stack."
+  ]
+}

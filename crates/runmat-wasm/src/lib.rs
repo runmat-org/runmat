@@ -70,12 +70,16 @@ use runmat_runtime::builtins::plotting::{
     get_surface_camera_state as runtime_get_surface_camera_state,
     handle_plot_surface_event as runtime_handle_plot_surface_event,
     install_figure_observer as runtime_install_figure_observer,
-    install_surface as runtime_install_surface, new_figure_handle as runtime_new_figure_handle,
+    install_surface as runtime_install_surface,
+    invalidate_surface_revisions as runtime_invalidate_surface_revisions,
+    new_figure_handle as runtime_new_figure_handle,
     present_figure_on_surface as runtime_present_figure_on_surface,
     present_surface as runtime_present_surface,
     render_current_scene as runtime_render_current_scene,
     render_figure_snapshot as runtime_render_figure_snapshot,
+    render_figure_snapshot_with_camera_state as runtime_render_figure_snapshot_with_camera_state,
     reset_hold_state_for_run as runtime_reset_hold_state_for_run,
+    reset_plot_state as runtime_reset_plot_state,
     reset_surface_camera as runtime_reset_surface_camera, resize_surface as runtime_resize_surface,
     select_figure as runtime_select_figure, set_hold as runtime_set_hold,
     set_plot_theme_config as runtime_set_plot_theme_config,
@@ -583,6 +587,8 @@ impl RunMatWasm {
         }
         let mut slot = self.session.borrow_mut();
         *slot = session;
+        runtime_reset_plot_state();
+        runtime_invalidate_surface_revisions();
         Ok(())
     }
 
@@ -1354,11 +1360,50 @@ pub async fn wasm_render_figure_image(
     handle: JsValue,
     width: Option<u32>,
     height: Option<u32>,
+    textmark: Option<String>,
 ) -> Result<Uint8Array, JsValue> {
+    let _ = shared_webgpu_context();
     let target = parse_optional_handle(handle)?.unwrap_or_else(runtime_current_figure_handle);
-    let bytes = runtime_render_figure_snapshot(target, width.unwrap_or(0), height.unwrap_or(0))
-        .await
-        .map_err(runtime_flow_to_js)?;
+    let bytes =
+        runtime_render_figure_snapshot(target, width.unwrap_or(0), height.unwrap_or(0), textmark)
+            .await
+            .map_err(runtime_flow_to_js)?;
+    Ok(Uint8Array::from(bytes.as_slice()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = renderFigureImageWithTextmark)]
+pub async fn wasm_render_figure_image_with_textmark(
+    handle: JsValue,
+    width: Option<u32>,
+    height: Option<u32>,
+    textmark: Option<String>,
+) -> Result<Uint8Array, JsValue> {
+    wasm_render_figure_image(handle, width, height, textmark).await
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = renderFigureImageWithCameraState)]
+pub async fn wasm_render_figure_image_with_camera_state(
+    handle: JsValue,
+    width: Option<u32>,
+    height: Option<u32>,
+    camera_state: JsValue,
+    textmark: Option<String>,
+) -> Result<Uint8Array, JsValue> {
+    let _ = shared_webgpu_context();
+    let target = parse_optional_handle(handle)?.unwrap_or_else(runtime_current_figure_handle);
+    let parsed: PlotSurfaceCameraState =
+        serde_wasm_bindgen::from_value(camera_state).map_err(|err| js_error(&err.to_string()))?;
+    let bytes = runtime_render_figure_snapshot_with_camera_state(
+        target,
+        width.unwrap_or(0),
+        height.unwrap_or(0),
+        parsed,
+        textmark,
+    )
+    .await
+    .map_err(runtime_flow_to_js)?;
     Ok(Uint8Array::from(bytes.as_slice()))
 }
 
@@ -2077,6 +2122,7 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
             "InvalidSubplotIndex"
         }
         FigureError::InvalidAxesHandle => "InvalidAxesHandle",
+        FigureError::InvalidPlotObjectHandle => "InvalidPlotObjectHandle",
         FigureError::RenderFailure { source } => {
             let details = source.to_string();
             let _ = Reflect::set(

@@ -2,7 +2,7 @@
 
 use runmat_macros::runtime_builtin;
 
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::bool_type;
 use crate::BuiltinResult;
 
 /// Flush pending figure updates to any bound plot surfaces.
@@ -16,10 +16,10 @@ use crate::BuiltinResult;
     keywords = "drawnow,graphics,flush,plot",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(bool_type),
     builtin_path = "crate::builtins::plotting::drawnow"
 )]
-pub async fn drawnow_builtin() -> BuiltinResult<String> {
+pub async fn drawnow_builtin() -> BuiltinResult<bool> {
     #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
     {
         use crate::builtins::plotting;
@@ -29,11 +29,11 @@ pub async fn drawnow_builtin() -> BuiltinResult<String> {
                 .with_builtin("drawnow")
                 .build()
         })?;
-        return Ok("drawnow: presented".to_string());
+        return Ok(true);
     }
 
     #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
     {
-        Ok("drawnow: ok".to_string())
+        Ok(true)
     }
 }

@@ -1,0 +1,42 @@
+{
+  "title": "grid",
+  "category": "plotting",
+  "keywords": [
+    "grid",
+    "grid on",
+    "grid off",
+    "chart grid lines",
+    "matlab grid"
+  ],
+  "summary": "Toggle grid lines for charts, subplots, and MATLAB `grid on` / `grid off` workflows.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::cmds"
+  },
+  "description": "`grid` controls the visibility of axes grid lines on the active subplot or axes selection. It supports the familiar MATLAB command-style forms `grid on`, `grid off`, and bare `grid` toggling, while returning the resulting boolean state in RunMat.",
+  "behaviors": [
+    "`grid on` enables grid lines on the current axes.",
+    "`grid off` disables grid lines on the current axes.",
+    "Calling `grid` with no argument toggles the current state.",
+    "Grid visibility is subplot-local and does not spill into other axes automatically."
+  ],
+  "examples": [
+    {
+      "description": "Enable grid lines on a simple line chart",
+      "input": "plot(1:5, [1 4 2 5 3]);\ngrid on;"
+    },
+    {
+      "description": "Toggle grid lines in one subplot only",
+      "input": "subplot(1, 2, 1);\nplot(1:5, 1:5);\ngrid off;\nsubplot(1, 2, 2);\nplot(1:5, [5 4 3 2 1]);\ngrid on;"
+    }
+  ],
+  "links": [
+    { "label": "axis", "url": "./axis" },
+    { "label": "box", "url": "./box" },
+    { "label": "subplot", "url": "./subplot" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs"
+  }
+}
