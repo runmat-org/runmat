@@ -59,7 +59,7 @@ fn slice_3d_leading_scalars_shape() {
 }
 
 #[test]
-fn slice_3d_trailing_singleton_kept_for_vector_index() {
+fn slice_3d_trailing_singleton_dropped_for_vector_index() {
     let ast = parse("A = reshape(1:24, 3, 4, 2); S = A(:, :, [2]);").unwrap();
     let hir = lower(&ast).unwrap();
     let vars = execute(&hir).unwrap();
@@ -71,8 +71,8 @@ fn slice_3d_trailing_singleton_kept_for_vector_index() {
     if let runmat_builtins::Value::Tensor(t) = s {
         assert_eq!(
             t.shape,
-            vec![3, 4, 1],
-            "A(:,:,[2]) should keep trailing singleton"
+            vec![3, 4],
+            "A(:,:,[2]) should drop trailing singleton"
         );
     }
 }
