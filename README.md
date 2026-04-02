@@ -149,6 +149,14 @@ team management.<br/><br/>
   - Line, scatter, and surface plots supported today  
   - Some advanced plot types (box plots, violin plots) are still in progress  
 
+  Open-source plotting engine demo (works in CLI and in the browser sandbox):
+
+  ![RunMat open-source 3D plotting demo](.github/assets/runmat-sandbox-3d-plotting.gif)
+
+  <p align="center">
+    <a href=".github/assets/runmat-sandbox-3d-plotting.gif"><strong>Open GIF directly</strong></a> · <a href="https://runmat.com/sandbox"><strong>Try it in browser sandbox →</strong></a>
+  </p>
+
 - **Open-source runtime**
 
   - The full runtime, GPU engine, JIT, GC, and plotting — everything in this repo — is MIT licensed  

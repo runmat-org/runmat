@@ -1,10 +1,12 @@
 [package]
 name = "runmat-snapshot"
-version = "0.3.0"
+version = "0.3.2"
 edition = "2021"
 authors = ["Dystr Team"]
 description = "High-performance snapshot creator for preloading RunMat standard library"
 license-file = "../LICENSE.md"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
 keywords = ["matlab", "octave", "snapshot", "serialization", "performance"]
 categories = ["science", "development-tools", "compilers"]
 

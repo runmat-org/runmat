@@ -1,0 +1,72 @@
+# RunMat
+
+> RunMat is a free, open-source runtime that executes MATLAB-syntax code (.m files)
+> in the browser, on the desktop, and from the CLI. It includes automatic GPU
+> acceleration via WebGPU, Metal, Vulkan, and DirectX 12. No license required.
+> The browser sandbox runs client-side with no login. RunMat Cloud (free account)
+> adds persistent projects, automatic version history, large-file storage, and
+> team collaboration.
+
+- Built by Dystr Inc., MIT-licensed
+- 300+ core MATLAB built-in functions (does not cover all MATLAB functions or specialized toolboxes)
+- Browser sandbox: runs entirely client-side via WebAssembly, no account required, nothing sent to a server
+- RunMat Cloud: free-tier server-side persistence with projects, run history, version snapshots, collaboration, and large-file storage
+- GPU acceleration on any vendor (Metal, Vulkan, DX12, WebGPU) -- not CUDA-only
+- Interactive 2D and 3D plotting rendered directly from GPU memory
+- Modern debugging: real-time type/shape tracking, live syntax validation, execution tracing, structured logging
+- Automatic file versioning and project snapshots (no git required)
+- Async (non-blocking) code execution
+- Single-binary deployment for air-gapped / ITAR-compliant environments
+
+## Getting Started
+
+- [Browser Sandbox](https://runmat.com/sandbox): Run MATLAB code instantly in your browser, no install or login
+- [Download CLI](https://runmat.com/download): Native binary for macOS, Linux, Windows
+- [Getting Started Guide](https://runmat.com/docs/getting-started): Setup and first steps
+- [Desktop/Browser Guide](https://runmat.com/docs/desktop-browser-guide): IDE walkthrough
+
+## Documentation
+
+- [Function Reference](https://runmat.com/docs/matlab-function-reference): All 300+ supported MATLAB functions
+- [Language Coverage](https://runmat.com/docs/language-coverage): What MATLAB syntax and semantics are supported
+- [Architecture](https://runmat.com/docs/architecture): How RunMat works internally (Rust runtime, WebAssembly, GPU fusion)
+- [CLI Reference](https://runmat.com/docs/cli): Command-line usage
+
+## RunMat Cloud
+
+- [Introducing RunMat Cloud](https://runmat.com/blog/introducing-runmat-cloud): Persistent projects, run history, version snapshots, and team collaboration
+- [Version Control for Engineers](https://runmat.com/blog/version-control-for-engineers-who-dont-use-git): Automatic file history and snapshots without git
+- [Large Data Persistence](https://runmat.com/blog/ad-hoc-checkpoints-to-large-data-persistence): Chunked, content-addressed storage for large numerical artifacts
+- [Restoring Historical Run State](https://runmat.com/blog/restoring-historical-run-state-scientific-numerical-calculations): Inspect past runs without re-execution
+- [Pricing](https://runmat.com/pricing): Free Hobby tier (100 MB) through Enterprise
+
+## Key Comparisons
+
+- [MATLAB Online Alternative](https://runmat.com/matlab-online): Side-by-side comparison of RunMat vs MATLAB Online
+- [Free MATLAB Alternatives](https://runmat.com/blog/free-matlab-alternatives): Benchmarked comparison of RunMat, Octave, Julia, Python
+- [Benchmarks](https://runmat.com/benchmarks): Performance data (82x faster than PyTorch on 1B-point elementwise math)
+
+## GPU Acceleration
+
+- [Fusion Engine](https://runmat.com/docs/accelerate/fusion-intro): How RunMat fuses sequential ops into fewer GPU kernels
+- [GPU in MATLAB Guide](https://runmat.com/blog/how-to-use-gpu-in-matlab): GPU setup guide comparing MATLAB's CUDA-only approach with RunMat's cross-vendor alternative
+
+## Debugging and Diagnostics
+
+- [fprintf and Modern Debugging](https://runmat.com/blog/matlab-fprintf): Why fprintf is a poor debugger and what RunMat provides instead (variable explorer, structured logging, execution tracing)
+
+## Enterprise and Air-Gap
+
+- [Mission-Critical Math: Air-Gap Deployment](https://runmat.com/blog/mission-critical-math-airgap): Single-binary deployment for ITAR-compliant, air-gapped environments with GPU acceleration, collaboration, and audit trails
+
+## About
+
+- [About RunMat](https://runmat.com/about): Company and mission
+- [Why Rust](https://runmat.com/blog/why-rust): Why the runtime is built in Rust
+- [GitHub](https://github.com/runmat-org/runmat): Source code
+
+## Optional
+
+- [Blog](https://runmat.com/blog): All blog posts
+- [Resources Hub](https://runmat.com/resources): Guides and resources
+- [Roadmap](https://runmat.com/docs/roadmap): Planned features

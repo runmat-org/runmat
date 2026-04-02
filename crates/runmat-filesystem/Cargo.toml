@@ -1,9 +1,11 @@
 [package]
 name = "runmat-filesystem"
-version = "0.3.0"
+version = "0.3.2"
 edition = "2021"
 description = "Swappable filesystem abstraction for RunMat hosts (native, wasm, remote)."
 license-file = "../LICENSE.md"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 async-trait = "0.1"

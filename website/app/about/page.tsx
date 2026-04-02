@@ -57,6 +57,7 @@ const jsonLd = {
       name: "RunMat",
       alternateName: ["RunMat by Dystr", "Dystr"],
       legalName: "Dystr Inc.",
+      foundingDate: "2022",
       url: "https://runmat.com",
       logo: {
         "@type": "ImageObject",
@@ -118,6 +119,34 @@ const jsonLd = {
       worksFor: { "@id": "https://runmat.com/#organization" },
     },
     {
+      "@type": "SoftwareApplication",
+      "@id": "https://runmat.com/#software",
+      name: "RunMat",
+      applicationCategory: "ScientificApplication",
+      operatingSystem: "macOS, Linux, Windows, Web (WebAssembly)",
+      url: "https://runmat.com",
+      downloadUrl: "https://runmat.com/download",
+      offers: {
+        "@type": "Offer",
+        price: "0",
+        priceCurrency: "USD",
+      },
+      featureList: [
+        "300+ core MATLAB built-in functions",
+        "Cross-vendor GPU acceleration (Metal, Vulkan, DirectX 12, WebGPU)",
+        "Automatic GPU kernel fusion engine",
+        "Client-side browser sandbox via WebAssembly",
+        "Interactive 2D and 3D GPU-rendered plotting",
+        "Real-time type and shape tracking",
+        "Execution tracing and structured logging",
+        "Automatic file versioning and project snapshots",
+        "Team collaboration with shared project state",
+        "Air-gapped single-binary deployment",
+      ],
+      author: { "@id": "https://runmat.com/#organization" },
+      publisher: { "@id": "https://runmat.com/#organization" },
+    },
+    {
       "@type": "BreadcrumbList",
       "@id": "https://runmat.com/about#breadcrumb",
       itemListElement: [
@@ -138,6 +167,7 @@ export default function AboutPage() {
         }}
       />
       <div className="container mx-auto px-4 md:px-6 lg:px-8 pt-12 md:pt-16 lg:pt-20 pb-16 md:pb-24 lg:pb-32">
+        <h1 className="sr-only">About RunMat</h1>
         {/* Who We Are */}
         <section className="pb-12 md:pb-16 lg:pb-20">
           <div className="grid gap-10 lg:grid-cols-2 lg:items-center">
@@ -152,7 +182,7 @@ export default function AboutPage() {
                   priority
                 />
               </div>
-              <p className="mt-3 text-xs text-muted-foreground">
+              <p className="mt-3 text-sm text-muted-foreground">
                 Co-founders{" "}
                 <Link
                   href="https://www.linkedin.com/in/nallana/"
@@ -177,13 +207,12 @@ export default function AboutPage() {
             <div className="order-1 lg:order-2 space-y-4">
               <h2 className="text-3xl md:text-4xl font-bold text-foreground">Who we are</h2>
               <p className="text-muted-foreground text-lg">
-                RunMat is a fast, open-source runtime that runs MATLAB-syntax code on GPU. We built it because we saw
-                the problem firsthand: talented engineers losing time to slow tools, expensive licenses, and workflows
-                that couldn&apos;t keep up with modern hardware.
+                We&apos;re a small team with deep roots in engineering and enterprise software who spent years
+                watching talented people lose time to slow tools and expensive licenses. We started as Dystr in 2022 and learned one thing: engineers
+                don&apos;t want a new platform. They want their current workflow to run faster.
               </p>
               <p className="text-muted-foreground text-lg">
-                We started with Dystr and learned a simple thing: engineers don&apos;t want a new platform. They want
-                their current workflow to run faster and feel modern. That led us to RunMat.{" "}
+                That led us to RunMat.{" "}
                 <Link
                   href="/blog/why-we-built-runmat"
                   className="text-foreground underline underline-offset-2 hover:text-primary"
@@ -198,9 +227,9 @@ export default function AboutPage() {
 
         {/* Backed By */}
         <section className="py-12 md:py-16 lg:py-20">
-          <Card className="mx-auto max-w-4xl border border-border/60 bg-[#0E1421] text-slate-100 shadow-lg">
+          <Card className="mx-auto max-w-4xl border border-border/60 bg-[#0E1421] text-gray-100 shadow-lg">
             <CardContent className="py-8 text-center space-y-4">
-              <p className="text-slate-200 text-lg">Backed by</p>
+              <p className="text-gray-300 text-lg">Backed by</p>
               <div className="mx-auto grid max-w-2xl grid-cols-2 items-center justify-items-center gap-8 rounded-lg border border-white/10 bg-white/90 px-8 py-6 sm:grid-cols-4 dark:bg-white/10">
                 <Link href="https://www.longjourney.vc/" target="_blank" rel="noreferrer">
                   <Image
@@ -261,20 +290,24 @@ export default function AboutPage() {
                 gives you both, plus real GPU speed.
               </p>
               <p className="text-muted-foreground text-lg">
-                Whether you&apos;re migrating off expensive MATLAB licenses, looking for GPU acceleration without
-                learning CUDA, or building workflows where AI writes code and humans verify it, RunMat fits.
+                Whether you&apos;re migrating off expensive MATLAB licenses or looking for GPU acceleration
+                without learning CUDA, RunMat fits.
               </p>
             </div>
             <div className="rounded-2xl border border-border/60 bg-muted/40 p-4">
-              <div className="relative h-[320px] w-full overflow-hidden rounded-xl border border-border/60 bg-background/40">
-                <Image
-                  src="https://web.runmatstatic.com/engineer-math.png"
-                  alt="Engineer working through equations on a whiteboard."
-                  fill
-                  sizes="(min-width: 1024px) 50vw, 100vw"
-                  className="object-cover"
-                />
-              </div>
+              <Link href="/sandbox" className="block rounded-xl overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                <video
+                  className="w-full h-auto rounded-xl"
+                  autoPlay
+                  muted
+                  loop
+                  playsInline
+                  poster="https://web.runmatstatic.com/video/posters/3d-interactive-plotting-runmat.png"
+                  aria-label="RunMat 3D interactive plotting demo"
+                >
+                  <source src="https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.mp4" type="video/mp4" />
+                </video>
+              </Link>
             </div>
           </div>
         </section>
@@ -292,7 +325,7 @@ export default function AboutPage() {
                   className="object-contain"
                 />
               </div>
-              <p className="mt-3 text-xs text-muted-foreground">
+              <p className="mt-3 text-sm text-muted-foreground">
                 Blog:{" "}
                 <Link
                   href="/blog/in-defense-of-matlab-whiteboard-style-code"
@@ -329,8 +362,8 @@ export default function AboutPage() {
                 high-performance alternative to MATLAB.
               </p>
               <p className="text-gray-300 text-lg">
-                We focus on performance, portability, and developer experience, without breaking the way engineers
-                already write math. That means a runtime that&apos;s fast, secure, and built for today&apos;s hardware.
+                We focus on performance and portability without breaking the way engineers already write math.
+                That means a runtime that&apos;s fast, secure, and runs on today&apos;s hardware out of the box.
               </p>
             </CardContent>
           </Card>
@@ -342,23 +375,45 @@ export default function AboutPage() {
             <div className="mx-auto max-w-4xl text-center space-y-4">
               <h2 className="text-3xl md:text-4xl font-bold text-foreground">What is RunMat today</h2>
               <p className="text-muted-foreground text-lg">
-                RunMat is an open-source runtime for math that runs MATLAB-style code in the browser, desktop, or
-                CLI, and can automatically run work on CPU or GPU.
+                RunMat is an open-source runtime that executes MATLAB-syntax code (.m files) in the browser, on the desktop, and from the CLI. It covers 300+ core built-in functions with cross-vendor GPU acceleration via Metal, Vulkan, DirectX 12, and WebGPU, though it does not replicate Simulink or specialized toolboxes. The browser sandbox runs entirely client-side via WebAssembly. No account needed, no install, nothing leaves your machine.
               </p>
             </div>
           </section>
-          <div className="mx-auto max-w-4xl rounded-2xl border border-border/60 bg-muted/40 p-0 mb-12">
-            <div className="relative h-[440px] w-full overflow-hidden rounded-2xl bg-background/40">
-              <Image
-                src="https://web.runmatstatic.com/runmat-sandbox-dark.png"
-                alt="RunMat sandbox interface preview."
-                fill
-                sizes="(min-width: 1024px) 960px, 100vw"
-                className="object-contain"
-              />
-            </div>
-          </div>
-          <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-3">
+          <Card className="mx-auto max-w-2xl border border-border/60 bg-[#0E1421] shadow-lg mb-12">
+            <CardContent className="py-6 md:py-8">
+              <h3 className="text-lg font-bold text-gray-100 mb-5">Product milestones</h3>
+              <div className="relative border-l-2 border-white/10 ml-1.5 space-y-5 pl-6">
+                <div className="relative">
+                  <span className="absolute -left-[calc(1.5rem+5px)] top-1 h-2.5 w-2.5 rounded-full bg-blue-500" />
+                  <p className="text-sm font-semibold text-blue-400">Aug 2025</p>
+                  <p className="text-sm font-semibold text-gray-100">CLI Launch</p>
+                  <p className="text-sm text-gray-300">
+                    ~5 ms startup, 150–180× faster than GNU Octave.{" "}
+                    <Link href="/blog/introducing-runmat" className="underline underline-offset-2 hover:text-gray-100">Read more</Link>
+                  </p>
+                </div>
+                <div className="relative">
+                  <span className="absolute -left-[calc(1.5rem+5px)] top-1 h-2.5 w-2.5 rounded-full bg-green-500" />
+                  <p className="text-sm font-semibold text-green-400">Nov 2025</p>
+                  <p className="text-sm font-semibold text-gray-100">RunMat Accelerate</p>
+                  <p className="text-sm text-gray-300">
+                    Automatic GPU fusion — 82× faster than PyTorch on 1B-point math.{" "}
+                    <Link href="/blog/runmat-accelerate-fastest-runtime-for-your-math" className="underline underline-offset-2 hover:text-gray-100">Read more</Link>
+                  </p>
+                </div>
+                <div className="relative">
+                  <span className="absolute -left-[calc(1.5rem+5px)] top-1 h-2.5 w-2.5 rounded-full bg-amber-500" />
+                  <p className="text-sm font-semibold text-amber-400">Mar 2026</p>
+                  <p className="text-sm font-semibold text-gray-100">Browser Sandbox + RunMat Cloud</p>
+                  <p className="text-sm text-gray-300">
+                    Client-side WebAssembly execution, persistent projects, versioning, and collaboration.{" "}
+                    <Link href="/blog/introducing-runmat-cloud" className="underline underline-offset-2 hover:text-gray-100">Read more</Link>
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <div className="mx-auto grid max-w-6xl gap-6 md:grid-cols-2 lg:grid-cols-4">
             <Card className="border border-blue-500/30 bg-[#0E1421] shadow-lg">
               <CardHeader className="border-b border-border/60">
                 <CardTitle className="text-xl text-gray-100">Runtime</CardTitle>
@@ -366,28 +421,23 @@ export default function AboutPage() {
               <CardContent className="text-lg text-gray-300 space-y-2">
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-blue-300">•</span>
-                  <p>Automatic GPU acceleration via kernel fusion</p>
+                  <p>Fusion engine auto-offloads op chains to GPU. No kernel code, no rewrites</p>
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-blue-300">•</span>
-                  <p>
-                    ~5ms startup (about 180× faster than{" "}
-                    <Link
-                      href="/blog/introducing-runmat"
-                      className="underline underline-offset-2 hover:text-blue-200"
-                    >
-                      GNU Octave
-                    </Link>
-                    )
-                  </p>
+                  <p>Cross-vendor GPU: Metal, DirectX 12, Vulkan, WebGPU. Works on any hardware</p>
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-blue-300">•</span>
-                  <p>Async support so long work doesn&apos;t lock up your app</p>
+                  <p>Ignition interpreter for ~5 ms startup; Turbine JIT (Cranelift) for hot paths</p>
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-blue-300">•</span>
-                  <p>Built in Rust for portability</p>
+                  <p>Async-capable. GPU readback and long scripts never block the host</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="mt-1 text-blue-300">•</span>
+                  <p>300+ built-in functions with a generational GC and memory-safe Rust core</p>
                 </div>
               </CardContent>
             </Card>
@@ -402,7 +452,7 @@ export default function AboutPage() {
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-green-300">•</span>
-                  <p>Fast plotting and visualization (improving quickly)</p>
+                  <p>Interactive 2D and 3D plotting with GPU-rendered surfaces (rotate, zoom, pan)</p>
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-green-300">•</span>
@@ -412,21 +462,79 @@ export default function AboutPage() {
                   <span className="mt-1 text-green-300">•</span>
                   <p>Clear errors that help you fix issues fast</p>
                 </div>
+                <div className="flex items-start gap-2">
+                  <span className="mt-1 text-green-300">•</span>
+                  <p>Real-time type and shape tracking with live syntax validation</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card className="border border-amber-500/30 bg-[#0E1421] shadow-lg">
+              <CardHeader className="border-b border-border/60">
+                <CardTitle className="text-xl text-gray-100">RunMat Cloud</CardTitle>
+              </CardHeader>
+              <CardContent className="text-lg text-gray-300 space-y-2">
+                <div className="flex items-start gap-2">
+                  <span className="mt-1 text-amber-300">•</span>
+                  <p>Persistent projects with automatic run history</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="mt-1 text-amber-300">•</span>
+                  <p>Automatic file versioning and project snapshots</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="mt-1 text-amber-300">•</span>
+                  <p>Team collaboration with shared project state</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="mt-1 text-amber-300">•</span>
+                  <p>Chunked, content-addressed large-file storage</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="mt-1 text-amber-300">•</span>
+                  <p>
+                    Free Hobby tier &middot;{" "}
+                    <Link href="/pricing" className="underline underline-offset-2 hover:text-amber-200">Pro &amp; Team tiers</Link>
+                  </p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="mt-1 text-amber-300">•</span>
+                  <p>
+                    <Link href="/blog/introducing-runmat-cloud" className="underline underline-offset-2 hover:text-amber-200">Learn more</Link>
+                  </p>
+                </div>
               </CardContent>
             </Card>
             <Card className="border border-purple-500/30 bg-[#0E1421] shadow-lg">
               <CardHeader className="border-b border-border/60">
                 <CardTitle className="text-xl text-gray-100">Enterprise</CardTitle>
               </CardHeader>
-              <CardContent className="text-lg text-gray-300 space-y-3">
-                <p>
-                  <span className="font-medium text-gray-100">Available now:</span> air-gapped deploys,
-                  local-first runs on your hardware.
-                </p>
-                <p>
-                  <span className="font-medium text-gray-100">Coming very soon:</span> saved projects, team
-                  orgs/projects, roles + SSO, large-file storage with resumable uploads, and version history.
-                </p>
+              <CardContent className="text-lg text-gray-300 space-y-2">
+                <div className="flex items-start gap-2">
+                  <span className="mt-1 text-purple-300">•</span>
+                  <p>Air-gapped, on-prem deployment as a single binary</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="mt-1 text-purple-300">•</span>
+                  <p>Built for ITAR and strict data-residency requirements</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="mt-1 text-purple-300">•</span>
+                  <p>SOC 2 audit-ready architecture</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="mt-1 text-purple-300">•</span>
+                  <p>SSO / SAML and SCIM provisioning</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="mt-1 text-purple-300">•</span>
+                  <p>Audit trails for compliance</p>
+                </div>
+                <div className="flex items-start gap-2">
+                  <span className="mt-1 text-purple-300">•</span>
+                  <p>
+                    <Link href="/blog/mission-critical-math-airgap" className="underline underline-offset-2 hover:text-purple-200">Full platform inside your airgap</Link>
+                  </p>
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -439,25 +547,25 @@ export default function AboutPage() {
           </div>
           <Card className="mx-auto max-w-4xl rounded-xl border border-border/60 bg-[#0E1421] shadow-lg">
             <CardContent className="py-6 md:py-8 space-y-4">
-            <p className="text-base md:text-lg text-gray-300">
+            <p className="text-lg text-gray-300">
               You can use RunMat today as a MATLAB-style runtime. Next, we&apos;re building it into a modern
               environment for engineers where:
             </p>
-            <div className="space-y-2 text-base md:text-lg text-gray-300">
+            <div className="space-y-2 text-lg text-gray-300">
               <div className="flex items-start gap-3">
                 <ArrowUpRight className="mt-1 h-4 w-4 text-blue-300 shrink-0" />
-                <span>You write or generate code faster</span>
+                <span>Write or generate code faster</span>
               </div>
               <div className="flex items-start gap-3">
                 <ArrowUpRight className="mt-1 h-4 w-4 text-blue-300 shrink-0" />
-                <span>You verify results faster</span>
+                <span>Verify results faster</span>
               </div>
               <div className="flex items-start gap-3">
                 <ArrowUpRight className="mt-1 h-4 w-4 text-blue-300 shrink-0" />
-                <span>You run work from laptop to cloud to secure enterprise setups</span>
+                <span>Run work on a laptop, in the cloud, or inside a secure enterprise setup</span>
               </div>
             </div>
-            <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-base md:text-lg text-gray-300">
+            <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-lg text-gray-300">
               <span className="font-semibold text-gray-100">The goal:</span>{" "}
               <span>Let engineers focus on math and physics, not programming.</span>
             </div>
@@ -471,7 +579,7 @@ export default function AboutPage() {
             <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-8">Open source at the core</h2>
             <Card className="border border-border/60 bg-[#0E1421] shadow-lg">
               <CardContent className="py-8 space-y-4">
-                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-border/60 bg-background/30 text-sm text-gray-400">
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-border/60 bg-background/30 text-sm text-gray-300">
                   <SiGithub className="h-7 w-7" />
                 </div>
                 <p className="text-gray-300 text-lg">
@@ -479,8 +587,8 @@ export default function AboutPage() {
                   <Link href="https://github.com/runmat-org/runmat" className="underline text-blue-300 hover:text-blue-200">
                     GitHub
                   </Link>
-                  . The JIT, the fusion engine, the GPU planner. We&apos;re committed to keeping it open source and
-                  actively maintained.
+                  . That includes the JIT, the fusion engine, and the GPU planner. We&apos;re committed to
+                  keeping it open source and actively maintained.
                 </p>
               </CardContent>
             </Card>
@@ -516,7 +624,7 @@ export default function AboutPage() {
                   variant="outline"
                   size="lg"
                   asChild
-                  className="h-12 px-8 text-base bg-[#0E1B1E] dark:bg-[#0E1B1E] border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100"
+                  className="h-12 px-8 text-base bg-[#0E1421] dark:bg-[#0E1421] border-border/60 text-gray-100"
                 >
                   <Link href="/download">Other download options</Link>
                 </Button>

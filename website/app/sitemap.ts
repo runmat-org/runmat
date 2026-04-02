@@ -16,12 +16,41 @@ export default function sitemap(): MetadataRoute.Sitemap {
   const baseUrl = 'https://runmat.com'
   const currentDate = new Date()
 
+  const videoPosters = 'https://web.runmatstatic.com/video/posters'
+  const videoBase = 'https://web.runmatstatic.com/video'
+
   const staticRoutes: MetadataRoute.Sitemap = [
     {
       url: baseUrl,
       lastModified: currentDate,
       changeFrequency: 'daily',
       priority: 1,
+      videos: [
+        {
+          title: 'RunMat wave interference simulation',
+          thumbnail_loc: `${videoPosters}/runmat-wave-simulation.png`,
+          content_loc: `${videoBase}/runmat-wave-simulation.mp4`,
+          description: 'GPU-accelerated wave interference simulation rendered in real time using RunMat surf().',
+        },
+        {
+          title: 'RunMat 3D interactive plotting',
+          thumbnail_loc: `${videoPosters}/3d-interactive-plotting-runmat.png`,
+          content_loc: `${videoBase}/3d-interactive-plotting-runmat.mp4`,
+          description: 'GPU-accelerated 3D surface plots running in the browser with no install or license required.',
+        },
+        {
+          title: 'RunMat shape tracking and type system',
+          thumbnail_loc: `${videoPosters}/runmat-shape-tracking.png`,
+          content_loc: `${videoBase}/runmat-shape-tracking.mp4`,
+          description: 'Variable explorer showing real-time shape, type, and value inspection while running MATLAB code.',
+        },
+        {
+          title: 'RunMat automatic versioning',
+          thumbnail_loc: `${videoPosters}/runmat-versioning.png`,
+          content_loc: `${videoBase}/runmat-versioning.mp4`,
+          description: 'Automatic file history and project snapshots with no git setup required.',
+        },
+      ],
     },
     {
       url: `${baseUrl}/download`,
@@ -133,11 +162,31 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.6,
     }))
 
+  const blogVideoMap: Record<string, MetadataRoute.Sitemap[number]['videos']> = {
+    'matlab-fprintf': [
+      {
+        title: 'RunMat variable explorer: debugging without fprintf',
+        thumbnail_loc: `${videoPosters}/runmat-debugging.png`,
+        content_loc: `${videoBase}/runmat-debugging.mp4`,
+        description: 'Demo of RunMat variable explorer inspecting workspace state during a thermal simulation.',
+      },
+    ],
+    'free-matlab-alternatives': [
+      {
+        title: 'RunMat 3D interactive plotting in the browser',
+        thumbnail_loc: `${videoPosters}/3d-interactive-plotting-runmat.png`,
+        content_loc: `${videoBase}/3d-interactive-plotting-runmat.mp4`,
+        description: 'GPU-accelerated 3D surface plots running in the browser with no install or license required.',
+      },
+    ],
+  }
+
   const blogPostRoutes: MetadataRoute.Sitemap = getPublicBlogPosts().map(post => ({
     url: `${baseUrl}/blog/${post.slug}`,
     lastModified: toDate(post.dateModified || post.date, currentDate),
     changeFrequency: 'monthly',
     priority: 0.6,
+    ...(blogVideoMap[post.slug] ? { videos: blogVideoMap[post.slug] } : {}),
   }))
 
   const benchmarkRoutes: MetadataRoute.Sitemap = getAllBenchmarks().map(benchmark => {

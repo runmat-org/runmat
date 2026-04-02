@@ -72,6 +72,15 @@ jsonLd:
         "@type": "SpeakableSpecification"
         cssSelector: ["h1"]
 
+    - "@type": "VideoObject"
+      "@id": "https://runmat.com/blog/matlab-fprintf#video"
+      name: "RunMat variable explorer: debugging without fprintf"
+      description: "Demo of RunMat's variable explorer inspecting workspace state during a thermal simulation — no fprintf calls or code modifications needed."
+      thumbnailUrl: "https://web.runmatstatic.com/video/posters/runmat-debugging.png"
+      contentUrl: "https://web.runmatstatic.com/video/runmat-debugging.mp4"
+      uploadDate: "2026-03-20T00:00:00Z"
+      duration: "PT15S"
+
     - "@type": "FAQPage"
       "@id": "https://runmat.com/blog/matlab-fprintf#faq"
       mainEntity:
@@ -190,6 +199,8 @@ Both communities moved on from print-as-debugger. MATLAB has a built-in debugger
 
 ## fprintf gotchas
 
+Three behaviors of fprintf catch engineers off guard: column-major traversal of matrices, silent format-string repetition over arrays, and the absence of an automatic newline.
+
 ### Column-major traversal
 
 When you pass a matrix to fprintf, it reads elements in [column-major order](https://en.wikipedia.org/wiki/Row-_and_column-major_order). MATLAB stores arrays column-first in memory, and fprintf walks linearly through that storage. If you expect row-by-row output, the results will surprise you:
@@ -242,7 +253,7 @@ This matters when you mix fprintf and disp in the same script, or when you call 
 
 ## What debugging actually looks like
 
-Return to the thermal simulation from the opening. The convergence loop diverges somewhere in 5,000 iterations. Here is how each approach plays out.
+A variable explorer eliminates the edit-run-scroll-delete cycle that fprintf debugging imposes. Return to the thermal simulation from the opening. The convergence loop diverges somewhere in 5,000 iterations. Here is how each approach plays out.
 
 ### The fprintf approach
 
@@ -272,7 +283,7 @@ You run again. Now you have 5,000 lines with four columns each. You scroll to it
 You run the same script, unmodified. No fprintf calls added.
 
 <a href="/sandbox" data-ph-capture-attribute-destination="sandbox" data-ph-capture-attribute-source="blog-matlab-fprintf" data-ph-capture-attribute-cta="debugging-video">
-  <video autoPlay loop muted playsInline className="my-6 w-full rounded-lg cursor-pointer">
+  <video autoPlay loop muted playsInline poster="https://web.runmatstatic.com/video/posters/runmat-debugging.png" className="my-6 w-full rounded-lg cursor-pointer">
     <source src="https://web.runmatstatic.com/video/runmat-debugging.mp4" type="video/mp4" />
   </video>
 </a>
