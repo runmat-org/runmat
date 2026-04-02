@@ -10,6 +10,7 @@ use std::sync::{Arc, RwLock};
 pub enum ConsoleStream {
     Stdout,
     Stderr,
+    ClearScreen,
 }
 
 /// Single console write (line or chunk) captured during execution.
@@ -50,6 +51,11 @@ pub fn record_console_output(stream: ConsoleStream, text: impl Into<String>) {
     {
         forwarder(&entry);
     }
+}
+
+/// Record a control event that asks the host to clear the visible console.
+pub fn record_clear_screen() {
+    record_console_output(ConsoleStream::ClearScreen, String::new());
 }
 
 /// Clears the per-thread console buffer. Call this before execution begins so

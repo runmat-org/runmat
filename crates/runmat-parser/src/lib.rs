@@ -393,6 +393,7 @@ enum CommandArgKind {
         optional: bool,
     },
     Any,
+    StringifyWords,
 }
 
 const COMMAND_VERBS: &[CommandVerb] = &[
@@ -466,7 +467,11 @@ const COMMAND_VERBS: &[CommandVerb] = &[
     },
     CommandVerb {
         name: "close",
-        arg_kind: CommandArgKind::Any,
+        arg_kind: CommandArgKind::StringifyWords,
+    },
+    CommandVerb {
+        name: "clear",
+        arg_kind: CommandArgKind::StringifyWords,
     },
 ];
 
@@ -862,6 +867,20 @@ impl Parser {
             }
             CommandArgKind::Any => {
                 // Accept general expressions; no normalization needed.
+            }
+            CommandArgKind::StringifyWords => {
+                for arg in args {
+                    let span = arg.span();
+                    match arg {
+                        Expr::Ident(word, _) => {
+                            *arg = Expr::String(format!("\"{}\"", word), span);
+                        }
+                        Expr::EndKeyword(_) => {
+                            *arg = Expr::String("\"end\"".to_string(), span);
+                        }
+                        _ => {}
+                    }
+                }
             }
         }
         Ok(())

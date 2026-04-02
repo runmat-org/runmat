@@ -1669,6 +1669,12 @@ fn emit_execution_streams(streams: &[ExecutionStreamEntry]) {
         match entry.stream {
             ExecutionStreamKind::Stdout => println!("{}", entry.text),
             ExecutionStreamKind::Stderr => eprintln!("{}", entry.text),
+            ExecutionStreamKind::ClearScreen => {
+                if atty::is(atty::Stream::Stdout) {
+                    print!("\x1B[2J\x1B[H");
+                    let _ = io::stdout().flush();
+                }
+            }
         }
     }
 }

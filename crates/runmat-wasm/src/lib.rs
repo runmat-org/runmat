@@ -82,6 +82,7 @@ use runmat_runtime::builtins::plotting::{
     set_surface_camera_state as runtime_set_surface_camera_state,
     web_renderer_ready as runtime_plot_renderer_ready, FigureAxesState, FigureError,
     FigureEventKind, FigureEventView, FigureHandle, HoldMode, PlotSurfaceCameraState,
+    clear_closed_figure_surfaces as runtime_clear_closed_figure_surfaces,
 };
 #[cfg(target_arch = "wasm32")]
 use runmat_runtime::builtins::{
@@ -2136,6 +2137,7 @@ fn axes_state_to_js(state: FigureAxesState) -> JsValue {
 fn emit_js_figure_event(event: FigureEventView<'_>) {
     if let FigureEventKind::Closed = event.kind {
         let handle = event.handle.as_u32();
+        let _ = runtime_clear_closed_figure_surfaces(handle);
         // Legacy API cleanup: if a figure-specific canvas was registered via the old handle-based
         // API, detach its surface when the figure is closed.
         let surface_id = LEGACY_FIGURE_SURFACES.with(|slot| slot.borrow_mut().remove(&handle));
@@ -2752,6 +2754,7 @@ impl From<ExecutionStreamEntry> for ConsoleStreamPayload {
         let stream = match entry.stream {
             ExecutionStreamKind::Stdout => "stdout",
             ExecutionStreamKind::Stderr => "stderr",
+            ExecutionStreamKind::ClearScreen => "clear",
         };
         Self {
             stream,
@@ -2766,6 +2769,7 @@ impl ConsoleStreamPayload {
         let stream = match entry.stream {
             runmat_runtime::console::ConsoleStream::Stdout => "stdout",
             runmat_runtime::console::ConsoleStream::Stderr => "stderr",
+            runmat_runtime::console::ConsoleStream::ClearScreen => "clear",
         };
         Self {
             stream,

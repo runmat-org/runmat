@@ -1308,6 +1308,42 @@ fn workspace_assign(name: &str, value: Value) -> Result<(), String> {
     set_workspace_variable(name, value, vars).map_err(|e| e.to_string())
 }
 
+fn workspace_clear() -> Result<(), String> {
+    let vars_ptr = WORKSPACE_VARS.with(|slot| *slot.borrow());
+    let Some(vars_ptr) = vars_ptr else {
+        return Err("clear: workspace state unavailable".to_string());
+    };
+    let vars = unsafe { &mut *vars_ptr };
+
+    WORKSPACE_STATE.with(|state| {
+        let mut state_mut = state.borrow_mut();
+        let Some(ws) = state_mut.as_mut() else {
+            return Err("clear: workspace state unavailable".to_string());
+        };
+        vars.clear();
+        ws.names.clear();
+        ws.assigned.clear();
+        ws.idx_to_name.clear();
+        ws.data_ptr = vars.as_ptr();
+        ws.len = vars.len();
+        Ok(())
+    })
+}
+
+fn workspace_remove(name: &str) -> Result<(), String> {
+    WORKSPACE_STATE.with(|state| {
+        let mut state_mut = state.borrow_mut();
+        let Some(ws) = state_mut.as_mut() else {
+            return Err("clear: workspace state unavailable".to_string());
+        };
+        if let Some(idx) = ws.names.remove(name) {
+            ws.assigned.remove(name);
+            ws.idx_to_name.remove(&idx);
+        }
+        Ok(())
+    })
+}
+
 fn workspace_snapshot() -> Vec<(String, Value)> {
     WORKSPACE_STATE.with(|state| {
         if let Some(ws) = state.borrow().as_ref() {
@@ -1360,6 +1396,7 @@ fn set_workspace_variable(name: &str, value: Value, vars: &mut Vec<Value>) -> Vm
                 } else {
                     let idx = vars.len();
                     ws.names.insert(name.to_string(), idx);
+                    ws.idx_to_name.insert(idx, name.to_string());
                     idx
                 };
                 if idx >= vars.len() {
@@ -1389,6 +1426,8 @@ fn ensure_workspace_resolver_registered() {
             snapshot: workspace_snapshot,
             globals: workspace_global_names,
             assign: Some(workspace_assign),
+            clear: Some(workspace_clear),
+            remove: Some(workspace_remove),
         });
     });
 }

@@ -116,6 +116,23 @@ pub(crate) mod wasm {
         });
     }
 
+    pub(super) fn clear_closed_figure_surfaces_impl(handle: u32) -> BuiltinResult<()> {
+        SURFACES.with(|slot| {
+            let mut map = slot.borrow_mut();
+            for entry in map.values_mut() {
+                if entry.bound_handle == Some(handle) {
+                    entry.bound_handle = None;
+                    entry.last_revision = None;
+                    entry
+                        .renderer
+                        .clear_surface()
+                        .map_err(|err| web_error(format!("Plotting failed: {err}")))?;
+                }
+            }
+            Ok(())
+        })
+    }
+
     pub fn web_renderer_ready() -> bool {
         SURFACES.with(|slot| !slot.borrow().is_empty())
     }
@@ -410,6 +427,10 @@ pub(crate) mod wasm {
 
     pub(super) fn detach_surface_impl(_surface_id: u32) {}
 
+    pub(super) fn clear_closed_figure_surfaces_impl(_handle: u32) -> BuiltinResult<()> {
+        Err(web_error(ERR_PLOTTING_UNAVAILABLE))
+    }
+
     pub fn web_renderer_ready() -> bool {
         false
     }
@@ -481,6 +502,10 @@ pub fn install_surface(surface_id: u32, renderer: wasm::RendererType) -> Builtin
 
 pub fn detach_surface(surface_id: u32) {
     wasm::detach_surface_impl(surface_id)
+}
+
+pub fn clear_closed_figure_surfaces(handle: u32) -> BuiltinResult<()> {
+    wasm::clear_closed_figure_surfaces_impl(handle)
 }
 
 pub fn resize_surface(

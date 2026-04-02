@@ -3,6 +3,7 @@
 //! Introspection builtins.
 
 pub mod class;
+pub mod clear;
 pub(crate) mod isa;
 pub(crate) mod ischar;
 pub(crate) mod isstring;

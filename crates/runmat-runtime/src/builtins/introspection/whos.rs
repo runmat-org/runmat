@@ -547,6 +547,8 @@ pub(crate) mod tests {
             },
             globals: || TEST_GLOBALS.with(|slot| slot.borrow().iter().cloned().collect()),
             assign: None,
+            clear: None,
+            remove: None,
         });
     }
 

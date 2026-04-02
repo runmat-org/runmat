@@ -202,7 +202,7 @@ export type PlotSurfaceEvent =
       metaKey?: boolean;
     };
 
-export type StdoutStreamKind = "stdout" | "stderr";
+export type StdoutStreamKind = "stdout" | "stderr" | "clear";
 
 export interface StdoutEntry {
   stream: StdoutStreamKind;
