@@ -951,9 +951,18 @@ mod tests {
     use super::*;
     use crate::builtins::plotting::tests::ensure_plot_test_env;
 
+    #[cfg(test)]
+    pub(crate) fn reset_for_tests() {
+        let mut reg = registry();
+        reg.figures.clear();
+        reg.current = FigureHandle::default();
+        reg.next_handle = FigureHandle::default().next();
+    }
+
     #[test]
     fn closing_last_figure_leaves_no_visible_figures() {
         ensure_plot_test_env();
+        reset_for_tests();
 
         let handle = new_figure_handle();
         assert_eq!(figure_handles(), vec![handle]);

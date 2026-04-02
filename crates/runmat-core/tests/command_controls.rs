@@ -65,7 +65,10 @@ fn clear_named_variable_removes_only_that_binding() {
 
     let y_value = block_on(engine.execute("y")).unwrap();
     assert!(y_value.error.is_none());
-    assert_eq!(y_value.value.as_ref().map(|v| v.to_string()), Some("2".to_string()));
+    assert_eq!(
+        y_value.value.as_ref().map(|v| v.to_string()),
+        Some("2".to_string())
+    );
 }
 
 #[test]

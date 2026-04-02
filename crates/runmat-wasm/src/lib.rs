@@ -61,9 +61,11 @@ use runmat_plot::{
 };
 #[cfg(target_arch = "wasm32")]
 use runmat_runtime::builtins::plotting::{
-    bind_surface_to_figure as runtime_bind_surface_to_figure, clear_figure as runtime_clear_figure,
-    close_figure as runtime_close_figure, configure_subplot as runtime_configure_subplot,
-    context as plotting_context, current_axes_state as runtime_current_axes_state,
+    bind_surface_to_figure as runtime_bind_surface_to_figure,
+    clear_closed_figure_surfaces as runtime_clear_closed_figure_surfaces,
+    clear_figure as runtime_clear_figure, close_figure as runtime_close_figure,
+    configure_subplot as runtime_configure_subplot, context as plotting_context,
+    current_axes_state as runtime_current_axes_state,
     current_figure_handle as runtime_current_figure_handle,
     detach_surface as runtime_detach_surface, figure_handles as runtime_figure_handles,
     fit_surface_extents as runtime_fit_surface_extents,
@@ -82,7 +84,6 @@ use runmat_runtime::builtins::plotting::{
     set_surface_camera_state as runtime_set_surface_camera_state,
     web_renderer_ready as runtime_plot_renderer_ready, FigureAxesState, FigureError,
     FigureEventKind, FigureEventView, FigureHandle, HoldMode, PlotSurfaceCameraState,
-    clear_closed_figure_surfaces as runtime_clear_closed_figure_surfaces,
 };
 #[cfg(target_arch = "wasm32")]
 use runmat_runtime::builtins::{
