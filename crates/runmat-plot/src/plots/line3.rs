@@ -25,8 +25,8 @@ impl Line3Plot {
         if x_data.len() != y_data.len() || x_data.len() != z_data.len() {
             return Err("Data length mismatch for plot3".to_string());
         }
-        if x_data.len() < 2 {
-            return Err("plot3 requires at least two points".to_string());
+        if x_data.is_empty() {
+            return Err("plot3 requires at least one point".to_string());
         }
         Ok(Self {
             x_data,
