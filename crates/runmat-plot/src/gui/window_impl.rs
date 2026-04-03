@@ -1120,6 +1120,7 @@ impl<'window> PlotWindow<'window> {
                                             far: 1.0,
                                         };
                                     cam.mark_dirty();
+                                    self.plot_renderer.note_axes_camera_interaction(i);
                                 }
                             }
                         }
@@ -1145,6 +1146,7 @@ impl<'window> PlotWindow<'window> {
                         *bottom += dy_world;
                         *top += dy_world;
                         cam.mark_dirty();
+                        self.plot_renderer.note_axes_camera_interaction(0);
                     }
                 }
             }
@@ -1205,6 +1207,7 @@ impl<'window> PlotWindow<'window> {
                                         far: 1.0,
                                     };
                                 cam.mark_dirty();
+                                self.plot_renderer.note_axes_camera_interaction(i);
                             }
                         }
                         break;
@@ -1250,6 +1253,7 @@ impl<'window> PlotWindow<'window> {
                     *bottom = new_bottom;
                     *top = new_top;
                     cam.mark_dirty();
+                    self.plot_renderer.note_axes_camera_interaction(0);
                 }
             }
         }
