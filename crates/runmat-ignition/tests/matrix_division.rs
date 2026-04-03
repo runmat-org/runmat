@@ -102,25 +102,20 @@ fn matrix_and_elementwise_division_lower_to_distinct_instructions() {
 
 #[test]
 fn left_division_operator_matches_mldivide_builtin_for_square_systems() {
-    let vars = execute_program(
-        "A = [1 2; 3 4]; b = [5; 6]; x = A \\ b; y = mldivide(A, b);",
-    );
+    let vars = execute_program("A = [1 2; 3 4]; b = [5; 6]; x = A \\ b; y = mldivide(A, b);");
     assert_same_real_tensor(&vars[2], &vars[3]);
 }
 
 #[test]
 fn left_division_operator_matches_mldivide_builtin_for_least_squares() {
-    let vars = execute_program(
-        "A = [1 2; 3 4; 5 6]; b = [7; 8; 9]; x = A \\ b; y = mldivide(A, b);",
-    );
+    let vars =
+        execute_program("A = [1 2; 3 4; 5 6]; b = [7; 8; 9]; x = A \\ b; y = mldivide(A, b);");
     assert_same_real_tensor(&vars[2], &vars[3]);
 }
 
 #[test]
 fn right_division_operator_matches_mrdivide_builtin_for_square_systems() {
-    let vars = execute_program(
-        "A = [1 2; 3 4]; B = [2 1; 1 2]; x = A / B; y = mrdivide(A, B);",
-    );
+    let vars = execute_program("A = [1 2; 3 4]; B = [2 1; 1 2]; x = A / B; y = mrdivide(A, B);");
     assert_same_real_tensor(&vars[2], &vars[3]);
 }
 

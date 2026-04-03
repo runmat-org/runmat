@@ -31,8 +31,11 @@ impl WgpuProvider {
         transpose: bool,
         lower: bool,
     ) -> Arc<wgpu::ComputePipeline> {
-        let shader =
-            crate::backend::wgpu::shaders::solve::triangular_linsolve_shader(self.precision, transpose, lower);
+        let shader = crate::backend::wgpu::shaders::solve::triangular_linsolve_shader(
+            self.precision,
+            transpose,
+            lower,
+        );
         let bind_group_layout = self.triangular_solve_bind_group_layout();
         let pipeline_layout = crate::backend::wgpu::pipelines::create_pipeline_layout(
             self.device_ref(),
@@ -96,10 +99,9 @@ impl WgpuProvider {
                 resource: params_buffer.as_entire_binding(),
             },
         ];
-        Ok(self.bind_group_cache.get_or_create(
-            bind_group_layout,
-            &bind_entries,
-            || {
+        Ok(self
+            .bind_group_cache
+            .get_or_create(bind_group_layout, &bind_entries, || {
                 Arc::new(
                     self.device_ref()
                         .create_bind_group(&wgpu::BindGroupDescriptor {
@@ -108,8 +110,7 @@ impl WgpuProvider {
                             entries: &bind_entries,
                         }),
                 )
-            },
-        ))
+            }))
     }
 
     pub(super) fn try_triangular_linsolve_device(

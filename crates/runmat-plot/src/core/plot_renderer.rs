@@ -2253,7 +2253,8 @@ impl PlotRenderer {
                     render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                 }
                 if let Some(index_buffer_ref) = index_buffer {
-                    render_pass.set_index_buffer(index_buffer_ref.slice(..), wgpu::IndexFormat::Uint32);
+                    render_pass
+                        .set_index_buffer(index_buffer_ref.slice(..), wgpu::IndexFormat::Uint32);
                     if let Some(indices) = &render_data.indices {
                         render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
                         log::debug!(

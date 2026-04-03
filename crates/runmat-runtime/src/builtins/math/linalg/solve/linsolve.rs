@@ -1211,8 +1211,12 @@ pub(crate) mod tests {
                 })
                 .expect("upload B");
 
-            let _ = linsolve_builtin(Value::GpuTensor(ha.clone()), Value::GpuTensor(hb.clone()), Vec::new())
-                .expect("gpu linsolve");
+            let _ = linsolve_builtin(
+                Value::GpuTensor(ha.clone()),
+                Value::GpuTensor(hb.clone()),
+                Vec::new(),
+            )
+            .expect("gpu linsolve");
 
             let telemetry = provider.telemetry_snapshot();
             assert_eq!(telemetry.linsolve.count, 1);
@@ -1244,8 +1248,12 @@ pub(crate) mod tests {
                 })
                 .expect("upload B");
 
-            let result = linsolve_builtin(Value::GpuTensor(ha.clone()), Value::GpuTensor(hb.clone()), Vec::new())
-                .expect("fallback linsolve");
+            let result = linsolve_builtin(
+                Value::GpuTensor(ha.clone()),
+                Value::GpuTensor(hb.clone()),
+                Vec::new(),
+            )
+            .expect("fallback linsolve");
             let gathered = test_support::gather(result).expect("gather fallback");
             assert_eq!(gathered.data, vec![3.0]);
 

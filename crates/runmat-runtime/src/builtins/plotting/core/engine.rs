@@ -565,7 +565,9 @@ pub(crate) mod native {
 mod tests {
     use super::render_figure_snapshot;
     use crate::builtins::plotting::plot::plot_builtin;
-    use crate::builtins::plotting::state::{clear_figure, current_figure_handle, reset_hold_state_for_run, PlotTestLockGuard};
+    use crate::builtins::plotting::state::{
+        clear_figure, current_figure_handle, reset_hold_state_for_run, PlotTestLockGuard,
+    };
     use crate::builtins::plotting::subplot::subplot_builtin;
     use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::title::title_builtin;
@@ -622,12 +624,14 @@ mod tests {
             Value::Tensor(tensor_from(&vertical)),
         ]))
         .expect("right plot");
-        title_builtin(vec![Value::String("Vertical slice through source".into())]).expect("right title");
+        title_builtin(vec![Value::String("Vertical slice through source".into())])
+            .expect("right title");
         xlabel_builtin(vec![Value::String("y (mm)".into())]).expect("right xlabel");
         ylabel_builtin(vec![Value::String("temperature (C)".into())]).expect("right ylabel");
 
         let handle = current_figure_handle();
-        let bytes = block_on(render_figure_snapshot(handle, 1280, 720, None)).expect("snapshot render");
+        let bytes =
+            block_on(render_figure_snapshot(handle, 1280, 720, None)).expect("snapshot render");
         assert!(bytes.len() > 1000, "expected nontrivial PNG payload");
     }
 }

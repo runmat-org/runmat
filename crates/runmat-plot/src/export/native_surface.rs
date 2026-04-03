@@ -293,7 +293,9 @@ impl NativeSurfaceRenderContext {
         #[cfg(feature = "egui-overlay")]
         {
             let Some(overlay) = self.overlay.as_mut() else {
-                log::debug!("runmat-plot: native_surface.render_scene_with_overlay.branch_no_overlay");
+                log::debug!(
+                    "runmat-plot: native_surface.render_scene_with_overlay.branch_no_overlay"
+                );
                 return self
                     .renderer
                     .render_scene_to_target(encoder, target_view, &self.config)
@@ -451,7 +453,9 @@ impl NativeSurfaceRenderContext {
                 plot_area_points.is_some()
             );
             if rows * cols > 1 {
-                log::debug!("runmat-plot: native_surface.render_scene_with_overlay.branch_subplot_axes");
+                log::debug!(
+                    "runmat-plot: native_surface.render_scene_with_overlay.branch_subplot_axes"
+                );
                 let rect_points = plot_area_points.unwrap_or_else(|| {
                     egui::Rect::from_min_size(
                         egui::Pos2::new(0.0, 0.0),
@@ -550,7 +554,9 @@ impl NativeSurfaceRenderContext {
                     viewports.len()
                 );
             } else {
-                log::debug!("runmat-plot: native_surface.render_scene_with_overlay.branch_single_axes");
+                log::debug!(
+                    "runmat-plot: native_surface.render_scene_with_overlay.branch_single_axes"
+                );
                 {
                     let clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("runmat-native-single-axes-clear"),
@@ -593,7 +599,9 @@ impl NativeSurfaceRenderContext {
                         true,
                     )
                     .map_err(|err| format!("native surface viewport render failed: {err}"))?;
-                log::debug!("runmat-plot: native_surface.render_scene_with_overlay.single_axes_render_ok");
+                log::debug!(
+                    "runmat-plot: native_surface.render_scene_with_overlay.single_axes_render_ok"
+                );
             }
 
             {
@@ -697,7 +705,9 @@ async fn create_headless_context(
         .request_device(&wgpu::DeviceDescriptor::default(), None)
         .await
         .map_err(|err| format!("Failed to create device: {err}"))?;
-    let context = NativeSurfaceRenderContext::new(Arc::new(device), Arc::new(queue), width, height, format).await?;
+    let context =
+        NativeSurfaceRenderContext::new(Arc::new(device), Arc::new(queue), width, height, format)
+            .await?;
     log::debug!(
         "runmat-plot: native_surface.headless_context.ready width={} height={}",
         width,

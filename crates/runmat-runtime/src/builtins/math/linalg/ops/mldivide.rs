@@ -655,8 +655,9 @@ pub(crate) mod tests {
                 })
                 .expect("upload matrix");
 
-            let result = mldivide_eval(&Value::GpuTensor(hs.clone()), &Value::GpuTensor(hm.clone()))
-                .expect("fallback mldivide");
+            let result =
+                mldivide_eval(&Value::GpuTensor(hs.clone()), &Value::GpuTensor(hm.clone()))
+                    .expect("fallback mldivide");
             let gathered = test_support::gather(result).expect("gather fallback");
             assert_eq!(gathered.data, vec![1.0, 2.0, 3.0]);
 

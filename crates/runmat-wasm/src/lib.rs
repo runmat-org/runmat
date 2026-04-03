@@ -1409,10 +1409,9 @@ pub async fn wasm_render_figure_image(
         render_height,
         textmark.as_deref().unwrap_or("")
     );
-    let bytes =
-        runtime_render_figure_snapshot(target, render_width, render_height, textmark)
-            .await
-            .map_err(runtime_flow_to_js)?;
+    let bytes = runtime_render_figure_snapshot(target, render_width, render_height, textmark)
+        .await
+        .map_err(runtime_flow_to_js)?;
     log::debug!(
         "RunMat wasm: renderFigureImage ok handle={} bytes={}",
         target.as_u32(),

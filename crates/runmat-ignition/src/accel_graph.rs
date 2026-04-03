@@ -4,7 +4,9 @@ use runmat_accelerate::graph::{
     AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, NodeId,
     PrimitiveOp, ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding, VarKind,
 };
-use runmat_builtins::{builtin_functions, shape_rules::element_count_if_known, AccelTag, Type, Value};
+use runmat_builtins::{
+    builtin_functions, shape_rules::element_count_if_known, AccelTag, Type, Value,
+};
 
 use crate::instr::Instr;
 
@@ -546,7 +548,13 @@ impl<'a> GraphBuilder<'a> {
         self.push_builtin_node(pc, "mldivide", vec![lhs, rhs], out_type);
     }
 
-    fn push_binary_primitive_node(&mut self, pc: usize, op: PrimitiveOp, lhs: ValueId, rhs: ValueId) {
+    fn push_binary_primitive_node(
+        &mut self,
+        pc: usize,
+        op: PrimitiveOp,
+        lhs: ValueId,
+        rhs: ValueId,
+    ) {
         let inputs = vec![lhs, rhs];
         let node_id = self.nodes.len() as NodeId;
         let span = InstrSpan { start: pc, end: pc };
@@ -608,7 +616,9 @@ impl<'a> GraphBuilder<'a> {
         let lhs_type = self.values.get(lhs as usize).map(|v| &v.ty);
         let rhs_type = self.values.get(rhs as usize).map(|v| &v.ty);
         match (lhs_type, rhs_type) {
-            (Some(left), Some(right)) => runmat_builtins::shape_rules::left_divide_output_type(left, right),
+            (Some(left), Some(right)) => {
+                runmat_builtins::shape_rules::left_divide_output_type(left, right)
+            }
             _ => Type::Unknown,
         }
     }
@@ -617,7 +627,9 @@ impl<'a> GraphBuilder<'a> {
         let lhs_type = self.values.get(lhs as usize).map(|v| &v.ty);
         let rhs_type = self.values.get(rhs as usize).map(|v| &v.ty);
         match (lhs_type, rhs_type) {
-            (Some(left), Some(right)) => runmat_builtins::shape_rules::right_divide_output_type(left, right),
+            (Some(left), Some(right)) => {
+                runmat_builtins::shape_rules::right_divide_output_type(left, right)
+            }
             _ => Type::Unknown,
         }
     }

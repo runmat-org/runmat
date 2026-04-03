@@ -646,8 +646,9 @@ pub(crate) mod tests {
                 })
                 .expect("upload scalar");
 
-            let result = mrdivide_eval(&Value::GpuTensor(hm.clone()), &Value::GpuTensor(hs.clone()))
-                .expect("fallback mrdivide");
+            let result =
+                mrdivide_eval(&Value::GpuTensor(hm.clone()), &Value::GpuTensor(hs.clone()))
+                    .expect("fallback mrdivide");
             let gathered = test_support::gather(result).expect("gather fallback");
             assert_eq!(gathered.data, vec![1.0, 2.0, 3.0]);
 
