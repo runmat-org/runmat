@@ -1,0 +1,91 @@
+name: WASM Bindings
+
+on:
+  push:
+    branches:
+      - dev
+      - main
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: ["self-hosted", "linux", "GCP"]
+    env:
+      RUST_BACKTRACE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ github.ref_name }}
+
+      - name: Install npm dependencies
+        working-directory: bindings/ts
+        run: npm ci
+
+      - name: Build wasm32 target
+        run: RUNMAT_GENERATE_WASM_REGISTRY=1 cargo build -p runmat-wasm --target wasm32-unknown-unknown
+
+      # - name: Run wasm headless tests
+      #   env:
+      #     WASM_BINDGEN_TEST_TIMEOUT: "300"
+      #   run: scripts/test-wasm-headless.sh
+
+      - name: Build bindings package
+        working-directory: bindings/ts
+        run: npm run build
+
+      - name: Lint bindings package
+        working-directory: bindings/ts
+        run: npm run lint
+
+      - name: Determine publish settings
+        id: publish_settings
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "${GITHUB_REF_NAME}" in
+            dev)
+              echo "dist_tag=dev" >> "${GITHUB_OUTPUT}"
+              echo "version_args=prerelease --preid=dev" >> "${GITHUB_OUTPUT}"
+              ;;
+            main)
+              echo "dist_tag=prod" >> "${GITHUB_OUTPUT}"
+              echo "version_args=patch" >> "${GITHUB_OUTPUT}"
+              ;;
+            *)
+              echo "Unsupported branch: ${GITHUB_REF_NAME}" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Bump bindings package version
+        id: bump_version
+        working-directory: bindings/ts
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm version ${{ steps.publish_settings.outputs.version_args }} --no-git-tag-version
+          echo "version=$(node -p 'require(\"./package.json\").version')" >> "${GITHUB_OUTPUT}"
+
+      - name: Commit version bump
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add bindings/ts/package.json bindings/ts/package-lock.json
+          git commit -m "chore(bindings): bump npm version to ${{ steps.bump_version.outputs.version }} [skip ci]"
+          git push origin HEAD:${GITHUB_REF_NAME}
+
+      - name: Publish bindings package to npm
+        working-directory: bindings/ts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --tag ${{ steps.publish_settings.outputs.dist_tag }}
