@@ -53,11 +53,9 @@ jobs:
           case "${GITHUB_REF_NAME}" in
             dev)
               echo "dist_tag=dev" >> "${GITHUB_OUTPUT}"
-              echo "version_args=prerelease --preid=dev" >> "${GITHUB_OUTPUT}"
               ;;
             main)
               echo "dist_tag=prod" >> "${GITHUB_OUTPUT}"
-              echo "version_args=patch" >> "${GITHUB_OUTPUT}"
               ;;
             *)
               echo "Unsupported branch: ${GITHUB_REF_NAME}" >&2
@@ -71,8 +69,96 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm version ${{ steps.publish_settings.outputs.version_args }} --no-git-tag-version
-          echo "version=$(node -p 'require(\"./package.json\").version')" >> "${GITHUB_OUTPUT}"
+          package_name="$(node -p 'require("./package.json").name')"
+          current_version="$(node -p 'require("./package.json").version')"
+          published_versions_json="$(npm view "${package_name}" versions --json 2>/dev/null || echo '[]')"
+
+          next_version="$(
+            PACKAGE_NAME="${package_name}" \
+            CURRENT_VERSION="${current_version}" \
+            PUBLISHED_VERSIONS_JSON="${published_versions_json}" \
+            GIT_BRANCH="${GITHUB_REF_NAME}" \
+            node <<'NODE'
+            function parse(version) {
+              const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(version);
+              if (!match) return null;
+              return {
+                raw: version,
+                major: Number(match[1]),
+                minor: Number(match[2]),
+                patch: Number(match[3]),
+                prerelease: match[4] ? match[4].split('.') : [],
+              };
+            }
+
+            function compareIdentifiers(a, b) {
+              const aNumeric = /^\d+$/.test(a);
+              const bNumeric = /^\d+$/.test(b);
+              if (aNumeric && bNumeric) return Number(a) - Number(b);
+              if (aNumeric) return -1;
+              if (bNumeric) return 1;
+              return a.localeCompare(b);
+            }
+
+            function compareVersions(left, right) {
+              const a = parse(left);
+              const b = parse(right);
+              if (!a || !b) return 0;
+              if (a.major !== b.major) return a.major - b.major;
+              if (a.minor !== b.minor) return a.minor - b.minor;
+              if (a.patch !== b.patch) return a.patch - b.patch;
+              if (a.prerelease.length === 0 && b.prerelease.length === 0) return 0;
+              if (a.prerelease.length === 0) return 1;
+              if (b.prerelease.length === 0) return -1;
+              const len = Math.max(a.prerelease.length, b.prerelease.length);
+              for (let i = 0; i < len; i += 1) {
+                if (a.prerelease[i] === undefined) return -1;
+                if (b.prerelease[i] === undefined) return 1;
+                const diff = compareIdentifiers(a.prerelease[i], b.prerelease[i]);
+                if (diff !== 0) return diff;
+              }
+              return 0;
+            }
+
+            const branch = process.env.GIT_BRANCH;
+            const currentVersion = process.env.CURRENT_VERSION;
+            const publishedRaw = JSON.parse(process.env.PUBLISHED_VERSIONS_JSON || '[]');
+            const publishedVersions = Array.isArray(publishedRaw)
+              ? publishedRaw
+              : typeof publishedRaw === 'string'
+                ? [publishedRaw]
+                : [];
+            const validPublished = publishedVersions.filter((version) => parse(version));
+            const latestPublished = validPublished.sort(compareVersions).at(-1) || currentVersion;
+            const latest = parse(latestPublished);
+
+            if (!latest) {
+              throw new Error(`Could not determine latest version for ${process.env.PACKAGE_NAME}`);
+            }
+
+            let nextVersion;
+            if (branch === 'dev') {
+              if (latest.prerelease[0] === 'dev' && /^\d+$/.test(latest.prerelease[1] || '')) {
+                nextVersion = `${latest.major}.${latest.minor}.${latest.patch}-dev.${Number(latest.prerelease[1]) + 1}`;
+              } else {
+                nextVersion = `${latest.major}.${latest.minor}.${latest.patch + 1}-dev.0`;
+              }
+            } else if (branch === 'main') {
+              if (latest.prerelease.length > 0) {
+                nextVersion = `${latest.major}.${latest.minor}.${latest.patch}`;
+              } else {
+                nextVersion = `${latest.major}.${latest.minor}.${latest.patch + 1}`;
+              }
+            } else {
+              throw new Error(`Unsupported branch: ${branch}`);
+            }
+
+            process.stdout.write(nextVersion);
+            NODE
+          )"
+
+          npm version "${next_version}" --no-git-tag-version
+          echo "version=${next_version}" >> "${GITHUB_OUTPUT}"
 
       - name: Commit version bump
         shell: bash
