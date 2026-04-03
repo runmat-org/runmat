@@ -4,7 +4,7 @@ use runmat_accelerate::graph::{
     AccelGraph, AccelGraphTag, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, NodeId,
     PrimitiveOp, ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding, VarKind,
 };
-use runmat_builtins::{builtin_functions, AccelTag, Type, Value};
+use runmat_builtins::{builtin_functions, shape_rules::element_count_if_known, AccelTag, Type, Value};
 
 use crate::instr::Instr;
 
@@ -105,7 +105,8 @@ impl<'a> GraphBuilder<'a> {
             Instr::Add => self.handle_binary_primitive(pc, PrimitiveOp::Add),
             Instr::Sub => self.handle_binary_primitive(pc, PrimitiveOp::Sub),
             Instr::Mul => self.handle_binary_primitive(pc, PrimitiveOp::Mul),
-            Instr::Div => self.handle_binary_primitive(pc, PrimitiveOp::Div),
+            Instr::RightDiv => self.handle_right_divide(pc),
+            Instr::LeftDiv => self.handle_left_divide(pc),
             Instr::Pow => self.handle_binary_primitive(pc, PrimitiveOp::Pow),
             Instr::ElemMul => self.handle_binary_primitive(pc, PrimitiveOp::ElemMul),
             Instr::ElemDiv => self.handle_binary_primitive(pc, PrimitiveOp::ElemDiv),
@@ -471,16 +472,6 @@ impl<'a> GraphBuilder<'a> {
                     _ => Type::Unknown,
                 }
             }
-            PrimitiveOp::Div => {
-                let lhs_type = self.values.get(lhs as usize).map(|v| &v.ty);
-                let rhs_type = self.values.get(rhs as usize).map(|v| &v.ty);
-                match (lhs_type, rhs_type) {
-                    (Some(left), Some(right)) => {
-                        runmat_builtins::shape_rules::right_divide_output_type(left, right)
-                    }
-                    _ => Type::Unknown,
-                }
-            }
             _ => {
                 let shape = self.infer_elementwise_shape(&inputs);
                 if matches!(shape, ShapeInfo::Unknown) {
@@ -503,6 +494,143 @@ impl<'a> GraphBuilder<'a> {
         node.outputs.push(out_value);
         self.nodes.push(node);
         self.stack.push(out_value);
+    }
+
+    fn handle_right_divide(&mut self, pc: usize) {
+        let rhs = match self.pop_value() {
+            Some(id) => id,
+            None => {
+                self.reset_stack();
+                return;
+            }
+        };
+        let lhs = match self.pop_value() {
+            Some(id) => id,
+            None => {
+                self.reset_stack();
+                return;
+            }
+        };
+
+        if self.value_is_scalar(rhs) {
+            self.push_binary_primitive_node(pc, PrimitiveOp::ElemDiv, lhs, rhs);
+            return;
+        }
+
+        let out_type = self.infer_right_divide_type(lhs, rhs);
+        self.push_builtin_node(pc, "mrdivide", vec![lhs, rhs], out_type);
+    }
+
+    fn handle_left_divide(&mut self, pc: usize) {
+        let rhs = match self.pop_value() {
+            Some(id) => id,
+            None => {
+                self.reset_stack();
+                return;
+            }
+        };
+        let lhs = match self.pop_value() {
+            Some(id) => id,
+            None => {
+                self.reset_stack();
+                return;
+            }
+        };
+
+        if self.value_is_scalar(lhs) {
+            self.push_binary_primitive_node(pc, PrimitiveOp::ElemLeftDiv, lhs, rhs);
+            return;
+        }
+
+        let out_type = self.infer_left_divide_type(lhs, rhs);
+        self.push_builtin_node(pc, "mldivide", vec![lhs, rhs], out_type);
+    }
+
+    fn push_binary_primitive_node(&mut self, pc: usize, op: PrimitiveOp, lhs: ValueId, rhs: ValueId) {
+        let inputs = vec![lhs, rhs];
+        let node_id = self.nodes.len() as NodeId;
+        let span = InstrSpan { start: pc, end: pc };
+        let out_type = match op {
+            PrimitiveOp::Mul => self.infer_matmul_type(&inputs),
+            _ => {
+                let shape = self.infer_elementwise_shape(&inputs);
+                if matches!(shape, ShapeInfo::Unknown) {
+                    Type::Unknown
+                } else {
+                    shape.to_type()
+                }
+            }
+        };
+        let mut node = AccelNode {
+            id: node_id,
+            label: AccelNodeLabel::Primitive(op),
+            category: primitive_category(op),
+            inputs: inputs.clone(),
+            outputs: Vec::new(),
+            span,
+            tags: primitive_tags(op),
+        };
+        let out_value = self.new_node_output(node_id, 0, out_type);
+        node.outputs.push(out_value);
+        self.nodes.push(node);
+        self.stack.push(out_value);
+    }
+
+    fn push_builtin_node(&mut self, pc: usize, name: &str, inputs: Vec<ValueId>, out_type: Type) {
+        let info = self
+            .builtin_cache
+            .get(&name.to_ascii_lowercase())
+            .cloned()
+            .unwrap_or(BuiltinInfo {
+                category: AccelOpCategory::Other,
+                tags: Vec::new(),
+            });
+        let node_id = self.nodes.len() as NodeId;
+        let span = InstrSpan { start: pc, end: pc };
+        let mut node = AccelNode {
+            id: node_id,
+            label: AccelNodeLabel::Builtin {
+                name: name.to_string(),
+            },
+            category: info.category,
+            inputs: inputs.clone(),
+            outputs: Vec::new(),
+            span,
+            tags: info.tags,
+        };
+        let out_value = self.new_node_output(node_id, 0, out_type);
+        node.outputs.push(out_value);
+        self.nodes.push(node);
+        self.stack.push(out_value);
+    }
+
+    fn infer_left_divide_type(&self, lhs: ValueId, rhs: ValueId) -> Type {
+        let lhs_type = self.values.get(lhs as usize).map(|v| &v.ty);
+        let rhs_type = self.values.get(rhs as usize).map(|v| &v.ty);
+        match (lhs_type, rhs_type) {
+            (Some(left), Some(right)) => runmat_builtins::shape_rules::left_divide_output_type(left, right),
+            _ => Type::Unknown,
+        }
+    }
+
+    fn infer_right_divide_type(&self, lhs: ValueId, rhs: ValueId) -> Type {
+        let lhs_type = self.values.get(lhs as usize).map(|v| &v.ty);
+        let rhs_type = self.values.get(rhs as usize).map(|v| &v.ty);
+        match (lhs_type, rhs_type) {
+            (Some(left), Some(right)) => runmat_builtins::shape_rules::right_divide_output_type(left, right),
+            _ => Type::Unknown,
+        }
+    }
+
+    fn value_is_scalar(&self, value_id: ValueId) -> bool {
+        let Some(info) = self.values.get(value_id as usize) else {
+            return false;
+        };
+        match &info.shape {
+            ShapeInfo::Scalar => true,
+            ShapeInfo::Tensor(dims) => element_count_if_known(dims.as_slice()) == Some(1),
+            ShapeInfo::Unknown => false,
+        }
     }
 
     fn handle_unary_primitive(&mut self, pc: usize, op: PrimitiveOp) {
@@ -898,7 +1026,6 @@ fn primitive_category(op: PrimitiveOp) -> AccelOpCategory {
         | PrimitiveOp::Add
         | PrimitiveOp::Sub
         | PrimitiveOp::Mul
-        | PrimitiveOp::Div
         | PrimitiveOp::Pow
         | PrimitiveOp::Neg
         | PrimitiveOp::UPlus
@@ -959,11 +1086,11 @@ mod tests {
     }
 
     #[test]
-    fn accel_graph_div_uses_right_divide_shape() {
+    fn accel_graph_right_divide_uses_mrdivide_shape() {
         let instructions = vec![
             Instr::LoadVar(0),
             Instr::LoadVar(1),
-            Instr::Div,
+            Instr::RightDiv,
             Instr::StoreVar(2),
         ];
         let var_types = vec![
@@ -978,7 +1105,10 @@ mod tests {
         let graph = build_accel_graph(&instructions, &var_types);
         let mut out_type = None;
         for node in &graph.nodes {
-            if let AccelNodeLabel::Primitive(PrimitiveOp::Div) = node.label {
+            if matches!(
+                &node.label,
+                AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("mrdivide")
+            ) {
                 let out_id = node.outputs.first().copied().expect("output");
                 let value = graph.value(out_id).expect("value");
                 out_type = Some(value.ty.clone());

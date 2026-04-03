@@ -838,13 +838,23 @@ pub struct ProviderDispatchStats {
     pub total_wall_time_ns: u64,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderFallbackStat {
+    pub reason: String,
+    pub count: u64,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ProviderTelemetry {
     pub fused_elementwise: ProviderDispatchStats,
     pub fused_reduction: ProviderDispatchStats,
     pub matmul: ProviderDispatchStats,
+    pub linsolve: ProviderDispatchStats,
+    pub mldivide: ProviderDispatchStats,
+    pub mrdivide: ProviderDispatchStats,
     pub upload_bytes: u64,
     pub download_bytes: u64,
+    pub solve_fallbacks: Vec<ProviderFallbackStat>,
     pub fusion_cache_hits: u64,
     pub fusion_cache_misses: u64,
     pub bind_group_cache_hits: u64,
@@ -2190,8 +2200,12 @@ pub trait AccelProvider: Send + Sync {
             fused_elementwise: ProviderDispatchStats::default(),
             fused_reduction: ProviderDispatchStats::default(),
             matmul: ProviderDispatchStats::default(),
+            linsolve: ProviderDispatchStats::default(),
+            mldivide: ProviderDispatchStats::default(),
+            mrdivide: ProviderDispatchStats::default(),
             upload_bytes: 0,
             download_bytes: 0,
+            solve_fallbacks: Vec::new(),
             fusion_cache_hits: hits,
             fusion_cache_misses: misses,
             bind_group_cache_hits: 0,

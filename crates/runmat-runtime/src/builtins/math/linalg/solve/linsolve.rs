@@ -983,6 +983,7 @@ pub(crate) mod tests {
     }
 
     use crate::builtins::common::test_support;
+    use runmat_accelerate_api::ProviderTelemetry;
 
     fn linsolve_builtin(lhs: Value, rhs: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
         block_on(super::linsolve_builtin(lhs, rhs, rest))
@@ -990,6 +991,15 @@ pub(crate) mod tests {
 
     fn evaluate(lhs: Value, rhs: Value, options: SolveOptions) -> BuiltinResult<LinsolveEval> {
         block_on(super::evaluate(lhs, rhs, options))
+    }
+
+    fn fallback_count(telemetry: &ProviderTelemetry, reason: &str) -> u64 {
+        telemetry
+            .solve_fallbacks
+            .iter()
+            .find(|entry| entry.reason == reason)
+            .map(|entry| entry.count)
+            .unwrap_or(0)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -1159,6 +1169,89 @@ pub(crate) mod tests {
             for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
                 assert!((gpu - cpu).abs() < 1e-12);
             }
+        });
+    }
+
+    #[test]
+    fn host_inputs_auto_promote_into_provider_solve_path() {
+        test_support::with_test_provider(|provider| {
+            provider.reset_telemetry();
+            let a = Tensor::new(vec![2.0, 1.0, 1.0, 3.0], vec![2, 2]).unwrap();
+            let b = Tensor::new(vec![4.0, 5.0], vec![2, 1]).unwrap();
+            let _ = linsolve_builtin(Value::Tensor(a), Value::Tensor(b), Vec::new())
+                .expect("host linsolve");
+            let telemetry = provider.telemetry_snapshot();
+            assert_eq!(telemetry.linsolve.count, 1);
+            assert_eq!(fallback_count(&telemetry, "linsolve:host_reupload"), 1);
+            assert!(telemetry.upload_bytes > 0);
+            assert!(telemetry.download_bytes > 0);
+        });
+    }
+
+    #[test]
+    fn provider_telemetry_records_gpu_host_reupload_path() {
+        test_support::with_test_provider(|provider| {
+            provider.reset_telemetry();
+            let a = Tensor::new(vec![2.0, 1.0, 1.0, 3.0], vec![2, 2]).unwrap();
+            let b = Tensor::new(vec![4.0, 5.0], vec![2, 1]).unwrap();
+            let ha = provider
+                .upload(&HostTensorView {
+                    data: &a.data,
+                    shape: &a.shape,
+                })
+                .expect("upload A");
+            let hb = provider
+                .upload(&HostTensorView {
+                    data: &b.data,
+                    shape: &b.shape,
+                })
+                .expect("upload B");
+
+            let _ = linsolve_builtin(Value::GpuTensor(ha.clone()), Value::GpuTensor(hb.clone()), Vec::new())
+                .expect("gpu linsolve");
+
+            let telemetry = provider.telemetry_snapshot();
+            assert_eq!(telemetry.linsolve.count, 1);
+            assert!(telemetry.upload_bytes > 0);
+            assert!(telemetry.download_bytes > 0);
+            assert_eq!(fallback_count(&telemetry, "linsolve:host_reupload"), 1);
+
+            let _ = provider.free(&ha);
+            let _ = provider.free(&hb);
+        });
+    }
+
+    #[test]
+    fn scalar_gpu_inputs_fall_back_without_provider_solve_dispatch() {
+        test_support::with_test_provider(|provider| {
+            provider.reset_telemetry();
+            let a = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
+            let b = Tensor::new(vec![6.0], vec![1, 1]).unwrap();
+            let ha = provider
+                .upload(&HostTensorView {
+                    data: &a.data,
+                    shape: &a.shape,
+                })
+                .expect("upload A");
+            let hb = provider
+                .upload(&HostTensorView {
+                    data: &b.data,
+                    shape: &b.shape,
+                })
+                .expect("upload B");
+
+            let result = linsolve_builtin(Value::GpuTensor(ha.clone()), Value::GpuTensor(hb.clone()), Vec::new())
+                .expect("fallback linsolve");
+            let gathered = test_support::gather(result).expect("gather fallback");
+            assert_eq!(gathered.data, vec![3.0]);
+
+            let telemetry = provider.telemetry_snapshot();
+            assert_eq!(telemetry.linsolve.count, 0);
+            assert_eq!(fallback_count(&telemetry, "linsolve:host_reupload"), 0);
+            assert!(telemetry.download_bytes > 0);
+
+            let _ = provider.free(&ha);
+            let _ = provider.free(&hb);
         });
     }
 

@@ -15479,6 +15479,7 @@ impl AccelProvider for WgpuProvider {
         options: &'a ProviderLinsolveOptions,
     ) -> AccelProviderFuture<'a, ProviderLinsolveResult> {
         Box::pin(async move {
+            let start = Instant::now();
             let HostTensorOwned {
                 data: lhs_data,
                 shape: lhs_shape,
@@ -15496,6 +15497,9 @@ impl AccelProvider for WgpuProvider {
             let (solution, rcond) =
                 linsolve_host_real_for_provider(&lhs_tensor, &rhs_tensor, options)
                     .map_err(|e| anyhow!("{e}"))?;
+            self.telemetry.record_linsolve_duration(start.elapsed());
+            self.telemetry
+                .record_solve_fallback("linsolve:host_reupload");
 
             let handle = self.upload(&HostTensorView {
                 data: &solution.data,
@@ -15627,6 +15631,7 @@ impl AccelProvider for WgpuProvider {
         rhs: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            let start = Instant::now();
             let HostTensorOwned {
                 data: lhs_data,
                 shape: lhs_shape,
@@ -15643,6 +15648,9 @@ impl AccelProvider for WgpuProvider {
 
             let result = mldivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
                 .map_err(|e| anyhow!("{e}"))?;
+            self.telemetry.record_mldivide_duration(start.elapsed());
+            self.telemetry
+                .record_solve_fallback("mldivide:host_reupload");
 
             let handle = self.upload(&HostTensorView {
                 data: &result.data,
@@ -15658,6 +15666,7 @@ impl AccelProvider for WgpuProvider {
         rhs: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            let start = Instant::now();
             let HostTensorOwned {
                 data: lhs_data,
                 shape: lhs_shape,
@@ -15674,6 +15683,9 @@ impl AccelProvider for WgpuProvider {
 
             let result = mrdivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
                 .map_err(|e| anyhow!("{e}"))?;
+            self.telemetry.record_mrdivide_duration(start.elapsed());
+            self.telemetry
+                .record_solve_fallback("mrdivide:host_reupload");
 
             let handle = self.upload(&HostTensorView {
                 data: &result.data,

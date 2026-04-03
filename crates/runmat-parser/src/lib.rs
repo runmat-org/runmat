@@ -118,7 +118,7 @@ pub enum BinOp {
     Add,
     Sub,
     Mul,
-    Div,
+    RightDiv,
     Pow,
     LeftDiv,
     Colon,
@@ -1154,7 +1154,7 @@ impl Parser {
             let op = match self.peek_token() {
                 Some(Token::Star) => BinOp::Mul,
                 Some(Token::DotStar) => BinOp::ElemMul,
-                Some(Token::Slash) => BinOp::Div,
+                Some(Token::Slash) => BinOp::RightDiv,
                 Some(Token::DotSlash) => BinOp::ElemDiv,
                 Some(Token::Backslash) => BinOp::LeftDiv,
                 Some(Token::DotBackslash) => BinOp::ElemLeftDiv,

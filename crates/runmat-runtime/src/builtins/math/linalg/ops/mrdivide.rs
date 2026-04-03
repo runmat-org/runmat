@@ -429,9 +429,19 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::ProviderTelemetry;
     use runmat_builtins::{ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
+    }
+
+    fn fallback_count(telemetry: &ProviderTelemetry, reason: &str) -> u64 {
+        telemetry
+            .solve_fallbacks
+            .iter()
+            .find(|entry| entry.reason == reason)
+            .map(|entry| entry.count)
+            .unwrap_or(0)
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -581,6 +591,73 @@ pub(crate) mod tests {
             for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
                 assert!((gpu - cpu).abs() < 1e-12);
             }
+        });
+    }
+
+    #[test]
+    fn provider_telemetry_records_gpu_host_reupload_path() {
+        test_support::with_test_provider(|provider| {
+            provider.reset_telemetry();
+            let a = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
+            let b = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
+            let ha = provider
+                .upload(&HostTensorView {
+                    data: &a.data,
+                    shape: &a.shape,
+                })
+                .expect("upload A");
+            let hb = provider
+                .upload(&HostTensorView {
+                    data: &b.data,
+                    shape: &b.shape,
+                })
+                .expect("upload B");
+
+            let _ = mrdivide_eval(&Value::GpuTensor(ha.clone()), &Value::GpuTensor(hb.clone()))
+                .expect("gpu mrdivide");
+
+            let telemetry = provider.telemetry_snapshot();
+            assert_eq!(telemetry.mrdivide.count, 1);
+            assert!(telemetry.upload_bytes > 0);
+            assert!(telemetry.download_bytes > 0);
+            assert_eq!(fallback_count(&telemetry, "mrdivide:host_reupload"), 1);
+
+            let _ = provider.free(&ha);
+            let _ = provider.free(&hb);
+        });
+    }
+
+    #[test]
+    fn scalar_gpu_rhs_falls_back_without_provider_solve_dispatch() {
+        test_support::with_test_provider(|provider| {
+            provider.reset_telemetry();
+            let matrix = Tensor::new(vec![2.0, 4.0, 6.0], vec![1, 3]).unwrap();
+            let scalar = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
+            let hm = provider
+                .upload(&HostTensorView {
+                    data: &matrix.data,
+                    shape: &matrix.shape,
+                })
+                .expect("upload matrix");
+            let hs = provider
+                .upload(&HostTensorView {
+                    data: &scalar.data,
+                    shape: &scalar.shape,
+                })
+                .expect("upload scalar");
+
+            let result = mrdivide_eval(&Value::GpuTensor(hm.clone()), &Value::GpuTensor(hs.clone()))
+                .expect("fallback mrdivide");
+            let gathered = test_support::gather(result).expect("gather fallback");
+            assert_eq!(gathered.data, vec![1.0, 2.0, 3.0]);
+
+            let telemetry = provider.telemetry_snapshot();
+            assert_eq!(telemetry.mrdivide.count, 0);
+            assert_eq!(fallback_count(&telemetry, "mrdivide:host_reupload"), 0);
+            assert!(telemetry.download_bytes > 0);
+
+            let _ = provider.free(&hm);
+            let _ = provider.free(&hs);
         });
     }
 

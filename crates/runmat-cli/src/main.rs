@@ -2932,6 +2932,27 @@ async fn show_accel_info(json: bool, reset: bool) -> Result<()> {
                 telemetry.matmul.count,
                 to_ms(telemetry.matmul.total_wall_time_ns)
             );
+            println!(
+                "  linsolve: count={} wall_ms={:.3}",
+                telemetry.linsolve.count,
+                to_ms(telemetry.linsolve.total_wall_time_ns)
+            );
+            println!(
+                "  mldivide: count={} wall_ms={:.3}",
+                telemetry.mldivide.count,
+                to_ms(telemetry.mldivide.total_wall_time_ns)
+            );
+            println!(
+                "  mrdivide: count={} wall_ms={:.3}",
+                telemetry.mrdivide.count,
+                to_ms(telemetry.mrdivide.total_wall_time_ns)
+            );
+            if !telemetry.solve_fallbacks.is_empty() {
+                println!("  solve_fallbacks:");
+                for fallback in &telemetry.solve_fallbacks {
+                    println!("    {} => {}", fallback.reason, fallback.count);
+                }
+            }
 
             if let Some(report) = runmat_accelerate::auto_offload_report() {
                 println!("Auto-offload:");
