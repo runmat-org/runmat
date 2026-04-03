@@ -29,6 +29,8 @@ PACKAGES=(
   liblapack-dev
   libopenblas-dev
   libssl-dev
+  nodejs
+  npm
   libudev-dev
   libwayland-dev
   libx11-dev
@@ -93,6 +95,8 @@ fi
 "${LDCONFIG_BIN}" -p | grep -q 'libopenblas\.so'
 "${LDCONFIG_BIN}" -p | grep -q 'liblapack\.so'
 gdb --version >/dev/null
+node --version >/dev/null
+npm --version >/dev/null
 
 echo
 echo "Linux runner bootstrap complete."
