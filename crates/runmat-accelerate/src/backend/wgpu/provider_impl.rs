@@ -67,6 +67,8 @@ use std::time::Duration;
 use tracing::info_span;
 use wgpu::util::DeviceExt;
 
+mod solve;
+
 use crate::backend::wgpu::autotune::AutotuneController;
 use crate::backend::wgpu::cache::{
     bind_group::BindGroupCache, key as cache_key, persist as cache_persist,
@@ -15479,6 +15481,9 @@ impl AccelProvider for WgpuProvider {
         options: &'a ProviderLinsolveOptions,
     ) -> AccelProviderFuture<'a, ProviderLinsolveResult> {
         Box::pin(async move {
+            if let Some(result) = self.try_triangular_linsolve_device(lhs, rhs, options)? {
+                return Ok(result);
+            }
             let start = Instant::now();
             let HostTensorOwned {
                 data: lhs_data,

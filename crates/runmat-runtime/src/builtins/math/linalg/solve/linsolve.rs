@@ -235,6 +235,10 @@ async fn try_gpu_linsolve(
     rhs: &Value,
     options: &SolveOptions,
 ) -> BuiltinResult<Option<LinsolveEval>> {
+    match crate::output_count::current_output_count() {
+        Some(0) | Some(1) => {}
+        Some(_) | None => return Ok(None),
+    }
     let provider = match runmat_accelerate_api::provider() {
         Some(p) => p,
         None => return Ok(None),
@@ -1253,6 +1257,146 @@ pub(crate) mod tests {
             let _ = provider.free(&ha);
             let _ = provider.free(&hb);
         });
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn wgpu_triangular_hint_avoids_host_reupload_fallback() {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        provider.reset_telemetry();
+
+        let a = Tensor::new(
+            vec![3.0, -1.0, 4.0, 0.0, 2.0, 1.0, 0.0, 0.0, 5.0],
+            vec![3, 3],
+        )
+        .unwrap();
+        let b = Tensor::new(vec![9.0, 1.0, 19.0], vec![3, 1]).unwrap();
+
+        let cpu = linsolve_builtin(Value::Tensor(a.clone()), Value::Tensor(b.clone()), {
+            let mut opts = StructValue::new();
+            opts.fields.insert("LT".to_string(), Value::Bool(true));
+            vec![Value::Struct(opts)]
+        })
+        .expect("cpu linsolve");
+        let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
+
+        let ha = provider
+            .upload(&HostTensorView {
+                data: &a.data,
+                shape: &a.shape,
+            })
+            .expect("upload A");
+        let hb = provider
+            .upload(&HostTensorView {
+                data: &b.data,
+                shape: &b.shape,
+            })
+            .expect("upload B");
+
+        let _output_guard = crate::output_count::push_output_count(Some(1));
+        let mut opts = StructValue::new();
+        opts.fields.insert("LT".to_string(), Value::Bool(true));
+        let gpu_value = linsolve_builtin(
+            Value::GpuTensor(ha.clone()),
+            Value::GpuTensor(hb.clone()),
+            vec![Value::Struct(opts)],
+        )
+        .expect("gpu triangular linsolve");
+        let gpu_solution = match gpu_value {
+            Value::OutputList(mut outputs) => outputs.remove(0),
+            other => other,
+        };
+        let gathered = test_support::gather(gpu_solution).expect("gather");
+        let _ = provider.free(&ha);
+        let _ = provider.free(&hb);
+
+        assert_eq!(gathered.shape, cpu_tensor.shape);
+        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+            assert!((gpu - cpu).abs() < 1e-5);
+        }
+
+        let telemetry = provider.telemetry_snapshot();
+        assert_eq!(telemetry.linsolve.count, 1);
+        assert_eq!(fallback_count(&telemetry, "linsolve:host_reupload"), 0);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn wgpu_transposed_triangular_hint_avoids_host_reupload_fallback() {
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let provider = runmat_accelerate_api::provider().expect("wgpu provider");
+        provider.reset_telemetry();
+
+        let a = Tensor::new(
+            vec![3.0, 1.0, 0.0, 0.0, 4.0, 2.0, 0.0, 0.0, 5.0],
+            vec![3, 3],
+        )
+        .unwrap();
+        let b = Tensor::new(vec![5.0, 14.0, 23.0], vec![3, 1]).unwrap();
+
+        let mut cpu_opts = StructValue::new();
+        cpu_opts.fields.insert("LT".to_string(), Value::Bool(true));
+        cpu_opts.fields.insert(
+            "TRANSA".to_string(),
+            Value::CharArray(CharArray::new_row("T")),
+        );
+        let cpu = linsolve_builtin(
+            Value::Tensor(a.clone()),
+            Value::Tensor(b.clone()),
+            vec![Value::Struct(cpu_opts)],
+        )
+        .expect("cpu linsolve");
+        let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
+
+        let ha = provider
+            .upload(&HostTensorView {
+                data: &a.data,
+                shape: &a.shape,
+            })
+            .expect("upload A");
+        let hb = provider
+            .upload(&HostTensorView {
+                data: &b.data,
+                shape: &b.shape,
+            })
+            .expect("upload B");
+
+        let _output_guard = crate::output_count::push_output_count(Some(1));
+        let mut gpu_opts = StructValue::new();
+        gpu_opts.fields.insert("LT".to_string(), Value::Bool(true));
+        gpu_opts.fields.insert(
+            "TRANSA".to_string(),
+            Value::CharArray(CharArray::new_row("T")),
+        );
+        let gpu_value = linsolve_builtin(
+            Value::GpuTensor(ha.clone()),
+            Value::GpuTensor(hb.clone()),
+            vec![Value::Struct(gpu_opts)],
+        )
+        .expect("gpu transposed triangular linsolve");
+        let gpu_solution = match gpu_value {
+            Value::OutputList(mut outputs) => outputs.remove(0),
+            other => other,
+        };
+        let gathered = test_support::gather(gpu_solution).expect("gather");
+        let _ = provider.free(&ha);
+        let _ = provider.free(&hb);
+
+        assert_eq!(gathered.shape, cpu_tensor.shape);
+        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+            assert!((gpu - cpu).abs() < 1e-5);
+        }
+
+        let telemetry = provider.telemetry_snapshot();
+        assert_eq!(telemetry.linsolve.count, 1);
+        assert_eq!(fallback_count(&telemetry, "linsolve:host_reupload"), 0);
     }
 
     #[cfg(feature = "wgpu")]

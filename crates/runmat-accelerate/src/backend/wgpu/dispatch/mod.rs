@@ -20,6 +20,7 @@ pub mod reduction;
 pub mod repmat;
 pub mod scan;
 pub mod scatter;
+pub mod solve;
 pub mod sub2ind;
 pub mod syrk;
 pub mod transpose;

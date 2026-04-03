@@ -304,6 +304,19 @@ pub struct BandwidthParams {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
+pub struct TriangularSolveParams {
+    pub len: u32,
+    pub offset: u32,
+    pub total: u32,
+    pub rows: u32,
+    pub rhs_cols: u32,
+    pub target_row: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
 pub struct SymmetryParamsF64 {
     pub rows: u32,
     pub cols: u32,

@@ -1391,17 +1391,26 @@ pub async fn wasm_render_figure_image(
     height: Option<u32>,
     textmark: Option<String>,
 ) -> Result<Uint8Array, JsValue> {
+    const DEFAULT_PREVIEW_WIDTH: u32 = 1280;
+    const DEFAULT_PREVIEW_HEIGHT: u32 = 720;
     let _ = shared_webgpu_context();
     let target = parse_optional_handle(handle)?.unwrap_or_else(runtime_current_figure_handle);
+    let normalized_width = width.unwrap_or(0).max(1);
+    let normalized_height = height.unwrap_or(0).max(1);
+    let (render_width, render_height) = if normalized_width == 1 && normalized_height == 1 {
+        (DEFAULT_PREVIEW_WIDTH, DEFAULT_PREVIEW_HEIGHT)
+    } else {
+        (normalized_width, normalized_height)
+    };
     log::debug!(
         "RunMat wasm: renderFigureImage start handle={} width={} height={} textmark={}",
         target.as_u32(),
-        width.unwrap_or(0),
-        height.unwrap_or(0),
+        render_width,
+        render_height,
         textmark.as_deref().unwrap_or("")
     );
     let bytes =
-        runtime_render_figure_snapshot(target, width.unwrap_or(0), height.unwrap_or(0), textmark)
+        runtime_render_figure_snapshot(target, render_width, render_height, textmark)
             .await
             .map_err(runtime_flow_to_js)?;
     log::debug!(
@@ -1432,14 +1441,23 @@ pub async fn wasm_render_figure_image_with_camera_state(
     camera_state: JsValue,
     textmark: Option<String>,
 ) -> Result<Uint8Array, JsValue> {
+    const DEFAULT_PREVIEW_WIDTH: u32 = 1280;
+    const DEFAULT_PREVIEW_HEIGHT: u32 = 720;
     let _ = shared_webgpu_context();
     let target = parse_optional_handle(handle)?.unwrap_or_else(runtime_current_figure_handle);
+    let normalized_width = width.unwrap_or(0).max(1);
+    let normalized_height = height.unwrap_or(0).max(1);
+    let (render_width, render_height) = if normalized_width == 1 && normalized_height == 1 {
+        (DEFAULT_PREVIEW_WIDTH, DEFAULT_PREVIEW_HEIGHT)
+    } else {
+        (normalized_width, normalized_height)
+    };
     let parsed: PlotSurfaceCameraState =
         serde_wasm_bindgen::from_value(camera_state).map_err(|err| js_error(&err.to_string()))?;
     let bytes = runtime_render_figure_snapshot_with_camera_state(
         target,
-        width.unwrap_or(0),
-        height.unwrap_or(0),
+        render_width,
+        render_height,
         parsed,
         textmark,
     )

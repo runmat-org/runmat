@@ -185,6 +185,58 @@ mod export_subplot_tests {
         let meta = std::fs::metadata(&tmp).unwrap();
         assert!(meta.len() > 1_000);
     }
+
+    #[tokio::test]
+    async fn test_export_two_axes_line_line_margin_style() {
+        if super::skip_headless_gpu_test(
+            "export_subplot_tests::test_export_two_axes_line_line_margin_style",
+        ) {
+            return;
+        }
+
+        let mut fig = runmat_plot::plots::Figure::new();
+        fig.set_subplot_grid(1, 2);
+
+        let x_mm: Vec<f64> = (-30..=30).map(|i| i as f64).collect();
+        let y_mm: Vec<f64> = (-25..=25).map(|i| i as f64).collect();
+        let centerline: Vec<f64> = x_mm
+            .iter()
+            .map(|x| 25.0 + 18.0 * (-(x / 11.0).powi(2)).exp())
+            .collect();
+        let vertical: Vec<f64> = y_mm
+            .iter()
+            .map(|y| 25.0 + 20.0 * (-(y / 9.0).powi(2)).exp())
+            .collect();
+
+        let left = runmat_plot::plots::LinePlot::new(x_mm.clone(), centerline).unwrap();
+        let left_idx = fig.add_line_plot(left);
+        let _ = fig.assign_plot_to_axes(left_idx, 0);
+        fig.set_axes_title(0, "Centerline slice");
+        fig.set_axes_xlabel(0, "x (mm)");
+        fig.set_axes_ylabel(0, "temperature (C)");
+
+        let right = runmat_plot::plots::LinePlot::new(y_mm.clone(), vertical).unwrap();
+        let right_idx = fig.add_line_plot(right);
+        let _ = fig.assign_plot_to_axes(right_idx, 1);
+        fig.set_axes_title(1, "Vertical slice through source");
+        fig.set_axes_xlabel(1, "y (mm)");
+        fig.set_axes_ylabel(1, "temperature (C)");
+
+        let exporter = runmat_plot::export::image::ImageExporter::with_settings(
+            runmat_plot::export::image::ImageExportSettings {
+                width: 1280,
+                height: 720,
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+        let tmp = std::env::temp_dir().join("subplot_two_axes_line_line_margin_style.png");
+        exporter.export_png(&mut fig, &tmp).await.unwrap();
+        assert!(tmp.exists());
+        let meta = std::fs::metadata(&tmp).unwrap();
+        assert!(meta.len() > 1_000);
+    }
 }
 
 #[cfg(test)]
