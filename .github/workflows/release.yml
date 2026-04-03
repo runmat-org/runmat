@@ -166,7 +166,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Test Summary
-        if: always()
+        if: always() && hashFiles('test.log') != ''
         uses: actions/github-script@v7
         with:
           github-token: ${{ github.token }}

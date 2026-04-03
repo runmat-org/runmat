@@ -194,7 +194,7 @@ jobs:
           cargo test --all-targets --all-features 2>&1 | tee test.log
 
       - name: Test Summary
-        if: always() && github.event_name == 'pull_request'
+        if: always() && github.event_name == 'pull_request' && hashFiles('test.log') != ''
         uses: actions/github-script@v7
         with:
           github-token: ${{ github.token }}
