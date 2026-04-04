@@ -2410,6 +2410,7 @@ pub fn provider() -> Option<&'static dyn AccelProvider> {
 
 /// Clear the globally registered provider. Intended for tests to ensure deterministic behaviour.
 pub fn clear_provider() {
+    replace_thread_provider(None);
     if let Ok(mut guard) = GLOBAL_PROVIDER.write() {
         *guard = None;
     }

@@ -1016,13 +1016,24 @@ pub(crate) mod tests {
             .count()
     }
 
-    fn host_linsolve_real(a: &Tensor, b: &Tensor, options: ProviderLinsolveOptions) -> (Tensor, f64) {
+    fn clear_accel_provider_state() {
+        runmat_accelerate_api::set_thread_provider(None);
+        runmat_accelerate_api::clear_provider();
+    }
+
+    fn host_linsolve_real(
+        a: &Tensor,
+        b: &Tensor,
+        options: ProviderLinsolveOptions,
+    ) -> (Tensor, f64) {
         super::linsolve_host_real_for_provider(a, b, &options).expect("host linsolve")
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linsolve_basic_square() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
         let a = Tensor::new(vec![2.0, 1.0, 1.0, 2.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![4.0, 5.0], vec![2, 1]).unwrap();
         let result =
@@ -1060,6 +1071,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linsolve_transposed_triangular_hint() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
         let a = Tensor::new(
             vec![3.0, 1.0, 0.0, 0.0, 4.0, 2.0, 0.0, 0.0, 5.0],
             vec![3, 3],
@@ -1083,13 +1096,8 @@ pub(crate) mod tests {
         assert_eq!(tensor.shape, vec![3, 1]);
 
         let a_transposed = transpose_tensor(&a);
-        let reference = evaluate(
-            Value::Tensor(a_transposed.clone()),
-            Value::Tensor(b.clone()),
-            SolveOptions::default(),
-        )
-        .expect("reference");
-        let expected_tensor = test_support::gather(reference.solution()).expect("gather ref");
+        let (expected_tensor, _) =
+            host_linsolve_real(&a_transposed, &b, ProviderLinsolveOptions::default());
 
         for (actual, expected) in tensor.data.iter().zip(expected_tensor.data.iter()) {
             approx_eq(*actual, *expected);
@@ -1176,8 +1184,14 @@ pub(crate) mod tests {
 
         assert_eq!(out.shape, expected.shape);
         for ((out_re, out_im), (exp_re, exp_im)) in out.data.iter().zip(expected.data.iter()) {
-            assert!((out_re - exp_re).abs() < 1e-10, "out_re={out_re} exp_re={exp_re}");
-            assert!((out_im - exp_im).abs() < 1e-10, "out_im={out_im} exp_im={exp_im}");
+            assert!(
+                (out_re - exp_re).abs() < 1e-10,
+                "out_re={out_re} exp_re={exp_re}"
+            );
+            assert!(
+                (out_im - exp_im).abs() < 1e-10,
+                "out_im={out_im} exp_im={exp_im}"
+            );
         }
     }
 
@@ -1205,6 +1219,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linsolve_recovers_rcond_output() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
         let a = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let eval = evaluate_args(Value::Tensor(a.clone()), Value::Tensor(b.clone()), &[])
@@ -1370,6 +1386,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_square_linsolve_avoids_host_reupload_fallback() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -1380,8 +1397,12 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![3.0, 1.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![7.0, 8.0], vec![2, 1]).unwrap();
 
-        let cpu = linsolve_builtin(Value::Tensor(a.clone()), Value::Tensor(b.clone()), Vec::new())
-            .expect("cpu linsolve");
+        let cpu = linsolve_builtin(
+            Value::Tensor(a.clone()),
+            Value::Tensor(b.clone()),
+            Vec::new(),
+        )
+        .expect("cpu linsolve");
         let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
         provider.reset_telemetry();
 
@@ -1429,6 +1450,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_square_linsolve_uses_device_path_without_output_count() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -1439,8 +1461,12 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![3.0, 1.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![7.0, 8.0], vec![2, 1]).unwrap();
 
-        let cpu = linsolve_builtin(Value::Tensor(a.clone()), Value::Tensor(b.clone()), Vec::new())
-            .expect("cpu linsolve");
+        let cpu = linsolve_builtin(
+            Value::Tensor(a.clone()),
+            Value::Tensor(b.clone()),
+            Vec::new(),
+        )
+        .expect("cpu linsolve");
         let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
         provider.reset_telemetry();
 
@@ -1482,6 +1508,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_square_linsolve_recovers_rcond_output_on_device() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -1529,7 +1556,10 @@ pub(crate) mod tests {
         let _ = provider.free(&hb);
 
         assert_eq!(gathered.shape, vec![2, 1]);
-        assert!((gpu_rcond - cpu_rcond).abs() < 1e-4, "gpu={gpu_rcond} cpu={cpu_rcond}");
+        assert!(
+            (gpu_rcond - cpu_rcond).abs() < 1e-4,
+            "gpu={gpu_rcond} cpu={cpu_rcond}"
+        );
 
         let telemetry = provider.telemetry_snapshot();
         assert_eq!(telemetry.linsolve.count, 1);
@@ -1541,6 +1571,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_square_linsolve_with_rcond_option_stays_on_device() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -1552,7 +1583,9 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![3.0, 1.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![7.0, 8.0], vec![2, 1]).unwrap();
         let mut cpu_opts = StructValue::new();
-        cpu_opts.fields.insert("RCOND".to_string(), Value::Num(0.05));
+        cpu_opts
+            .fields
+            .insert("RCOND".to_string(), Value::Num(0.05));
         let cpu = linsolve_builtin(
             Value::Tensor(a.clone()),
             Value::Tensor(b.clone()),
@@ -1577,7 +1610,9 @@ pub(crate) mod tests {
 
         let _output_guard = crate::output_count::push_output_count(Some(1));
         let mut gpu_opts = StructValue::new();
-        gpu_opts.fields.insert("RCOND".to_string(), Value::Num(0.05));
+        gpu_opts
+            .fields
+            .insert("RCOND".to_string(), Value::Num(0.05));
         let gpu_value = linsolve_builtin(
             Value::GpuTensor(ha.clone()),
             Value::GpuTensor(hb.clone()),
@@ -1607,6 +1642,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_tall_linsolve_avoids_host_reupload_fallback() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -1617,8 +1653,12 @@ pub(crate) mod tests {
         let a = Tensor::new(vec![1.0, 0.0, 1.0, 0.0, 1.0, 1.0], vec![3, 2]).unwrap();
         let b = Tensor::new(vec![1.0, 2.0, 2.0], vec![3, 1]).unwrap();
 
-        let cpu = linsolve_builtin(Value::Tensor(a.clone()), Value::Tensor(b.clone()), Vec::new())
-            .expect("cpu linsolve");
+        let cpu = linsolve_builtin(
+            Value::Tensor(a.clone()),
+            Value::Tensor(b.clone()),
+            Vec::new(),
+        )
+        .expect("cpu linsolve");
         let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
         provider.reset_telemetry();
 
@@ -1664,6 +1704,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_posdef_linsolve_avoids_host_reupload_fallback() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -1675,7 +1716,9 @@ pub(crate) mod tests {
         let b = Tensor::new(vec![7.0, 8.0], vec![2, 1]).unwrap();
 
         let mut cpu_opts = StructValue::new();
-        cpu_opts.fields.insert("POSDEF".to_string(), Value::Bool(true));
+        cpu_opts
+            .fields
+            .insert("POSDEF".to_string(), Value::Bool(true));
         let cpu = linsolve_builtin(
             Value::Tensor(a.clone()),
             Value::Tensor(b.clone()),
@@ -1708,7 +1751,9 @@ pub(crate) mod tests {
 
         let _output_guard = crate::output_count::push_output_count(Some(2));
         let mut gpu_opts = StructValue::new();
-        gpu_opts.fields.insert("POSDEF".to_string(), Value::Bool(true));
+        gpu_opts
+            .fields
+            .insert("POSDEF".to_string(), Value::Bool(true));
         let gpu_value = linsolve_builtin(
             Value::GpuTensor(ha.clone()),
             Value::GpuTensor(hb.clone()),
@@ -1732,7 +1777,10 @@ pub(crate) mod tests {
         for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
             assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
         }
-        assert!((gpu_rcond - cpu_rcond).abs() < 1e-4, "gpu={gpu_rcond} cpu={cpu_rcond}");
+        assert!(
+            (gpu_rcond - cpu_rcond).abs() < 1e-4,
+            "gpu={gpu_rcond} cpu={cpu_rcond}"
+        );
 
         let telemetry = provider.telemetry_snapshot();
         assert_eq!(telemetry.linsolve.count, 1);
@@ -1745,6 +1793,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_transposed_posdef_linsolve_uses_cholesky_path() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -1756,7 +1805,9 @@ pub(crate) mod tests {
         let b = Tensor::new(vec![8.0, 9.0], vec![2, 1]).unwrap();
 
         let mut cpu_opts = StructValue::new();
-        cpu_opts.fields.insert("POSDEF".to_string(), Value::Bool(true));
+        cpu_opts
+            .fields
+            .insert("POSDEF".to_string(), Value::Bool(true));
         cpu_opts.fields.insert(
             "TRANSA".to_string(),
             Value::CharArray(CharArray::new_row("T")),
@@ -1785,7 +1836,9 @@ pub(crate) mod tests {
 
         let _output_guard = crate::output_count::push_output_count(Some(1));
         let mut gpu_opts = StructValue::new();
-        gpu_opts.fields.insert("POSDEF".to_string(), Value::Bool(true));
+        gpu_opts
+            .fields
+            .insert("POSDEF".to_string(), Value::Bool(true));
         gpu_opts.fields.insert(
             "TRANSA".to_string(),
             Value::CharArray(CharArray::new_row("T")),
@@ -1820,6 +1873,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_symmetric_linsolve_avoids_host_reupload_fallback() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -1885,6 +1939,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_transposed_square_linsolve_avoids_host_reupload_fallback() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -1956,6 +2011,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_conjugate_square_linsolve_avoids_host_reupload_fallback_for_real_inputs() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -2028,6 +2084,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_transposed_rectangular_linsolve_avoids_host_reupload_fallback() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -2043,7 +2100,9 @@ pub(crate) mod tests {
             "TRANSA".to_string(),
             Value::CharArray(CharArray::new_row("T")),
         );
-        cpu_opts.fields.insert("RECT".to_string(), Value::Bool(true));
+        cpu_opts
+            .fields
+            .insert("RECT".to_string(), Value::Bool(true));
         let cpu = linsolve_builtin(
             Value::Tensor(a.clone()),
             Value::Tensor(b.clone()),
@@ -2072,7 +2131,9 @@ pub(crate) mod tests {
             "TRANSA".to_string(),
             Value::CharArray(CharArray::new_row("T")),
         );
-        gpu_opts.fields.insert("RECT".to_string(), Value::Bool(true));
+        gpu_opts
+            .fields
+            .insert("RECT".to_string(), Value::Bool(true));
         let gpu_value = linsolve_builtin(
             Value::GpuTensor(ha.clone()),
             Value::GpuTensor(hb.clone()),
@@ -2101,6 +2162,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_triangular_hint_avoids_host_reupload_fallback() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -2165,6 +2227,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_transposed_triangular_hint_avoids_host_reupload_fallback() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -2239,6 +2302,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_round_trip_matches_cpu() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );

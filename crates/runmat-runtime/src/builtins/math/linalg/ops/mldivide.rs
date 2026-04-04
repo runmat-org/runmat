@@ -435,6 +435,11 @@ pub(crate) mod tests {
             .unwrap_or(0)
     }
 
+    fn clear_accel_provider_state() {
+        runmat_accelerate_api::set_thread_provider(None);
+        runmat_accelerate_api::clear_provider();
+    }
+
     use num_complex::Complex64;
     use runmat_builtins::{ResolveContext, Type};
 
@@ -483,6 +488,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn solves_square_system() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
         let a = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![5.0, 6.0], vec![2, 1]).unwrap();
         let result =
@@ -500,6 +507,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn solves_least_squares() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
         let a = Tensor::new(vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0], vec![3, 2]).unwrap();
         let b = Tensor::new(vec![7.0, 8.0, 9.0], vec![3, 1]).unwrap();
         let result =
@@ -675,6 +684,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_tall_path_avoids_host_reupload_fallback() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -724,6 +734,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_square_path_avoids_host_reupload_fallback() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
@@ -773,12 +784,17 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_round_trip_matches_cpu() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
         let provider = match runmat_accelerate_api::provider() {
             Some(p) => p,
             None => panic!("wgpu provider not available"),
+        };
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-4,
         };
 
         let a = Tensor::new(vec![4.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
@@ -805,7 +821,7 @@ pub(crate) mod tests {
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
         for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
-            assert!((gpu - cpu).abs() < 1e-10);
+            assert!((gpu - cpu).abs() < tol, "gpu={gpu} cpu={cpu}");
         }
     }
 

@@ -42,29 +42,28 @@ impl WgpuProvider {
     fn enforce_device_rcond(&self, options: &ProviderLinsolveOptions, rcond: f64) -> Result<()> {
         if let Some(threshold) = options.rcond {
             if rcond < threshold {
-                return Err(anyhow!("linsolve: matrix is singular to working precision."));
+                return Err(anyhow!(
+                    "linsolve: matrix is singular to working precision."
+                ));
             }
         }
         Ok(())
     }
 
-    fn host_tensor_from_handle_sync(&self, label: &str, handle: &GpuTensorHandle) -> Result<Tensor> {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let HostTensorOwned { data, shape } = block_on(<Self as AccelProvider>::download(
-                self, handle,
-            ))?;
-            Tensor::new(data, shape).map_err(|e| anyhow!("{label}: {e}"))
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            let _ = handle;
-            Err(anyhow!("{label}: synchronous factor readback is unavailable on wasm"))
-        }
+    async fn host_tensor_from_handle(
+        &self,
+        label: &str,
+        handle: &GpuTensorHandle,
+    ) -> Result<Tensor> {
+        let HostTensorOwned { data, shape } =
+            <Self as AccelProvider>::download(self, handle).await?;
+        Tensor::new(data, shape).map_err(|e| anyhow!("{label}: {e}"))
     }
 
-    fn triangular_rcond_sync(&self, lhs: &GpuTensorHandle) -> Result<f64> {
-        let tensor = self.host_tensor_from_handle_sync("linsolve_triangular_rcond", lhs)?;
+    async fn triangular_rcond(&self, lhs: &GpuTensorHandle) -> Result<f64> {
+        let tensor = self
+            .host_tensor_from_handle("linsolve_triangular_rcond", lhs)
+            .await?;
         let rows = tensor.rows();
         let cols = tensor.cols();
         ensure!(
@@ -76,7 +75,9 @@ impl WgpuProvider {
         for i in 0..rows {
             let diag = tensor.data[i + i * rows].abs();
             if diag == 0.0 {
-                return Err(anyhow!("linsolve: matrix is singular to working precision."));
+                return Err(anyhow!(
+                    "linsolve: matrix is singular to working precision."
+                ));
             }
             min_diag = min_diag.min(diag);
             max_diag = max_diag.max(diag);
@@ -84,20 +85,14 @@ impl WgpuProvider {
         Ok(Self::diagonal_rcond(min_diag, max_diag))
     }
 
-    fn svd_rcond_sync(&self, label: &str, factor: &GpuTensorHandle) -> Result<f64> {
-        let tensor = self.host_tensor_from_handle_sync(label, factor)?;
-        #[cfg(not(target_arch = "wasm32"))]
-        let eval = block_on(runmat_runtime::builtins::math::linalg::factor::svd::evaluate(
+    async fn svd_rcond(&self, label: &str, factor: &GpuTensorHandle) -> Result<f64> {
+        let tensor = self.host_tensor_from_handle(label, factor).await?;
+        let eval = runmat_runtime::builtins::math::linalg::factor::svd::evaluate(
             Value::Tensor(tensor),
             &[],
-        ))
+        )
+        .await
         .map_err(|err| runtime_flow_to_anyhow(label, err))?;
-        #[cfg(target_arch = "wasm32")]
-        let eval = {
-            return Err(anyhow!(
-                "{label}: synchronous singular-value estimation is unavailable on wasm"
-            ));
-        };
         let singular_values = host_tensor_from_value(label, eval.singular_values())?;
         Ok(Self::singular_value_rcond(&singular_values.data))
     }
@@ -375,16 +370,18 @@ impl WgpuProvider {
                 resource: params_buffer.as_entire_binding(),
             },
         ];
-        let bind_group = self.bind_group_cache.get_or_create(layout, &bind_entries, || {
-            Arc::new(
-                self.device_ref()
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-chol-bind"),
-                        layout,
-                        entries: &bind_entries,
-                    }),
-            )
-        });
+        let bind_group = self
+            .bind_group_cache
+            .get_or_create(layout, &bind_entries, || {
+                Arc::new(
+                    self.device_ref()
+                        .create_bind_group(&wgpu::BindGroupDescriptor {
+                            label: Some("runmat-chol-bind"),
+                            layout,
+                            entries: &bind_entries,
+                        }),
+                )
+            });
         crate::backend::wgpu::dispatch::qr_power_iter::run(
             self.device_ref(),
             self.queue_ref(),
@@ -410,17 +407,13 @@ impl WgpuProvider {
         Ok((r_handle, r_inv_handle))
     }
 
-    fn try_posdef_linsolve_device(
+    async fn try_posdef_linsolve_device(
         &self,
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
         options: &ProviderLinsolveOptions,
     ) -> Result<Option<ProviderLinsolveResult>> {
-        if !options.posdef
-            || options.lower
-            || options.upper
-            || options.rectangular
-        {
+        if !options.posdef || options.lower || options.upper || options.rectangular {
             return Ok(None);
         }
         if self.precision() != ProviderPrecision::F32 {
@@ -443,7 +436,7 @@ impl WgpuProvider {
         let (r_handle, r_inv_handle) =
             self.chol_factor_spd_device(lhs, lhs_rows, "runmat-linsolve-posdef")?;
         let rcond = if Self::needs_rcond(options) {
-            let factor_rcond = match self.svd_rcond_sync("linsolve_posdef_rcond", &r_handle) {
+            let factor_rcond = match self.svd_rcond("linsolve_posdef_rcond", &r_handle).await {
                 Ok(value) => value,
                 Err(err) => {
                     let _ = self.free(&r_handle);
@@ -494,20 +487,21 @@ impl WgpuProvider {
             ("rhs_cols", rhs_cols as u64),
             ("transpose", if options.transposed { 1 } else { 0 }),
         ];
-        let tuning = [("method", 4), ("symmetric", if options.symmetric { 1 } else { 0 })];
+        let tuning = [
+            ("method", 4),
+            ("symmetric", if options.symmetric { 1 } else { 0 }),
+        ];
         self.record_kernel_launch_basic("linsolve_posdef_chol", &shape, &tuning);
         Ok(Some(solution))
     }
 
-    fn try_qr_linsolve_device(
+    async fn try_qr_linsolve_device(
         &self,
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
         options: &ProviderLinsolveOptions,
     ) -> Result<Option<ProviderLinsolveResult>> {
-        if options.lower
-            || options.upper
-        {
+        if options.lower || options.upper {
             return Ok(None);
         }
         if self.precision() != ProviderPrecision::F32 {
@@ -520,7 +514,7 @@ impl WgpuProvider {
             None
         };
         let solve_lhs = transposed_lhs.as_ref().unwrap_or(lhs);
-        let result = (|| -> Result<Option<ProviderLinsolveResult>> {
+        let result = async {
             let (lhs_rows, lhs_cols) = Self::matrix_dims_for_solve(&solve_lhs.shape)?;
             let (rhs_rows, rhs_cols) = Self::matrix_dims_for_solve(&rhs.shape)?;
             if rhs_rows != lhs_rows {
@@ -554,7 +548,7 @@ impl WgpuProvider {
                     false,
                 )?;
                 let rcond = if Self::needs_rcond(options) {
-                    let rcond = match self.svd_rcond_sync("linsolve_tall_qr_rcond", &r_handle) {
+                    let rcond = match self.svd_rcond("linsolve_tall_qr_rcond", &r_handle).await {
                         Ok(value) => value,
                         Err(err) => {
                             let _ = self.free(&q_handle);
@@ -574,12 +568,8 @@ impl WgpuProvider {
                 let q_t_handle = self.transpose_exec(&q_handle)?;
                 let projected_rhs =
                     self.matmul_exec_with_usage(&q_t_handle, rhs, BufferUsageClass::FusionOut)?;
-                let mut triangular = self.run_triangular_linsolve_device(
-                    &r_handle,
-                    &projected_rhs,
-                    false,
-                    false,
-                )?;
+                let mut triangular =
+                    self.run_triangular_linsolve_device(&r_handle, &projected_rhs, false, false)?;
                 let _ = self.free(&projected_rhs);
                 let _ = self.free(&q_t_handle);
                 let _ = self.free(&q_handle);
@@ -591,7 +581,10 @@ impl WgpuProvider {
                     ("cols", lhs_cols as u64),
                     ("rhs_cols", rhs_cols as u64),
                 ];
-                let tuning = [("method", 2), ("transpose", if options.transposed { 1 } else { 0 })];
+                let tuning = [
+                    ("method", 2),
+                    ("transpose", if options.transposed { 1 } else { 0 }),
+                ];
                 self.record_kernel_launch_basic("linsolve_tall_qr", &shape, &tuning);
                 return Ok(Some(triangular));
             }
@@ -618,7 +611,7 @@ impl WgpuProvider {
                 false,
             )?;
             let rcond = if Self::needs_rcond(options) {
-                let rcond = match self.svd_rcond_sync("linsolve_wide_qr_rcond", &r_handle) {
+                let rcond = match self.svd_rcond("linsolve_wide_qr_rcond", &r_handle).await {
                     Ok(value) => value,
                     Err(err) => {
                         let _ = self.free(&q_handle);
@@ -653,29 +646,30 @@ impl WgpuProvider {
                 ("cols", lhs_cols as u64),
                 ("rhs_cols", rhs_cols as u64),
             ];
-            let tuning = [("method", 3), ("transpose", if options.transposed { 1 } else { 0 })];
+            let tuning = [
+                ("method", 3),
+                ("transpose", if options.transposed { 1 } else { 0 }),
+            ];
             self.record_kernel_launch_basic("linsolve_wide_qr", &shape, &tuning);
             Ok(Some(ProviderLinsolveResult {
                 solution,
                 reciprocal_condition: rcond,
             }))
-        })();
+        }
+        .await;
         if let Some(handle) = transposed_lhs.as_ref() {
             let _ = self.free(handle);
         }
         result
     }
 
-    pub(super) fn try_triangular_linsolve_device(
+    pub(super) async fn try_triangular_linsolve_device(
         &self,
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
         options: &ProviderLinsolveOptions,
     ) -> Result<Option<ProviderLinsolveResult>> {
-        if options.rectangular
-            || options.symmetric
-            || options.posdef
-        {
+        if options.rectangular || options.symmetric || options.posdef {
             return Ok(None);
         }
         if options.lower == options.upper {
@@ -710,7 +704,7 @@ impl WgpuProvider {
         }
 
         let rcond = if Self::needs_rcond(options) {
-            let rcond = self.triangular_rcond_sync(lhs)?;
+            let rcond = self.triangular_rcond(lhs).await?;
             self.enforce_device_rcond(options, rcond)?;
             rcond
         } else {
@@ -734,22 +728,25 @@ impl WgpuProvider {
         Ok(Some(result))
     }
 
-    pub(super) fn try_linsolve_device(
+    pub(super) async fn try_linsolve_device(
         &self,
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
         options: &ProviderLinsolveOptions,
     ) -> Result<Option<ProviderLinsolveResult>> {
-        if let Some(result) = self.try_triangular_linsolve_device(lhs, rhs, options)? {
+        if let Some(result) = self
+            .try_triangular_linsolve_device(lhs, rhs, options)
+            .await?
+        {
             return Ok(Some(result));
         }
-        if let Some(result) = self.try_posdef_linsolve_device(lhs, rhs, options)? {
+        if let Some(result) = self.try_posdef_linsolve_device(lhs, rhs, options).await? {
             return Ok(Some(result));
         }
-        self.try_qr_linsolve_device(lhs, rhs, options)
+        self.try_qr_linsolve_device(lhs, rhs, options).await
     }
 
-    pub(super) fn try_mrdivide_device(
+    pub(super) async fn try_mrdivide_device(
         &self,
         lhs: &GpuTensorHandle,
         rhs: &GpuTensorHandle,
@@ -758,7 +755,9 @@ impl WgpuProvider {
         let _ = Self::matrix_dims_for_solve(&rhs.shape)?;
         let rhs_t = self.permute_exec(rhs, &[1, 0])?;
         let lhs_t = self.permute_exec(lhs, &[1, 0])?;
-        let result = self.try_linsolve_device(&rhs_t, &lhs_t, &ProviderLinsolveOptions::default())?;
+        let result = self
+            .try_linsolve_device(&rhs_t, &lhs_t, &ProviderLinsolveOptions::default())
+            .await?;
         let output = if let Some(result) = result {
             let transposed = self.permute_exec(&result.solution, &[1, 0])?;
             let _ = self.free(&result.solution);

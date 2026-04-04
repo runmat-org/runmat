@@ -1299,7 +1299,7 @@ impl AccelProvider for InProcessProvider {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut guard = registry().lock().unwrap_or_else(|e| e.into_inner());
         guard.insert(id, host.data.to_vec());
-        let bytes = (host.data.len() * std::mem::size_of::<f64>()) as u64;
+        let bytes = std::mem::size_of_val(host.data) as u64;
         self.telemetry.record_upload_bytes(bytes);
         let handle = GpuTensorHandle {
             shape: host.shape.to_vec(),
@@ -5563,8 +5563,12 @@ static INSTANCE: OnceCell<InProcessProvider> = OnceCell::new();
 /// Safe to call multiple times; only the first call installs the provider.
 pub fn register_inprocess_provider() {
     let provider: &'static InProcessProvider = INSTANCE.get_or_init(InProcessProvider::new);
-    // Safety: we intentionally install a reference with 'static lifetime. Always reassert.
-    unsafe { runmat_accelerate_api::register_provider(provider) };
+    #[cfg(not(test))]
+    unsafe {
+        // Safety: we intentionally install a reference with 'static lifetime. Always reassert.
+        runmat_accelerate_api::register_provider(provider)
+    };
+    runmat_accelerate_api::set_thread_provider(Some(provider));
 }
 
 /// Reset the in-process provider RNG to its default seed (test-only helper).
