@@ -351,6 +351,7 @@ pub struct ProviderLinsolveOptions {
     pub conjugate: bool,
     pub symmetric: bool,
     pub posdef: bool,
+    pub need_rcond: bool,
     pub rcond: Option<f64>,
 }
 

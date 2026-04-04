@@ -15481,7 +15481,7 @@ impl AccelProvider for WgpuProvider {
         options: &'a ProviderLinsolveOptions,
     ) -> AccelProviderFuture<'a, ProviderLinsolveResult> {
         Box::pin(async move {
-            if let Some(result) = self.try_triangular_linsolve_device(lhs, rhs, options)? {
+            if let Some(result) = self.try_linsolve_device(lhs, rhs, options)? {
                 return Ok(result);
             }
             let start = Instant::now();
@@ -15637,6 +15637,12 @@ impl AccelProvider for WgpuProvider {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let start = Instant::now();
+            if let Some(result) =
+                self.try_linsolve_device(lhs, rhs, &ProviderLinsolveOptions::default())?
+            {
+                self.telemetry.record_mldivide_duration(start.elapsed());
+                return Ok(result.solution);
+            }
             let HostTensorOwned {
                 data: lhs_data,
                 shape: lhs_shape,
@@ -15672,6 +15678,10 @@ impl AccelProvider for WgpuProvider {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
             let start = Instant::now();
+            if let Some(result) = self.try_mrdivide_device(lhs, rhs)? {
+                self.telemetry.record_mrdivide_duration(start.elapsed());
+                return Ok(result);
+            }
             let HostTensorOwned {
                 data: lhs_data,
                 shape: lhs_shape,
