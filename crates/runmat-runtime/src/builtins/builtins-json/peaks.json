@@ -1,0 +1,117 @@
+{
+  "title": "peaks",
+  "category": "array/creation",
+  "keywords": [
+    "peaks",
+    "sample data",
+    "test surface",
+    "demo",
+    "3d",
+    "surface"
+  ],
+  "summary": "Sample data: 3-D test surface on an n-by-n grid.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/peaks.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Computed on the host CPU. Results are returned as host tensors."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::array::creation::peaks::tests",
+    "integration": null
+  },
+  "description": "`peaks` evaluates the following function over an n×n grid spanning [-3, 3] × [-3, 3]:\n\n```\nZ = 3*(1-x)^2 * exp(-x^2 - (y+1)^2)\n    - 10*(x/5 - x^3 - y^5) * exp(-x^2 - y^2)\n    - 1/3 * exp(-(x+1)^2 - y^2)\n```\n\nIt is commonly used to demonstrate 3-D surface plots. RunMat matches MATLAB's formula and default grid size exactly.",
+  "behaviors": [
+    "`peaks` with no arguments returns a 49×49 matrix (MATLAB default).",
+    "`peaks(n)` returns an n×n matrix evaluated on an n-point grid from -3 to 3 on both axes.",
+    "`peaks(X, Y)` evaluates the formula at caller-supplied coordinate matrices and returns a Z matrix of the same size.",
+    "`[X, Y, Z] = peaks(…)` returns all three matrices — the X and Y coordinate grids and the computed Z surface.",
+    "`peaks(0)` returns an empty 0×0 matrix.",
+    "When exactly two outputs are requested, `[X, Y] = peaks(n)` returns only the coordinate grids without Z."
+  ],
+  "examples": [
+    {
+      "description": "Default 49×49 surface",
+      "input": "Z = peaks;\nsurf(Z);"
+    },
+    {
+      "description": "Custom grid size",
+      "input": "Z = peaks(30);\nsurf(Z);\ncolormap('parula');\ncolorbar;"
+    },
+    {
+      "description": "Full three-output form",
+      "input": "[X, Y, Z] = peaks(40);\nsurf(X, Y, Z);\nshading interp;\ncolorbar;\nview(45, 30);"
+    },
+    {
+      "description": "Caller-supplied coordinate matrices",
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 50), linspace(-3, 3, 50));\nZ = peaks(X, Y);\ncontourf(X, Y, Z);\ncolorbar;"
+    },
+    {
+      "description": "Combine with contour",
+      "input": "[X, Y, Z] = peaks(50);\nsubplot(1, 2, 1);\nsurf(X, Y, Z);\nview(3);\nsubplot(1, 2, 2);\ncontourf(X, Y, Z);\ncolorbar;"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why is the default size 49?",
+      "answer": "MATLAB chose 49 as the default grid size for `peaks`. RunMat matches this exactly."
+    },
+    {
+      "question": "Can I get the coordinate grids back as well as Z?",
+      "answer": "Yes. Use `[X, Y, Z] = peaks(n)` to retrieve all three matrices."
+    },
+    {
+      "question": "How do I move the result to the GPU?",
+      "answer": "Call `gpuArray(peaks(n))` if you need the output on the GPU. RunMat computes `peaks` on the host today."
+    },
+    {
+      "question": "What happens with `peaks(0)`?",
+      "answer": "`peaks(0)` returns an empty 0×0 tensor, consistent with how other array-creation functions handle a zero size."
+    }
+  ],
+  "links": [
+    {
+      "label": "surf",
+      "url": "./surf"
+    },
+    {
+      "label": "mesh",
+      "url": "./mesh"
+    },
+    {
+      "label": "contour",
+      "url": "./contour"
+    },
+    {
+      "label": "meshgrid",
+      "url": "./meshgrid"
+    },
+    {
+      "label": "linspace",
+      "url": "./linspace"
+    },
+    {
+      "label": "magic",
+      "url": "./magic"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/array/creation/peaks.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/array/creation/peaks.rs"
+  },
+  "gpu_residency": "`peaks` always runs on the host CPU today. If you need the result on the GPU, wrap the call in `gpuArray(...)`.",
+  "gpu_behavior": [
+    "RunMat computes `peaks` on the host and returns a host tensor. No acceleration provider hooks are defined for this builtin."
+  ]
+}

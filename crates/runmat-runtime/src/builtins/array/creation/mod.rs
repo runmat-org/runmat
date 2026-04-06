@@ -6,6 +6,7 @@ pub(crate) mod linspace;
 pub(crate) mod logspace;
 pub(crate) mod magic;
 pub mod meshgrid;
+pub(crate) mod peaks;
 pub(crate) mod ones;
 pub(crate) mod rand;
 pub(crate) mod randi;
