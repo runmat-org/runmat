@@ -62,6 +62,7 @@ struct FormatFlags {
     left_align: bool,
     sign_plus: bool,
     sign_space: bool,
+    grouping: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -150,6 +151,15 @@ fn parse_format_spec(chars: &mut Peekable<Chars<'_>>) -> BuiltinResult<FormatSpe
             }
             Some('+') => {
                 flags.sign_plus = true;
+                chars.next();
+            }
+            Some('\'') => {
+                flags.grouping = true;
+                chars.next();
+            }
+            Some('I') => {
+                // Locale-specific alternative digits are not implemented yet.
+                // Consume the flag to keep format parsing compatible.
                 chars.next();
             }
             _ => break,
@@ -428,6 +438,10 @@ fn format_integer(
         }
     }
 
+    if flags.grouping && base == 10 {
+        digits = group_decimal_digits(&digits);
+    }
+
     apply_width(sign, prefix, digits, flags, width, flags.zero_pad)
 }
 
@@ -471,6 +485,10 @@ fn format_unsigned(
             2 => prefix.push_str("0b"),
             _ => {}
         }
+    }
+
+    if flags.grouping && base == 10 {
+        digits = group_decimal_digits(&digits);
     }
 
     apply_width(String::new(), prefix, digits, flags, width, flags.zero_pad)
@@ -535,6 +553,10 @@ fn format_float(
 
     if alternate && !body.contains('.') && matches!(conversion, 'f' | 'F' | 'g' | 'G') {
         body.push('.');
+    }
+
+    if flags.grouping && matches!(conversion, 'f' | 'F' | 'g' | 'G') {
+        body = group_float_mantissa(&body);
     }
 
     let zero_pad_allowed = flags.zero_pad && !flags.left_align;
@@ -851,6 +873,41 @@ fn to_base_string(mut value: u128, base: u32, uppercase: bool) -> String {
     buf.iter().rev().collect()
 }
 
+fn group_decimal_digits(digits: &str) -> String {
+    if digits.len() <= 3 {
+        return digits.to_string();
+    }
+    let chars: Vec<char> = digits.chars().collect();
+    let mut out = String::with_capacity(digits.len() + (digits.len() - 1) / 3);
+    for (idx, ch) in chars.iter().enumerate() {
+        if idx > 0 && (chars.len() - idx).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(*ch);
+    }
+    out
+}
+
+fn group_float_mantissa(text: &str) -> String {
+    let (mantissa, exponent) = match text.find(['e', 'E']) {
+        Some(idx) => (&text[..idx], &text[idx..]),
+        None => (text, ""),
+    };
+
+    let mut parts = mantissa.splitn(2, '.');
+    let int_part = parts.next().unwrap_or_default();
+    let frac_part = parts.next();
+    let grouped_int = group_decimal_digits(int_part);
+
+    let mut out = grouped_int;
+    if let Some(frac) = frac_part {
+        out.push('.');
+        out.push_str(frac);
+    }
+    out.push_str(exponent);
+    out
+}
+
 /// Extract a printf-style format string from a MATLAB value, validating that it
 /// is a character row vector or string scalar.
 pub fn extract_format_string(value: &Value, context: &str) -> BuiltinResult<String> {
@@ -1044,4 +1101,23 @@ async fn flatten_value(value: Value, output: &mut Vec<Value>, context: &str) -> 
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn format_variadic_supports_thousands_grouping_flag() {
+        let out = format_variadic("%'d %'.2f", &[Value::Num(1234567.0), Value::Num(12345.5)])
+            .expect("grouped formatting should succeed");
+        assert_eq!(out, "1,234,567 12,345.50");
+    }
+
+    #[test]
+    fn format_variadic_consumes_i_flag_without_error() {
+        let out = format_variadic("%Id", &[Value::Int(IntValue::I32(42))])
+            .expect("I flag should be accepted as compatibility no-op");
+        assert_eq!(out, "42");
+    }
 }

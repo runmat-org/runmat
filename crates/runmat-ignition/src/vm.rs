@@ -1929,7 +1929,9 @@ async fn run_interpreter_inner(
                     for instr in &bytecode.instructions[span.start..=span.end] {
                         if matches!(
                             instr,
-                            Instr::StoreIndex(_)
+                            Instr::StoreVar(_)
+                                | Instr::StoreLocal(_)
+                                | Instr::StoreIndex(_)
                                 | Instr::StoreSlice(_, _, _, _)
                                 | Instr::StoreSliceEx(_, _, _, _, _)
                                 | Instr::StoreRangeEnd { .. }

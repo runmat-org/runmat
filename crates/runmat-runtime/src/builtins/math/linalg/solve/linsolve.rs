@@ -1008,6 +1008,7 @@ pub(crate) mod tests {
             .unwrap_or(0)
     }
 
+    #[cfg(feature = "wgpu")]
     fn kernel_launch_count(telemetry: &ProviderTelemetry, kernel: &str) -> usize {
         telemetry
             .kernel_launches

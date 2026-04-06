@@ -175,6 +175,38 @@ fn shared_input_output_name_multi_output_reads_original_input() {
 }
 
 #[test]
+fn fprintf_inline_cast_argument_does_not_stack_underflow() {
+    let program = r#"
+        x = single(3.14);
+        fprintf("Value: %.4f\n", double(x));
+    "#;
+    let hir = lower(&parse(program).unwrap()).unwrap();
+    let result = execute(&hir);
+    assert!(
+        result.is_ok(),
+        "inline cast in fprintf should execute without stack underflow: {result:?}"
+    );
+}
+
+#[test]
+fn sprintf_inline_cast_argument_formats_value() {
+    let program = r#"
+        x = single(3.14);
+        s = sprintf("Value: %.4f", double(x));
+    "#;
+    let hir = lower(&parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).expect("sprintf with inline cast should succeed");
+    assert!(vars.iter().any(|value| {
+        if let runmat_builtins::Value::CharArray(chars) = value {
+            let rendered: String = chars.data.iter().collect();
+            rendered == "Value: 3.1400"
+        } else {
+            false
+        }
+    }));
+}
+
+#[test]
 fn member_get_set_and_method_call_skeleton() {
     let input = "obj = new_object('Point'); obj = setfield(obj, 'x', 3); ax = getfield(obj, 'x');";
     let ast = parse(input).unwrap();
