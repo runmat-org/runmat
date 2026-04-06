@@ -15,14 +15,52 @@
 //! * `peaks(n)`     – n×n Z matrix over the standard [-3,3] grid
 //! * `peaks(X, Y)`  – evaluate at caller-supplied coordinate matrices
 //! * `[X,Y,Z] = peaks(…)` – also return the coordinate matrices
+//!
+//! GPU acceleration
+//! ----------------
+//! When a GPU provider is active the `peaks(n)` and `peaks(X_gpu, Y_gpu)` forms
+//! dispatch to dedicated WGSL compute shaders that evaluate the formula directly
+//! on the device.  The `[X, Y, Z] = peaks(n)` multi-output form constructs X and
+//! Y via the existing meshgrid GPU path and obtains Z from the peaks shader.
 
 use runmat_builtins::{ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
-use crate::builtins::common::tensor;
+use crate::builtins::common::spec::{
+    BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
+    ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
+};
+use crate::builtins::common::{gpu_helpers, tensor};
 
 const DEFAULT_N: usize = 49;
+
+#[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::array::creation::peaks")]
+pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
+    name: "peaks",
+    op_kind: GpuOpKind::Custom("array_construct"),
+    supported_precisions: &[ScalarType::F32, ScalarType::F64],
+    broadcast: BroadcastSemantics::None,
+    provider_hooks: &[ProviderHook::Custom("peaks"), ProviderHook::Custom("peaks_xy")],
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    residency: ResidencyPolicy::NewHandle,
+    nan_mode: ReductionNaN::Include,
+    two_pass_threshold: None,
+    workgroup_size: None,
+    accepts_nan_mode: false,
+    notes: "The peaks(n) and peaks(X,Y) forms dispatch to dedicated WGSL shaders. The host path is used as fallback and for multi-output [X,Y,Z] coordinate grids.",
+};
+
+#[runmat_macros::register_fusion_spec(builtin_path = "crate::builtins::array::creation::peaks")]
+pub const FUSION_SPEC: BuiltinFusionSpec = BuiltinFusionSpec {
+    name: "peaks",
+    shape: ShapeRequirements::Any,
+    constant_strategy: ConstantStrategy::InlineLiteral,
+    elementwise: None,
+    reduction: None,
+    emits_nan: false,
+    notes: "peaks materialises a dense matrix and is not fused with other operations.",
+};
 
 fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("peaks").build()
@@ -46,37 +84,115 @@ async fn peaks_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
 
     match rest.len() {
         // peaks  or  peaks()
-        0 => {
-            let (x_flat, y_flat) = make_axis(DEFAULT_N);
-            let (x_mat, y_mat) = make_grids(&x_flat, &y_flat, DEFAULT_N, DEFAULT_N);
-            let z_mat = compute_z(&x_mat, &y_mat, DEFAULT_N, DEFAULT_N);
-            build_output(x_mat, y_mat, z_mat, DEFAULT_N, DEFAULT_N, out_count)
-        }
+        0 => peaks_from_n(DEFAULT_N, out_count).await,
 
         // peaks(n)
         1 => {
             let n = parse_scalar_n(&rest[0]).await?;
-            let (x_flat, y_flat) = make_axis(n);
-            let (x_mat, y_mat) = make_grids(&x_flat, &y_flat, n, n);
-            let z_mat = compute_z(&x_mat, &y_mat, n, n);
-            build_output(x_mat, y_mat, z_mat, n, n, out_count)
+            peaks_from_n(n, out_count).await
         }
 
         // peaks(X, Y)
-        2 => {
-            let x_mat = gather_tensor(&rest[0]).await?;
-            let y_mat = gather_tensor(&rest[1]).await?;
-            let (rows, cols) = matrix_shape(&x_mat)?;
-            let (y_rows, y_cols) = matrix_shape(&y_mat)?;
-            if rows != y_rows || cols != y_cols {
-                return Err(builtin_error("peaks: X and Y must have the same size"));
-            }
-            let z_mat = compute_z(&x_mat.data, &y_mat.data, rows, cols);
-            build_output(x_mat.data, y_mat.data, z_mat, rows, cols, out_count)
-        }
+        2 => peaks_from_xy(&rest[0], &rest[1], out_count).await,
 
         _ => Err(builtin_error("peaks: expected 0, 1, or 2 input arguments")),
     }
+}
+
+/// Generate the peaks surface for an n×n standard grid, trying the GPU provider first.
+async fn peaks_from_n(n: usize, out_count: Option<usize>) -> crate::BuiltinResult<Value> {
+    let wants_multi = matches!(out_count, Some(2) | Some(3));
+
+    // Single-Z case: try the GPU peaks shader directly.
+    if !wants_multi {
+        if let Some(provider) = runmat_accelerate_api::provider() {
+            if let Ok(handle) = provider.peaks(n) {
+                return Ok(Value::GpuTensor(handle));
+            }
+        }
+    }
+
+    // Host computation (also used for multi-output [X, Y, Z]).
+    let (x_flat, y_flat) = make_axis(n);
+    let (x_mat, y_mat) = make_grids(&x_flat, &y_flat, n, n);
+    let z_mat = compute_z(&x_mat, &y_mat, n, n);
+
+    // For multi-output, try to upload all three matrices to the GPU.
+    if wants_multi {
+        if let Some(provider) = runmat_accelerate_api::provider() {
+            let shape = [n, n];
+            let x_view = runmat_accelerate_api::HostTensorView {
+                data: &x_mat,
+                shape: &shape,
+            };
+            let y_view = runmat_accelerate_api::HostTensorView {
+                data: &y_mat,
+                shape: &shape,
+            };
+            let z_view = runmat_accelerate_api::HostTensorView {
+                data: &z_mat,
+                shape: &shape,
+            };
+            if let (Ok(xh), Ok(yh), Ok(zh)) = (
+                provider.upload(&x_view),
+                provider.upload(&y_view),
+                provider.upload(&z_view),
+            ) {
+                return Ok(match out_count {
+                    Some(3) => Value::OutputList(vec![
+                        Value::GpuTensor(xh),
+                        Value::GpuTensor(yh),
+                        Value::GpuTensor(zh),
+                    ]),
+                    _ => Value::OutputList(vec![Value::GpuTensor(xh), Value::GpuTensor(yh)]),
+                });
+            }
+        }
+    }
+
+    build_output(x_mat, y_mat, z_mat, n, n, out_count)
+}
+
+/// Evaluate the peaks formula at caller-supplied X and Y values.
+async fn peaks_from_xy(
+    x_val: &Value,
+    y_val: &Value,
+    out_count: Option<usize>,
+) -> crate::BuiltinResult<Value> {
+    // GPU fast path: both inputs already on device.
+    if let (Value::GpuTensor(x_handle), Value::GpuTensor(y_handle)) = (x_val, y_val) {
+        if let Some(provider) = runmat_accelerate_api::provider() {
+            if let Ok(z_handle) = provider.peaks_xy(x_handle, y_handle) {
+                return match out_count {
+                    Some(3) => Ok(Value::OutputList(vec![
+                        Value::GpuTensor(x_handle.clone()),
+                        Value::GpuTensor(y_handle.clone()),
+                        Value::GpuTensor(z_handle),
+                    ])),
+                    Some(2) => Ok(Value::OutputList(vec![
+                        Value::GpuTensor(x_handle.clone()),
+                        Value::GpuTensor(y_handle.clone()),
+                    ])),
+                    _ => Ok(Value::GpuTensor(z_handle)),
+                };
+            }
+        }
+        // Provider absent or failed: gather to host and continue.
+        let x_tensor = gpu_helpers::gather_tensor_async(x_handle).await?;
+        let y_tensor = gpu_helpers::gather_tensor_async(y_handle).await?;
+        validate_xy_shapes(&x_tensor, &y_tensor)?;
+        let (rows, cols) = matrix_shape(&x_tensor)?;
+        let z_mat = compute_z(&x_tensor.data, &y_tensor.data, rows, cols);
+        return build_output(x_tensor.data, y_tensor.data, z_mat, rows, cols, out_count);
+    }
+
+    // Host path.
+    let x_tensor = gather_tensor(x_val).await?;
+    let y_tensor = gather_tensor(y_val).await?;
+    validate_xy_shapes(&x_tensor, &y_tensor)?;
+    let (rows, cols) = matrix_shape(&x_tensor)?;
+    let z_mat = compute_z(&x_tensor.data, &y_tensor.data, rows, cols);
+    build_output(x_tensor.data, y_tensor.data, z_mat, rows, cols, out_count)
 }
 
 // ---------------------------------------------------------------------------
@@ -220,6 +336,13 @@ fn matrix_shape(tensor: &Tensor) -> crate::BuiltinResult<(usize, usize)> {
     }
 }
 
+fn validate_xy_shapes(x: &Tensor, y: &Tensor) -> crate::BuiltinResult<()> {
+    if x.shape != y.shape {
+        return Err(builtin_error("peaks: X and Y must have the same size"));
+    }
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -331,5 +454,204 @@ mod tests {
     fn peaks_negative_n_errors() {
         let err = peaks_builtin(vec![Value::Num(-1.0)]).unwrap_err();
         assert!(err.to_string().contains("non-negative"));
+    }
+
+    // -----------------------------------------------------------------------
+    // GPU parity tests
+    //
+    // The simple_provider used by with_test_provider has no GPU compute; it
+    // stores tensors in a host HashMap.  Calling provider.peaks(n) returns Err
+    // from that provider, so peaks_from_n falls back to the host path — meaning
+    // with_test_provider tests would silently compare CPU against CPU.
+    //
+    // The wgpu-gated tests below call provider.peaks / provider.peaks_xy
+    // *directly*, so we know for certain we are exercising the WGSL shader.
+    // CPU reference values come from the host peaks_at / compute_z functions.
+    // -----------------------------------------------------------------------
+
+    #[cfg(feature = "wgpu")]
+    mod wgpu_parity {
+        use super::*;
+        use crate::builtins::common::test_support;
+        use runmat_accelerate::backend::wgpu::provider::{
+            register_wgpu_provider, WgpuProviderOptions,
+        };
+        use runmat_accelerate_api::{AccelProvider, HostTensorView, ProviderPrecision};
+
+        fn wgpu_provider() -> &'static dyn AccelProvider {
+            register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu provider");
+            runmat_accelerate_api::provider().expect("provider registered")
+        }
+
+        fn tol(provider: &dyn AccelProvider) -> f64 {
+            match provider.precision() {
+                ProviderPrecision::F64 => 1e-10,
+                ProviderPrecision::F32 => 1e-4,
+            }
+        }
+
+        fn gather_handle(
+            handle: runmat_accelerate_api::GpuTensorHandle,
+        ) -> runmat_builtins::Tensor {
+            test_support::gather(Value::GpuTensor(handle)).expect("gather")
+        }
+
+        /// peaks(n) shader matches host for n ∈ {1, 3, 7, 10, 20, 49}.
+        /// Calls provider.peaks() directly so there is no silent fallback.
+        #[test]
+        fn peaks_wgpu_parity_n() {
+            let provider = wgpu_provider();
+            let tol = tol(provider);
+
+            for &n in &[1usize, 3, 7, 10, 20, 49] {
+                let (x_flat, y_flat) = make_axis(n);
+                let (x_mat, y_mat) = make_grids(&x_flat, &y_flat, n, n);
+                let z_ref = compute_z(&x_mat, &y_mat, n, n);
+
+                let handle = provider
+                    .peaks(n)
+                    .unwrap_or_else(|e| panic!("provider.peaks({n}) failed: {e}"));
+                let t = gather_handle(handle);
+
+                assert_eq!(t.shape, vec![n, n], "shape mismatch for n={n}");
+                for (i, (&gv, &cv)) in t.data.iter().zip(z_ref.iter()).enumerate() {
+                    let err = (gv - cv).abs();
+                    assert!(
+                        err <= tol,
+                        "n={n} row={} col={}: gpu={gv:.8e} cpu={cv:.8e} err={err:.2e}",
+                        i % n,
+                        i / n,
+                    );
+                }
+            }
+        }
+
+        /// peaks(0) produces an empty tensor without panicking.
+        #[test]
+        fn peaks_wgpu_empty() {
+            let provider = wgpu_provider();
+            let handle = provider.peaks(0).expect("peaks(0)");
+            let t = gather_handle(handle);
+            assert_eq!(t.shape, vec![0, 0]);
+            assert!(t.data.is_empty());
+        }
+
+        /// peaks_xy shader matches host at coordinates spanning the interesting
+        /// region: corners, origin, saddle points, and near the main peak.
+        /// Calls provider.peaks_xy() directly — no silent fallback possible.
+        #[test]
+        fn peaks_wgpu_xy_parity() {
+            let provider = wgpu_provider();
+            let tol = tol(provider);
+
+            let x_data: Vec<f64> = vec![
+                -3.0, 0.0, 3.0, -3.0, 0.0, 3.0, -1.0, 0.5, 1.5, -2.5, 2.5, 0.0,
+            ];
+            let y_data: Vec<f64> = vec![
+                -3.0, -3.0, -3.0, 3.0, 3.0, 3.0, -1.0, -0.5, 1.0, 0.0, 0.0, 0.5,
+            ];
+            let n = x_data.len();
+            let shape = [1usize, n];
+
+            let z_ref: Vec<f64> = x_data
+                .iter()
+                .zip(y_data.iter())
+                .map(|(&x, &y)| peaks_at(x, y))
+                .collect();
+
+            let x_handle = provider
+                .upload(&HostTensorView {
+                    data: &x_data,
+                    shape: &shape,
+                })
+                .expect("upload x");
+            let y_handle = provider
+                .upload(&HostTensorView {
+                    data: &y_data,
+                    shape: &shape,
+                })
+                .expect("upload y");
+
+            let z_handle = provider
+                .peaks_xy(&x_handle, &y_handle)
+                .expect("provider.peaks_xy");
+            let t = gather_handle(z_handle);
+
+            assert_eq!(t.shape, shape.to_vec());
+            for (i, (&gv, &cv)) in t.data.iter().zip(z_ref.iter()).enumerate() {
+                let err = (gv - cv).abs();
+                assert!(
+                    err <= tol,
+                    "peaks_xy idx={i} x={} y={}: gpu={gv:.8e} cpu={cv:.8e} err={err:.2e}",
+                    x_data[i],
+                    y_data[i],
+                );
+            }
+        }
+
+        /// peaks_xy with empty tensors produces an empty result without panicking.
+        #[test]
+        fn peaks_wgpu_xy_empty() {
+            let provider = wgpu_provider();
+            let empty: &[f64] = &[];
+            let shape = [0usize, 0];
+            let x_handle = provider
+                .upload(&HostTensorView {
+                    data: empty,
+                    shape: &shape,
+                })
+                .expect("upload x");
+            let y_handle = provider
+                .upload(&HostTensorView {
+                    data: empty,
+                    shape: &shape,
+                })
+                .expect("upload y");
+            let z_handle = provider
+                .peaks_xy(&x_handle, &y_handle)
+                .expect("peaks_xy empty");
+            let t = gather_handle(z_handle);
+            assert!(t.data.is_empty());
+        }
+
+        /// End-to-end: peaks_builtin(n) dispatches to GPU and returns a GpuTensor
+        /// — confirms there is no silent host fallback.
+        #[test]
+        fn peaks_builtin_returns_gpu_tensor() {
+            register_wgpu_provider(WgpuProviderOptions::default()).expect("wgpu provider");
+            let value = peaks_builtin(vec![Value::Num(10.0)]).expect("peaks");
+            assert!(
+                matches!(value, Value::GpuTensor(_)),
+                "expected GpuTensor from peaks(10), got {value:?}"
+            );
+        }
+
+        /// End-to-end: peaks_builtin(X_gpu, Y_gpu) dispatches to GPU.
+        #[test]
+        fn peaks_builtin_xy_returns_gpu_tensor() {
+            let provider = wgpu_provider();
+            let x_data = [0.0f64, 1.0, -1.0];
+            let y_data = [0.0f64, 0.5, -0.5];
+            let shape = [1usize, 3];
+            let x_handle = provider
+                .upload(&HostTensorView {
+                    data: &x_data,
+                    shape: &shape,
+                })
+                .expect("upload x");
+            let y_handle = provider
+                .upload(&HostTensorView {
+                    data: &y_data,
+                    shape: &shape,
+                })
+                .expect("upload y");
+
+            let value = peaks_builtin(vec![Value::GpuTensor(x_handle), Value::GpuTensor(y_handle)])
+                .expect("peaks xy");
+            assert!(
+                matches!(value, Value::GpuTensor(_)),
+                "expected GpuTensor from peaks(X_gpu, Y_gpu), got {value:?}"
+            );
+        }
     }
 }
