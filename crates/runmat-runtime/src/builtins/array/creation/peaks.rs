@@ -23,7 +23,8 @@
 //! on the device.  The `[X, Y, Z] = peaks(n)` multi-output form constructs X and
 //! Y via the existing meshgrid GPU path and obtains Z from the peaks shader.
 
-use runmat_builtins::{ResolveContext, Tensor, Type, Value};
+use runmat_builtins::shape_rules::element_count_if_known;
+use runmat_builtins::{LiteralValue, ResolveContext, Tensor, Type, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::build_runtime_error;
@@ -66,8 +67,107 @@ fn builtin_error(message: impl Into<String>) -> crate::RuntimeError {
     build_runtime_error(message).with_builtin("peaks").build()
 }
 
-fn peaks_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
-    Type::tensor()
+fn peaks_type(args: &[Type], ctx: &ResolveContext) -> Type {
+    match args {
+        [] => Type::tensor_with_shape(vec![DEFAULT_N, DEFAULT_N]),
+        [arg] => peaks_n_type(arg, ctx),
+        [x, y] => peaks_xy_type(x, y),
+        _ => Type::Unknown,
+    }
+}
+
+fn peaks_n_type(arg: &Type, ctx: &ResolveContext) -> Type {
+    if let Some(n) = peaks_literal_n(ctx) {
+        return Type::Tensor {
+            shape: Some(vec![Some(n), Some(n)]),
+        };
+    }
+
+    match arg {
+        Type::Num | Type::Int | Type::Bool => Type::Tensor {
+            shape: Some(vec![None, None]),
+        },
+        Type::Tensor { shape: Some(shape) } | Type::Logical { shape: Some(shape) } => {
+            let element_count = element_count_if_known(shape);
+            if element_count != Some(1) && element_count.is_some() {
+                Type::Unknown
+            } else {
+                Type::Tensor {
+                    shape: Some(vec![None, None]),
+                }
+            }
+        }
+        Type::Tensor { shape: None } | Type::Logical { shape: None } => Type::Tensor {
+            shape: Some(vec![None, None]),
+        },
+        Type::Unknown => Type::Unknown,
+        _ => Type::Unknown,
+    }
+}
+
+fn peaks_xy_type(x: &Type, y: &Type) -> Type {
+    let Some(x_shape) = peaks_xy_input_shape(x) else {
+        return Type::Unknown;
+    };
+    let Some(y_shape) = peaks_xy_input_shape(y) else {
+        return Type::Unknown;
+    };
+    let Some(shape) = same_size_shape(&x_shape, &y_shape) else {
+        return Type::Unknown;
+    };
+    Type::Tensor { shape: Some(shape) }
+}
+
+fn peaks_literal_n(ctx: &ResolveContext) -> Option<usize> {
+    match ctx.literal_args.first() {
+        Some(LiteralValue::Number(value)) => {
+            if !value.is_finite() {
+                return None;
+            }
+            let rounded = value.round();
+            if rounded < 0.0 || (rounded - value).abs() > 1e-9 {
+                return None;
+            }
+            Some(rounded as usize)
+        }
+        Some(LiteralValue::Bool(value)) => Some(usize::from(*value)),
+        _ => None,
+    }
+}
+
+fn peaks_xy_input_shape(ty: &Type) -> Option<Vec<Option<usize>>> {
+    match ty {
+        Type::Num => Some(vec![Some(1), Some(1)]),
+        Type::Tensor { shape: Some(shape) } => peaks_matrix_shape(shape),
+        Type::Tensor { shape: None } => Some(vec![None, None]),
+        Type::Unknown => Some(vec![None, None]),
+        _ => None,
+    }
+}
+
+fn peaks_matrix_shape(shape: &[Option<usize>]) -> Option<Vec<Option<usize>>> {
+    match shape {
+        [] => Some(vec![Some(1), Some(1)]),
+        [n] => Some(vec![Some(1), *n]),
+        [rows, cols] => Some(vec![*rows, *cols]),
+        _ => None,
+    }
+}
+
+fn same_size_shape(lhs: &[Option<usize>], rhs: &[Option<usize>]) -> Option<Vec<Option<usize>>> {
+    if lhs.len() != rhs.len() {
+        return None;
+    }
+
+    let mut out = Vec::with_capacity(lhs.len());
+    for (left, right) in lhs.iter().zip(rhs.iter()) {
+        match (left, right) {
+            (Some(a), Some(b)) if a != b => return None,
+            (Some(a), _) | (_, Some(a)) => out.push(Some(*a)),
+            (None, None) => out.push(None),
+        }
+    }
+    Some(out)
 }
 
 #[runtime_builtin(
@@ -384,40 +484,34 @@ fn validate_xy_shapes(x: &Tensor, y: &Tensor) -> crate::BuiltinResult<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::common::test_support;
     use futures::executor::block_on;
 
     fn peaks_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::peaks_builtin(rest))
     }
 
+    fn gather_result(value: Value) -> Tensor {
+        test_support::gather(value).expect("gather")
+    }
+
     #[test]
     fn peaks_default_shape() {
-        let value = peaks_builtin(vec![]).expect("peaks");
-        match value {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![49, 49]),
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        let gathered = gather_result(peaks_builtin(vec![]).expect("peaks"));
+        assert_eq!(gathered.shape, vec![49, 49]);
     }
 
     #[test]
     fn peaks_n_shape() {
-        let value = peaks_builtin(vec![Value::Num(20.0)]).expect("peaks");
-        match value {
-            Value::Tensor(t) => assert_eq!(t.shape, vec![20, 20]),
-            other => panic!("expected tensor, got {other:?}"),
-        }
+        let gathered = gather_result(peaks_builtin(vec![Value::Num(20.0)]).expect("peaks"));
+        assert_eq!(gathered.shape, vec![20, 20]);
     }
 
     #[test]
     fn peaks_zero_is_empty() {
-        let value = peaks_builtin(vec![Value::Num(0.0)]).expect("peaks");
-        match value {
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![0, 0]);
-                assert!(t.data.is_empty());
-            }
-            other => panic!("expected empty tensor, got {other:?}"),
-        }
+        let gathered = gather_result(peaks_builtin(vec![Value::Num(0.0)]).expect("peaks"));
+        assert_eq!(gathered.shape, vec![0, 0]);
+        assert!(gathered.data.is_empty());
     }
 
     #[test]
@@ -425,15 +519,9 @@ mod tests {
         // At n=1 the single grid point maps to the stop endpoint (x=3, y=3).
         // tensor_into_value may collapse a 1×1 tensor to Value::Num.
         let expected = peaks_at(3.0, 3.0);
-        let value = peaks_builtin(vec![Value::Num(1.0)]).expect("peaks");
-        let got = match value {
-            Value::Num(v) => v,
-            Value::Tensor(t) => {
-                assert_eq!(t.shape, vec![1, 1]);
-                t.data[0]
-            }
-            other => panic!("expected scalar or 1×1 tensor, got {other:?}"),
-        };
+        let gathered = gather_result(peaks_builtin(vec![Value::Num(1.0)]).expect("peaks"));
+        assert_eq!(gathered.shape, vec![1, 1]);
+        let got = gathered.data[0];
         assert!((got - expected).abs() < 1e-12);
     }
 
@@ -508,6 +596,74 @@ mod tests {
         assert!(
             err.to_string().contains("too large"),
             "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn peaks_type_defaults_to_49_square() {
+        assert_eq!(
+            peaks_type(&[], &ResolveContext::new(Vec::new())),
+            Type::Tensor {
+                shape: Some(vec![Some(49), Some(49)]),
+            }
+        );
+    }
+
+    #[test]
+    fn peaks_type_uses_literal_n() {
+        let ctx = ResolveContext::new(vec![LiteralValue::Number(20.0)]);
+        assert_eq!(
+            peaks_type(&[Type::Num], &ctx),
+            Type::Tensor {
+                shape: Some(vec![Some(20), Some(20)]),
+            }
+        );
+    }
+
+    #[test]
+    fn peaks_type_unknown_scalar_n_still_infers_matrix_rank() {
+        assert_eq!(
+            peaks_type(&[Type::Num], &ResolveContext::new(Vec::new())),
+            Type::Tensor {
+                shape: Some(vec![None, None]),
+            }
+        );
+    }
+
+    #[test]
+    fn peaks_type_propagates_xy_matrix_shape() {
+        let xy = Type::Tensor {
+            shape: Some(vec![Some(3), Some(4)]),
+        };
+        assert_eq!(
+            peaks_type(&[xy.clone(), xy], &ResolveContext::new(Vec::new())),
+            Type::Tensor {
+                shape: Some(vec![Some(3), Some(4)]),
+            }
+        );
+    }
+
+    #[test]
+    fn peaks_type_normalizes_xy_vectors_to_row_matrix() {
+        let xy = Type::Tensor {
+            shape: Some(vec![Some(5)]),
+        };
+        assert_eq!(
+            peaks_type(&[xy.clone(), xy], &ResolveContext::new(Vec::new())),
+            Type::Tensor {
+                shape: Some(vec![Some(1), Some(5)]),
+            }
+        );
+    }
+
+    #[test]
+    fn peaks_type_rejects_known_nonscalar_n_input() {
+        let matrix = Type::Tensor {
+            shape: Some(vec![Some(2), Some(2)]),
+        };
+        assert_eq!(
+            peaks_type(&[matrix], &ResolveContext::new(Vec::new())),
+            Type::Unknown
         );
     }
 
