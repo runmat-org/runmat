@@ -37,7 +37,6 @@ export default function Hero() {
               muted
               loop
               playsInline
-              fetchPriority="high"
               poster="https://web.runmatstatic.com/video/posters/runmat-wave-simulation.webp"
               aria-label="RunMat wave simulation demo"
             >
