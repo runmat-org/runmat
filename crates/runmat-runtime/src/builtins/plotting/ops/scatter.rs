@@ -576,7 +576,7 @@ pub(crate) mod tests {
     };
     use super::*;
     use crate::builtins::plotting::state::current_axes_handle_for_figure;
-    use crate::builtins::plotting::tests::ensure_plot_test_env;
+    use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
     use crate::builtins::plotting::{
         clear_figure, clone_figure, configure_subplot, current_figure_handle,
         reset_hold_state_for_run,
@@ -726,6 +726,7 @@ pub(crate) mod tests {
 
     #[test]
     fn scatter_accepts_scalar_point() {
+        let _guard = lock_plot_registry();
         setup_plot_tests();
         let _ = scatter_builtin(Value::Num(1.0), Value::Num(2.0), Vec::new());
         let fig = clone_figure(current_figure_handle()).unwrap();
