@@ -6,9 +6,18 @@ import { Card, CardContent } from "@/components/ui/card";
 import { SiGithub } from "react-icons/si";
 import { Users, GitBranch, Camera, Lock, Shield, Eye, ClipboardCheck, Cpu, Monitor, HardDrive } from "lucide-react";
 
-import MatlabCodeCard from "@/components/MatlabCodeCard";
+import dynamic from "next/dynamic";
 import Hero from "@/components/Hero";
-import BenchmarkShowcaseBlock from "@/components/benchmarks/BenchmarkShowcaseBlock";
+import LazyVideo from "@/components/LazyVideo";
+
+const MatlabCodeCard = dynamic(() => import("@/components/MatlabCodeCard"), {
+  loading: () => <div className="w-full max-w-3xl h-[120px] rounded-3xl bg-muted/40 animate-pulse" />,
+});
+
+const BenchmarkShowcaseBlock = dynamic(
+  () => import("@/components/benchmarks/BenchmarkShowcaseBlock"),
+  { loading: () => <div className="w-full h-[300px] rounded-xl bg-muted/40 animate-pulse" /> },
+);
 
 const jsonLd = {
   "@context": "https://schema.org",
@@ -101,7 +110,7 @@ const jsonLd = {
       "@id": "https://runmat.com/#hero-video",
       "name": "RunMat wave interference simulation",
       "description": "GPU-accelerated wave interference simulation rendered in real time using RunMat's surf() function.",
-      "thumbnailUrl": "https://web.runmatstatic.com/video/posters/runmat-wave-simulation.png",
+      "thumbnailUrl": "https://web.runmatstatic.com/video/posters/runmat-wave-simulation.webp",
       "contentUrl": "https://web.runmatstatic.com/video/runmat-wave-simulation.mp4",
       "uploadDate": "2026-03-03T00:00:00Z",
       "duration": "PT10S"
@@ -204,17 +213,16 @@ export default function HomePage() {
           <div className="mx-auto max-w-3xl">
             <div className="rounded-xl border border-border overflow-hidden elevated-panel">
               <Link href="/sandbox" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-b-none rounded-t-xl overflow-hidden">
-                <video
+                <LazyVideo
                   className="w-full h-auto"
-                  autoPlay
                   muted
                   loop
                   playsInline
-                  poster="https://web.runmatstatic.com/video/posters/3d-interactive-plotting-runmat.png"
+                  poster="https://web.runmatstatic.com/video/posters/3d-interactive-plotting-runmat.webp"
                   aria-label="RunMat 3D interactive plotting demo"
                 >
                   <source src="https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.mp4" type="video/mp4" />
-                </video>
+                </LazyVideo>
               </Link>
             </div>
           </div>
@@ -308,17 +316,16 @@ export default function HomePage() {
           <div className="mx-auto max-w-3xl">
             <div className="rounded-xl border border-border overflow-hidden elevated-panel">
               <Link href="/sandbox" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-b-none rounded-t-xl overflow-hidden">
-                <video
+                <LazyVideo
                   className="w-full h-auto"
-                  autoPlay
                   muted
                   loop
                   playsInline
-                  poster="https://web.runmatstatic.com/video/posters/runmat-shape-tracking.png"
+                  poster="https://web.runmatstatic.com/video/posters/runmat-shape-tracking.webp"
                   aria-label="RunMat shape tracking and type system demo"
                 >
                   <source src="https://web.runmatstatic.com/video/runmat-shape-tracking.mp4" type="video/mp4" />
-                </video>
+                </LazyVideo>
               </Link>
             </div>
           </div>
@@ -341,17 +348,16 @@ export default function HomePage() {
               href="/sandbox"
               className="rounded-2xl border border-border overflow-hidden min-h-[380px] md:row-span-3 bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
-              <video
+              <LazyVideo
                 className="w-full h-full min-h-[380px] object-cover object-left-top"
-                autoPlay
                 muted
                 loop
                 playsInline
-                poster="https://web.runmatstatic.com/video/posters/runmat-versioning.png"
+                poster="https://web.runmatstatic.com/video/posters/runmat-versioning.webp"
                 aria-label="RunMat versioning demo"
               >
                 <source src="https://web.runmatstatic.com/video/runmat-versioning.mp4" type="video/mp4" />
-              </video>
+              </LazyVideo>
             </Link>
             <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
               <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
