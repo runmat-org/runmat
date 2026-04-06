@@ -10,7 +10,6 @@ import dynamic from "next/dynamic";
 import Hero from "@/components/Hero";
 
 const MatlabCodeCard = dynamic(() => import("@/components/MatlabCodeCard"), {
-  ssr: false,
   loading: () => <div className="w-full max-w-3xl h-[120px] rounded-3xl bg-muted/40 animate-pulse" />,
 });
 
