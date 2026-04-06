@@ -1137,8 +1137,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var x: f64;
     var y: f64;
     if n == 1u {
-        x = 0.0;
-        y = 0.0;
+        x = 3.0;
+        y = 3.0;
     } else {
         let nm1 = f64(n - 1u);
         x = -3.0 + 6.0 * f64(col) / nm1;
@@ -1192,8 +1192,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     var x: f32;
     var y: f32;
     if n == 1u {
-        x = 0.0;
-        y = 0.0;
+        x = 3.0;
+        y = 3.0;
     } else {
         let nm1 = f32(n - 1u);
         x = -3.0 + 6.0 * f32(col) / nm1;
