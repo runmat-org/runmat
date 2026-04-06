@@ -64,7 +64,11 @@ export const trackWebsiteEvent = (event: string, properties: WebsiteEventPropert
     window.gtag('event', canonicalEvent, payload);
   }
   if (typeof window !== 'undefined') {
-    posthog.capture(canonicalEvent, payload);
+    try {
+      posthog.capture(canonicalEvent, payload);
+    } catch {
+      // PostHog may not be initialized (e.g. missing POSTHOG_KEY) — never break callers
+    }
   }
 };
 
