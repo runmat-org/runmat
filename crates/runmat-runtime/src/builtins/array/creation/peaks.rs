@@ -192,6 +192,19 @@ async fn peaks_from_xy(
         return build_output(x_tensor.data, y_tensor.data, z_mat, rows, cols, out_count);
     }
 
+    // Mixed-residency: at least one input is a GpuTensor but not both (the
+    // both-GPU case was handled above).  Gather whichever side is on the device
+    // so the host formula can run.  Emit a targeted error when gathering fails
+    // rather than letting the type-match below produce a confusing message.
+    if matches!(x_val, Value::GpuTensor(_)) || matches!(y_val, Value::GpuTensor(_)) {
+        let x_tensor = gather_tensor_or_gpu(x_val).await?;
+        let y_tensor = gather_tensor_or_gpu(y_val).await?;
+        validate_xy_shapes(&x_tensor, &y_tensor)?;
+        let (rows, cols) = matrix_shape(&x_tensor)?;
+        let z_mat = compute_z(&x_tensor.data, &y_tensor.data, rows, cols);
+        return build_output(x_tensor.data, y_tensor.data, z_mat, rows, cols, out_count);
+    }
+
     // Host path.
     let x_tensor = gather_tensor(x_val).await?;
     let y_tensor = gather_tensor(y_val).await?;
@@ -334,6 +347,18 @@ async fn gather_tensor(value: &Value) -> crate::BuiltinResult<Tensor> {
             Tensor::new(vec![*v], vec![1, 1]).map_err(|e| builtin_error(format!("peaks: {e}")))
         }
         _ => Err(builtin_error("peaks: X and Y must be numeric matrices")),
+    }
+}
+
+/// Like [`gather_tensor`] but also handles `Value::GpuTensor` by copying the
+/// device buffer back to the host.  Used for the mixed-residency path in
+/// [`peaks_from_xy`] where only one of the two inputs lives on the GPU.
+async fn gather_tensor_or_gpu(value: &Value) -> crate::BuiltinResult<Tensor> {
+    match value {
+        Value::GpuTensor(handle) => gpu_helpers::gather_tensor_async(handle)
+            .await
+            .map_err(|e| builtin_error(format!("peaks: could not gather GPU tensor to host: {e}"))),
+        other => gather_tensor(other).await,
     }
 }
 
