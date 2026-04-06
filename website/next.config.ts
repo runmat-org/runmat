@@ -2,8 +2,7 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   // Allow API routes to run on Vercel (no static export)
-  images: { 
-    unoptimized: true,
+  images: {
     remotePatterns: [
       {
         protocol: 'https',
@@ -12,7 +11,7 @@ const nextConfig: NextConfig = {
     ],
   },
   experimental: {
-    optimizePackageImports: ["lucide-react"],
+    optimizePackageImports: ["lucide-react", "react-icons"],
   },
   // Ensure Markdown files living outside the website/ dir are traced for SSG/SSR on Vercel
   outputFileTracingIncludes: {

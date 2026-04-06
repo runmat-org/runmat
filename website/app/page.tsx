@@ -6,9 +6,18 @@ import { Card, CardContent } from "@/components/ui/card";
 import { SiGithub } from "react-icons/si";
 import { Users, GitBranch, Camera, Lock, Shield, Eye, ClipboardCheck, Cpu, Monitor, HardDrive } from "lucide-react";
 
-import MatlabCodeCard from "@/components/MatlabCodeCard";
+import dynamic from "next/dynamic";
 import Hero from "@/components/Hero";
-import BenchmarkShowcaseBlock from "@/components/benchmarks/BenchmarkShowcaseBlock";
+
+const MatlabCodeCard = dynamic(() => import("@/components/MatlabCodeCard"), {
+  ssr: false,
+  loading: () => <div className="w-full max-w-3xl h-[120px] rounded-3xl bg-muted/40 animate-pulse" />,
+});
+
+const BenchmarkShowcaseBlock = dynamic(
+  () => import("@/components/benchmarks/BenchmarkShowcaseBlock"),
+  { loading: () => <div className="w-full h-[300px] rounded-xl bg-muted/40 animate-pulse" /> },
+);
 
 const jsonLd = {
   "@context": "https://schema.org",
@@ -101,7 +110,7 @@ const jsonLd = {
       "@id": "https://runmat.com/#hero-video",
       "name": "RunMat wave interference simulation",
       "description": "GPU-accelerated wave interference simulation rendered in real time using RunMat's surf() function.",
-      "thumbnailUrl": "https://web.runmatstatic.com/video/posters/runmat-wave-simulation.png",
+      "thumbnailUrl": "https://web.runmatstatic.com/video/posters/runmat-wave-simulation.webp",
       "contentUrl": "https://web.runmatstatic.com/video/runmat-wave-simulation.mp4",
       "uploadDate": "2026-03-03T00:00:00Z",
       "duration": "PT10S"
@@ -210,7 +219,8 @@ export default function HomePage() {
                   muted
                   loop
                   playsInline
-                  poster="https://web.runmatstatic.com/video/posters/3d-interactive-plotting-runmat.png"
+                  preload="none"
+                  poster="https://web.runmatstatic.com/video/posters/3d-interactive-plotting-runmat.webp"
                   aria-label="RunMat 3D interactive plotting demo"
                 >
                   <source src="https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.mp4" type="video/mp4" />
@@ -314,7 +324,8 @@ export default function HomePage() {
                   muted
                   loop
                   playsInline
-                  poster="https://web.runmatstatic.com/video/posters/runmat-shape-tracking.png"
+                  preload="none"
+                  poster="https://web.runmatstatic.com/video/posters/runmat-shape-tracking.webp"
                   aria-label="RunMat shape tracking and type system demo"
                 >
                   <source src="https://web.runmatstatic.com/video/runmat-shape-tracking.mp4" type="video/mp4" />
@@ -347,7 +358,8 @@ export default function HomePage() {
                 muted
                 loop
                 playsInline
-                poster="https://web.runmatstatic.com/video/posters/runmat-versioning.png"
+                preload="none"
+                poster="https://web.runmatstatic.com/video/posters/runmat-versioning.webp"
                 aria-label="RunMat versioning demo"
               >
                 <source src="https://web.runmatstatic.com/video/runmat-versioning.mp4" type="video/mp4" />
