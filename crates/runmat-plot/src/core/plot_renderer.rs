@@ -70,6 +70,9 @@ pub struct PlotRenderer {
 
     /// If false, do not auto-fit camera when the figure updates (user has interacted).
     camera_auto_fit: bool,
+    /// Per-axes 2D camera ownership. True means the user has interacted and automatic 2D refits
+    /// should not overwrite the camera during ordinary figure updates.
+    axes_2d_camera_user_controlled: Vec<bool>,
     /// Per-node GPU buffer cache for stable interactive redraws.
     scene_buffer_cache: RefCell<HashMap<u64, CachedSceneBuffers>>,
 }
@@ -255,6 +258,7 @@ impl PlotRenderer {
             last_scene_viewport_px: None,
             last_axes_plot_sizes_px: None,
             camera_auto_fit: true,
+            axes_2d_camera_user_controlled: vec![false],
             scene_buffer_cache: RefCell::new(HashMap::new()),
         })
     }
@@ -290,6 +294,28 @@ impl PlotRenderer {
         self.camera_auto_fit = false;
     }
 
+    pub fn note_axes_camera_interaction(&mut self, axes_index: usize) {
+        self.note_camera_interaction();
+        if self.axes_has_3d_content(axes_index) {
+            return;
+        }
+        if let Some(flag) = self.axes_2d_camera_user_controlled.get_mut(axes_index) {
+            *flag = true;
+        }
+    }
+
+    fn clear_axes_camera_interaction(&mut self, axes_index: usize) {
+        if let Some(flag) = self.axes_2d_camera_user_controlled.get_mut(axes_index) {
+            *flag = false;
+        }
+    }
+
+    fn clear_all_axes_camera_interaction(&mut self) {
+        for flag in &mut self.axes_2d_camera_user_controlled {
+            *flag = false;
+        }
+    }
+
     /// Set the figure to render
     pub fn set_figure(&mut self, figure: Figure) {
         // Clear existing scene
@@ -307,6 +333,7 @@ impl PlotRenderer {
         if self.axes_cameras.len() != num_axes {
             self.axes_cameras
                 .resize_with(num_axes, Self::create_default_camera);
+            self.axes_2d_camera_user_controlled.resize(num_axes, false);
             self.camera_auto_fit = true;
         }
 
@@ -328,6 +355,7 @@ impl PlotRenderer {
                 } else {
                     Self::create_default_camera()
                 };
+                self.clear_axes_camera_interaction(axes_index);
                 self.camera_auto_fit = true;
             }
         }
@@ -445,6 +473,14 @@ impl PlotRenderer {
     fn refit_2d_cameras_to_scene_bounds(&mut self) {
         for idx in 0..self.axes_cameras.len() {
             if self.axes_has_3d_content(idx) {
+                continue;
+            }
+            if self
+                .axes_2d_camera_user_controlled
+                .get(idx)
+                .copied()
+                .unwrap_or(false)
+            {
                 continue;
             }
             let Some((x_min, x_max, y_min, y_max)) = self.display_bounds_for_axes(idx) else {
@@ -761,6 +797,7 @@ impl PlotRenderer {
         } else {
             self.fit_camera_to_data()
         };
+        self.clear_all_axes_camera_interaction();
         self.camera_auto_fit = false;
         self.needs_update = true;
     }
@@ -814,6 +851,7 @@ impl PlotRenderer {
                 *c = cam;
             }
         }
+        self.clear_all_axes_camera_interaction();
         self.camera_auto_fit = false;
         self.needs_update = true;
     }
@@ -1261,7 +1299,16 @@ impl PlotRenderer {
         let start_time = Instant::now();
         let (rows, cols) = self.figure_axes_grid();
         let axes_count = rows.saturating_mul(cols);
+        log::debug!(
+            "runmat-plot: renderer.scene_to_target.start rows={} cols={} axes_count={} width={} height={}",
+            rows,
+            cols,
+            axes_count,
+            config.width,
+            config.height
+        );
         if axes_count <= 1 {
+            log::debug!("runmat-plot: renderer.scene_to_target.branch_single_axes");
             return self.render(
                 encoder,
                 RenderTarget {
@@ -1274,6 +1321,10 @@ impl PlotRenderer {
 
         let viewports =
             Self::compute_tiled_viewports(config.width.max(1), config.height.max(1), rows, cols);
+        log::debug!(
+            "runmat-plot: renderer.scene_to_target.branch_subplot_axes viewports={}",
+            viewports.len()
+        );
         self.render_axes_to_viewports(
             encoder,
             target_view,
@@ -1336,6 +1387,15 @@ impl PlotRenderer {
         axes_index: usize,
         clear_background: bool,
     ) -> Result<RenderResult, Box<dyn std::error::Error>> {
+        log::debug!(
+            "runmat-plot: renderer.camera_to_viewport.start axes_index={} viewport=({}, {}, {}, {}) clear_background={}",
+            axes_index,
+            viewport_scissor.0,
+            viewport_scissor.1,
+            viewport_scissor.2,
+            viewport_scissor.3,
+            clear_background
+        );
         let use_msaa = config.msaa_samples.max(1) > 1;
         self.wgpu_renderer.ensure_msaa(config.msaa_samples);
         let msaa_view_keepalive = if use_msaa {
@@ -1392,6 +1452,12 @@ impl PlotRenderer {
         let mut cam = camera.clone();
         cam.update_aspect_ratio(aspect_ratio);
         cam.depth_mode = config.depth_mode;
+        log::debug!(
+            "runmat-plot: renderer.camera_to_target_viewport.camera_ready axes_index={} aspect_ratio={} msaa_samples={}",
+            axes_index,
+            aspect_ratio,
+            config.msaa_samples
+        );
 
         // Dynamic clip planes (CAD-like): keep near/far tight to visible bounds to avoid
         // clipping surprises and depth precision collapse on huge datasets.
@@ -1411,6 +1477,10 @@ impl PlotRenderer {
         let view_proj_matrix = cam.view_proj_matrix();
         self.wgpu_renderer
             .update_uniforms_for_axes(axes_index, view_proj_matrix, Mat4::IDENTITY);
+        log::debug!(
+            "runmat-plot: renderer.camera_to_target_viewport.uniforms_updated axes_index={}",
+            axes_index
+        );
 
         let (mut sx, mut sy, mut sw, mut sh) = viewport_scissor;
         let target_w = self.wgpu_renderer.surface_config.width.max(1);
@@ -1431,6 +1501,15 @@ impl PlotRenderer {
         let is_2d = matches!(
             cam.projection,
             crate::core::camera::ProjectionType::Orthographic { .. }
+        );
+        log::debug!(
+            "runmat-plot: renderer.camera_to_target_viewport.viewport_normalized axes_index={} viewport=({}, {}, {}, {}) is_2d={}",
+            axes_index,
+            sx,
+            sy,
+            sw,
+            sh,
+            is_2d
         );
         match cam.projection {
             crate::core::camera::ProjectionType::Orthographic {
@@ -1477,6 +1556,10 @@ impl PlotRenderer {
         let mut grid_plane_buffers: Option<(wgpu::Buffer, wgpu::Buffer)> = None;
         let mut total_vertices = 0usize;
         let mut total_triangles = 0usize;
+        log::debug!(
+            "runmat-plot: renderer.camera_to_target_viewport.collect_render_items.start axes_index={}",
+            axes_index
+        );
         for node in self.scene.get_visible_nodes() {
             if let Some(render_data) = &node.render_data {
                 if node.axes_index == axes_index {
@@ -1503,6 +1586,13 @@ impl PlotRenderer {
                 }
             }
         }
+        log::debug!(
+            "runmat-plot: renderer.camera_to_target_viewport.collect_render_items.ok axes_index={} items={} total_vertices={} total_triangles={}",
+            axes_index,
+            render_items.len(),
+            total_vertices,
+            total_triangles
+        );
 
         // 3D helpers: CAD-style XY grid at Z=0 (grid on/off) + origin triad (always).
         // These are generated per-frame so they can adapt to zoom level.
@@ -1933,6 +2023,12 @@ impl PlotRenderer {
         {
             // Prepare MSAA render target if enabled
             let use_msaa = self.wgpu_renderer.msaa_sample_count > 1;
+            log::debug!(
+                "runmat-plot: renderer.camera_to_target_viewport.render_pass_start axes_index={} use_msaa={} clear_background={}",
+                axes_index,
+                use_msaa,
+                clear_background
+            );
 
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Plot Camera Viewport Pass"),
@@ -1982,8 +2078,21 @@ impl PlotRenderer {
                 1.0,
             );
             render_pass.set_scissor_rect(sx, sy, sw.max(1), sh.max(1));
+            log::debug!(
+                "runmat-plot: renderer.camera_to_target_viewport.render_pass_ready axes_index={} viewport=({}, {}, {}, {})",
+                axes_index,
+                sx,
+                sy,
+                sw.max(1),
+                sh.max(1)
+            );
             if let Some(ref vb_grid) = grid_vb_opt {
                 if let Some(ref pipeline) = self.wgpu_renderer.direct_line_pipeline {
+                    log::debug!(
+                        "runmat-plot: renderer.camera_to_target_viewport.draw_grid_start axes_index={} vertex_buffer_size={}",
+                        axes_index,
+                        vb_grid.size()
+                    );
                     render_pass.set_pipeline(pipeline);
                     render_pass.set_bind_group(
                         0,
@@ -1999,6 +2108,10 @@ impl PlotRenderer {
                     render_pass.draw(
                         0..(vb_grid.size() / std::mem::size_of::<Vertex>() as u64) as u32,
                         0..1,
+                    );
+                    log::debug!(
+                        "runmat-plot: renderer.camera_to_target_viewport.draw_grid_ok axes_index={}",
+                        axes_index
                     );
                 }
             }
@@ -2053,6 +2166,17 @@ impl PlotRenderer {
                         || (use_direct_for_lines && is_lines)
                         || is_points)
                     && bounds_opt.is_some();
+                log::debug!(
+                    "runmat-plot: renderer.camera_to_target_viewport.draw_item_start axes_index={} item_index={} pipeline={:?} use_direct={} textured={} indexed={} draw_calls={} point_buffer={} ",
+                    axes_index,
+                    idx,
+                    render_data.pipeline_type,
+                    use_direct,
+                    is_textured,
+                    index_buffer.is_some(),
+                    render_data.draw_calls.len(),
+                    point_buffers[idx].is_some()
+                );
 
                 if use_direct {
                     // Safe because we only read pointers here within pass
@@ -2070,6 +2194,11 @@ impl PlotRenderer {
                         .get_direct_uniform_bind_group_for_axes(axes_index);
                     render_pass.set_pipeline(pipeline_ref);
                     render_pass.set_bind_group(0, uniform_bg, &[]);
+                    log::debug!(
+                        "runmat-plot: renderer.camera_to_target_viewport.draw_item_pipeline_ready axes_index={} item_index={} branch=direct",
+                        axes_index,
+                        idx
+                    );
                 } else if is_textured {
                     let pipeline = self
                         .wgpu_renderer
@@ -2084,6 +2213,11 @@ impl PlotRenderer {
                     if let Some(ref bg) = image_bind_groups[idx] {
                         render_pass.set_bind_group(1, bg, &[]);
                     }
+                    log::debug!(
+                        "runmat-plot: renderer.camera_to_target_viewport.draw_item_pipeline_ready axes_index={} item_index={} branch=textured",
+                        axes_index,
+                        idx
+                    );
                 } else {
                     let pipeline = self.wgpu_renderer.get_pipeline(render_data.pipeline_type);
                     render_pass.set_pipeline(pipeline);
@@ -2092,6 +2226,11 @@ impl PlotRenderer {
                         self.wgpu_renderer
                             .get_uniform_bind_group_for_axes(axes_index),
                         &[],
+                    );
+                    log::debug!(
+                        "runmat-plot: renderer.camera_to_target_viewport.draw_item_pipeline_ready axes_index={} item_index={} branch=standard",
+                        axes_index,
+                        idx
                     );
                 }
 
@@ -2102,21 +2241,42 @@ impl PlotRenderer {
                         }
                         render_pass.set_vertex_buffer(0, buf.slice(..));
                         render_pass.draw(0..len as u32, 0..1);
+                        log::debug!(
+                            "runmat-plot: renderer.camera_to_target_viewport.draw_item_ok axes_index={} item_index={} mode=direct_points vertices={}",
+                            axes_index,
+                            idx,
+                            len
+                        );
                         continue;
                     }
                 } else {
                     render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
                 }
-                if let Some(idx) = index_buffer {
-                    render_pass.set_index_buffer(idx.slice(..), wgpu::IndexFormat::Uint32);
+                if let Some(index_buffer_ref) = index_buffer {
+                    render_pass
+                        .set_index_buffer(index_buffer_ref.slice(..), wgpu::IndexFormat::Uint32);
                     if let Some(indices) = &render_data.indices {
                         render_pass.draw_indexed(0..indices.len() as u32, 0, 0..1);
+                        log::debug!(
+                            "runmat-plot: renderer.camera_to_target_viewport.draw_item_ok axes_index={} item_index={} mode=indexed indices={}",
+                            axes_index,
+                            idx,
+                            indices.len()
+                        );
                     }
                 } else {
                     for dc in &render_data.draw_calls {
                         render_pass.draw(
                             dc.vertex_offset as u32..(dc.vertex_offset + dc.vertex_count) as u32,
                             0..dc.instance_count as u32,
+                        );
+                        log::debug!(
+                            "runmat-plot: renderer.camera_to_target_viewport.draw_call_ok axes_index={} item_index={} mode=draw vertex_offset={} vertex_count={} instances={}",
+                            axes_index,
+                            idx,
+                            dc.vertex_offset,
+                            dc.vertex_count,
+                            dc.instance_count
                         );
                     }
                 }
@@ -2125,6 +2285,10 @@ impl PlotRenderer {
             // Draw procedural 3D grid plane after data, depth-tested (no depth writes).
             if let Some((ref vb, ref ib)) = grid_plane_buffers {
                 if let Some(pipeline) = self.wgpu_renderer.grid_plane_pipeline() {
+                    log::debug!(
+                        "runmat-plot: renderer.camera_to_target_viewport.draw_grid_plane_start axes_index={}",
+                        axes_index
+                    );
                     render_pass.set_pipeline(pipeline);
                     render_pass.set_bind_group(
                         0,
@@ -2141,9 +2305,20 @@ impl PlotRenderer {
                     render_pass.set_vertex_buffer(0, vb.slice(..));
                     render_pass.set_index_buffer(ib.slice(..), wgpu::IndexFormat::Uint32);
                     render_pass.draw_indexed(0..6, 0, 0..1);
+                    log::debug!(
+                        "runmat-plot: renderer.camera_to_target_viewport.draw_grid_plane_ok axes_index={}",
+                        axes_index
+                    );
                 }
             }
         }
+
+        log::debug!(
+            "runmat-plot: renderer.camera_to_target_viewport.ok axes_index={} total_vertices={} total_triangles={}",
+            axes_index,
+            total_vertices,
+            total_triangles
+        );
 
         Ok(RenderResult {
             success: true,
@@ -2164,6 +2339,13 @@ impl PlotRenderer {
         msaa_samples: u32,
         base_config: &PlotRenderConfig,
     ) -> Result<(), Box<dyn std::error::Error>> {
+        log::debug!(
+            "runmat-plot: renderer.axes_to_viewports.start viewport_count={} msaa_samples={} width={} height={}",
+            axes_viewports.len(),
+            msaa_samples,
+            base_config.width,
+            base_config.height
+        );
         // Build map axes_index -> node ids
         let mut axes_to_nodes: std::collections::HashMap<usize, Vec<crate::core::scene::NodeId>> =
             std::collections::HashMap::new();
@@ -2198,6 +2380,7 @@ impl PlotRenderer {
             })
             .collect();
         if active_axes.is_empty() {
+            log::debug!("runmat-plot: renderer.axes_to_viewports.no_active_axes");
             return Ok(());
         }
 
@@ -2209,8 +2392,20 @@ impl PlotRenderer {
         };
 
         for (ax_idx, viewport) in axes_viewports.iter().enumerate() {
+            log::debug!(
+                "runmat-plot: renderer.axes_to_viewports.viewport axes_index={} viewport=({}, {}, {}, {})",
+                ax_idx,
+                viewport.0,
+                viewport.1,
+                viewport.2,
+                viewport.3
+            );
             let ids_for_axes = axes_to_nodes.get(&ax_idx).cloned().unwrap_or_default();
             if ids_for_axes.is_empty() {
+                log::debug!(
+                    "runmat-plot: renderer.axes_to_viewports.skip_empty_axes axes_index={}",
+                    ax_idx
+                );
                 continue;
             }
 
@@ -2241,6 +2436,13 @@ impl PlotRenderer {
             cfg.msaa_samples = msaa_samples.max(1);
             let is_first_axes = Some(&ax_idx) == active_axes.first();
             let is_last_axes = Some(&ax_idx) == active_axes.last();
+            log::debug!(
+                "runmat-plot: renderer.axes_to_viewports.axes_ready axes_index={} node_count={} first_axes={} last_axes={}",
+                ax_idx,
+                ids_for_axes.len(),
+                is_first_axes,
+                is_last_axes
+            );
             let render_target = if let Some(ref msaa_view) = shared_msaa_view {
                 RenderTarget {
                     view: msaa_view.as_ref(),
@@ -2265,6 +2467,10 @@ impl PlotRenderer {
                 ax_idx,
                 is_first_axes,
             )?;
+            log::debug!(
+                "runmat-plot: renderer.axes_to_viewports.axes_render_ok axes_index={}",
+                ax_idx
+            );
 
             // Restore hidden nodes visibility
             for id in hidden_ids {
@@ -2273,6 +2479,7 @@ impl PlotRenderer {
                 }
             }
         }
+        log::debug!("runmat-plot: renderer.axes_to_viewports.ok");
         Ok(())
     }
 

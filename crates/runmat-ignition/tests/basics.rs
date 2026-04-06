@@ -112,6 +112,51 @@ fn complex_literal_matrix_executes() {
 }
 
 #[test]
+fn leading_dot_complex_literals_execute() {
+    let input = "A = [.1i .5e-2j];";
+    let ast = parse(input).unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    match &vars[0] {
+        Value::ComplexTensor(tensor) => {
+            assert_eq!(tensor.shape, vec![1, 2]);
+            assert_eq!(tensor.data, vec![(0.0, 0.1), (0.0, 0.005)]);
+        }
+        other => panic!("expected complex tensor, got {other:?}"),
+    }
+}
+
+#[test]
+fn matrix_literal_with_leading_dot_entries_executes() {
+    let input = "A = [1 .2 .3];";
+    let ast = parse(input).unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    match &vars[0] {
+        Value::Tensor(tensor) => {
+            assert_eq!(tensor.shape, vec![1, 3]);
+            assert_eq!(tensor.data, vec![1.0, 0.2, 0.3]);
+        }
+        other => panic!("expected tensor, got {other:?}"),
+    }
+}
+
+#[test]
+fn elementwise_division_accepts_leading_dot_rhs() {
+    let input = "A = [1 2 3]; B = A./.5;";
+    let ast = parse(input).unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    match &vars[1] {
+        Value::Tensor(tensor) => {
+            assert_eq!(tensor.shape, vec![1, 3]);
+            assert_eq!(tensor.data, vec![2.0, 4.0, 6.0]);
+        }
+        other => panic!("expected tensor, got {other:?}"),
+    }
+}
+
+#[test]
 fn chol_multiassign_reports_failure() {
     let input = "A = [1 2; 2 1]; [R, p] = chol(A);";
     let ast = parse(input).unwrap();

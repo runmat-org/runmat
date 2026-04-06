@@ -382,6 +382,119 @@ async fn call_builtin_auto(name: &str, args: &[Value]) -> VmResult<Value> {
     Ok(call_builtin_vm!(name, &prepared)?)
 }
 
+fn is_scalarish_for_division(value: &Value) -> bool {
+    match value {
+        Value::Int(_) | Value::Num(_) | Value::Complex(_, _) | Value::Bool(_) => true,
+        Value::LogicalArray(arr) => is_scalar_shape(&arr.shape),
+        Value::Tensor(tensor) => is_scalar_shape(&tensor.shape),
+        Value::ComplexTensor(tensor) => is_scalar_shape(&tensor.shape),
+        Value::GpuTensor(handle) => is_scalar_shape(&handle.shape),
+        _ => false,
+    }
+}
+
+async fn execute_elementwise_division(lhs: &Value, rhs: &Value) -> VmResult<Value> {
+    let (lhs_acc, rhs_acc) = accel_promote_binary(AutoBinaryOp::Elementwise, lhs, rhs).await?;
+    Ok(call_builtin_vm!("rdivide", &[lhs_acc, rhs_acc])?)
+}
+
+async fn execute_elementwise_left_division(lhs: &Value, rhs: &Value) -> VmResult<Value> {
+    let (rhs_acc, lhs_acc) = accel_promote_binary(AutoBinaryOp::Elementwise, rhs, lhs).await?;
+    Ok(call_builtin_vm!("rdivide", &[rhs_acc, lhs_acc])?)
+}
+
+async fn execute_right_division(lhs: &Value, rhs: &Value) -> VmResult<Value> {
+    match (lhs, rhs) {
+        (Value::Object(obj), _) => {
+            let args = vec![
+                Value::Object(obj.clone()),
+                Value::String("mrdivide".to_string()),
+                rhs.clone(),
+            ];
+            match call_builtin_vm!("call_method", &args) {
+                Ok(v) => Ok(v),
+                Err(_) => {
+                    if is_scalarish_for_division(rhs) {
+                        execute_elementwise_division(lhs, rhs).await
+                    } else {
+                        call_builtin_auto("mrdivide", &[lhs.clone(), rhs.clone()]).await
+                    }
+                }
+            }
+        }
+        (_, Value::Object(obj)) => {
+            let args = vec![
+                Value::Object(obj.clone()),
+                Value::String("mrdivide".to_string()),
+                lhs.clone(),
+            ];
+            match call_builtin_vm!("call_method", &args) {
+                Ok(v) => Ok(v),
+                Err(_) => {
+                    if is_scalarish_for_division(rhs) {
+                        execute_elementwise_division(lhs, rhs).await
+                    } else {
+                        call_builtin_auto("mrdivide", &[lhs.clone(), rhs.clone()]).await
+                    }
+                }
+            }
+        }
+        _ => {
+            if is_scalarish_for_division(rhs) {
+                execute_elementwise_division(lhs, rhs).await
+            } else {
+                call_builtin_auto("mrdivide", &[lhs.clone(), rhs.clone()]).await
+            }
+        }
+    }
+}
+
+async fn execute_left_division(lhs: &Value, rhs: &Value) -> VmResult<Value> {
+    match (lhs, rhs) {
+        (Value::Object(obj), _) => {
+            let args = vec![
+                Value::Object(obj.clone()),
+                Value::String("mldivide".to_string()),
+                rhs.clone(),
+            ];
+            match call_builtin_vm!("call_method", &args) {
+                Ok(v) => Ok(v),
+                Err(_) => {
+                    if is_scalarish_for_division(lhs) {
+                        execute_elementwise_left_division(lhs, rhs).await
+                    } else {
+                        call_builtin_auto("mldivide", &[lhs.clone(), rhs.clone()]).await
+                    }
+                }
+            }
+        }
+        (_, Value::Object(obj)) => {
+            let args = vec![
+                Value::Object(obj.clone()),
+                Value::String("mldivide".to_string()),
+                lhs.clone(),
+            ];
+            match call_builtin_vm!("call_method", &args) {
+                Ok(v) => Ok(v),
+                Err(_) => {
+                    if is_scalarish_for_division(lhs) {
+                        execute_elementwise_left_division(lhs, rhs).await
+                    } else {
+                        call_builtin_auto("mldivide", &[lhs.clone(), rhs.clone()]).await
+                    }
+                }
+            }
+        }
+        _ => {
+            if is_scalarish_for_division(lhs) {
+                execute_elementwise_left_division(lhs, rhs).await
+            } else {
+                call_builtin_auto("mldivide", &[lhs.clone(), rhs.clone()]).await
+            }
+        }
+    }
+}
+
 fn output_hint_for_single_result(bytecode: &Bytecode, pc: usize) -> usize {
     match bytecode.instructions.get(pc + 1) {
         Some(Instr::Pop) | Some(Instr::EmitStackTop { .. }) => 0,
@@ -2521,53 +2634,23 @@ async fn run_interpreter_inner(
                     }
                 }
             }
-            Instr::Div => {
+            Instr::RightDiv => {
                 let b = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 let a = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match (&a, &b) {
-                    (Value::Object(obj), _) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("mrdivide".to_string()),
-                            b.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                let (a_acc, b_acc) =
-                                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                                let v = call_builtin_vm!("rdivide", &[a_acc, b_acc])?;
-                                stack.push(v)
-                            }
-                        }
-                    }
-                    (_, Value::Object(obj)) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("mrdivide".to_string()),
-                            a.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                let (a_acc, b_acc) =
-                                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                                let v = call_builtin_vm!("rdivide", &[a_acc, b_acc])?;
-                                stack.push(v)
-                            }
-                        }
-                    }
-                    _ => {
-                        let (a_acc, b_acc) =
-                            accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                        let v = call_builtin_vm!("rdivide", &[a_acc, b_acc])?;
-                        stack.push(v)
-                    }
-                }
+                stack.push(execute_right_division(&a, &b).await?)
+            }
+            Instr::LeftDiv => {
+                let b = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let a = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                stack.push(execute_left_division(&a, &b).await?)
             }
             Instr::Pow => {
                 let b = stack

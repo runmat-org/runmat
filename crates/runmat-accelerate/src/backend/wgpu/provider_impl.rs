@@ -67,6 +67,8 @@ use std::time::Duration;
 use tracing::info_span;
 use wgpu::util::DeviceExt;
 
+mod solve;
+
 use crate::backend::wgpu::autotune::AutotuneController;
 use crate::backend::wgpu::cache::{
     bind_group::BindGroupCache, key as cache_key, persist as cache_persist,
@@ -15479,6 +15481,10 @@ impl AccelProvider for WgpuProvider {
         options: &'a ProviderLinsolveOptions,
     ) -> AccelProviderFuture<'a, ProviderLinsolveResult> {
         Box::pin(async move {
+            if let Some(result) = self.try_linsolve_device(lhs, rhs, options).await? {
+                return Ok(result);
+            }
+            let start = Instant::now();
             let HostTensorOwned {
                 data: lhs_data,
                 shape: lhs_shape,
@@ -15496,6 +15502,9 @@ impl AccelProvider for WgpuProvider {
             let (solution, rcond) =
                 linsolve_host_real_for_provider(&lhs_tensor, &rhs_tensor, options)
                     .map_err(|e| anyhow!("{e}"))?;
+            self.telemetry.record_linsolve_duration(start.elapsed());
+            self.telemetry
+                .record_solve_fallback("linsolve:host_reupload");
 
             let handle = self.upload(&HostTensorView {
                 data: &solution.data,
@@ -15627,6 +15636,14 @@ impl AccelProvider for WgpuProvider {
         rhs: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            let start = Instant::now();
+            if let Some(result) = self
+                .try_linsolve_device(lhs, rhs, &ProviderLinsolveOptions::default())
+                .await?
+            {
+                self.telemetry.record_mldivide_duration(start.elapsed());
+                return Ok(result.solution);
+            }
             let HostTensorOwned {
                 data: lhs_data,
                 shape: lhs_shape,
@@ -15643,6 +15660,9 @@ impl AccelProvider for WgpuProvider {
 
             let result = mldivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
                 .map_err(|e| anyhow!("{e}"))?;
+            self.telemetry.record_mldivide_duration(start.elapsed());
+            self.telemetry
+                .record_solve_fallback("mldivide:host_reupload");
 
             let handle = self.upload(&HostTensorView {
                 data: &result.data,
@@ -15658,6 +15678,11 @@ impl AccelProvider for WgpuProvider {
         rhs: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            let start = Instant::now();
+            if let Some(result) = self.try_mrdivide_device(lhs, rhs).await? {
+                self.telemetry.record_mrdivide_duration(start.elapsed());
+                return Ok(result);
+            }
             let HostTensorOwned {
                 data: lhs_data,
                 shape: lhs_shape,
@@ -15674,6 +15699,9 @@ impl AccelProvider for WgpuProvider {
 
             let result = mrdivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
                 .map_err(|e| anyhow!("{e}"))?;
+            self.telemetry.record_mrdivide_duration(start.elapsed());
+            self.telemetry
+                .record_solve_fallback("mrdivide:host_reupload");
 
             let handle = self.upload(&HostTensorView {
                 data: &result.data,

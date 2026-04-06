@@ -452,7 +452,7 @@ pub fn eval_const_num(expr: &HirExpr) -> Option<f64> {
                 parser::BinOp::Add => Some(a + b),
                 parser::BinOp::Sub => Some(a - b),
                 parser::BinOp::Mul | parser::BinOp::ElemMul => Some(a * b),
-                parser::BinOp::Div | parser::BinOp::ElemDiv => Some(a / b),
+                parser::BinOp::RightDiv | parser::BinOp::ElemDiv => Some(a / b),
                 parser::BinOp::LeftDiv | parser::BinOp::ElemLeftDiv => Some(b / a),
                 parser::BinOp::Pow | parser::BinOp::ElemPow => Some(a.powf(b)),
                 _ => None,
@@ -689,7 +689,7 @@ pub fn infer_expr_type_with_env(
                 parser::BinOp::LeftDiv => {
                     runmat_builtins::shape_rules::left_divide_output_type(&ta, &tb)
                 }
-                parser::BinOp::Div => {
+                parser::BinOp::RightDiv => {
                     runmat_builtins::shape_rules::right_divide_output_type(&ta, &tb)
                 }
                 parser::BinOp::Add
@@ -3257,6 +3257,11 @@ impl Ctx {
         id
     }
 
+    fn lookup_current_scope(&self, name: &str) -> Option<VarId> {
+        let current = self.scopes.len() - 1;
+        self.scopes[current].bindings.get(name).copied()
+    }
+
     fn lookup(&self, name: &str) -> Option<VarId> {
         let mut scope_idx = Some(self.scopes.len() - 1);
         while let Some(idx) = scope_idx {
@@ -3491,8 +3496,13 @@ impl Ctx {
             } => {
                 self.push_scope();
                 let param_ids: Vec<VarId> = params.iter().map(|p| self.define(p.clone())).collect();
-                let output_ids: Vec<VarId> =
-                    outputs.iter().map(|o| self.define(o.clone())).collect();
+                let output_ids: Vec<VarId> = outputs
+                    .iter()
+                    .map(|o| {
+                        self.lookup_current_scope(o)
+                            .unwrap_or_else(|| self.define(o.clone()))
+                    })
+                    .collect();
                 let body_hir = self.lower_stmts(body)?;
                 self.pop_scope();
 
@@ -3695,7 +3705,7 @@ impl Ctx {
                     BinOp::Add
                     | BinOp::Sub
                     | BinOp::Mul
-                    | BinOp::Div
+                    | BinOp::RightDiv
                     | BinOp::Pow
                     | BinOp::LeftDiv => {
                         if matches!(left_ty, Type::Tensor { .. })

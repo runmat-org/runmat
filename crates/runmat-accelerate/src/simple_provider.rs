@@ -1,5 +1,6 @@
 use crate::host_lu::{lu_factor_host, LuHostFactors};
 use crate::sortrows_host::{sort_rows_host, SortRowsHostOutputs};
+use crate::telemetry::AccelTelemetry;
 use anyhow::{anyhow, ensure, Result};
 use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{
@@ -45,6 +46,7 @@ use runmat_runtime::builtins::math::reduction::diff_tensor_host;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
+use std::time::Instant;
 
 const PROVIDER_DEFAULT_SEED: u64 = 0x9e3779b97f4a7c15;
 
@@ -260,12 +262,14 @@ fn next_normal_pair(state: &mut u64) -> (f64, f64) {
 
 pub struct InProcessProvider {
     next_id: AtomicU64,
+    telemetry: AccelTelemetry,
 }
 
 impl InProcessProvider {
-    pub const fn new() -> Self {
+    pub fn new() -> Self {
         Self {
             next_id: AtomicU64::new(1),
+            telemetry: AccelTelemetry::new(),
         }
     }
 
@@ -1295,6 +1299,8 @@ impl AccelProvider for InProcessProvider {
         let id = self.next_id.fetch_add(1, Ordering::Relaxed);
         let mut guard = registry().lock().unwrap_or_else(|e| e.into_inner());
         guard.insert(id, host.data.to_vec());
+        let bytes = std::mem::size_of_val(host.data) as u64;
+        self.telemetry.record_upload_bytes(bytes);
         let handle = GpuTensorHandle {
             shape: host.shape.to_vec(),
             device_id: 0,
@@ -1308,6 +1314,8 @@ impl AccelProvider for InProcessProvider {
         Box::pin(async move {
             let guard = registry().lock().unwrap_or_else(|e| e.into_inner());
             if let Some(buf) = guard.get(&h.buffer_id) {
+                let bytes = (buf.len() * std::mem::size_of::<f64>()) as u64;
+                self.telemetry.record_download_bytes(bytes);
                 Ok(HostTensorOwned {
                     data: buf.clone(),
                     shape: h.shape.clone(),
@@ -1340,10 +1348,12 @@ impl AccelProvider for InProcessProvider {
     }
 
     fn telemetry_snapshot(&self) -> runmat_accelerate_api::ProviderTelemetry {
-        runmat_accelerate_api::ProviderTelemetry::default()
+        self.telemetry.snapshot(0, 0, 0, 0, None)
     }
 
-    fn reset_telemetry(&self) {}
+    fn reset_telemetry(&self) {
+        self.telemetry.reset();
+    }
 
     fn sort_rows<'a>(
         &'a self,
@@ -5193,6 +5203,7 @@ impl AccelProvider for InProcessProvider {
         options: &'a ProviderLinsolveOptions,
     ) -> AccelProviderFuture<'a, ProviderLinsolveResult> {
         Box::pin(async move {
+            let start = Instant::now();
             let (lhs_data, rhs_data) = {
                 let guard = registry().lock().unwrap();
                 let lhs_buf = guard
@@ -5205,6 +5216,10 @@ impl AccelProvider for InProcessProvider {
                     .ok_or_else(|| anyhow!("linsolve: unknown buffer {}", rhs.buffer_id))?;
                 (lhs_buf, rhs_buf)
             };
+            self.telemetry
+                .record_download_bytes((lhs_data.len() * std::mem::size_of::<f64>()) as u64);
+            self.telemetry
+                .record_download_bytes((rhs_data.len() * std::mem::size_of::<f64>()) as u64);
 
             let lhs_tensor =
                 Tensor::new(lhs_data, lhs.shape.clone()).map_err(|e| anyhow!("linsolve: {e}"))?;
@@ -5214,6 +5229,11 @@ impl AccelProvider for InProcessProvider {
             let (solution, rcond) =
                 linsolve_host_real_for_provider(&lhs_tensor, &rhs_tensor, options)
                     .map_err(|e| anyhow!("{e}"))?;
+            self.telemetry.record_linsolve_duration(start.elapsed());
+            self.telemetry
+                .record_solve_fallback("linsolve:host_reupload");
+            self.telemetry
+                .record_upload_bytes((solution.data.len() * std::mem::size_of::<f64>()) as u64);
 
             let Tensor { data, shape, .. } = solution;
             let handle = self.allocate_tensor(data, shape);
@@ -5357,6 +5377,7 @@ impl AccelProvider for InProcessProvider {
         rhs: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            let start = Instant::now();
             let (lhs_data, rhs_data) = {
                 let guard = registry().lock().unwrap();
                 let lhs_buf = guard
@@ -5369,6 +5390,10 @@ impl AccelProvider for InProcessProvider {
                     .ok_or_else(|| anyhow!("mldivide: unknown buffer {}", rhs.buffer_id))?;
                 (lhs_buf, rhs_buf)
             };
+            self.telemetry
+                .record_download_bytes((lhs_data.len() * std::mem::size_of::<f64>()) as u64);
+            self.telemetry
+                .record_download_bytes((rhs_data.len() * std::mem::size_of::<f64>()) as u64);
 
             let lhs_tensor =
                 Tensor::new(lhs_data, lhs.shape.clone()).map_err(|e| anyhow!("mldivide: {e}"))?;
@@ -5377,6 +5402,11 @@ impl AccelProvider for InProcessProvider {
 
             let result = mldivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
                 .map_err(|e| anyhow!("{e}"))?;
+            self.telemetry.record_mldivide_duration(start.elapsed());
+            self.telemetry
+                .record_solve_fallback("mldivide:host_reupload");
+            self.telemetry
+                .record_upload_bytes((result.data.len() * std::mem::size_of::<f64>()) as u64);
 
             let Tensor { data, shape, .. } = result;
             Ok(self.allocate_tensor(data, shape))
@@ -5389,6 +5419,7 @@ impl AccelProvider for InProcessProvider {
         rhs: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
+            let start = Instant::now();
             let (lhs_data, rhs_data) = {
                 let guard = registry().lock().unwrap();
                 let lhs_buf = guard
@@ -5401,6 +5432,10 @@ impl AccelProvider for InProcessProvider {
                     .ok_or_else(|| anyhow!("mrdivide: unknown buffer {}", rhs.buffer_id))?;
                 (lhs_buf, rhs_buf)
             };
+            self.telemetry
+                .record_download_bytes((lhs_data.len() * std::mem::size_of::<f64>()) as u64);
+            self.telemetry
+                .record_download_bytes((rhs_data.len() * std::mem::size_of::<f64>()) as u64);
 
             let lhs_tensor =
                 Tensor::new(lhs_data, lhs.shape.clone()).map_err(|e| anyhow!("mrdivide: {e}"))?;
@@ -5409,6 +5444,11 @@ impl AccelProvider for InProcessProvider {
 
             let result = mrdivide_host_real_for_provider(&lhs_tensor, &rhs_tensor)
                 .map_err(|e| anyhow!("{e}"))?;
+            self.telemetry.record_mrdivide_duration(start.elapsed());
+            self.telemetry
+                .record_solve_fallback("mrdivide:host_reupload");
+            self.telemetry
+                .record_upload_bytes((result.data.len() * std::mem::size_of::<f64>()) as u64);
 
             let Tensor { data, shape, .. } = result;
             Ok(self.allocate_tensor(data, shape))
@@ -5523,8 +5563,12 @@ static INSTANCE: OnceCell<InProcessProvider> = OnceCell::new();
 /// Safe to call multiple times; only the first call installs the provider.
 pub fn register_inprocess_provider() {
     let provider: &'static InProcessProvider = INSTANCE.get_or_init(InProcessProvider::new);
-    // Safety: we intentionally install a reference with 'static lifetime. Always reassert.
-    unsafe { runmat_accelerate_api::register_provider(provider) };
+    #[cfg(not(test))]
+    unsafe {
+        // Safety: we intentionally install a reference with 'static lifetime. Always reassert.
+        runmat_accelerate_api::register_provider(provider)
+    };
+    runmat_accelerate_api::set_thread_provider(Some(provider));
 }
 
 /// Reset the in-process provider RNG to its default seed (test-only helper).

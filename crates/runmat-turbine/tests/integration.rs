@@ -172,9 +172,9 @@ fn test_interpreter_fallback() {
 fn test_multiple_function_compilation() {
     gc_test_context(|| {
         if let Ok(mut engine) = TurbineEngine::new() {
-            let test_cases = ["a = 1 + 2", "b = 3 * 4", "c = 5 - 1", "d = 8 / 2"];
+            let jit_cases = ["a = 1 + 2", "b = 3 * 4", "c = 5 - 1"];
 
-            for (i, source) in test_cases.iter().enumerate() {
+            for (i, source) in jit_cases.iter().enumerate() {
                 let ast = parse(source).unwrap();
                 let hir = lower(&ast).unwrap();
                 let bytecode = compile(&hir, &HashMap::new()).unwrap();
@@ -182,6 +182,23 @@ fn test_multiple_function_compilation() {
                 let result = engine.compile_bytecode(&bytecode);
                 assert!(result.is_ok(), "Failed to compile case {i}: {source}");
             }
+
+            let source = "d = 8 / 2";
+            let ast = parse(source).unwrap();
+            let hir = lower(&ast).unwrap();
+            let bytecode = compile(&hir, &HashMap::new()).unwrap();
+            let compile_result = engine.compile_bytecode(&bytecode);
+            assert!(
+                compile_result.is_err(),
+                "matrix division should stay on the interpreter path"
+            );
+
+            let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+            let exec_result = engine.execute_or_compile(&bytecode, &mut vars);
+            assert!(
+                exec_result.is_ok(),
+                "fallback execution failed for {source}"
+            );
 
             let _stats = engine.stats();
             // Stats should be available and engine functional
@@ -345,7 +362,10 @@ fn test_complex_expression_compilation() {
             let bytecode = compile(&hir, &HashMap::new()).unwrap();
 
             let result = engine.compile_bytecode(&bytecode);
-            assert!(result.is_ok());
+            assert!(
+                result.is_err(),
+                "matrix division should not compile in JIT mode"
+            );
 
             let mut vars = vec![Value::Num(0.0); bytecode.var_count];
             let exec_result = engine.execute_or_compile(&bytecode, &mut vars);

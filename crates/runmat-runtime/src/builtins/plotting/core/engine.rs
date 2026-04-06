@@ -280,12 +280,25 @@ pub async fn render_figure_snapshot(
     textmark: Option<String>,
 ) -> BuiltinResult<Vec<u8>> {
     const SNAPSHOT_CONTEXT: &str = "renderFigureImage";
+    log::debug!(
+        "runmat-runtime: render_figure_snapshot.start handle={} width={} height={} textmark={}",
+        handle.as_u32(),
+        width,
+        height,
+        textmark.as_deref().unwrap_or("")
+    );
     let figure = clone_figure(handle).ok_or_else(|| {
         map_control_flow_with_builtin(
             engine_error(format!("figure handle {} does not exist", handle.as_u32())),
             SNAPSHOT_CONTEXT,
         )
     })?;
+    log::debug!(
+        "runmat-runtime: render_figure_snapshot.figure_cloned handle={} axes={} elements={}",
+        handle.as_u32(),
+        figure.axes_metadata.len(),
+        figure.statistics().total_plots
+    );
     let bytes = runmat_plot::export::native_surface::render_figure_png_bytes_interactive_and_theme_and_textmark(
         figure,
         width,
@@ -295,6 +308,13 @@ pub async fn render_figure_snapshot(
     )
     .await
     .map_err(|err| {
+        log::warn!(
+            "runmat-runtime: render_figure_snapshot.failed handle={} width={} height={} error={}",
+            handle.as_u32(),
+            width,
+            height,
+            err
+        );
         map_control_flow_with_builtin(
             engine_error_with_source(
                 format!("Plot export failed: {err}"),
@@ -303,6 +323,11 @@ pub async fn render_figure_snapshot(
             SNAPSHOT_CONTEXT,
         )
     })?;
+    log::debug!(
+        "runmat-runtime: render_figure_snapshot.ok handle={} bytes={}",
+        handle.as_u32(),
+        bytes.len()
+    );
     Ok(bytes)
 }
 
@@ -315,6 +340,13 @@ pub async fn render_figure_snapshot_with_camera_state(
     textmark: Option<String>,
 ) -> BuiltinResult<Vec<u8>> {
     const SNAPSHOT_CONTEXT: &str = "renderFigureImage";
+    log::debug!(
+        "runmat-runtime: render_figure_snapshot_with_camera_state.start handle={} width={} height={} axes={}",
+        handle.as_u32(),
+        width,
+        height,
+        camera_state.axes.len()
+    );
     let figure = clone_figure(handle).ok_or_else(|| {
         map_control_flow_with_builtin(
             engine_error(format!("figure handle {} does not exist", handle.as_u32())),
@@ -338,6 +370,11 @@ pub async fn render_figure_snapshot_with_camera_state(
         )
         .await
             .map_err(|err| {
+                log::warn!(
+                    "runmat-runtime: render_figure_snapshot_with_camera_state.fallback_failed handle={} error={}",
+                    handle.as_u32(),
+                    err
+                );
                 map_control_flow_with_builtin(
                     engine_error_with_source(
                         format!("Plot export failed: {err}"),
@@ -346,6 +383,11 @@ pub async fn render_figure_snapshot_with_camera_state(
                     SNAPSHOT_CONTEXT,
                 )
             })?;
+        log::debug!(
+            "runmat-runtime: render_figure_snapshot_with_camera_state.fallback_ok handle={} bytes={}",
+            handle.as_u32(),
+            bytes.len()
+        );
         return Ok(bytes);
     }
 
@@ -359,6 +401,12 @@ pub async fn render_figure_snapshot_with_camera_state(
     )
     .await
     .map_err(|err| {
+        log::warn!(
+            "runmat-runtime: render_figure_snapshot_with_camera_state.failed handle={} axes={} error={}",
+            handle.as_u32(),
+            axes_cameras.len(),
+            err
+        );
         map_control_flow_with_builtin(
             engine_error_with_source(
                 format!("Plot export failed: {err}"),
@@ -367,6 +415,12 @@ pub async fn render_figure_snapshot_with_camera_state(
             SNAPSHOT_CONTEXT,
         )
     })?;
+    log::debug!(
+        "runmat-runtime: render_figure_snapshot_with_camera_state.ok handle={} bytes={} axes={}",
+        handle.as_u32(),
+        bytes.len(),
+        axes_cameras.len()
+    );
     Ok(bytes)
 }
 
@@ -504,5 +558,80 @@ pub(crate) mod native {
                 });
             let _ = install_figure_observer(observer);
         });
+    }
+}
+
+#[cfg(all(test, feature = "plot-core"))]
+mod tests {
+    use super::render_figure_snapshot;
+    use crate::builtins::plotting::plot::plot_builtin;
+    use crate::builtins::plotting::state::{
+        clear_figure, current_figure_handle, reset_hold_state_for_run, PlotTestLockGuard,
+    };
+    use crate::builtins::plotting::subplot::subplot_builtin;
+    use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
+    use crate::builtins::plotting::title::title_builtin;
+    use crate::builtins::plotting::xlabel::xlabel_builtin;
+    use crate::builtins::plotting::ylabel::ylabel_builtin;
+    use futures::executor::block_on;
+    use runmat_builtins::{Tensor, Value};
+
+    fn setup_plot_tests() -> PlotTestLockGuard {
+        let guard = lock_plot_registry();
+        ensure_plot_test_env();
+        reset_hold_state_for_run();
+        let _ = clear_figure(None);
+        guard
+    }
+
+    fn tensor_from(data: &[f64]) -> Tensor {
+        Tensor {
+            data: data.to_vec(),
+            shape: vec![data.len()],
+            rows: data.len(),
+            cols: 1,
+            dtype: runmat_builtins::NumericDType::F64,
+        }
+    }
+
+    #[test]
+    fn render_figure_snapshot_supports_margin_style_two_axes_lines() {
+        let _guard = setup_plot_tests();
+        let x_mm: Vec<f64> = (-30..=30).map(|i| i as f64).collect();
+        let y_mm: Vec<f64> = (-25..=25).map(|i| i as f64).collect();
+        let centerline: Vec<f64> = x_mm
+            .iter()
+            .map(|x| 25.0 + 18.0 * (-(x / 11.0).powi(2)).exp())
+            .collect();
+        let vertical: Vec<f64> = y_mm
+            .iter()
+            .map(|y| 25.0 + 20.0 * (-(y / 9.0).powi(2)).exp())
+            .collect();
+
+        subplot_builtin(Value::Num(1.0), Value::Num(2.0), Value::Num(1.0)).expect("subplot 1");
+        block_on(plot_builtin(vec![
+            Value::Tensor(tensor_from(&x_mm)),
+            Value::Tensor(tensor_from(&centerline)),
+        ]))
+        .expect("left plot");
+        title_builtin(vec![Value::String("Centerline slice".into())]).expect("left title");
+        xlabel_builtin(vec![Value::String("x (mm)".into())]).expect("left xlabel");
+        ylabel_builtin(vec![Value::String("temperature (C)".into())]).expect("left ylabel");
+
+        subplot_builtin(Value::Num(1.0), Value::Num(2.0), Value::Num(2.0)).expect("subplot 2");
+        block_on(plot_builtin(vec![
+            Value::Tensor(tensor_from(&y_mm)),
+            Value::Tensor(tensor_from(&vertical)),
+        ]))
+        .expect("right plot");
+        title_builtin(vec![Value::String("Vertical slice through source".into())])
+            .expect("right title");
+        xlabel_builtin(vec![Value::String("y (mm)".into())]).expect("right xlabel");
+        ylabel_builtin(vec![Value::String("temperature (C)".into())]).expect("right ylabel");
+
+        let handle = current_figure_handle();
+        let bytes =
+            block_on(render_figure_snapshot(handle, 1280, 720, None)).expect("snapshot render");
+        assert!(bytes.len() > 1000, "expected nontrivial PNG payload");
     }
 }

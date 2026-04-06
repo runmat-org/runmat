@@ -31,7 +31,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Prefers the provider mldivide hook; WGPU currently gathers to the host solver and re-uploads the result.",
+    notes: "Prefers the provider mldivide hook; WGPU currently supports selected real F32 device-resident square and rectangular solve cases, otherwise it gathers to the host solver and re-uploads the result.",
 };
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
@@ -421,8 +421,23 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::ProviderTelemetry;
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
+    }
+
+    fn fallback_count(telemetry: &ProviderTelemetry, reason: &str) -> u64 {
+        telemetry
+            .solve_fallbacks
+            .iter()
+            .find(|entry| entry.reason == reason)
+            .map(|entry| entry.count)
+            .unwrap_or(0)
+    }
+
+    fn clear_accel_provider_state() {
+        runmat_accelerate_api::set_thread_provider(None);
+        runmat_accelerate_api::clear_provider();
     }
 
     use num_complex::Complex64;
@@ -473,6 +488,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn solves_square_system() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
         let a = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![5.0, 6.0], vec![2, 1]).unwrap();
         let result =
@@ -490,6 +507,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn solves_least_squares() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
         let a = Tensor::new(vec![1.0, 3.0, 5.0, 2.0, 4.0, 6.0], vec![3, 2]).unwrap();
         let b = Tensor::new(vec![7.0, 8.0, 9.0], vec![3, 1]).unwrap();
         let result =
@@ -593,16 +612,189 @@ pub(crate) mod tests {
         });
     }
 
+    #[test]
+    fn provider_telemetry_records_gpu_host_reupload_path() {
+        test_support::with_test_provider(|provider| {
+            provider.reset_telemetry();
+            let a = Tensor::new(vec![4.0, 2.0, 1.0, 3.0], vec![2, 2]).unwrap();
+            let b = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
+            let ha = provider
+                .upload(&HostTensorView {
+                    data: &a.data,
+                    shape: &a.shape,
+                })
+                .expect("upload A");
+            let hb = provider
+                .upload(&HostTensorView {
+                    data: &b.data,
+                    shape: &b.shape,
+                })
+                .expect("upload B");
+
+            let _ = mldivide_eval(&Value::GpuTensor(ha.clone()), &Value::GpuTensor(hb.clone()))
+                .expect("gpu mldivide");
+
+            let telemetry = provider.telemetry_snapshot();
+            assert_eq!(telemetry.mldivide.count, 1);
+            assert!(telemetry.upload_bytes > 0);
+            assert!(telemetry.download_bytes > 0);
+            assert_eq!(fallback_count(&telemetry, "mldivide:host_reupload"), 1);
+
+            let _ = provider.free(&ha);
+            let _ = provider.free(&hb);
+        });
+    }
+
+    #[test]
+    fn scalar_gpu_input_falls_back_without_provider_solve_dispatch() {
+        test_support::with_test_provider(|provider| {
+            provider.reset_telemetry();
+            let scalar = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
+            let matrix = Tensor::new(vec![2.0, 4.0, 6.0], vec![1, 3]).unwrap();
+            let hs = provider
+                .upload(&HostTensorView {
+                    data: &scalar.data,
+                    shape: &scalar.shape,
+                })
+                .expect("upload scalar");
+            let hm = provider
+                .upload(&HostTensorView {
+                    data: &matrix.data,
+                    shape: &matrix.shape,
+                })
+                .expect("upload matrix");
+
+            let result =
+                mldivide_eval(&Value::GpuTensor(hs.clone()), &Value::GpuTensor(hm.clone()))
+                    .expect("fallback mldivide");
+            let gathered = test_support::gather(result).expect("gather fallback");
+            assert_eq!(gathered.data, vec![1.0, 2.0, 3.0]);
+
+            let telemetry = provider.telemetry_snapshot();
+            assert_eq!(telemetry.mldivide.count, 0);
+            assert_eq!(fallback_count(&telemetry, "mldivide:host_reupload"), 0);
+            assert!(telemetry.download_bytes > 0);
+
+            let _ = provider.free(&hs);
+            let _ = provider.free(&hm);
+        });
+    }
+
     #[cfg(feature = "wgpu")]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn wgpu_round_trip_matches_cpu() {
+    fn wgpu_tall_path_avoids_host_reupload_fallback() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );
         let provider = match runmat_accelerate_api::provider() {
             Some(p) => p,
             None => panic!("wgpu provider not available"),
+        };
+        if provider.precision() != runmat_accelerate_api::ProviderPrecision::F32 {
+            return;
+        }
+        provider.reset_telemetry();
+
+        let a = Tensor::new(vec![1.0, 0.0, 1.0, 0.0, 1.0, 1.0], vec![3, 2]).unwrap();
+        let b = Tensor::new(vec![1.0, 2.0, 2.0], vec![3, 1]).unwrap();
+        let cpu = mldivide_builtin(Value::Tensor(a.clone()), Value::Tensor(b.clone()))
+            .expect("cpu mldivide");
+        let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
+        provider.reset_telemetry();
+
+        let view_a = HostTensorView {
+            data: &a.data,
+            shape: &a.shape,
+        };
+        let view_b = HostTensorView {
+            data: &b.data,
+            shape: &b.shape,
+        };
+        let ha = provider.upload(&view_a).expect("upload A");
+        let hb = provider.upload(&view_b).expect("upload B");
+        let gpu_value = mldivide_eval(&Value::GpuTensor(ha.clone()), &Value::GpuTensor(hb.clone()))
+            .expect("gpu mldivide");
+        let gathered = test_support::gather(gpu_value).expect("gather");
+        let _ = provider.free(&ha);
+        let _ = provider.free(&hb);
+
+        assert_eq!(gathered.shape, cpu_tensor.shape);
+        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+            assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
+        }
+
+        let telemetry = provider.telemetry_snapshot();
+        assert_eq!(telemetry.mldivide.count, 1);
+        assert_eq!(fallback_count(&telemetry, "mldivide:host_reupload"), 0);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn wgpu_square_path_avoids_host_reupload_fallback() {
+        let _accel_guard = test_support::accel_test_lock();
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let provider = match runmat_accelerate_api::provider() {
+            Some(p) => p,
+            None => panic!("wgpu provider not available"),
+        };
+        if provider.precision() != runmat_accelerate_api::ProviderPrecision::F32 {
+            return;
+        }
+        provider.reset_telemetry();
+
+        let a = Tensor::new(vec![3.0, 1.0, 2.0, 4.0], vec![2, 2]).unwrap();
+        let b = Tensor::new(vec![7.0, 8.0], vec![2, 1]).unwrap();
+        let cpu = mldivide_builtin(Value::Tensor(a.clone()), Value::Tensor(b.clone()))
+            .expect("cpu mldivide");
+        let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
+        provider.reset_telemetry();
+
+        let view_a = HostTensorView {
+            data: &a.data,
+            shape: &a.shape,
+        };
+        let view_b = HostTensorView {
+            data: &b.data,
+            shape: &b.shape,
+        };
+        let ha = provider.upload(&view_a).expect("upload A");
+        let hb = provider.upload(&view_b).expect("upload B");
+        let gpu_value = mldivide_eval(&Value::GpuTensor(ha.clone()), &Value::GpuTensor(hb.clone()))
+            .expect("gpu mldivide");
+        let gathered = test_support::gather(gpu_value).expect("gather");
+        let _ = provider.free(&ha);
+        let _ = provider.free(&hb);
+
+        assert_eq!(gathered.shape, cpu_tensor.shape);
+        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+            assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
+        }
+
+        let telemetry = provider.telemetry_snapshot();
+        assert_eq!(telemetry.mldivide.count, 1);
+        assert_eq!(fallback_count(&telemetry, "mldivide:host_reupload"), 0);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn wgpu_round_trip_matches_cpu() {
+        let _accel_guard = test_support::accel_test_lock();
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let provider = match runmat_accelerate_api::provider() {
+            Some(p) => p,
+            None => panic!("wgpu provider not available"),
+        };
+        let tol = match provider.precision() {
+            runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,
+            runmat_accelerate_api::ProviderPrecision::F32 => 1e-4,
         };
 
         let a = Tensor::new(vec![4.0, 1.0, 2.0, 3.0], vec![2, 2]).unwrap();
@@ -629,7 +821,7 @@ pub(crate) mod tests {
 
         assert_eq!(gathered.shape, cpu_tensor.shape);
         for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
-            assert!((gpu - cpu).abs() < 1e-10);
+            assert!((gpu - cpu).abs() < tol, "gpu={gpu} cpu={cpu}");
         }
     }
 

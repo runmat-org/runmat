@@ -862,15 +862,32 @@ impl RunMatWasm {
     #[wasm_bindgen(js_name = exportFigureScene)]
     pub fn export_figure_scene(&self, handle: u32) -> Result<Option<Vec<u8>>, JsValue> {
         self.ensure_not_disposed()?;
+        log::debug!("RunMat wasm: exportFigureScene start handle={handle}");
         match runtime_plot_export_figure_scene(FigureHandle::from(handle)) {
-            Ok(Some(payload)) => Ok(Some(payload)),
+            Ok(Some(payload)) => {
+                log::debug!(
+                    "RunMat wasm: exportFigureScene ok handle={} bytes={}",
+                    handle,
+                    payload.len()
+                );
+                Ok(Some(payload))
+            }
             Ok(None) => {
+                log::debug!("RunMat wasm: exportFigureScene empty handle={}", handle);
                 let current = runtime_current_figure_handle();
                 if current.as_u32() == handle {
                     return Ok(None);
                 }
                 match runtime_plot_export_figure_scene(current) {
-                    Ok(payload) => Ok(payload),
+                    Ok(payload) => {
+                        log::debug!(
+                            "RunMat wasm: exportFigureScene fallback handle={} current_handle={} has_payload={}",
+                            handle,
+                            current.as_u32(),
+                            payload.as_ref().map(|bytes| bytes.len()).unwrap_or(0)
+                        );
+                        Ok(payload)
+                    }
                     Err(err) => {
                         warn!("RunMat wasm: fallback figure scene export rejected: {err}");
                         Ok(None)
@@ -887,9 +904,19 @@ impl RunMatWasm {
     #[wasm_bindgen(js_name = importFigureScene)]
     pub async fn import_figure_scene(&self, scene: &[u8]) -> Result<Option<u32>, JsValue> {
         self.ensure_not_disposed()?;
+        log::debug!("RunMat wasm: importFigureScene start bytes={}", scene.len());
         match runtime_plot_import_figure_scene_async(scene).await {
-            Ok(Some(handle)) => Ok(Some(handle.as_u32())),
-            Ok(None) => Ok(None),
+            Ok(Some(handle)) => {
+                log::debug!(
+                    "RunMat wasm: importFigureScene ok handle={}",
+                    handle.as_u32()
+                );
+                Ok(Some(handle.as_u32()))
+            }
+            Ok(None) => {
+                log::debug!("RunMat wasm: importFigureScene returned none");
+                Ok(None)
+            }
             Err(err) => {
                 if err.identifier() == Some(ReplayErrorKind::DecodeFailed.identifier()) {
                     warn!("RunMat wasm: figure scene decode failed: {err}");
@@ -1364,12 +1391,32 @@ pub async fn wasm_render_figure_image(
     height: Option<u32>,
     textmark: Option<String>,
 ) -> Result<Uint8Array, JsValue> {
+    const DEFAULT_PREVIEW_WIDTH: u32 = 1280;
+    const DEFAULT_PREVIEW_HEIGHT: u32 = 720;
     let _ = shared_webgpu_context();
     let target = parse_optional_handle(handle)?.unwrap_or_else(runtime_current_figure_handle);
-    let bytes =
-        runtime_render_figure_snapshot(target, width.unwrap_or(0), height.unwrap_or(0), textmark)
-            .await
-            .map_err(runtime_flow_to_js)?;
+    let normalized_width = width.unwrap_or(0).max(1);
+    let normalized_height = height.unwrap_or(0).max(1);
+    let (render_width, render_height) = if normalized_width == 1 && normalized_height == 1 {
+        (DEFAULT_PREVIEW_WIDTH, DEFAULT_PREVIEW_HEIGHT)
+    } else {
+        (normalized_width, normalized_height)
+    };
+    log::debug!(
+        "RunMat wasm: renderFigureImage start handle={} width={} height={} textmark={}",
+        target.as_u32(),
+        render_width,
+        render_height,
+        textmark.as_deref().unwrap_or("")
+    );
+    let bytes = runtime_render_figure_snapshot(target, render_width, render_height, textmark)
+        .await
+        .map_err(runtime_flow_to_js)?;
+    log::debug!(
+        "RunMat wasm: renderFigureImage ok handle={} bytes={}",
+        target.as_u32(),
+        bytes.len()
+    );
     Ok(Uint8Array::from(bytes.as_slice()))
 }
 
@@ -1393,14 +1440,23 @@ pub async fn wasm_render_figure_image_with_camera_state(
     camera_state: JsValue,
     textmark: Option<String>,
 ) -> Result<Uint8Array, JsValue> {
+    const DEFAULT_PREVIEW_WIDTH: u32 = 1280;
+    const DEFAULT_PREVIEW_HEIGHT: u32 = 720;
     let _ = shared_webgpu_context();
     let target = parse_optional_handle(handle)?.unwrap_or_else(runtime_current_figure_handle);
+    let normalized_width = width.unwrap_or(0).max(1);
+    let normalized_height = height.unwrap_or(0).max(1);
+    let (render_width, render_height) = if normalized_width == 1 && normalized_height == 1 {
+        (DEFAULT_PREVIEW_WIDTH, DEFAULT_PREVIEW_HEIGHT)
+    } else {
+        (normalized_width, normalized_height)
+    };
     let parsed: PlotSurfaceCameraState =
         serde_wasm_bindgen::from_value(camera_state).map_err(|err| js_error(&err.to_string()))?;
     let bytes = runtime_render_figure_snapshot_with_camera_state(
         target,
-        width.unwrap_or(0),
-        height.unwrap_or(0),
+        render_width,
+        render_height,
         parsed,
         textmark,
     )
@@ -1714,9 +1770,8 @@ fn extract_line_value(value: &JsValue) -> Option<String> {
 #[cfg(target_arch = "wasm32")]
 async fn install_surface_renderer(surface_id: u32, canvas: WebCanvas) -> Result<(), JsValue> {
     init_logging_once();
-    let enable_overlay = matches!(canvas, WebCanvas::Html(_));
     let options = WebRendererOptions {
-        enable_overlay,
+        enable_overlay: true,
         ..WebRendererOptions::default()
     };
     let canvas_kind = match &canvas {
@@ -1729,13 +1784,27 @@ async fn install_surface_renderer(surface_id: u32, canvas: WebCanvas) -> Result<
     );
     let renderer = match shared_webgpu_context() {
         Some(shared) => {
+            log::debug!(
+                "plot-web: install_surface_renderer using shared context surface_id={} canvas_kind={}",
+                surface_id,
+                canvas_kind
+            );
             WebRenderer::with_shared_context(canvas.clone(), options.clone(), shared).await
         }
-        None => WebRenderer::new(canvas, options).await,
+        None => {
+            log::debug!(
+                "plot-web: install_surface_renderer using dedicated context surface_id={} canvas_kind={}",
+                surface_id,
+                canvas_kind
+            );
+            WebRenderer::new(canvas, options).await
+        }
     }
     .map_err(|err| js_error(&format!("Failed to initialize plot renderer: {err}")))?;
+    log::debug!("plot-web: install_surface_renderer renderer_ready surface_id={surface_id}");
     runtime_install_surface(surface_id, renderer)
         .map_err(|err| js_error(&format!("Failed to register plot surface: {err}")))?;
+    log::debug!("plot-web: install_surface_renderer registered surface_id={surface_id}");
     Ok(())
 }
 
