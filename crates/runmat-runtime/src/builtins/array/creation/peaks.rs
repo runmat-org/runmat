@@ -89,7 +89,7 @@ fn make_axis(n: usize) -> (Vec<f64>, Vec<f64>) {
         return (Vec::new(), Vec::new());
     }
     if n == 1 {
-        return (vec![0.0], vec![0.0]);
+        return (vec![3.0], vec![3.0]);
     }
     let axis: Vec<f64> = (0..n)
         .map(|i| -3.0 + 6.0 * (i as f64) / ((n - 1) as f64))
@@ -265,9 +265,9 @@ mod tests {
 
     #[test]
     fn peaks_one_is_scalar() {
-        // At n=1 the single grid point maps to (x=0, y=0).
+        // At n=1 the single grid point maps to the stop endpoint (x=3, y=3).
         // tensor_into_value may collapse a 1×1 tensor to Value::Num.
-        let expected = peaks_at(0.0, 0.0);
+        let expected = peaks_at(3.0, 3.0);
         let value = peaks_builtin(vec![Value::Num(1.0)]).expect("peaks");
         let got = match value {
             Value::Num(v) => v,
