@@ -69,24 +69,13 @@ async fn peaks_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
             let (rows, cols) = matrix_shape(&x_mat)?;
             let (y_rows, y_cols) = matrix_shape(&y_mat)?;
             if rows != y_rows || cols != y_cols {
-                return Err(builtin_error(
-                    "peaks: X and Y must have the same size",
-                ));
+                return Err(builtin_error("peaks: X and Y must have the same size"));
             }
             let z_mat = compute_z(&x_mat.data, &y_mat.data, rows, cols);
-            build_output(
-                x_mat.data,
-                y_mat.data,
-                z_mat,
-                rows,
-                cols,
-                out_count,
-            )
+            build_output(x_mat.data, y_mat.data, z_mat, rows, cols, out_count)
         }
 
-        _ => Err(builtin_error(
-            "peaks: expected 0, 1, or 2 input arguments",
-        )),
+        _ => Err(builtin_error("peaks: expected 0, 1, or 2 input arguments")),
     }
 }
 
@@ -112,12 +101,7 @@ fn make_axis(n: usize) -> (Vec<f64>, Vec<f64>) {
 ///
 /// meshgrid(x_axis, y_axis): X[row,col] = x_axis[col], Y[row,col] = y_axis[row].
 /// Column-major: element (row, col) lives at index `row + col * rows`.
-fn make_grids(
-    x_axis: &[f64],
-    y_axis: &[f64],
-    rows: usize,
-    cols: usize,
-) -> (Vec<f64>, Vec<f64>) {
+fn make_grids(x_axis: &[f64], y_axis: &[f64], rows: usize, cols: usize) -> (Vec<f64>, Vec<f64>) {
     let size = rows * cols;
     let mut x_mat = vec![0.0f64; size];
     let mut y_mat = vec![0.0f64; size];
@@ -184,7 +168,7 @@ fn build_output(
 }
 
 fn make_tensor(data: Vec<f64>, shape: Vec<usize>) -> crate::BuiltinResult<Value> {
-    if shape.iter().any(|&d| d == 0) {
+    if shape.contains(&0) {
         return Tensor::new(Vec::new(), shape)
             .map(tensor::tensor_into_value)
             .map_err(|e| builtin_error(format!("peaks: {e}")));
@@ -221,11 +205,10 @@ async fn parse_scalar_n(value: &Value) -> crate::BuiltinResult<usize> {
 async fn gather_tensor(value: &Value) -> crate::BuiltinResult<Tensor> {
     match value {
         Value::Tensor(t) => Ok(t.clone()),
-        Value::Num(v) => Tensor::new(vec![*v], vec![1, 1])
-            .map_err(|e| builtin_error(format!("peaks: {e}"))),
-        _ => Err(builtin_error(
-            "peaks: X and Y must be numeric matrices",
-        )),
+        Value::Num(v) => {
+            Tensor::new(vec![*v], vec![1, 1]).map_err(|e| builtin_error(format!("peaks: {e}")))
+        }
+        _ => Err(builtin_error("peaks: X and Y must be numeric matrices")),
     }
 }
 
@@ -306,7 +289,10 @@ mod tests {
         //   = exp(-1) * 8/3
         let expected = std::f64::consts::E.recip() * 8.0 / 3.0;
         let got = peaks_at(0.0, 0.0);
-        assert!((got - expected).abs() < 1e-12, "got {got}, expected {expected}");
+        assert!(
+            (got - expected).abs() < 1e-12,
+            "got {got}, expected {expected}"
+        );
     }
 
     #[test]
@@ -315,8 +301,7 @@ mod tests {
         let x = Tensor::new(vec![0.0, 1.0, 0.0, 1.0], vec![2, 2]).unwrap();
         let y = Tensor::new(vec![0.0, 0.0, 1.0, 1.0], vec![2, 2]).unwrap();
         let value =
-            peaks_builtin(vec![Value::Tensor(x.clone()), Value::Tensor(y.clone())])
-                .expect("peaks");
+            peaks_builtin(vec![Value::Tensor(x.clone()), Value::Tensor(y.clone())]).expect("peaks");
         match value {
             Value::Tensor(t) => {
                 assert_eq!(t.shape, vec![2, 2]);
@@ -331,12 +316,8 @@ mod tests {
 
     #[test]
     fn peaks_too_many_args_errors() {
-        let err = peaks_builtin(vec![
-            Value::Num(1.0),
-            Value::Num(2.0),
-            Value::Num(3.0),
-        ])
-        .unwrap_err();
+        let err =
+            peaks_builtin(vec![Value::Num(1.0), Value::Num(2.0), Value::Num(3.0)]).unwrap_err();
         assert!(err.to_string().contains("0, 1, or 2"));
     }
 
