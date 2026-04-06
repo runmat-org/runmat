@@ -82,6 +82,12 @@ fn peaks_type(_args: &[Type], _ctx: &ResolveContext) -> Type {
 async fn peaks_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let out_count = crate::output_count::current_output_count();
 
+    if matches!(out_count, Some(n) if n > 3) {
+        return Err(builtin_error(
+            "peaks: too many output arguments; maximum is 3",
+        ));
+    }
+
     match rest.len() {
         // peaks  or  peaks()
         0 => peaks_from_n(DEFAULT_N, out_count).await,
@@ -315,6 +321,9 @@ async fn parse_scalar_n(value: &Value) -> crate::BuiltinResult<usize> {
     if rounded < 0.0 {
         return Err(builtin_error("peaks: n must be non-negative"));
     }
+    if rounded > usize::MAX as f64 {
+        return Err(builtin_error("peaks: n is too large for this platform"));
+    }
     Ok(rounded as usize)
 }
 
@@ -445,6 +454,17 @@ mod tests {
     }
 
     #[test]
+    fn peaks_too_many_outputs_errors() {
+        // Simulate [a,b,c,d] = peaks() — out_count = 4 must be rejected.
+        let _guard = crate::output_count::push_output_count(Some(4));
+        let err = peaks_builtin(vec![]).unwrap_err();
+        assert!(
+            err.to_string().contains("too many output arguments"),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
     fn peaks_non_integer_n_errors() {
         let err = peaks_builtin(vec![Value::Num(3.7)]).unwrap_err();
         assert!(err.to_string().contains("integer"));
@@ -454,6 +474,16 @@ mod tests {
     fn peaks_negative_n_errors() {
         let err = peaks_builtin(vec![Value::Num(-1.0)]).unwrap_err();
         assert!(err.to_string().contains("non-negative"));
+    }
+
+    #[test]
+    fn peaks_n_too_large_errors() {
+        // 2e19 exceeds usize::MAX on all common platforms; must error cleanly.
+        let err = peaks_builtin(vec![Value::Num(2e19)]).unwrap_err();
+        assert!(
+            err.to_string().contains("too large"),
+            "unexpected error: {err}"
+        );
     }
 
     // -----------------------------------------------------------------------
