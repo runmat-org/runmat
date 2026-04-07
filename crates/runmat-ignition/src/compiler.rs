@@ -1,5 +1,5 @@
 use crate::functions::UserFunction;
-use crate::instr::{EmitLabel, Instr};
+use crate::instr::{EmitLabel, EndExpr, Instr};
 use crate::CompileError;
 use once_cell::sync::OnceCell;
 use runmat_builtins::{self, Type};
@@ -70,18 +70,113 @@ fn parse_number(expr: &HirExpr) -> Option<f64> {
     }
 }
 
-fn range_end_offset(expr: &HirExpr) -> Option<i64> {
-    let HirExprKind::Range(_, _, end) = &expr.kind else {
+fn end_numeric_expr(expr: &HirExpr) -> Option<EndExpr> {
+    end_numeric_expr_from_expr(&expr.kind)
+}
+
+fn numeric_expr_any(expr: &HirExpr) -> Option<EndExpr> {
+    end_numeric_expr_internal(&expr.kind).map(|(e, _)| e)
+}
+
+fn range_dynamic_end_spec(expr: &HirExpr) -> Option<(Option<EndExpr>, Option<EndExpr>, EndExpr)> {
+    let HirExprKind::Range(start, step, end) = &expr.kind else {
         return None;
     };
-    match &end.kind {
-        HirExprKind::End => Some(0),
-        HirExprKind::Binary(left, op, right)
-            if matches!(op, runmat_parser::BinOp::Sub) && matches!(left.kind, HirExprKind::End) =>
-        {
-            match &right.kind {
-                HirExprKind::Number(s) => Some(s.parse::<i64>().unwrap_or(0)),
-                _ => Some(0),
+    let start_end = end_numeric_expr(start);
+    let step_end = step.as_ref().and_then(|s| end_numeric_expr(s));
+    let end_end = end_numeric_expr(end);
+    if start_end.is_none() && step_end.is_none() && end_end.is_none() {
+        return None;
+    }
+    let resolved_end = if let Some(e) = end_end {
+        e
+    } else {
+        numeric_expr_any(end)?
+    };
+    Some((start_end, step_end, resolved_end))
+}
+
+fn end_numeric_expr_from_expr(kind: &HirExprKind) -> Option<EndExpr> {
+    let (expr, has_end) = end_numeric_expr_internal(kind)?;
+    if has_end {
+        Some(expr)
+    } else {
+        None
+    }
+}
+
+fn end_numeric_expr_internal(kind: &HirExprKind) -> Option<(EndExpr, bool)> {
+    match kind {
+        HirExprKind::End => Some((EndExpr::End, true)),
+        HirExprKind::Number(s) => s.parse::<f64>().ok().map(|v| (EndExpr::Const(v), false)),
+        HirExprKind::Var(id) => Some((EndExpr::Var(id.0), false)),
+        HirExprKind::Unary(op, inner) => {
+            let (child, has_end) = end_numeric_expr_internal(&inner.kind)?;
+            match op {
+                runmat_parser::UnOp::Plus => Some((EndExpr::Pos(Box::new(child)), has_end)),
+                runmat_parser::UnOp::Minus => Some((EndExpr::Neg(Box::new(child)), has_end)),
+                _ => None,
+            }
+        }
+        HirExprKind::FuncCall(name, args) => {
+            let mut out_args = Vec::with_capacity(args.len());
+            let mut has_end = false;
+            for arg in args {
+                let (e, h) = end_numeric_expr_internal(&arg.kind)?;
+                out_args.push(e);
+                has_end |= h;
+            }
+            let lname = name.to_ascii_lowercase();
+            if args.len() == 1 {
+                let single = out_args.into_iter().next().unwrap_or(EndExpr::Const(0.0));
+                let out = match lname.as_str() {
+                    "floor" => EndExpr::Floor(Box::new(single)),
+                    "ceil" | "ceiling" => EndExpr::Ceil(Box::new(single)),
+                    "round" => EndExpr::Round(Box::new(single)),
+                    "fix" => EndExpr::Fix(Box::new(single)),
+                    _ => EndExpr::Call(name.clone(), vec![single]),
+                };
+                Some((out, has_end))
+            } else {
+                Some((EndExpr::Call(name.clone(), out_args), has_end))
+            }
+        }
+        HirExprKind::Binary(left, op, right) => {
+            let (lhs, left_has_end) = end_numeric_expr_internal(&left.kind)?;
+            let (rhs, right_has_end) = end_numeric_expr_internal(&right.kind)?;
+            let has_end = left_has_end || right_has_end;
+            match op {
+                runmat_parser::BinOp::Add => {
+                    Some((EndExpr::Add(Box::new(lhs), Box::new(rhs)), has_end))
+                }
+                runmat_parser::BinOp::Sub => {
+                    Some((EndExpr::Sub(Box::new(lhs), Box::new(rhs)), has_end))
+                }
+                runmat_parser::BinOp::Mul => {
+                    Some((EndExpr::Mul(Box::new(lhs), Box::new(rhs)), has_end))
+                }
+                runmat_parser::BinOp::ElemMul => {
+                    Some((EndExpr::Mul(Box::new(lhs), Box::new(rhs)), has_end))
+                }
+                runmat_parser::BinOp::RightDiv => {
+                    Some((EndExpr::Div(Box::new(lhs), Box::new(rhs)), has_end))
+                }
+                runmat_parser::BinOp::ElemDiv => {
+                    Some((EndExpr::Div(Box::new(lhs), Box::new(rhs)), has_end))
+                }
+                runmat_parser::BinOp::LeftDiv => {
+                    Some((EndExpr::LeftDiv(Box::new(lhs), Box::new(rhs)), has_end))
+                }
+                runmat_parser::BinOp::ElemLeftDiv => {
+                    Some((EndExpr::LeftDiv(Box::new(lhs), Box::new(rhs)), has_end))
+                }
+                runmat_parser::BinOp::Pow => {
+                    Some((EndExpr::Pow(Box::new(lhs), Box::new(rhs)), has_end))
+                }
+                runmat_parser::BinOp::ElemPow => {
+                    Some((EndExpr::Pow(Box::new(lhs), Box::new(rhs)), has_end))
+                }
+                _ => None,
             }
         }
         _ => None,
@@ -331,6 +426,14 @@ impl Compiler {
             K::End => true,
             K::Unary(_, e) => Self::expr_contains_end(e),
             K::Binary(a, _, b) => Self::expr_contains_end(a) || Self::expr_contains_end(b),
+            K::Range(a, b, c) => {
+                Self::expr_contains_end(a)
+                    || b.as_ref()
+                        .map(|e| Self::expr_contains_end(e))
+                        .unwrap_or(false)
+                    || Self::expr_contains_end(c)
+            }
+            K::FuncCall(_, args) => args.iter().any(Self::expr_contains_end),
             K::Tensor(rows) | K::Cell(rows) => rows
                 .iter()
                 .flat_map(|r| r.iter())
@@ -1196,8 +1299,7 @@ impl Compiler {
                                 let mut colon_mask: u32 = 0;
                                 let mut end_mask: u32 = 0;
                                 let mut numeric_count = 0usize;
-                                let mut end_offsets: Vec<(usize, i64)> = Vec::new();
-                                let mut lowered_range_end = false;
+                                let mut end_offsets: Vec<(usize, EndExpr)> = Vec::new();
                                 for (dim, index) in indices.iter().enumerate() {
                                     if matches!(index.kind, runmat_hir::HirExprKind::Colon) {
                                         colon_mask |= 1u32 << dim;
@@ -1205,79 +1307,46 @@ impl Compiler {
                                         end_mask |= 1u32 << dim;
                                     } else {
                                         // If this index is a Range whose end references End (with or without offset),
-                                        // skip compiling it here; it will be handled by StoreRangeEnd.
-                                        if indices.len() > 1 {
-                                            if let Some(off) = range_end_offset(index) {
-                                                end_offsets.push((numeric_count, off));
-                                                continue;
-                                            }
+                                        // skip compiling it here; it will be handled by StoreSliceExpr.
+                                        if let Some((_start_end, _step_end, end_expr)) =
+                                            range_dynamic_end_spec(index)
+                                        {
+                                            end_offsets.push((numeric_count, end_expr));
+                                            continue;
                                         }
-                                        // Special-case 1-D range with end arithmetic when dims == 1
-                                        if indices.len() == 1 {
-                                            if let runmat_hir::HirExprKind::Range(
-                                                start,
-                                                step,
-                                                _end,
-                                            ) = &index.kind
-                                            {
-                                                if let Some(offset) = range_end_offset(index) {
-                                                    // Emit StoreSlice1DRangeEnd: base and range params evaluated before RHS
-                                                    self.compile_expr(start)?;
-                                                    let mut lvalue_count = 2usize;
-                                                    let has_step = step.is_some();
-                                                    if let Some(st) = step {
-                                                        self.compile_expr(st)?;
-                                                        lvalue_count += 1;
-                                                    }
-                                                    let mut lvalue_temps =
-                                                        Vec::with_capacity(lvalue_count);
-                                                    for _ in 0..lvalue_count {
-                                                        let temp = self.alloc_temp();
-                                                        self.emit(Instr::StoreVar(temp));
-                                                        lvalue_temps.push(temp);
-                                                    }
-                                                    lvalue_temps.reverse();
-                                                    self.compile_expr(rhs)?;
-                                                    let rhs_temp = self.alloc_temp();
-                                                    self.emit(Instr::StoreVar(rhs_temp));
-                                                    for temp in &lvalue_temps {
-                                                        self.emit(Instr::LoadVar(*temp));
-                                                    }
-                                                    self.emit(Instr::LoadVar(rhs_temp));
-                                                    self.emit(Instr::StoreSlice1DRangeEnd {
-                                                        has_step,
-                                                        offset,
-                                                    });
-                                                    lowered_range_end = true;
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                        if !lowered_range_end {
-                                            self.compile_expr(index)?;
+                                        // 1-D end-bounded ranges flow through generic StoreSliceExpr.
+                                        if let Some(off) = end_numeric_expr(index) {
+                                            self.emit(Instr::LoadConst(0.0));
+                                            end_offsets.push((numeric_count, off));
                                             numeric_count += 1;
+                                            continue;
                                         }
+                                        self.compile_expr(index)?;
+                                        numeric_count += 1;
                                     }
                                 }
-                                if lowered_range_end {
-                                    // VM already pushed updated tensor; store back to var
-                                    self.emit(Instr::StoreVar(var_id.0));
-                                } else {
+                                {
                                     // Push RHS last so VM pops it first
                                     // Detect any ranges whose upper bound depends on `end`.
                                     let mut has_any_range_end = false;
                                     let mut range_dims: Vec<usize> = Vec::new();
                                     let mut range_has_step: Vec<bool> = Vec::new();
-                                    let mut end_offs: Vec<i64> = Vec::new();
+                                    let mut range_start_exprs: Vec<Option<EndExpr>> = Vec::new();
+                                    let mut range_step_exprs: Vec<Option<EndExpr>> = Vec::new();
+                                    let mut end_offs: Vec<EndExpr> = Vec::new();
                                     for (dim, index) in indices.iter().enumerate() {
                                         if let runmat_hir::HirExprKind::Range(_start, step, _end) =
                                             &index.kind
                                         {
-                                            if let Some(off) = range_end_offset(index) {
+                                            if let Some((start_end, step_end, end_expr)) =
+                                                range_dynamic_end_spec(index)
+                                            {
                                                 has_any_range_end = true;
                                                 range_dims.push(dim);
                                                 range_has_step.push(step.is_some());
-                                                end_offs.push(off);
+                                                range_start_exprs.push(start_end);
+                                                range_step_exprs.push(step_end);
+                                                end_offs.push(end_expr);
                                             }
                                         }
                                     }
@@ -1290,9 +1359,27 @@ impl Compiler {
                                                 _end,
                                             ) = &indices[dim].kind
                                             {
-                                                self.compile_expr(start)?;
+                                                if range_start_exprs[range_dims
+                                                    .iter()
+                                                    .position(|&rd| rd == dim)
+                                                    .unwrap()]
+                                                .is_some()
+                                                {
+                                                    self.emit(Instr::LoadConst(0.0));
+                                                } else {
+                                                    self.compile_expr(start)?;
+                                                }
                                                 if let Some(st) = step {
-                                                    self.compile_expr(st)?;
+                                                    if range_step_exprs[range_dims
+                                                        .iter()
+                                                        .position(|&rd| rd == dim)
+                                                        .unwrap()]
+                                                    .is_some()
+                                                    {
+                                                        self.emit(Instr::LoadConst(0.0));
+                                                    } else {
+                                                        self.compile_expr(st)?;
+                                                    }
                                                 }
                                             }
                                         }
@@ -1315,14 +1402,17 @@ impl Compiler {
                                             self.emit(Instr::LoadVar(*temp));
                                         }
                                         self.emit(Instr::LoadVar(rhs_temp));
-                                        self.emit(Instr::StoreRangeEnd {
+                                        self.emit(Instr::StoreSliceExpr {
                                             dims: indices.len(),
                                             numeric_count,
                                             colon_mask,
                                             end_mask,
                                             range_dims,
                                             range_has_step,
-                                            end_offsets: end_offs,
+                                            range_start_exprs,
+                                            range_step_exprs,
+                                            range_end_exprs: end_offs,
+                                            end_numeric_exprs: Vec::new(),
                                         });
                                     } else {
                                         // Attempt packing of function returns or cell expansion for 1-D slices
@@ -1483,13 +1573,18 @@ impl Compiler {
                                                 end_mask,
                                             ));
                                         } else {
-                                            self.emit(Instr::StoreSliceEx(
-                                                indices.len(),
+                                            self.emit(Instr::StoreSliceExpr {
+                                                dims: indices.len(),
                                                 numeric_count,
                                                 colon_mask,
                                                 end_mask,
-                                                end_offsets,
-                                            ));
+                                                range_dims: Vec::new(),
+                                                range_has_step: Vec::new(),
+                                                range_start_exprs: Vec::new(),
+                                                range_step_exprs: Vec::new(),
+                                                range_end_exprs: Vec::new(),
+                                                end_numeric_exprs: end_offsets,
+                                            });
                                         }
                                     }
                                     // Store updated base back to variable
@@ -2533,7 +2628,7 @@ impl Compiler {
             }
             HirExprKind::Index(base, indices) => {
                 let has_colon = indices.iter().any(|e| matches!(e.kind, HirExprKind::Colon));
-                let has_end = indices.iter().any(|e| matches!(e.kind, HirExprKind::End));
+                let has_end = indices.iter().any(Self::expr_contains_end);
                 let has_vector = indices.iter().any(|e| {
                     matches!(e.kind, HirExprKind::Range(_, _, _) | HirExprKind::Tensor(_))
                         || matches!(
@@ -2546,38 +2641,48 @@ impl Compiler {
                             e.kind,
                             HirExprKind::Number(_) | HirExprKind::Colon | HirExprKind::End
                         )
-                        || !matches!(
-                            e.kind,
-                            HirExprKind::Number(_) | HirExprKind::Colon | HirExprKind::End
-                        )
                 });
                 // General case: any-dimension ranges with end arithmetic (e.g., A(:,2:2:end-1,...))
-                // We lower into IndexRangeEnd: push base, then per-range start[, step] in increasing dimension order,
+                // We lower into IndexSliceExpr: push base, then per-range start[, step] in increasing dimension order,
                 // then any numeric scalar indices (in order). Colon and plain end dims are marked in masks.
                 {
                     let mut has_any_range_end = false;
                     let mut range_dims: Vec<usize> = Vec::new();
                     let mut range_has_step: Vec<bool> = Vec::new();
-                    let mut end_offsets: Vec<i64> = Vec::new();
+                    let mut range_start_exprs: Vec<Option<EndExpr>> = Vec::new();
+                    let mut range_step_exprs: Vec<Option<EndExpr>> = Vec::new();
+                    let mut end_offsets: Vec<EndExpr> = Vec::new();
                     // First pass: detect any Range whose upper bound depends on `end`.
                     for (dim, index) in indices.iter().enumerate() {
                         if let HirExprKind::Range(_start, step, _end) = &index.kind {
-                            if let Some(off) = range_end_offset(index) {
+                            if let Some((start_end, step_end, end_expr)) =
+                                range_dynamic_end_spec(index)
+                            {
                                 has_any_range_end = true;
                                 range_dims.push(dim);
                                 range_has_step.push(step.is_some());
-                                end_offsets.push(off);
+                                range_start_exprs.push(start_end);
+                                range_step_exprs.push(step_end);
+                                end_offsets.push(end_expr);
                             }
                         }
                     }
                     if has_any_range_end {
                         self.compile_expr(base)?;
                         // Push per-range start and optional step in dimension order
-                        for &dim in &range_dims {
+                        for (ri, &dim) in range_dims.iter().enumerate() {
                             if let HirExprKind::Range(start, step, _end) = &indices[dim].kind {
-                                self.compile_expr(start)?;
+                                if range_start_exprs[ri].is_some() {
+                                    self.emit(Instr::LoadConst(0.0));
+                                } else {
+                                    self.compile_expr(start)?;
+                                }
                                 if let Some(st) = step {
-                                    self.compile_expr(st)?;
+                                    if range_step_exprs[ri].is_some() {
+                                        self.emit(Instr::LoadConst(0.0));
+                                    } else {
+                                        self.compile_expr(st)?;
+                                    }
                                 }
                             }
                         }
@@ -2596,7 +2701,7 @@ impl Compiler {
                                 HirExprKind::Range(_, _, _) => {
                                     // End-bounded ranges are encoded via `range_dims`; all other
                                     // ranges still need their compiled selector payload.
-                                    if range_end_offset(index).is_some() {
+                                    if range_dynamic_end_spec(index).is_some() {
                                         continue;
                                     }
                                     self.compile_expr(index)?;
@@ -2608,24 +2713,18 @@ impl Compiler {
                                 }
                             }
                         }
-                        // For pure 1-D case with a single range_dim, degrade to legacy Index1DRangeEnd to keep existing test stable
-                        if indices.len() == 1 && range_dims.len() == 1 {
-                            // We pushed start[, step] already. Emit Index1DRangeEnd.
-                            self.emit(Instr::Index1DRangeEnd {
-                                has_step: range_has_step[0],
-                                offset: end_offsets[0],
-                            });
-                        } else {
-                            self.emit(Instr::IndexRangeEnd {
-                                dims: indices.len(),
-                                numeric_count,
-                                colon_mask,
-                                end_mask,
-                                range_dims,
-                                range_has_step,
-                                end_offsets,
-                            });
-                        }
+                        self.emit(Instr::IndexSliceExpr {
+                            dims: indices.len(),
+                            numeric_count,
+                            colon_mask,
+                            end_mask,
+                            range_dims,
+                            range_has_step,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs: end_offsets,
+                            end_numeric_exprs: Vec::new(),
+                        });
                         return Ok(());
                     }
                 }
@@ -2640,29 +2739,20 @@ impl Compiler {
                     let mut colon_mask: u32 = 0;
                     let mut end_mask: u32 = 0;
                     let mut numeric_count = 0usize;
-                    let mut end_offsets: Vec<(usize, i64)> = Vec::new();
+                    let mut end_offsets: Vec<(usize, EndExpr)> = Vec::new();
                     for (dim, index) in indices.iter().enumerate() {
                         if matches!(index.kind, HirExprKind::Colon) {
                             colon_mask |= 1u32 << dim;
                         } else if matches!(index.kind, HirExprKind::End) {
                             end_mask |= 1u32 << dim;
                         } else {
-                            // Detect simple end arithmetic forms: end-1, end-2 etc.
-                            if let HirExprKind::Binary(left, op, right) = &index.kind {
-                                if matches!(op, runmat_parser::BinOp::Sub)
-                                    && matches!(left.kind, HirExprKind::End)
-                                {
-                                    // Right should be number literal string; parse as integer offset if possible
-                                    if let HirExprKind::Number(ref s) = right.kind {
-                                        if let Ok(k) = s.parse::<i64>() {
-                                            // Reserve a numeric slot: push placeholder and count it
-                                            self.emit(Instr::LoadConst(0.0));
-                                            end_offsets.push((numeric_count, k));
-                                            numeric_count += 1;
-                                            continue;
-                                        }
-                                    }
-                                }
+                            if let Some(off) = end_numeric_expr(index) {
+                                // Reserve a numeric slot: push placeholder and count it.
+                                // Positive value -> end-k, negative value -> floor(end/|k|).
+                                self.emit(Instr::LoadConst(0.0));
+                                end_offsets.push((numeric_count, off));
+                                numeric_count += 1;
+                                continue;
                             }
                             self.compile_expr(index)?;
                             numeric_count += 1;
@@ -2676,13 +2766,18 @@ impl Compiler {
                             end_mask,
                         ));
                     } else {
-                        self.emit(Instr::IndexSliceEx(
-                            indices.len(),
+                        self.emit(Instr::IndexSliceExpr {
+                            dims: indices.len(),
                             numeric_count,
                             colon_mask,
                             end_mask,
-                            end_offsets,
-                        ));
+                            range_dims: Vec::new(),
+                            range_has_step: Vec::new(),
+                            range_start_exprs: Vec::new(),
+                            range_step_exprs: Vec::new(),
+                            range_end_exprs: Vec::new(),
+                            end_numeric_exprs: end_offsets,
+                        });
                     }
                 } else {
                     self.compile_expr(base)?;

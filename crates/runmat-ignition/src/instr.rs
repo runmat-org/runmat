@@ -13,6 +13,26 @@ pub enum EmitLabel {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum EndExpr {
+    End,
+    Const(f64),
+    Var(usize),
+    Call(String, Vec<EndExpr>),
+    Add(Box<EndExpr>, Box<EndExpr>),
+    Sub(Box<EndExpr>, Box<EndExpr>),
+    Mul(Box<EndExpr>, Box<EndExpr>),
+    Div(Box<EndExpr>, Box<EndExpr>),
+    LeftDiv(Box<EndExpr>, Box<EndExpr>),
+    Pow(Box<EndExpr>, Box<EndExpr>),
+    Neg(Box<EndExpr>),
+    Pos(Box<EndExpr>),
+    Floor(Box<EndExpr>),
+    Ceil(Box<EndExpr>),
+    Round(Box<EndExpr>),
+    Fix(Box<EndExpr>),
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum Instr {
     LoadConst(f64),
     LoadComplex(f64, f64),
@@ -62,36 +82,32 @@ pub enum Instr {
     // colon_mask bit i set => dim i is colon (0-based),
     // end_mask bit i set => dim i is plain 'end' (no arithmetic) and should resolve to that dim's length
     IndexSlice(usize, usize, u32, u32),
-    // N-D range/selectors with per-dimension modes and end arithmetic offsets for ranges
-    // dims: total dims; numeric_count: count of extra numeric scalar indices following; colon_mask/end_mask like IndexSlice;
-    // range_dims: list of dimension indices that are ranges; for each, we expect start [, step] pushed in order; end_offsets align with range_dims
-    IndexRangeEnd {
+    // Unified expression-based slicing/indexing path with dynamic ranges and end arithmetic
+    IndexSliceExpr {
         dims: usize,
         numeric_count: usize,
         colon_mask: u32,
         end_mask: u32,
         range_dims: Vec<usize>,
         range_has_step: Vec<bool>,
-        end_offsets: Vec<i64>,
+        range_start_exprs: Vec<Option<EndExpr>>,
+        range_step_exprs: Vec<Option<EndExpr>>,
+        range_end_exprs: Vec<EndExpr>,
+        end_numeric_exprs: Vec<(usize, EndExpr)>,
     },
-    // 1-D range with end arithmetic: base on stack, then start [, step]
-    Index1DRangeEnd {
-        has_step: bool,
-        offset: i64,
-    },
-    // Store with range+end arithmetic across dims; stack layout mirrors IndexRangeEnd plus RHS (on top)
-    StoreRangeEnd {
+    // Unified expression-based slice assignment path with dynamic ranges and end arithmetic
+    StoreSliceExpr {
         dims: usize,
         numeric_count: usize,
         colon_mask: u32,
         end_mask: u32,
         range_dims: Vec<usize>,
         range_has_step: Vec<bool>,
-        end_offsets: Vec<i64>,
+        range_start_exprs: Vec<Option<EndExpr>>,
+        range_step_exprs: Vec<Option<EndExpr>>,
+        range_end_exprs: Vec<EndExpr>,
+        end_numeric_exprs: Vec<(usize, EndExpr)>,
     },
-    // Extended slice: supports end arithmetic per-numeric index via offsets list.
-    // Tuple items are (numeric_position_in_order, offset) representing 'end - offset'.
-    IndexSliceEx(usize, usize, u32, u32, Vec<(usize, i64)>),
     // Cell arrays
     CreateCell2D(usize, usize), // rows, cols; pops rows*cols elements
     IndexCell(usize),           // Number of indices (1D or 2D supported)
@@ -103,13 +119,6 @@ pub enum Instr {
     StoreIndexCell(usize), // like IndexCell, but for cell arrays; pops RHS and updates base
     // Store slice with colon/end semantics (mirrors IndexSlice)
     StoreSlice(usize, usize, u32, u32),
-    // Store slice with end arithmetic offsets applied to numeric indices
-    StoreSliceEx(usize, usize, u32, u32, Vec<(usize, i64)>),
-    // Store with 1-D range having end arithmetic: base, start, [step], rhs
-    StoreSlice1DRangeEnd {
-        has_step: bool,
-        offset: i64,
-    },
     // Object/Class member/method operations
     LoadMember(String),        // base on stack -> member value
     LoadMemberOrInit(String), // base on stack -> member value (missing struct field => empty struct)
@@ -261,15 +270,9 @@ impl Instr {
             Instr::StoreIndex(num_indices) | Instr::StoreIndexCell(num_indices) => {
                 effect(num_indices + 2, 1)
             }
-            Instr::IndexSlice(_, numeric_count, _, _)
-            | Instr::IndexSliceEx(_, numeric_count, _, _, _) => effect(numeric_count + 1, 1),
-            Instr::StoreSlice(_, numeric_count, _, _)
-            | Instr::StoreSliceEx(_, numeric_count, _, _, _) => effect(numeric_count + 2, 1),
-            Instr::Index1DRangeEnd { has_step, .. } => effect(if *has_step { 3 } else { 2 }, 1),
-            Instr::StoreSlice1DRangeEnd { has_step, .. } => {
-                effect(if *has_step { 4 } else { 3 }, 1)
-            }
-            Instr::IndexRangeEnd {
+            Instr::IndexSlice(_, numeric_count, _, _) => effect(numeric_count + 1, 1),
+            Instr::StoreSlice(_, numeric_count, _, _) => effect(numeric_count + 2, 1),
+            Instr::IndexSliceExpr {
                 numeric_count,
                 range_has_step,
                 ..
@@ -280,7 +283,7 @@ impl Instr {
                     .sum::<usize>();
                 effect(1 + numeric_count + range_pops, 1)
             }
-            Instr::StoreRangeEnd {
+            Instr::StoreSliceExpr {
                 numeric_count,
                 range_has_step,
                 ..

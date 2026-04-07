@@ -204,7 +204,6 @@ fn gpu_slice_assignment_and_range_indexing() {
         .expect("parse");
     let hir = lower(&ast).expect("lower");
     let vars = execute(&hir).expect("execute");
-
     let b_tensor = vars
         .into_iter()
         .filter_map(|value| match value {

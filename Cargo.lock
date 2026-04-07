@@ -5590,6 +5590,7 @@ dependencies = [
  "crossbeam-utils",
  "futures",
  "js-sys",
+ "log",
  "once_cell",
  "reqwest 0.12.23",
  "serde",

@@ -617,19 +617,20 @@ impl BytecodeCompiler {
                     | Instr::UPlus
                     | Instr::AndAnd(_)
                     | Instr::OrOr(_)
-                    | Instr::IndexSliceEx(_, _, _, _, _)
-                    | Instr::IndexRangeEnd { .. }
-                    | Instr::Index1DRangeEnd { .. }
-                    | Instr::StoreRangeEnd { .. }
+                    | Instr::IndexSliceExpr { .. }
+                    | Instr::StoreSliceExpr { .. }
                     | Instr::StoreSlice(_, _, _, _)
-                    | Instr::StoreSliceEx(_, _, _, _, _)
-                    | Instr::StoreSlice1DRangeEnd { .. }
                     | Instr::LoadMember(_)
+                    | Instr::LoadMemberOrInit(_)
                     | Instr::LoadMemberDynamic
+                    | Instr::LoadMemberDynamicOrInit
                     | Instr::StoreMember(_)
+                    | Instr::StoreMemberOrInit(_)
                     | Instr::StoreMemberDynamic
+                    | Instr::StoreMemberDynamicOrInit
                     | Instr::CreateClosure(_, _)
                     | Instr::CallMethod(_, _)
+                    | Instr::CallMethodOrMemberIndex(_, _)
                     | Instr::IndexCellExpand(_, _)
                     | Instr::StoreIndex(_)
                     | Instr::StoreIndexCell(_)

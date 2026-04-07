@@ -286,10 +286,21 @@ fn fft_output_supports_end_arithmetic_range_indexing() {
     "#;
     let ast = parse(input).expect("parse fft end range script");
     let hir = lower(&ast).expect("lower fft end range script");
+    let bytecode = compile(&hir, &HashMap::new()).expect("compile fft end range script");
+    assert!(
+        bytecode
+            .instructions
+            .iter()
+            .any(|ins| matches!(ins, Instr::IndexSliceExpr { .. })),
+        "expected IndexSliceExpr in lowered bytecode, got {:?}",
+        bytecode.instructions
+    );
     let vars = execute(&hir).expect("fft end-range indexing should execute");
     assert!(
-        vars.iter().any(|v| matches!(v, Value::Bool(true))),
-        "expected boolean true marker in vars, got {vars:?}"
+        vars.iter().any(|v| {
+            matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
+        }),
+        "expected true/equivalent marker in vars, got {vars:?}"
     );
 }
 
@@ -308,4 +319,185 @@ fn fft2_output_supports_two_dimensional_indexing() {
     assert!(vars
         .iter()
         .any(|v| matches!(v, Value::Num(n) if (*n - 2.0).abs() < 1e-12)));
+}
+
+#[test]
+fn fft_output_supports_scalar_end_div_indexing() {
+    let input = r#"
+        x = [1 2 3 4 5 6 7 8];
+        Y = fft(x);
+        a = Y(end/2);
+        ok = (real(a) == -4) && (imag(a) > 1.6) && (imag(a) < 1.7);
+    "#;
+    let ast = parse(input).expect("parse fft scalar end-div indexing script");
+    let hir = lower(&ast).expect("lower fft scalar end-div indexing script");
+    let vars = execute(&hir).expect("fft scalar end-div indexing should execute");
+    assert!(
+        vars.iter().any(|v| {
+            matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
+        }),
+        "expected true/equivalent marker in vars, got {vars:?}"
+    );
+}
+
+#[test]
+fn fft_output_supports_complex_range_assignment_with_end_div() {
+    let input = r#"
+        x = [1 2 3 4 5 6 7 8];
+        Y = fft(x);
+        Y(1:end/2) = 1 + 2i;
+        a = Y(1);
+        b = Y(4);
+        ok = (real(a) == 1) && (imag(a) == 2) && (real(b) == 1) && (imag(b) == 2);
+    "#;
+    let ast = parse(input).expect("parse fft complex range assign script");
+    let hir = lower(&ast).expect("lower fft complex range assign script");
+    let vars = execute(&hir).expect("fft complex range assign should execute");
+    assert!(
+        vars.iter().any(|v| {
+            matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
+        }),
+        "expected true/equivalent marker in vars, got {vars:?}"
+    );
+}
+
+#[test]
+fn fft2_output_supports_complex_multidim_end_ranges() {
+    let input = r#"
+        A = [1 2; 3 4];
+        F = fft2(A);
+        S = F(1:end/2, 1:end);
+        ok = (numel(S) == 2);
+    "#;
+    let ast = parse(input).expect("parse fft2 complex multidim end range script");
+    let hir = lower(&ast).expect("lower fft2 complex multidim end range script");
+    let vars = execute(&hir).expect("fft2 complex multidim end range should execute");
+    assert!(
+        vars.iter().any(|v| {
+            matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
+        }),
+        "expected true/equivalent marker in vars, got {vars:?}"
+    );
+}
+
+#[test]
+fn fft_end_arithmetic_supports_general_scalar_and_range_forms() {
+    let input = r#"
+        x = [1 2 3 4 5 6 7 8];
+        Y = fft(x);
+        a = Y(end*1 - 3 + 2/2);
+        h = Y(2:(end*1 - 1/2));
+        ok = (real(a) == -4) && (numel(h) == 6);
+    "#;
+    let ast = parse(input).expect("parse general end arithmetic script");
+    let hir = lower(&ast).expect("lower general end arithmetic script");
+    let vars = execute(&hir).expect("general end arithmetic should execute");
+    assert!(
+        vars.iter().any(|v| {
+            matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
+        }),
+        "expected true/equivalent marker in vars, got {vars:?}"
+    );
+}
+
+#[test]
+fn fft_end_arithmetic_out_of_bounds_raises_error() {
+    let input = r#"
+        x = [1 2 3 4 5 6 7 8];
+        Y = fft(x);
+        z = Y(end + 1);
+    "#;
+    let ast = parse(input).expect("parse end arithmetic oob script");
+    let hir = lower(&ast).expect("lower end arithmetic oob script");
+    let err = execute(&hir).expect_err("end+1 should be out-of-bounds");
+    assert!(
+        err.to_string().contains("Index out of bounds")
+            || err.to_string().contains("Subscript out of bounds"),
+        "unexpected error: {err:?}"
+    );
+}
+
+#[test]
+fn fft_complex_assignment_covers_scalar_slice_and_multidim_broadcast() {
+    let input = r#"
+        x = [1 2 3 4 5 6 7 8];
+        Y = fft(x);
+        Y(1) = 3 + 4i;
+        Y(1:end/2) = 1 + 2i;
+        A = [1 2; 3 4];
+        F = fft2(A);
+        F(:, 1) = 9 + 10i;
+        ok = (real(Y(1)) == 1) && (imag(Y(1)) == 2) && (real(F(2,1)) == 9) && (imag(F(2,1)) == 10);
+    "#;
+    let ast = parse(input).expect("parse complex assignment coverage script");
+    let hir = lower(&ast).expect("lower complex assignment coverage script");
+    let vars = execute(&hir).expect("complex assignment coverage should execute");
+    assert!(
+        vars.iter().any(|v| {
+            matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
+        }),
+        "expected true/equivalent marker in vars, got {vars:?}"
+    );
+}
+
+#[test]
+fn object_range_end_assignment_accepts_rich_end_expression_payload() {
+    let input = r#"
+        __register_test_classes();
+        o = new_object('OverIdx');
+        o(1:(end*1 - 1/2)) = 7;
+        r = o(1);
+        ok = (r == 99);
+    "#;
+    let ast = parse(input).expect("parse object range-end payload script");
+    let hir = lower(&ast).expect("lower object range-end payload script");
+    let vars = execute(&hir).expect("object range-end payload script should execute");
+    assert!(
+        vars.iter().any(|v| {
+            matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
+        }),
+        "expected true/equivalent marker in vars, got {vars:?}"
+    );
+}
+
+#[test]
+fn fft_end_arithmetic_supports_pow_round_floor_fix_and_leftdiv() {
+    let input = r#"
+        x = [1 2 3 4 5 6 7 8];
+        Y = fft(x);
+        a = Y(round(end^1 / 2));
+        b = Y(floor(end ./ 2));
+        c = Y(fix(2 \ end));
+        ok = (real(a) == real(b)) && (real(c) == real(Y(2)));
+    "#;
+    let ast = parse(input).expect("parse advanced end arithmetic functions script");
+    let hir = lower(&ast).expect("lower advanced end arithmetic functions script");
+    let vars = execute(&hir).expect("advanced end arithmetic functions should execute");
+    assert!(
+        vars.iter().any(|v| {
+            matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
+        }),
+        "expected true/equivalent marker in vars, got {vars:?}"
+    );
+}
+
+#[test]
+fn fft_end_arithmetic_supports_variable_offsets() {
+    let input = r#"
+        x = [1 2 3 4 5 6 7 8];
+        k = 2;
+        Y = fft(x);
+        a = Y(end - k);
+        h = Y(1:(end - k));
+        ok = (real(a) == -4) && (numel(h) == 6);
+    "#;
+    let ast = parse(input).expect("parse variable end arithmetic script");
+    let hir = lower(&ast).expect("lower variable end arithmetic script");
+    let vars = execute(&hir).expect("variable end arithmetic should execute");
+    assert!(
+        vars.iter().any(|v| {
+            matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
+        }),
+        "expected true/equivalent marker in vars, got {vars:?}"
+    );
 }

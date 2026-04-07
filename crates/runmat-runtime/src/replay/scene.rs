@@ -312,31 +312,47 @@ async fn read_scene_chunks_bytes_async(
         .collect::<Vec<_>>();
     let batch = runmat_filesystem::read_many_async(&request_paths).await?;
     let mut resolved = std::collections::HashMap::new();
+    let mut failures = std::collections::HashMap::new();
     for (index, entry) in batch.into_iter().enumerate() {
         if let Some(path) = unique_paths.get(index) {
+            let error = entry.error().map(|value| value.to_string());
             resolved.insert(path.clone(), entry.into_bytes());
+            failures.insert(path.clone(), error);
         }
     }
 
     let mut out = Vec::with_capacity(chunks.len());
     for (chunk, candidates) in chunks.iter().zip(per_chunk_candidates.into_iter()) {
         let mut found = None;
-        for candidate in candidates {
-            if let Some(Some(bytes)) = resolved.get(&candidate) {
+        for candidate in &candidates {
+            if let Some(Some(bytes)) = resolved.get(candidate) {
                 found = Some(bytes.clone());
                 break;
             }
         }
         let bytes = found.ok_or_else(|| {
+            let attempted = candidates.join(", ");
+            let failure_details = candidates
+                .iter()
+                .filter_map(|candidate| failures.get(candidate).and_then(|value| value.as_ref()).map(|err| format!("{candidate} => {err}")))
+                .collect::<Vec<_>>()
+                .join(" | ");
             std::io::Error::new(
                 std::io::ErrorKind::NotFound,
                 format!(
-                    "unable to resolve scene chunk from refs {}",
+                    "unable to resolve scene chunk from refs {} (attempted: {}){}",
                     chunk
                         .src
                         .as_deref()
                         .or(chunk.artifact_id.as_deref())
                         .unwrap_or("<unknown>")
+                    ,
+                    attempted,
+                    if failure_details.is_empty() {
+                        String::new()
+                    } else {
+                        format!("; failures: {failure_details}")
+                    }
                 ),
             )
         })?;
@@ -357,9 +373,11 @@ fn build_scene_chunk_candidates(
         }
     }
     if let Some(artifact_id) = &chunk.artifact_id {
+        let artifact_root = artifact_root_from_dataset_path(&data_ref.dataset_path);
         base_paths.extend(chunk_paths_from_artifact_id(
             artifact_id,
             data_ref.dtype.as_deref(),
+            artifact_root.as_deref(),
         ));
     }
     if base_paths.is_empty() {
@@ -381,39 +399,21 @@ fn build_scene_chunk_candidates(
     };
 
     for base in &base_paths {
-        push(base.clone());
-        let stripped = base.trim_start_matches("./");
-        if !stripped.is_empty() {
-            push(stripped.to_string());
-            if !stripped.starts_with('/') {
-                push(format!("/{stripped}"));
-            }
-        }
-        if !base.starts_with('/') {
-            push(format!("/{base}"));
-        }
-    }
-
-    let cwd = runmat_filesystem::current_dir().ok();
-    if let Some(cwd) = &cwd {
-        for base in &base_paths {
-            let stripped = base.trim_start_matches("./");
-            push(cwd.join(base).to_string_lossy().to_string());
-            if !stripped.is_empty() {
-                push(cwd.join(stripped).to_string_lossy().to_string());
-                let mut current = Some(cwd.as_path());
-                while let Some(dir) = current {
-                    push(dir.join(stripped).to_string_lossy().to_string());
-                    current = dir.parent();
-                }
-            }
+        let normalized = normalize_scene_chunk_ref(base);
+        push(normalized.clone());
+        if !normalized.starts_with('/') {
+            push(format!("/{normalized}"));
         }
     }
 
     Ok(candidates)
 }
 
-fn chunk_paths_from_artifact_id(artifact_id: &str, dtype: Option<&str>) -> Vec<String> {
+fn chunk_paths_from_artifact_id(
+    artifact_id: &str,
+    dtype: Option<&str>,
+    artifact_root: Option<&str>,
+) -> Vec<String> {
     let Some(hash_hex) = artifact_id.strip_prefix("sha256:") else {
         return Vec::new();
     };
@@ -435,10 +435,39 @@ fn chunk_paths_from_artifact_id(artifact_id: &str, dtype: Option<&str>) -> Vec<S
     suffixes.push("chunk.json");
     suffixes.push("json");
     suffixes.push("bin");
+    let root = normalize_scene_artifact_root(artifact_root.unwrap_or(".artifacts"));
     suffixes
         .into_iter()
-        .map(|suffix| format!(".artifacts/objects/{prefix}/{hash_hex}.{suffix}"))
+        .map(|suffix| format!("{root}/objects/{prefix}/{hash_hex}.{suffix}"))
         .collect()
+}
+
+fn artifact_root_from_dataset_path(dataset_path: &str) -> Option<String> {
+    let normalized = normalize_scene_chunk_ref(dataset_path);
+    let marker = "/datasets/";
+    let idx = normalized.find(marker)?;
+    if idx == 0 {
+        return None;
+    }
+    Some(normalized[..idx].to_string())
+}
+
+fn normalize_scene_artifact_root(root: &str) -> String {
+    let normalized = normalize_scene_chunk_ref(root);
+    if normalized.is_empty() {
+        return ".artifacts".to_string();
+    }
+    normalized.trim_end_matches('/').to_string()
+}
+
+fn normalize_scene_chunk_ref(path: &str) -> String {
+    let normalized = path.trim().replace('\\', "/");
+    let collapsed = normalized
+        .split('/')
+        .filter(|segment| !segment.is_empty() && *segment != ".")
+        .collect::<Vec<_>>()
+        .join("/");
+    collapsed.trim_start_matches("./").trim_start_matches('/').to_string()
 }
 
 #[cfg(feature = "plot-core")]
@@ -915,10 +944,54 @@ mod tests {
     #[test]
     fn scene_chunk_paths_from_artifact_id_includes_expected_candidates() {
         let hash_hex = "7af8faff9e5fe6ba87fec8e4ce6d79dca7f29bbee9f9809a36119346b411ee36";
-        let candidates = chunk_paths_from_artifact_id(&format!("sha256:{hash_hex}"), Some("f64"));
+        let candidates = chunk_paths_from_artifact_id(
+            &format!("sha256:{hash_hex}"),
+            Some("f64"),
+            Some(".artifacts"),
+        );
         assert!(candidates.iter().any(|path| {
             path == ".artifacts/objects/7a/7af8faff9e5fe6ba87fec8e4ce6d79dca7f29bbee9f9809a36119346b411ee36.f64.chunk.json"
         }));
+    }
+
+    #[cfg(feature = "plot-core")]
+    #[test]
+    fn scene_chunk_paths_from_artifact_id_uses_dataset_artifact_root() {
+        let hash_hex = "7af8faff9e5fe6ba87fec8e4ce6d79dca7f29bbee9f9809a36119346b411ee36";
+        let candidates = chunk_paths_from_artifact_id(
+            &format!("sha256:{hash_hex}"),
+            Some("f64"),
+            Some("custom-artifacts"),
+        );
+        assert!(candidates
+            .iter()
+            .any(|path| path == "custom-artifacts/objects/7a/7af8faff9e5fe6ba87fec8e4ce6d79dca7f29bbee9f9809a36119346b411ee36.f64.chunk.json"));
+    }
+
+    #[cfg(feature = "plot-core")]
+    #[test]
+    fn scene_chunk_candidates_include_dot_slash_artifact_prefix() {
+        let chunk = SceneDataChunkRef {
+            src: Some(
+                ".artifacts/objects/6a/6ac838c06809d12de7c81db7dbf1f17a7fcf7cb21d30a7288f5ad71d3a5b520d.f64.chunk.json"
+                    .to_string(),
+            ),
+            artifact_id: None,
+        };
+        let data_ref = SceneDataRef {
+            dataset_path: ".artifacts/datasets/unused".to_string(),
+            array: "values".to_string(),
+            shape: vec![1],
+            dtype: Some("f64".to_string()),
+            chunks: vec![chunk.clone()],
+        };
+        let candidates = build_scene_chunk_candidates(&chunk, &data_ref).expect("chunk candidates");
+        assert!(candidates
+            .iter()
+            .any(|path| path == ".artifacts/objects/6a/6ac838c06809d12de7c81db7dbf1f17a7fcf7cb21d30a7288f5ad71d3a5b520d.f64.chunk.json"));
+        assert!(candidates
+            .iter()
+            .any(|path| path == "/.artifacts/objects/6a/6ac838c06809d12de7c81db7dbf1f17a7fcf7cb21d30a7288f5ad71d3a5b520d.f64.chunk.json"));
     }
 
     #[cfg(feature = "plot-core")]
