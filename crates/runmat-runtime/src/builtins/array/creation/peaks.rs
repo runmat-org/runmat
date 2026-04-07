@@ -486,6 +486,7 @@ mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::{handle_precision, provider_for_handle, ProviderPrecision};
 
     fn peaks_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
         block_on(super::peaks_builtin(rest))
@@ -493,6 +494,19 @@ mod tests {
 
     fn gather_result(value: Value) -> Tensor {
         test_support::gather(value).expect("gather")
+    }
+
+    fn value_tolerance(value: &Value) -> f64 {
+        match value {
+            Value::GpuTensor(handle) => match handle_precision(handle)
+                .or_else(|| provider_for_handle(handle).map(|provider| provider.precision()))
+                .unwrap_or(ProviderPrecision::F64)
+            {
+                ProviderPrecision::F64 => 1e-12,
+                ProviderPrecision::F32 => 1e-4,
+            },
+            _ => 1e-12,
+        }
     }
 
     #[test]
@@ -519,10 +533,12 @@ mod tests {
         // At n=1 the single grid point maps to the stop endpoint (x=3, y=3).
         // tensor_into_value may collapse a 1×1 tensor to Value::Num.
         let expected = peaks_at(3.0, 3.0);
-        let gathered = gather_result(peaks_builtin(vec![Value::Num(1.0)]).expect("peaks"));
+        let value = peaks_builtin(vec![Value::Num(1.0)]).expect("peaks");
+        let tol = value_tolerance(&value);
+        let gathered = gather_result(value);
         assert_eq!(gathered.shape, vec![1, 1]);
         let got = gathered.data[0];
-        assert!((got - expected).abs() < 1e-12);
+        assert!((got - expected).abs() < tol);
     }
 
     #[test]
