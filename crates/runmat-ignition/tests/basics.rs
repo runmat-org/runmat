@@ -186,3 +186,126 @@ fn uint16_cast_is_callable_in_vm() {
         other => panic!("expected tensor output, got {other:?}"),
     }
 }
+
+#[test]
+fn atan2_with_rhs_expression_executes_without_stack_underflow() {
+    let input = r#"
+        Vq_drop = 1.2;
+        V_pcc = 2.4;
+        Vd_drop = 0.3;
+        delta_g0 = atan2(Vq_drop, V_pcc + Vd_drop);
+    "#;
+    let ast = parse(input).expect("parse atan2 rhs expression script");
+    let hir = lower(&ast).expect("lower atan2 rhs expression script");
+    let vars = execute(&hir).expect("atan2 rhs expression should execute");
+    let delta: f64 = (&vars[3]).try_into().expect("convert delta_g0 to f64");
+    assert!((delta - 1.2f64.atan2(2.7)).abs() < 1e-12);
+}
+
+#[test]
+fn atan2_with_rhs_expression_lowers_to_add_then_builtin_call() {
+    let input = "Vq_drop = 1; V_pcc = 2; Vd_drop = 3; delta_g0 = atan2(Vq_drop, V_pcc + Vd_drop);";
+    let ast = parse(input).expect("parse atan2 lowering script");
+    let hir = lower(&ast).expect("lower atan2 lowering script");
+    let bytecode = compile(&hir, &HashMap::new()).expect("compile atan2 lowering script");
+
+    let has_expected_shape = bytecode.instructions.windows(5).any(|window| {
+        matches!(window[0], Instr::LoadVar(_))
+            && matches!(window[1], Instr::LoadVar(_))
+            && matches!(window[2], Instr::LoadVar(_))
+            && matches!(window[3], Instr::Add)
+            && matches!(window[4], Instr::CallBuiltin(ref name, 2) if name == "atan2")
+    });
+
+    assert!(
+        has_expected_shape,
+        "expected LoadVar,LoadVar,LoadVar,Add,CallBuiltin(atan2,2) sequence; got {:?}",
+        bytecode.instructions
+    );
+}
+
+#[test]
+fn atan2_multi_output_argument_path_unpacks_before_call() {
+    let input = r#"
+        function [a,b] = g()
+          a = 1;
+          b = 2;
+        end
+        x = atan2(g());
+    "#;
+    let ast = parse(input).expect("parse atan2 multi-output script");
+    let hir = lower(&ast).expect("lower atan2 multi-output script");
+    let vars = execute(&hir).expect("atan2 multi-output script should execute");
+    let x: f64 = (&vars[2]).try_into().expect("convert x to f64");
+    assert!((x - 1.0f64.atan2(2.0)).abs() < 1e-12);
+
+    let bytecode = compile(&hir, &HashMap::new()).expect("compile atan2 multi-output script");
+    let has_unpack_barrier = bytecode.instructions.windows(3).any(|window| {
+        matches!(window[0], Instr::CallFunctionMulti(ref name, 0, 2) if name == "g")
+            && matches!(window[1], Instr::Unpack(2))
+            && matches!(window[2], Instr::CallBuiltin(ref name, 2) if name == "atan2")
+    });
+    assert!(
+        has_unpack_barrier,
+        "expected CallFunctionMulti(g,0,2) -> Unpack(2) -> CallBuiltin(atan2,2) in bytecode"
+    );
+}
+
+#[test]
+fn fft_output_supports_scalar_and_range_indexing() {
+    let input = r#"
+        x = [1 2 3 4 5 6 7 8];
+        Y = fft(x);
+        a = Y(1);
+        h = Y(1:4);
+        n = numel(h);
+        ra = real(a);
+        ia = imag(a);
+    "#;
+    let ast = parse(input).expect("parse fft indexing script");
+    let hir = lower(&ast).expect("lower fft indexing script");
+    let vars = execute(&hir).expect("fft output indexing should execute");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, Value::Num(n) if (*n - 4.0).abs() < 1e-12)));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, Value::Num(n) if (*n - 36.0).abs() < 1e-12)));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, Value::Num(n) if n.abs() < 1e-12)));
+}
+
+#[test]
+fn fft_output_supports_end_arithmetic_range_indexing() {
+    let input = r#"
+        x = [1 2 3 4 5 6 7 8];
+        Y = fft(x);
+        h = Y(1:end/2);
+        ok = (numel(h) == 4);
+    "#;
+    let ast = parse(input).expect("parse fft end range script");
+    let hir = lower(&ast).expect("lower fft end range script");
+    let vars = execute(&hir).expect("fft end-range indexing should execute");
+    assert!(
+        vars.iter().any(|v| matches!(v, Value::Bool(true))),
+        "expected boolean true marker in vars, got {vars:?}"
+    );
+}
+
+#[test]
+fn fft2_output_supports_two_dimensional_indexing() {
+    let input = r#"
+        A = [1 2; 3 4];
+        F = fft2(A);
+        c = F(1,2);
+        col = F(:,1);
+        n = numel(col);
+    "#;
+    let ast = parse(input).expect("parse fft2 indexing script");
+    let hir = lower(&ast).expect("lower fft2 indexing script");
+    let vars = execute(&hir).expect("fft2 output indexing should execute");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, Value::Num(n) if (*n - 2.0).abs() < 1e-12)));
+}
