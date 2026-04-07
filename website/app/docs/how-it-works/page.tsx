@@ -71,10 +71,10 @@ export default function HowItWorksPage() {
           </p>
 
           <div className="grid md:grid-cols-2 gap-8 mb-8">
-            <Card className="border-l-4 border-l-blue-500">
+            <Card className="border-l-4 border-l-[hsl(var(--brand))]">
               <CardContent className="px-6 py-2">
                 <div className="flex items-center mb-4">
-                  <div className="bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200 rounded-full w-10 h-10 flex items-center justify-center text-lg font-bold mr-4">
+                  <div className="mr-4 flex h-10 w-10 items-center justify-center rounded-full bg-secondary text-[hsl(var(--brand))]">
                     <Zap className="h-5 w-5" />
                   </div>
                   <h3 className="text-xl font-semibold">Phase 1: Instant Execution</h3>
@@ -101,9 +101,9 @@ export default function HowItWorksPage() {
           </Card>
           </div>
           
-          <div className="bg-gradient-to-r from-blue-50 to-green-50 dark:from-blue-950/30 dark:to-green-950/30 rounded-lg p-6">
+          <div className="rounded-lg border border-border bg-card p-6">
             <div className="flex items-start">
-              <BarChart3 className="h-6 w-6 text-blue-600 mr-3 mt-1 flex-shrink-0" />
+              <BarChart3 className="h-6 w-6 mr-3 mt-1 flex-shrink-0 text-[hsl(var(--brand))]" />
               <div>
                 <h4 className="text-lg font-semibold mb-3">Why this approach wins</h4>
                 <p className="text-muted-foreground leading-relaxed">
@@ -143,7 +143,7 @@ export default function HowItWorksPage() {
             </li>
             <li className="flex items-start">
               <span className="text-green-600 mr-3 mt-1">•</span>
-              <span>Often beats hand-tuned PyTorch—see our <Link href="/benchmarks" className="text-blue-600 hover:underline">benchmarks</Link></span>
+              <span>Often beats hand-tuned PyTorch—see our <Link href="/benchmarks" className="text-[hsl(var(--brand))] hover:underline">benchmarks</Link></span>
             </li>
           </ul>
           <p className="text-lg leading-relaxed font-medium">
@@ -207,9 +207,9 @@ export default function HowItWorksPage() {
               </CardContent>
             </Card>
           </div>
-          <div className="bg-gradient-to-r from-blue-50 to-green-50 dark:from-blue-950/30 dark:to-green-950/30 rounded-lg p-6 mt-6">
+          <div className="mt-6 rounded-lg border border-border bg-card p-6">
             <div className="flex items-start">
-              <BarChart3 className="h-6 w-6 text-blue-600 mr-3 mt-1 flex-shrink-0" />
+              <BarChart3 className="h-6 w-6 mr-3 mt-1 flex-shrink-0 text-[hsl(var(--brand))]" />
               <div>
                 <h4 className="text-lg font-semibold mb-3">Portable by design</h4>
                 <p className="text-muted-foreground leading-relaxed">
@@ -221,9 +221,9 @@ export default function HowItWorksPage() {
             </div>
           </div>
 
-          <div className="bg-gradient-to-r from-blue-50 to-green-50 dark:from-blue-950/30 dark:to-green-950/30 rounded-lg p-6 mt-6">
+          <div className="mt-6 rounded-lg border border-border bg-card p-6">
             <div className="flex items-start">
-              <BarChart3 className="h-6 w-6 text-blue-600 mr-3 mt-1 flex-shrink-0" />
+              <BarChart3 className="h-6 w-6 mr-3 mt-1 flex-shrink-0 text-[hsl(var(--brand))]" />
               <div>
                 <h4 className="text-lg font-semibold mb-3">Why this architecture is different</h4>
                 <p className="text-muted-foreground leading-relaxed">
@@ -384,14 +384,14 @@ export default function HowItWorksPage() {
             {/* Ignition Interpreter */}
             <div>
               <h3 className="text-2xl font-semibold mb-4 flex items-center">
-                <Zap className="h-6 w-6 text-blue-600 mr-3" />
+                <Zap className="h-6 w-6 mr-3 text-[hsl(var(--brand))]" />
                 The Ignition Interpreter: Speed from Day One
               </h3>
               <p className="text-lg text-muted-foreground mb-4">
                 When you type <code>A = [1, 2; 3, 4]</code> and press enter, here&apos;s what happens in microseconds:
               </p>
-              <div className="bg-muted dark:bg-slate-900 rounded-lg p-6 border border-border dark:border-slate-800">
-                <ol className="space-y-3 text-foreground dark:text-muted-foreground">
+              <div className="rounded-lg border border-border bg-muted p-6">
+                <ol className="space-y-3 text-foreground">
                   <li><strong>1. Lexical Analysis:</strong> Your MATLAB code gets tokenized into meaningful chunks</li>
                   <li><strong>2. Parsing:</strong> Tokens become an Abstract Syntax Tree (AST) representing the structure</li>
                   <li><strong>3. HIR Translation:</strong> The AST becomes High-level Intermediate Representation for optimization</li>
@@ -413,8 +413,8 @@ export default function HowItWorksPage() {
               <p className="text-lg text-muted-foreground mb-4">
                 Once a function gets called enough times (the JIT is configurable, with good defaults), Turbine kicks in:
               </p>
-              <div className="bg-muted dark:bg-slate-900 rounded-lg p-6 border border-border dark:border-slate-800">
-                <ul className="space-y-3 text-foreground dark:text-muted-foreground">
+              <div className="rounded-lg border border-border bg-muted p-6">
+                <ul className="space-y-3 text-foreground">
                   <li><strong>• Type Specialization:</strong> Generate optimized code paths for your specific data types</li>
                   <li><strong>• Loop Optimization:</strong> Unroll tight loops and vectorize operations using SIMD instructions</li>
                   <li><strong>• Function Inlining:</strong> Eliminate call overhead for frequently-used builtins like <code>sin()</code> or <code>cos()</code></li>
@@ -433,7 +433,7 @@ export default function HowItWorksPage() {
         {/* Memory: The Foundation of Speed */}
         <section className="mb-12">
           <h2 className="text-3xl font-bold mb-6 text-foreground flex items-center">
-            <Database className="h-8 w-8 text-purple-600 mr-3" />
+            <Database className="mr-3 h-8 w-8 text-[hsl(var(--brand))]" />
             Memory: The Foundation of Speed
           </h2>
           <p className="text-lg text-muted-foreground mb-6">
@@ -471,7 +471,7 @@ export default function HowItWorksPage() {
             temporary matrices in algorithms, etc. Our garbage collector is designed with this pattern in mind:
           </p>
           
-          <div className="bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-950/30 dark:to-blue-950/30 rounded-lg p-6">
+          <div className="rounded-lg border border-border bg-card p-6">
             <div className="grid md:grid-cols-2 gap-6">
               <div>
                 <h4 className="text-lg font-semibold mb-3">Generational Collection</h4>
@@ -559,7 +559,7 @@ export default function HowItWorksPage() {
         {/* Packages and Ecosystem */}
         <section className="mb-12">
           <h2 className="text-3xl font-bold mb-6 text-foreground flex items-center">
-            <GitBranch className="h-8 w-8 text-blue-600 mr-3" />
+            <GitBranch className="mr-3 h-8 w-8 text-[hsl(var(--brand))]" />
             Packages: extend the runtime without bloating the core
           </h2>
           <p className="text-lg text-muted-foreground mb-6">
@@ -622,7 +622,7 @@ export default function HowItWorksPage() {
         {/* What's Next */}
         <section className="mb-12">
           <h2 className="text-3xl font-bold mb-6 text-foreground flex items-center">
-            <Shield className="h-8 w-8 text-purple-600 mr-3" />
+            <Shield className="mr-3 h-8 w-8 text-[hsl(var(--brand))]" />
             What&apos;s Next: The Future is Bright
           </h2>
           <p className="text-lg text-muted-foreground mb-6">
@@ -685,7 +685,7 @@ export default function HowItWorksPage() {
 
         {/* Learn More */}
         <section>
-          <Card className="bg-gradient-to-r from-blue-50 to-orange-50 dark:from-blue-900/20 dark:to-orange-900/20 border-blue-200 dark:border-blue-800">
+          <Card className="border-border bg-card">
             <CardContent className="p-6 text-center">
               <h3 className="text-lg font-semibold mb-4 text-foreground">
                 Ready to Dive Deeper?

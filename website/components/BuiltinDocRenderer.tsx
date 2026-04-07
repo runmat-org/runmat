@@ -47,7 +47,7 @@ function renderBlock(block: BuiltinDocBlock): React.ReactNode {
       );
     case 'list':
       return block.ordered ? (
-        <ol className="my-6 ml-6 space-y-2 list-decimal marker:text-blue-500 break-words">
+        <ol className="my-6 ml-6 space-y-2 list-decimal marker:text-[hsl(var(--brand))] break-words">
           {block.items.map((item, index) => (
             <li key={index} className="text-muted-foreground leading-relaxed pl-2 break-words">
               {renderInlineNodes(item)}
@@ -55,7 +55,7 @@ function renderBlock(block: BuiltinDocBlock): React.ReactNode {
           ))}
         </ol>
       ) : (
-        <ul className="my-6 ml-6 space-y-2 list-disc marker:text-blue-500 break-words">
+        <ul className="my-6 ml-6 space-y-2 list-disc marker:text-[hsl(var(--brand))] break-words">
           {block.items.map((item, index) => (
             <li key={index} className="text-muted-foreground leading-relaxed pl-2 break-words">
               {renderInlineNodes(item)}
@@ -186,7 +186,7 @@ function renderInlineNodes(nodes: BuiltinDocInlineNode[]): React.ReactNode[] {
           <a
             key={index}
             href={node.href}
-            className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline underline-offset-4 transition-colors"
+            className="text-[hsl(var(--brand))] hover:opacity-80 underline underline-offset-4 transition-colors"
           >
             {renderInlineNodes(node.label)}
           </a>

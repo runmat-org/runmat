@@ -129,13 +129,13 @@ export default function LicensePage() {
             </CardContent>
           </Card>
 
-          <Card className="border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/50 shadow-lg">
+          <Card className="bg-card border-border">
             <CardHeader className="text-center pb-3">
-              <HelpCircle className="h-8 w-8 mx-auto mb-2 text-blue-300 dark:text-blue-400" />
-              <CardTitle className="text-lg text-foreground dark:text-blue-100 font-semibold">Special Rules</CardTitle>
+              <HelpCircle className="h-8 w-8 mx-auto mb-2 text-[hsl(var(--brand))]" />
+              <CardTitle className="text-lg text-foreground font-semibold">Special Rules</CardTitle>
             </CardHeader>
             <CardContent className="text-center">
-              <p className="text-sm text-foreground dark:text-blue-200 font-medium">
+              <p className="text-sm text-foreground font-medium">
                 Commercial scientific software companies must keep modifications open source
               </p>
             </CardContent>
@@ -269,7 +269,7 @@ export default function LicensePage() {
                   When in doubt, reach out! We&apos;re happy to clarify licensing questions and work with you 
                   to ensure your use case is properly covered.
                 </p>
-                <div className="flex items-center space-x-2 text-blue-600 dark:text-blue-400">
+                <div className="flex items-center space-x-2 text-[hsl(var(--brand))]">
                   <Mail className="h-4 w-4" />
                   <Link href="mailto:legal@dystr.com" className="hover:underline">
                     legal@dystr.com
@@ -329,7 +329,7 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
         {/* Contact Section */}
         <section>
-          <Card className="bg-blue-50 dark:bg-blue-950/50 border-blue-200 dark:border-blue-800">
+          <Card className="bg-card border-border">
             <CardContent className="p-6 text-center">
               <h3 className="text-lg font-semibold mb-3 text-muted-foreground">
                 Need Legal Clarification?
@@ -345,10 +345,10 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                 .
               </p>
               <div className="flex items-center justify-center space-x-2">
-                <Mail className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                <Mail className="h-4 w-4 text-[hsl(var(--brand))]" />
                 <Link 
                   href="mailto:legal@dystr.com" 
-                  className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                  className="text-[hsl(var(--brand))] hover:underline font-medium"
                 >
                   legal@dystr.com
                 </Link>

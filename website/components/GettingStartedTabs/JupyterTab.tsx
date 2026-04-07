@@ -14,7 +14,7 @@ export function JupyterTabContent() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center text-base">
-            <span className="bg-blue-100 dark:bg-blue-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-blue-600 mr-3">1</span>
+            <span className="bg-secondary rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-[hsl(var(--brand))] mr-3">1</span>
             Install RunMat as a Jupyter kernel
           </CardTitle>
         </CardHeader>
@@ -52,7 +52,7 @@ export function JupyterTabContent() {
             <div>jupyter lab</div>
             <div className="mt-2 text-gray-400"># Then select &quot;RunMat&quot; when creating a new notebook</div>
           </div>
-          <div className="flex items-center space-x-2 text-sm text-blue-600 dark:text-blue-400">
+          <div className="flex items-center space-x-2 text-sm text-[hsl(var(--brand))]">
             <CheckCircle className="h-4 w-4 flex-shrink-0" />
             <span>Full MATLAB syntax support with automatic GPU acceleration</span>
           </div>

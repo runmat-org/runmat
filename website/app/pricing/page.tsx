@@ -152,7 +152,7 @@ export default function PricingPage() {
                   </Button>
                   <Button
                     asChild
-                    className="w-full rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow border-0 hover:from-blue-600 hover:to-purple-700 transition-colors"
+                    className="w-full rounded-lg border-0 bg-[hsl(var(--brand))] text-white transition-opacity shadow-none hover:bg-[hsl(var(--brand))]/90"
                   >
                     <Link href="/sandbox">Open Sandbox</Link>
                   </Button>
@@ -185,7 +185,7 @@ export default function PricingPage() {
                 </div>
                 <Button
                   asChild
-                  className="w-full rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow border-0 hover:from-blue-600 hover:to-purple-700 transition-colors"
+                  className="w-full rounded-lg border-0 bg-[hsl(var(--brand))] text-white transition-opacity shadow-none hover:bg-[hsl(var(--brand))]/90"
                 >
                   <Link
                     href="/contact?type=enterprise"

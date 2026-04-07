@@ -41,7 +41,7 @@ export function ContentCard({
               />
             </div>
           ) : (
-            <div className="w-full h-40 rounded-lg mb-3 flex-shrink-0 bg-gradient-to-br from-purple-500 via-purple-600 to-blue-600 group-hover:from-purple-600 group-hover:via-purple-700 group-hover:to-blue-700 transition-all border border-border/50" />
+            <div className="w-full h-40 rounded-lg mb-3 flex-shrink-0 bg-muted transition-all border border-border/50" />
           )}
 
           {typeBadge && (

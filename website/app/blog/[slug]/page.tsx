@@ -455,7 +455,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
                       sizes="(max-width: 1024px) 100vw, 33vw"
                     />
                   ) : (
-                    <div className="w-full h-full bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700" />
+                    <div className="h-full w-full bg-card" />
                   )}
                 </div>
                 <div className="p-4 space-y-3">

@@ -282,7 +282,7 @@ export default async function BenchmarkPage({ params }: { params: Promise<{ slug
       </div>
 
       <div className="mt-16 not-prose">
-        <Card className="border border-purple-500/30 bg-gradient-to-r from-purple-500/10 to-blue-500/10 shadow-lg">
+        <Card className="border border-border bg-card">
           <CardContent className="py-8 space-y-4 text-center">
             <h3 className="text-2xl md:text-3xl font-bold text-foreground">
               Try RunMat — free, instant, no sign-up
@@ -294,7 +294,7 @@ export default async function BenchmarkPage({ params }: { params: Promise<{ slug
               <Button
                 size="lg"
                 asChild
-                className="h-12 px-8 text-base font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200"
+                className="h-12 border-0 bg-[hsl(var(--brand))] px-8 text-base font-semibold text-white transition-opacity duration-200 shadow-none hover:bg-[hsl(var(--brand))]/90"
               >
                 <Link
                   href="/sandbox"

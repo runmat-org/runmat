@@ -54,7 +54,7 @@ export default function SubscribeForm() {
         />
         <button
           type="submit"
-          className="h-12 w-full px-8 text-lg font-semibold sm:h-10 sm:w-auto sm:px-6 sm:text-sm flex-shrink-0 whitespace-nowrap rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow hover:from-blue-600 hover:to-purple-700 transition-colors disabled:opacity-60"
+          className="h-12 w-full px-8 text-lg font-semibold sm:h-10 sm:w-auto sm:px-6 sm:text-sm flex-shrink-0 whitespace-nowrap rounded-lg bg-[hsl(var(--brand))] text-white transition-colors shadow-none hover:bg-[hsl(var(--brand))]/90 disabled:opacity-60"
           disabled={status === "loading" || status === "success"}
         >
           {status === "loading" ? "Subscribing..." : status === "success" ? "Subscribed" : "Stay In The Loop"}

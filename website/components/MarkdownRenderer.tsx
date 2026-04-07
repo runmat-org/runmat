@@ -161,16 +161,16 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       return <p className="my-6 text-muted-foreground leading-relaxed break-words" {...props}>{children}</p>;
     },
     ul: ({ children, ...props }: { children: React.ReactNode }) => (
-      <ul className="my-6 ml-6 space-y-2 list-disc marker:text-blue-500 break-words" {...props}>{children}</ul>
+      <ul className="my-6 ml-6 space-y-2 list-disc marker:text-[hsl(var(--brand))] break-words" {...props}>{children}</ul>
     ),
     ol: ({ children, ...props }: { children: React.ReactNode }) => (
-      <ol className="my-6 ml-6 space-y-2 list-decimal marker:text-blue-500 break-words" {...props}>{children}</ol>
+      <ol className="my-6 ml-6 space-y-2 list-decimal marker:text-[hsl(var(--brand))] break-words" {...props}>{children}</ol>
     ),
     li: ({ children, ...props }: { children: React.ReactNode }) => (
       <li className="text-muted-foreground leading-relaxed pl-2 break-words" {...props}>{children}</li>
     ),
     blockquote: ({ children, ...props }: { children: React.ReactNode }) => (
-      <blockquote className="my-6 pl-4 sm:pl-6 border-l-4 border-blue-500 bg-blue-50 dark:bg-blue-900/20 py-4 pr-4 rounded-r-lg break-words overflow-x-hidden" {...props}>
+      <blockquote className="my-6 pl-4 sm:pl-6 border-l-4 border-[hsl(var(--brand))] bg-muted py-4 pr-4 rounded-r-lg break-words overflow-x-hidden" {...props}>
         <div className="text-muted-foreground italic break-words">{children}</div>
       </blockquote>
     ),
@@ -183,7 +183,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       return (
         <a
           href={href}
-          className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline underline-offset-4 transition-colors"
+          className="text-[hsl(var(--brand))] hover:opacity-80 underline underline-offset-4 transition-colors"
           {...props}
           {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
         >

@@ -86,7 +86,7 @@ export default function FusionGuidePage() {
                 RunMat fuses common patterns that show up across linear algebra, signal processing, imaging, and solver workloads into single GPU programs. Keeping them
                 fused prevents redundant memory traffic and lets us re-use provider kernels to ship quickly.
               </p>
-              <ul className="list-disc pl-6 space-y-3 marker:text-blue-500">
+              <ul className="list-disc pl-6 space-y-3 marker:text-[hsl(var(--brand))]">
                 <li className="text-muted-foreground">
                   <strong>Elementwise &amp; reductions:</strong> Collapse dozens of scalar operations into one dispatch and
                   prevent repeated reads/writes of the same tensor.
@@ -139,7 +139,7 @@ export default function FusionGuidePage() {
 
             <section id="how-to-use" className="space-y-4 scroll-mt-28">
               <h2 className="text-3xl font-bold text-foreground">How to Use These Docs</h2>
-              <ol className="list-decimal pl-6 space-y-3 marker:text-blue-500">
+              <ol className="list-decimal pl-6 space-y-3 marker:text-[hsl(var(--brand))]">
                 <li className="text-muted-foreground">
                   <strong>Looking for coverage:</strong> Start with the link that matches your math. Each page lists the exact
                   instruction patterns the fusion planner looks for and the operations that stay on device.

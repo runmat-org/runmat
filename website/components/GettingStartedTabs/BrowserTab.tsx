@@ -39,7 +39,7 @@ export function BrowserTabContent() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center text-base">
-            <span className="bg-blue-100 dark:bg-blue-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-blue-600 mr-3">1</span>
+            <span className="bg-secondary rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-[hsl(var(--brand))] mr-3">1</span>
             Run the demo
           </CardTitle>
         </CardHeader>

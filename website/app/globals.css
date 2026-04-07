@@ -5,52 +5,89 @@
 
 @import "prismjs/themes/prism-okaidia.css";
 
+/* Map Shadcn CSS variables to Tailwind v4 theme tokens */
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-brand: hsl(var(--brand));
+  --radius: var(--radius);
+  --radius-xs: 0;
+  --radius-sm: 0;
+  --radius-md: 0;
+  --radius-lg: 0;
+  --radius-xl: 0;
+  --radius-2xl: 0;
+  --radius-3xl: 0;
+  --radius-4xl: 0;
+}
+
 @layer base {
   :root {
     --background: 0 0% 100%;
-    --foreground: 20 14.3% 4.1%;
+    --foreground: 0 0% 3.9%;
     --card: 0 0% 100%;
-    --card-foreground: 20 14.3% 4.1%;
+    --card-foreground: 0 0% 3.9%;
     --popover: 0 0% 100%;
-    --popover-foreground: 20 14.3% 4.1%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 60 4.8% 95.9%;
-    --secondary-foreground: 24 9.8% 10%;
-    --muted: 60 4.8% 95.9%;
-    --muted-foreground: 25 5.3% 44.7%;
-    --accent: 60 4.8% 95.9%;
-    --accent-foreground: 24 9.8% 10%;
+    --popover-foreground: 0 0% 3.9%;
+    --primary: 0 0% 9%;
+    --primary-foreground: 0 0% 98%;
+    --secondary: 0 0% 96.1%;
+    --secondary-foreground: 0 0% 9%;
+    --muted: 0 0% 96.1%;
+    --muted-foreground: 0 0% 45.1%;
+    --accent: 0 0% 96.1%;
+    --accent-foreground: 0 0% 9%;
     --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 20 5.9% 90%;
-    --input: 20 5.9% 90%;
-    --ring: 221.2 83.2% 53.3%;
-    --radius: 0.5rem;
-    --code-surface: 210 40% 98%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 0 0% 89.8%;
+    --input: 0 0% 89.8%;
+    --ring: 0 0% 3.9%;
+    --radius: 0;
+    --brand: 219 100% 65.5%;
+    --editor-background: #FCFCFD;
+    --code-surface: 220 20% 99%;
   }
 
   .dark {
-    --background: 20 14.3% 4.1%;
-    --foreground: 60 9.1% 97.8%;
-    --card: 20 14.3% 4.1%;
-    --card-foreground: 60 9.1% 97.8%;
-    --popover: 20 14.3% 4.1%;
-    --popover-foreground: 60 9.1% 97.8%;
-    --primary: 221.2 83.2% 53.3%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 12 6.5% 15.1%;
-    --secondary-foreground: 60 9.1% 97.8%;
-    --muted: 12 6.5% 15.1%;
-    --muted-foreground: 24 5.4% 63.9%;
-    --accent: 12 6.5% 15.1%;
-    --accent-foreground: 60 9.1% 97.8%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 60 9.1% 97.8%;
-    --border: 12 6.5% 15.1%;
-    --input: 12 6.5% 15.1%;
-    --ring: 221.2 83.2% 53.3%;
-    --code-surface: 222 40% 12%;
+    --background: 240 10% 3.9%;
+    --foreground: 240 4.8% 95.9%;
+    --card: 225 20% 11.8%;
+    --card-foreground: 240 4.8% 95.9%;
+    --popover: 225 20% 11.8%;
+    --popover-foreground: 240 4.8% 95.9%;
+    --primary: 240 4.8% 95.9%;
+    --primary-foreground: 240 5.9% 10%;
+    --secondary: 240 3.7% 15.9%;
+    --secondary-foreground: 240 4.8% 95.9%;
+    --muted: 240 5.9% 10%;
+    --muted-foreground: 240 5% 64.9%;
+    --accent: 240 3.7% 15.9%;
+    --accent-foreground: 240 4.8% 95.9%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 98%;
+    --border: 240 3.7% 15.9%;
+    --input: 240 5.3% 26.1%;
+    --ring: 240 4.9% 83.9%;
+    --brand: 219 100% 65.5%;
+    --editor-background: #181B24;
+    --code-surface: 225 20% 12%;
   }
 }
 
@@ -138,16 +175,11 @@
   .markdown-pre {
     margin-top: 1rem;
     margin-bottom: 1.5rem;
-    border-radius: 1rem;
+    border-radius: 6px;
     border: 1px solid hsl(var(--border));
-    background-color: hsl(var(--code-surface));
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.08);
+    background-color: var(--editor-background);
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
-  }
-
-  .dark .markdown-pre {
-    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.45);
   }
 
   .markdown-pre code {
@@ -157,7 +189,7 @@
     line-height: 1.7;
     background: transparent !important;
     color: hsl(var(--foreground));
-    font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     min-width: max-content;
@@ -175,7 +207,7 @@
   .markdown-inline-code {
     background: hsl(var(--muted));
     padding: 0.15rem 0.35rem;
-    border-radius: 0.35rem;
+    border-radius: 4px;
     border: 1px solid hsl(var(--border));
     font-size: 0.9em;
     word-break: break-word;
@@ -205,81 +237,26 @@
   }
 
 .gradient-brand {
-    background: linear-gradient(135deg, #3ea7fd 0%, #bb51ff 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: hsl(var(--brand));
     display: inline-block;
     padding-bottom: 0.1em;
     line-height: 1.2;
   }
 
-  /* Brand text styles to match the logo's magenta gradient */
   .brand-text {
-    background: #B864F4;
-    -webkit-background-clip: text;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
+    color: hsl(var(--brand));
   }
 
-  /* Optional moving sheen highlight over brand text */
   .brand-text-sheen {
-    background: #B864F4;
-    background-clip: text;
-    -webkit-text-fill-color: transparent;
-    animation: brand-sheen 3.5s ease-in-out infinite;
+    color: hsl(var(--brand));
   }
 
-  @keyframes brand-sheen {
-    to {
-      background-position: 0 0, 150% 0;
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .brand-text-sheen {
-      animation: none;
-    }
-  }
-
-  /* Home page static depth (no animation); brand palette, runs full page height */
   .home-page-depth {
-    background:
-      radial-gradient(1200px 600px at 15% 8%, rgba(62, 167, 253, 0.07), transparent 60%),
-      radial-gradient(1000px 520px at 85% 12%, rgba(187, 81, 255, 0.07), transparent 62%),
-      radial-gradient(1100px 550px at 15% 28%, rgba(62, 167, 253, 0.05), transparent 58%),
-      radial-gradient(900px 480px at 85% 32%, rgba(187, 81, 255, 0.05), transparent 60%),
-      radial-gradient(1000px 500px at 15% 52%, rgba(62, 167, 253, 0.04), transparent 56%),
-      radial-gradient(800px 440px at 85% 56%, rgba(187, 81, 255, 0.04), transparent 58%),
-      radial-gradient(1100px 550px at 15% 76%, rgba(62, 167, 253, 0.04), transparent 58%),
-      radial-gradient(900px 480px at 85% 80%, rgba(187, 81, 255, 0.04), transparent 60%),
-      radial-gradient(1000px 500px at 15% 98%, rgba(62, 167, 253, 0.03), transparent 55%),
-      radial-gradient(800px 440px at 85% 98%, rgba(187, 81, 255, 0.03), transparent 55%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
-  }
-  .dark .home-page-depth {
-    background:
-      radial-gradient(1200px 600px at 15% 8%, rgba(62, 167, 253, 0.09), transparent 60%),
-      radial-gradient(1000px 520px at 85% 12%, rgba(187, 81, 255, 0.09), transparent 62%),
-      radial-gradient(1100px 550px at 15% 28%, rgba(62, 167, 253, 0.06), transparent 58%),
-      radial-gradient(900px 480px at 85% 32%, rgba(187, 81, 255, 0.06), transparent 60%),
-      radial-gradient(1000px 500px at 15% 52%, rgba(62, 167, 253, 0.05), transparent 56%),
-      radial-gradient(800px 440px at 85% 56%, rgba(187, 81, 255, 0.05), transparent 58%),
-      radial-gradient(1100px 550px at 15% 76%, rgba(62, 167, 253, 0.05), transparent 58%),
-      radial-gradient(900px 480px at 85% 80%, rgba(187, 81, 255, 0.05), transparent 60%),
-      radial-gradient(1000px 500px at 15% 98%, rgba(62, 167, 253, 0.04), transparent 55%),
-      radial-gradient(800px 440px at 85% 98%, rgba(187, 81, 255, 0.04), transparent 55%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.015), transparent);
+    background: none;
   }
   .elevated-panel {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.1), inset 0 1px 0 rgba(255, 255, 255, 0.12);
-    border: 1px solid rgba(0, 0, 0, 0.06);
-  }
-  .dark .elevated-panel {
-    background: linear-gradient(180deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.01));
-    box-shadow: 0 14px 35px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.06);
-    border-color: rgba(255, 255, 255, 0.08);
+    background: hsl(var(--card));
+    border: 1px solid hsl(var(--border));
   }
   .hero-depth-veil {
     background: linear-gradient(180deg, hsl(var(--background) / 0.35), hsl(var(--background) / 0.12), hsl(var(--background) / 0.35));
@@ -358,14 +335,15 @@
 }
 
 :not(pre) > code[class*="language-"], pre[class*="language-"] {
-  background: hsl(var(--code-surface));
+  background: var(--editor-background);
 }
 
 /* WCAG-friendly Prism colors for light mode on near-white code surfaces. */
+/* Light-mode Prism overrides — matched to the product's Monaco editor theme */
 html:not(.dark) :not(pre) > code[class*="language-"],
 html:not(.dark) pre[class*="language-"],
 html:not(.dark) code[class*="language-"] {
-  color: #111827;
+  color: #1C2430;
   text-shadow: none;
 }
 
@@ -373,44 +351,98 @@ html:not(.dark) .token.comment,
 html:not(.dark) .token.prolog,
 html:not(.dark) .token.doctype,
 html:not(.dark) .token.cdata {
-  color: #4b5563;
+  color: #778195;
 }
 
 html:not(.dark) .token.punctuation,
 html:not(.dark) .token.operator,
 html:not(.dark) .token.entity,
 html:not(.dark) .token.url {
-  color: #374151;
+  color: #1C2430;
 }
 
 html:not(.dark) .token.keyword,
 html:not(.dark) .token.atrule,
 html:not(.dark) .token.important {
-  color: #1d4ed8;
+  color: #6C54C7;
 }
 
 html:not(.dark) .token.function,
 html:not(.dark) .token.class-name,
 html:not(.dark) .token.builtin {
-  color: #7c3aed;
+  color: #39506F;
 }
 
 html:not(.dark) .token.string,
 html:not(.dark) .token.char,
 html:not(.dark) .token.attr-value,
 html:not(.dark) .token.inserted {
-  color: #166534;
+  color: #35705C;
 }
 
 html:not(.dark) .token.number,
 html:not(.dark) .token.boolean,
 html:not(.dark) .token.constant,
 html:not(.dark) .token.symbol {
-  color: #b45309;
+  color: #8D6231;
 }
 
 html:not(.dark) .token.regex,
 html:not(.dark) .token.variable,
 html:not(.dark) .token.selector {
-  color: #be123c;
+  color: #4A5A73;
+}
+
+/* Dark-mode Prism overrides — matched to the product's Monaco editor theme */
+.dark :not(pre) > code[class*="language-"],
+.dark pre[class*="language-"],
+.dark code[class*="language-"] {
+  color: #E7EBF2;
+  text-shadow: none;
+}
+
+.dark .token.comment,
+.dark .token.prolog,
+.dark .token.doctype,
+.dark .token.cdata {
+  color: #8A92A3;
+}
+
+.dark .token.punctuation,
+.dark .token.operator,
+.dark .token.entity,
+.dark .token.url {
+  color: #E7EBF2;
+}
+
+.dark .token.keyword,
+.dark .token.atrule,
+.dark .token.important {
+  color: #C0A9FF;
+}
+
+.dark .token.function,
+.dark .token.class-name,
+.dark .token.builtin {
+  color: #CBD2E0;
+}
+
+.dark .token.string,
+.dark .token.char,
+.dark .token.attr-value,
+.dark .token.inserted {
+  color: #9EC3A7;
+}
+
+.dark .token.number,
+.dark .token.boolean,
+.dark .token.constant,
+.dark .token.symbol {
+  color: #D8B37D;
+}
+
+.dark .token.regex,
+.dark .token.variable,
+.dark .token.selector {
+  color: #B8C0D2;
 }

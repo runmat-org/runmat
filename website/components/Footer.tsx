@@ -106,7 +106,7 @@ export default function Footer() {
           </div>
           <p className="flex items-center text-center text-sm md:text-left" style={{ color: 'hsl(var(--muted-foreground))' }}>
             Made with
-            <Heart className="mx-1 h-4 w-4 fill-red-500 text-red-500" />
+            <Heart className="mx-1 h-4 w-4 fill-destructive text-destructive" />
             for the scientific community by{" "}
             <Link
               href={dystrHref}

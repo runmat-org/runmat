@@ -41,7 +41,7 @@ export default function DownloadPage() {
 
         {/* Quick Install */}
         <section className="mb-12">
-          <Card className="bg-gradient-to-r from-blue-50 to-orange-50 dark:from-blue-900/20 dark:to-orange-900/20 border-blue-200 dark:border-blue-800">
+          <Card className="bg-card border-border">
             <CardContent className="p-4 text-center">
               <OSInstallCommand className="max-w-4xl mx-auto shadow-none border-none" />
             </CardContent>
@@ -133,15 +133,15 @@ export default function DownloadPage() {
             <Card className="opacity-60 relative">
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <Monitor className="h-5 w-5 mr-2 text-gray-400" />
+                  <Monitor className="h-5 w-5 mr-2 text-muted-foreground" />
                   Desktop App
-                  <span className="ml-auto bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded-full text-xs font-medium">
+                  <span className="ml-auto bg-gray-200 dark:bg-gray-700 text-muted-foreground px-2 py-1 rounded-full text-xs font-medium">
                     Coming soon
                   </span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-gray-500 dark:text-gray-400 mb-4">
+                <p className="text-muted-foreground mb-4">
                   Full IDE with native GPU performance and local file system access.
                 </p>
                 <Button className="w-full opacity-50 cursor-not-allowed" disabled>
@@ -155,15 +155,15 @@ export default function DownloadPage() {
             <Card className="opacity-60 relative">
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <Code className="h-5 w-5 mr-2 text-gray-400" />
+                  <Code className="h-5 w-5 mr-2 text-muted-foreground" />
                   VS Code Extension
-                  <span className="ml-auto bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded-full text-xs font-medium">
+                  <span className="ml-auto bg-gray-200 dark:bg-gray-700 text-muted-foreground px-2 py-1 rounded-full text-xs font-medium">
                     Coming soon
                   </span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-gray-500 dark:text-gray-400 mb-4">
+                <p className="text-muted-foreground mb-4">
                   Get syntax highlighting, IntelliSense, and integrated debugging for RunMat.
                 </p>
                 <Button className="w-full opacity-50 cursor-not-allowed" disabled>
@@ -177,15 +177,15 @@ export default function DownloadPage() {
             <Card className="opacity-60 relative">
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <Code className="h-5 w-5 mr-2 text-gray-400" />
+                  <Code className="h-5 w-5 mr-2 text-muted-foreground" />
                   IntelliJ IDEA Plugin
-                  <span className="ml-auto bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-1 rounded-full text-xs font-medium">
+                  <span className="ml-auto bg-gray-200 dark:bg-gray-700 text-muted-foreground px-2 py-1 rounded-full text-xs font-medium">
                     Coming soon
                   </span>
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-gray-500 dark:text-gray-400 mb-4">
+                <p className="text-muted-foreground mb-4">
                   Get syntax highlighting, IntelliSense, and integrated debugging for RunMat.
                 </p>
                 <Button className="w-full opacity-50 cursor-not-allowed" disabled>
@@ -204,7 +204,7 @@ export default function DownloadPage() {
           </h2>
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card className="bg-gradient-to-r from-green-50 to-blue-50 dark:from-green-900/20 dark:to-blue-900/20 border-green-200 dark:border-green-800">
+            <Card className="bg-card border-border">
               <CardContent className="p-6">
                 <div className="flex items-center mb-4">
                   <Code className="h-6 w-6 mr-3 text-green-600" />
@@ -225,10 +225,10 @@ export default function DownloadPage() {
                 </Button>
               </CardContent>
             </Card>
-            <Card className="bg-gradient-to-r from-purple-50 to-blue-50 dark:from-purple-900/20 dark:to-blue-900/20 border-purple-200 dark:border-purple-800">
+            <Card className="bg-card border-border">
               <CardContent className="p-6">
                 <div className="flex items-center mb-4">
-                  <Zap className="h-6 w-6 mr-3 text-purple-600" />
+                  <Zap className="h-6 w-6 mr-3 text-[hsl(var(--brand))]" />
                   <h3 className="text-xl font-bold text-foreground">
                     Set up Jupyter kernel
                   </h3>

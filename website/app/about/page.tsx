@@ -171,7 +171,7 @@ export default function AboutPage() {
         {/* Who We Are */}
         <section className="pb-12 md:pb-16 lg:pb-20">
           <div className="grid gap-10 lg:grid-cols-2 lg:items-center">
-            <div className="order-2 lg:order-1 rounded-2xl border border-border/60 bg-muted/40 p-4">
+            <div className="order-2 lg:order-1 rounded-lg border border-border/60 bg-muted/40 p-4">
               <div className="relative h-[320px] w-full overflow-hidden rounded-xl border border-border/60 bg-background/40">
                 <Image
                   src="https://web.runmatstatic.com/julie-nabeel-group-about-page.png"
@@ -227,10 +227,10 @@ export default function AboutPage() {
 
         {/* Backed By */}
         <section className="py-12 md:py-16 lg:py-20">
-          <Card className="mx-auto max-w-4xl border border-border/60 bg-[#0E1421] text-gray-100 shadow-lg">
+          <Card className="mx-auto max-w-4xl border border-border/60 bg-card text-foreground shadow-lg">
             <CardContent className="py-8 text-center space-y-4">
-              <p className="text-gray-300 text-lg">Backed by</p>
-              <div className="mx-auto grid max-w-2xl grid-cols-2 items-center justify-items-center gap-8 rounded-lg border border-white/10 bg-white/90 px-8 py-6 sm:grid-cols-4 dark:bg-white/10">
+              <p className="text-muted-foreground text-lg">Backed by</p>
+              <div className="mx-auto grid max-w-2xl grid-cols-2 items-center justify-items-center gap-8 rounded-lg border border-border bg-white/90 px-8 py-6 sm:grid-cols-4 dark:bg-white/10">
                 <Link href="https://www.longjourney.vc/" target="_blank" rel="noreferrer">
                   <Image
                     src="https://web.runmatstatic.com/VC%20logos/long-journey.png"
@@ -294,7 +294,7 @@ export default function AboutPage() {
                 without learning CUDA, RunMat fits.
               </p>
             </div>
-            <div className="rounded-2xl border border-border/60 bg-muted/40 p-4">
+            <div className="rounded-lg border border-border/60 bg-muted/40 p-4">
               <Link href="/sandbox" className="block rounded-xl overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
                 <video
                   className="w-full h-auto rounded-xl"
@@ -315,7 +315,7 @@ export default function AboutPage() {
         {/* Easy to Read, Fast to Run */}
         <section className="py-16 md:py-24 lg:py-32">
           <div className="grid gap-10 lg:grid-cols-2 lg:items-start">
-            <div className="order-2 lg:order-1 rounded-2xl border border-border/60 bg-muted/40 p-4 w-full">
+            <div className="order-2 lg:order-1 rounded-lg border border-border/60 bg-muted/40 p-4 w-full">
               <div className="relative w-full overflow-hidden rounded-xl border border-border/60 bg-background/40 aspect-video">
                 <Image
                   src="https://web.runmatstatic.com/matlab-runmat-whiteboard-c.png"
@@ -354,14 +354,14 @@ export default function AboutPage() {
 
         {/* Our Mission */}
         <section className="py-16 md:py-24 lg:py-32">
-          <Card className="mx-auto max-w-4xl border border-border/60 bg-[#0E1421] shadow-lg">
+          <Card className="mx-auto max-w-4xl border border-border/60 bg-card shadow-lg">
             <CardContent className="py-8 space-y-3 text-center">
-              <h2 className="text-3xl md:text-4xl font-bold text-gray-100">Our mission</h2>
-              <p className="text-xl text-gray-100 font-semibold">
+              <h2 className="text-3xl md:text-4xl font-bold text-foreground">Our mission</h2>
+              <p className="text-xl text-foreground font-semibold">
                 To enable people to do math and physics that they couldn&apos;t do before by creating a modern,
                 high-performance alternative to MATLAB.
               </p>
-              <p className="text-gray-300 text-lg">
+              <p className="text-muted-foreground text-lg">
                 We focus on performance and portability without breaking the way engineers already write math.
                 That means a runtime that&apos;s fast, secure, and runs on today&apos;s hardware out of the box.
               </p>
@@ -379,73 +379,73 @@ export default function AboutPage() {
               </p>
             </div>
           </section>
-          <Card className="mx-auto max-w-2xl border border-border/60 bg-[#0E1421] shadow-lg mb-12">
+          <Card className="mx-auto max-w-2xl border border-border/60 bg-card shadow-lg mb-12">
             <CardContent className="py-6 md:py-8">
-              <h3 className="text-lg font-bold text-gray-100 mb-5">Product milestones</h3>
-              <div className="relative border-l-2 border-white/10 ml-1.5 space-y-5 pl-6">
+              <h3 className="text-lg font-bold text-foreground mb-5">Product milestones</h3>
+              <div className="relative border-l-2 border-border ml-1.5 space-y-5 pl-6">
                 <div className="relative">
                   <span className="absolute -left-[calc(1.5rem+5px)] top-1 h-2.5 w-2.5 rounded-full bg-blue-500" />
-                  <p className="text-sm font-semibold text-blue-400">Aug 2025</p>
-                  <p className="text-sm font-semibold text-gray-100">CLI Launch</p>
-                  <p className="text-sm text-gray-300">
+                  <p className="text-sm font-semibold text-[hsl(var(--brand))]">Aug 2025</p>
+                  <p className="text-sm font-semibold text-foreground">CLI Launch</p>
+                  <p className="text-sm text-muted-foreground">
                     ~5 ms startup, 150–180× faster than GNU Octave.{" "}
-                    <Link href="/blog/introducing-runmat" className="underline underline-offset-2 hover:text-gray-100">Read more</Link>
+                    <Link href="/blog/introducing-runmat" className="underline underline-offset-2 hover:text-foreground">Read more</Link>
                   </p>
                 </div>
                 <div className="relative">
                   <span className="absolute -left-[calc(1.5rem+5px)] top-1 h-2.5 w-2.5 rounded-full bg-green-500" />
                   <p className="text-sm font-semibold text-green-400">Nov 2025</p>
-                  <p className="text-sm font-semibold text-gray-100">RunMat Accelerate</p>
-                  <p className="text-sm text-gray-300">
+                  <p className="text-sm font-semibold text-foreground">RunMat Accelerate</p>
+                  <p className="text-sm text-muted-foreground">
                     Automatic GPU fusion — 82× faster than PyTorch on 1B-point math.{" "}
-                    <Link href="/blog/runmat-accelerate-fastest-runtime-for-your-math" className="underline underline-offset-2 hover:text-gray-100">Read more</Link>
+                    <Link href="/blog/runmat-accelerate-fastest-runtime-for-your-math" className="underline underline-offset-2 hover:text-foreground">Read more</Link>
                   </p>
                 </div>
                 <div className="relative">
                   <span className="absolute -left-[calc(1.5rem+5px)] top-1 h-2.5 w-2.5 rounded-full bg-amber-500" />
                   <p className="text-sm font-semibold text-amber-400">Mar 2026</p>
-                  <p className="text-sm font-semibold text-gray-100">Browser Sandbox + RunMat Cloud</p>
-                  <p className="text-sm text-gray-300">
+                  <p className="text-sm font-semibold text-foreground">Browser Sandbox + RunMat Cloud</p>
+                  <p className="text-sm text-muted-foreground">
                     Client-side WebAssembly execution, persistent projects, versioning, and collaboration.{" "}
-                    <Link href="/blog/introducing-runmat-cloud" className="underline underline-offset-2 hover:text-gray-100">Read more</Link>
+                    <Link href="/blog/introducing-runmat-cloud" className="underline underline-offset-2 hover:text-foreground">Read more</Link>
                   </p>
                 </div>
               </div>
             </CardContent>
           </Card>
           <div className="mx-auto grid max-w-6xl gap-6 md:grid-cols-2 lg:grid-cols-4">
-            <Card className="border border-blue-500/30 bg-[#0E1421] shadow-lg">
+            <Card className="border border-blue-500/30 bg-card shadow-lg">
               <CardHeader className="border-b border-border/60">
-                <CardTitle className="text-xl text-gray-100">Runtime</CardTitle>
+                <CardTitle className="text-xl text-foreground">Runtime</CardTitle>
               </CardHeader>
-              <CardContent className="text-lg text-gray-300 space-y-2">
+              <CardContent className="text-lg text-muted-foreground space-y-2">
                 <div className="flex items-start gap-2">
-                  <span className="mt-1 text-blue-300">•</span>
+                  <span className="mt-1 text-[hsl(var(--brand))]">•</span>
                   <p>Fusion engine auto-offloads op chains to GPU. No kernel code, no rewrites</p>
                 </div>
                 <div className="flex items-start gap-2">
-                  <span className="mt-1 text-blue-300">•</span>
+                  <span className="mt-1 text-[hsl(var(--brand))]">•</span>
                   <p>Cross-vendor GPU: Metal, DirectX 12, Vulkan, WebGPU. Works on any hardware</p>
                 </div>
                 <div className="flex items-start gap-2">
-                  <span className="mt-1 text-blue-300">•</span>
+                  <span className="mt-1 text-[hsl(var(--brand))]">•</span>
                   <p>Ignition interpreter for ~5 ms startup; Turbine JIT (Cranelift) for hot paths</p>
                 </div>
                 <div className="flex items-start gap-2">
-                  <span className="mt-1 text-blue-300">•</span>
+                  <span className="mt-1 text-[hsl(var(--brand))]">•</span>
                   <p>Async-capable. GPU readback and long scripts never block the host</p>
                 </div>
                 <div className="flex items-start gap-2">
-                  <span className="mt-1 text-blue-300">•</span>
+                  <span className="mt-1 text-[hsl(var(--brand))]">•</span>
                   <p>300+ built-in functions with a generational GC and memory-safe Rust core</p>
                 </div>
               </CardContent>
             </Card>
-            <Card className="border border-green-500/30 bg-[#0E1421] shadow-lg">
+            <Card className="border border-green-500/30 bg-card shadow-lg">
               <CardHeader className="border-b border-border/60">
-                <CardTitle className="text-xl text-gray-100">Platform</CardTitle>
+                <CardTitle className="text-xl text-foreground">Platform</CardTitle>
               </CardHeader>
-              <CardContent className="text-lg text-gray-300 space-y-2">
+              <CardContent className="text-lg text-muted-foreground space-y-2">
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-green-300">•</span>
                   <p>Browser sandbox: run code instantly, no install</p>
@@ -468,11 +468,11 @@ export default function AboutPage() {
                 </div>
               </CardContent>
             </Card>
-            <Card className="border border-amber-500/30 bg-[#0E1421] shadow-lg">
+            <Card className="border border-amber-500/30 bg-card shadow-lg">
               <CardHeader className="border-b border-border/60">
-                <CardTitle className="text-xl text-gray-100">RunMat Cloud</CardTitle>
+                <CardTitle className="text-xl text-foreground">RunMat Cloud</CardTitle>
               </CardHeader>
-              <CardContent className="text-lg text-gray-300 space-y-2">
+              <CardContent className="text-lg text-muted-foreground space-y-2">
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-amber-300">•</span>
                   <p>Persistent projects with automatic run history</p>
@@ -504,11 +504,11 @@ export default function AboutPage() {
                 </div>
               </CardContent>
             </Card>
-            <Card className="border border-purple-500/30 bg-[#0E1421] shadow-lg">
+            <Card className="border border-border bg-card shadow-lg">
               <CardHeader className="border-b border-border/60">
-                <CardTitle className="text-xl text-gray-100">Enterprise</CardTitle>
+                <CardTitle className="text-xl text-foreground">Enterprise</CardTitle>
               </CardHeader>
-              <CardContent className="text-lg text-gray-300 space-y-2">
+              <CardContent className="text-lg text-muted-foreground space-y-2">
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-purple-300">•</span>
                   <p>Air-gapped, on-prem deployment as a single binary</p>
@@ -545,28 +545,28 @@ export default function AboutPage() {
           <div className="mx-auto max-w-5xl text-center mb-8 space-y-2">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground">Where we&apos;re headed</h2>
           </div>
-          <Card className="mx-auto max-w-4xl rounded-xl border border-border/60 bg-[#0E1421] shadow-lg">
+          <Card className="mx-auto max-w-4xl rounded-xl border border-border/60 bg-card shadow-lg">
             <CardContent className="py-6 md:py-8 space-y-4">
-            <p className="text-lg text-gray-300">
+            <p className="text-lg text-muted-foreground">
               You can use RunMat today as a MATLAB-style runtime. Next, we&apos;re building it into a modern
               environment for engineers where:
             </p>
-            <div className="space-y-2 text-lg text-gray-300">
+            <div className="space-y-2 text-lg text-muted-foreground">
               <div className="flex items-start gap-3">
-                <ArrowUpRight className="mt-1 h-4 w-4 text-blue-300 shrink-0" />
+                <ArrowUpRight className="mt-1 h-4 w-4 text-[hsl(var(--brand))] shrink-0" />
                 <span>Write or generate code faster</span>
               </div>
               <div className="flex items-start gap-3">
-                <ArrowUpRight className="mt-1 h-4 w-4 text-blue-300 shrink-0" />
+                <ArrowUpRight className="mt-1 h-4 w-4 text-[hsl(var(--brand))] shrink-0" />
                 <span>Verify results faster</span>
               </div>
               <div className="flex items-start gap-3">
-                <ArrowUpRight className="mt-1 h-4 w-4 text-blue-300 shrink-0" />
+                <ArrowUpRight className="mt-1 h-4 w-4 text-[hsl(var(--brand))] shrink-0" />
                 <span>Run work on a laptop, in the cloud, or inside a secure enterprise setup</span>
               </div>
             </div>
-            <div className="rounded-xl border border-white/10 bg-white/5 p-4 text-lg text-gray-300">
-              <span className="font-semibold text-gray-100">The goal:</span>{" "}
+            <div className="rounded-xl border border-border bg-white/5 p-4 text-lg text-muted-foreground">
+              <span className="font-semibold text-foreground">The goal:</span>{" "}
               <span>Let engineers focus on math and physics, not programming.</span>
             </div>
             </CardContent>
@@ -577,14 +577,14 @@ export default function AboutPage() {
         <section className="py-12 md:py-16 lg:py-20">
           <div className="mx-auto max-w-3xl text-center">
             <h2 className="text-3xl md:text-4xl font-bold text-foreground mb-8">Open source at the core</h2>
-            <Card className="border border-border/60 bg-[#0E1421] shadow-lg">
+            <Card className="border border-border/60 bg-card shadow-lg">
               <CardContent className="py-8 space-y-4">
-                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-border/60 bg-background/30 text-sm text-gray-300">
+                <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-border/60 bg-background/30 text-sm text-muted-foreground">
                   <SiGithub className="h-7 w-7" />
                 </div>
-                <p className="text-gray-300 text-lg">
+                <p className="text-muted-foreground text-lg">
                   The core runtime is MIT licensed and on{" "}
-                  <Link href="https://github.com/runmat-org/runmat" className="underline text-blue-300 hover:text-blue-200">
+                  <Link href="https://github.com/runmat-org/runmat" className="underline text-[hsl(var(--brand))] hover:opacity-90">
                     GitHub
                   </Link>
                   . That includes the JIT, the fusion engine, and the GPU planner. We&apos;re committed to
@@ -597,7 +597,7 @@ export default function AboutPage() {
 
         {/* Get Started */}
         <section className="py-12 md:py-16 lg:py-20 text-center">
-          <Card className="mx-auto max-w-3xl border border-purple-500/30 bg-gradient-to-r from-purple-500/10 to-blue-500/10 shadow-lg">
+          <Card className="mx-auto max-w-3xl border border-border bg-card shadow-lg">
             <CardContent className="py-8 space-y-4">
               <h2 className="text-3xl md:text-4xl font-bold text-foreground">
                 Run MATLAB code online - no install, no license
@@ -609,7 +609,7 @@ export default function AboutPage() {
                 <Button
                   size="lg"
                   asChild
-                  className="h-12 px-8 text-base font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200"
+                  className="h-12 px-8 text-base font-semibold bg-[hsl(var(--brand))] text-white hover:bg-[hsl(var(--brand))]/90 border-0 transition-opacity duration-200 shadow-none"
                 >
                   <Link
                     href="/sandbox"
@@ -624,7 +624,7 @@ export default function AboutPage() {
                   variant="outline"
                   size="lg"
                   asChild
-                  className="h-12 px-8 text-base bg-[#0E1421] dark:bg-[#0E1421] border-border/60 text-gray-100"
+                  className="h-12 px-8 text-base bg-card border-border/60 text-foreground"
                 >
                   <Link href="/download">Other download options</Link>
                 </Button>

@@ -60,13 +60,13 @@ export default function Navigation() {
                 >
                   Docs
                 </NavigationMenuTrigger>
-                <NavigationMenuContent className="w-56 rounded-lg border border-gray-700/60 bg-black/95 backdrop-blur-xl shadow-lg">
+                <NavigationMenuContent className="w-56 rounded-lg border-border bg-popover backdrop-blur-xl shadow-lg">
                   <ul className="grid gap-1 p-1">
                     <li>
                       <NavigationMenuLink asChild>
                         <Link
                           href="/docs/getting-started"
-                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-popover-foreground/90 transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
                         >
                           Getting Started
                         </Link>
@@ -76,7 +76,7 @@ export default function Navigation() {
                       <NavigationMenuLink asChild>
                         <Link
                           href="/docs/matlab-function-reference"
-                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-popover-foreground/90 transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
                         >
                           Function Reference
                         </Link>
@@ -86,7 +86,7 @@ export default function Navigation() {
                       <NavigationMenuLink asChild>
                         <Link
                           href="/docs/architecture"
-                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-popover-foreground/90 transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
                         >
                           Architecture
                         </Link>
@@ -96,18 +96,18 @@ export default function Navigation() {
                       <NavigationMenuLink asChild>
                         <Link
                           href="/docs/cli"
-                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-popover-foreground/90 transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
                         >
                           CLI Reference
                         </Link>
                       </NavigationMenuLink>
                     </li>
-                    <li className="my-1 h-px bg-gray-700/50" />
+                    <li className="my-1 h-px bg-border" />
                     <li>
                       <NavigationMenuLink asChild>
                         <Link
                           href="/docs"
-                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-popover-foreground/90 transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
                         >
                           View all docs
                         </Link>
@@ -123,13 +123,13 @@ export default function Navigation() {
                 >
                   Resources
                 </NavigationMenuTrigger>
-                <NavigationMenuContent className="w-56 rounded-lg border border-gray-700/60 bg-black/95 backdrop-blur-xl shadow-lg">
+                <NavigationMenuContent className="w-56 rounded-lg border-border bg-popover backdrop-blur-xl shadow-lg">
                   <ul className="grid gap-1 p-1">
                     <li>
                       <NavigationMenuLink asChild>
                         <Link
                           href="/blog"
-                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-popover-foreground/90 transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
                         >
                           Blog
                         </Link>
@@ -139,7 +139,7 @@ export default function Navigation() {
                       <NavigationMenuLink asChild>
                         <Link
                           href="/resources/guides"
-                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-popover-foreground/90 transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
                         >
                           Guides
                         </Link>
@@ -149,7 +149,7 @@ export default function Navigation() {
                       <NavigationMenuLink asChild>
                         <Link
                           href="/benchmarks"
-                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-popover-foreground/90 transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
                         >
                           Benchmarks
                         </Link>
@@ -159,18 +159,18 @@ export default function Navigation() {
                       <NavigationMenuLink asChild>
                         <Link
                           href="/about"
-                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-popover-foreground/90 transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
                         >
                           About RunMat
                         </Link>
                       </NavigationMenuLink>
                     </li>
-                    <li className="my-1 h-px bg-gray-700/50" />
+                    <li className="my-1 h-px bg-border" />
                     <li>
                       <NavigationMenuLink asChild>
                         <Link
                           href="/resources"
-                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-white/90 transition-colors hover:bg-white/5 hover:text-white focus:bg-white/5 focus:text-white"
+                          className="whitespace-nowrap rounded-md px-3 py-2 text-sm text-popover-foreground/90 transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
                         >
                           Resource Hub
                         </Link>
@@ -242,10 +242,10 @@ export default function Navigation() {
               </Link>
             </Button>
             <ThemeToggle />
-            <Button size="sm" asChild>
+            <Button variant="ghost" size="sm" asChild>
               <Link href="/download">
-                <Download className="mr-2 h-4 w-4" />
-                Download
+                <Download className="h-4 w-4" />
+                <span className="ml-1">Download</span>
               </Link>
             </Button>
             <Button variant="outline" size="sm" className="ml-2" asChild>
@@ -255,7 +255,7 @@ export default function Navigation() {
             </Button>
             <Link
               href="/sandbox"
-              className="inline-flex items-center justify-center h-10 px-6 text-sm font-semibold flex-shrink-0 whitespace-nowrap rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow hover:from-blue-600 hover:to-purple-700 transition-colors"
+              className="inline-flex items-center justify-center h-10 px-6 text-sm font-semibold flex-shrink-0 whitespace-nowrap rounded-lg bg-[hsl(var(--brand))] text-white transition-colors shadow-none hover:bg-[hsl(var(--brand))]/90"
               onClick={handleTryInBrowserClick}
               target="_blank"
               rel="noopener noreferrer"
@@ -369,7 +369,7 @@ export default function Navigation() {
               </Link>
               <Link
                 href="https://runmat.com/sandbox"
-                className="flex w-full items-center justify-center rounded-lg mt-2 p-3 text-sm font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow hover:from-blue-600 hover:to-purple-700 transition-colors"
+                className="flex w-full items-center justify-center rounded-lg mt-2 p-3 text-sm font-semibold bg-[hsl(var(--brand))] text-white transition-colors shadow-none hover:bg-[hsl(var(--brand))]/90"
                 onClick={() => {
                   setMobileMenuOpen(false);
                   handleTryInBrowserClick();

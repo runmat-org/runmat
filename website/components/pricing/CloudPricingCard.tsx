@@ -70,9 +70,9 @@ export default function CloudPricingCard() {
   const currentTier = cloudTierConfig[activeTier];
 
   return (
-    <Card className="relative flex h-full flex-col border border-blue-500/50 bg-muted/40 shadow-lg shadow-blue-500/10">
+    <Card className="relative flex h-full flex-col border border-[hsl(var(--brand))]/50 bg-muted/40 shadow-lg shadow-[hsl(var(--brand))]/10">
       <CardHeader className="space-y-3 pb-4">
-        <Badge className="w-fit bg-violet-500/20 text-violet-800 border-violet-600/50 dark:text-violet-200 dark:border-violet-400/40 hover:bg-violet-500/20">
+        <Badge className="w-fit bg-secondary text-foreground border-border hover:bg-secondary">
           Cloud
         </Badge>
         <CardTitle className="text-xl text-foreground">RunMat Cloud</CardTitle>
@@ -101,7 +101,7 @@ export default function CloudPricingCard() {
                     "whitespace-nowrap rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                     selected
-                      ? "bg-gradient-to-r from-blue-500 to-purple-600 text-white"
+                      ? "bg-[hsl(var(--brand))] text-white"
                       : "text-muted-foreground hover:bg-accent hover:text-foreground"
                   )}
                 >
@@ -128,7 +128,7 @@ export default function CloudPricingCard() {
                 const href = typeof feature === "string" ? undefined : feature.href;
                 return (
                   <li key={label} className="flex items-start gap-2 text-sm text-muted-foreground">
-                    <Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-violet-300" />
+                    <Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
                     {href ? (
                       <a href={href} className="no-underline hover:text-foreground transition-colors">
                         {label}
@@ -144,7 +144,7 @@ export default function CloudPricingCard() {
         </div>
         <Button
           asChild
-          className="w-full rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow border-0 hover:from-blue-600 hover:to-purple-700 transition-colors"
+          className="w-full rounded-lg bg-[hsl(var(--brand))] text-white border-0 transition-colors shadow-none hover:bg-[hsl(var(--brand))]/90"
         >
           <Link href={currentTier.ctaHref}>{currentTier.ctaLabel}</Link>
         </Button>

@@ -11,12 +11,12 @@ import Hero from "@/components/Hero";
 import LazyVideo from "@/components/LazyVideo";
 
 const MatlabCodeCard = dynamic(() => import("@/components/MatlabCodeCard"), {
-  loading: () => <div className="w-full max-w-3xl h-[120px] rounded-3xl bg-muted/40 animate-pulse" />,
+  loading: () => <div className="w-full max-w-3xl h-[120px] rounded-lg bg-muted/40 animate-pulse" />,
 });
 
 const BenchmarkShowcaseBlock = dynamic(
   () => import("@/components/benchmarks/BenchmarkShowcaseBlock"),
-  { loading: () => <div className="w-full h-[300px] rounded-xl bg-muted/40 animate-pulse" /> },
+  { loading: () => <div className="w-full h-[300px] rounded-lg bg-muted/40 animate-pulse" /> },
 );
 
 const jsonLd = {
@@ -183,7 +183,7 @@ export const metadata: Metadata = {
 
 export default function HomePage() {
   return (
-    <div className="flex flex-col min-h-screen home-page home-page-depth">
+    <div className="flex flex-col min-h-screen home-page">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
@@ -211,8 +211,8 @@ export default function HomePage() {
             </p>
           </div>
           <div className="mx-auto max-w-3xl">
-            <div className="rounded-xl border border-border overflow-hidden elevated-panel">
-              <Link href="/sandbox" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-b-none rounded-t-xl overflow-hidden">
+            <div className="rounded-lg border border-border overflow-hidden elevated-panel">
+              <Link href="/sandbox" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-b-none rounded-t-lg overflow-hidden">
                 <LazyVideo
                   className="w-full h-auto"
                   muted
@@ -314,8 +314,8 @@ export default function HomePage() {
             </p>
           </div>
           <div className="mx-auto max-w-3xl">
-            <div className="rounded-xl border border-border overflow-hidden elevated-panel">
-              <Link href="/sandbox" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-b-none rounded-t-xl overflow-hidden">
+            <div className="rounded-lg border border-border overflow-hidden elevated-panel">
+              <Link href="/sandbox" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-b-none rounded-t-lg overflow-hidden">
                 <LazyVideo
                   className="w-full h-auto"
                   muted
@@ -346,7 +346,7 @@ export default function HomePage() {
           <div className="mx-auto max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
             <Link
               href="/sandbox"
-              className="rounded-2xl border border-border overflow-hidden min-h-[380px] md:row-span-3 bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="rounded-lg border border-border overflow-hidden min-h-[380px] md:row-span-3 bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               <LazyVideo
                 className="w-full h-full min-h-[380px] object-cover object-left-top"
@@ -359,26 +359,26 @@ export default function HomePage() {
                 <source src="https://web.runmatstatic.com/video/runmat-versioning.mp4" type="video/mp4" />
               </LazyVideo>
             </Link>
-            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
+            <div className="rounded-lg border border-border bg-card p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
                 <GitBranch className="h-5 w-5" />
               </span>
-              <h3 className="text-lg font-semibold text-gray-100">Automatic file history</h3>
-              <p className="text-sm text-gray-300 mt-1">Every save creates a version. Browse the timeline, restore any previous state. No commits, no staging.</p>
+              <h3 className="text-lg font-semibold text-foreground">Automatic file history</h3>
+              <p className="text-sm text-muted-foreground mt-1">Every save creates a version. Browse the timeline, restore any previous state. No commits, no staging.</p>
             </div>
-            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
+            <div className="rounded-lg border border-border bg-card p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
                 <Camera className="h-5 w-5" />
               </span>
-              <h3 className="text-lg font-semibold text-gray-100">Project snapshots</h3>
-              <p className="text-sm text-gray-300 mt-1">Capture your entire project in one click. Restore instantly. A clean timeline with no merge conflicts.</p>
+              <h3 className="text-lg font-semibold text-foreground">Project snapshots</h3>
+              <p className="text-sm text-muted-foreground mt-1">Capture your entire project in one click. Restore instantly. A clean timeline with no merge conflicts.</p>
             </div>
-            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
+            <div className="rounded-lg border border-border bg-card p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
                 <Users className="h-5 w-5" />
               </span>
-              <h3 className="text-lg font-semibold text-gray-100">Cloud project sharing</h3>
-              <p className="text-sm text-gray-300 mt-1">Share projects with colleagues instantly. No shared drives, no emailing files.</p>
+              <h3 className="text-lg font-semibold text-foreground">Cloud project sharing</h3>
+              <p className="text-sm text-muted-foreground mt-1">Share projects with colleagues instantly. No shared drives, no emailing files.</p>
             </div>
           </div>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -405,26 +405,26 @@ export default function HomePage() {
             </p>
           </div>
           <div className="mx-auto max-w-5xl grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
+            <div className="rounded-lg border border-border bg-card p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
                 <Cpu className="h-5 w-5" />
               </span>
-              <h3 className="text-lg font-semibold text-gray-100">Any GPU</h3>
-              <p className="text-sm text-gray-300 mt-1">Metal on Mac, Vulkan on Linux and ARM, DirectX 12 on Windows. No CUDA dependency.</p>
+              <h3 className="text-lg font-semibold text-foreground">Any GPU</h3>
+              <p className="text-sm text-muted-foreground mt-1">Metal on Mac, Vulkan on Linux and ARM, DirectX 12 on Windows. No CUDA dependency.</p>
             </div>
-            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
+            <div className="rounded-lg border border-border bg-card p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
                 <Monitor className="h-5 w-5" />
               </span>
-              <h3 className="text-lg font-semibold text-gray-100">Any OS</h3>
-              <p className="text-sm text-gray-300 mt-1">macOS, Windows, Linux, and headless servers. Same runtime, same results.</p>
+              <h3 className="text-lg font-semibold text-foreground">Any OS</h3>
+              <p className="text-sm text-muted-foreground mt-1">macOS, Windows, Linux, and headless servers. Same runtime, same results.</p>
             </div>
-            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
+            <div className="rounded-lg border border-border bg-card p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
                 <HardDrive className="h-5 w-5" />
               </span>
-              <h3 className="text-lg font-semibold text-gray-100">High-bandwidth cloud filesystem</h3>
-              <p className="text-sm text-gray-300 mt-1">Sharded storage for multi-petabyte datasets. Parallel reads and writes designed for NIC saturation. Delta snapshots for efficient dataset versioning.</p>
+              <h3 className="text-lg font-semibold text-foreground">High-bandwidth cloud filesystem</h3>
+              <p className="text-sm text-muted-foreground mt-1">Sharded storage for multi-petabyte datasets. Parallel reads and writes designed for NIC saturation. Delta snapshots for efficient dataset versioning.</p>
             </div>
           </div>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
@@ -446,19 +446,19 @@ export default function HomePage() {
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl mb-8">
               Open source, MIT licensed
             </h2>
-            <Card className="border border-border/60 bg-[#0E1421] shadow-lg">
+            <Card className="border border-border bg-card">
               <CardContent className="py-8 space-y-4">
                 <Link
                   href="https://github.com/runmat-org/runmat"
                   target="_blank"
                   rel="noreferrer"
-                  className="mx-auto flex h-28 w-28 items-center justify-center rounded-full border border-border/60 bg-background/30 text-gray-400 hover:text-gray-200 transition-colors"
+                  className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-border bg-secondary text-muted-foreground hover:text-foreground transition-colors"
                 >
-                  <SiGithub className="h-14 w-14" />
+                  <SiGithub className="h-8 w-8" />
                 </Link>
-                <p className="text-gray-300 text-lg">
+                <p className="text-muted-foreground text-lg">
                   Read every line of code that runs your math. Fork it, audit it, self-host it. No vendor lock-in, no black boxes. The runtime is on{" "}
-                  <Link href="https://github.com/runmat-org/runmat" className="underline text-blue-300 hover:text-blue-200" target="_blank" rel="noreferrer">
+                  <Link href="https://github.com/runmat-org/runmat" className="underline text-[hsl(var(--brand))] hover:opacity-80" target="_blank" rel="noreferrer">
                     GitHub
                   </Link>
                   {" "}and actively maintained.
@@ -481,42 +481,42 @@ export default function HomePage() {
             </p>
           </div>
           <div className="mx-auto mt-10 max-w-5xl">
-            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/15 via-[#0E1421] to-[#0A0F1C] p-8 shadow-lg">
+            <div className="rounded-lg border border-border bg-card p-8">
               <div className="mt-4 grid gap-6 md:grid-cols-2">
                 <div className="flex items-start gap-4">
-                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400">
+                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary text-muted-foreground">
                     <Lock className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-xl font-medium text-gray-100">SSO &amp; SCIM</p>
-                    <p className="text-base text-gray-300">Integrate with your identity provider. Provision and deprovision users automatically.</p>
+                    <p className="text-xl font-medium text-foreground">SSO &amp; SCIM</p>
+                    <p className="text-base text-muted-foreground">Integrate with your identity provider. Provision and deprovision users automatically.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4">
-                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400">
+                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary text-muted-foreground">
                     <Shield className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-xl font-medium text-gray-100">ITAR-compliant deployment</p>
-                    <p className="text-base text-gray-300">Self-hosted, air-gapped option available for export-controlled environments.</p>
+                    <p className="text-xl font-medium text-foreground">ITAR-compliant deployment</p>
+                    <p className="text-base text-muted-foreground">Self-hosted, air-gapped option available for export-controlled environments.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4">
-                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400">
+                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary text-muted-foreground">
                     <Eye className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-xl font-medium text-gray-100">Open source &amp; auditable</p>
-                    <p className="text-base text-gray-300">MIT-licensed runtime. Inspect every line of code that runs your math.</p>
+                    <p className="text-xl font-medium text-foreground">Open source &amp; auditable</p>
+                    <p className="text-base text-muted-foreground">MIT-licensed runtime. Inspect every line of code that runs your math.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4">
-                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400">
+                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary text-muted-foreground">
                     <ClipboardCheck className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-xl font-medium text-gray-100">SOC 2 ready</p>
-                    <p className="text-base text-gray-300">Built to SOC 2 standards. Audit planned for Q2 2026.</p>
+                    <p className="text-xl font-medium text-foreground">SOC 2 ready</p>
+                    <p className="text-base text-muted-foreground">Built to SOC 2 standards. Audit planned for Q2 2026.</p>
                   </div>
                 </div>
               </div>
@@ -537,7 +537,7 @@ export default function HomePage() {
       {/* Final CTA */}
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
-          <Card className="mx-auto max-w-3xl border border-purple-500/30 bg-gradient-to-r from-purple-500/10 to-blue-500/10 shadow-lg">
+          <Card className="mx-auto max-w-3xl border border-border bg-card">
             <CardContent className="py-8 space-y-4 text-center">
               <h2 className="text-3xl md:text-4xl font-bold text-foreground">
                 Try it now
@@ -549,7 +549,7 @@ export default function HomePage() {
                 <Button
                   size="lg"
                   asChild
-                  className="h-12 px-8 text-base font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200"
+                  className="h-12 px-8 text-base font-semibold bg-[hsl(var(--brand))] text-white border-0 shadow-none hover:bg-[hsl(var(--brand))]/90"
                 >
                   <Link
                     href="/sandbox"

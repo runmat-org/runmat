@@ -17,7 +17,7 @@ export default function Hero() {
               <Button
                 size="lg"
                 asChild
-                className="h-12 px-8 text-base font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200 hover:from-blue-600 hover:to-purple-700"
+                className="h-12 px-8 text-base font-semibold bg-[hsl(var(--brand))] hover:bg-[hsl(var(--brand))]/90 text-white border-0 shadow-none"
               >
                 <Link href="/sandbox">Open Sandbox</Link>
               </Button>
@@ -29,7 +29,7 @@ export default function Hero() {
 
           <Link
             href="/docs/reference/builtins/surf#wave-interference-from-8-point-sources"
-            className="group relative rounded-2xl border border-border overflow-hidden min-h-[360px] flex items-center justify-center bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            className="group relative rounded-lg border border-border overflow-hidden min-h-[360px] flex items-center justify-center bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
           >
             <video
               className="w-full h-auto min-h-[360px] object-cover"

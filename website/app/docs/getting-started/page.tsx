@@ -119,7 +119,7 @@ export default function GettingStartedPage() {
           <Button
             asChild
             size="lg"
-            className="h-12 px-8 text-base font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200 hover:from-blue-600 hover:to-purple-700"
+            className="h-12 px-8 text-base font-semibold bg-[hsl(var(--brand))] text-white hover:bg-[hsl(var(--brand))]/90 border-0 transition-opacity duration-200 shadow-none"
           >
             <Link
               href="/sandbox"
@@ -241,7 +241,7 @@ export default function GettingStartedPage() {
             <Card className="hover:shadow-lg transition-shadow">
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <BarChart3 className="h-5 w-5 mr-2 text-blue-600" />
+                  <BarChart3 className="h-5 w-5 mr-2 text-[hsl(var(--brand))]" />
                   Plotting &amp; diagnostics
                 </CardTitle>
               </CardHeader>
@@ -261,7 +261,7 @@ export default function GettingStartedPage() {
             <Card className="hover:shadow-lg transition-shadow">
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <FileText className="h-5 w-5 mr-2 text-blue-600" />
+                  <FileText className="h-5 w-5 mr-2 text-[hsl(var(--brand))]" />
                   Learn the fundamentals
                 </CardTitle>
               </CardHeader>
@@ -321,7 +321,7 @@ export default function GettingStartedPage() {
             <Card className="hover:shadow-lg transition-shadow">
               <CardHeader>
                 <CardTitle className="flex items-center">
-                  <Zap className="h-5 w-5 mr-2 text-purple-600" />
+                  <Zap className="h-5 w-5 mr-2 text-[hsl(var(--brand))]" />
                   Understand the design
                 </CardTitle>
               </CardHeader>
@@ -342,7 +342,7 @@ export default function GettingStartedPage() {
 
         {/* Help */}
         <section>
-          <Card className="bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
+          <Card className="bg-card border-border">
             <CardContent className="p-6">
               <h3 className="text-lg font-semibold mb-3 text-foreground">
                 Need help?

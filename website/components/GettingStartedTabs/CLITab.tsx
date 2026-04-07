@@ -45,7 +45,7 @@ export function CLITabContent() {
             <div className="text-green-400 mt-1">RunMat v0.0.1 by Dystr …</div>
             <div className="text-green-400">Type &apos;help&apos; for help, &apos;exit&apos; to quit</div>
             <div className="mt-2 text-white">runmat&gt;</div>
-            <div className="mt-2 text-blue-400">runmat&gt;</div> <span>A = [1, 2, 3; 4, 5, 6]; B = A * 2</span>
+            <div className="mt-2 text-[hsl(var(--brand))]">runmat&gt;</div> <span>A = [1, 2, 3; 4, 5, 6]; B = A * 2</span>
             <div className="text-gray-400 mt-1">ans = [2 4 6; 8 10 12]</div>
             <div className="mt-2 text-gray-400"># Or run a file:</div>
             <div className="text-gray-400">$ runmat script.m</div>
