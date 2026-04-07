@@ -1180,6 +1180,22 @@ pub trait AccelProvider: Send + Sync {
         Err(anyhow::anyhow!("fspecial not supported by provider"))
     }
 
+    /// Evaluate the `peaks` test surface on an n×n grid spanning [-3,3]×[-3,3].
+    /// Returns the Z matrix (n×n) as a GPU tensor.
+    fn peaks(&self, _n: usize) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("peaks not supported by provider"))
+    }
+
+    /// Evaluate the `peaks` formula element-wise on caller-supplied GPU coordinate tensors.
+    /// X and Y must have the same shape. Returns a Z tensor of the same shape.
+    fn peaks_xy(
+        &self,
+        _x: &GpuTensorHandle,
+        _y: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("peaks_xy not supported by provider"))
+    }
+
     /// Apply an N-D correlation/convolution with padding semantics matching MATLAB's `imfilter`.
     fn imfilter<'a>(
         &'a self,

@@ -10274,6 +10274,181 @@ impl WgpuProvider {
 
         Ok(self.register_existing_buffer(out_buffer, shape_vec, total_len))
     }
+
+    pub(crate) fn peaks_exec(&self, n: usize) -> Result<GpuTensorHandle> {
+        if n > u32::MAX as usize {
+            return Err(anyhow!("peaks: dimension exceeds GPU limits"));
+        }
+        let total_len = n
+            .checked_mul(n)
+            .ok_or_else(|| anyhow!("peaks: tensor size overflows"))?;
+        ensure!(
+            total_len <= u32::MAX as usize,
+            "peaks: tensor length exceeds GPU dispatch limits"
+        );
+        let shape_vec = vec![n, n];
+        let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-peaks-out")?;
+        if total_len == 0 {
+            return Ok(self.register_existing_buffer(out_buffer, shape_vec, 0));
+        }
+
+        let n_u32 = n as u32;
+        let total_u32 = total_len as u32;
+        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        let mut offset = 0usize;
+
+        while offset < total_len {
+            let chunk_len = (total_len - offset).min(chunk_capacity).max(1);
+            let offset_u32 = offset as u32;
+            let chunk_u32 = chunk_len as u32;
+
+            let params_buffer = match self.precision {
+                NumericPrecision::F64 => {
+                    let params = crate::backend::wgpu::params::PeaksParamsF64 {
+                        n: n_u32,
+                        total: total_u32,
+                        chunk: chunk_u32,
+                        offset: offset_u32,
+                    };
+                    self.uniform_buffer(&params, "runmat-peaks-params-f64")
+                }
+                NumericPrecision::F32 => {
+                    let params = crate::backend::wgpu::params::PeaksParamsF32 {
+                        n: n_u32,
+                        total: total_u32,
+                        chunk: chunk_u32,
+                        offset: offset_u32,
+                    };
+                    self.uniform_buffer(&params, "runmat-peaks-params-f32")
+                }
+            };
+
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-peaks-bind"),
+                    layout: &self.pipelines.peaks.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+
+            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                chunk_u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::creation::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &self.pipelines.peaks.pipeline,
+                &bind_group,
+                workgroups,
+                "runmat-peaks-encoder",
+                "runmat-peaks-pass",
+            );
+
+            offset += chunk_len;
+        }
+
+        Ok(self.register_existing_buffer(out_buffer, shape_vec, total_len))
+    }
+
+    pub(crate) fn peaks_xy_exec(
+        &self,
+        x: &GpuTensorHandle,
+        y: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
+        ensure!(
+            x.shape == y.shape,
+            "peaks: X and Y must have the same shape"
+        );
+        let total_len =
+            product_checked(&x.shape).ok_or_else(|| anyhow!("peaks: tensor size overflows"))?;
+        ensure!(
+            total_len <= u32::MAX as usize,
+            "peaks: tensor length exceeds GPU dispatch limits"
+        );
+        let shape_vec = x.shape.clone();
+        let out_buffer = self.create_storage_buffer_checked(total_len, "runmat-peaks-xy-out")?;
+        if total_len == 0 {
+            return Ok(self.register_existing_buffer(out_buffer, shape_vec, 0));
+        }
+
+        let x_entry = self.get_entry(x)?;
+        let y_entry = self.get_entry(y)?;
+        let total_u32 = total_len as u32;
+        let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
+            * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
+        let mut offset = 0usize;
+
+        while offset < total_len {
+            let chunk_len = (total_len - offset).min(chunk_capacity).max(1);
+            let offset_u32 = offset as u32;
+            let chunk_u32 = chunk_len as u32;
+
+            let params_buffer = {
+                let params = crate::backend::wgpu::params::PeaksXYParams {
+                    total: total_u32,
+                    chunk: chunk_u32,
+                    offset: offset_u32,
+                    _pad: 0,
+                };
+                self.uniform_buffer(&params, "runmat-peaks-xy-params")
+            };
+
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-peaks-xy-bind"),
+                    layout: &self.pipelines.peaks_xy.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: x_entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: y_entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
+
+            let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+                chunk_u32,
+                crate::backend::wgpu::config::WORKGROUP_SIZE,
+            );
+            crate::backend::wgpu::dispatch::creation::run(
+                self.device_ref(),
+                self.queue_ref(),
+                &self.pipelines.peaks_xy.pipeline,
+                &bind_group,
+                workgroups,
+                "runmat-peaks-xy-encoder",
+                "runmat-peaks-xy-pass",
+            );
+
+            offset += chunk_len;
+        }
+
+        Ok(self.register_existing_buffer(out_buffer, shape_vec, total_len))
+    }
+
     pub(crate) fn random_integer_range_exec(
         &self,
         lower: i64,
@@ -13424,6 +13599,14 @@ impl AccelProvider for WgpuProvider {
 
     fn fspecial(&self, request: &FspecialRequest) -> Result<GpuTensorHandle> {
         self.fspecial_exec(request)
+    }
+
+    fn peaks(&self, n: usize) -> Result<GpuTensorHandle> {
+        self.peaks_exec(n)
+    }
+
+    fn peaks_xy(&self, x: &GpuTensorHandle, y: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+        self.peaks_xy_exec(x, y)
     }
 
     fn imfilter<'a>(

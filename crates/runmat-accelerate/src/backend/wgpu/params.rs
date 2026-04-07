@@ -631,6 +631,33 @@ pub struct LinspaceParamsF32 {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
+pub struct PeaksParamsF64 {
+    pub n: u32,
+    pub total: u32,
+    pub chunk: u32,
+    pub offset: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct PeaksParamsF32 {
+    pub n: u32,
+    pub total: u32,
+    pub chunk: u32,
+    pub offset: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct PeaksXYParams {
+    pub total: u32,
+    pub chunk: u32,
+    pub offset: u32,
+    pub _pad: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
 pub struct RandomIntParamsF64 {
     pub lower: f64,
     pub upper: f64,

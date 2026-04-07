@@ -85,6 +85,10 @@ const RANDPERM_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::RANDP
 const RANDPERM_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::RANDPERM_SHADER_F32;
 const FSPECIAL_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::FSPECIAL_SHADER_F64;
 const FSPECIAL_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::FSPECIAL_SHADER_F32;
+const PEAKS_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::PEAKS_SHADER_F64;
+const PEAKS_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::PEAKS_SHADER_F32;
+const PEAKS_XY_SHADER_F64: &str = crate::backend::wgpu::shaders::creation::PEAKS_XY_SHADER_F64;
+const PEAKS_XY_SHADER_F32: &str = crate::backend::wgpu::shaders::creation::PEAKS_XY_SHADER_F32;
 const POLYVAL_SHADER_F64: &str = crate::backend::wgpu::shaders::polyval::POLYVAL_SHADER_F64;
 const POLYVAL_SHADER_F32: &str = crate::backend::wgpu::shaders::polyval::POLYVAL_SHADER_F32;
 const POLYDER_SHADER_F64: &str = crate::backend::wgpu::shaders::polyder::POLYDER_SHADER_F64;
@@ -199,6 +203,8 @@ pub struct WgpuPipelines {
     pub stochastic_evolution: PipelineBundle,
     pub randperm: PipelineBundle,
     pub fspecial: PipelineBundle,
+    pub peaks: PipelineBundle,
+    pub peaks_xy: PipelineBundle,
     pub imfilter: PipelineBundle,
     pub image_normalize: PipelineBundle,
     pub polyval: PipelineBundle,
@@ -834,6 +840,35 @@ impl WgpuPipelines {
             },
         );
 
+        let peaks = create_pipeline(
+            device,
+            "runmat-peaks-layout",
+            "runmat-peaks-shader",
+            "runmat-peaks-pipeline",
+            vec![storage_read_write_entry(0), uniform_entry(1)],
+            match precision {
+                NumericPrecision::F64 => PEAKS_SHADER_F64,
+                NumericPrecision::F32 => PEAKS_SHADER_F32,
+            },
+        );
+
+        let peaks_xy = create_pipeline(
+            device,
+            "runmat-peaks-xy-layout",
+            "runmat-peaks-xy-shader",
+            "runmat-peaks-xy-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => PEAKS_XY_SHADER_F64,
+                NumericPrecision::F32 => PEAKS_XY_SHADER_F32,
+            },
+        );
+
         let imfilter = create_pipeline(
             device,
             "runmat-imfilter-layout",
@@ -1133,6 +1168,8 @@ impl WgpuPipelines {
             stochastic_evolution,
             randperm,
             fspecial,
+            peaks,
+            peaks_xy,
             imfilter,
             image_normalize,
             polyval,
