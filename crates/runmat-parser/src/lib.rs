@@ -53,6 +53,7 @@ pub enum Expr {
     Member(Box<Expr>, String, Span),
     // Dynamic field: s.(expr)
     MemberDynamic(Box<Expr>, Box<Expr>, Span),
+    DottedInvoke(Box<Expr>, String, Vec<Expr>, Span),
     MethodCall(Box<Expr>, String, Vec<Expr>, Span),
     AnonFunc {
         params: Vec<String>,
@@ -81,6 +82,7 @@ impl Expr {
             | Expr::FuncCall(_, _, span)
             | Expr::Member(_, _, span)
             | Expr::MemberDynamic(_, _, span)
+            | Expr::DottedInvoke(_, _, _, span)
             | Expr::MethodCall(_, _, _, span)
             | Expr::FuncHandle(_, span)
             | Expr::MetaClass(_, span) => *span,
@@ -105,6 +107,7 @@ impl Expr {
             Expr::FuncCall(name, args, _) => Expr::FuncCall(name, args, span),
             Expr::Member(base, name, _) => Expr::Member(base, name, span),
             Expr::MemberDynamic(base, name, _) => Expr::MemberDynamic(base, name, span),
+            Expr::DottedInvoke(base, name, args, _) => Expr::DottedInvoke(base, name, args, span),
             Expr::MethodCall(base, name, args, _) => Expr::MethodCall(base, name, args, span),
             Expr::AnonFunc { params, body, .. } => Expr::AnonFunc { params, body, span },
             Expr::FuncHandle(name, _) => Expr::FuncHandle(name, span),
@@ -1275,7 +1278,11 @@ impl Parser {
                     }
                     let end = self.last_token_end();
                     let span = self.span_from(expr.span().start, end);
-                    expr = Expr::MethodCall(Box::new(expr), name_token.0, args, span);
+                    if matches!(expr, Expr::MetaClass(_, _)) {
+                        expr = Expr::MethodCall(Box::new(expr), name_token.0, args, span);
+                    } else {
+                        expr = Expr::DottedInvoke(Box::new(expr), name_token.0, args, span);
+                    }
                 } else {
                     let span = self.span_from(expr.span().start, name_token.2);
                     expr = Expr::Member(Box::new(expr), name_token.0, span);

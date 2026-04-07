@@ -230,6 +230,112 @@ fn member_get_set_and_method_call_skeleton() {
 }
 
 #[test]
+fn implicit_struct_creation_for_root_variable_assignment() {
+    let input = "s.x = 10; s.y = 20; v = getfield(s, 'x') + getfield(s, 'y');";
+    let hir = lower(&parse(input).unwrap()).unwrap();
+    let vars = execute(&hir).expect("implicit struct creation should succeed");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 30.0).abs() < 1e-9)));
+}
+
+#[test]
+fn implicit_struct_creation_for_function_output_variable() {
+    let input = r#"
+        function r = make_result()
+            r.x = 10;
+            r.y = 20;
+        end
+        s = make_result();
+        x = getfield(s, 'x');
+        y = getfield(s, 'y');
+    "#;
+    let hir = lower(&parse(input).unwrap()).unwrap();
+    let vars = execute(&hir).expect("function output struct materialization should succeed");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
+}
+
+#[test]
+fn nested_member_assignment_materializes_missing_intermediate_structs() {
+    let input = "s = struct(); s.a.b = 1; v = getfield(getfield(s, 'a'), 'b');";
+    let hir = lower(&parse(input).unwrap()).unwrap();
+    let vars = execute(&hir).expect("nested member assignment should succeed");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs() < 1e-9)));
+}
+
+#[test]
+fn struct_field_indexing_read_path_uses_member_then_index_semantics() {
+    let input =
+        "s = struct(); s.arr = [10 20 30]; x = s.arr(2); y = s.arr(1:2); y1 = y(1); y2 = y(2);";
+    let hir = lower(&parse(input).unwrap()).unwrap();
+    let vars = execute(&hir).expect("struct field indexing reads should succeed");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
+}
+
+#[test]
+fn dotted_invoke_preserves_object_method_dispatch() {
+    let input = "obj = new_object('Point'); obj = setfield(obj,'x',5); obj = setfield(obj,'y',7); obj = obj.move(1,2); rx = getfield(obj,'x'); ry = getfield(obj,'y');";
+    let hir = lower(&parse(input).unwrap()).unwrap();
+    let vars = execute(&hir).expect("object method dispatch should succeed");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 6.0).abs() < 1e-9)));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
+}
+
+#[test]
+fn dotted_invoke_runtime_struct_dispatch_when_base_type_unknown() {
+    let input = r#"
+        function y = pick(s)
+            y = s.arr(2);
+        end
+        s = struct();
+        s.arr = [10 20 30];
+        z = pick(s);
+    "#;
+    let hir = lower(&parse(input).unwrap()).unwrap();
+    let vars = execute(&hir).expect("runtime dotted invoke struct dispatch should succeed");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
+}
+
+#[test]
+fn nested_dynamic_member_assignment_materializes_and_writes_back() {
+    let input =
+        "s = struct(); f1 = 'a'; f2 = 'b'; s.(f1).(f2) = 3; v = getfield(getfield(s, 'a'), 'b');";
+    let hir = lower(&parse(input).unwrap()).unwrap();
+    let vars = execute(&hir).expect("nested dynamic member assignment should succeed");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
+}
+
+#[test]
+fn mixed_member_cell_and_index_read_chain() {
+    let input = "s = struct(); s.arr = {[10 20], [30 40]}; v = s.arr{2}(1);";
+    let hir = lower(&parse(input).unwrap()).unwrap();
+    let vars = execute(&hir).expect("mixed member/cell/index chain should succeed");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 30.0).abs() < 1e-9)));
+}
+
+#[test]
 fn function_handle_anon_round_trip() {
     let input = "h = make_handle('sin'); g = make_anon('x', 'x+1');";
     let ast = parse(input).unwrap();

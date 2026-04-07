@@ -1938,7 +1938,9 @@ async fn run_interpreter_inner(
                                 | Instr::StoreSlice1DRangeEnd { .. }
                                 | Instr::StoreIndexCell(_)
                                 | Instr::StoreMember(_)
+                                | Instr::StoreMemberOrInit(_)
                                 | Instr::StoreMemberDynamic
+                                | Instr::StoreMemberDynamicOrInit
                         ) {
                             has_barrier = true;
                             break;
@@ -9891,7 +9893,8 @@ async fn run_interpreter_inner(
                     }
                 }
             }
-            Instr::LoadMember(field) => {
+            Instr::LoadMember(field) | Instr::LoadMemberOrInit(field) => {
+                let allow_init = matches!(bytecode.instructions[pc], Instr::LoadMemberOrInit(_));
                 let base = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
@@ -9974,6 +9977,8 @@ async fn run_interpreter_inner(
                     Value::Struct(st) => {
                         if let Some(v) = st.fields.get(&field) {
                             stack.push(v.clone());
+                        } else if allow_init {
+                            stack.push(Value::Struct(runmat_builtins::StructValue::new()));
                         } else {
                             vm_bail!(format!("Undefined field '{}'", field));
                         }
@@ -10020,7 +10025,9 @@ async fn run_interpreter_inner(
                     _ => vm_bail!("LoadMember on non-object".to_string()),
                 }
             }
-            Instr::LoadMemberDynamic => {
+            Instr::LoadMemberDynamic | Instr::LoadMemberDynamicOrInit => {
+                let allow_init =
+                    matches!(bytecode.instructions[pc], Instr::LoadMemberDynamicOrInit);
                 let name_val = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
@@ -10086,6 +10093,8 @@ async fn run_interpreter_inner(
                     Value::Struct(st) => {
                         if let Some(v) = st.fields.get(&name) {
                             stack.push(v.clone());
+                        } else if allow_init {
+                            stack.push(Value::Struct(runmat_builtins::StructValue::new()));
                         } else {
                             vm_bail!(format!("Undefined field '{}'", name));
                         }
@@ -10111,7 +10120,8 @@ async fn run_interpreter_inner(
                     _ => vm_bail!("LoadMemberDynamic on non-struct/object".to_string()),
                 }
             }
-            Instr::StoreMember(field) => {
+            Instr::StoreMember(field) | Instr::StoreMemberOrInit(field) => {
+                let allow_init = matches!(bytecode.instructions[pc], Instr::StoreMemberOrInit(_));
                 let rhs = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
@@ -10253,10 +10263,17 @@ async fn run_interpreter_inner(
                         }
                         stack.push(Value::Cell(ca));
                     }
+                    Value::Num(0.0) if allow_init => {
+                        let mut st = runmat_builtins::StructValue::new();
+                        st.fields.insert(field, rhs);
+                        stack.push(Value::Struct(st));
+                    }
                     _ => vm_bail!("StoreMember on non-object".to_string()),
                 }
             }
-            Instr::StoreMemberDynamic => {
+            Instr::StoreMemberDynamic | Instr::StoreMemberDynamicOrInit => {
+                let allow_init =
+                    matches!(bytecode.instructions[pc], Instr::StoreMemberDynamicOrInit);
                 let rhs = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
@@ -10347,6 +10364,11 @@ async fn run_interpreter_inner(
                         }
                         stack.push(Value::Cell(ca));
                     }
+                    Value::Num(0.0) if allow_init => {
+                        let mut st = runmat_builtins::StructValue::new();
+                        st.fields.insert(name, rhs);
+                        stack.push(Value::Struct(st));
+                    }
                     _ => vm_bail!("StoreMemberDynamic on non-struct/object".to_string()),
                 }
             }
@@ -10404,6 +10426,108 @@ async fn run_interpreter_inner(
                         }
                     }
                     _ => vm_bail!("CallMethod on non-object".to_string()),
+                }
+            }
+            Instr::CallMethodOrMemberIndex(name, arg_count) => {
+                let mut args = Vec::with_capacity(arg_count);
+                for _ in 0..arg_count {
+                    args.push(
+                        stack
+                            .pop()
+                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
+                    );
+                }
+                args.reverse();
+                let base = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+
+                match base {
+                    Value::Object(obj) => {
+                        if let Some((m, _owner)) =
+                            runmat_builtins::lookup_method(&obj.class_name, &name)
+                        {
+                            if m.is_static {
+                                vm_bail!(format!(
+                                    "Method '{}' is static; use classref({}).{}",
+                                    name, obj.class_name, name
+                                ));
+                            }
+                            if m.access == runmat_builtins::Access::Private {
+                                vm_bail!(format!("Method '{}' is private", name))
+                            }
+                            let mut full_args = Vec::with_capacity(1 + args.len());
+                            full_args.push(Value::Object(obj));
+                            full_args.extend(args.into_iter());
+                            let v = call_builtin_vm!(&m.function_name, &full_args)?;
+                            stack.push(v);
+                            continue;
+                        }
+
+                        let mut method_args = Vec::with_capacity(1 + args.len());
+                        method_args.push(Value::Object(obj.clone()));
+                        method_args.extend(args.iter().cloned());
+
+                        let qualified = format!("{}.{}", obj.class_name, name);
+                        if let Ok(v) = call_builtin_vm!(&qualified, &method_args) {
+                            stack.push(v);
+                            continue;
+                        }
+                        if let Ok(v) = call_builtin_vm!(&name, &method_args) {
+                            stack.push(v);
+                            continue;
+                        }
+
+                        let mut getfield_args = Vec::with_capacity(3);
+                        getfield_args.push(Value::Object(obj));
+                        getfield_args.push(Value::String(name));
+                        if !args.is_empty() {
+                            let idx_cell = runmat_builtins::CellArray::new(args, 1, arg_count)
+                                .map_err(|e| format!("getfield idx build: {e}"))?;
+                            getfield_args.push(Value::Cell(idx_cell));
+                        }
+                        match call_builtin_vm!("getfield", &getfield_args) {
+                            Ok(v) => stack.push(v),
+                            Err(e) => vm_bail!(e.to_string()),
+                        }
+                    }
+                    Value::HandleObject(handle) => {
+                        let mut method_args = Vec::with_capacity(2 + args.len());
+                        method_args.push(Value::HandleObject(handle.clone()));
+                        method_args.push(Value::String(name.clone()));
+                        method_args.extend(args.iter().cloned());
+                        if let Ok(v) = call_builtin_vm!("call_method", &method_args) {
+                            stack.push(v);
+                            continue;
+                        }
+
+                        let mut getfield_args = Vec::with_capacity(3);
+                        getfield_args.push(Value::HandleObject(handle));
+                        getfield_args.push(Value::String(name));
+                        if !args.is_empty() {
+                            let idx_cell = runmat_builtins::CellArray::new(args, 1, arg_count)
+                                .map_err(|e| format!("getfield idx build: {e}"))?;
+                            getfield_args.push(Value::Cell(idx_cell));
+                        }
+                        match call_builtin_vm!("getfield", &getfield_args) {
+                            Ok(v) => stack.push(v),
+                            Err(e) => vm_bail!(e.to_string()),
+                        }
+                    }
+                    other => {
+                        let mut getfield_args = Vec::with_capacity(3);
+                        getfield_args.push(other);
+                        getfield_args.push(Value::String(name));
+                        if !args.is_empty() {
+                            let idx_cell = runmat_builtins::CellArray::new(args, 1, arg_count)
+                                .map_err(|e| format!("getfield idx build: {e}"))?;
+                            getfield_args.push(Value::Cell(idx_cell));
+                        }
+                        match call_builtin_vm!("getfield", &getfield_args) {
+                            Ok(v) => stack.push(v),
+                            Err(e) => vm_bail!(e.to_string()),
+                        }
+                    }
                 }
             }
             Instr::LoadMethod(name) => {

@@ -112,11 +112,16 @@ pub enum Instr {
     },
     // Object/Class member/method operations
     LoadMember(String),        // base on stack -> member value
-    LoadMemberDynamic,         // base, name on stack -> member value (structs and objects)
-    StoreMember(String),       // base, rhs on stack -> updated base
-    StoreMemberDynamic,        // base, name, rhs on stack -> updated base
-    LoadMethod(String),        // base on stack -> method handle
+    LoadMemberOrInit(String), // base on stack -> member value (missing struct field => empty struct)
+    LoadMemberDynamic,        // base, name on stack -> member value (structs and objects)
+    LoadMemberDynamicOrInit, // base, name on stack -> member value (missing struct field => empty struct)
+    StoreMember(String),     // base, rhs on stack -> updated base
+    StoreMemberOrInit(String), // base, rhs on stack -> updated base (numeric zero base => struct)
+    StoreMemberDynamic,      // base, name, rhs on stack -> updated base
+    StoreMemberDynamicOrInit, // base, name, rhs on stack -> updated base (numeric zero base => struct)
+    LoadMethod(String),       // base on stack -> method handle
     CallMethod(String, usize), // base on stack along with args
+    CallMethodOrMemberIndex(String, usize),
     // Closures and handle invocation
     CreateClosure(String, usize), // function name and capture count; captures expected on stack
     // Static class access
@@ -237,10 +242,13 @@ impl Instr {
             | Instr::Transpose
             | Instr::ConjugateTranspose
             | Instr::LoadMember(_)
+            | Instr::LoadMemberOrInit(_)
             | Instr::LoadMethod(_) => effect(1, 1),
             Instr::CallBuiltin(_, argc) | Instr::CallFunction(_, argc) => effect(*argc, 1),
             Instr::CallFunctionMulti(_, argc, out_count) => effect(*argc, *out_count),
-            Instr::CallMethod(_, argc) => effect(argc + 1, 1),
+            Instr::CallMethod(_, argc) | Instr::CallMethodOrMemberIndex(_, argc) => {
+                effect(argc + 1, 1)
+            }
             Instr::CallStaticMethod(_, _, argc) => effect(*argc, 1),
             Instr::CallFeval(argc) => effect(argc + 1, 1),
             Instr::StochasticEvolution => effect(4, 1),
@@ -283,9 +291,11 @@ impl Instr {
                     .sum::<usize>();
                 effect(2 + numeric_count + range_pops, 1)
             }
-            Instr::LoadMemberDynamic => effect(2, 1),
+            Instr::LoadMemberDynamic | Instr::LoadMemberDynamicOrInit => effect(2, 1),
             Instr::StoreMember(_) => effect(2, 1),
+            Instr::StoreMemberOrInit(_) => effect(2, 1),
             Instr::StoreMemberDynamic => effect(3, 1),
+            Instr::StoreMemberDynamicOrInit => effect(3, 1),
             Instr::CreateClosure(_, capture_count) => effect(*capture_count, 1),
             Instr::CallBuiltinExpandLast(_, fixed_argc, num_indices) => {
                 effect(fixed_argc + num_indices + 1, 1)

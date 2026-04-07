@@ -344,6 +344,58 @@ impl Compiler {
             _ => false,
         }
     }
+
+    fn allow_implicit_struct_materialization(ty: &Type) -> bool {
+        matches!(ty, Type::Unknown | Type::Struct { .. })
+    }
+
+    fn emit_store_back_member_chain(
+        &mut self,
+        base: &runmat_hir::HirExpr,
+    ) -> Result<(), CompileError> {
+        match &base.kind {
+            runmat_hir::HirExprKind::Var(var_id) => {
+                self.emit(Instr::StoreVar(var_id.0));
+                Ok(())
+            }
+            runmat_hir::HirExprKind::Member(parent, field) => {
+                self.compile_member_base_for_assignment(parent)?;
+                self.emit(Instr::Swap);
+                self.emit(Instr::StoreMemberOrInit(field.clone()));
+                self.emit_store_back_member_chain(parent)
+            }
+            runmat_hir::HirExprKind::MemberDynamic(parent, name_expr) => {
+                let tmp = self.alloc_temp();
+                self.emit(Instr::StoreVar(tmp));
+                self.compile_member_base_for_assignment(parent)?;
+                self.compile_expr(name_expr)?;
+                self.emit(Instr::LoadVar(tmp));
+                self.emit(Instr::StoreMemberDynamicOrInit);
+                self.emit_store_back_member_chain(parent)
+            }
+            _ => Ok(()),
+        }
+    }
+
+    fn compile_member_base_for_assignment(
+        &mut self,
+        base: &runmat_hir::HirExpr,
+    ) -> Result<(), CompileError> {
+        match &base.kind {
+            runmat_hir::HirExprKind::Member(parent, field) => {
+                self.compile_member_base_for_assignment(parent)?;
+                self.emit(Instr::LoadMemberOrInit(field.clone()));
+                Ok(())
+            }
+            runmat_hir::HirExprKind::MemberDynamic(parent, name_expr) => {
+                self.compile_member_base_for_assignment(parent)?;
+                self.compile_expr(name_expr)?;
+                self.emit(Instr::LoadMemberDynamicOrInit);
+                Ok(())
+            }
+            _ => self.compile_expr(base),
+        }
+    }
     #[allow(clippy::only_used_in_recursion)]
     fn collect_free_vars(
         &self,
@@ -385,7 +437,13 @@ impl Compiler {
                 }
                 self.collect_free_vars(e, bound, seen, out);
             }
-            K::FuncCall(_, args) | K::MethodCall(_, _, args) => {
+            K::FuncCall(_, args) => {
+                for a in args {
+                    self.collect_free_vars(a, bound, seen, out);
+                }
+            }
+            K::MethodCall(base, _, args) | K::DottedInvoke(base, _, args) => {
+                self.collect_free_vars(base, bound, seen, out);
                 for a in args {
                     self.collect_free_vars(a, bound, seen, out);
                 }
@@ -439,7 +497,14 @@ impl Compiler {
                     }
                     visit_expr(end, max);
                 }
-                HirExprKind::FuncCall(_, args) | HirExprKind::MethodCall(_, _, args) => {
+                HirExprKind::FuncCall(_, args) => {
+                    for arg in args {
+                        visit_expr(arg, max);
+                    }
+                }
+                HirExprKind::MethodCall(base, _, args)
+                | HirExprKind::DottedInvoke(base, _, args) => {
+                    visit_expr(base, max);
                     for arg in args {
                         visit_expr(arg, max);
                     }
@@ -1467,8 +1532,8 @@ impl Compiler {
                         {
                             // Chain: base is a member access. Evaluate object, load member, update via index, then write member back.
                             // Evaluate object and get member value
-                            self.compile_expr(member_base)?;
-                            self.emit(Instr::LoadMember(field.clone()));
+                            self.compile_member_base_for_assignment(member_base)?;
+                            self.emit(Instr::LoadMemberOrInit(field.clone()));
                             // Decide slice vs numeric
                             let has_colon = indices
                                 .iter()
@@ -1524,14 +1589,11 @@ impl Compiler {
                                 self.compile_expr(rhs)?;
                                 self.emit(Instr::StoreIndex(indices.len()));
                             }
-                            // Now updated member is on stack. Re-evaluate object, swap, and StoreMember
-                            self.compile_expr(member_base)?;
+                            // Now updated member is on stack. Re-evaluate object chain and write back.
+                            self.compile_member_base_for_assignment(member_base)?;
                             self.emit(Instr::Swap);
-                            self.emit(Instr::StoreMember(field.clone()));
-                            // If object is a variable, also store back to var
-                            if let runmat_hir::HirExprKind::Var(root_var) = member_base.kind {
-                                self.emit(Instr::StoreVar(root_var.0));
-                            }
+                            self.emit(Instr::StoreMemberOrInit(field.clone()));
+                            self.emit_store_back_member_chain(member_base)?;
                         } else {
                             return Err(self.compile_error(
                                 "unsupported lvalue target (index on non-variable/non-member)",
@@ -1551,20 +1613,18 @@ impl Compiler {
                             &base.kind
                         {
                             // Load object, load member, perform cell index store, then write member back to object
-                            self.compile_expr(member_base)?;
-                            self.emit(Instr::LoadMember(field.clone()));
+                            self.compile_member_base_for_assignment(member_base)?;
+                            self.emit(Instr::LoadMemberOrInit(field.clone()));
                             for index in indices {
                                 self.compile_expr(index)?;
                             }
                             self.compile_expr(rhs)?;
                             self.emit(Instr::StoreIndexCell(indices.len()));
-                            // Updated member on stack; re-evaluate object, swap, store member
-                            self.compile_expr(member_base)?;
+                            // Updated member on stack; re-evaluate object chain and write back
+                            self.compile_member_base_for_assignment(member_base)?;
                             self.emit(Instr::Swap);
-                            self.emit(Instr::StoreMember(field.clone()));
-                            if let runmat_hir::HirExprKind::Var(root_var) = member_base.kind {
-                                self.emit(Instr::StoreVar(root_var.0));
-                            }
+                            self.emit(Instr::StoreMemberOrInit(field.clone()));
+                            self.emit_store_back_member_chain(member_base)?;
                         } else {
                             // Fallback: evaluate base, indices, rhs, and store (for object chains via subsasgn)
                             self.compile_expr(base)?;
@@ -1576,32 +1636,25 @@ impl Compiler {
                         }
                     }
                     runmat_hir::HirLValue::Member(base, field) => {
-                        // Member assignment. If base is a variable, ensure we store updated object back.
-                        if let runmat_hir::HirExprKind::Var(var_id) = base.kind.clone() {
-                            self.emit(Instr::LoadVar(var_id.0));
-                            self.compile_expr(rhs)?;
-                            self.emit(Instr::StoreMember(field.clone()));
-                            self.emit(Instr::StoreVar(var_id.0));
+                        self.compile_member_base_for_assignment(base)?;
+                        self.compile_expr(rhs)?;
+                        if Self::allow_implicit_struct_materialization(&base.ty) {
+                            self.emit(Instr::StoreMemberOrInit(field.clone()));
                         } else {
-                            // Complex base: evaluate to a value, then store member; updated object remains on stack
-                            self.compile_expr(base)?;
-                            self.compile_expr(rhs)?;
                             self.emit(Instr::StoreMember(field.clone()));
                         }
+                        self.emit_store_back_member_chain(base)?;
                     }
                     runmat_hir::HirLValue::MemberDynamic(base, name_expr) => {
-                        if let runmat_hir::HirExprKind::Var(var_id) = base.kind.clone() {
-                            self.emit(Instr::LoadVar(var_id.0));
-                            self.compile_expr(name_expr)?;
-                            self.compile_expr(rhs)?;
-                            self.emit(Instr::StoreMemberDynamic);
-                            self.emit(Instr::StoreVar(var_id.0));
+                        self.compile_member_base_for_assignment(base)?;
+                        self.compile_expr(name_expr)?;
+                        self.compile_expr(rhs)?;
+                        if Self::allow_implicit_struct_materialization(&base.ty) {
+                            self.emit(Instr::StoreMemberDynamicOrInit);
                         } else {
-                            self.compile_expr(base)?;
-                            self.compile_expr(name_expr)?;
-                            self.compile_expr(rhs)?;
                             self.emit(Instr::StoreMemberDynamic);
                         }
+                        self.emit_store_back_member_chain(base)?;
                     }
                     _ => return Err(self.compile_error("unsupported lvalue target")),
                 }
@@ -2675,6 +2728,13 @@ impl Compiler {
                 self.compile_expr(base)?;
                 self.compile_expr(name_expr)?;
                 self.emit(Instr::LoadMemberDynamic);
+            }
+            HirExprKind::DottedInvoke(base, member, args) => {
+                self.compile_expr(base)?;
+                for arg in args {
+                    self.compile_expr(arg)?;
+                }
+                self.emit(Instr::CallMethodOrMemberIndex(member.clone(), args.len()));
             }
             // Dynamic member s.(expr)
             HirExprKind::MethodCall(b, m, a) if m == &"()".to_string() && a.len() == 1 => {

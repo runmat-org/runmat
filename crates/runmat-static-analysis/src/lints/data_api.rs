@@ -222,7 +222,8 @@ fn analyze_data_expr(
     diags: &mut Vec<HirDiagnostic>,
 ) {
     match &expr.kind {
-        HirExprKind::MethodCall(base, method, args) => {
+        HirExprKind::MethodCall(base, method, args)
+        | HirExprKind::DottedInvoke(base, method, args) => {
             if method == "array" {
                 if let HirExprKind::Var(ds_var) = base.kind {
                     if let Some(dataset) = datasets.get(&ds_var) {
@@ -550,7 +551,8 @@ fn walk_expr_general(
                 walk_expr_general(arg, diags, non_tx_write_count, tx_vars);
             }
         }
-        HirExprKind::MethodCall(base, method, args) => {
+        HirExprKind::MethodCall(base, method, args)
+        | HirExprKind::DottedInvoke(base, method, args) => {
             if method == "write" {
                 let in_tx =
                     matches!(base.kind, HirExprKind::Var(var_id) if tx_vars.contains(&var_id));
