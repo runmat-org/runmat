@@ -52,7 +52,7 @@ export type WebsiteEventProperties = {
   [key: string]: unknown;
 };
 
-export const trackWebsiteEvent = async (event: string, properties: WebsiteEventProperties = {}) => {
+export const trackWebsiteEvent = (event: string, properties: WebsiteEventProperties = {}) => {
   const canonicalEvent = toCanonicalWebsiteEvent(event);
   const payload = {
     ...properties,
@@ -63,12 +63,9 @@ export const trackWebsiteEvent = async (event: string, properties: WebsiteEventP
     window.gtag('event', canonicalEvent, payload);
   }
   if (typeof window !== 'undefined') {
-    try {
-      const { default: posthog } = await import('posthog-js');
+    import('posthog-js').then(({ default: posthog }) => {
       posthog.capture(canonicalEvent, payload);
-    } catch {
-      // PostHog unavailable — analytics event lost, not user-facing
-    }
+    }).catch(() => {});
   }
 };
 
