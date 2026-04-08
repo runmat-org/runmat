@@ -501,3 +501,43 @@ fn fft_end_arithmetic_supports_variable_offsets() {
         "expected true/equivalent marker in vars, got {vars:?}"
     );
 }
+
+#[test]
+fn end_expression_supports_builtin_calls_in_index_context() {
+    let input = r#"
+        x = [10 20 30 40 50 60 70 80];
+        a = x(abs(end-3));
+        b = x(max(end-6, 2));
+        ok = (a == 50) && (b == 20);
+    "#;
+    let ast = parse(input).expect("parse builtin-in-end-expression script");
+    let hir = lower(&ast).expect("lower builtin-in-end-expression script");
+    let vars = execute(&hir).expect("builtin-in-end-expression should execute");
+    assert!(
+        vars.iter().any(|v| {
+            matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
+        }),
+        "expected true/equivalent marker in vars, got {vars:?}"
+    );
+}
+
+#[test]
+fn end_expression_supports_user_function_calls_in_index_context() {
+    let input = r#"
+        function y = pick(n)
+            y = n;
+        end
+        x = [10 20 30 40 50 60 70 80];
+        a = x(pick(end-3));
+        ok = (a == 50);
+    "#;
+    let ast = parse(input).expect("parse userfunc-in-end-expression script");
+    let hir = lower(&ast).expect("lower userfunc-in-end-expression script");
+    let vars = execute(&hir).expect("userfunc-in-end-expression should execute");
+    assert!(
+        vars.iter().any(|v| {
+            matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
+        }),
+        "expected true/equivalent marker in vars, got {vars:?}"
+    );
+}
