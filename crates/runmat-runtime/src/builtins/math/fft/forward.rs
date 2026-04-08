@@ -1,8 +1,8 @@
 //! MATLAB-compatible `fft` builtin with GPU-aware semantics for RunMat.
 
 use super::common::{
-    default_dimension, download_provider_complex_tensor, gather_gpu_complex_tensor, parse_length,
-    transform_complex_tensor, TransformDirection, value_to_complex_tensor,
+    default_dimension, gather_gpu_complex_tensor, parse_length, transform_complex_tensor,
+    TransformDirection, value_to_complex_tensor,
 };
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, Value};
@@ -103,8 +103,7 @@ async fn fft_gpu(
 
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(out) = provider.fft_dim(&handle, length, dim_index).await {
-            let complex = download_provider_complex_tensor(provider, &out, BUILTIN_NAME, true).await?;
-            return Ok(complex_tensor_into_value(complex));
+            return Ok(Value::GpuTensor(out));
         }
     }
 
@@ -148,7 +147,10 @@ pub(super) fn fft_complex_tensor(
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use crate::builtins::math::fft::common;
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use num_complex::Complex;
@@ -169,6 +171,13 @@ pub(crate) mod tests {
         match value {
             Value::ComplexTensor(tensor) => tensor,
             Value::Complex(re, im) => HostComplexTensor::new(vec![(re, im)], vec![1, 1]).unwrap(),
+            Value::GpuTensor(handle) => {
+                let provider = runmat_accelerate_api::provider_for_handle(&handle)
+                    .or_else(runmat_accelerate_api::provider)
+                    .expect("provider for gpu handle");
+                let host = block_on(provider.download(&handle)).expect("download gpu fft output");
+                common::host_to_complex_tensor(host, BUILTIN_NAME).expect("decode gpu complex")
+            }
             other => panic!("expected complex tensor, got {other:?}"),
         }
     }
@@ -474,6 +483,33 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn fft_gpu_non_power_of_two_length_matches_cpu() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![4]).unwrap();
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &tensor.data,
+                shape: &tensor.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let gpu = fft_builtin_sync(
+                Value::GpuTensor(handle.clone()),
+                vec![Value::Int(IntValue::I32(7))],
+            )
+            .expect("fft gpu");
+            let cpu = fft_builtin_sync(Value::Tensor(tensor), vec![Value::Int(IntValue::I32(7))])
+                .expect("fft cpu");
+            let gpu_host = value_as_complex_tensor(gpu);
+            let cpu_host = value_as_complex_tensor(cpu);
+            assert_eq!(gpu_host.shape, cpu_host.shape);
+            for (a, b) in gpu_host.data.iter().zip(cpu_host.data.iter()) {
+                assert!(approx_eq(*a, *b, 1e-10));
+            }
+            provider.free(&handle).ok();
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     #[cfg(feature = "wgpu")]
     fn fft_wgpu_matches_cpu() {
         if let Some(provider) = runmat_accelerate::backend::wgpu::provider::ensure_wgpu_provider()
@@ -493,7 +529,7 @@ pub(crate) mod tests {
             let cpu_ct = value_as_complex_tensor(cpu);
             assert_eq!(gpu_ct.shape, cpu_ct.shape);
             for (a, b) in gpu_ct.data.iter().zip(cpu_ct.data.iter()) {
-                assert!(approx_eq(*a, *b, 1e-9));
+                assert!(approx_eq(*a, *b, 1e-9), "{a:?} vs {b:?}");
             }
             provider.free(&handle).ok();
         }

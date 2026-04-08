@@ -120,9 +120,17 @@ async fn ifftn_gpu(
         }
 
         if ok {
-            let complex = download_provider_complex_tensor(provider, &current, BUILTIN_NAME, true)
-                .await?;
-            return finalize_ifftn_output(complex, symmetric);
+            if !symmetric {
+                return Ok(Value::GpuTensor(current));
+            }
+            if let Ok(real) = provider.fft_extract_real(&current).await {
+                provider.free(&current).ok();
+                runmat_accelerate_api::clear_residency(&current);
+                return Ok(Value::GpuTensor(real));
+            }
+            let complex =
+                download_provider_complex_tensor(provider, &current, BUILTIN_NAME, true).await?;
+            return finalize_ifftn_output(complex, true);
         }
     }
 

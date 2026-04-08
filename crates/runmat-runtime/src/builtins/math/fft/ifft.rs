@@ -109,9 +109,17 @@ async fn ifft_gpu(
     if let Some(provider) = runmat_accelerate_api::provider() {
         if target_len != 0 {
             if let Ok(out) = provider.ifft_dim(&handle, length, dim_index).await {
-                let complex = download_provider_complex_tensor(provider, &out, BUILTIN_NAME, true)
-                    .await?;
-                return finalize_ifft_output(complex, symmetric);
+                if !symmetric {
+                    return Ok(Value::GpuTensor(out));
+                }
+                if let Ok(real) = provider.fft_extract_real(&out).await {
+                    provider.free(&out).ok();
+                    runmat_accelerate_api::clear_residency(&out);
+                    return Ok(Value::GpuTensor(real));
+                }
+                let complex =
+                    download_provider_complex_tensor(provider, &out, BUILTIN_NAME, true).await?;
+                return finalize_ifft_output(complex, true);
             }
         }
 
@@ -203,7 +211,10 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use crate::builtins::math::fft::common;
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use num_complex::Complex;
@@ -223,6 +234,13 @@ pub(crate) mod tests {
     fn value_as_complex_tensor(value: Value) -> HostComplexTensor {
         match value {
             Value::ComplexTensor(t) => t,
+            Value::GpuTensor(handle) => {
+                let provider = runmat_accelerate_api::provider_for_handle(&handle)
+                    .or_else(runmat_accelerate_api::provider)
+                    .expect("provider for gpu handle");
+                let host = block_on(provider.download(&handle)).expect("download gpu ifft output");
+                common::host_to_complex_tensor(host, BUILTIN_NAME).expect("decode gpu complex")
+            }
             Value::Tensor(t) => {
                 HostComplexTensor::new(t.data.into_iter().map(|re| (re, 0.0)).collect(), t.shape)
                     .unwrap()
@@ -503,6 +521,37 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn ifft_gpu_symmetric_returns_resident_real_tensor() {
+        test_support::with_test_provider(|provider| {
+            let spectrum = vec![10.0, 0.0, -2.0, 2.0, -2.0, 0.0, -2.0, -2.0];
+            let shape = vec![4, 2];
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &spectrum,
+                shape: &shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let gpu = ifft_builtin(
+                Value::GpuTensor(handle.clone()),
+                vec![Value::from("symmetric")],
+            )
+            .expect("ifft symmetric");
+            match gpu {
+                Value::GpuTensor(_) | Value::Tensor(_) => {
+                    let gathered = test_support::gather(gpu).expect("gather symmetric real");
+                    assert_eq!(gathered.data.len(), 4);
+                    assert_eq!(gathered.shape.first().copied().unwrap_or(0), 4);
+                    for (idx, value) in gathered.data.iter().enumerate() {
+                        assert!((*value - (idx as f64 + 1.0)).abs() < 1e-10);
+                    }
+                }
+                other => panic!("expected real output tensor, got {other:?}"),
+            }
+            provider.free(&handle).ok();
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     #[cfg(feature = "wgpu")]
     fn ifft_wgpu_matches_cpu() {
         if let Some(provider) = runmat_accelerate::backend::wgpu::provider::ensure_wgpu_provider()
@@ -527,7 +576,7 @@ pub(crate) mod tests {
             let cpu_ct = value_as_complex_tensor(cpu);
             assert_eq!(gpu_ct.shape, cpu_ct.shape);
             for (a, b) in gpu_ct.data.iter().zip(cpu_ct.data.iter()) {
-                assert!(approx_eq(*a, *b, 1e-9));
+                assert!(approx_eq(*a, *b, 1e-9), "{a:?} vs {b:?}");
             }
             provider.free(&handle).ok();
         }

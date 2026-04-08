@@ -115,9 +115,7 @@ async fn fftn_gpu(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> Builtin
         }
 
         if ok {
-            let complex = download_provider_complex_tensor(provider, &current, BUILTIN_NAME, true)
-                .await?;
-            return Ok(complex_tensor_into_value(complex));
+            return Ok(Value::GpuTensor(current));
         }
     }
 

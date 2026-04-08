@@ -7,6 +7,7 @@ pub mod diag;
 pub mod diff;
 pub mod elementwise;
 pub mod filter;
+pub mod fft;
 pub mod find;
 pub mod flip;
 pub mod image_normalize;

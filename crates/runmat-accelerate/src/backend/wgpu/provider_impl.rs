@@ -8,7 +8,6 @@ use anyhow::{anyhow, ensure, Result};
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
 use futures::channel::oneshot;
 use log::{debug, error, info, warn};
-use num_complex::Complex;
 use once_cell::sync::OnceCell;
 #[cfg(not(target_arch = "wasm32"))]
 use pollster::block_on;
@@ -57,7 +56,6 @@ use runmat_runtime::builtins::math::poly::polyfit::polyfit_host_real_for_provide
 use runmat_runtime::builtins::math::reduction::compute_median_inplace;
 use runmat_runtime::RuntimeError;
 use runmat_time::Instant;
-use rustfft::FftPlanner;
 use serde::{Deserialize, Serialize};
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -74,6 +72,7 @@ use tracing::info_span;
 use wgpu::util::DeviceExt;
 
 mod solve;
+mod fft;
 
 use crate::backend::wgpu::autotune::AutotuneController;
 use crate::backend::wgpu::cache::{
@@ -164,6 +163,7 @@ pub struct WgpuProvider {
     // Optimization caches
     pow2_of: Mutex<HashMap<u64, u64>>, // squared_buffer_id -> base_buffer_id
     moments_cache: Mutex<MomentsCache>, // (base_buffer_id, dims) -> (mean, ex2)
+    fft_twiddle_cache: Mutex<HashMap<(usize, u8), Arc<wgpu::Buffer>>>, // (len, mode) -> twiddle buffer
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1734,13 +1734,6 @@ fn apply_triu_mask_host(data: &mut [f64], shape: &[usize], offset: isize) -> Res
     Ok(())
 }
 
-fn fft_trim_trailing_ones(shape: &mut Vec<usize>, minimum_rank: usize) {
-    while shape.len() > minimum_rank && shape.last() == Some(&1) {
-        shape.pop();
-    }
-    *shape = normalize_scalar_shape(shape);
-}
-
 fn stride_before_for(shape: &[usize], dim: usize) -> usize {
     if dim == 0 {
         return 1;
@@ -2818,6 +2811,7 @@ impl WgpuProvider {
             autotune_device_tag,
             pow2_of: Mutex::new(HashMap::new()),
             moments_cache: Mutex::new(HashMap::new()),
+            fft_twiddle_cache: Mutex::new(HashMap::new()),
         })
     }
 
@@ -12905,254 +12899,6 @@ impl WgpuProvider {
 
         Ok(std_handle)
     }
-    pub(crate) async fn fft_dim_exec(
-        &self,
-        handle: &GpuTensorHandle,
-        len: Option<usize>,
-        dim: usize,
-    ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, mut shape } =
-            <Self as AccelProvider>::download(self, handle).await?;
-        let mut complex_axis = false;
-        if shape.last() == Some(&2) {
-            complex_axis = true;
-            shape.pop();
-        }
-        if shape.is_empty() {
-            if complex_axis {
-                let inferred = data.len() / 2;
-                shape = vec![inferred];
-            } else if data.is_empty() {
-                shape = vec![0];
-            } else {
-                shape = vec![data.len()];
-            }
-        }
-        let origin_rank = shape.len();
-        while shape.len() <= dim {
-            shape.push(1);
-        }
-        let current_len = shape.get(dim).copied().unwrap_or(0);
-        let target_len = len.unwrap_or(current_len);
-
-        let inner_stride = shape[..dim]
-            .iter()
-            .copied()
-            .fold(1usize, |acc, v| acc.saturating_mul(v));
-        let outer_stride = shape[dim + 1..]
-            .iter()
-            .copied()
-            .fold(1usize, |acc, v| acc.saturating_mul(v));
-        let num_slices = inner_stride.saturating_mul(outer_stride);
-
-        let copy_len = current_len.min(target_len);
-
-        let mut out_shape = shape.clone();
-        if dim < out_shape.len() {
-            out_shape[dim] = target_len;
-        }
-
-        if target_len == 0 || num_slices == 0 {
-            fft_trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
-            let mut packed_shape = out_shape.clone();
-            packed_shape.push(2);
-            let buffer = self.create_storage_buffer(0, "runmat-fft-empty");
-            return Ok(self.register_existing_buffer(buffer, packed_shape, 0));
-        }
-
-        let total_elems = shape
-            .iter()
-            .copied()
-            .fold(1usize, |acc, v| acc.saturating_mul(v));
-        let mut input = Vec::with_capacity(total_elems);
-        if complex_axis {
-            for idx in 0..total_elems {
-                let base = idx * 2;
-                let re = data.get(base).copied().unwrap_or(0.0);
-                let im = data.get(base + 1).copied().unwrap_or(0.0);
-                input.push(Complex::new(re, im));
-            }
-        } else {
-            for idx in 0..total_elems {
-                let re = data.get(idx).copied().unwrap_or(0.0);
-                input.push(Complex::new(re, 0.0));
-            }
-        }
-
-        let mut planner = FftPlanner::<f64>::new();
-        let fft_plan = if target_len > 1 {
-            Some(planner.plan_fft_forward(target_len))
-        } else {
-            None
-        };
-
-        let mut buffer_line = vec![Complex::new(0.0, 0.0); target_len];
-        let mut output = vec![Complex::new(0.0, 0.0); target_len.saturating_mul(num_slices)];
-
-        for outer in 0..outer_stride {
-            let base_in = outer.saturating_mul(current_len.saturating_mul(inner_stride));
-            let base_out = outer.saturating_mul(target_len.saturating_mul(inner_stride));
-            for inner in 0..inner_stride {
-                buffer_line.fill(Complex::new(0.0, 0.0));
-                for (k, slot) in buffer_line.iter_mut().enumerate().take(copy_len) {
-                    let src_idx = base_in + inner + k * inner_stride;
-                    if src_idx < input.len() {
-                        *slot = input[src_idx];
-                    }
-                }
-                if let Some(plan) = &fft_plan {
-                    plan.process(&mut buffer_line);
-                }
-                for (k, value) in buffer_line.iter().enumerate().take(target_len) {
-                    let dst_idx = base_out + inner + k * inner_stride;
-                    if dst_idx < output.len() {
-                        output[dst_idx] = *value;
-                    }
-                }
-            }
-        }
-
-        fft_trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
-        let mut packed_shape = out_shape.clone();
-        packed_shape.push(2);
-
-        let mut packed = Vec::with_capacity(output.len() * 2);
-        for complex in output {
-            packed.push(complex.re);
-            packed.push(complex.im);
-        }
-
-        let view = HostTensorView {
-            data: &packed,
-            shape: &packed_shape,
-        };
-        let result = self.upload(&view)?;
-        Ok(result)
-    }
-    pub(crate) async fn ifft_dim_exec(
-        &self,
-        handle: &GpuTensorHandle,
-        len: Option<usize>,
-        dim: usize,
-    ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, mut shape } =
-            <Self as AccelProvider>::download(self, handle).await?;
-        let mut complex_axis = false;
-        if shape.last() == Some(&2) {
-            complex_axis = true;
-            shape.pop();
-        }
-        if shape.is_empty() {
-            if complex_axis {
-                let inferred = data.len() / 2;
-                shape = vec![inferred];
-            } else if data.is_empty() {
-                shape = vec![0];
-            } else {
-                shape = vec![data.len()];
-            }
-        }
-        let origin_rank = shape.len();
-        while shape.len() <= dim {
-            shape.push(1);
-        }
-        let current_len = shape.get(dim).copied().unwrap_or(0);
-        let target_len = len.unwrap_or(current_len);
-
-        let inner_stride = shape[..dim]
-            .iter()
-            .copied()
-            .fold(1usize, |acc, v| acc.saturating_mul(v));
-        let outer_stride = shape[dim + 1..]
-            .iter()
-            .copied()
-            .fold(1usize, |acc, v| acc.saturating_mul(v));
-        let num_slices = inner_stride.saturating_mul(outer_stride);
-        let copy_len = current_len.min(target_len);
-
-        let mut out_shape = shape.clone();
-        if dim < out_shape.len() {
-            out_shape[dim] = target_len;
-        }
-
-        if target_len == 0 || num_slices == 0 {
-            fft_trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
-            let mut packed_shape = out_shape.clone();
-            packed_shape.push(2);
-            let buffer = self.create_storage_buffer(0, "runmat-ifft-empty");
-            return Ok(self.register_existing_buffer(buffer, packed_shape, 0));
-        }
-
-        let total_elems = shape
-            .iter()
-            .copied()
-            .fold(1usize, |acc, v| acc.saturating_mul(v));
-        let mut input = Vec::with_capacity(total_elems);
-        if complex_axis {
-            for idx in 0..total_elems {
-                let base = idx * 2;
-                let re = data.get(base).copied().unwrap_or(0.0);
-                let im = data.get(base + 1).copied().unwrap_or(0.0);
-                input.push(Complex::new(re, im));
-            }
-        } else {
-            for idx in 0..total_elems {
-                let re = data.get(idx).copied().unwrap_or(0.0);
-                input.push(Complex::new(re, 0.0));
-            }
-        }
-
-        let mut planner = FftPlanner::<f64>::new();
-        let plan = if target_len > 1 {
-            Some(planner.plan_fft_inverse(target_len))
-        } else {
-            None
-        };
-
-        let mut buffer_line = vec![Complex::new(0.0, 0.0); target_len];
-        let mut output = vec![Complex::new(0.0, 0.0); target_len.saturating_mul(num_slices)];
-        let scale = 1.0 / (target_len as f64);
-
-        for outer in 0..outer_stride {
-            let base_in = outer.saturating_mul(current_len.saturating_mul(inner_stride));
-            let base_out = outer.saturating_mul(target_len.saturating_mul(inner_stride));
-            for inner in 0..inner_stride {
-                buffer_line.fill(Complex::new(0.0, 0.0));
-                for (k, slot) in buffer_line.iter_mut().enumerate().take(copy_len) {
-                    let src_idx = base_in + inner + k * inner_stride;
-                    if src_idx < input.len() {
-                        *slot = input[src_idx];
-                    }
-                }
-                if let Some(plan) = &plan {
-                    plan.process(&mut buffer_line);
-                }
-                for (k, value) in buffer_line.iter().enumerate().take(target_len) {
-                    let dst_idx = base_out + inner + k * inner_stride;
-                    if dst_idx < output.len() {
-                        output[dst_idx] = *value * scale;
-                    }
-                }
-            }
-        }
-
-        fft_trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
-        let mut packed_shape = out_shape.clone();
-        packed_shape.push(2);
-
-        let mut packed = Vec::with_capacity(output.len() * 2);
-        for value in output {
-            packed.push(value.re);
-            packed.push(value.im);
-        }
-
-        let view = HostTensorView {
-            data: &packed,
-            shape: &packed_shape,
-        };
-        let result = self.upload(&view)?;
-        Ok(result)
-    }
     pub(crate) fn find_exec(
         &self,
         a: &GpuTensorHandle,
@@ -14185,6 +13931,13 @@ impl AccelProvider for WgpuProvider {
         dim: usize,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move { self.ifft_dim_exec(handle, len, dim).await })
+    }
+
+    fn fft_extract_real<'a>(
+        &'a self,
+        handle: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move { self.fft_extract_real_exec(handle) })
     }
 
     fn unique<'a>(

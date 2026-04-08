@@ -1875,6 +1875,12 @@ pub trait AccelProvider: Send + Sync {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("ifft_dim not supported by provider")
     }
+    fn fft_extract_real<'a>(
+        &'a self,
+        _handle: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("fft_extract_real not supported by provider")
+    }
     fn unique<'a>(
         &'a self,
         _handle: &'a GpuTensorHandle,

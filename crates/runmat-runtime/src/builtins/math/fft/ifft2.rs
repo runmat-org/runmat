@@ -98,10 +98,18 @@ async fn ifft2_gpu(
                         provider.free(&first).ok();
                         runmat_accelerate_api::clear_residency(&first);
                     }
+                    if !symmetric {
+                        return Ok(Value::GpuTensor(second));
+                    }
+                    if let Ok(real) = provider.fft_extract_real(&second).await {
+                        provider.free(&second).ok();
+                        runmat_accelerate_api::clear_residency(&second);
+                        return Ok(Value::GpuTensor(real));
+                    }
                     let complex =
                         download_provider_complex_tensor(provider, &second, BUILTIN_NAME, true)
                             .await?;
-                    return finalize_ifft2_output(complex, symmetric);
+                    return finalize_ifft2_output(complex, true);
                 }
                 Err(_) => {
                     let partial =
@@ -250,7 +258,10 @@ fn parse_ifft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usi
 
 #[cfg(test)]
 pub(crate) mod tests {
+    use crate::builtins::math::fft::common;
     use super::*;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
@@ -268,6 +279,20 @@ pub(crate) mod tests {
         let complex = value_to_complex_tensor(Value::Tensor(tensor.clone()), "fft2").unwrap();
         let first = super::super::fft::fft_complex_tensor(complex, None, Some(1)).unwrap();
         super::super::fft::fft_complex_tensor(first, None, Some(2)).unwrap()
+    }
+
+    fn value_to_host_complex(value: Value) -> ComplexTensor {
+        match value {
+            Value::ComplexTensor(ct) => ct,
+            Value::GpuTensor(handle) => {
+                let provider = runmat_accelerate_api::provider_for_handle(&handle)
+                    .or_else(runmat_accelerate_api::provider)
+                    .expect("provider for gpu handle");
+                let host = block_on(provider.download(&handle)).expect("download gpu ifft2 output");
+                common::host_to_complex_tensor(host, BUILTIN_NAME).expect("decode gpu complex")
+            }
+            other => panic!("expected complex value, got {other:?}"),
+        }
     }
 
     #[test]
@@ -467,14 +492,11 @@ pub(crate) mod tests {
             let cpu = ifft2_builtin(Value::ComplexTensor(spectrum.clone()), Vec::new())
                 .expect("ifft2 cpu");
 
-            match (gpu, cpu) {
-                (Value::ComplexTensor(g), Value::ComplexTensor(c)) => {
-                    assert_eq!(g.shape, c.shape);
-                    for (lhs, rhs) in g.data.iter().zip(c.data.iter()) {
-                        assert!(approx_eq(*lhs, *rhs, 1e-10), "{lhs:?} vs {rhs:?}");
-                    }
-                }
-                other => panic!("unexpected results {other:?}"),
+            let g = value_to_host_complex(gpu);
+            let c = value_to_host_complex(cpu);
+            assert_eq!(g.shape, c.shape);
+            for (lhs, rhs) in g.data.iter().zip(c.data.iter()) {
+                assert!(approx_eq(*lhs, *rhs, 1e-10), "{lhs:?} vs {rhs:?}");
             }
         });
     }
@@ -547,8 +569,8 @@ pub(crate) mod tests {
             ifft2_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("ifft2 gpu");
         let cpu_val = ifft2_builtin(Value::ComplexTensor(spectrum), Vec::new()).expect("ifft2 cpu");
 
-        let gpu_ct = value_to_complex_tensor(gpu_val, "ifft2").expect("gpu complex tensor");
-        let cpu_ct = value_to_complex_tensor(cpu_val, "ifft2").expect("cpu complex tensor");
+        let gpu_ct = value_to_host_complex(gpu_val);
+        let cpu_ct = value_to_host_complex(cpu_val);
         assert_eq!(gpu_ct.shape, cpu_ct.shape);
 
         let tol = match provider.precision() {
