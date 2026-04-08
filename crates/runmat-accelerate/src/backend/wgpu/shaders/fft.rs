@@ -16,8 +16,7 @@ struct Params {
 
 @group(0) @binding(0) var<storage, read> Input: Tensor;
 @group(0) @binding(1) var<storage, read_write> Output: Tensor;
-@group(0) @binding(2) var<storage, read> Twiddles: Tensor;
-@group(0) @binding(3) var<uniform> params: Params;
+@group(0) @binding(2) var<uniform> params: Params;
 
 @compute @workgroup_size(@WG@)
 fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
@@ -426,8 +425,7 @@ struct Params {
 
 @group(0) @binding(0) var<storage, read> Input: Tensor;
 @group(0) @binding(1) var<storage, read_write> Output: Tensor;
-@group(0) @binding(2) var<storage, read> Twiddles: Tensor;
-@group(0) @binding(3) var<storage, read> params: Params;
+@group(0) @binding(2) var<uniform> params: Params;
 
 fn load_complex(data: ptr<storage, array<f64>, read>, index: u32) -> vec2<f64> {
     let base = index * 2u;

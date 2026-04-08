@@ -431,6 +431,21 @@ impl WgpuProvider {
                             digits,
                         );
                     }
+                    return self.try_fft_dim_exec_native_mixed(
+                        entry.buffer,
+                        shape,
+                        dim,
+                        origin_rank,
+                        current_len,
+                        copy_len,
+                        target_len,
+                        inner_stride,
+                        total_out,
+                        out_scalar_len,
+                        complex_axis,
+                        inverse,
+                        &factors,
+                    );
                 } else if has_5 && !has_3 {
                     if let Some(digits) = fft_log5_pow5(target_len) {
                         return self.try_fft_dim_exec_native_radix5(
@@ -449,6 +464,21 @@ impl WgpuProvider {
                             digits,
                         );
                     }
+                    return self.try_fft_dim_exec_native_mixed(
+                        entry.buffer,
+                        shape,
+                        dim,
+                        origin_rank,
+                        current_len,
+                        copy_len,
+                        target_len,
+                        inner_stride,
+                        total_out,
+                        out_scalar_len,
+                        complex_axis,
+                        inverse,
+                        &factors,
+                    );
                 } else {
                     return self.try_fft_dim_exec_native_mixed(
                         entry.buffer,
