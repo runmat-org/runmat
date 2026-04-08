@@ -2,7 +2,7 @@
 
 use super::common::{
     default_dimension, gather_gpu_complex_tensor, parse_length, transform_complex_tensor,
-    TransformDirection, value_to_complex_tensor,
+    value_to_complex_tensor, TransformDirection,
 };
 use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, Value};
@@ -116,7 +116,11 @@ async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
         .await
         .map_err(fft_error)?
-        .ok_or_else(|| fft_error(format!("{BUILTIN_NAME}: dimension must be numeric, got {value:?}")))
+        .ok_or_else(|| {
+            fft_error(format!(
+                "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
+            ))
+        })
 }
 
 async fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<usize>)> {
@@ -142,18 +146,24 @@ pub(super) fn fft_complex_tensor(
     length: Option<usize>,
     dimension: Option<usize>,
 ) -> BuiltinResult<ComplexTensor> {
-    transform_complex_tensor(tensor, length, dimension, TransformDirection::Forward, BUILTIN_NAME)
+    transform_complex_tensor(
+        tensor,
+        length,
+        dimension,
+        TransformDirection::Forward,
+        BUILTIN_NAME,
+    )
 }
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::builtins::math::fft::common;
     use super::*;
-    #[cfg(feature = "wgpu")]
-    use runmat_accelerate_api::AccelProvider;
     use crate::builtins::common::test_support;
+    use crate::builtins::math::fft::common;
     use futures::executor::block_on;
     use num_complex::Complex;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::{
         ComplexTensor as HostComplexTensor, IntValue, ResolveContext, Tensor, Type,
     };

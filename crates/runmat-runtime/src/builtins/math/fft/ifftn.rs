@@ -82,7 +82,7 @@ async fn ifftn_gpu(
     symmetric: bool,
 ) -> BuiltinResult<Value> {
     if let Some(ref spec) = sizes {
-        if spec.iter().any(|&n| n == 0) {
+        if spec.contains(&0) {
             return ifftn_gpu_fallback(handle, sizes, symmetric).await;
         }
     }
@@ -158,7 +158,12 @@ fn ifftn_complex_tensor(
     tensor: ComplexTensor,
     sizes: Option<Vec<usize>>,
 ) -> BuiltinResult<ComplexTensor> {
-    transform_nd_complex_tensor(tensor, sizes.as_deref(), TransformDirection::Inverse, BUILTIN_NAME)
+    transform_nd_complex_tensor(
+        tensor,
+        sizes.as_deref(),
+        TransformDirection::Inverse,
+        BUILTIN_NAME,
+    )
 }
 
 fn finalize_ifftn_output(tensor: ComplexTensor, symmetric: bool) -> BuiltinResult<Value> {
@@ -272,9 +277,8 @@ mod tests {
             vec![Value::from("symmetric"), Value::Tensor(size)],
         ))
         .unwrap_err();
-        assert!(
-            err.message()
-                .contains("symmetry flag must appear as the final argument")
-        );
+        assert!(err
+            .message()
+            .contains("symmetry flag must appear as the final argument"));
     }
 }

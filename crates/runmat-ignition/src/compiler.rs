@@ -2804,13 +2804,8 @@ impl Compiler {
                         self.emit(Instr::LoadStaticProperty(cls_name.clone(), field.clone()));
                     }
                     HirExprKind::FuncCall(name, args) if name == "classref" && args.len() == 1 => {
-                        if let HirExprKind::String(cls) = &args[0].kind {
-                            let cls_name = Self::normalize_class_literal_name(cls);
-                            self.emit(Instr::LoadStaticProperty(cls_name, field.clone()));
-                        } else {
-                            self.compile_expr(base)?;
-                            self.emit(Instr::LoadMember(field.clone()));
-                        }
+                        self.compile_expr(base)?;
+                        self.emit(Instr::LoadMember(field.clone()));
                     }
                     _ => {
                         // Default to instance property access; subsref overloading is handled at runtime via call_method if needed

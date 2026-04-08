@@ -334,7 +334,12 @@ async fn read_scene_chunks_bytes_async(
             let attempted = candidates.join(", ");
             let failure_details = candidates
                 .iter()
-                .filter_map(|candidate| failures.get(candidate).and_then(|value| value.as_ref()).map(|err| format!("{candidate} => {err}")))
+                .filter_map(|candidate| {
+                    failures
+                        .get(candidate)
+                        .and_then(|value| value.as_ref())
+                        .map(|err| format!("{candidate} => {err}"))
+                })
                 .collect::<Vec<_>>()
                 .join(" | ");
             std::io::Error::new(
@@ -345,8 +350,7 @@ async fn read_scene_chunks_bytes_async(
                         .src
                         .as_deref()
                         .or(chunk.artifact_id.as_deref())
-                        .unwrap_or("<unknown>")
-                    ,
+                        .unwrap_or("<unknown>"),
                     attempted,
                     if failure_details.is_empty() {
                         String::new()
@@ -467,7 +471,10 @@ fn normalize_scene_chunk_ref(path: &str) -> String {
         .filter(|segment| !segment.is_empty() && *segment != ".")
         .collect::<Vec<_>>()
         .join("/");
-    collapsed.trim_start_matches("./").trim_start_matches('/').to_string()
+    collapsed
+        .trim_start_matches("./")
+        .trim_start_matches('/')
+        .to_string()
 }
 
 #[cfg(feature = "plot-core")]

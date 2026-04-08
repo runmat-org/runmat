@@ -123,7 +123,8 @@ async fn ifft_gpu(
             }
         }
 
-        let complex = download_provider_complex_tensor(provider, &handle, BUILTIN_NAME, false).await?;
+        let complex =
+            download_provider_complex_tensor(provider, &handle, BUILTIN_NAME, false).await?;
         let transformed = ifft_complex_tensor(complex, length, dimension)?;
         return finalize_ifft_output(transformed, symmetric);
     }
@@ -138,7 +139,13 @@ pub(super) fn ifft_complex_tensor(
     length: Option<usize>,
     dimension: Option<usize>,
 ) -> BuiltinResult<ComplexTensor> {
-    transform_complex_tensor(tensor, length, dimension, TransformDirection::Inverse, BUILTIN_NAME)
+    transform_complex_tensor(
+        tensor,
+        length,
+        dimension,
+        TransformDirection::Inverse,
+        BUILTIN_NAME,
+    )
 }
 
 fn finalize_ifft_output(tensor: ComplexTensor, symmetric: bool) -> BuiltinResult<Value> {
@@ -153,7 +160,11 @@ async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
     tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
         .await
         .map_err(ifft_error)?
-        .ok_or_else(|| ifft_error(format!("{BUILTIN_NAME}: dimension must be numeric, got {value:?}")))
+        .ok_or_else(|| {
+            ifft_error(format!(
+                "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
+            ))
+        })
 }
 
 async fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<usize>, bool)> {
@@ -211,13 +222,13 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::builtins::math::fft::common;
     use super::*;
-    #[cfg(feature = "wgpu")]
-    use runmat_accelerate_api::AccelProvider;
     use crate::builtins::common::test_support;
+    use crate::builtins::math::fft::common;
     use futures::executor::block_on;
     use num_complex::Complex;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use runmat_builtins::{
         ComplexTensor as HostComplexTensor, IntValue, ResolveContext, Tensor, Type,
     };

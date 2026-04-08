@@ -1,7 +1,7 @@
 // Internal note: this file has become a bit too large.
 // Subsequent provider call implementations that would otherwise
-// be added in this file should, going forwards, be added to 
-// ./provider_impl/*.rs instead. This module will be refactored into 
+// be added in this file should, going forwards, be added to
+// ./provider_impl/*.rs instead. This module will be refactored into
 // submodules in that manner in the future.
 
 use anyhow::{anyhow, ensure, Result};
@@ -71,8 +71,8 @@ use std::time::Duration;
 use tracing::info_span;
 use wgpu::util::DeviceExt;
 
-mod solve;
 mod fft;
+mod solve;
 
 use crate::backend::wgpu::autotune::AutotuneController;
 use crate::backend::wgpu::cache::{

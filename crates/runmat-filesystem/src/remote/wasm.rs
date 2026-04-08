@@ -130,8 +130,7 @@ impl RemoteFsProvider {
     fn fetch_download_url(&self, path: &str) -> io::Result<DownloadUrlResponse> {
         info!(
             "remote.fs.download_url.request path={} direct_read_threshold_bytes={}",
-            path,
-            self.direct_read_threshold_bytes
+            path, self.direct_read_threshold_bytes
         );
         let text = self.send_text(
             "GET",
@@ -326,9 +325,7 @@ impl RemoteFsProvider {
         let metadata: MetadataResponse = serde_json::from_str(&text).map_err(map_serde_err)?;
         info!(
             "remote.fs.metadata.ok path={} len={} file_type={}",
-            path,
-            metadata.len,
-            metadata.file_type
+            path, metadata.len, metadata.file_type
         );
         Ok(metadata)
     }
@@ -372,10 +369,7 @@ impl RemoteFsProvider {
             ),
             Err(error) => warn!(
                 "remote.fs.read_chunk.failed path={} offset={} length={} error={}",
-                path,
-                offset,
-                length,
-                error
+                path, offset, length, error
             ),
         }
         response
@@ -533,17 +527,14 @@ impl RemoteFsProvider {
         if should_use_direct_read(len, self.direct_read_threshold_bytes) {
             info!(
                 "remote.fs.read_strategy path={} strategy=signed-url len={}",
-                path,
-                len
+                path, len
             );
             let url = self.fetch_download_url(path)?.download_url;
             return self.read_range_from_url(path, &url, 0, len);
         }
         info!(
             "remote.fs.read_strategy path={} strategy=fs-read len={} chunk_bytes={}",
-            path,
-            len,
-            self.chunk_bytes
+            path, len, self.chunk_bytes
         );
         let mut buffer = Vec::with_capacity(len as usize);
         let mut offset = 0;

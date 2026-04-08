@@ -258,12 +258,12 @@ fn parse_ifft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usi
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use crate::builtins::math::fft::common;
     use super::*;
+    use crate::builtins::common::test_support;
+    use crate::builtins::math::fft::common;
+    use futures::executor::block_on;
     #[cfg(feature = "wgpu")]
     use runmat_accelerate_api::AccelProvider;
-    use crate::builtins::common::test_support;
-    use futures::executor::block_on;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, ResolveContext, Tensor as HostTensor, Type};
 

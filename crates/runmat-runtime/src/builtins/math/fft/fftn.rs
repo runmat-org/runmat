@@ -77,7 +77,7 @@ fn fftn_host(value: Value, sizes: Option<Vec<usize>>) -> BuiltinResult<Value> {
 
 async fn fftn_gpu(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> BuiltinResult<Value> {
     if let Some(ref spec) = sizes {
-        if spec.iter().any(|&n| n == 0) {
+        if spec.contains(&0) {
             return fftn_gpu_fallback(handle, sizes).await;
         }
     }
@@ -122,9 +122,13 @@ async fn fftn_gpu(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> Builtin
     fftn_gpu_fallback(handle, sizes).await
 }
 
-async fn fftn_gpu_fallback(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> BuiltinResult<Value> {
+async fn fftn_gpu_fallback(
+    handle: GpuTensorHandle,
+    sizes: Option<Vec<usize>>,
+) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
-        let complex = download_provider_complex_tensor(provider, &handle, BUILTIN_NAME, false).await?;
+        let complex =
+            download_provider_complex_tensor(provider, &handle, BUILTIN_NAME, false).await?;
         let transformed = fftn_complex_tensor(complex, sizes)?;
         return Ok(complex_tensor_into_value(transformed));
     }
@@ -134,8 +138,16 @@ async fn fftn_gpu_fallback(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -
     Ok(complex_tensor_into_value(transformed))
 }
 
-fn fftn_complex_tensor(tensor: ComplexTensor, sizes: Option<Vec<usize>>) -> BuiltinResult<ComplexTensor> {
-    transform_nd_complex_tensor(tensor, sizes.as_deref(), TransformDirection::Forward, BUILTIN_NAME)
+fn fftn_complex_tensor(
+    tensor: ComplexTensor,
+    sizes: Option<Vec<usize>>,
+) -> BuiltinResult<ComplexTensor> {
+    transform_nd_complex_tensor(
+        tensor,
+        sizes.as_deref(),
+        TransformDirection::Forward,
+        BUILTIN_NAME,
+    )
 }
 
 fn parse_fftn_sizes(args: &[Value]) -> BuiltinResult<Option<Vec<usize>>> {

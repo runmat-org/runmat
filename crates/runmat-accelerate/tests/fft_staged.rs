@@ -38,7 +38,10 @@ fn tolerance(precision: ProviderPrecision) -> f64 {
 fn cpu_fft_forward(data: &[f64]) -> Vec<(f64, f64)> {
     let mut planner = FftPlanner::<f64>::new();
     let plan = planner.plan_fft_forward(data.len());
-    let mut buf = data.iter().map(|&v| Complex::new(v, 0.0)).collect::<Vec<_>>();
+    let mut buf = data
+        .iter()
+        .map(|&v| Complex::new(v, 0.0))
+        .collect::<Vec<_>>();
     if data.len() > 1 {
         plan.process(&mut buf);
     }

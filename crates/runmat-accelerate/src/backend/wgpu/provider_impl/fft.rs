@@ -6,8 +6,8 @@ use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 use rustfft::FftPlanner;
 use std::sync::Arc;
 
-use crate::backend::wgpu::types::NumericPrecision;
 use crate::backend::wgpu::resources::UniformBufferKey;
+use crate::backend::wgpu::types::NumericPrecision;
 
 use super::WgpuProvider;
 
@@ -86,10 +86,14 @@ fn fft_factor_smooth_235(mut len: usize) -> Option<Vec<u32>> {
 impl WgpuProvider {
     fn fft_uniform_buffer<T: Pod>(&self, data: &T, label: &'static str) -> Arc<wgpu::Buffer> {
         let size = std::mem::size_of::<T>() as u64;
-        let buffer = self
-            .kernel_resources
-            .uniform_buffer(self.device_ref(), UniformBufferKey::LenOpParams, size, label);
-        self.queue_ref().write_buffer(buffer.as_ref(), 0, bytes_of(data));
+        let buffer = self.kernel_resources.uniform_buffer(
+            self.device_ref(),
+            UniformBufferKey::LenOpParams,
+            size,
+            label,
+        );
+        self.queue_ref()
+            .write_buffer(buffer.as_ref(), 0, bytes_of(data));
         buffer
     }
 
@@ -101,7 +105,8 @@ impl WgpuProvider {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         }));
-        self.queue_ref().write_buffer(buffer.as_ref(), 0, bytes_of(data));
+        self.queue_ref()
+            .write_buffer(buffer.as_ref(), 0, bytes_of(data));
         buffer
     }
 
@@ -126,11 +131,11 @@ impl WgpuProvider {
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let mut encoder = self
-            .device_ref()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("runmat-fft-debug-copy"),
-            });
+        let mut encoder =
+            self.device_ref()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("runmat-fft-debug-copy"),
+                });
         encoder.copy_buffer_to_buffer(buffer.as_ref(), 0, &staging, 0, size_bytes);
         self.submit(encoder);
         let Ok(bytes) = self.map_readback_bytes_sync(staging, size_bytes, "fft-debug") else {
@@ -178,7 +183,12 @@ impl WgpuProvider {
         (a, b)
     }
 
-    fn fft_twiddle_buffer(&self, len: usize, half_only: bool, label: &str) -> Result<Arc<wgpu::Buffer>> {
+    fn fft_twiddle_buffer(
+        &self,
+        len: usize,
+        half_only: bool,
+        label: &str,
+    ) -> Result<Arc<wgpu::Buffer>> {
         let mode = if half_only { 1u8 } else { 0u8 };
         if let Ok(cache) = self.fft_twiddle_cache.lock() {
             if let Some(existing) = cache.get(&(len, mode)) {
@@ -190,7 +200,8 @@ impl WgpuProvider {
         let twiddle_scalar_len = count
             .checked_mul(2)
             .ok_or_else(|| anyhow!("fft_dim: twiddle buffer length overflow"))?;
-        let size_bytes = (twiddle_scalar_len.max(1) as u64).saturating_mul(self.element_size as u64);
+        let size_bytes =
+            (twiddle_scalar_len.max(1) as u64).saturating_mul(self.element_size as u64);
         let twiddle = Arc::new(self.device_ref().create_buffer(&wgpu::BufferDescriptor {
             label: Some(label),
             size: size_bytes,
@@ -238,7 +249,8 @@ impl WgpuProvider {
         if let Some(native) = self.try_fft_dim_exec_native(handle, len, dim, false)? {
             return Ok(native);
         }
-        self.fft_dim_exec_host_fallback(handle, len, dim, false).await
+        self.fft_dim_exec_host_fallback(handle, len, dim, false)
+            .await
     }
 
     pub(crate) async fn ifft_dim_exec(
@@ -250,10 +262,14 @@ impl WgpuProvider {
         if let Some(native) = self.try_fft_dim_exec_native(handle, len, dim, true)? {
             return Ok(native);
         }
-        self.fft_dim_exec_host_fallback(handle, len, dim, true).await
+        self.fft_dim_exec_host_fallback(handle, len, dim, true)
+            .await
     }
 
-    pub(crate) fn fft_extract_real_exec(&self, handle: &GpuTensorHandle) -> Result<GpuTensorHandle> {
+    pub(crate) fn fft_extract_real_exec(
+        &self,
+        handle: &GpuTensorHandle,
+    ) -> Result<GpuTensorHandle> {
         let entry = self.get_entry(handle)?;
         let mut out_shape = handle.shape.clone();
         if out_shape.last() != Some(&2) {
@@ -282,24 +298,26 @@ impl WgpuProvider {
                 _pad0: 0,
             };
             let params_buffer = self.fft_uniform_buffer(&params, "runmat-fft-extract-real-params");
-            let bind_group = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-fft-extract-real-bind"),
-                layout: &self.pipelines.fft_extract_real.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: out_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-fft-extract-real-bind"),
+                    layout: &self.pipelines.fft_extract_real.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
             let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                 chunk_len as u32,
                 crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -338,7 +356,11 @@ impl WgpuProvider {
             shape.pop();
         }
         if shape.is_empty() {
-            let scalar_len = if complex_axis { entry.len / 2 } else { entry.len };
+            let scalar_len = if complex_axis {
+                entry.len / 2
+            } else {
+                entry.len
+            };
             shape = vec![scalar_len];
         }
 
@@ -466,13 +488,13 @@ impl WgpuProvider {
                 return self.try_fft_dim_exec_native_radix3(
                     entry.buffer,
                     shape,
-                dim,
-                origin_rank,
-                current_len,
-                copy_len,
-                target_len,
-                inner_stride,
-                total_out,
+                    dim,
+                    origin_rank,
+                    current_len,
+                    copy_len,
+                    target_len,
+                    inner_stride,
+                    total_out,
                     out_scalar_len,
                     complex_axis,
                     inverse,
@@ -521,24 +543,26 @@ impl WgpuProvider {
                 input_complex: if complex_axis { 1 } else { 0 },
             };
             let params_buffer = self.fft_uniform_buffer(&params, "runmat-fft-init-params");
-            let bind_group = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-fft-init-bind"),
-                layout: &self.pipelines.fft_init.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: entry.buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: stage_a.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-fft-init-bind"),
+                    layout: &self.pipelines.fft_init.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: stage_a.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
             let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                 chunk_len as u32,
                 crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -580,34 +604,42 @@ impl WgpuProvider {
                 if Self::fft_debug_enabled() {
                     eprintln!(
                         "[fft-debug] stage2 params span={} half={} step={} chunk={} off={}",
-                        params.stage_span, params.stage_half, params.twiddle_step, params.len, params.offset
+                        params.stage_span,
+                        params.stage_half,
+                        params.twiddle_step,
+                        params.len,
+                        params.offset
                     );
                 }
                 let params_buffer = self.fft_uniform_buffer(&params, "runmat-fft-stage-params");
-                let bind_group = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-fft-stage-bind"),
-                    layout: &self.pipelines.fft_stage.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: stage_a.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: stage_b.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
+                let bind_group = self
+                    .device_ref()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-fft-stage-bind"),
+                        layout: &self.pipelines.fft_stage.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: stage_a.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: stage_b.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
                 let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                     chunk_len as u32,
                     crate::backend::wgpu::config::WORKGROUP_SIZE,
                 );
                 if Self::fft_debug_enabled() {
-                    eprintln!("[fft-debug] stage2 dispatch workgroups={workgroups} chunk={chunk_len}");
+                    eprintln!(
+                        "[fft-debug] stage2 dispatch workgroups={workgroups} chunk={chunk_len}"
+                    );
                 }
                 crate::backend::wgpu::dispatch::fft::run(
                     self.device_ref(),
@@ -638,24 +670,26 @@ impl WgpuProvider {
                 _pad0: 0,
             };
             let params_buffer = self.fft_uniform_buffer(&params, "runmat-fft-reorder-params");
-            let bind_group = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-fft-reorder-bind"),
-                layout: &self.pipelines.fft_reorder.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: stage_a.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: stage_b.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-fft-reorder-bind"),
+                    layout: &self.pipelines.fft_reorder.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: stage_a.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: stage_b.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
             let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                 chunk_len as u32,
                 crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -676,9 +710,11 @@ impl WgpuProvider {
         fft_trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
         let mut packed_shape = out_shape;
         packed_shape.push(2);
-        Ok(Some(
-            self.register_existing_buffer(stage_b, packed_shape, out_scalar_len),
-        ))
+        Ok(Some(self.register_existing_buffer(
+            stage_b,
+            packed_shape,
+            out_scalar_len,
+        )))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -725,7 +761,8 @@ impl WgpuProvider {
         let chirp_scalar_len = target_len
             .checked_mul(2)
             .ok_or_else(|| anyhow!("fft_dim: chirp buffer overflow"))?;
-        let chirp_buffer = self.create_storage_buffer(chirp_scalar_len, "runmat-fft-bluestein-chirp");
+        let chirp_buffer =
+            self.create_storage_buffer(chirp_scalar_len, "runmat-fft-bluestein-chirp");
         let pi = std::f64::consts::PI;
         let sign = if inverse { 1.0 } else { -1.0 };
         match self.precision {
@@ -769,16 +806,30 @@ impl WgpuProvider {
                 input_complex: if complex_axis { 1 } else { 0 },
             };
             let params_buffer = self.fft_uniform_buffer(&params, "runmat-fft-blue-prep-params");
-            let bind_group = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-fft-blue-prep-bind"),
-                layout: &self.pipelines.fft_bluestein_prep.layout,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: in_buffer.as_ref().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: a_buffer.as_ref().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: chirp_buffer.as_ref().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: params_buffer.as_entire_binding() },
-                ],
-            });
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-fft-blue-prep-bind"),
+                    layout: &self.pipelines.fft_bluestein_prep.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: in_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: a_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: chirp_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
             let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                 chunk_len as u32,
                 crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -812,15 +863,26 @@ impl WgpuProvider {
                 _pad1: 0,
             };
             let params_buffer = self.fft_uniform_buffer(&params, "runmat-fft-blue-kernel-params");
-            let bind_group = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-fft-blue-kernel-bind"),
-                layout: &self.pipelines.fft_bluestein_kernel.layout,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: b_buffer.as_ref().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: chirp_buffer.as_ref().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: params_buffer.as_entire_binding() },
-                ],
-            });
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-fft-blue-kernel-bind"),
+                    layout: &self.pipelines.fft_bluestein_kernel.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: b_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: chirp_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
             let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                 chunk_len as u32,
                 crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -836,7 +898,8 @@ impl WgpuProvider {
             boff += chunk_len;
         }
 
-        let a_handle = self.register_existing_buffer(a_buffer, ext_shape_packed.clone(), m_out_scalar_len);
+        let a_handle =
+            self.register_existing_buffer(a_buffer, ext_shape_packed.clone(), m_out_scalar_len);
         let b_handle = self.register_existing_buffer(b_buffer, vec![m_len, 2], b_scalar_len);
         let Some(a_fft) = self.try_fft_dim_exec_native(&a_handle, Some(m_len), dim, false)? else {
             return Ok(None);
@@ -859,19 +922,34 @@ impl WgpuProvider {
                 _pad1: 0,
                 _pad2: 0,
             };
-            let params_buffer = self.fft_uniform_buffer(&params, "runmat-fft-blue-pointwise-params");
+            let params_buffer =
+                self.fft_uniform_buffer(&params, "runmat-fft-blue-pointwise-params");
             let a_entry = self.get_entry(&a_fft)?;
             let b_entry = self.get_entry(&b_fft)?;
-            let bind_group = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-fft-blue-pointwise-bind"),
-                layout: &self.pipelines.fft_pointwise_broadcast.layout,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: a_entry.buffer.as_ref().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: b_entry.buffer.as_ref().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: c_fft_buf.as_ref().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: params_buffer.as_entire_binding() },
-                ],
-            });
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-fft-blue-pointwise-bind"),
+                    layout: &self.pipelines.fft_pointwise_broadcast.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: a_entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: b_entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: c_fft_buf.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
             let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                 chunk_len as u32,
                 crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -887,8 +965,10 @@ impl WgpuProvider {
             poff += chunk_len;
         }
 
-        let c_fft_handle = self.register_existing_buffer(c_fft_buf, ext_shape_packed.clone(), m_out_scalar_len);
-        let Some(c_time) = self.try_fft_dim_exec_native(&c_fft_handle, Some(m_len), dim, true)? else {
+        let c_fft_handle =
+            self.register_existing_buffer(c_fft_buf, ext_shape_packed.clone(), m_out_scalar_len);
+        let Some(c_time) = self.try_fft_dim_exec_native(&c_fft_handle, Some(m_len), dim, true)?
+        else {
             return Ok(None);
         };
 
@@ -908,16 +988,30 @@ impl WgpuProvider {
             };
             let params_buffer = self.fft_uniform_buffer(&params, "runmat-fft-blue-finalize-params");
             let c_entry = self.get_entry(&c_time)?;
-            let bind_group = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-fft-blue-finalize-bind"),
-                layout: &self.pipelines.fft_bluestein_finalize.layout,
-                entries: &[
-                    wgpu::BindGroupEntry { binding: 0, resource: c_entry.buffer.as_ref().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 1, resource: out_buffer.as_ref().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 2, resource: chirp_buffer.as_ref().as_entire_binding() },
-                    wgpu::BindGroupEntry { binding: 3, resource: params_buffer.as_entire_binding() },
-                ],
-            });
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-fft-blue-finalize-bind"),
+                    layout: &self.pipelines.fft_bluestein_finalize.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: c_entry.buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: out_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: chirp_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 3,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
             let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                 chunk_len as u32,
                 crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -944,9 +1038,11 @@ impl WgpuProvider {
         out_shape[dim] = target_len;
         fft_trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
         out_shape.push(2);
-        Ok(Some(
-            self.register_existing_buffer(out_buffer, out_shape, out_scalar_len),
-        ))
+        Ok(Some(self.register_existing_buffer(
+            out_buffer,
+            out_shape,
+            out_scalar_len,
+        )))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -994,24 +1090,26 @@ impl WgpuProvider {
                 input_complex: if complex_axis { 1 } else { 0 },
             };
             let params_buffer = self.fft_uniform_buffer(&params, "runmat-fftm-init-params");
-            let bind_group = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-fftm-init-bind"),
-                layout: &self.pipelines.fft_init.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: in_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: stage_a.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-fftm-init-bind"),
+                    layout: &self.pipelines.fft_init.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: in_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: stage_a.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
             let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                 chunk_len as u32,
                 crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -1051,25 +1149,28 @@ impl WgpuProvider {
                         _pad1: 0,
                         _pad2: 0,
                     };
-                    let params_buffer = self.fft_uniform_buffer(&params, "runmat-fftm-stage2-params");
-                    let bind_group = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-fftm-stage2-bind"),
-                        layout: &self.pipelines.fft_stage.layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: stage_a.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: stage_b.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: params_buffer.as_entire_binding(),
-                            },
-                        ],
-                    });
+                    let params_buffer =
+                        self.fft_uniform_buffer(&params, "runmat-fftm-stage2-params");
+                    let bind_group =
+                        self.device_ref()
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("runmat-fftm-stage2-bind"),
+                                layout: &self.pipelines.fft_stage.layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: stage_a.as_ref().as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: stage_b.as_ref().as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: params_buffer.as_entire_binding(),
+                                    },
+                                ],
+                            });
                     let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                         chunk_len as u32,
                         crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -1105,29 +1206,32 @@ impl WgpuProvider {
                         _pad1: 0,
                         _pad2: 0,
                     };
-                    let params_buffer = self.fft_uniform_buffer(&params, "runmat-fftm-stage3-params");
-                    let bind_group = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-fftm-stage3-bind"),
-                        layout: &self.pipelines.fft_stage3.layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: stage_a.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: stage_b.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: twiddle.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: params_buffer.as_entire_binding(),
-                            },
-                        ],
-                    });
+                    let params_buffer =
+                        self.fft_uniform_buffer(&params, "runmat-fftm-stage3-params");
+                    let bind_group =
+                        self.device_ref()
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("runmat-fftm-stage3-bind"),
+                                layout: &self.pipelines.fft_stage3.layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: stage_a.as_ref().as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: stage_b.as_ref().as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: twiddle.as_ref().as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 3,
+                                        resource: params_buffer.as_entire_binding(),
+                                    },
+                                ],
+                            });
                     let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                         chunk_len as u32,
                         crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -1163,29 +1267,32 @@ impl WgpuProvider {
                         _pad1: 0,
                         _pad2: 0,
                     };
-                    let params_buffer = self.fft_uniform_buffer(&params, "runmat-fftm-stage5-params");
-                    let bind_group = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("runmat-fftm-stage5-bind"),
-                        layout: &self.pipelines.fft_stage5.layout,
-                        entries: &[
-                            wgpu::BindGroupEntry {
-                                binding: 0,
-                                resource: stage_a.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 1,
-                                resource: stage_b.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 2,
-                                resource: twiddle.as_ref().as_entire_binding(),
-                            },
-                            wgpu::BindGroupEntry {
-                                binding: 3,
-                                resource: params_buffer.as_entire_binding(),
-                            },
-                        ],
-                    });
+                    let params_buffer =
+                        self.fft_uniform_buffer(&params, "runmat-fftm-stage5-params");
+                    let bind_group =
+                        self.device_ref()
+                            .create_bind_group(&wgpu::BindGroupDescriptor {
+                                label: Some("runmat-fftm-stage5-bind"),
+                                layout: &self.pipelines.fft_stage5.layout,
+                                entries: &[
+                                    wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: stage_a.as_ref().as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 1,
+                                        resource: stage_b.as_ref().as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 2,
+                                        resource: twiddle.as_ref().as_entire_binding(),
+                                    },
+                                    wgpu::BindGroupEntry {
+                                        binding: 3,
+                                        resource: params_buffer.as_entire_binding(),
+                                    },
+                                ],
+                            });
                     let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                         chunk_len as u32,
                         crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -1228,25 +1335,28 @@ impl WgpuProvider {
                 _pad0: 0,
                 radices,
             };
-            let params_buffer = self.fft_storage_param_buffer(&params, "runmat-fftm-reorder-params");
-            let bind_group = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-fftm-reorder-bind"),
-                layout: &self.pipelines.fft_reorder_mixed.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: stage_a.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: stage_b.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let params_buffer =
+                self.fft_storage_param_buffer(&params, "runmat-fftm-reorder-params");
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-fftm-reorder-bind"),
+                    layout: &self.pipelines.fft_reorder_mixed.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: stage_a.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: stage_b.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
             let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                 chunk_len as u32,
                 crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -1267,9 +1377,11 @@ impl WgpuProvider {
         shape[dim] = target_len;
         fft_trim_trailing_ones(&mut shape, origin_rank.max(dim + 1));
         shape.push(2);
-        Ok(Some(
-            self.register_existing_buffer(stage_b, shape, out_scalar_len),
-        ))
+        Ok(Some(self.register_existing_buffer(
+            stage_b,
+            shape,
+            out_scalar_len,
+        )))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1313,24 +1425,26 @@ impl WgpuProvider {
                 input_complex: if complex_axis { 1 } else { 0 },
             };
             let params_buffer = self.fft_uniform_buffer(&params, "runmat-fft3-init-params");
-            let bind_group = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-fft3-init-bind"),
-                layout: &self.pipelines.fft_init.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: in_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: stage_a.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-fft3-init-bind"),
+                    layout: &self.pipelines.fft_init.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: in_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: stage_a.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
             let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                 chunk_len as u32,
                 crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -1372,38 +1486,46 @@ impl WgpuProvider {
                 if Self::fft_debug_enabled() {
                     eprintln!(
                         "[fft-debug] stage3 params span={} third={} step={} chunk={} off={}",
-                        params.stage_span, params.stage_third, params.twiddle_step, params.len, params.offset
+                        params.stage_span,
+                        params.stage_third,
+                        params.twiddle_step,
+                        params.len,
+                        params.offset
                     );
                 }
                 let params_buffer = self.fft_uniform_buffer(&params, "runmat-fft3-stage-params");
-                let bind_group = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-fft3-stage-bind"),
-                    layout: &self.pipelines.fft_stage3.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: stage_a.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: stage_b.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: twiddle.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
+                let bind_group = self
+                    .device_ref()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-fft3-stage-bind"),
+                        layout: &self.pipelines.fft_stage3.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: stage_a.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: stage_b.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: twiddle.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
                 let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                     chunk_len as u32,
                     crate::backend::wgpu::config::WORKGROUP_SIZE,
                 );
                 if Self::fft_debug_enabled() {
-                    eprintln!("[fft-debug] stage3 dispatch workgroups={workgroups} chunk={chunk_len}");
+                    eprintln!(
+                        "[fft-debug] stage3 dispatch workgroups={workgroups} chunk={chunk_len}"
+                    );
                 }
                 crate::backend::wgpu::dispatch::fft::run(
                     self.device_ref(),
@@ -1434,24 +1556,26 @@ impl WgpuProvider {
                 _pad0: 0,
             };
             let params_buffer = self.fft_uniform_buffer(&params, "runmat-fft3-reorder-params");
-            let bind_group = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-fft3-reorder-bind"),
-                layout: &self.pipelines.fft_reorder3.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: stage_a.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: stage_b.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-fft3-reorder-bind"),
+                    layout: &self.pipelines.fft_reorder3.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: stage_a.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: stage_b.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
             let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                 chunk_len as u32,
                 crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -1472,9 +1596,11 @@ impl WgpuProvider {
         shape[dim] = target_len;
         fft_trim_trailing_ones(&mut shape, origin_rank.max(dim + 1));
         shape.push(2);
-        Ok(Some(
-            self.register_existing_buffer(stage_b, shape, out_scalar_len),
-        ))
+        Ok(Some(self.register_existing_buffer(
+            stage_b,
+            shape,
+            out_scalar_len,
+        )))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1518,24 +1644,26 @@ impl WgpuProvider {
                 input_complex: if complex_axis { 1 } else { 0 },
             };
             let params_buffer = self.fft_uniform_buffer(&params, "runmat-fft5-init-params");
-            let bind_group = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-fft5-init-bind"),
-                layout: &self.pipelines.fft_init.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: in_buffer.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: stage_a.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-fft5-init-bind"),
+                    layout: &self.pipelines.fft_init.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: in_buffer.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: stage_a.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
             let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                 chunk_len as u32,
                 crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -1573,28 +1701,30 @@ impl WgpuProvider {
                     _pad2: 0,
                 };
                 let params_buffer = self.fft_uniform_buffer(&params, "runmat-fft5-stage-params");
-                let bind_group = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("runmat-fft5-stage-bind"),
-                    layout: &self.pipelines.fft_stage5.layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: stage_a.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: stage_b.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: twiddle.as_ref().as_entire_binding(),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 3,
-                            resource: params_buffer.as_entire_binding(),
-                        },
-                    ],
-                });
+                let bind_group = self
+                    .device_ref()
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("runmat-fft5-stage-bind"),
+                        layout: &self.pipelines.fft_stage5.layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: stage_a.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: stage_b.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: twiddle.as_ref().as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: params_buffer.as_entire_binding(),
+                            },
+                        ],
+                    });
                 let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                     chunk_len as u32,
                     crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -1627,24 +1757,26 @@ impl WgpuProvider {
                 _pad0: 0,
             };
             let params_buffer = self.fft_uniform_buffer(&params, "runmat-fft5-reorder-params");
-            let bind_group = self.device_ref().create_bind_group(&wgpu::BindGroupDescriptor {
-                label: Some("runmat-fft5-reorder-bind"),
-                layout: &self.pipelines.fft_reorder5.layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: stage_a.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: stage_b.as_ref().as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 2,
-                        resource: params_buffer.as_entire_binding(),
-                    },
-                ],
-            });
+            let bind_group = self
+                .device_ref()
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("runmat-fft5-reorder-bind"),
+                    layout: &self.pipelines.fft_reorder5.layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: stage_a.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: stage_b.as_ref().as_entire_binding(),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: params_buffer.as_entire_binding(),
+                        },
+                    ],
+                });
             let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
                 chunk_len as u32,
                 crate::backend::wgpu::config::WORKGROUP_SIZE,
@@ -1663,9 +1795,11 @@ impl WgpuProvider {
         shape[dim] = target_len;
         fft_trim_trailing_ones(&mut shape, origin_rank.max(dim + 1));
         shape.push(2);
-        Ok(Some(
-            self.register_existing_buffer(stage_b, shape, out_scalar_len),
-        ))
+        Ok(Some(self.register_existing_buffer(
+            stage_b,
+            shape,
+            out_scalar_len,
+        )))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1676,7 +1810,8 @@ impl WgpuProvider {
         dim: usize,
         inverse: bool,
     ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, mut shape } = <Self as AccelProvider>::download(self, handle).await?;
+        let HostTensorOwned { data, mut shape } =
+            <Self as AccelProvider>::download(self, handle).await?;
         let mut complex_axis = false;
         if shape.last() == Some(&2) {
             complex_axis = true;
