@@ -162,7 +162,7 @@ fn serial_tensor_for_object(obj: &ObjectInstance) -> BuiltinResult<Tensor> {
     }
 }
 
-fn datetime_object_from_serial_tensor(
+pub(crate) fn datetime_object_from_serial_tensor(
     serials: Tensor,
     format: impl Into<String>,
 ) -> BuiltinResult<Value> {
@@ -492,14 +492,14 @@ fn numeric_value_to_datetime(value: Value, format: Option<String>) -> BuiltinRes
     )
 }
 
-fn serials_from_datetime_value(value: &Value) -> BuiltinResult<Tensor> {
+pub(crate) fn serials_from_datetime_value(value: &Value) -> BuiltinResult<Tensor> {
     match value {
         Value::Object(obj) if obj.is_class(DATETIME_CLASS) => serial_tensor_for_object(obj),
         _ => Err(datetime_error("datetime: expected a datetime value")),
     }
 }
 
-fn datetime_format_from_value(value: &Value) -> String {
+pub(crate) fn datetime_format_from_value(value: &Value) -> String {
     match value {
         Value::Object(obj) if obj.is_class(DATETIME_CLASS) => format_for_object(obj),
         _ => DEFAULT_DATETIME_FORMAT.to_string(),
@@ -895,7 +895,11 @@ async fn datetime_ge(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 #[runmat_macros::runtime_builtin(name = "datetime.plus", builtin_path = "crate::datetime")]
 async fn datetime_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let lhs_serials = serials_from_datetime_value(&lhs)?;
-    let rhs_numeric = serial_tensor_from_value(rhs, "plus")?;
+    let rhs_numeric = if crate::duration::is_duration_object(&rhs) {
+        crate::duration::duration_tensor_from_duration_value(&rhs)?
+    } else {
+        serial_tensor_from_value(rhs, "plus")?
+    };
     let (left, right, shape) = binary_numeric_tensors(&lhs_serials, &rhs_numeric, "plus")?;
     let serials = left
         .iter()
@@ -909,6 +913,16 @@ async fn datetime_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 async fn datetime_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let lhs_serials = serials_from_datetime_value(&lhs)?;
     match &rhs {
+        _ if crate::duration::is_duration_object(&rhs) => {
+            let rhs_days = crate::duration::duration_tensor_from_duration_value(&rhs)?;
+            let (left, right, shape) = binary_numeric_tensors(&lhs_serials, &rhs_days, "minus")?;
+            let serials = left
+                .iter()
+                .zip(right.iter())
+                .map(|(a, b)| a - b)
+                .collect::<Vec<_>>();
+            datetime_object_from_serials(serials, shape, datetime_format_from_value(&lhs))
+        }
         Value::Object(obj) if obj.is_class(DATETIME_CLASS) => {
             let rhs_serials = serial_tensor_for_object(obj)?;
             let (left, right, shape) = binary_numeric_tensors(&lhs_serials, &rhs_serials, "minus")?;
@@ -917,7 +931,12 @@ async fn datetime_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
                 .zip(right.iter())
                 .map(|(a, b)| a - b)
                 .collect::<Vec<_>>();
-            tensor_or_scalar(deltas, shape)
+            let tensor = Tensor::new(deltas, shape)
+                .map_err(|err| datetime_error(format!("minus: {err}")))?;
+            crate::duration::duration_object_from_days_tensor(
+                tensor,
+                crate::duration::DEFAULT_DURATION_FORMAT,
+            )
         }
         _ => {
             let rhs_numeric = serial_tensor_from_value(rhs, "minus")?;
@@ -1036,5 +1055,31 @@ mod tests {
         let rhs = run_datetime(vec![Value::Num(2024.0), Value::Num(1.0), Value::Num(2.0)]);
         let cmp = futures::executor::block_on(datetime_lt(lhs, rhs)).expect("lt");
         assert_eq!(cmp, Value::Num(1.0));
+    }
+
+    #[test]
+    fn datetime_and_duration_interoperate() {
+        let lhs = run_datetime(vec![Value::Num(2024.0), Value::Num(1.0), Value::Num(1.0)]);
+        let rhs = run_datetime(vec![Value::Num(2024.0), Value::Num(1.0), Value::Num(2.0)]);
+        let delta = futures::executor::block_on(datetime_minus(rhs.clone(), lhs.clone()))
+            .expect("datetime minus datetime");
+        let delta_text = crate::duration::duration_display_text(&delta)
+            .expect("duration display")
+            .expect("duration text");
+        assert_eq!(delta_text, "24:00:00");
+
+        let round_trip =
+            futures::executor::block_on(datetime_plus(lhs.clone(), delta.clone())).expect("plus");
+        let round_trip_text = datetime_display_text(&round_trip)
+            .expect("datetime display")
+            .expect("datetime text");
+        assert_eq!(round_trip_text, "02-Jan-2024");
+
+        let restored =
+            futures::executor::block_on(datetime_minus(rhs, delta)).expect("minus duration");
+        let restored_text = datetime_display_text(&restored)
+            .expect("datetime display")
+            .expect("datetime text");
+        assert_eq!(restored_text, "01-Jan-2024");
     }
 }

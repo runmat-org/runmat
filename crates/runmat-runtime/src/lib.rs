@@ -21,6 +21,7 @@ pub mod callsite;
 pub mod console;
 pub mod data;
 pub mod datetime;
+pub mod duration;
 pub mod interaction;
 pub mod interrupt;
 pub mod output_context;
