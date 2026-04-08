@@ -2383,8 +2383,8 @@ fn centered_gram_fusion_matches_cpu() {
         let vars_gpu = interpret_function(&bytecode, vars).expect("gpu interpret");
         let cov_gpu = vars_gpu.get(cov_index).expect("cov gpu");
         assert!(
-            matches!(cov_gpu, Value::GpuTensor(_) | Value::Tensor(_)),
-            "expected tensor-like result"
+            matches!(cov_gpu, Value::GpuTensor(_)),
+            "expected gpu tensor result"
         );
         let gathered_gpu = gather_if_needed(cov_gpu).expect("gather gpu");
         let gpu_tensor = match gathered_gpu {
@@ -2509,8 +2509,8 @@ fn power_step_normalization_matches_cpu() {
         let vars_gpu = interpret_function(&bytecode, vars).expect("gpu interpret");
         let q_gpu = vars_gpu.get(q_index).expect("gpu Q");
         assert!(
-            matches!(q_gpu, Value::GpuTensor(_) | Value::Tensor(_)),
-            "expected tensor-like result"
+            matches!(q_gpu, Value::GpuTensor(_)),
+            "expected gpu tensor result"
         );
         let gathered_gpu = gather_if_needed(q_gpu).expect("gather gpu");
         let gpu_tensor = match gathered_gpu {
@@ -2583,8 +2583,8 @@ fn image_normalize_matches_cpu() {
         let vars_gpu = interpret_function(&bytecode, vars_cpu.clone()).expect("gpu interpret");
         let out_gpu = vars_gpu.get(out_index).expect("gpu out");
         assert!(
-            matches!(out_gpu, Value::GpuTensor(_) | Value::Tensor(_)),
-            "expected tensor-like result"
+            matches!(out_gpu, Value::GpuTensor(_)),
+            "expected gpu tensor result"
         );
         let gathered_gpu = gather_if_needed(out_gpu).expect("gather gpu out");
         let gpu_tensor = match gathered_gpu {

@@ -2361,9 +2361,7 @@ async fn run_interpreter_inner(
                     for instr in &bytecode.instructions[span.start..=span.end] {
                         if matches!(
                             instr,
-                            Instr::StoreVar(_)
-                                | Instr::StoreLocal(_)
-                                | Instr::StoreIndex(_)
+                            Instr::StoreIndex(_)
                                 | Instr::StoreSlice(_, _, _, _)
                                 | Instr::StoreSliceExpr { .. }
                                 | Instr::StoreIndexCell(_)
@@ -2416,6 +2414,17 @@ async fn run_interpreter_inner(
                             break;
                         }
                     }
+                }
+                if fusion_debug_enabled() {
+                    log::trace!(
+                        "fusion gate pc={} kind={:?} span={}..{} has_barrier={} stored_vars={:?}",
+                        pc,
+                        plan.group.kind,
+                        span.start,
+                        span.end,
+                        has_barrier,
+                        stored_vars
+                    );
                 }
                 let _fusion_span = info_span!(
                     "fusion.execute",
@@ -10106,14 +10115,18 @@ async fn run_interpreter_inner(
                             if p.get_access == runmat_builtins::Access::Private {
                                 vm_bail!(format!("Property '{}' is private", field))
                             }
-                            if let Some(v) = runmat_builtins::get_static_property_value(&owner, &field) {
+                            if let Some(v) =
+                                runmat_builtins::get_static_property_value(&owner, &field)
+                            {
                                 stack.push(v);
                             } else if let Some(v) = &p.default_value {
                                 stack.push(v.clone());
                             } else {
                                 stack.push(Value::Num(0.0));
                             }
-                        } else if let Some((m, _owner)) = runmat_builtins::lookup_method(&cls, &field) {
+                        } else if let Some((m, _owner)) =
+                            runmat_builtins::lookup_method(&cls, &field)
+                        {
                             if !m.is_static {
                                 vm_bail!(format!("Method '{}' is not static", field));
                             }
@@ -10260,14 +10273,18 @@ async fn run_interpreter_inner(
                             if p.get_access == runmat_builtins::Access::Private {
                                 vm_bail!(format!("Property '{}' is private", name))
                             }
-                            if let Some(v) = runmat_builtins::get_static_property_value(&owner, &name) {
+                            if let Some(v) =
+                                runmat_builtins::get_static_property_value(&owner, &name)
+                            {
                                 stack.push(v);
                             } else if let Some(v) = &p.default_value {
                                 stack.push(v.clone());
                             } else {
                                 stack.push(Value::Num(0.0));
                             }
-                        } else if let Some((m, _owner)) = runmat_builtins::lookup_method(&cls, &name) {
+                        } else if let Some((m, _owner)) =
+                            runmat_builtins::lookup_method(&cls, &name)
+                        {
                             if !m.is_static {
                                 vm_bail!(format!("Method '{}' is not static", name));
                             }
@@ -10738,7 +10755,8 @@ async fn run_interpreter_inner(
                         }
 
                         if args.is_empty() {
-                            if let Some((p, owner)) = runmat_builtins::lookup_property(&cls, &name) {
+                            if let Some((p, owner)) = runmat_builtins::lookup_property(&cls, &name)
+                            {
                                 if !p.is_static {
                                     vm_bail!(format!("Property '{}' is not static", name));
                                 }
