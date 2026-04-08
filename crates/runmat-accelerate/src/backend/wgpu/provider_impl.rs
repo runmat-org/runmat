@@ -1,3 +1,9 @@
+// Internal note: this file has become a bit too large.
+// Subsequent provider call implementations that would otherwise
+// be added in this file should, going forwards, be added to 
+// ./provider_impl/*.rs instead. This module will be refactored into 
+// submodules in that manner in the future.
+
 use anyhow::{anyhow, ensure, Result};
 use bytemuck::{bytes_of, cast_slice, Pod, Zeroable};
 use futures::channel::oneshot;

@@ -541,3 +541,23 @@ fn end_expression_supports_user_function_calls_in_index_context() {
         "expected true/equivalent marker in vars, got {vars:?}"
     );
 }
+
+#[test]
+fn fftn_and_ifftn_execute_with_size_vector_and_indexing() {
+    let input = r#"
+        A = reshape(1:8, [2 2 2]);
+        F = fftn(A, [2 2 2]);
+        s = F(1:end/2);
+        B = ifftn(F, [2 2 2]);
+        ok = (numel(s) == 4) && (round(real(B(1))) == 1);
+    "#;
+    let ast = parse(input).expect("parse fftn/ifftn script");
+    let hir = lower(&ast).expect("lower fftn/ifftn script");
+    let vars = execute(&hir).expect("fftn/ifftn script should execute");
+    assert!(
+        vars.iter().any(|v| {
+            matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
+        }),
+        "expected true/equivalent marker in vars, got {vars:?}"
+    );
+}
