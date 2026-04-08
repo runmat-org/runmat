@@ -1,28 +1,21 @@
 //! MATLAB-compatible `fft` builtin with GPU-aware semantics for RunMat.
 
 use super::common::{
-    default_dimension, host_to_complex_tensor, parse_length, tensor_to_complex_tensor,
-    trim_trailing_ones, value_to_complex_tensor,
+    default_dimension, download_provider_complex_tensor, gather_gpu_complex_tensor, parse_length,
+    transform_complex_tensor, TransformDirection, value_to_complex_tensor,
 };
-use num_complex::Complex;
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, Value};
 use runmat_macros::runtime_builtin;
-use rustfft::FftPlanner;
-use std::sync::Arc;
 
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{
-    gpu_helpers,
-    shape::{is_scalar_shape, normalize_scalar_shape},
-    tensor,
-};
+use crate::builtins::common::{shape::normalize_scalar_shape, tensor};
 use crate::builtins::math::fft::type_resolvers::fft_type;
-use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::math::fft::forward")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
@@ -58,10 +51,6 @@ fn fft_error(message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message)
         .with_builtin(BUILTIN_NAME)
         .build()
-}
-
-fn builtin_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
-    build_runtime_error(message).with_builtin(builtin).build()
 }
 
 #[runtime_builtin(
@@ -107,54 +96,28 @@ async fn fft_gpu(
     let target_len = length.unwrap_or(current_len);
 
     if target_len == 0 {
-        let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-        let complex = tensor_to_complex_tensor(tensor, BUILTIN_NAME)?;
+        let complex = gather_gpu_complex_tensor(&handle, BUILTIN_NAME).await?;
         let transformed = fft_complex_tensor(complex, length, dimension)?;
         return Ok(complex_tensor_into_value(transformed));
     }
 
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Ok(out) = provider.fft_dim(&handle, length, dim_index).await {
-            let complex = fft_download_gpu_result(provider, &out, BUILTIN_NAME).await?;
+            let complex = download_provider_complex_tensor(provider, &out, BUILTIN_NAME, true).await?;
             return Ok(complex_tensor_into_value(complex));
         }
     }
 
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    let complex = tensor_to_complex_tensor(tensor, BUILTIN_NAME)?;
+    let complex = gather_gpu_complex_tensor(&handle, BUILTIN_NAME).await?;
     let transformed = fft_complex_tensor(complex, length, dimension)?;
     Ok(complex_tensor_into_value(transformed))
 }
 
-pub(super) async fn fft_download_gpu_result(
-    provider: &dyn AccelProvider,
-    handle: &GpuTensorHandle,
-    builtin: &str,
-) -> BuiltinResult<ComplexTensor> {
-    let host = download_handle_async(provider, handle)
-        .await
-        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
-    provider.free(handle).ok();
-    runmat_accelerate_api::clear_residency(handle);
-    host_to_complex_tensor(host, builtin)
-}
-
 async fn parse_dimension_arg(value: &Value) -> BuiltinResult<usize> {
-    match value {
-        Value::Int(_) | Value::Num(_) => {
-            tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
-                .await
-                .map_err(fft_error)?
-                .ok_or_else(|| {
-                    fft_error(format!(
-                        "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
-                    ))
-                })
-        }
-        _ => Err(fft_error(format!(
-            "{BUILTIN_NAME}: dimension must be numeric, got {value:?}"
-        ))),
-    }
+    tensor::dimension_from_value_async(value, BUILTIN_NAME, false)
+        .await
+        .map_err(fft_error)?
+        .ok_or_else(|| fft_error(format!("{BUILTIN_NAME}: dimension must be numeric, got {value:?}")))
 }
 
 async fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<usize>)> {
@@ -176,107 +139,11 @@ async fn parse_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option
 }
 
 pub(super) fn fft_complex_tensor(
-    mut tensor: ComplexTensor,
+    tensor: ComplexTensor,
     length: Option<usize>,
     dimension: Option<usize>,
 ) -> BuiltinResult<ComplexTensor> {
-    if is_scalar_shape(&tensor.shape) {
-        tensor.shape = normalize_scalar_shape(&tensor.shape);
-        tensor.rows = tensor.shape.first().copied().unwrap_or(1);
-        tensor.cols = tensor.shape.get(1).copied().unwrap_or(1);
-    }
-
-    let mut shape = tensor.shape.clone();
-    let origin_rank = shape.len();
-    let dim = match dimension {
-        Some(0) => return Err(fft_error("fft: dimension must be >= 1")),
-        Some(dim) => dim - 1,
-        None => default_dimension(&shape) - 1,
-    };
-
-    while shape.len() <= dim {
-        shape.push(1);
-    }
-
-    let current_len = shape[dim];
-    let target_len = length.unwrap_or(current_len);
-
-    if target_len == 0 {
-        let mut out_shape = shape;
-        out_shape[dim] = 0;
-        trim_trailing_ones(&mut out_shape, origin_rank);
-        return ComplexTensor::new(Vec::<(f64, f64)>::new(), out_shape)
-            .map_err(|e| fft_error(format!("fft: {e}")));
-    }
-
-    let inner_stride = shape[..dim]
-        .iter()
-        .copied()
-        .fold(1usize, |acc, dim| acc.saturating_mul(dim));
-    let outer_stride = shape[dim + 1..]
-        .iter()
-        .copied()
-        .fold(1usize, |acc, dim| acc.saturating_mul(dim));
-    let num_slices = inner_stride.saturating_mul(outer_stride);
-
-    let input = tensor
-        .data
-        .into_iter()
-        .map(|(re, im)| Complex::new(re, im))
-        .collect::<Vec<_>>();
-
-    if num_slices == 0 {
-        let mut out_shape = shape;
-        out_shape[dim] = target_len;
-        trim_trailing_ones(&mut out_shape, origin_rank);
-        let data = vec![(0.0, 0.0); 0];
-        return ComplexTensor::new(data, out_shape).map_err(|e| fft_error(format!("fft: {e}")));
-    }
-
-    let output_len = target_len.saturating_mul(num_slices);
-    let mut output = vec![Complex::new(0.0, 0.0); output_len];
-
-    let mut planner = FftPlanner::<f64>::new();
-    let fft_plan: Option<Arc<dyn rustfft::Fft<f64>>> = if target_len > 1 {
-        Some(planner.plan_fft_forward(target_len))
-    } else {
-        None
-    };
-
-    let copy_len = current_len.min(target_len);
-    let mut buffer = vec![Complex::new(0.0, 0.0); target_len];
-
-    for outer in 0..outer_stride {
-        let base_in = outer.saturating_mul(current_len.saturating_mul(inner_stride));
-        let base_out = outer.saturating_mul(target_len.saturating_mul(inner_stride));
-        for inner in 0..inner_stride {
-            buffer.iter_mut().for_each(|c| *c = Complex::new(0.0, 0.0));
-            for (k, slot) in buffer.iter_mut().enumerate().take(copy_len) {
-                let src_idx = base_in + inner + k * inner_stride;
-                if src_idx < input.len() {
-                    *slot = input[src_idx];
-                }
-            }
-            if target_len > 1 {
-                if let Some(plan) = &fft_plan {
-                    plan.process(&mut buffer);
-                }
-            }
-            for (k, value) in buffer.iter().enumerate().take(target_len) {
-                let dst_idx = base_out + inner + k * inner_stride;
-                if dst_idx < output.len() {
-                    output[dst_idx] = *value;
-                }
-            }
-        }
-    }
-
-    let mut out_shape = shape;
-    out_shape[dim] = target_len;
-    trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
-
-    let data = output.into_iter().map(|c| (c.re, c.im)).collect::<Vec<_>>();
-    ComplexTensor::new(data, out_shape).map_err(|e| fft_error(format!("fft: {e}")))
+    transform_complex_tensor(tensor, length, dimension, TransformDirection::Forward, BUILTIN_NAME)
 }
 
 #[cfg(test)]
@@ -571,6 +438,16 @@ pub(crate) mod tests {
             .unwrap_err(),
         );
         assert!(err.contains("dimension must be >= 1"));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn fft_accepts_scalar_tensor_dimension_argument() {
+        let dim = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
+        let (len, parsed_dim) = block_on(parse_arguments(&[Value::Num(4.0), Value::Tensor(dim)]))
+            .expect("parse arguments");
+        assert_eq!(len, Some(4));
+        assert_eq!(parsed_dim, Some(2));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

@@ -1,16 +1,18 @@
 //! MATLAB-compatible `ifftn` builtin with GPU-aware semantics for RunMat.
 
-use super::common::{host_to_complex_tensor, tensor_to_complex_tensor, value_to_complex_tensor};
-use super::ifft::ifft_complex_tensor;
+use super::common::{
+    complex_tensor_to_real_value, download_provider_complex_tensor, gather_gpu_complex_tensor,
+    parse_nd_sizes_value, parse_symflag, transform_nd_complex_tensor, value_to_complex_tensor,
+    TransformDirection,
+};
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::fft::type_resolvers::ifftn_type;
-use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, Value};
 
 #[cfg(test)]
@@ -61,23 +63,27 @@ fn ifftn_error(message: impl Into<String>) -> RuntimeError {
     builtin_path = "crate::builtins::math::fft::ifftn"
 )]
 async fn ifftn_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Value> {
-    let sizes = parse_ifftn_sizes(&rest)?;
+    let (sizes, symmetric) = parse_ifftn_arguments(&rest)?;
     match value {
-        Value::GpuTensor(handle) => ifftn_gpu(handle, sizes).await,
-        other => ifftn_host(other, sizes),
+        Value::GpuTensor(handle) => ifftn_gpu(handle, sizes, symmetric).await,
+        other => ifftn_host(other, sizes, symmetric),
     }
 }
 
-fn ifftn_host(value: Value, sizes: Option<Vec<usize>>) -> BuiltinResult<Value> {
+fn ifftn_host(value: Value, sizes: Option<Vec<usize>>, symmetric: bool) -> BuiltinResult<Value> {
     let tensor = value_to_complex_tensor(value, BUILTIN_NAME)?;
     let transformed = ifftn_complex_tensor(tensor, sizes)?;
-    Ok(complex_tensor_into_value(transformed))
+    finalize_ifftn_output(transformed, symmetric)
 }
 
-async fn ifftn_gpu(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> BuiltinResult<Value> {
+async fn ifftn_gpu(
+    handle: GpuTensorHandle,
+    sizes: Option<Vec<usize>>,
+    symmetric: bool,
+) -> BuiltinResult<Value> {
     if let Some(ref spec) = sizes {
         if spec.iter().any(|&n| n == 0) {
-            return ifftn_gpu_fallback(handle, sizes).await;
+            return ifftn_gpu_fallback(handle, sizes, symmetric).await;
         }
     }
 
@@ -114,115 +120,101 @@ async fn ifftn_gpu(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> Builti
         }
 
         if ok {
-            let host = download_handle_async(provider, &current)
-                .await
-                .map_err(|e| ifftn_error(format!("ifftn: {e}")))?;
-            provider.free(&current).ok();
-            runmat_accelerate_api::clear_residency(&current);
-            let complex = host_to_complex_tensor(host, BUILTIN_NAME)?;
-            return Ok(complex_tensor_into_value(complex));
+            let complex = download_provider_complex_tensor(provider, &current, BUILTIN_NAME, true)
+                .await?;
+            return finalize_ifftn_output(complex, symmetric);
         }
     }
 
-    ifftn_gpu_fallback(handle, sizes).await
+    ifftn_gpu_fallback(handle, sizes, symmetric).await
 }
 
 async fn ifftn_gpu_fallback(
     handle: GpuTensorHandle,
     sizes: Option<Vec<usize>>,
+    symmetric: bool,
 ) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
-        let host = download_handle_async(provider, &handle)
-            .await
-            .map_err(|e| ifftn_error(format!("ifftn: {e}")))?;
-        runmat_accelerate_api::clear_residency(&handle);
-        let complex = host_to_complex_tensor(host, BUILTIN_NAME)?;
+        let complex =
+            download_provider_complex_tensor(provider, &handle, BUILTIN_NAME, false).await?;
         let transformed = ifftn_complex_tensor(complex, sizes)?;
-        return Ok(complex_tensor_into_value(transformed));
+        return finalize_ifftn_output(transformed, symmetric);
     }
 
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    let complex = if tensor.shape.last() == Some(&2) {
-        let host = HostTensorOwned {
-            data: tensor.data,
-            shape: tensor.shape,
-        };
-        host_to_complex_tensor(host, BUILTIN_NAME)?
-    } else {
-        tensor_to_complex_tensor(tensor, BUILTIN_NAME)?
-    };
+    let complex = gather_gpu_complex_tensor(&handle, BUILTIN_NAME).await?;
     let transformed = ifftn_complex_tensor(complex, sizes)?;
-    Ok(complex_tensor_into_value(transformed))
+    finalize_ifftn_output(transformed, symmetric)
 }
 
 fn ifftn_complex_tensor(
     tensor: ComplexTensor,
     sizes: Option<Vec<usize>>,
 ) -> BuiltinResult<ComplexTensor> {
-    let mut out = tensor;
-    let axis_count = sizes
-        .as_ref()
-        .map(|v| v.len())
-        .unwrap_or_else(|| out.shape.len().max(1));
-
-    for axis in 0..axis_count {
-        let len = sizes.as_ref().and_then(|v| v.get(axis).copied());
-        out = ifft_complex_tensor(out, len, Some(axis + 1))?;
-    }
-    Ok(out)
+    transform_nd_complex_tensor(tensor, sizes.as_deref(), TransformDirection::Inverse, BUILTIN_NAME)
 }
 
-fn parse_ifftn_sizes(args: &[Value]) -> BuiltinResult<Option<Vec<usize>>> {
-    match args.len() {
-        0 => Ok(None),
-        1 => parse_sizes_value(&args[0]).map(Some),
-        _ => Err(ifftn_error("ifftn: expected ifftn(X) or ifftn(X, SIZE)")),
+fn finalize_ifftn_output(tensor: ComplexTensor, symmetric: bool) -> BuiltinResult<Value> {
+    if symmetric {
+        complex_tensor_to_real_value(tensor, BUILTIN_NAME)
+    } else {
+        Ok(complex_tensor_into_value(tensor))
     }
+}
+
+fn parse_ifftn_arguments(args: &[Value]) -> BuiltinResult<(Option<Vec<usize>>, bool)> {
+    if args.is_empty() {
+        return Ok((None, false));
+    }
+
+    let (symflag, rem) = split_symflag(args)?;
+    let symmetric = symflag.unwrap_or(false);
+
+    let sizes = match rem.len() {
+        0 => None,
+        1 => Some(parse_sizes_value(&rem[0])?),
+        _ => {
+            return Err(ifftn_error(
+                "ifftn: expected ifftn(X), ifftn(X, SIZE), or ifftn(X, SIZE, symflag)",
+            ))
+        }
+    };
+    Ok((sizes, symmetric))
+}
+
+fn split_symflag(args: &[Value]) -> BuiltinResult<(Option<bool>, &[Value])> {
+    if let Some((last, rest)) = args.split_last() {
+        if let Some(flag) = parse_symflag(last, BUILTIN_NAME)? {
+            for value in rest {
+                if parse_symflag(value, BUILTIN_NAME)?.is_some() {
+                    return Err(ifftn_error(
+                        "ifftn: symmetry flag must appear once at the end",
+                    ));
+                }
+            }
+            return Ok((Some(flag), rest));
+        }
+    }
+
+    for value in args {
+        if parse_symflag(value, BUILTIN_NAME)?.is_some() {
+            return Err(ifftn_error(
+                "ifftn: symmetry flag must appear as the final argument",
+            ));
+        }
+    }
+
+    Ok((None, args))
 }
 
 fn parse_sizes_value(value: &Value) -> BuiltinResult<Vec<usize>> {
-    match value {
-        Value::Tensor(t) => parse_sizes_data(&t.data),
-        Value::LogicalArray(logical) => {
-            let t = tensor::logical_to_tensor(logical)
-                .map_err(|e| ifftn_error(format!("ifftn: {e}")))?;
-            parse_sizes_data(&t.data)
-        }
-        Value::Num(n) => parse_sizes_data(&[*n]),
-        Value::Int(i) => parse_sizes_data(&[i.to_f64()]),
-        Value::Complex(re, im) => {
-            if im.abs() > f64::EPSILON {
-                return Err(ifftn_error("ifftn: SIZE must be real-valued"));
-            }
-            parse_sizes_data(&[*re])
-        }
-        Value::ComplexTensor(_) => Err(ifftn_error("ifftn: SIZE must be real-valued")),
-        _ => Err(ifftn_error("ifftn: SIZE must be numeric")),
-    }
-}
-
-fn parse_sizes_data(data: &[f64]) -> BuiltinResult<Vec<usize>> {
-    let mut out = Vec::with_capacity(data.len());
-    for &v in data {
-        if !v.is_finite() {
-            return Err(ifftn_error("ifftn: SIZE values must be finite"));
-        }
-        if v < 0.0 {
-            return Err(ifftn_error("ifftn: SIZE values must be non-negative"));
-        }
-        let rounded = v.round();
-        if (rounded - v).abs() > f64::EPSILON {
-            return Err(ifftn_error("ifftn: SIZE values must be integers"));
-        }
-        out.push(rounded as usize);
-    }
-    Ok(out)
+    parse_nd_sizes_value(value, BUILTIN_NAME)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::builtins::math::fft::fft::fft_complex_tensor;
+    use futures::executor::block_on;
 
     #[test]
     fn ifftn_roundtrip_matches_input_real_part() {
@@ -237,5 +229,44 @@ mod tests {
             assert!((*re - input.data[idx]).abs() < 1e-10);
             assert!(im.abs() < 1e-10);
         }
+    }
+
+    #[test]
+    fn ifftn_accepts_symmetric_flag() {
+        let input = Tensor::new((1..=8).map(|v| v as f64).collect(), vec![2, 2, 2]).unwrap();
+        let complex = value_to_complex_tensor(Value::Tensor(input.clone()), BUILTIN_NAME).unwrap();
+        let a = fft_complex_tensor(complex, None, Some(1)).unwrap();
+        let b = fft_complex_tensor(a, None, Some(2)).unwrap();
+        let freq = fft_complex_tensor(b, None, Some(3)).unwrap();
+
+        let result = block_on(ifftn_builtin(
+            Value::ComplexTensor(freq),
+            vec![Value::from("symmetric")],
+        ))
+        .expect("ifftn symmetric");
+        match result {
+            Value::Tensor(t) => {
+                assert_eq!(t.shape, vec![2, 2, 2]);
+                for (got, expected) in t.data.iter().zip(input.data.iter()) {
+                    assert!((*got - *expected).abs() < 1e-10);
+                }
+            }
+            other => panic!("expected real tensor, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn ifftn_requires_symflag_final_position() {
+        let input = Tensor::new((1..=8).map(|v| v as f64).collect(), vec![2, 2, 2]).unwrap();
+        let size = Tensor::new(vec![2.0, 2.0, 2.0], vec![1, 3]).unwrap();
+        let err = block_on(ifftn_builtin(
+            Value::Tensor(input),
+            vec![Value::from("symmetric"), Value::Tensor(size)],
+        ))
+        .unwrap_err();
+        assert!(
+            err.message()
+                .contains("symmetry flag must appear as the final argument")
+        );
     }
 }

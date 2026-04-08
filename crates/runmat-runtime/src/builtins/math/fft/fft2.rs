@@ -1,16 +1,19 @@
 //! MATLAB-compatible `fft2` builtin with GPU-aware semantics for RunMat.
 
-use super::common::{parse_length, tensor_to_complex_tensor, value_to_complex_tensor};
-use super::fft::{fft_complex_tensor, fft_download_gpu_result};
+use super::common::{
+    download_provider_complex_tensor, gather_gpu_complex_tensor, parse_2d_lengths_from_data,
+    parse_length, transform_axes_complex_tensor, value_to_complex_tensor, TransformDirection,
+};
+use super::fft::fft_complex_tensor;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::tensor;
 use crate::builtins::math::fft::type_resolvers::fft2_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -88,11 +91,15 @@ async fn fft2_gpu(
                         provider.free(&first).ok();
                         runmat_accelerate_api::clear_residency(&first);
                     }
-                    let complex = fft2_download_gpu_result(provider, &second).await?;
+                    let complex =
+                        download_provider_complex_tensor(provider, &second, BUILTIN_NAME, true)
+                            .await?;
                     return Ok(complex_tensor_into_value(complex));
                 }
                 Err(_) => {
-                    let partial = fft2_download_gpu_result(provider, &first).await?;
+                    let partial =
+                        download_provider_complex_tensor(provider, &first, BUILTIN_NAME, true)
+                            .await?;
                     let completed = fft_complex_tensor(partial, lengths.1, Some(2))?;
                     return Ok(complex_tensor_into_value(completed));
                 }
@@ -103,19 +110,11 @@ async fn fft2_gpu(
     fft2_gpu_fallback(handle, lengths).await
 }
 
-async fn fft2_download_gpu_result(
-    provider: &dyn AccelProvider,
-    handle: &GpuTensorHandle,
-) -> BuiltinResult<ComplexTensor> {
-    fft_download_gpu_result(provider, handle, BUILTIN_NAME).await
-}
-
 async fn fft2_gpu_fallback(
     handle: GpuTensorHandle,
     lengths: (Option<usize>, Option<usize>),
 ) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    let complex = tensor_to_complex_tensor(tensor, BUILTIN_NAME)?;
+    let complex = gather_gpu_complex_tensor(&handle, BUILTIN_NAME).await?;
     let transformed = fft2_complex_tensor(complex, lengths)?;
     Ok(complex_tensor_into_value(transformed))
 }
@@ -125,8 +124,12 @@ fn fft2_complex_tensor(
     lengths: (Option<usize>, Option<usize>),
 ) -> BuiltinResult<ComplexTensor> {
     let (len_rows, len_cols) = lengths;
-    let first = fft_complex_tensor(tensor, len_rows, Some(1))?;
-    fft_complex_tensor(first, len_cols, Some(2))
+    transform_axes_complex_tensor(
+        tensor,
+        &[len_rows, len_cols],
+        TransformDirection::Forward,
+        BUILTIN_NAME,
+    )
 }
 
 fn parse_fft2_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<usize>)> {
@@ -146,11 +149,11 @@ fn parse_fft2_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<
 
 fn parse_fft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usize>)> {
     match value {
-        Value::Tensor(tensor) => parse_length_pair(&tensor.data, BUILTIN_NAME),
+        Value::Tensor(tensor) => parse_2d_lengths_from_data(&tensor.data, BUILTIN_NAME),
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(logical)
                 .map_err(|e| fft2_error(format!("{BUILTIN_NAME}: {e}")))?;
-            parse_length_pair(&tensor.data, BUILTIN_NAME)
+            parse_2d_lengths_from_data(&tensor.data, BUILTIN_NAME)
         }
         Value::Num(_) | Value::Int(_) => {
             let len = parse_length(value, BUILTIN_NAME)?;
@@ -182,27 +185,6 @@ fn parse_fft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usiz
         | Value::ClassRef(_)
         | Value::MException(_)
         | Value::OutputList(_) => Err(fft2_error("fft2: transform lengths must be numeric")),
-    }
-}
-
-fn parse_length_pair(data: &[f64], builtin: &str) -> BuiltinResult<(Option<usize>, Option<usize>)> {
-    match data.len() {
-        0 => Ok((None, None)),
-        1 => {
-            let scalar = Value::Num(data[0]);
-            let len = parse_length(&scalar, builtin)?;
-            Ok((len, len))
-        }
-        2 => {
-            let first = Value::Num(data[0]);
-            let second = Value::Num(data[1]);
-            let len_rows = parse_length(&first, builtin)?;
-            let len_cols = parse_length(&second, builtin)?;
-            Ok((len_rows, len_cols))
-        }
-        _ => Err(fft2_error(format!(
-            "{builtin}: size vector must contain at most two elements"
-        ))),
     }
 }
 

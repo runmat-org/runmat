@@ -1,16 +1,17 @@
 //! MATLAB-compatible `fftn` builtin with GPU-aware semantics for RunMat.
 
-use super::common::{host_to_complex_tensor, tensor_to_complex_tensor, value_to_complex_tensor};
-use super::fft::{fft_complex_tensor, fft_download_gpu_result};
+use super::common::{
+    download_provider_complex_tensor, gather_gpu_complex_tensor, parse_nd_sizes_value,
+    transform_nd_complex_tensor, value_to_complex_tensor, TransformDirection,
+};
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
 use crate::builtins::math::fft::type_resolvers::fftn_type;
-use crate::{build_runtime_error, dispatcher::download_handle_async, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::{GpuTensorHandle, HostTensorOwned};
+use crate::{build_runtime_error, BuiltinResult, RuntimeError};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, Value};
 
 #[cfg(test)]
@@ -114,7 +115,8 @@ async fn fftn_gpu(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> Builtin
         }
 
         if ok {
-            let complex = fft_download_gpu_result(provider, &current, BUILTIN_NAME).await?;
+            let complex = download_provider_complex_tensor(provider, &current, BUILTIN_NAME, true)
+                .await?;
             return Ok(complex_tensor_into_value(complex));
         }
     }
@@ -124,41 +126,18 @@ async fn fftn_gpu(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> Builtin
 
 async fn fftn_gpu_fallback(handle: GpuTensorHandle, sizes: Option<Vec<usize>>) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider() {
-        let host = download_handle_async(provider, &handle)
-            .await
-            .map_err(|e| fftn_error(format!("fftn: {e}")))?;
-        runmat_accelerate_api::clear_residency(&handle);
-        let complex = host_to_complex_tensor(host, BUILTIN_NAME)?;
+        let complex = download_provider_complex_tensor(provider, &handle, BUILTIN_NAME, false).await?;
         let transformed = fftn_complex_tensor(complex, sizes)?;
         return Ok(complex_tensor_into_value(transformed));
     }
 
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    let complex = if tensor.shape.last() == Some(&2) {
-        let host = HostTensorOwned {
-            data: tensor.data,
-            shape: tensor.shape,
-        };
-        host_to_complex_tensor(host, BUILTIN_NAME)?
-    } else {
-        tensor_to_complex_tensor(tensor, BUILTIN_NAME)?
-    };
+    let complex = gather_gpu_complex_tensor(&handle, BUILTIN_NAME).await?;
     let transformed = fftn_complex_tensor(complex, sizes)?;
     Ok(complex_tensor_into_value(transformed))
 }
 
 fn fftn_complex_tensor(tensor: ComplexTensor, sizes: Option<Vec<usize>>) -> BuiltinResult<ComplexTensor> {
-    let mut out = tensor;
-    let axis_count = sizes
-        .as_ref()
-        .map(|v| v.len())
-        .unwrap_or_else(|| out.shape.len().max(1));
-
-    for axis in 0..axis_count {
-        let len = sizes.as_ref().and_then(|v| v.get(axis).copied());
-        out = fft_complex_tensor(out, len, Some(axis + 1))?;
-    }
-    Ok(out)
+    transform_nd_complex_tensor(tensor, sizes.as_deref(), TransformDirection::Forward, BUILTIN_NAME)
 }
 
 fn parse_fftn_sizes(args: &[Value]) -> BuiltinResult<Option<Vec<usize>>> {
@@ -170,47 +149,13 @@ fn parse_fftn_sizes(args: &[Value]) -> BuiltinResult<Option<Vec<usize>>> {
 }
 
 fn parse_sizes_value(value: &Value) -> BuiltinResult<Vec<usize>> {
-    match value {
-        Value::Tensor(t) => parse_sizes_data(&t.data),
-        Value::LogicalArray(logical) => {
-            let t = tensor::logical_to_tensor(logical)
-                .map_err(|e| fftn_error(format!("fftn: {e}")))?;
-            parse_sizes_data(&t.data)
-        }
-        Value::Num(n) => parse_sizes_data(&[*n]),
-        Value::Int(i) => parse_sizes_data(&[i.to_f64()]),
-        Value::Complex(re, im) => {
-            if im.abs() > f64::EPSILON {
-                return Err(fftn_error("fftn: SIZE must be real-valued"));
-            }
-            parse_sizes_data(&[*re])
-        }
-        Value::ComplexTensor(_) => Err(fftn_error("fftn: SIZE must be real-valued")),
-        _ => Err(fftn_error("fftn: SIZE must be numeric")),
-    }
-}
-
-fn parse_sizes_data(data: &[f64]) -> BuiltinResult<Vec<usize>> {
-    let mut out = Vec::with_capacity(data.len());
-    for &v in data {
-        if !v.is_finite() {
-            return Err(fftn_error("fftn: SIZE values must be finite"));
-        }
-        if v < 0.0 {
-            return Err(fftn_error("fftn: SIZE values must be non-negative"));
-        }
-        let rounded = v.round();
-        if (rounded - v).abs() > f64::EPSILON {
-            return Err(fftn_error("fftn: SIZE values must be integers"));
-        }
-        out.push(rounded as usize);
-    }
-    Ok(out)
+    parse_nd_sizes_value(value, BUILTIN_NAME)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::builtins::math::fft::fft::fft_complex_tensor;
 
     #[test]
     fn fftn_matches_sequential_fft_on_3d() {
