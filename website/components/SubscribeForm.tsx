@@ -45,7 +45,7 @@ export default function SubscribeForm() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@example.com"
-          className="w-full h-11 rounded-lg border border-border bg-muted/20 px-4 text-base text-foreground placeholder:text-muted-foreground shadow-sm focus:outline-none focus:ring-2 focus:ring-ring/40 sm:h-10 sm:text-sm sm:flex-1 min-w-0"
+          className="w-full h-11 rounded-md border border-border bg-muted/20 px-4 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring/40 sm:h-10 sm:text-sm sm:flex-1 min-w-0"
           aria-label="Email address"
           autoComplete="email"
           inputMode="email"
@@ -54,7 +54,7 @@ export default function SubscribeForm() {
         />
         <button
           type="submit"
-          className="h-12 w-full px-8 text-lg font-semibold sm:h-10 sm:w-auto sm:px-6 sm:text-sm flex-shrink-0 whitespace-nowrap rounded-lg bg-[hsl(var(--brand))] text-white transition-colors shadow-none hover:bg-[hsl(var(--brand))]/90 disabled:opacity-60"
+          className="h-12 w-full px-8 text-lg font-semibold sm:h-10 sm:w-auto sm:px-6 sm:text-sm flex-shrink-0 whitespace-nowrap bg-[hsl(var(--brand))] text-white transition-colors shadow-none hover:bg-[hsl(var(--brand))]/90 disabled:opacity-60"
           disabled={status === "loading" || status === "success"}
         >
           {status === "loading" ? "Subscribing..." : status === "success" ? "Subscribed" : "Stay In The Loop"}

@@ -50,10 +50,10 @@ export default function ResourcesPage() {
       <div className="container mx-auto px-4 py-16 md:px-6 md:py-24 space-y-12">
         {/* Hero */}
         <div className="mx-auto max-w-[58rem] text-center">
-          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl md:text-4xl">
             Resource Hub
           </h1>
-          <p className="mt-6 text-base text-muted-foreground sm:text-lg">
+          <p className="mt-6 text-foreground text-[0.938rem]">
             Hand-picked guides, docs, and benchmarks to learn RunMat.
           </p>
         </div>
@@ -146,7 +146,7 @@ function TypeCard({
   const color = typeColor(type);
   return (
     <Link href={href} className="block h-full group">
-      <Card className="h-full bg-muted/5 hover:bg-muted/50 transition-all rounded-lg p-5 text-left">
+      <Card className="h-full bg-muted/50 hover:bg-card transition-all rounded-lg p-5 text-left">
         <CardHeader className="space-y-3 p-0">
           <div
             className="w-10 h-10 rounded-md flex items-center justify-center transition-colors"

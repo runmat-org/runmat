@@ -75,12 +75,12 @@ export default function BuiltinsExplorer({ builtins }: { builtins: Builtin[] }) 
             value={q}
             onChange={(e)=>setQ(e.target.value)}
             placeholder="Search builtins…"
-            className="w-full text-sm rounded-md border border-border bg-muted/40 pr-3 pl-3 py-2 h-9 focus:outline-none focus:ring-2 focus:ring-primary/60 focus:border-primary placeholder:text-muted-foreground/80 shadow-sm"
+            className="w-full text-sm rounded-md border border-border bg-muted pr-3 pl-3 py-2 h-9 focus:outline-none focus:ring-2 focus:ring-primary/60 focus:border-primary placeholder:text-muted-foreground/80 shadow-sm"
           />
         </div>
         {/* Pagination header */}
         <div className="mb-2 flex items-center justify-between text-sm">
-          <div className="text-muted-foreground">
+          <div className="text-foreground">
             Showing <span className="font-medium">{results.length === 0 ? 0 : startIdx + 1}</span>–<span className="font-medium">{endIdx}</span> of <span className="font-medium">{results.length}</span>
           </div>
           <div className="flex items-center gap-2">
@@ -89,7 +89,7 @@ export default function BuiltinsExplorer({ builtins }: { builtins: Builtin[] }) 
               id="page-size"
               value={pageSize}
               onChange={(e)=>setPageSize(Number(e.target.value))}
-              className="h-8 rounded-md border border-border bg-muted/40 px-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/60"
+              className="h-8 rounded-md border border-border bg-muted px-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/60"
             >
               <option value={10}>10</option>
               <option value={25}>25</option>
@@ -101,14 +101,14 @@ export default function BuiltinsExplorer({ builtins }: { builtins: Builtin[] }) 
                 type="button"
                 onClick={()=> setPage(p => Math.max(1, p - 1))}
                 disabled={currentPage <= 1}
-                className="h-8 px-3 rounded-md border border-border bg-muted/40 disabled:opacity-50 hover:bg-muted"
+                className="h-8 px-3 rounded-md border border-border bg-muted disabled:opacity-50 hover:bg-muted"
                 aria-label="Previous page"
               >Prev</button>
               <button
                 type="button"
                 onClick={()=> setPage(p => Math.min(pageCount, p + 1))}
                 disabled={currentPage >= pageCount}
-                className="h-8 px-3 rounded-md border border-border bg-muted/40 disabled:opacity-50 hover:bg-muted"
+                className="h-8 px-3 rounded-md border border-border bg-muted disabled:opacity-50 hover:bg-muted"
                 aria-label="Next page"
               >Next</button>
             </div>
@@ -116,33 +116,33 @@ export default function BuiltinsExplorer({ builtins }: { builtins: Builtin[] }) 
         </div>
         <ul className="divide-y divide-border rounded border border-border">
           {pagedResults.map((b) => (
-            <li key={b.slug} className="p-3 hover:bg-muted/40">
+            <li key={b.slug} className="p-3 hover:bg-muted">
               <div className="flex items-center justify-between gap-3">
                 <Link href={`/docs/reference/builtins/${b.slug}`} className="font-medium hover:underline">{b.name}</Link>
               </div>
-              {b.summary && <div className="text-sm text-muted-foreground mt-1">{b.summary}</div>}
+              {b.summary && <div className="text-sm text-foreground mt-1">{b.summary}</div>}
             </li>
           ))}
           {results.length === 0 && (
-            <li className="p-3 text-sm text-muted-foreground">No builtins match your filters.</li>
+            <li className="p-3 text-sm text-foreground">No builtins match your filters.</li>
           )}
         </ul>
         {/* Pagination footer */}
         <div className="mt-3 flex items-center justify-between text-sm">
-          <div className="text-muted-foreground">Page <span className="font-medium">{currentPage}</span> of <span className="font-medium">{pageCount}</span></div>
+          <div className="text-foreground">Page <span className="font-medium">{currentPage}</span> of <span className="font-medium">{pageCount}</span></div>
           <div className="flex items-center gap-2">
             <button
               type="button"
               onClick={()=> setPage(p => Math.max(1, p - 1))}
               disabled={currentPage <= 1}
-              className="h-8 px-3 rounded-md border border-border bg-muted/40 disabled:opacity-50 hover:bg-muted"
+              className="h-8 px-3 rounded-md border border-border bg-muted disabled:opacity-50 hover:bg-muted"
               aria-label="Previous page"
             >Prev</button>
             <button
               type="button"
               onClick={()=> setPage(p => Math.min(pageCount, p + 1))}
               disabled={currentPage >= pageCount}
-              className="h-8 px-3 rounded-md border border-border bg-muted/40 disabled:opacity-50 hover:bg-muted"
+              className="h-8 px-3 rounded-md border border-border bg-muted disabled:opacity-50 hover:bg-muted"
               aria-label="Next page"
             >Next</button>
           </div>

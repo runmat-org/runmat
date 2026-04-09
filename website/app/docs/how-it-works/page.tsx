@@ -30,13 +30,13 @@ export default function HowItWorksPage() {
         
         {/* Header */}
         <div className="mb-12">
-          <h1 className="text-4xl lg:text-5xl font-bold mb-6 text-foreground">
+          <h1 className="text-2xl sm:text-3xl font-bold mb-6 text-foreground">
             How RunMat Works
           </h1>
-          <p className="text-xl text-muted-foreground leading-relaxed">
+          <p className="text-[0.938rem] text-foreground leading-relaxed">
             RunMat is a GPU-accelerated runtime for MATLAB code that automatically optimizes your math across CPU and GPU—often outperforming hand-tuned PyTorch without any kernel programming. 
           </p>
-          <p className="text-lg text-muted-foreground leading-relaxed mt-8">
+          <p className="text-[0.938rem] text-foreground leading-relaxed mt-8">
             It implements the full language grammar and core semantics of the MATLAB programming language — arrays and indexing, control flow, functions and multiple returns, cells/structs, and
             classdef OOP — with a fast engine that can execute your code quickly on CPU or GPU. RunMat is a clean, fast runtime for the MATLAB language.
           </p>
@@ -44,18 +44,18 @@ export default function HowItWorksPage() {
 
         {/* The Problem with Traditional Scientific Computing */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">Why existing approaches are slow</h2>
+          <h2 className="text-xl sm:text-2xl font-semibold mb-6 text-foreground">Why existing approaches are slow</h2>
           <div className="bg-gradient-to-r from-amber-100 to-yellow-100 dark:from-amber-900/40 dark:to-yellow-900/40 rounded-lg p-6 mb-8 border border-amber-200 dark:border-amber-800">
-              <p className="text-lg leading-relaxed">
+              <p className="text-[0.938rem] text-foreground leading-relaxed">
               <strong>Traditional MATLAB:</strong> Slow startup, interpreted loops, no GPU support without expensive toolboxes.
             </p>
-            <p className="text-lg leading-relaxed mt-4">
+            <p className="text-[0.938rem] text-foreground leading-relaxed mt-4">
               <strong>Octave:</strong> Significantly slower than MATLAB, especially for loop-heavy code. It is also not a full implementation of the MATLAB language, and does not have a GPU layer.
               </p>
-              <p className="text-lg leading-relaxed mt-4">
+              <p className="text-[0.938rem] text-foreground leading-relaxed mt-4">
               <strong>PyTorch/TensorFlow:</strong> Requires rewriting code, explicit device management, kernel programming knowledge.
               </p>
-              <p className="text-lg leading-relaxed mt-4 text-muted-foreground">
+              <p className="text-[0.938rem] text-foreground leading-relaxed mt-4">
               <strong>The result:</strong> Scientists choose between ease (MATLAB) or speed (PyTorch)—not both.
               </p>
             </div>
@@ -63,8 +63,8 @@ export default function HowItWorksPage() {
 
         {/* The RunMat Solution */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">RunMat: slim core + adaptive compilation</h2>
-          <p className="text-lg text-muted-foreground mb-8">
+          <h2 className="text-xl sm:text-2xl font-semibold mb-6 text-foreground">RunMat: slim core + adaptive compilation</h2>
+          <p className="text-[0.938rem] text-foreground mb-8">
             Inspired by modern JavaScript engines, RunMat starts instantly in a high-performance interpreter and
             upgrades hot code to native machine code. The core is intentionally small and predictable, so the engine
             can be ruthlessly optimized.
@@ -77,9 +77,9 @@ export default function HowItWorksPage() {
                   <div className="mr-4 flex h-10 w-10 items-center justify-center rounded-full bg-secondary text-[hsl(var(--brand))]">
                     <Zap className="h-5 w-5" />
                   </div>
-                  <h3 className="text-xl font-semibold">Phase 1: Instant Execution</h3>
+                  <h3 className="text-base sm:text-lg font-semibold">Phase 1: Instant Execution</h3>
                 </div>
-                <p className="text-muted-foreground leading-relaxed">
+                <p className="text-[0.938rem] text-foreground leading-relaxed">
                   Your code runs immediately through our <strong>Ignition interpreter</strong> — no compilation wait time.
                   Perfect for interactive work, tests, and scripts. While executing, we profile which functions are hot.
                 </p>
@@ -91,9 +91,9 @@ export default function HowItWorksPage() {
                   <div className="bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200 rounded-full w-10 h-10 flex items-center justify-center text-lg font-bold mr-4">
                     <Cpu className="h-5 w-5" />
                   </div>
-                  <h3 className="text-xl font-semibold">Phase 2: Machine Code</h3>
+                  <h3 className="text-base sm:text-lg font-semibold">Phase 2: Machine Code</h3>
               </div>
-                <p className="text-muted-foreground leading-relaxed">
+                <p className="text-[0.938rem] text-foreground leading-relaxed">
                   Functions that run frequently get upgraded to native machine code via the <strong>Turbine JIT</strong>:
                   loop optimizations, type-specialized paths, and vectorization tailored to your data and call patterns.
                 </p>
@@ -106,7 +106,7 @@ export default function HowItWorksPage() {
               <BarChart3 className="h-6 w-6 mr-3 mt-1 flex-shrink-0 text-[hsl(var(--brand))]" />
               <div>
                 <h4 className="text-lg font-semibold mb-3">Why this approach wins</h4>
-                <p className="text-muted-foreground leading-relaxed">
+                <p className="text-[0.938rem] text-foreground leading-relaxed">
                   The RunMat JIT sees <em>exactly</em> how your code behaves: matrix sizes, datatypes, calling patterns.
                   The 20% of your code that runs 80% of the time gets the full optimization budget.
                 </p>
@@ -117,44 +117,44 @@ export default function HowItWorksPage() {
 
         {/* Automatic GPU Acceleration */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">Automatic GPU Acceleration: Faster than Hand-Optimized Code</h2>
-          <p className="text-lg leading-relaxed mb-6 text-muted-foreground">
+          <h2 className="text-xl sm:text-2xl font-semibold mb-6 text-foreground">Automatic GPU Acceleration: Faster than Hand-Optimized Code</h2>
+          <p className="text-[0.938rem] text-foreground leading-relaxed mb-6">
             RunMat&apos;s fusion engine automatically:
           </p>
-          <p className="text-sm text-muted-foreground mb-4">
+          <p className="text-[0.938rem] text-foreground mb-4">
             For a product overview, read the{" "}
             <Link href="/blog/runmat-accelerate-fastest-runtime-for-your-math" className="underline">
               RunMat Accelerate announcement
             </Link>
             .
           </p>
-          <ul className="space-y-4 mb-6 text-lg leading-relaxed">
+          <ul className="space-y-4 mb-6 text-[0.938rem] text-foreground leading-relaxed">
             <li className="flex items-start">
-              <span className="text-green-600 mr-3 mt-1">•</span>
+              <span className="text-green-600 dark:text-green-400 mr-3 mt-1">•</span>
               <span>Detects GPU-friendly operations and routes them intelligently</span>
             </li>
             <li className="flex items-start">
-              <span className="text-green-600 mr-3 mt-1">•</span>
+              <span className="text-green-600 dark:text-green-400 mr-3 mt-1">•</span>
               <span>Fuses operation chains into optimized kernels (like PyTorch&apos;s <code className="bg-muted px-1.5 py-0.5 rounded">torch.compile</code>, but automatic)</span>
             </li>
             <li className="flex items-start">
-              <span className="text-green-600 mr-3 mt-1">•</span>
+              <span className="text-green-600 dark:text-green-400 mr-3 mt-1">•</span>
               <span>Manages memory placement between CPU/GPU for maximum throughput</span>
             </li>
             <li className="flex items-start">
-              <span className="text-green-600 mr-3 mt-1">•</span>
+              <span className="text-green-600 dark:text-green-400 mr-3 mt-1">•</span>
               <span>Often beats hand-tuned PyTorch—see our <Link href="/benchmarks" className="text-[hsl(var(--brand))] hover:underline">benchmarks</Link></span>
             </li>
           </ul>
-          <p className="text-lg leading-relaxed font-medium">
+          <p className="text-[0.938rem] text-foreground leading-relaxed font-medium">
             No device flags. No kernel code. Just math that runs at maximum speed.
           </p>
         </section>
 
         {/* Language and Semantics */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">Language compatibility and semantics</h2>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-muted-foreground">
+          <h2 className="text-xl sm:text-2xl font-semibold mb-6 text-foreground">Language compatibility and semantics</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-[0.938rem] text-foreground">
             <Card>
               <CardHeader><CardTitle>Full grammar</CardTitle></CardHeader>
               <CardContent>
@@ -181,8 +181,8 @@ export default function HowItWorksPage() {
 
         {/* HIR & AST: acceleration and tooling */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">HIR & AST: foundation for acceleration and tooling</h2>
-          <p className="text-lg text-muted-foreground mb-6">
+          <h2 className="text-xl sm:text-2xl font-semibold mb-6 text-foreground">HIR & AST: foundation for acceleration and tooling</h2>
+          <p className="text-[0.938rem] text-foreground mb-6">
             RunMat lowers source to a high-level, typed IR (HIR) with flow-sensitive inference. A stable AST→HIR pipeline
             gives the engine precise structure and types, which unlocks acceleration and first-class editor tooling.
           </p>
@@ -190,7 +190,7 @@ export default function HowItWorksPage() {
             <Card>
               <CardContent className="p-6">
                 <h4 className="text-lg font-semibold mb-3">Seamless Accelerate</h4>
-                <p className="text-muted-foreground">
+                <p className="text-[0.938rem] text-foreground">
                   Tensor/Matrix ops are explicit in HIR, so the planner can route work to CPU or GPU, fuse common
                   elementwise chains, and support reverse-mode autograd by default. This lets the planner
                   dispatch and manage memory and operations across GPU/CPU/TPU/etc without needing any user code changes.
@@ -200,7 +200,7 @@ export default function HowItWorksPage() {
             <Card>
               <CardContent className="p-6">
                 <h4 className="text-lg font-semibold mb-3">Great IntelliSense (LSP)</h4>
-                <p className="text-muted-foreground">
+                <p className="text-[0.938rem] text-foreground">
                   Typed nodes power hover types, signature help, go-to-definition across packages, property/field
                   completion from the class registry, and precise diagnostics. The same HIR backs the interpreter and JIT.
                 </p>
@@ -212,7 +212,7 @@ export default function HowItWorksPage() {
               <BarChart3 className="h-6 w-6 mr-3 mt-1 flex-shrink-0 text-[hsl(var(--brand))]" />
               <div>
                 <h4 className="text-lg font-semibold mb-3">Portable by design</h4>
-                <p className="text-muted-foreground leading-relaxed">
+                <p className="text-[0.938rem] text-foreground leading-relaxed">
                   Typed HIR lowers to Cranelift IR, which makes it trivial to target multiple architectures. That makes RunMat
                   platform-agnostic and lightweight: small static binaries, predictable performance on Linux/macOS/Windows or embedded devices,
                   and room for ahead-of-time or cached compilation where it helps startup.
@@ -226,7 +226,7 @@ export default function HowItWorksPage() {
               <BarChart3 className="h-6 w-6 mr-3 mt-1 flex-shrink-0 text-[hsl(var(--brand))]" />
               <div>
                 <h4 className="text-lg font-semibold mb-3">Why this architecture is different</h4>
-                <p className="text-muted-foreground leading-relaxed">
+                <p className="text-[0.938rem] text-foreground leading-relaxed">
                   Octave&apos;s classic interpreter does not expose a typed IR, limiting deep optimization and IDE tooling.
                   MATLAB has powerful internal IRs but limited external LSP integration. RunMat&apos;s stable HIR/ABI and
                   Cranelift backend make accelerators and editors plug in cleanly across platforms.
@@ -238,7 +238,7 @@ export default function HowItWorksPage() {
 
         {/* Performance Characteristics */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">
+          <h2 className="text-xl sm:text-2xl font-semibold mb-6 text-foreground">
             Performance Characteristics
           </h2>
           
@@ -250,16 +250,16 @@ export default function HowItWorksPage() {
               <CardContent>
                 <div className="space-y-3">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">GNU Octave</span>
+                    <span className="text-[0.938rem] text-foreground">GNU Octave</span>
                     <span className="font-semibold">914ms avg</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">RunMat</span>
-                    <span className="font-semibold text-green-600">5ms avg</span>
+                    <span className="text-[0.938rem] text-foreground">RunMat</span>
+                    <span className="font-semibold text-green-600 dark:text-green-400">5ms avg</span>
                   </div>
                   <div className="flex justify-between border-t pt-2">
                     <span className="text-foreground font-medium">Speedup</span>
-                    <span className="font-semibold text-green-600">182.93× faster</span>
+                    <span className="font-semibold text-green-600 dark:text-green-400">182.93× faster</span>
                   </div>
                 </div>
               </CardContent>
@@ -272,16 +272,16 @@ export default function HowItWorksPage() {
               <CardContent>
                 <div className="space-y-3">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">GNU Octave</span>
+                    <span className="text-[0.938rem] text-foreground">GNU Octave</span>
                     <span className="font-semibold">822ms avg</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">RunMat</span>
-                    <span className="font-semibold text-green-600">5ms avg</span>
+                    <span className="text-[0.938rem] text-foreground">RunMat</span>
+                    <span className="font-semibold text-green-600 dark:text-green-400">5ms avg</span>
                   </div>
                   <div className="flex justify-between border-t pt-2">
                     <span className="text-foreground font-medium">Speedup</span>
-                    <span className="font-semibold text-green-600">164.40× faster</span>
+                    <span className="font-semibold text-green-600 dark:text-green-400">164.40× faster</span>
                   </div>
                 </div>
               </CardContent>
@@ -294,20 +294,20 @@ export default function HowItWorksPage() {
               <CardContent>
                 <div className="space-y-3">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">GNU Octave</span>
+                    <span className="text-[0.938rem] text-foreground">GNU Octave</span>
                     <span className="font-semibold">868ms avg</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">RunMat (Interpreter)</span>
-                    <span className="font-semibold text-green-600">5.7ms avg</span>
+                    <span className="text-[0.938rem] text-foreground">RunMat (Interpreter)</span>
+                    <span className="font-semibold text-green-600 dark:text-green-400">5.7ms avg</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">RunMat (JIT)</span>
-                    <span className="font-semibold text-green-600">5.3ms avg</span>
+                    <span className="text-[0.938rem] text-foreground">RunMat (JIT)</span>
+                    <span className="font-semibold text-green-600 dark:text-green-400">5.3ms avg</span>
                   </div>
                   <div className="flex justify-between border-t pt-2">
                     <span className="text-foreground font-medium">Speedup</span>
-                    <span className="font-semibold text-green-600">153-163x faster</span>
+                    <span className="font-semibold text-green-600 dark:text-green-400">153-163x faster</span>
                   </div>
                 </div>
               </CardContent>
@@ -320,16 +320,16 @@ export default function HowItWorksPage() {
               <CardContent>
                 <div className="space-y-3">
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">GNU Octave</span>
+                    <span className="text-[0.938rem] text-foreground">GNU Octave</span>
                     <span className="font-semibold">876ms avg</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-muted-foreground">RunMat</span>
-                    <span className="font-semibold text-green-600">5.7ms avg</span>
+                    <span className="text-[0.938rem] text-foreground">RunMat</span>
+                    <span className="font-semibold text-green-600 dark:text-green-400">5.7ms avg</span>
                   </div>
                   <div className="flex justify-between border-t pt-2">
                     <span className="text-foreground font-medium">Speedup</span>
-                    <span className="font-semibold text-green-600">154.54x faster</span>
+                    <span className="font-semibold text-green-600 dark:text-green-400">154.54x faster</span>
                   </div>
                 </div>
               </CardContent>
@@ -343,33 +343,33 @@ export default function HowItWorksPage() {
 
         {/* How GPU Acceleration Works */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">How GPU Acceleration Works</h2>
+          <h2 className="text-xl sm:text-2xl font-semibold mb-6 text-foreground">How GPU Acceleration Works</h2>
           
           <div className="space-y-8">
             <div>
-              <h3 className="text-2xl font-semibold mb-4">Stage 1: Capture the Math</h3>
-              <p className="text-lg text-muted-foreground leading-relaxed">
+              <h3 className="text-base sm:text-lg font-semibold mb-4">Stage 1: Capture the Math</h3>
+              <p className="text-[0.938rem] text-foreground leading-relaxed">
                 RunMat builds an acceleration graph of your operations, tracking shapes, dependencies, and operation types. This graph captures the mathematical intent without being tied to specific hardware, enabling intelligent optimization decisions.
               </p>
             </div>
 
             <div>
-              <h3 className="text-2xl font-semibold mb-4">Stage 2: Intelligent Routing</h3>
-              <p className="text-lg text-muted-foreground leading-relaxed">
+              <h3 className="text-base sm:text-lg font-semibold mb-4">Stage 2: Intelligent Routing</h3>
+              <p className="text-[0.938rem] text-foreground leading-relaxed">
                 Auto-offload heuristics decide CPU vs GPU based on size and operation type. Small operations stay on CPU to avoid transfer overhead, while large computations automatically route to GPU for maximum throughput.
               </p>
             </div>
 
             <div>
-              <h3 className="text-2xl font-semibold mb-4">Stage 3: Kernel Fusion</h3>
-              <p className="text-lg text-muted-foreground leading-relaxed">
+              <h3 className="text-base sm:text-lg font-semibold mb-4">Stage 3: Kernel Fusion</h3>
+              <p className="text-[0.938rem] text-foreground leading-relaxed">
                 Sequential operations compile into single GPU kernels, eliminating memory transfers between steps. Instead of launching ten separate kernels, RunMat fuses them into one optimized GPU program that runs end-to-end on device.
               </p>
             </div>
 
             <div>
-              <h3 className="text-2xl font-semibold mb-4">Stage 4: Execution with Residency</h3>
-              <p className="text-lg text-muted-foreground leading-relaxed">
+              <h3 className="text-base sm:text-lg font-semibold mb-4">Stage 4: Execution with Residency</h3>
+              <p className="text-[0.938rem] text-foreground leading-relaxed">
                 Data stays on GPU between operations, copying back only when needed. This residency-aware execution minimizes host↔device transfers, keeping your data where it can be processed fastest.
               </p>
             </div>
@@ -378,16 +378,16 @@ export default function HowItWorksPage() {
 
         {/* Deep Dive: How the Magic Happens */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">Deep Dive: How the Magic Happens</h2>
+          <h2 className="text-xl sm:text-2xl font-semibold mb-6 text-foreground">Deep Dive: How the Magic Happens</h2>
           
           <div className="space-y-8">
             {/* Ignition Interpreter */}
             <div>
-              <h3 className="text-2xl font-semibold mb-4 flex items-center">
+              <h3 className="text-base sm:text-lg font-semibold mb-4 flex items-center">
                 <Zap className="h-6 w-6 mr-3 text-[hsl(var(--brand))]" />
                 The Ignition Interpreter: Speed from Day One
               </h3>
-              <p className="text-lg text-muted-foreground mb-4">
+              <p className="text-[0.938rem] text-foreground mb-4">
                 When you type <code>A = [1, 2; 3, 4]</code> and press enter, here&apos;s what happens in microseconds:
               </p>
               <div className="rounded-lg border border-border bg-muted p-6">
@@ -399,18 +399,18 @@ export default function HowItWorksPage() {
                   <li><strong>5. Immediate Execution:</strong> Bytecode runs instantly while profiling counters track &quot;hot&quot; functions</li>
                 </ol>
               </div>
-              <p className="text-muted-foreground mt-4">
+              <p className="text-[0.938rem] text-foreground mt-4">
                 This entire pipeline completes in under 5ms — faster than most editors can update their syntax highlighting.
               </p>
                 </div>
 
             {/* Turbine JIT */}
                 <div>
-              <h3 className="text-2xl font-semibold mb-4 flex items-center">
-                <Cpu className="h-6 w-6 text-green-600 mr-3" />
+              <h3 className="text-base sm:text-lg font-semibold mb-4 flex items-center">
+                <Cpu className="h-6 w-6 text-green-600 dark:text-green-400 mr-3" />
                 The Turbine JIT: When Performance Really Matters
               </h3>
-              <p className="text-lg text-muted-foreground mb-4">
+              <p className="text-[0.938rem] text-foreground mb-4">
                 Once a function gets called enough times (the JIT is configurable, with good defaults), Turbine kicks in:
               </p>
               <div className="rounded-lg border border-border bg-muted p-6">
@@ -422,7 +422,7 @@ export default function HowItWorksPage() {
                   <li><strong>• Dead Code Elimination:</strong> Remove branches that never execute in your specific use case</li>
                   </ul>
               </div>
-              <p className="text-muted-foreground mt-4">
+              <p className="text-[0.938rem] text-foreground mt-4">
                 The result? Machine code optimized for your specific usage patterns, with specialized paths 
                 for your data types and calling conventions.
               </p>
@@ -432,11 +432,11 @@ export default function HowItWorksPage() {
 
         {/* Memory: The Foundation of Speed */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground flex items-center">
+          <h2 className="text-xl sm:text-2xl font-semibold mb-6 text-foreground flex items-center">
             <Database className="mr-3 h-8 w-8 text-[hsl(var(--brand))]" />
             Memory: The Foundation of Speed
           </h2>
-          <p className="text-lg text-muted-foreground mb-6">
+          <p className="text-[0.938rem] text-foreground mb-6">
             MATLAB&apos;s strength has always been matrices (and tensors), so we designed our memory system from the ground up for numerical computing:
           </p>
           
@@ -444,7 +444,7 @@ export default function HowItWorksPage() {
             <Card>
               <CardContent className="p-6">
                 <h4 className="text-lg font-semibold mb-3">Zero-Copy Arrays</h4>
-                <p className="text-muted-foreground">
+                <p className="text-[0.938rem] text-foreground">
                   Arrays use column-major layout (just like MATLAB) and pass directly to BLAS/LAPACK libraries 
                   without any data copying. Large matrix/tensor operations can work directly with the underlying memory 
                   without unnecessary data movement.
@@ -454,7 +454,7 @@ export default function HowItWorksPage() {
             <Card>
               <CardContent className="p-6">
                 <h4 className="text-lg font-semibold mb-3">Copy-on-Write Semantics</h4>
-                <p className="text-muted-foreground">
+                <p className="text-[0.938rem] text-foreground">
                   When you write <code>B = A</code>, we don&apos;t copy the entire matrix/tensor. Instead, B shares A&apos;s memory 
                   until you modify one of them. This preserves MATLAB semantics while dramatically reducing memory usage.
                 </p>
@@ -465,8 +465,8 @@ export default function HowItWorksPage() {
 
         {/* Garbage Collection */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">Garbage Collection: Smart Memory Management</h2>
-          <p className="text-lg text-muted-foreground mb-6">
+          <h2 className="text-xl sm:text-2xl font-semibold mb-6 text-foreground">Garbage Collection: Smart Memory Management</h2>
+          <p className="text-[0.938rem] text-foreground mb-6">
             Scientific computing creates lots of temporary arrays — intermediate results in calculations, 
             temporary matrices in algorithms, etc. Our garbage collector is designed with this pattern in mind:
           </p>
@@ -475,14 +475,14 @@ export default function HowItWorksPage() {
             <div className="grid md:grid-cols-2 gap-6">
               <div>
                 <h4 className="text-lg font-semibold mb-3">Generational Collection</h4>
-                <p className="text-muted-foreground">
+                <p className="text-[0.938rem] text-foreground">
                   Young objects (like temporary calculation results) get collected quickly and frequently. 
                   Old objects (like your main data matrices) are scanned rarely via remembered sets, minimizing overhead.
                   </p>
                 </div>
               <div>
                 <h4 className="text-lg font-semibold mb-3">Short, predictable pauses</h4>
-                <p className="text-muted-foreground">
+                <p className="text-[0.938rem] text-foreground">
                   Minor collections are stop-the-world but fast. Write barriers track old→young edges so minor GCs
                   only scan what changed, not the entire heap.
                 </p>
@@ -493,11 +493,11 @@ export default function HowItWorksPage() {
 
         {/* Instant Startup */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground flex items-center">
-            <Clock className="h-8 w-8 text-orange-600 mr-3" />
+          <h2 className="text-xl sm:text-2xl font-semibold mb-6 text-foreground flex items-center">
+            <Clock className="h-8 w-8 text-orange-600 dark:text-orange-400 mr-3" />
             Instant Startup: 2000x Faster Boot Times
           </h2>
-          <p className="text-lg text-muted-foreground mb-6">
+          <p className="text-[0.938rem] text-foreground mb-6">
             Remember how MATLAB takes 10+ seconds to start? It&apos;s a symptom of a larger problem.
             RunMat solves runtime startup time using modern techniques like <strong>snapshotting, lightweight runtime design, and fast compilation</strong>.
           </p>
@@ -506,7 +506,7 @@ export default function HowItWorksPage() {
                         <Card>
               <CardContent className="p-6">
                 <h4 className="text-lg font-semibold mb-3">Lightweight Runtime Architecture</h4>
-                <p className="text-muted-foreground">
+                <p className="text-[0.938rem] text-foreground">
                   Built from the ground up in Rust with minimal startup overhead. No massive Java runtimes, 
                   no complex licensing checks, no bloated legacy code. Just a lean, fast runtime that gets 
                   out of your way and lets you focus on your work.
@@ -516,7 +516,7 @@ export default function HowItWorksPage() {
             <Card>
               <CardContent className="p-6">
                 <h4 className="text-lg font-semibold mb-3">Instant Compilation Pipeline</h4>
-                <p className="text-muted-foreground">
+                <p className="text-[0.938rem] text-foreground">
                   Our compilation pipeline is designed for speed: fast lexing, efficient parsing, and immediate 
                   bytecode execution. Combined with pre-warmed snapshots of the standard library, we eliminate 
                   the cold-start penalty that plagues traditional environments.
@@ -528,11 +528,11 @@ export default function HowItWorksPage() {
 
         {/* Modern Plotting */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground flex items-center">
-            <Monitor className="h-8 w-8 text-green-600 mr-3" />
+          <h2 className="text-xl sm:text-2xl font-semibold mb-6 text-foreground flex items-center">
+            <Monitor className="h-8 w-8 text-green-600 dark:text-green-400 mr-3" />
             Modern Plotting (Pre-release): Built for the GPU Era
           </h2>
-          <p className="text-lg text-muted-foreground mb-6">
+          <p className="text-[0.938rem] text-foreground mb-6">
             Traditional MATLAB plotting is CPU-bound and struggles with large datasets. RunMat&apos;s plotting layer is still in pre-release: simple 2D line and scatter plots render on the GPU today, while filled shapes, 3D surfaces, and richer controls are actively being built:
           </p>
           
@@ -540,7 +540,7 @@ export default function HowItWorksPage() {
             <Card>
               <CardContent className="p-6">
                 <h4 className="text-lg font-semibold mb-3">GPU-Accelerated Rendering (Today)</h4>
-                <p className="text-muted-foreground">
+                <p className="text-[0.938rem] text-foreground">
                   Built on WebGPU (wgpu) with custom WGSL shaders. Current builds handle simple 2D line and scatter datasets efficiently by keeping them on the GPU, and we&apos;re extending the renderer to handle filled shapes and larger plot families.
                 </p>
               </CardContent>
@@ -548,7 +548,7 @@ export default function HowItWorksPage() {
             <Card>
               <CardContent className="p-6">
                 <h4 className="text-lg font-semibold mb-3">Interactive by Default (Work in Progress)</h4>
-                <p className="text-muted-foreground">
+                <p className="text-[0.938rem] text-foreground">
                   Basic zoom and pan controls ship today; more advanced rotation, camera presets, and LOD tricks are on the roadmap so that larger datasets feel smooth once the richer plot types land.
                 </p>
             </CardContent>
@@ -558,15 +558,15 @@ export default function HowItWorksPage() {
 
         {/* Packages and Ecosystem */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground flex items-center">
+          <h2 className="text-xl sm:text-2xl font-semibold mb-6 text-foreground flex items-center">
             <GitBranch className="mr-3 h-8 w-8 text-[hsl(var(--brand))]" />
             Packages: extend the runtime without bloating the core
           </h2>
-          <p className="text-lg text-muted-foreground mb-6">
+          <p className="text-[0.938rem] text-foreground mb-6">
             RunMat keeps the core minimal. New functions, types, and accelerators ship as packages — native (Rust)
             for maximum performance, or source (MATLAB) for portability.
           </p>
-          <p className="text-sm text-muted-foreground mb-4">
+          <p className="text-[0.938rem] text-foreground mb-4">
             See the draft <Link href="/docs/package-manager" className="underline">Package Manager design</Link> for how registries, semver, and native/source packages will work.
           </p>
           
@@ -574,15 +574,15 @@ export default function HowItWorksPage() {
             <Card>
               <CardContent className="p-6">
                 <h4 className="text-xl font-semibold mb-3">Lightning-Fast REPL</h4>
-                <p className="text-muted-foreground mb-4">
+                <p className="text-[0.938rem] text-foreground mb-4">
                   No more waiting for calculations to complete. The interactive shell starts instantly, 
                   remembers your variables and functions within your session, and provides fast syntax error
                   detection with clear, helpful error messages.
                 </p>
-                <div className="bg-slate-100 dark:bg-slate-800 rounded p-3 font-mono text-sm">
-                  <span className="text-green-600">runmat&gt;</span> A = randn(1000, 1000); B = A * A&apos;;<br />
+                <div className="bg-muted rounded p-3 font-mono text-sm">
+                  <span className="text-green-600 dark:text-green-400">runmat&gt;</span> A = randn(1000, 1000); B = A * A&apos;;<br />
                   { /* Note: This is a placeholder for the actual computation time. Need to measure this after implementing tic / toc */}
-                  <span className="text-blue-600">ans =</span> 1000.0  {false && <span className="text-gray-500">% Computed in 2us</span>}
+                  <span className="text-blue-600 dark:text-blue-400">ans =</span> 1000.0  {false && <span className="text-muted-foreground">% Computed in 2us</span>}
                 </div>
               </CardContent>
             </Card>
@@ -590,14 +590,14 @@ export default function HowItWorksPage() {
             <Card>
               <CardContent className="p-6">
                 <h4 className="text-xl font-semibold mb-3">First-class Jupyter integration</h4>
-                <p className="text-muted-foreground mb-4">
+                <p className="text-[0.938rem] text-foreground mb-4">
                   Built for the notebook era. Install RunMat as a Jupyter kernel with one command, 
                   and enjoy the same performance in your favorite notebook environment. 
                   Rich display support for plots, matrices, and data structures.
                 </p>
-                <div className="bg-slate-100 dark:bg-slate-800 rounded p-3 font-mono text-sm">
-                  <span className="text-green-600">$</span> runmat --install-kernel<br/>
-                  <span className="text-gray-500">✓ RunMat Jupyter kernel installed successfully!</span>
+                <div className="bg-muted rounded p-3 font-mono text-sm">
+                  <span className="text-green-600 dark:text-green-400">$</span> runmat --install-kernel<br/>
+                  <span className="text-muted-foreground">✓ RunMat Jupyter kernel installed successfully!</span>
                 </div>
               </CardContent>
             </Card>
@@ -605,14 +605,14 @@ export default function HowItWorksPage() {
             <Card>
               <CardContent className="p-6">
                 <h4 className="text-xl font-semibold mb-3">Modern cloud & container deployment</h4>
-                <p className="text-muted-foreground mb-4">
+                <p className="text-[0.938rem] text-foreground mb-4">
                   Single static binary with zero dependencies makes deployment trivial. Run MATLAB code in Docker 
                   containers, Kubernetes clusters, or cloud functions. No complex runtime environments, no licensing 
                   servers — just copy the binary and go.
                 </p>
-                <div className="bg-slate-100 dark:bg-slate-800 rounded p-3 font-mono text-sm">
-                  <span className="text-green-600">$</span> echo &quot;A = [1, 2; 3, 4]; det(A)&quot; | runmat<br/>
-                  <span className="text-blue-600">ans =</span> -2.0
+                <div className="bg-muted rounded p-3 font-mono text-sm">
+                  <span className="text-green-600 dark:text-green-400">$</span> echo &quot;A = [1, 2; 3, 4]; det(A)&quot; | runmat<br/>
+                  <span className="text-blue-600 dark:text-blue-400">ans =</span> -2.0
                 </div>
               </CardContent>
             </Card>
@@ -621,11 +621,11 @@ export default function HowItWorksPage() {
 
         {/* What's Next */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground flex items-center">
+          <h2 className="text-xl sm:text-2xl font-semibold mb-6 text-foreground flex items-center">
             <Shield className="mr-3 h-8 w-8 text-[hsl(var(--brand))]" />
             What&apos;s Next: The Future is Bright
           </h2>
-          <p className="text-lg text-muted-foreground mb-6">
+          <p className="text-[0.938rem] text-foreground mb-6">
             We&apos;re just getting started. Here&apos;s what&apos;s coming to make scientific computing even better:
           </p>
           
@@ -633,7 +633,7 @@ export default function HowItWorksPage() {
             <Card className="border-l-4 border-l-orange-500">
               <CardContent className="p-6">
                 <h4 className="text-xl font-semibold mb-3">Cross-Platform Deployment: Run Anywhere</h4>
-                <p className="text-muted-foreground">
+                <p className="text-[0.938rem] text-foreground">
                   Compile your MATLAB code to run on any platform — from embedded microcontrollers 
                   and edge devices to web browsers via WebAssembly, mobile devices, and cloud infrastructure. 
                   Write once in MATLAB, deploy everywhere from IoT sensors to high-performance clusters.
@@ -644,7 +644,7 @@ export default function HowItWorksPage() {
             <Card className="border-l-4 border-l-green-500">
               <CardContent className="p-6">
                 <h4 className="text-xl font-semibold mb-3">Enterprise Freedom: Break the License Prison</h4>
-                <p className="text-muted-foreground">
+                <p className="text-[0.938rem] text-foreground">
                   No per-seat licensing, no network license servers, no vendor audits. Deploy RunMat 
                   across unlimited machines, scale teams without budget explosions, and never face 
                   astronomical renewal costs again. True computational freedom for organizations of any size.
@@ -657,25 +657,25 @@ export default function HowItWorksPage() {
 
         {/* Contrast: MATLAB, Octave, RunMat */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-6 text-foreground">How RunMat differs</h2>
+          <h2 className="text-xl sm:text-2xl font-semibold mb-6 text-foreground">How RunMat differs</h2>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             <Card>
               <CardHeader><CardTitle>MATLAB</CardTitle></CardHeader>
-              <CardContent className="text-muted-foreground">
+              <CardContent className="text-[0.938rem] text-foreground">
                 Proprietary, massive standard library, heavy startup, license-gated deployment.
                 Incredible breadth; less flexible for custom runtime needs.
               </CardContent>
             </Card>
             <Card>
               <CardHeader><CardTitle>GNU Octave</CardTitle></CardHeader>
-              <CardContent className="text-muted-foreground">
+              <CardContent className="text-[0.938rem] text-foreground">
                 Open-source and compatible with many scripts; classic interpreter architecture
                 emphasizes portability over peak performance and startup speed.
               </CardContent>
             </Card>
             <Card>
               <CardHeader><CardTitle>RunMat</CardTitle></CardHeader>
-              <CardContent className="text-muted-foreground">
+              <CardContent className="text-[0.938rem] text-foreground">
                 Open-source, modern engine with full language grammar and core semantics,
                 fast startup, tiered execution, generational GC, and a package-first library model.
               </CardContent>
@@ -687,10 +687,10 @@ export default function HowItWorksPage() {
         <section>
           <Card className="border-border bg-card">
             <CardContent className="p-6 text-center">
-              <h3 className="text-lg font-semibold mb-4 text-foreground">
+              <h3 className="text-base sm:text-lg font-semibold mb-4 text-foreground">
                 Ready to Dive Deeper?
               </h3>
-              <p className="text-muted-foreground mb-6">
+              <p className="text-[0.938rem] text-foreground mb-6">
                 Explore RunMat&apos;s source code or try it yourself to see this architecture in action.
               </p>
               <div className="flex flex-col sm:flex-row gap-3 justify-center">

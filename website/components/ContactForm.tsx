@@ -150,7 +150,7 @@ export default function ContactForm() {
 
         <button
           type="submit"
-          className="h-12 w-full px-8 text-base font-semibold rounded-lg bg-[hsl(var(--brand))] text-white transition-colors shadow-none hover:bg-[hsl(var(--brand))]/90 disabled:opacity-60 sm:h-10 sm:text-sm"
+          className="h-12 w-full px-8 text-base font-semibold rounded-none bg-[hsl(var(--brand))] text-white transition-colors shadow-none hover:bg-[hsl(var(--brand))]/90 disabled:opacity-60 sm:h-10 sm:text-sm"
           disabled={disabled}
           data-ph-capture-attribute-destination="contact"
           data-ph-capture-attribute-source="contact-page"

@@ -1,5 +1,4 @@
 import { Metadata } from "next";
-import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import Link from "next/link";
 import { ContentCard } from "@/components/content-card";
@@ -23,12 +22,12 @@ export default function BenchmarksPage() {
   return (
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-16 md:px-6 md:py-24">
-        <div className="mx-auto max-w-[58rem] text-center">
-          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
+        <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center">
+          <h1 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
             RunMat Benchmarks
           </h1>
-          <p className="mt-6 text-base text-muted-foreground sm:text-lg">
-            Reproducible, cross-language benchmarks comparing RunMat against common alternatives for representative workloads
+          <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
+            Reproducible, cross-language benchmarks comparing RunMat against common alternatives for representative workloads.
           </p>
         </div>
 
@@ -47,29 +46,27 @@ export default function BenchmarksPage() {
         </div>
 
         {/* Call to Action */}
-        <div className="mt-16 text-center">
-          <Card className="inline-block">
-            <CardContent className="p-6">
-              <h3 className="text-2xl font-semibold mb-2 sm:text-3xl">
-                Reproduce the Benchmarks
-              </h3>
-              <p className="text-muted-foreground mb-4">
-                See the benchmarks directory in the RunMat repo for full source code and instructions
-              </p>
-              <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                <Button variant="outline" size="sm" asChild>
-                  <Link href="https://github.com/runmat-org/runmat/tree/main/benchmarks" target="_blank">
-                    View on GitHub
-                  </Link>
-                </Button>
-                <Button variant="outline" size="sm" asChild>
-                  <Link href="/download">
-                    Download RunMat
-                  </Link>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+        <div className="mt-16 max-w-3xl mx-auto">
+          <div className="rounded-lg border border-border bg-card px-6 py-8 sm:px-8 sm:py-10 text-center space-y-4">
+            <h3 className="text-lg sm:text-xl font-semibold text-foreground">
+              Reproduce the benchmarks
+            </h3>
+            <p className="text-foreground text-sm max-w-md mx-auto">
+              Full source code and instructions are in the benchmarks directory of the RunMat repo.
+            </p>
+            <div className="flex flex-col sm:flex-row gap-3 justify-center pt-1">
+              <Button variant="outline" size="lg" asChild className="h-11 px-7 text-sm rounded-none">
+                <Link href="https://github.com/runmat-org/runmat/tree/main/benchmarks" target="_blank">
+                  View on GitHub
+                </Link>
+              </Button>
+              <Button variant="ghost" size="lg" asChild className="h-11 px-7 text-sm text-muted-foreground hover:text-foreground">
+                <Link href="/download">
+                  Download RunMat
+                </Link>
+              </Button>
+            </div>
+          </div>
         </div>
       </div>
     </div>

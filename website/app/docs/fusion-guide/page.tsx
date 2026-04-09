@@ -64,14 +64,14 @@ export default function FusionGuidePage() {
           <div className="space-y-12">
             <header className="space-y-6">
               <div>
-                <p className="text-sm uppercase tracking-wide text-primary font-semibold">Fusion Reference</p>
-                <h1 className="text-4xl md:text-5xl font-bold text-foreground mt-2">Fusion Guide</h1>
+                <p className="text-xs uppercase tracking-wider text-foreground font-semibold">Fusion Reference</p>
+                <h1 className="text-2xl sm:text-3xl font-bold text-foreground mt-2">Fusion Guide</h1>
               </div>
-              <p className="text-lg md:text-xl text-muted-foreground leading-relaxed max-w-3xl">
+              <p className="text-[0.938rem] text-foreground leading-relaxed max-w-3xl">
                 RunMat&apos;s acceleration layer recognises multiple flavours of fusible graphs and hands them to your GPU
                 provider as single kernels.
               </p>
-              <p className="text-sm text-muted-foreground">
+              <p className="text-[0.938rem] text-foreground">
                 New to Accelerate? Start with the{" "}
                 <Link href="/blog/runmat-accelerate-fastest-runtime-for-your-math" className="underline">
                   RunMat Accelerate overview
@@ -82,46 +82,46 @@ export default function FusionGuidePage() {
 
 
             <section id="why-groups" className="space-y-4 scroll-mt-16">
-              <p className="text-muted-foreground">
+              <p className="text-foreground text-[0.938rem]">
                 RunMat fuses common patterns that show up across linear algebra, signal processing, imaging, and solver workloads into single GPU programs. Keeping them
                 fused prevents redundant memory traffic and lets us re-use provider kernels to ship quickly.
               </p>
-              <ul className="list-disc pl-6 space-y-3 marker:text-[hsl(var(--brand))]">
-                <li className="text-muted-foreground">
+              <ul className="list-disc pl-6 space-y-2 marker:text-muted-foreground">
+                <li className="text-foreground text-[0.938rem]">
                   <strong>Elementwise &amp; reductions:</strong> Collapse dozens of scalar operations into one dispatch and
                   prevent repeated reads/writes of the same tensor.
                 </li>
-                <li className="text-muted-foreground">
+                <li className="text-foreground text-[0.938rem]">
                   <strong>Matmul epilogues:</strong> Fusing scale, bias, and activation work avoids launching a second kernel
                   that touches the full matrix again and delivers RunMat&apos;s matmul + activation parity goals.
                 </li>
-                <li className="text-muted-foreground">
+                <li className="text-foreground text-[0.938rem]">
                   <strong>Covariance / Gram / power-step / explained-variance chains:</strong> Iterative factorizations spend
                   most of their time in repeated &quot;multiply, renormalize, measure&quot; loops. Treating each stage as a fusion kind
                   keeps eigensolvers and Krylov methods resident on the GPU.
                 </li>
-                <li className="text-muted-foreground">
+                <li className="text-foreground text-[0.938rem]">
                   <strong>Image normalisation:</strong> Imaging and sensor pipelines often start with per-frame whitening plus
                   gain/bias adjustments. Folding statistics and affine transforms into one kernel removes several launches per
                   frame.
                 </li>
               </ul>
-              <p className="text-muted-foreground">
+              <p className="text-foreground text-[0.938rem]">
                 We prioritised these groups because they appear across domains, keep chatty host/device traffic off PCIe, and
                 benefit greatly from fusion. We&apos;ll be adding more fusion groups in the future to cover more workloads.
               </p>
-              <p className="text-muted-foreground">
+              <p className="text-foreground text-[0.938rem]">
                 Have a new fusion flavour in mind? Open an issue or submit a pull request so we can explore it together.
               </p>
             </section>
 
             <section id="documents" className="space-y-4 scroll-mt-16">
-              <h2 className="text-3xl font-bold text-foreground">RunMat Currently Fuses the Following Patterns</h2>
+              <h2 className="text-xl sm:text-2xl font-bold text-foreground">RunMat Currently Fuses the Following Patterns</h2>
 
               <div className="mt-6 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
                 {fusionTopics.map((topic) => (
                   <Link key={topic.href} href={topic.href} className="block h-full">
-                    <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
+                    <Card className="group relative overflow-hidden transition-colors hover:bg-muted cursor-pointer h-full">
                       <CardHeader>
                         <CardTitle>{topic.title}</CardTitle>
                         <CardDescription>{topic.description}</CardDescription>
@@ -138,17 +138,17 @@ export default function FusionGuidePage() {
             </section>
 
             <section id="how-to-use" className="space-y-4 scroll-mt-28">
-              <h2 className="text-3xl font-bold text-foreground">How to Use These Docs</h2>
-              <ol className="list-decimal pl-6 space-y-3 marker:text-[hsl(var(--brand))]">
-                <li className="text-muted-foreground">
+              <h2 className="text-xl sm:text-2xl font-bold text-foreground">How to Use These Docs</h2>
+              <ol className="list-decimal pl-6 space-y-2 marker:text-muted-foreground">
+                <li className="text-foreground text-[0.938rem]">
                   <strong>Looking for coverage:</strong> Start with the link that matches your math. Each page lists the exact
                   instruction patterns the fusion planner looks for and the operations that stay on device.
                 </li>
-                <li className="text-muted-foreground">
+                <li className="text-foreground text-[0.938rem]">
                   <strong>Investigating surprises:</strong> If a workload isn&apos;t fusing, cross-check the prerequisites
                   section (e.g. single-consumer chains for elementwise groups or constant epsilon for power steps).
                 </li>
-                <li className="text-muted-foreground">
+                <li className="text-foreground text-[0.938rem]">
                   <strong>Telemetry correlation:</strong> Provider telemetry reports <code>fusion_kind</code> labels. Match those
                   labels to the filenames above to understand what the GPU executed.
                 </li>
@@ -159,7 +159,7 @@ export default function FusionGuidePage() {
 
           <aside className="hidden lg:block">
             <div className="sticky top-24">
-              <div className="text-sm font-semibold text-foreground/90 mb-2">On this page</div>
+              <div className="text-xs font-semibold uppercase tracking-wider text-foreground mb-2">On this page</div>
               <ul className="text-sm space-y-2">
                 {tocItems.map((item) => (
                   <li key={item.id}>

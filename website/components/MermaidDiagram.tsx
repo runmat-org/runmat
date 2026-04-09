@@ -113,7 +113,7 @@ export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
     return (
       <div className={`w-full ${className ?? ''}`}>
         <div className="flex items-center justify-center p-8">
-          <div className="animate-pulse text-gray-500 dark:text-gray-400">Loading diagram...</div>
+          <div className="animate-pulse text-muted-foreground">Loading diagram...</div>
         </div>
       </div>
     );
@@ -131,7 +131,7 @@ export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
     <div className={`w-full ${className ?? ''}`}>
       {isLoading && (
         <div className="flex items-center justify-center p-8">
-          <div className="animate-pulse text-gray-500 dark:text-gray-400">Loading diagram...</div>
+          <div className="animate-pulse text-muted-foreground">Loading diagram...</div>
         </div>
       )}
       <div ref={ref} className={`${isLoading ? 'hidden' : ''} w-full mermaid`} />

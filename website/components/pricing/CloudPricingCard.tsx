@@ -70,13 +70,13 @@ export default function CloudPricingCard() {
   const currentTier = cloudTierConfig[activeTier];
 
   return (
-    <Card className="relative flex h-full flex-col border border-[hsl(var(--brand))]/50 bg-muted/40 shadow-lg shadow-[hsl(var(--brand))]/10">
+    <Card className="relative flex h-full flex-col border border-[hsl(var(--brand))]/50 shadow-sm">
       <CardHeader className="space-y-3 pb-4">
         <Badge className="w-fit bg-secondary text-foreground border-border hover:bg-secondary">
           Cloud
         </Badge>
-        <CardTitle className="text-xl text-foreground">RunMat Cloud</CardTitle>
-        <p className="text-xs text-muted-foreground">Everything in RunMat, plus cloud storage and versioning.</p>
+        <CardTitle className="text-lg font-semibold text-foreground">RunMat Cloud</CardTitle>
+        <p className="text-[0.938rem] text-foreground">Everything in RunMat, plus cloud storage and versioning.</p>
         <p className="text-3xl font-bold text-foreground">{currentTier.price}</p>
       </CardHeader>
       <CardContent className="flex flex-1 min-h-0 flex-col space-y-5">
@@ -118,7 +118,7 @@ export default function CloudPricingCard() {
             className="space-y-2"
           >
             {currentTier.inheritsFrom && (
-              <p className="text-xs font-medium text-muted-foreground/70">
+              <p className="text-[0.938rem] font-medium text-foreground">
                 {currentTier.inheritsFrom}
               </p>
             )}
@@ -127,8 +127,8 @@ export default function CloudPricingCard() {
                 const label = typeof feature === "string" ? feature : feature.label;
                 const href = typeof feature === "string" ? undefined : feature.href;
                 return (
-                  <li key={label} className="flex items-start gap-2 text-sm text-muted-foreground">
-                    <Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-muted-foreground" />
+                  <li key={label} className="flex items-start gap-2 text-[0.938rem] text-foreground">
+                    <Check className="mt-0.5 h-4 w-4 flex-shrink-0 text-foreground" />
                     {href ? (
                       <a href={href} className="no-underline hover:text-foreground transition-colors">
                         {label}
@@ -144,7 +144,7 @@ export default function CloudPricingCard() {
         </div>
         <Button
           asChild
-          className="w-full rounded-lg bg-[hsl(var(--brand))] text-white border-0 transition-colors shadow-none hover:bg-[hsl(var(--brand))]/90"
+          className="w-full rounded-none bg-[hsl(var(--brand))] text-white border-0 transition-colors shadow-none hover:bg-[hsl(var(--brand))]/90"
         >
           <Link href={currentTier.ctaHref}>{currentTier.ctaLabel}</Link>
         </Button>

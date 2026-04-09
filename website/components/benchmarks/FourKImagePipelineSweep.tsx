@@ -15,7 +15,7 @@ const SWEEP_ROWS: SweepRow[] = [
 
 export default function FourKImagePipelineSweep() {
   return (
-    <div className="mx-auto w-full max-w-[40rem] rounded-lg border border-border/60 bg-background/60 overflow-hidden shadow-lg">
+    <div className="mx-auto w-full max-w-[40rem] rounded-lg border border-border/60 bg-background/60 overflow-hidden shadow-sm">
       {/* Header */}
       <div className="bg-card px-4 sm:px-6 py-4 border-b border-border/60">
         <div className="text-sm sm:text-base font-semibold uppercase tracking-wide text-foreground">
@@ -30,7 +30,7 @@ export default function FourKImagePipelineSweep() {
       <div className="bg-card">
         <div className="overflow-x-auto">
           <table className="w-full text-sm sm:text-base">
-            <thead className="border-b border-border/60 bg-muted/40 text-center">
+            <thead className="border-b border-border/60 text-center">
               <tr>
                 <th className="px-3 sm:px-6 py-2 sm:py-3 text-center text-muted-foreground font-medium">
                   Batch size (images)
@@ -61,12 +61,12 @@ export default function FourKImagePipelineSweep() {
                     {row.runMatMs}
                   </td>
                   <td className="px-3 sm:px-6 py-2 sm:py-3 text-center">
-                    <span className="inline-flex items-center justify-center rounded-full border border-purple-500/40 bg-purple-500/10 px-3 py-1 text-sm sm:text-base text-purple-100">
+                    <span className="inline-flex items-center justify-center rounded-full border border-purple-500/40 bg-purple-500/10 px-3 py-1 text-sm sm:text-base text-purple-700 dark:text-purple-200">
                       {row.vsPyTorch}
                     </span>
                   </td>
                   <td className="px-3 sm:px-6 py-2 sm:py-3 text-center">
-                    <span className="inline-flex items-center justify-center rounded-full border border-blue-500/40 bg-blue-500/10 px-3 py-1 text-sm sm:text-base text-blue-100">
+                    <span className="inline-flex items-center justify-center rounded-full border border-blue-500/40 bg-blue-500/10 px-3 py-1 text-sm sm:text-base text-blue-700 dark:text-blue-200">
                       {row.vsNumPy}
                     </span>
                   </td>

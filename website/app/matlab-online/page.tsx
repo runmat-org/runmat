@@ -3,7 +3,7 @@ import React from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import MatlabInlineCodeBlock from "@/components/MatlabInlineCodeBlock";
+import { SandboxCta } from "@/components/SandboxCta";
 import BenchmarkShowcaseBlock from "@/components/benchmarks/BenchmarkShowcaseBlock";
 import {
   BarChart3,
@@ -282,18 +282,18 @@ export default function MatlabOnlinePage() {
         }}
       />
 
-      <div className="container mx-auto px-4 md:px-6 lg:px-8">
-        {/* Hero */}
-        <section className="w-full py-16 md:py-24 lg:py-32" id="hero">
+      {/* Hero */}
+      <section className="w-full py-16 md:py-24 lg:py-32" id="hero">
+        <div className="container mx-auto px-4 md:px-6 lg:px-8">
           <div className="grid grid-cols-1 gap-10 lg:grid-cols-2 lg:items-center">
             <div className="flex flex-col space-y-6 text-left items-start">
-              <div className="mb-2 p-0 text-lg font-semibold uppercase tracking-wide text-primary">
+              <div className="mb-2 p-0 text-sm font-semibold uppercase tracking-wider text-foreground">
                 MATLAB online alternative
               </div>
-              <h1 className="font-heading text-left leading-tight tracking-tight text-[clamp(2.6rem,4.8vw,4.25rem)] sm:text-[clamp(3rem,4vw,5rem)] lg:text-[clamp(3.25rem,3.6vw,5.25rem)]">
+              <h1 className="font-heading text-left leading-tight tracking-tight text-3xl sm:text-4xl md:text-5xl">
                 Run your MATLAB code in the browser blazing fast
               </h1>
-              <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-lg">
+              <p className="max-w-[42rem] leading-relaxed text-foreground text-[0.938rem]">
                 RunMat executes MATLAB-syntax code in your browser with auto GPU acceleration. No account or licence
                 needed.
               </p>
@@ -301,7 +301,7 @@ export default function MatlabOnlinePage() {
                 <Button
                   size="lg"
                   asChild
-                  className="h-12 px-8 text-base font-semibold bg-[hsl(var(--brand))] text-white hover:bg-[hsl(var(--brand))]/90 border-0 shadow-none"
+                  className="h-12 px-8 text-base font-semibold rounded-none bg-[hsl(var(--brand))] text-white hover:bg-[hsl(var(--brand))]/90 border-0 shadow-none"
                 >
                   <Link
                     href="/sandbox"
@@ -316,7 +316,7 @@ export default function MatlabOnlinePage() {
                   variant="outline"
                   size="lg"
                   asChild
-                  className="h-12 px-8 text-base bg-card border-border text-foreground"
+                  className="h-12 px-8 text-base rounded-none bg-card border-border text-foreground"
                 >
                   <Link href="/docs/desktop-browser-guide">View getting started</Link>
                 </Button>
@@ -337,44 +337,46 @@ export default function MatlabOnlinePage() {
               </video>
             </div>
           </div>
-        </section>
+        </div>
+      </section>
 
-        {/* Challenges with MATLAB Online */}
-        <section className="py-16 md:py-24 lg:py-32">
-          <div className="mx-auto max-w-5xl rounded-xl border border-amber-500/30 bg-gradient-to-r from-amber-500/15 to-transparent shadow-lg">
+      {/* Challenges with MATLAB Online */}
+      <section className="w-full py-16 md:py-24 lg:py-32">
+        <div className="container mx-auto px-4 md:px-6 lg:px-8">
+          <div className="mx-auto max-w-5xl rounded-lg border border-amber-500/30 bg-card shadow-sm">
             <div className="px-6 py-8">
               <div className="flex flex-col gap-6">
                 <div className="flex items-start gap-3">
-                  <AlertTriangle className="mt-1 h-5 w-5 text-amber-300" />
+                  <AlertTriangle className="mt-1 h-5 w-5 text-amber-600 dark:text-amber-400" />
                   <div>
-                    <h3 className="text-xl font-semibold text-foreground">MATLAB Online has friction</h3>
-                    <p className="text-lg text-muted-foreground mt-2">
+                    <h3 className="text-lg font-semibold text-foreground">MATLAB Online has friction</h3>
+                    <p className="text-[0.938rem] text-foreground mt-2">
                       MATLAB Online runs your code on MathWorks&apos; servers, requires an account, and caps free usage at 20 hours/month with 15-minute idle timeouts. Engineers and students hit these limits regularly:
                     </p>
                   </div>
                 </div>
                 <div className="grid gap-4 sm:grid-cols-2">
                   <div className="rounded-lg border border-amber-500/30 bg-card px-5 py-4">
-                    <p className="text-xl font-semibold text-foreground">Account barriers</p>
-                    <p className="text-lg text-muted-foreground mt-2">
+                    <p className="text-sm font-semibold text-foreground">Account barriers</p>
+                    <p className="text-sm text-foreground mt-1">
                       Sign-up process and license requirements create unnecessary friction for quick tasks.
                     </p>
                   </div>
                   <div className="rounded-lg border border-amber-500/30 bg-card px-5 py-4">
-                    <p className="text-xl font-semibold text-foreground">Idle timeouts &amp; hour caps</p>
-                    <p className="text-lg text-muted-foreground mt-2">
+                    <p className="text-sm font-semibold text-foreground">Idle timeouts &amp; hour caps</p>
+                    <p className="text-sm text-foreground mt-1">
                       Sessions timeout after 15 minutes of inactivity. Free tier is capped at 20 hours/month.
                     </p>
                   </div>
                   <div className="rounded-lg border border-amber-500/30 bg-card px-5 py-4">
-                    <p className="text-xl font-semibold text-foreground">Cloud dependency</p>
-                    <p className="text-lg text-muted-foreground mt-2">
+                    <p className="text-sm font-semibold text-foreground">Cloud dependency</p>
+                    <p className="text-sm text-foreground mt-1">
                       Code must be uploaded to remote servers, raising privacy and connectivity concerns.
                     </p>
                   </div>
                   <div className="rounded-lg border border-amber-500/30 bg-card px-5 py-4">
-                    <p className="text-xl font-semibold text-foreground">No local GPU access</p>
-                    <p className="text-lg text-muted-foreground mt-2">
+                    <p className="text-sm font-semibold text-foreground">No local GPU access</p>
+                    <p className="text-sm text-foreground mt-1">
                       Code runs on MathWorks&apos; servers, so you cannot use your own GPU for acceleration.
                     </p>
                   </div>
@@ -382,227 +384,193 @@ export default function MatlabOnlinePage() {
               </div>
             </div>
           </div>
-        </section>
+        </div>
+      </section>
 
-        {/* RunMat as an alternative */}
-        <section className="py-16 md:py-24 lg:py-32">
-          <div className="mx-auto max-w-4xl space-y-4 text-center">
-            <h2 className="text-3xl md:text-4xl font-bold text-foreground">
+      {/* RunMat as an alternative */}
+      <section className="w-full py-16 md:py-24 lg:py-32">
+        <div className="container mx-auto px-4 md:px-6 lg:px-8">
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
+            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">
               Meet RunMat: no license required
             </h2>
-            <p className="text-muted-foreground text-lg">
+            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
               RunMat is an open-source runtime that understands MATLAB syntax and runs it directly in your browser.
               Your code executes on your own device via WebAssembly, with GPU acceleration in browsers that support
               WebGPU.
             </p>
           </div>
-          <div className="mx-auto mt-10 max-w-5xl space-y-6">
-            <div className="rounded-lg border border-border bg-card p-8 shadow-lg">
-              <div className="text-center space-y-2">
-                <h3 className="text-xl md:text-2xl font-semibold text-foreground">
-                  Key differences from MATLAB Online
-                </h3>
+          <div className="mx-auto mt-12 max-w-5xl">
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+              <div className="rounded-lg border border-border bg-muted/40 p-6">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
+                  <CheckCircle className="h-5 w-5" />
+                </span>
+                <p className="text-base font-medium text-foreground">No account required</p>
+                <p className="text-[0.938rem] text-foreground mt-1">Open the sandbox and start coding immediately. No sign-up, no license key.</p>
               </div>
-              <div className="mt-8 grid gap-6 md:grid-cols-2">
-                <div className="flex items-start gap-4">
-                  <span className="mt-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-secondary text-foreground">
-                    <CheckCircle className="h-5 w-5" />
-                  </span>
-                  <div>
-                    <p className="text-xl font-medium text-foreground">No account required</p>
-                    <p className="text-lg text-muted-foreground">Open the sandbox and start coding immediately. No sign-up, no license key.</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-4">
-                  <span className="mt-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-secondary text-foreground">
-                    <Code2 className="h-5 w-5" />
-                  </span>
-                  <div>
-                    <p className="text-xl font-medium text-foreground">Client-side execution</p>
-                    <p className="text-lg text-muted-foreground">
-                      Your code compiles to WebAssembly and runs locally in your browser. Nothing leaves your device unless you choose to save to the cloud.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-4">
-                  <span className="mt-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-secondary text-foreground">
-                    <Zap className="h-5 w-5" />
-                  </span>
-                  <div>
-                    <p className="text-xl font-medium text-foreground">GPU acceleration on any vendor</p>
-                    <p className="text-lg text-muted-foreground">
-                      Metal on Mac, Vulkan on Linux, DirectX 12 on Windows. WebGPU in the browser. No CUDA dependency.
-                    </p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-4">
-                  <span className="mt-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-secondary text-foreground">
-                    <BarChart3 className="h-5 w-5" />
-                  </span>
-                  <div>
-                    <p className="text-xl font-medium text-foreground">Interactive 2D &amp; 3D plotting</p>
-                    <p className="text-lg text-muted-foreground">GPU-rendered surfaces you can rotate, zoom, and pan. Plots live in the same computation chain as your math.</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-4">
-                  <span className="mt-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-secondary text-foreground">
-                    <AlertTriangle className="h-5 w-5" />
-                  </span>
-                  <div>
-                    <p className="text-xl font-medium text-foreground">Type &amp; shape tracking</p>
-                    <p className="text-lg text-muted-foreground">Hover any variable to see its dimensions. Mismatched matrix sizes get red underlines before you run.</p>
-                  </div>
-                </div>
-                <div className="flex items-start gap-4">
-                  <span className="mt-1 inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-secondary text-foreground">
-                    <Globe className="h-5 w-5" />
-                  </span>
-                  <div>
-                    <p className="text-xl font-medium text-foreground">Works offline</p>
-                    <p className="text-lg text-muted-foreground">
-                      After the initial page load, RunMat runs without an internet connection. The CLI provides full local file access today; the desktop app is coming soon.
-                    </p>
-                  </div>
-                </div>
+              <div className="rounded-lg border border-border bg-muted/40 p-6">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
+                  <Code2 className="h-5 w-5" />
+                </span>
+                <p className="text-base font-medium text-foreground">Client-side execution</p>
+                <p className="text-[0.938rem] text-foreground mt-1">
+                  Your code compiles to WebAssembly and runs locally in your browser. Nothing leaves your device unless you choose to save to the cloud.
+                </p>
               </div>
-              <div className="mt-8 flex justify-center">
-                <Button
-                  size="lg"
-                  asChild
-                  className="h-12 px-8 text-base font-semibold bg-[hsl(var(--brand))] text-white hover:bg-[hsl(var(--brand))]/90 border-0 shadow-none"
-                >
-                  <Link
-                    href="/sandbox"
-                    data-ph-capture-attribute-destination="sandbox"
-                    data-ph-capture-attribute-source="matlab-online-features"
-                    data-ph-capture-attribute-cta="try-runmat-browser"
-                  >
-                    Try RunMat in your browser
-                  </Link>
-                </Button>
+              <div className="rounded-lg border border-border bg-muted/40 p-6">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
+                  <Zap className="h-5 w-5" />
+                </span>
+                <p className="text-base font-medium text-foreground">GPU acceleration on any vendor</p>
+                <p className="text-[0.938rem] text-foreground mt-1">
+                  Metal on Mac, Vulkan on Linux, DirectX 12 on Windows. WebGPU in the browser. No CUDA dependency.
+                </p>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/40 p-6">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
+                  <BarChart3 className="h-5 w-5" />
+                </span>
+                <p className="text-base font-medium text-foreground">Interactive 2D &amp; 3D plotting</p>
+                <p className="text-[0.938rem] text-foreground mt-1">GPU-rendered surfaces you can rotate, zoom, and pan. Plots live in the same computation chain as your math.</p>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/40 p-6">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
+                  <AlertTriangle className="h-5 w-5" />
+                </span>
+                <p className="text-base font-medium text-foreground">Type &amp; shape tracking</p>
+                <p className="text-[0.938rem] text-foreground mt-1">Hover any variable to see its dimensions. Mismatched matrix sizes get red underlines before you run.</p>
+              </div>
+              <div className="rounded-lg border border-border bg-muted/40 p-6">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
+                  <Globe className="h-5 w-5" />
+                </span>
+                <p className="text-base font-medium text-foreground">Works offline</p>
+                <p className="text-[0.938rem] text-foreground mt-1">
+                  After the initial page load, RunMat runs without an internet connection. The CLI provides full local file access today; the desktop app is coming soon.
+                </p>
               </div>
             </div>
-          </div>
-        </section>
-
-        {/* How it works */}
-        <section className="py-16 md:py-24 lg:py-32">
-          <div className="mx-auto max-w-4xl text-center mb-10 space-y-3">
-            <h2 className="text-3xl md:text-4xl font-bold text-foreground">How it works</h2>
-            <p className="text-muted-foreground text-lg">Get started in three simple steps.</p>
-          </div>
-          <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-3 md:items-stretch">
-            <Card className="border border-border/60 bg-card shadow-lg overflow-hidden flex flex-col h-full">
-              <div className="bg-muted/40 p-6 flex items-start justify-start h-[200px]">
+            <div className="mt-10 flex justify-center">
+              <Button
+                size="lg"
+                asChild
+                className="h-12 px-8 text-base font-semibold rounded-none bg-[hsl(var(--brand))] text-white hover:bg-[hsl(var(--brand))]/90 border-0 shadow-none"
+              >
                 <Link
-                  href="https://runmat.com/sandbox"
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-lg border border-border bg-secondary text-foreground px-3 py-2 text-base flex items-center gap-2 transition hover:opacity-90"
+                  href="/sandbox"
                   data-ph-capture-attribute-destination="sandbox"
-                  data-ph-capture-attribute-source="matlab-online-how-it-works"
-                  data-ph-capture-attribute-cta="runmat-org-sandbox"
+                  data-ph-capture-attribute-source="matlab-online-features"
+                  data-ph-capture-attribute-cta="try-runmat-browser"
                 >
-                  <span className="h-2 w-2 rounded-full bg-red-400"></span>
-                  <span className="h-2 w-2 rounded-full bg-yellow-400"></span>
-                  <span className="h-2 w-2 rounded-full bg-green-400"></span>
-                  <span className="ml-2">runmat.com/sandbox</span>
+                  Try RunMat in your browser
                 </Link>
-              </div>
-              <CardContent className="pt-6 space-y-2 flex-1">
-                <div className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border bg-secondary text-foreground text-base">
-                  1
-                </div>
-                <h3 className="text-xl font-semibold text-foreground">Open the sandbox</h3>
-                <p className="text-lg text-muted-foreground">
-                  Click the button to launch RunMat in your browser. No downloads or sign-ups required.
-                </p>
-              </CardContent>
-            </Card>
-            <Card className="border border-border/60 bg-card shadow-lg overflow-hidden flex flex-col h-full">
-              <div className="bg-muted/40 p-6 flex flex-col items-start justify-start gap-3 min-h-[200px]">
-                <div className="how-it-works-code w-full rounded-md overflow-hidden bg-[var(--editor-background)] dark:bg-[var(--editor-background)]">
-                  <MatlabInlineCodeBlock
-                    code={"A = [3 1 3 2];\nC = unique(A);"}
-                    showRunButton
-                    preClassName="[&_code]:text-[0.75rem] [&_code]:leading-relaxed !bg-transparent"
-                  />
-                </div>
-              </div>
-              <CardContent className="pt-6 space-y-2 flex-1">
-                <div className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border bg-secondary text-foreground text-base">
-                  2
-                </div>
-                <h3 className="text-xl font-semibold text-foreground">Write or paste code</h3>
-                <p className="text-lg text-muted-foreground">
-                  Type your MATLAB-style code directly, or paste existing scripts from your projects.
-                </p>
-              </CardContent>
-            </Card>
-            <Card className="border border-border/60 bg-card shadow-lg overflow-hidden flex flex-col h-full">
-              <div className="bg-muted/40 p-6 flex items-start justify-start h-[200px]">
-                <div className="how-it-works-code w-full rounded-md overflow-hidden bg-[var(--editor-background)] dark:bg-[var(--editor-background)]">
-                  <MatlabInlineCodeBlock
-                    code={"C =\n\n     1     2     3"}
-                    preClassName="[&_code]:text-[0.75rem] [&_code]:leading-relaxed !bg-transparent"
-                  />
-                </div>
-              </div>
-              <CardContent className="pt-6 space-y-2 flex-1">
-                <div className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-border bg-secondary text-foreground text-base">
-                  3
-                </div>
-                <h3 className="text-xl font-semibold text-foreground">Run and see results</h3>
-                <p className="text-lg text-muted-foreground">
-                  Execute your code instantly. View outputs, plots, and results in real time.
-                </p>
-              </CardContent>
-            </Card>
+              </Button>
+            </div>
           </div>
-        </section>
+        </div>
+      </section>
 
-        {/* Versioning and collaboration */}
-        <section className="py-16 md:py-24 lg:py-32">
-          <div className="mx-auto max-w-4xl text-center mb-10 space-y-3">
-            <h2 className="text-3xl md:text-4xl font-bold text-foreground">Every change versioned. No git required.</h2>
-            <p className="text-muted-foreground text-lg">
+      {/* How it works */}
+      <section className="w-full py-16 md:py-24 lg:py-32">
+        <div className="container mx-auto px-4 md:px-6 lg:px-8">
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
+            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">How it works</h2>
+            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">Get started in three simple steps.</p>
+          </div>
+          <div className="mx-auto max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
+            <div className="space-y-8">
+              <div className="flex items-start gap-4">
+                <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--brand))]/10 text-[hsl(var(--brand))] text-lg font-bold">
+                  1
+                </span>
+                <div>
+                  <h3 className="text-lg font-semibold text-foreground">Open the sandbox</h3>
+                  <p className="text-[0.938rem] text-foreground mt-1">Go to <Link href="/sandbox" className="underline text-[hsl(var(--brand))] hover:text-[hsl(var(--brand))]/80">runmat.com/sandbox</Link>. No downloads, no sign-up, no license key.</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-4">
+                <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--brand))]/10 text-[hsl(var(--brand))] text-lg font-bold">
+                  2
+                </span>
+                <div>
+                  <h3 className="text-lg font-semibold text-foreground">Write or paste code</h3>
+                  <p className="text-[0.938rem] text-foreground mt-1">Type MATLAB-style code directly in the editor, or paste existing scripts from your projects.</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-4">
+                <span className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-[hsl(var(--brand))]/10 text-[hsl(var(--brand))] text-lg font-bold">
+                  3
+                </span>
+                <div>
+                  <h3 className="text-lg font-semibold text-foreground">Run and see results</h3>
+                  <p className="text-[0.938rem] text-foreground mt-1">Execute your code instantly. View outputs, plots, and results in real time, all in your browser.</p>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-xl border border-border overflow-hidden">
+              <video
+                className="w-full h-auto"
+                autoPlay
+                muted
+                loop
+                playsInline
+                preload="metadata"
+                poster="https://web.runmatstatic.com/video/posters/runmat-wave-simulation.webp"
+                aria-label="RunMat wave simulation demo"
+              >
+                <source src="https://web.runmatstatic.com/video/runmat-wave-simulation.mp4" type="video/mp4" />
+              </video>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* Versioning and collaboration */}
+      <section className="w-full py-16 md:py-24 lg:py-32">
+        <div className="container mx-auto px-4 md:px-6 lg:px-8">
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
+            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Every change versioned. No git required.</h2>
+            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
               Every save creates a version automatically. Per-file history and full project snapshots are included on all{" "}
-              <Link href="/pricing" className="underline hover:text-foreground">Cloud tiers</Link>, starting at $0 with 100 MB on the Hobby tier. Paid plans add project sharing with your team -- no git setup or merge conflicts.
+              <Link href="/pricing" className="underline hover:text-foreground/80">Cloud tiers</Link>, starting at $0 with 100 MB on the Hobby tier. Paid plans add project sharing with your team -- no git setup or merge conflicts.
             </p>
           </div>
           <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-3">
             <div className="rounded-lg border border-border bg-card p-6">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-secondary text-muted-foreground mb-3">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-foreground/10 text-foreground mb-3">
                 <GitBranch className="h-5 w-5" />
               </span>
               <h3 className="text-lg font-semibold text-foreground">Automatic file history</h3>
-              <p className="text-sm text-muted-foreground mt-1">Browse the timeline and restore any previous state. No commits, no staging area.</p>
+              <p className="text-[0.938rem] text-foreground mt-1">Browse the timeline and restore any previous state. No commits, no staging area.</p>
               <Link href="/blog/version-control-for-engineers-who-dont-use-git" className="text-xs text-muted-foreground hover:text-foreground underline mt-2 inline-block">Learn more</Link>
             </div>
             <div className="rounded-lg border border-border bg-card p-6">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-secondary text-muted-foreground mb-3">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-foreground/10 text-foreground mb-3">
                 <Camera className="h-5 w-5" />
               </span>
               <h3 className="text-lg font-semibold text-foreground">Project snapshots</h3>
-              <p className="text-sm text-muted-foreground mt-1">Capture your entire project in one click. Restore instantly, even across terabyte-scale datasets.</p>
+              <p className="text-[0.938rem] text-foreground mt-1">Capture your entire project in one click. Restore instantly, even across terabyte-scale datasets.</p>
               <Link href="/docs/versioning" className="text-xs text-muted-foreground hover:text-foreground underline mt-2 inline-block">Learn more</Link>
             </div>
             <div className="rounded-lg border border-border bg-card p-6">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-secondary text-muted-foreground mb-3">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border bg-foreground/10 text-foreground mb-3">
                 <Users className="h-5 w-5" />
               </span>
               <h3 className="text-lg font-semibold text-foreground">Cloud project sharing</h3>
-              <p className="text-sm text-muted-foreground mt-1">Share projects with colleagues instantly. No shared drives, no emailing files back and forth.</p>
+              <p className="text-[0.938rem] text-foreground mt-1">Share projects with colleagues instantly. No shared drives, no emailing files back and forth.</p>
               <Link href="/blog/from-ad-hoc-checkpoints-to-reliable-large-data-persistence" className="text-xs text-muted-foreground hover:text-foreground underline mt-2 inline-block">Learn more</Link>
             </div>
           </div>
-        </section>
+        </div>
+      </section>
 
-        {/* Benchmarks */}
-        <section className="py-16 md:py-24 lg:py-32">
-          <div className="mx-auto max-w-4xl text-center mb-10 space-y-3">
-            <h2 className="text-3xl md:text-4xl font-bold text-foreground">The fastest runtime for your math</h2>
-            <p className="text-muted-foreground text-lg">
+      {/* Benchmarks */}
+      <section className="w-full py-16 md:py-24 lg:py-32">
+        <div className="container mx-auto px-4 md:px-6 lg:px-8">
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
+            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">The fastest runtime for your math</h2>
+            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
               RunMat fuses sequential operations into fewer GPU steps and keeps arrays on-device between steps. Less memory traffic, fewer kernel launches, faster scripts.
             </p>
           </div>
@@ -612,99 +580,101 @@ export default function MatlabOnlinePage() {
           <p className="mx-auto max-w-3xl text-sm text-muted-foreground text-center">
             Times shown are CLI results. The same benchmarks run in the sandbox; browser GPU throttling affects absolute times. No MATLAB comparison per MathWorks&apos; terms.
           </p>
-          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mt-6">
-            <Link href="/docs/accelerate/fusion-intro" className="text-sm hover:text-foreground text-muted-foreground transition-colors underline">
+          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center flex-wrap text-center mt-8">
+            <Link href="/docs/accelerate/fusion-intro" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
               How fusion works
             </Link>
-            <span className="hidden sm:inline text-muted-foreground">&middot;</span>
-            <Link href="/benchmarks" className="text-sm hover:text-foreground text-muted-foreground transition-colors underline">
+            <span className="hidden sm:inline text-foreground/50">&middot;</span>
+            <Link href="/benchmarks" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
               All benchmarks
             </Link>
           </div>
-        </section>
+        </div>
+      </section>
 
-        {/* Comparison */}
-        <section className="py-16 md:py-24 lg:py-32">
-          <div className="mx-auto max-w-5xl text-center mb-10 space-y-3">
-            <h2 className="text-3xl md:text-4xl font-bold text-foreground">RunMat vs. MATLAB Online</h2>
-            <p className="text-muted-foreground text-lg">RunMat runs client-side with GPU acceleration and no account. MATLAB Online requires a license, runs on MathWorks&apos; servers, and caps free usage.</p>
+      {/* Comparison */}
+      <section className="w-full py-16 md:py-24 lg:py-32">
+        <div className="container mx-auto px-4 md:px-6 lg:px-8">
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
+            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">RunMat vs. MATLAB Online</h2>
+            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">RunMat runs client-side with GPU acceleration and no account. MATLAB Online requires a license, runs on MathWorks&apos; servers, and caps free usage.</p>
           </div>
           <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-2">
-            <Card className="border border-border bg-card shadow-lg">
+            <Card className="border border-border bg-card shadow-sm">
               <CardContent className="p-6 space-y-4">
                 <div>
-                  <h3 className="text-xl font-semibold text-foreground">RunMat</h3>
-                  <p className="text-lg text-muted-foreground">High-performance, open-source runtime for math</p>
+                  <h3 className="text-lg font-semibold text-foreground">RunMat</h3>
+                  <p className="text-[0.938rem] text-foreground">High-performance, open-source runtime for math</p>
                 </div>
-                <ul className="space-y-3 text-lg">
-                  <li className="flex items-start gap-3 text-green-300">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-300">
+                <ul className="space-y-2 text-sm">
+                  <li className="flex items-start gap-3 text-green-600 dark:text-green-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-600 dark:text-green-400">
                       ✓
                     </span>
                     Open-source runtime
                   </li>
-                  <li className="flex items-start gap-3 text-green-300">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-300">
+                  <li className="flex items-start gap-3 text-green-600 dark:text-green-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-600 dark:text-green-400">
                       ✓
                     </span>
                     No account required
                   </li>
-                  <li className="flex items-start gap-3 text-green-300">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-300">
+                  <li className="flex items-start gap-3 text-green-600 dark:text-green-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-600 dark:text-green-400">
                       ✓
                     </span>
                     Client-side execution
                   </li>
-                  <li className="flex items-start gap-3 text-green-300">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-300">
+                  <li className="flex items-start gap-3 text-green-600 dark:text-green-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-600 dark:text-green-400">
                       ✓
                     </span>
                     Cross-platform GPU (Metal, Vulkan, DX12, WebGPU)
                   </li>
-                  <li className="flex items-start gap-3 text-green-300">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-300">
+                  <li className="flex items-start gap-3 text-green-600 dark:text-green-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-600 dark:text-green-400">
                       ✓
                     </span>
                     Works offline
                   </li>
-                  <li className="flex items-start gap-3 text-green-300">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-300">
+                  <li className="flex items-start gap-3 text-green-600 dark:text-green-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-600 dark:text-green-400">
                       ✓
                     </span>
                     Core matrix operations
                   </li>
-                  <li className="flex items-start gap-3 text-green-300">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-300">
+                  <li className="flex items-start gap-3 text-green-600 dark:text-green-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-600 dark:text-green-400">
                       ✓
                     </span>
                     Interactive 2D &amp; 3D plotting
                   </li>
-                  <li className="flex items-start gap-3 text-green-300">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-300">
+                  <li className="flex items-start gap-3 text-green-600 dark:text-green-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-600 dark:text-green-400">
                       ✓
                     </span>
                     Real-time type &amp; shape tracking
                   </li>
-                  <li className="flex items-start gap-3 text-green-300">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-300">
+                  <li className="flex items-start gap-3 text-green-600 dark:text-green-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-600 dark:text-green-400">
                       ✓
                     </span>
                     Execution tracing &amp; diagnostics
                   </li>
-                  <li className="flex items-start gap-3 text-green-300">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-300">
+                  <li className="flex items-start gap-3 text-green-600 dark:text-green-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-600 dark:text-green-400">
                       ✓
                     </span>
                     Automatic file versioning &amp; snapshots (Cloud)
                   </li>
-                  <li className="flex items-start gap-3 text-muted-foreground">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-muted-foreground">
+                  <li className="flex items-start gap-3 text-foreground">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-foreground">
                       –
                     </span>
                     Limited package / toolbox support
                   </li>
-                  <li className="flex items-start gap-3 text-muted-foreground">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-muted-foreground">
+                  <li className="flex items-start gap-3 text-foreground">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-foreground">
                       –
                     </span>
                     Subset of MATLAB functions
@@ -712,63 +682,63 @@ export default function MatlabOnlinePage() {
                 </ul>
               </CardContent>
             </Card>
-            <Card className="border border-border/60 bg-card shadow-lg">
+            <Card className="border border-border/60 bg-card shadow-sm">
               <CardContent className="p-6 space-y-4">
                 <div>
-                  <h3 className="text-xl font-semibold text-foreground">MATLAB Online</h3>
-                  <p className="text-lg text-muted-foreground">MathWorks official platform</p>
+                  <h3 className="text-lg font-semibold text-foreground">MATLAB Online</h3>
+                  <p className="text-[0.938rem] text-foreground">MathWorks official platform</p>
                 </div>
-                <ul className="space-y-3 text-lg">
-                  <li className="flex items-start gap-3 text-red-300">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-red-300">
+                <ul className="space-y-2 text-sm">
+                  <li className="flex items-start gap-3 text-red-600 dark:text-red-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-red-600 dark:text-red-400">
                       ✕
                     </span>
                     Requires paid license
                   </li>
-                  <li className="flex items-start gap-3 text-red-300">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-red-300">
+                  <li className="flex items-start gap-3 text-red-600 dark:text-red-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-red-600 dark:text-red-400">
                       ✕
                     </span>
                     Account &amp; sign-in required
                   </li>
-                  <li className="flex items-start gap-3 text-red-300">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-red-300">
+                  <li className="flex items-start gap-3 text-red-600 dark:text-red-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-red-600 dark:text-red-400">
                       ✕
                     </span>
                     Cloud-based execution
                   </li>
-                  <li className="flex items-start gap-3 text-green-300">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-300">
+                  <li className="flex items-start gap-3 text-green-600 dark:text-green-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-600 dark:text-green-400">
                       ✓
                     </span>
                     GPU support available
                   </li>
-                  <li className="flex items-start gap-3 text-red-300">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-red-300">
+                  <li className="flex items-start gap-3 text-red-600 dark:text-red-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-red-600 dark:text-red-400">
                       ✕
                     </span>
                     Requires internet connection
                   </li>
-                  <li className="flex items-start gap-3 text-green-300">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-300">
+                  <li className="flex items-start gap-3 text-green-600 dark:text-green-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-600 dark:text-green-400">
                       ✓
                     </span>
                     Full MATLAB language
                   </li>
-                  <li className="flex items-start gap-3 text-green-300">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-300">
+                  <li className="flex items-start gap-3 text-green-600 dark:text-green-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-600 dark:text-green-400">
                       ✓
                     </span>
                     Complete toolbox ecosystem
                   </li>
-                  <li className="flex items-start gap-3 text-green-300">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-300">
+                  <li className="flex items-start gap-3 text-green-600 dark:text-green-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-green-600 dark:text-green-400">
                       ✓
                     </span>
                     Official MathWorks support
                   </li>
-                  <li className="flex items-start gap-3 text-red-300">
-                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-red-300">
+                  <li className="flex items-start gap-3 text-red-600 dark:text-red-400">
+                    <span className="mt-0.5 inline-flex items-center justify-center text-base text-red-600 dark:text-red-400">
                       ✕
                     </span>
                     No built-in file versioning
@@ -777,99 +747,101 @@ export default function MatlabOnlinePage() {
               </CardContent>
             </Card>
           </div>
-        </section>
+        </div>
+      </section>
 
-        {/* What works today */}
-        <section className="py-16 md:py-24 lg:py-32">
-          <div className="mx-auto max-w-5xl text-center mb-10 space-y-3">
-            <h2 className="text-3xl md:text-4xl font-bold text-foreground">What works today</h2>
-            <p className="text-muted-foreground text-lg">Core matrix workflows, plotting, and debugging ship today. Here is what is in progress.</p>
+      {/* What works today */}
+      <section className="w-full py-16 md:py-24 lg:py-32">
+        <div className="container mx-auto px-4 md:px-6 lg:px-8">
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
+            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">What works today</h2>
+            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">Core matrix workflows, plotting, and debugging ship today. Here is what is in progress.</p>
           </div>
           <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-2">
-            <Card className="border border-green-500/30 bg-card shadow-lg">
+            <Card className="border border-green-500/30 bg-card shadow-sm">
               <CardHeader className="flex flex-row items-center gap-3 border-b border-border/60">
-                <CheckCircle className="h-4 w-4 text-green-300" />
-                <CardTitle className="text-xl text-foreground">Works well</CardTitle>
+                <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+                <CardTitle className="text-lg text-foreground">Works well</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-2 text-muted-foreground text-lg">
+              <CardContent className="space-y-2 text-foreground text-sm">
                 <div className="flex items-start gap-2">
-                  <span className="mt-1 text-green-300">•</span>
+                  <span className="mt-1 text-green-600 dark:text-green-400">•</span>
                   <p>Matrix and array operations (indexing, slicing, reshaping)</p>
                 </div>
                 <div className="flex items-start gap-2">
-                  <span className="mt-1 text-green-300">•</span>
+                  <span className="mt-1 text-green-600 dark:text-green-400">•</span>
                   <p>Arithmetic, logical, and relational operators</p>
                 </div>
                 <div className="flex items-start gap-2">
-                  <span className="mt-1 text-green-300">•</span>
+                  <span className="mt-1 text-green-600 dark:text-green-400">•</span>
                   <p>Control flow (if/else, for, while, switch)</p>
                 </div>
                 <div className="flex items-start gap-2">
-                  <span className="mt-1 text-green-300">•</span>
+                  <span className="mt-1 text-green-600 dark:text-green-400">•</span>
                   <p>User-defined functions with multiple outputs</p>
                 </div>
                 <div className="flex items-start gap-2">
-                  <span className="mt-1 text-green-300">•</span>
+                  <span className="mt-1 text-green-600 dark:text-green-400">•</span>
                   <p>Cells, structs, and basic classdef OOP</p>
                 </div>
                 <div className="flex items-start gap-2">
-                  <span className="mt-1 text-green-300">•</span>
+                  <span className="mt-1 text-green-600 dark:text-green-400">•</span>
                   <p>300+ built-in functions</p>
                 </div>
                 <div className="flex items-start gap-2">
-                  <span className="mt-1 text-green-300">•</span>
+                  <span className="mt-1 text-green-600 dark:text-green-400">•</span>
                   <p>17+ plot types (plot, scatter, surf, contour, bar, pie, stem, quiver, and more) with GPU acceleration, subplots, figure handles, and interactive 3D camera</p>
                 </div>
                 <div className="flex items-start gap-2">
-                  <span className="mt-1 text-green-300">•</span>
+                  <span className="mt-1 text-green-600 dark:text-green-400">•</span>
                   <p>Real-time type and shape tracking (hover to see matrix dimensions)</p>
                 </div>
                 <div className="flex items-start gap-2">
-                  <span className="mt-1 text-green-300">•</span>
+                  <span className="mt-1 text-green-600 dark:text-green-400">•</span>
                   <p>Live syntax validation (red underlines for dimension mismatches and errors)</p>
                 </div>
                 <div className="flex items-start gap-2">
-                  <span className="mt-1 text-green-300">•</span>
+                  <span className="mt-1 text-green-600 dark:text-green-400">•</span>
                   <p>Execution tracing and diagnostic logging</p>
                 </div>
                 <div className="flex items-start gap-2">
-                  <span className="mt-1 text-green-300">•</span>
+                  <span className="mt-1 text-green-600 dark:text-green-400">•</span>
                   <p>Async code execution (non-blocking runs)</p>
                 </div>
               </CardContent>
             </Card>
-            <Card className="border border-amber-500/30 bg-card shadow-lg">
+            <Card className="border border-amber-500/30 bg-card shadow-sm">
               <CardHeader className="flex flex-row items-center gap-3 border-b border-border/60">
-                <Clock className="h-4 w-4 text-amber-300" />
-                <CardTitle className="text-xl text-foreground">Limitations &amp; future work</CardTitle>
+                <Clock className="h-4 w-4 text-amber-600 dark:text-amber-400" />
+                <CardTitle className="text-lg text-foreground">Limitations &amp; future work</CardTitle>
               </CardHeader>
-              <CardContent className="space-y-4 text-muted-foreground text-lg">
+              <CardContent className="space-y-4 text-foreground text-sm">
                 <div>
-                  <h4 className="text-lg font-semibold text-foreground mb-2">In progress</h4>
+                  <h4 className="text-sm font-semibold text-foreground mb-2">In progress</h4>
                   <div className="space-y-2">
                     <div className="flex items-start gap-2">
-                      <span className="mt-1 text-amber-300">•</span>
+                      <span className="mt-1 text-amber-600 dark:text-amber-400">•</span>
                       <p>Extensible package support (signal processing, optimization, etc.)</p>
                     </div>
                     <div className="flex items-start gap-2">
-                      <span className="mt-1 text-amber-300">•</span>
+                      <span className="mt-1 text-amber-600 dark:text-amber-400">•</span>
                       <p>Some edge-case MATLAB semantics</p>
                     </div>
                   </div>
                 </div>
                 <div className="border-t border-border/60 pt-4">
-                  <h4 className="text-lg font-semibold text-foreground mb-2">Not supported</h4>
+                  <h4 className="text-sm font-semibold text-foreground mb-2">Not supported</h4>
                   <div className="space-y-2">
                     <div className="flex items-start gap-2">
-                      <span className="mt-1 text-slate-300">•</span>
+                      <span className="mt-1 text-muted-foreground">•</span>
                       <p>Simulink or graphical block diagrams</p>
                     </div>
                     <div className="flex items-start gap-2">
-                      <span className="mt-1 text-slate-300">•</span>
+                      <span className="mt-1 text-muted-foreground">•</span>
                       <p>MATLAB-specific file formats (.slx, .mlapp)</p>
                     </div>
                     <div className="flex items-start gap-2">
-                      <span className="mt-1 text-slate-300">•</span>
+                      <span className="mt-1 text-muted-foreground">•</span>
                       <p>Java/COM interop</p>
                     </div>
                   </div>
@@ -877,7 +849,7 @@ export default function MatlabOnlinePage() {
               </CardContent>
             </Card>
           </div>
-          <p className="mx-auto mt-6 max-w-4xl text-lg text-muted-foreground text-center">
+          <p className="mx-auto mt-6 max-w-4xl text-sm text-foreground text-center">
             For a detailed list, see the{" "}
             <Link href="/docs/language-coverage" className="underline">
               language coverage guide
@@ -892,48 +864,50 @@ export default function MatlabOnlinePage() {
             </Link>
             .
           </p>
-        </section>
+        </div>
+      </section>
 
-        {/* Enterprise */}
-        <section className="py-16 md:py-24 lg:py-32">
+      {/* Enterprise */}
+      <section className="w-full py-16 md:py-24 lg:py-32">
+        <div className="container mx-auto px-4 md:px-6 lg:px-8">
           <div className="mx-auto max-w-5xl">
-            <div className="rounded-lg border border-border bg-card p-8 shadow-lg">
-              <h2 className="text-2xl md:text-3xl font-bold text-foreground mb-6">Built for teams</h2>
+            <div className="rounded-lg border border-border bg-muted/40 p-8">
+              <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground mb-8">Built for teams</h2>
               <div className="grid gap-6 md:grid-cols-2">
                 <div className="flex items-start gap-4">
-                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary text-muted-foreground">
+                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary text-foreground">
                     <Lock className="h-5 w-5" />
                   </span>
                   <div>
                     <p className="text-xl font-medium text-foreground">SSO &amp; SCIM</p>
-                    <p className="text-base text-muted-foreground">Integrate with your identity provider. Provision and deprovision users automatically.</p>
+                    <p className="text-[0.938rem] text-foreground">Integrate with your identity provider. Provision and deprovision users automatically.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4">
-                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary text-muted-foreground">
+                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary text-foreground">
                     <Shield className="h-5 w-5" />
                   </span>
                   <div>
                     <p className="text-xl font-medium text-foreground">ITAR-compliant deployment</p>
-                    <p className="text-base text-muted-foreground">Self-hosted, air-gapped option for export-controlled environments.</p>
+                    <p className="text-[0.938rem] text-foreground">Self-hosted, air-gapped option for export-controlled environments.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4">
-                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary text-muted-foreground">
+                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary text-foreground">
                     <Eye className="h-5 w-5" />
                   </span>
                   <div>
                     <p className="text-xl font-medium text-foreground">Open source &amp; auditable</p>
-                    <p className="text-base text-muted-foreground">MIT-licensed runtime. Inspect every line of code that runs your math.</p>
+                    <p className="text-[0.938rem] text-foreground">MIT-licensed runtime. Inspect every line of code that runs your math.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4">
-                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary text-muted-foreground">
+                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary text-foreground">
                     <ClipboardCheck className="h-5 w-5" />
                   </span>
                   <div>
                     <p className="text-xl font-medium text-foreground">SOC 2 ready</p>
-                    <p className="text-base text-muted-foreground">Built to SOC 2 standards. Audit planned for Q2 2026.</p>
+                    <p className="text-[0.938rem] text-foreground">Built to SOC 2 standards. Audit planned for Q2 2026.</p>
                   </div>
                 </div>
               </div>
@@ -944,13 +918,15 @@ export default function MatlabOnlinePage() {
               </div>
             </div>
           </div>
-        </section>
+        </div>
+      </section>
 
-        {/* FAQs */}
-        <section className="py-16 md:py-24 lg:py-32">
-          <div className="mx-auto max-w-4xl text-center mb-8 space-y-3">
-            <h2 className="text-3xl md:text-4xl font-bold text-foreground">Frequently asked questions</h2>
-            <p className="text-muted-foreground text-lg">
+      {/* FAQs */}
+      <section className="w-full py-16 md:py-24 lg:py-32">
+        <div className="container mx-auto px-4 md:px-6 lg:px-8">
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
+            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Frequently asked questions</h2>
+            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
               Common questions about RunMat and MATLAB compatibility.
             </p>
           </div>
@@ -958,60 +934,31 @@ export default function MatlabOnlinePage() {
             {faqItems.map(item => (
               <details
                 key={item.question}
-                className="group self-start rounded-xl border border-border/60 bg-card shadow-lg"
+                className="group self-start rounded-xl border border-border/60 bg-card shadow-sm"
               >
                 <summary className="flex cursor-pointer list-none items-center justify-between px-6 py-4 text-foreground">
-                  <span className="text-lg font-medium">{item.question}</span>
+                  <span className="text-sm font-medium">{item.question}</span>
                   <span className="text-muted-foreground transition-transform duration-200 group-open:rotate-180">
                     ⌄
                   </span>
                 </summary>
-                <div className="px-6 pb-4 text-lg text-muted-foreground">
+                <div className="px-6 pb-4 text-sm text-foreground">
                   {item.answerContent ?? item.answer}
                 </div>
               </details>
             ))}
           </div>
-        </section>
+        </div>
+      </section>
 
-        {/* Final CTA */}
-        <section className="py-16 md:py-24 lg:py-32 text-center">
-          <Card className="mx-auto max-w-3xl border border-border bg-card shadow-lg">
-            <CardContent className="py-8 space-y-4">
-              <h2 className="text-3xl md:text-4xl font-bold text-foreground">
-                Run MATLAB code online - no install, no license
-              </h2>
-              <p className="text-muted-foreground text-lg">
-                Start running math immediately in your browser.
-              </p>
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-                <Button
-                  size="lg"
-                  asChild
-                  className="h-12 px-8 text-base font-semibold bg-[hsl(var(--brand))] text-white hover:bg-[hsl(var(--brand))]/90 border-0 shadow-none"
-                >
-                  <Link
-                    href="/sandbox"
-                    data-ph-capture-attribute-destination="sandbox"
-                    data-ph-capture-attribute-source="matlab-online-bottom-cta"
-                    data-ph-capture-attribute-cta="launch-sandbox"
-                  >
-                    Launch the sandbox
-                  </Link>
-                </Button>
-                <Button
-                  variant="outline"
-                  size="lg"
-                  asChild
-                  className="h-12 px-8 text-base bg-card border-border text-foreground"
-                >
-                  <Link href="/download">Other download options</Link>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </section>
-      </div>
+      {/* Final CTA */}
+      <section className="w-full py-16 md:py-24 lg:py-32">
+        <div className="container mx-auto px-4 md:px-6 lg:px-8">
+          <div className="mx-auto max-w-3xl">
+            <SandboxCta source="matlab-online-bottom-cta" />
+          </div>
+        </div>
+      </section>
     </div>
   );
 }

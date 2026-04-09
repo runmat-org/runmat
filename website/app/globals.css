@@ -28,14 +28,14 @@
   --color-ring: hsl(var(--ring));
   --color-brand: hsl(var(--brand));
   --radius: var(--radius);
-  --radius-xs: 0;
-  --radius-sm: 0;
-  --radius-md: 0;
-  --radius-lg: 0;
-  --radius-xl: 0;
-  --radius-2xl: 0;
-  --radius-3xl: 0;
-  --radius-4xl: 0;
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.25rem;
+  --radius-md: 0.25rem;
+  --radius-lg: 0.25rem;
+  --radius-xl: 0.25rem;
+  --radius-2xl: 0.25rem;
+  --radius-3xl: 0.25rem;
+  --radius-4xl: 0.25rem;
 }
 
 @layer base {
@@ -59,10 +59,10 @@
     --border: 0 0% 89.8%;
     --input: 0 0% 89.8%;
     --ring: 0 0% 3.9%;
-    --radius: 0;
+    --radius: 0.25rem;
     --brand: 219 100% 65.5%;
-    --editor-background: #FCFCFD;
-    --code-surface: 220 20% 99%;
+    --editor-background: #1e1e2e;
+    --code-surface: 220 20% 13%;
   }
 
   .dark {
@@ -86,8 +86,8 @@
     --input: 240 5.3% 26.1%;
     --ring: 240 4.9% 83.9%;
     --brand: 219 100% 65.5%;
-    --editor-background: #181B24;
-    --code-surface: 225 20% 12%;
+    --editor-background: #12151D;
+    --code-surface: 225 20% 9%;
   }
 }
 
@@ -205,13 +205,18 @@
   /* Let Prism token colors shine but ensure inline readability */
   :not(pre) > code,
   .markdown-inline-code {
-    background: hsl(var(--muted));
-    padding: 0.15rem 0.35rem;
+    background: hsl(var(--muted) / 0.7);
+    padding: 0.2rem 0.4rem;
     border-radius: 4px;
     border: 1px solid hsl(var(--border));
-    font-size: 0.9em;
+    font-size: 0.875em;
     word-break: break-word;
     overflow-wrap: break-word;
+  }
+  .dark :not(pre) > code,
+  .dark .markdown-inline-code {
+    background: hsl(220 15% 14%);
+    border-color: hsl(220 10% 24%);
   }
 
   /* Mermaid embeds: ensure full width visuals */
@@ -336,113 +341,4 @@
 
 :not(pre) > code[class*="language-"], pre[class*="language-"] {
   background: var(--editor-background);
-}
-
-/* WCAG-friendly Prism colors for light mode on near-white code surfaces. */
-/* Light-mode Prism overrides — matched to the product's Monaco editor theme */
-html:not(.dark) :not(pre) > code[class*="language-"],
-html:not(.dark) pre[class*="language-"],
-html:not(.dark) code[class*="language-"] {
-  color: #1C2430;
-  text-shadow: none;
-}
-
-html:not(.dark) .token.comment,
-html:not(.dark) .token.prolog,
-html:not(.dark) .token.doctype,
-html:not(.dark) .token.cdata {
-  color: #778195;
-}
-
-html:not(.dark) .token.punctuation,
-html:not(.dark) .token.operator,
-html:not(.dark) .token.entity,
-html:not(.dark) .token.url {
-  color: #1C2430;
-}
-
-html:not(.dark) .token.keyword,
-html:not(.dark) .token.atrule,
-html:not(.dark) .token.important {
-  color: #6C54C7;
-}
-
-html:not(.dark) .token.function,
-html:not(.dark) .token.class-name,
-html:not(.dark) .token.builtin {
-  color: #39506F;
-}
-
-html:not(.dark) .token.string,
-html:not(.dark) .token.char,
-html:not(.dark) .token.attr-value,
-html:not(.dark) .token.inserted {
-  color: #35705C;
-}
-
-html:not(.dark) .token.number,
-html:not(.dark) .token.boolean,
-html:not(.dark) .token.constant,
-html:not(.dark) .token.symbol {
-  color: #8D6231;
-}
-
-html:not(.dark) .token.regex,
-html:not(.dark) .token.variable,
-html:not(.dark) .token.selector {
-  color: #4A5A73;
-}
-
-/* Dark-mode Prism overrides — matched to the product's Monaco editor theme */
-.dark :not(pre) > code[class*="language-"],
-.dark pre[class*="language-"],
-.dark code[class*="language-"] {
-  color: #E7EBF2;
-  text-shadow: none;
-}
-
-.dark .token.comment,
-.dark .token.prolog,
-.dark .token.doctype,
-.dark .token.cdata {
-  color: #8A92A3;
-}
-
-.dark .token.punctuation,
-.dark .token.operator,
-.dark .token.entity,
-.dark .token.url {
-  color: #E7EBF2;
-}
-
-.dark .token.keyword,
-.dark .token.atrule,
-.dark .token.important {
-  color: #C0A9FF;
-}
-
-.dark .token.function,
-.dark .token.class-name,
-.dark .token.builtin {
-  color: #CBD2E0;
-}
-
-.dark .token.string,
-.dark .token.char,
-.dark .token.attr-value,
-.dark .token.inserted {
-  color: #9EC3A7;
-}
-
-.dark .token.number,
-.dark .token.boolean,
-.dark .token.constant,
-.dark .token.symbol {
-  color: #D8B37D;
-}
-
-.dark .token.regex,
-.dark .token.variable,
-.dark .token.selector {
-  color: #B8C0D2;
 }

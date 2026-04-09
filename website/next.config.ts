@@ -8,6 +8,10 @@ const nextConfig: NextConfig = {
         protocol: 'https',
         hostname: 'web.runmatstatic.com',
       },
+      {
+        protocol: 'https',
+        hostname: 'runmat.com',
+      },
     ],
   },
   experimental: {

@@ -45,7 +45,7 @@ export function MatlabCodeCard({ code = sampleCode, className }: MatlabCodeCardP
       }}
     >
       {/* macOS-style title bar with traffic lights + URL bar */}
-      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-border bg-[#F7F8FB] dark:bg-[#141820]">
+      <div className="flex items-center gap-3 px-4 py-2.5 border-b border-white/[0.06] bg-[#181c28]">
         <div className="flex gap-2 shrink-0">
           <span className="h-3 w-3 rounded-full bg-[#ff5f56]" />
           <span className="h-3 w-3 rounded-full bg-[#ffbd2e]" />
@@ -53,7 +53,7 @@ export function MatlabCodeCard({ code = sampleCode, className }: MatlabCodeCardP
         </div>
         {/* URL bar */}
         <div className="flex-1 flex justify-center">
-          <div className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-black/[0.04] dark:bg-white/[0.06] text-[12px] text-muted-foreground select-none">
+            <div className="flex items-center gap-1.5 px-3 py-1 rounded-md bg-white/[0.06] text-[12px] text-[#9099AA] select-none">
             <svg width="10" height="10" viewBox="0 0 16 16" fill="none" className="shrink-0 opacity-50">
               <path d="M8 1a4.5 4.5 0 00-4.5 4.5V7H3a1 1 0 00-1 1v6a1 1 0 001 1h10a1 1 0 001-1V8a1 1 0 00-1-1h-.5V5.5A4.5 4.5 0 008 1zm-3 4.5a3 3 0 116 0V7H5V5.5z" fill="currentColor" />
             </svg>
@@ -65,9 +65,9 @@ export function MatlabCodeCard({ code = sampleCode, className }: MatlabCodeCardP
       </div>
 
       {/* Editor tab strip */}
-      <div className="flex items-center border-b border-border bg-[#F3F4F6] dark:bg-[#12151D]">
+      <div className="flex items-center border-b border-white/[0.06] bg-[#14171f]">
         <div className="flex items-center gap-1.5 px-3 py-1.5 text-[12px] bg-[var(--editor-background)] border-r border-border">
-          <span className="text-foreground dark:text-[#CDD4E2] font-medium select-none">example.m</span>
+          <span className="text-[#CDD4E2] font-medium select-none">example.m</span>
         </div>
       </div>
 
@@ -95,7 +95,7 @@ export function MatlabCodeCard({ code = sampleCode, className }: MatlabCodeCardP
           {highlightedLines.map((lineHtml, i) => (
             <div key={i} className="flex text-[13px] leading-[21px] hover:bg-white/[0.02]">
               <span
-                className="shrink-0 select-none text-right w-10 pr-4 dark:text-[#737C90] text-[#9099AA]"
+                className="shrink-0 select-none text-right w-10 pr-4 text-[#737C90]"
                 aria-hidden="true"
               >
                 {i + 1}

@@ -7,7 +7,7 @@ export function JupyterTabContent() {
   return (
     <div className="space-y-6">
       <div id="jupyter-notebook-integration" className="scroll-mt-24" />
-      <p className="text-muted-foreground">
+      <p className="text-foreground">
         Use RunMat as a Jupyter kernel for interactive notebooks with full MATLAB syntax and automatic GPU acceleration. Requires RunMat CLI installed first.
       </p>
 
@@ -19,10 +19,10 @@ export function JupyterTabContent() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-muted-foreground text-sm">
+          <p className="text-foreground text-sm">
             One-time setup that works with existing Jupyter installations:
           </p>
-          <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto">
+          <div className="bg-[var(--editor-background)] rounded-md p-4 font-mono text-sm text-white overflow-x-auto">
             <div>runmat --install-kernel</div>
             <div className="text-green-400 mt-1">RunMat Jupyter kernel installed successfully!</div>
             <div className="text-green-400">Kernel directory: ~/.local/share/jupyter/kernels/runmat</div>
@@ -42,15 +42,15 @@ export function JupyterTabContent() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-muted-foreground text-sm">
+          <p className="text-foreground text-sm">
             Launch Jupyter Notebook or Jupyter Lab, then choose &quot;RunMat&quot; when creating a new notebook:
           </p>
-          <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto">
-            <div className="text-gray-400"># Start Jupyter Notebook</div>
+          <div className="bg-[var(--editor-background)] rounded-md p-4 font-mono text-sm text-white overflow-x-auto">
+            <div className="text-white/60"># Start Jupyter Notebook</div>
             <div>jupyter notebook</div>
-            <div className="mt-2 text-gray-400"># Or Jupyter Lab</div>
+            <div className="mt-2 text-white/60"># Or Jupyter Lab</div>
             <div>jupyter lab</div>
-            <div className="mt-2 text-gray-400"># Then select &quot;RunMat&quot; when creating a new notebook</div>
+            <div className="mt-2 text-white/60"># Then select &quot;RunMat&quot; when creating a new notebook</div>
           </div>
           <div className="flex items-center space-x-2 text-sm text-[hsl(var(--brand))]">
             <CheckCircle className="h-4 w-4 flex-shrink-0" />
@@ -67,16 +67,16 @@ export function JupyterTabContent() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-muted-foreground text-sm">
+          <p className="text-foreground text-sm">
             Check that the RunMat kernel is listed:
           </p>
-          <div className="bg-gray-900 rounded-md p-4 font-mono text-sm text-white overflow-x-auto">
+          <div className="bg-[var(--editor-background)] rounded-md p-4 font-mono text-sm text-white overflow-x-auto">
             <div>jupyter kernelspec list</div>
-            <div className="text-gray-400 mt-1">Available kernels:</div>
-            <div className="text-gray-400">  python3    /usr/local/share/jupyter/kernels/python3</div>
+            <div className="text-white/60 mt-1">Available kernels:</div>
+            <div className="text-white/60">  python3    /usr/local/share/jupyter/kernels/python3</div>
             <div className="text-green-400">  runmat    ~/.local/share/jupyter/kernels/runmat</div>
           </div>
-          <p className="text-muted-foreground text-sm">
+          <p className="text-foreground text-sm">
             If RunMat doesn&apos;t appear, ensure Jupyter is installed and run the install command again.
           </p>
         </CardContent>

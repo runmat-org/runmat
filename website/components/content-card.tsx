@@ -28,7 +28,7 @@ export function ContentCard({
 }: ContentCardProps) {
   return (
     <Link href={href} className="block h-full group">
-      <Card className="group overflow-hidden transition-all hover:shadow-lg cursor-pointer h-full flex flex-col">
+      <Card className="group overflow-hidden transition-all cursor-pointer h-full flex flex-col bg-muted/50 hover:bg-card">
         <CardContent className="p-5 flex flex-col h-full gap-0">
           {image ? (
             <div className="relative w-full h-40 rounded-lg mb-3 overflow-hidden flex-shrink-0">
@@ -36,7 +36,7 @@ export function ContentCard({
                 src={image}
                 alt={imageAlt ?? title}
                 fill
-                className="object-contain transition-transform duration-300 group-hover:scale-105"
+                className="object-contain"
                 sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
               />
             </div>
@@ -58,7 +58,7 @@ export function ContentCard({
           </h3>
 
           {excerpt && (
-            <p className="text-sm text-muted-foreground line-clamp-2 leading-snug mb-2">
+            <p className="text-sm text-foreground line-clamp-2 leading-snug mb-2">
               {excerpt}
             </p>
           )}

@@ -17,7 +17,7 @@ export function BuiltinMetadataChips({ metadata, categoryAnchor }: BuiltinMetada
   return (
     <div className="flex flex-wrap items-center gap-3 mb-6">
       <Link href={categoryHref}>
-        <Badge variant="outline" className="px-3 py-1.5 h-auto border-border/50 bg-muted/30 cursor-pointer hover:bg-accent hover:text-accent-foreground transition-colors">
+        <Badge variant="outline" className="px-3 py-1.5 h-auto border-border/50 bg-muted cursor-pointer hover:bg-accent hover:text-accent-foreground transition-colors">
           <div className="flex items-center gap-2">
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Category</span>
             <Layers className="h-3.5 w-3.5 text-muted-foreground" />
@@ -28,12 +28,12 @@ export function BuiltinMetadataChips({ metadata, categoryAnchor }: BuiltinMetada
 
       {metadata.gpuSupport && (
         <Badge
-          variant="default"
-          className="px-3 py-1.5 h-auto"
+          variant="outline"
+          className="px-3 py-1.5 h-auto border-border/50 bg-muted"
         >
           <div className="flex items-center gap-2">
-            <span className="text-xs font-medium text-muted-foreground/80 uppercase tracking-wide">GPU</span>
-            <Zap className="h-3.5 w-3.5" />
+            <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">GPU</span>
+            <Zap className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
             <span className="font-medium text-green-600 dark:text-green-400">Yes</span>
           </div>
         </Badge>
@@ -43,7 +43,7 @@ export function BuiltinMetadataChips({ metadata, categoryAnchor }: BuiltinMetada
         <Badge
           key={badge}
           variant="outline"
-          className="px-3 py-1.5 h-auto border-border/50 bg-muted/30 font-medium"
+          className="px-3 py-1.5 h-auto border-border/50 bg-muted font-medium"
         >
           {badge}
         </Badge>

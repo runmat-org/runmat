@@ -51,10 +51,10 @@ export default async function ResourcesByTypePage({ params }: { params: Promise<
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-16 md:px-6 md:py-24 space-y-10">
         <div className="mx-auto max-w-[58rem] text-center">
-          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl md:text-4xl">
             {label}
           </h1>
-          <p className="mt-6 text-base text-muted-foreground sm:text-lg">
+          <p className="mt-6 text-foreground text-[0.938rem]">
             Guides and walkthroughs curated for this category.
           </p>
         </div>

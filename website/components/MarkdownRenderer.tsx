@@ -95,13 +95,13 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
 
   const defaultComponents: MarkdownRendererComponents = {
     h1: ({ children, ...props }: { children: React.ReactNode }) => (
-      <h1 className="text-3xl sm:text-4xl md:text-5xl lg:text-6xl font-bold mt-12 mb-6 text-foreground first:mt-0 break-words" {...props}>{children}</h1>
+      <h1 className="text-2xl sm:text-3xl font-bold mt-10 mb-4 text-foreground first:mt-0 break-words" {...props}>{children}</h1>
     ),
     h2: ({ children, ...props }: { children: React.ReactNode }) => {
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h2 id={id} className="group scroll-mt-24 text-3xl sm:text-4xl md:text-5xl font-semibold mt-10 mb-5 text-foreground break-words" {...props}>
+        <h2 id={id} className="group scroll-mt-24 text-xl sm:text-2xl font-semibold mt-8 mb-3 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h2>
@@ -111,7 +111,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h3 id={id} className="group scroll-mt-24 text-2xl sm:text-3xl font-semibold mt-8 mb-4 text-foreground break-words" {...props}>
+        <h3 id={id} className="group scroll-mt-24 text-base sm:text-lg font-semibold mt-6 mb-2 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h3>
@@ -121,7 +121,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h4 id={id} className="group scroll-mt-24 text-xl sm:text-2xl font-semibold mt-6 mb-3 text-foreground break-words" {...props}>
+        <h4 id={id} className="group scroll-mt-24 text-base sm:text-lg font-semibold mt-5 mb-2 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h4>
@@ -131,7 +131,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h5 id={id} className="group scroll-mt-24 text-lg sm:text-xl font-semibold mt-5 mb-2 text-foreground break-words" {...props}>
+        <h5 id={id} className="group scroll-mt-24 text-base font-semibold mt-4 mb-1.5 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h5>
@@ -141,7 +141,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const text = toPlainText(children);
       const id = slugifyHeading(text.replace(/`/g, ''));
       return (
-        <h6 id={id} className="group scroll-mt-24 text-base sm:text-lg font-semibold mt-4 mb-2 text-foreground break-words" {...props}>
+        <h6 id={id} className="group scroll-mt-24 text-sm font-semibold mt-4 mb-1.5 text-foreground break-words" {...props}>
           {children}
           <HeadingAnchor id={id} />
         </h6>
@@ -156,26 +156,26 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
         return false;
       });
       if (hasBlock) {
-        return <div className="my-6 break-words" {...props}>{children}</div>;
+        return <div className="my-4 break-words" {...props}>{children}</div>;
       }
-      return <p className="my-6 text-muted-foreground leading-relaxed break-words" {...props}>{children}</p>;
+      return <p className="my-4 text-foreground text-[0.938rem] leading-relaxed break-words" {...props}>{children}</p>;
     },
     ul: ({ children, ...props }: { children: React.ReactNode }) => (
-      <ul className="my-6 ml-6 space-y-2 list-disc marker:text-[hsl(var(--brand))] break-words" {...props}>{children}</ul>
+      <ul className="my-4 ml-6 space-y-1.5 list-disc marker:text-muted-foreground break-words" {...props}>{children}</ul>
     ),
     ol: ({ children, ...props }: { children: React.ReactNode }) => (
-      <ol className="my-6 ml-6 space-y-2 list-decimal marker:text-[hsl(var(--brand))] break-words" {...props}>{children}</ol>
+      <ol className="my-4 ml-6 space-y-1.5 list-decimal marker:text-muted-foreground break-words" {...props}>{children}</ol>
     ),
     li: ({ children, ...props }: { children: React.ReactNode }) => (
-      <li className="text-muted-foreground leading-relaxed pl-2 break-words" {...props}>{children}</li>
+      <li className="text-foreground text-[0.938rem] leading-relaxed pl-2 break-words" {...props}>{children}</li>
     ),
     blockquote: ({ children, ...props }: { children: React.ReactNode }) => (
-      <blockquote className="my-6 pl-4 sm:pl-6 border-l-4 border-[hsl(var(--brand))] bg-muted py-4 pr-4 rounded-r-lg break-words overflow-x-hidden" {...props}>
-        <div className="text-muted-foreground italic break-words">{children}</div>
+      <blockquote className="my-4 pl-4 sm:pl-6 border-l-4 border-[hsl(var(--brand))] bg-muted py-3 pr-4 rounded-r-lg break-words overflow-x-hidden" {...props}>
+        <div className="text-foreground/80 italic break-words">{children}</div>
       </blockquote>
     ),
     hr: ({ ...props }: Record<string, unknown>) => (
-      <hr className="my-12 border-t border-border" {...props} />
+      <hr className="my-8 border-t border-border" {...props} />
     ),
     a: ({ children, href, ...props }: { children: React.ReactNode; href?: string }) => {
       const isInternal = href === 'https://runmat.com' || href?.startsWith('https://runmat.com/') || href?.startsWith('https://runmat.com?') || href?.startsWith('https://runmat.com#');
@@ -183,7 +183,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       return (
         <a
           href={href}
-          className="text-[hsl(var(--brand))] hover:opacity-80 underline underline-offset-4 transition-colors"
+          className="text-[hsl(var(--brand))] hover:text-[hsl(var(--brand))]/80 underline underline-offset-4 transition-colors"
           {...props}
           {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
         >
@@ -192,24 +192,24 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       );
     },
     table: ({ children, ...props }: { children: React.ReactNode }) => (
-      <div className="my-8 mx-0 overflow-x-auto max-w-full">
-        <table className="w-full min-w-full sm:min-w-[500px] border-collapse border border-border rounded-lg table-mobile-wrap" {...props}>{children}</table>
+      <div className="my-5 mx-0 overflow-x-auto max-w-full">
+        <table className="w-full caption-bottom text-sm border border-border rounded-md table-mobile-wrap" {...props}>{children}</table>
       </div>
     ),
     thead: ({ children, ...props }: { children: React.ReactNode }) => (
-      <thead className="bg-muted" {...props}>{children}</thead>
+      <thead className="bg-muted/50 [&_tr]:border-b [&_tr]:border-border" {...props}>{children}</thead>
     ),
     tbody: ({ children, ...props }: { children: React.ReactNode }) => (
-      <tbody {...props}>{children}</tbody>
+      <tbody className="[&_tr:last-child]:border-0" {...props}>{children}</tbody>
     ),
     tr: ({ children, ...props }: { children: React.ReactNode }) => (
-      <tr className="border-b border-border last:border-b-0" {...props}>{children}</tr>
+      <tr className="border-b border-border transition-colors" {...props}>{children}</tr>
     ),
     th: ({ children, ...props }: { children: React.ReactNode }) => (
-      <th className="border border-border px-2 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm text-left font-semibold text-foreground" {...props}>{children}</th>
+      <th className="px-4 py-2.5 text-left align-middle text-sm font-semibold text-foreground border-r border-border last:border-r-0" {...props}>{children}</th>
     ),
     td: ({ children, ...props }: { children: React.ReactNode }) => (
-      <td className="border border-border px-2 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm text-muted-foreground" {...props}>{children}</td>
+      <td className="px-4 py-2.5 align-middle text-sm text-foreground border-r border-border last:border-r-0" {...props}>{children}</td>
     ),
     pre: ({ children, ...props }: { children?: React.ReactNode }) => {
       // Check if this contains a mermaid code block
@@ -273,7 +273,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
         const code = toPlainText(children).trim();
 
         return (
-          <div className="my-8 relative group">
+          <div className="my-5 relative group">
             {isRunnable && (
               <div className="absolute top-3 right-3 z-10">
                 <TryInBrowserButton 
@@ -302,7 +302,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
         const mermaidContent = toPlainText(children);
         
         return (
-          <div className="my-8 w-full">
+          <div className="my-5 w-full">
             <MermaidDiagram chart={mermaidContent.trim()} />
           </div>
         );
@@ -322,7 +322,7 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       <img 
         src={src} 
         alt={alt} 
-        className="my-6 max-w-full h-auto rounded-lg" 
+        className="my-5 max-w-full h-auto rounded-lg" 
         loading="lazy"
         {...props} 
       />

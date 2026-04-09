@@ -1,5 +1,4 @@
 import { Metadata } from "next";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
@@ -7,7 +6,6 @@ import {
   Code,
   Zap,
   Cpu,
-  ExternalLink,
   Monitor,
 } from "lucide-react";
 import { SiGithub } from "react-icons/si";
@@ -26,258 +24,225 @@ export const metadata: Metadata = {
 export default function DownloadPage() {
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-20">
-        
-        {/* Header */}
-        <div className="text-center mb-12">
-          <Badge className="mb-4">Free download</Badge>
-          <h1 className="text-4xl lg:text-5xl font-bold mb-6 text-foreground">
-            Download RunMat
-          </h1>
-          <p className="text-xl text-muted-foreground leading-relaxed max-w-3xl mx-auto">
-            Get started with RunMat in seconds.
-          </p>
-        </div>
+      <div className="container mx-auto px-4 md:px-6 lg:px-8">
 
-        {/* Quick Install */}
-        <section className="mb-12">
-          <Card className="bg-card border-border">
-            <CardContent className="p-4 text-center">
-              <OSInstallCommand className="max-w-4xl mx-auto shadow-none border-none" />
-            </CardContent>
-          </Card>
+        {/* Header */}
+        <section className="w-full py-16 md:py-24 lg:py-32">
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
+            <h1 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+              Download RunMat
+            </h1>
+            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
+              Get started with RunMat in seconds. Free, open source, MIT licensed.
+            </p>
+          </div>
+
+          {/* Quick Install */}
+          <div className="mx-auto max-w-3xl">
+            <Card className="bg-card border-border">
+              <CardContent className="p-4 text-center">
+                <OSInstallCommand className="max-w-4xl mx-auto shadow-none border-none" />
+              </CardContent>
+            </Card>
+            <p className="text-center text-[0.938rem] text-foreground mt-6">
+              Or <Link href="/sandbox" className="underline text-[hsl(var(--brand))] hover:text-[hsl(var(--brand))]/80">try RunMat in your browser</Link> with no installation.
+            </p>
+          </div>
         </section>
 
-        <p className="text-center text-muted-foreground mt-4">
-          Or <Link href="/sandbox" className="underline hover:text-foreground">try RunMat in your browser</Link> with no installation.
-        </p>
-
         {/* Alternative Installation Methods */}
-        <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-8 text-center text-foreground">
-            Alternative installation methods
-          </h2>
+        <section className="w-full py-16 md:py-24 lg:py-32">
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
+            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+              Alternative installation methods
+            </h2>
+          </div>
           
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            
-            {/* Package Managers */}
-            <Card className="relative">
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Package className="h-5 w-5 mr-2 text-primary" />
-                  Homebrew (macOS/Linux)
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div>
-                    <h4 className="font-semibold text-foreground mb-2">One-liner install</h4>
-                    <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-foreground dark:text-foreground">
-                      brew install runmat-org/tap/runmat
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <h4 className="font-semibold text-foreground">Tap then install</h4>
-                    <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-foreground dark:text-foreground">
-                      brew tap runmat-org/tap
-                    </div>
-                    <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-foreground dark:text-foreground">
-                      brew install runmat
-                    </div>
+          <div className="mx-auto max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="rounded-lg border border-border bg-card p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground">
+                  <Package className="h-5 w-5" />
+                </span>
+                <h3 className="text-lg font-semibold text-foreground">Homebrew (macOS/Linux)</h3>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm font-medium text-foreground mb-2">One-liner install</p>
+                  <div className="bg-[var(--editor-background)] text-white rounded-md p-3 font-mono text-sm">
+                    brew install runmat-org/tap/runmat
                   </div>
                 </div>
-              </CardContent>
-            </Card>
+                <div className="space-y-2">
+                  <p className="text-sm font-medium text-foreground">Tap then install</p>
+                  <div className="bg-[var(--editor-background)] text-white rounded-md p-3 font-mono text-sm">
+                    brew tap runmat-org/tap
+                  </div>
+                  <div className="bg-[var(--editor-background)] text-white rounded-md p-3 font-mono text-sm">
+                    brew install runmat
+                  </div>
+                </div>
+              </div>
+            </div>
 
-            {/* Cargo Installation */}
-            <Card className="relative border-primary/40">
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Cpu className="h-5 w-5 mr-2 text-primary" />
-                  Cargo (Rust)
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <div>
-                    <h4 className="font-semibold text-foreground mb-2">Install from crates.io</h4>
-                    <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-foreground dark:text-foreground">
-                      cargo install runmat
-                    </div>
+            <div className="rounded-lg border border-border bg-card p-6">
+              <div className="flex items-center gap-2 mb-4">
+                <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground">
+                  <Cpu className="h-5 w-5" />
+                </span>
+                <h3 className="text-lg font-semibold text-foreground">Cargo (Rust)</h3>
+              </div>
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm font-medium text-foreground mb-2">Install from crates.io</p>
+                  <div className="bg-[var(--editor-background)] text-white rounded-md p-3 font-mono text-sm">
+                    cargo install runmat
                   </div>
-                  
-                  <div>
-                    <h4 className="font-semibold text-foreground mb-2">From source (latest)</h4>
-                    <div className="bg-gray-200 dark:bg-gray-700 rounded-md p-3 font-mono text-sm text-foreground dark:text-foreground">
-                      cargo install --git https://github.com/runmat-org/runmat
-                    </div>
-                  </div>
-                  
-                  <p className="text-sm text-muted-foreground">
-                    Requires Rust 1.70+ with LLVM support
-                  </p>
                 </div>
-              </CardContent>
-            </Card>
+                <div>
+                  <p className="text-sm font-medium text-foreground mb-2">From source (latest)</p>
+                  <div className="bg-[var(--editor-background)] text-white rounded-md p-3 font-mono text-sm break-all">
+                    cargo install --git https://github.com/runmat-org/runmat
+                  </div>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Requires Rust 1.70+ with LLVM support
+                </p>
+              </div>
+            </div>
           </div>
         </section>
 
         {/* Development Setup */}
-        <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-8 text-center text-foreground">
-            Development environment
-          </h2>
+        <section className="w-full py-16 md:py-24 lg:py-32">
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
+            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+              Development environment
+            </h2>
+          </div>
           
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {/* Desktop App */}
-            <Card className="opacity-60 relative">
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Monitor className="h-5 w-5 mr-2 text-muted-foreground" />
-                  Desktop App
-                  <span className="ml-auto bg-gray-200 dark:bg-gray-700 text-muted-foreground px-2 py-1 rounded-full text-xs font-medium">
-                    Coming soon
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground mb-4">
-                  Full IDE with native GPU performance and local file system access.
-                </p>
-                <Button className="w-full opacity-50 cursor-not-allowed" disabled>
-                  <ExternalLink className="mr-2 h-4 w-4" />
-                  Download
-                </Button>
-              </CardContent>
-            </Card>
+          <div className="mx-auto max-w-5xl grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="rounded-lg border border-border bg-card p-6 opacity-60">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
+                <Monitor className="h-5 w-5" />
+              </span>
+              <div className="flex items-center gap-2 mb-1">
+                <h3 className="text-lg font-semibold text-foreground">Desktop App</h3>
+                <span className="text-xs text-muted-foreground border border-border rounded-md px-2 py-0.5">Coming soon</span>
+              </div>
+              <p className="text-[0.938rem] text-foreground mt-1">
+                Full IDE with native GPU performance and local file system access.
+              </p>
+            </div>
 
-            {/* VS Code Extension */}
-            <Card className="opacity-60 relative">
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Code className="h-5 w-5 mr-2 text-muted-foreground" />
-                  VS Code Extension
-                  <span className="ml-auto bg-gray-200 dark:bg-gray-700 text-muted-foreground px-2 py-1 rounded-full text-xs font-medium">
-                    Coming soon
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground mb-4">
-                  Get syntax highlighting, IntelliSense, and integrated debugging for RunMat.
-                </p>
-                <Button className="w-full opacity-50 cursor-not-allowed" disabled>
-                  <ExternalLink className="mr-2 h-4 w-4" />
-                  Install extension
-                </Button>
-              </CardContent>
-            </Card>
+            <div className="rounded-lg border border-border bg-card p-6 opacity-60">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
+                <Code className="h-5 w-5" />
+              </span>
+              <div className="flex items-center gap-2 mb-1">
+                <h3 className="text-lg font-semibold text-foreground">VS Code Extension</h3>
+                <span className="text-xs text-muted-foreground border border-border rounded-md px-2 py-0.5">Coming soon</span>
+              </div>
+              <p className="text-[0.938rem] text-foreground mt-1">
+                Syntax highlighting, IntelliSense, and integrated debugging for RunMat.
+              </p>
+            </div>
 
-            {/* IntelliJ IDEA Plugin */}
-            <Card className="opacity-60 relative">
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Code className="h-5 w-5 mr-2 text-muted-foreground" />
-                  IntelliJ IDEA Plugin
-                  <span className="ml-auto bg-gray-200 dark:bg-gray-700 text-muted-foreground px-2 py-1 rounded-full text-xs font-medium">
-                    Coming soon
-                  </span>
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-muted-foreground mb-4">
-                  Get syntax highlighting, IntelliSense, and integrated debugging for RunMat.
-                </p>
-                <Button className="w-full opacity-50 cursor-not-allowed" disabled>
-                  <ExternalLink className="mr-2 h-4 w-4" />
-                  Install extension
-                </Button>
-              </CardContent>
-            </Card>
+            <div className="rounded-lg border border-border bg-card p-6 opacity-60">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
+                <Code className="h-5 w-5" />
+              </span>
+              <div className="flex items-center gap-2 mb-1">
+                <h3 className="text-lg font-semibold text-foreground">IntelliJ Plugin</h3>
+                <span className="text-xs text-muted-foreground border border-border rounded-md px-2 py-0.5">Coming soon</span>
+              </div>
+              <p className="text-[0.938rem] text-foreground mt-1">
+                Syntax highlighting, IntelliSense, and integrated debugging for RunMat.
+              </p>
+            </div>
           </div>
         </section>
 
         {/* Next Steps */}
-        <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-8 text-center text-foreground">
-            Next steps
-          </h2>
+        <section className="w-full py-16 md:py-24 lg:py-32">
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
+            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+              Next steps
+            </h2>
+          </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card className="bg-card border-border">
-              <CardContent className="p-6">
-                <div className="flex items-center mb-4">
-                  <Code className="h-6 w-6 mr-3 text-green-600" />
-                  <h3 className="text-xl font-bold text-foreground">
-                    Start coding
-                  </h3>
-                </div>
-                <p className="text-muted-foreground mb-4">
-                  Jump into the interactive REPL or run your existing MATLAB scripts by typing <code className="rounded bg-muted px-1 py-0.5 text-foreground">runmat</code> in your terminal.
-                </p>
-                <div className="bg-muted rounded-md p-3 font-mono text-sm text-foreground border border-border mb-4">
-                  runmat
-                </div>
-                <Button variant="outline" size="sm" asChild className="w-full">
-                  <Link href="/docs/getting-started">
-                    Getting started guide
-                  </Link>
-                </Button>
-              </CardContent>
-            </Card>
-            <Card className="bg-card border-border">
-              <CardContent className="p-6">
-                <div className="flex items-center mb-4">
-                  <Zap className="h-6 w-6 mr-3 text-[hsl(var(--brand))]" />
-                  <h3 className="text-xl font-bold text-foreground">
-                    Set up Jupyter kernel
-                  </h3>
-                </div>
-                <p className="text-muted-foreground mb-4">
-                  Use RunMat as a Jupyter kernel for interactive notebooks with 150x speedup over GNU Octave.
-                </p>
-                <div className="bg-muted rounded-md p-3 font-mono text-sm text-foreground border border-border mb-4">
-                  runmat --install-kernel
-                </div>
-                <Button variant="outline" size="sm" asChild className="w-full">
-                  <Link href="/docs/getting-started#jupyter-notebook-integration">
-                    Jupyter setup guide
-                  </Link>
-                </Button>
-              </CardContent>
-            </Card>
+          <div className="mx-auto max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="rounded-lg border border-border bg-card p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
+                <Code className="h-5 w-5" />
+              </span>
+              <h3 className="text-lg font-semibold text-foreground">Start coding</h3>
+              <p className="text-[0.938rem] text-foreground mt-1 mb-4">
+                Jump into the interactive REPL or run your existing MATLAB scripts.
+              </p>
+              <div className="bg-[var(--editor-background)] text-white rounded-md p-3 font-mono text-sm mb-4">
+                runmat
+              </div>
+              <Button variant="outline" size="sm" asChild className="w-full rounded-none">
+                <Link href="/docs/getting-started">
+                  Getting started guide
+                </Link>
+              </Button>
+            </div>
+            <div className="rounded-lg border border-border bg-card p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
+                <Zap className="h-5 w-5" />
+              </span>
+              <h3 className="text-lg font-semibold text-foreground">Set up Jupyter kernel</h3>
+              <p className="text-[0.938rem] text-foreground mt-1 mb-4">
+                Use RunMat as a Jupyter kernel for interactive notebooks.
+              </p>
+              <div className="bg-[var(--editor-background)] text-white rounded-md p-3 font-mono text-sm mb-4">
+                runmat --install-kernel
+              </div>
+              <Button variant="outline" size="sm" asChild className="w-full rounded-none">
+                <Link href="/docs/getting-started#jupyter-notebook-integration">
+                  Jupyter setup guide
+                </Link>
+              </Button>
+            </div>
           </div>
         </section>
 
         {/* Source Code */}
-        <section className="mb-12">
-          <Card className="bg-muted border-border">
-            <CardHeader className="text-center">
-              <CardTitle className="flex items-center justify-center text-foreground">
-                <SiGithub className="h-6 w-6 mr-2" />
-                Open source
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="text-center">
-              <p className="text-muted-foreground mb-6">
+        <section className="w-full py-16 md:py-24 lg:py-32">
+          <div className="mx-auto max-w-3xl text-center">
+            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl mb-12">
+              Open source
+            </h2>
+            <div className="rounded-lg border border-border bg-card p-8 space-y-4">
+              <Link
+                href="https://github.com/runmat-org/runmat"
+                target="_blank"
+                rel="noreferrer"
+                className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-border bg-secondary text-foreground hover:opacity-80 transition-opacity"
+              >
+                <SiGithub className="h-7 w-7" />
+              </Link>
+              <p className="text-[0.938rem] text-foreground">
                 RunMat is completely open source. Explore the code, contribute, or build it yourself.
               </p>
-              <div className="flex flex-col sm:flex-row gap-3 justify-center">
-                <Button asChild>
-                            <Link href="https://github.com/runmat-org/runmat" target="_blank" rel="noopener noreferrer">
-            <SiGithub className="mr-2 h-4 w-4" />
-            View on GitHub
+              <div className="flex flex-col sm:flex-row gap-3 justify-center pt-1">
+                <Button asChild className="rounded-none bg-[hsl(var(--brand))] text-white border-0 shadow-none hover:bg-[hsl(var(--brand))]/90">
+                  <Link href="https://github.com/runmat-org/runmat" target="_blank" rel="noopener noreferrer">
+                    <SiGithub className="mr-2 h-4 w-4" />
+                    View on GitHub
                   </Link>
                 </Button>
-                <Button variant="outline" asChild>
+                <Button variant="ghost" asChild className="text-muted-foreground hover:text-foreground">
                   <Link href="https://crates.io/crates/runmat" target="_blank" rel="noopener noreferrer">
                     <Package className="mr-2 h-4 w-4" />
                     View on crates.io
                   </Link>
                 </Button>
               </div>
-            </CardContent>
-          </Card>
+            </div>
+          </div>
         </section>
 
       </div>
