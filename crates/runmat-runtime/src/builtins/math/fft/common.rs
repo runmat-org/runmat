@@ -181,7 +181,6 @@ pub fn host_to_complex_tensor(
             ));
         }
         let mut complex_shape = shape;
-        complex_shape.pop();
         if complex_shape.is_empty() {
             complex_shape.push(1);
         }

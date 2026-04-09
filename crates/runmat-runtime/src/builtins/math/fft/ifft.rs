@@ -509,7 +509,17 @@ pub(crate) mod tests {
                 shape: &shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let gpu = ifft_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("ifft");
+            let spectrum_handle = runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![4],
+                device_id: handle.device_id,
+                buffer_id: handle.buffer_id,
+            };
+            runmat_accelerate_api::set_handle_storage(
+                &spectrum_handle,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            );
+            let gpu =
+                ifft_builtin(Value::GpuTensor(spectrum_handle.clone()), Vec::new()).expect("ifft");
             let cpu_spectrum = HostComplexTensor::new(
                 vec![(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)],
                 vec![4],
@@ -537,8 +547,17 @@ pub(crate) mod tests {
                 shape: &shape,
             };
             let handle = provider.upload(&view).expect("upload");
+            let spectrum_handle = runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![4],
+                device_id: handle.device_id,
+                buffer_id: handle.buffer_id,
+            };
+            runmat_accelerate_api::set_handle_storage(
+                &spectrum_handle,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            );
             let gpu = ifft_builtin(
-                Value::GpuTensor(handle.clone()),
+                Value::GpuTensor(spectrum_handle.clone()),
                 vec![Value::from("symmetric")],
             )
             .expect("ifft symmetric");
@@ -571,7 +590,17 @@ pub(crate) mod tests {
                 shape: &shape,
             };
             let handle = provider.upload(&view).expect("upload");
-            let gpu = ifft_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("gpu ifft");
+            let spectrum_handle = runmat_accelerate_api::GpuTensorHandle {
+                shape: vec![4],
+                device_id: handle.device_id,
+                buffer_id: handle.buffer_id,
+            };
+            runmat_accelerate_api::set_handle_storage(
+                &spectrum_handle,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            );
+            let gpu = ifft_builtin(Value::GpuTensor(spectrum_handle.clone()), Vec::new())
+                .expect("gpu ifft");
             let cpu_spectrum = HostComplexTensor::new(
                 vec![(10.0, 0.0), (-2.0, 2.0), (-2.0, 0.0), (-2.0, -2.0)],
                 vec![4],

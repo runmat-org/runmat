@@ -474,21 +474,27 @@ pub(crate) mod tests {
         test_support::with_test_provider(|provider| {
             let tensor = HostTensor::new((0..8).map(|v| v as f64).collect(), vec![2, 4]).unwrap();
             let spectrum = fft2_of_tensor(&tensor);
-
-            let host_real_imag = spectrum
-                .data
-                .iter()
-                .flat_map(|(re, im)| [*re, *im])
-                .collect::<Vec<_>>();
-            let mut shape = spectrum.shape.clone();
-            shape.push(2);
             let view = HostTensorView {
-                data: &host_real_imag,
-                shape: &shape,
+                data: &spectrum
+                    .data
+                    .iter()
+                    .flat_map(|(re, im)| [*re, *im])
+                    .collect::<Vec<_>>(),
+                shape: &[2, 4, 2],
             };
-            let handle = provider.upload(&view).expect("upload spectrum");
+            let raw = provider.upload(&view).expect("upload spectrum");
+            let second = runmat_accelerate_api::GpuTensorHandle {
+                shape: spectrum.shape.clone(),
+                device_id: raw.device_id,
+                buffer_id: raw.buffer_id,
+            };
+            runmat_accelerate_api::set_handle_storage(
+                &second,
+                runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+            );
 
-            let gpu = ifft2_builtin(Value::GpuTensor(handle), Vec::new()).expect("ifft2 gpu");
+            let gpu =
+                ifft2_builtin(Value::GpuTensor(second.clone()), Vec::new()).expect("ifft2 gpu");
             let cpu = ifft2_builtin(Value::ComplexTensor(spectrum.clone()), Vec::new())
                 .expect("ifft2 cpu");
 
@@ -498,6 +504,8 @@ pub(crate) mod tests {
             for (lhs, rhs) in g.data.iter().zip(c.data.iter()) {
                 assert!(approx_eq(*lhs, *rhs, 1e-10), "{lhs:?} vs {rhs:?}");
             }
+            provider.free(&raw).ok();
+            provider.free(&second).ok();
         });
     }
 
@@ -557,16 +565,23 @@ pub(crate) mod tests {
             .iter()
             .flat_map(|(re, im)| [*re, *im])
             .collect::<Vec<_>>();
-        let mut shape = spectrum.shape.clone();
-        shape.push(2);
         let view = HostTensorView {
             data: &host_real_imag,
-            shape: &shape,
+            shape: &[4, 4, 2],
         };
-        let handle = provider.upload(&view).expect("upload spectrum");
+        let raw = provider.upload(&view).expect("upload spectrum");
+        let second = runmat_accelerate_api::GpuTensorHandle {
+            shape: spectrum.shape.clone(),
+            device_id: raw.device_id,
+            buffer_id: raw.buffer_id,
+        };
+        runmat_accelerate_api::set_handle_storage(
+            &second,
+            runmat_accelerate_api::GpuTensorStorage::ComplexInterleaved,
+        );
 
         let gpu_val =
-            ifft2_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("ifft2 gpu");
+            ifft2_builtin(Value::GpuTensor(second.clone()), Vec::new()).expect("ifft2 gpu");
         let cpu_val = ifft2_builtin(Value::ComplexTensor(spectrum), Vec::new()).expect("ifft2 cpu");
 
         let gpu_ct = value_to_host_complex(gpu_val);
@@ -580,6 +595,8 @@ pub(crate) mod tests {
         for (lhs, rhs) in gpu_ct.data.iter().zip(cpu_ct.data.iter()) {
             assert!(approx_eq(*lhs, *rhs, tol), "{lhs:?} vs {rhs:?}");
         }
+        provider.free(&raw).ok();
+        provider.free(&second).ok();
     }
 
     fn ifft2_builtin(value: Value, rest: Vec<Value>) -> BuiltinResult<Value> {
