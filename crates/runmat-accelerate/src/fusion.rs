@@ -2628,6 +2628,22 @@ fn builtin_expr(
         "isinf" => return builtin_unary_call("isInf", inputs, exprs),
         "isnan" => return builtin_unary_call("isNan", inputs, exprs),
         "single" | "double" | "gpuarray" => return builtin_identity(inputs, exprs),
+        "fix" => return builtin_unary_call("trunc", inputs, exprs),
+        "sign" => return builtin_unary_call("sign", inputs, exprs),
+        "mod" => {
+            let lhs = exprs.get(inputs.first()?).cloned()?;
+            let rhs = exprs.get(inputs.get(1)?).cloned()?;
+            return Some(format!(
+                "select(({lhs} - {rhs} * floor({lhs} / {rhs})), {lhs}, (isInf({rhs}) && isFinite({lhs})))"
+            ));
+        }
+        "rem" => {
+            let lhs = exprs.get(inputs.first()?).cloned()?;
+            let rhs = exprs.get(inputs.get(1)?).cloned()?;
+            return Some(format!(
+                "select(({lhs} - {rhs} * trunc({lhs} / {rhs})), {lhs}, (isInf({rhs}) && isFinite({lhs})))"
+            ));
+        }
         "sin" => "sin",
         "cos" => "cos",
         "tan" => "tan",
@@ -2635,6 +2651,13 @@ fn builtin_expr(
         "acos" => "acos",
         "atan" => "atan",
         "atan2" => return builtin_binary("atan2", inputs, exprs),
+        "hypot" => return builtin_binary("hypot", inputs, exprs),
+        "pow2" => {
+            if inputs.len() == 1 {
+                return builtin_unary_call("exp2", inputs, exprs);
+            }
+            return None;
+        }
         "sinh" => "sinh",
         "cosh" => "cosh",
         "tanh" => "tanh",
@@ -2652,6 +2675,24 @@ fn builtin_expr(
         "min" => return builtin_binary("min", inputs, exprs),
         _ => {
             return match name.to_ascii_lowercase().as_str() {
+                "asinh" => {
+                    let arg = exprs.get(inputs.first()?).cloned()?;
+                    let one = cast_literal(scalar_ty, "1.0");
+                    Some(format!("log({arg} + sqrt(({arg} * {arg}) + {one}))"))
+                }
+                "acosh" => {
+                    let arg = exprs.get(inputs.first()?).cloned()?;
+                    let one = cast_literal(scalar_ty, "1.0");
+                    Some(format!(
+                        "log({arg} + sqrt(({arg} - {one}) * ({arg} + {one})))"
+                    ))
+                }
+                "atanh" => {
+                    let arg = exprs.get(inputs.first()?).cloned()?;
+                    let one = cast_literal(scalar_ty, "1.0");
+                    let half = cast_literal(scalar_ty, "0.5");
+                    Some(format!("({half} * log(({one} + {arg}) / ({one} - {arg})))"))
+                }
                 "log10" => {
                     let arg = exprs.get(inputs.first()?).cloned()?;
                     let constant = cast_literal(scalar_ty, "0.4342944819032518");
@@ -3303,6 +3344,37 @@ mod tests {
 
         let atan2 = super::builtin_expr("atan2", &[0, 1], &exprs, "f32");
         assert_eq!(atan2.unwrap(), "atan2(v0, v1)");
+
+        let asinh = super::builtin_expr("asinh", &[0], &exprs, "f32");
+        assert!(asinh.unwrap().contains("sqrt"));
+
+        let acosh = super::builtin_expr("acosh", &[0], &exprs, "f32");
+        assert!(acosh.unwrap().contains("sqrt"));
+
+        let atanh = super::builtin_expr("atanh", &[0], &exprs, "f32");
+        assert!(atanh.unwrap().contains("log"));
+
+        let hypot = super::builtin_expr("hypot", &[0, 1], &exprs, "f32");
+        assert_eq!(hypot.unwrap(), "hypot(v0, v1)");
+
+        let sign = super::builtin_expr("sign", &[0], &exprs, "f32");
+        assert_eq!(sign.unwrap(), "sign(v0)");
+
+        let fix = super::builtin_expr("fix", &[0], &exprs, "f32");
+        assert_eq!(fix.unwrap(), "trunc(v0)");
+
+        let modulo = super::builtin_expr("mod", &[0, 1], &exprs, "f32");
+        let modulo = modulo.unwrap();
+        assert!(modulo.contains("floor"));
+        assert!(modulo.contains("isInf"));
+
+        let rem = super::builtin_expr("rem", &[0, 1], &exprs, "f32");
+        let rem = rem.unwrap();
+        assert!(rem.contains("trunc"));
+        assert!(rem.contains("isInf"));
+
+        let pow2 = super::builtin_expr("pow2", &[0], &exprs, "f32");
+        assert_eq!(pow2.unwrap(), "exp2(v0)");
 
         let single = super::builtin_expr("single", &[0], &exprs, "f32");
         assert_eq!(single.unwrap(), "v0");

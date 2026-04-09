@@ -312,6 +312,7 @@ pub fn runtime_builtin(args: TokenStream, input: TokenStream) -> TokenStream {
         .iter()
         .map(|mode| match mode.as_str() {
             "unary" => quote! { runmat_builtins::AccelTag::Unary },
+            "binary" => quote! { runmat_builtins::AccelTag::Elementwise },
             "elementwise" => quote! { runmat_builtins::AccelTag::Elementwise },
             "reduction" => quote! { runmat_builtins::AccelTag::Reduction },
             "matmul" => quote! { runmat_builtins::AccelTag::MatMul },

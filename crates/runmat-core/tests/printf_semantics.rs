@@ -46,6 +46,26 @@ fn fprintf_rm138_repro_is_stable_end_to_end() {
 }
 
 #[test]
+fn disp_inline_cast_argument_is_stable_end_to_end() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+    let script = r#"
+        x = single(3.14);
+        disp(double(x));
+    "#;
+    let result = block_on(engine.execute(script)).unwrap();
+    let rendered = stdout_stream(&result);
+    let parsed: f64 = rendered
+        .trim()
+        .parse()
+        .expect("disp output should parse as f64");
+    let expected = f64::from(3.14f32);
+    assert!(
+        (parsed - expected).abs() < 1e-6,
+        "expected {expected}, got {parsed}"
+    );
+}
+
+#[test]
 fn fprintf_stream_routing_is_correct() {
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
     let result = block_on(engine.execute("fprintf('out'); fprintf(2, 'err');")).unwrap();

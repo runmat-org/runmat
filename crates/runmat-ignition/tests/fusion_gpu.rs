@@ -3,8 +3,9 @@
 use anyhow::{anyhow, bail, Context};
 use futures::executor::block_on;
 use once_cell::sync::OnceCell;
+use runmat_accelerate::fusion_exec::{execute_elementwise, FusionExecutionRequest};
 use runmat_accelerate::{
-    configure_auto_offload, fusion_residency, AutoOffloadLogLevel, AutoOffloadOptions,
+    configure_auto_offload, fusion_residency, AutoOffloadLogLevel, AutoOffloadOptions, FusionKind,
 };
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, AccelProviderFuture, ApiDeviceInfo, CorrcoefOptions,
@@ -735,7 +736,10 @@ impl ParsedShader {
                         tmp_exprs.push(expr);
                     }
                 }
-            } else if let Some(rest) = trimmed.strip_prefix("output.data[idx] =") {
+            } else if let Some(rest) = trimmed
+                .strip_prefix("output.data[idx] =")
+                .or_else(|| trimmed.strip_prefix("output.data[g] ="))
+            {
                 let expr = rest.trim().trim_end_matches(';').trim().to_string();
                 output_expr = Some(expr);
             }
@@ -861,10 +865,38 @@ impl<'a> ExprParser<'a> {
     }
 
     fn parse_expression(&mut self) -> anyhow::Result<f64> {
-        let mut value = self.parse_term()?;
+        self.parse_logical_and()
+    }
+
+    fn parse_logical_and(&mut self) -> anyhow::Result<f64> {
+        let mut value = self.parse_additive()?;
+        while self.match_symbol('&') {
+            self.expect_symbol('&')?;
+            let rhs = self.parse_additive()?;
+            value = if value != 0.0 && rhs != 0.0 { 1.0 } else { 0.0 };
+        }
+        Ok(value)
+    }
+
+    fn parse_additive(&mut self) -> anyhow::Result<f64> {
+        let mut value = self.parse_comparison()?;
         while let Some(op) = self.match_symbols(&['+', '-']) {
-            let rhs = self.parse_term()?;
+            let rhs = self.parse_comparison()?;
             value = if op == '+' { value + rhs } else { value - rhs };
+        }
+        Ok(value)
+    }
+
+    fn parse_comparison(&mut self) -> anyhow::Result<f64> {
+        let mut value = self.parse_term()?;
+        loop {
+            if self.match_symbol('=') {
+                self.expect_symbol('=')?;
+                let rhs = self.parse_term()?;
+                value = if value == rhs { 1.0 } else { 0.0 };
+                continue;
+            }
+            break;
         }
         Ok(value)
     }
@@ -936,7 +968,13 @@ impl<'a> ExprParser<'a> {
             }
             self.expect_symbol('[')?;
             let idx_ident = self.expect_ident()?;
-            if idx_ident != "idx" {
+            let is_input_index = idx_ident == "idx"
+                || idx_ident == "g"
+                || idx_ident
+                    .strip_prefix('i')
+                    .map(|rest| !rest.is_empty() && rest.chars().all(|ch| ch.is_ascii_digit()))
+                    .unwrap_or(false);
+            if !is_input_index {
                 bail!("expected 'idx' access, found '{idx_ident}'");
             }
             self.expect_symbol(']')?;
@@ -965,7 +1003,13 @@ impl<'a> ExprParser<'a> {
             return self.call_function(&name, args);
         }
 
-        if name == "idx" {
+        if name == "idx"
+            || name == "g"
+            || name
+                .strip_prefix('i')
+                .map(|rest| !rest.is_empty() && rest.chars().all(|ch| ch.is_ascii_digit()))
+                .unwrap_or(false)
+        {
             return Ok(self.idx as f64);
         }
 
@@ -986,6 +1030,7 @@ impl<'a> ExprParser<'a> {
             "acos" => Ok(arg(0)?.acos()),
             "atan" => Ok(arg(0)?.atan()),
             "atan2" => Ok(arg(0)?.atan2(arg(1)?)),
+            "hypot" => Ok(arg(0)?.hypot(arg(1)?)),
             "sinh" => Ok(arg(0)?.sinh()),
             "cosh" => Ok(arg(0)?.cosh()),
             "tanh" => Ok(arg(0)?.tanh()),
@@ -995,6 +1040,7 @@ impl<'a> ExprParser<'a> {
             "log2" => Ok(arg(0)?.log2()),
             "sqrt" => Ok(arg(0)?.sqrt()),
             "abs" => Ok(arg(0)?.abs()),
+            "sign" => Ok(arg(0)?.signum()),
             "floor" => Ok(arg(0)?.floor()),
             "ceil" => Ok(arg(0)?.ceil()),
             "round" => Ok(arg(0)?.round()),
@@ -1002,6 +1048,10 @@ impl<'a> ExprParser<'a> {
             "expm1" => Ok(arg(0)?.exp_m1()),
             "log1p" => Ok(arg(0)?.ln_1p()),
             "pow" => Ok(arg(0)?.powf(arg(1)?)),
+            "isNan" => Ok(if arg(0)?.is_nan() { 1.0 } else { 0.0 }),
+            "isFinite" => Ok(if arg(0)?.is_finite() { 1.0 } else { 0.0 }),
+            "isInf" => Ok(if arg(0)?.is_infinite() { 1.0 } else { 0.0 }),
+            "select" => Ok(if arg(2)? != 0.0 { arg(1)? } else { arg(0)? }),
             "f32" | "f64" => Ok(arg(0)?),
             _ => Err(anyhow!("unsupported function '{name}' in fused shader")),
         }
@@ -2027,7 +2077,6 @@ fn fused_elementwise_residency_and_gather() {
         let hir = lower(&ast).expect("lower");
         let bytecode = compile(&hir, &HashMap::new()).expect("compile");
 
-        dbg!(&bytecode.fusion_groups);
         let vars = interpret(&bytecode).expect("interpret");
 
         let y_index = bytecode
@@ -2140,6 +2189,580 @@ fn fused_literal_constant_and_extended_builtins() {
         let v_data = check_tensor(vars.get(v_index).expect("value for v"));
         let v_expected: Vec<f64> = [4.0f64, 5.0, 6.0].iter().map(|x| x.sqrt()).collect();
         assert_eq!(v_data, v_expected);
+    });
+}
+
+#[test]
+fn fused_safe_followup_builtins_remain_resident() {
+    gc_test_context(|| {
+        ensure_provider_registered();
+
+        let source = r#"
+        x = [-2.5, -1.25, 0.5];
+        y = sign(x) + fix(x) + pow2(x) + hypot(x, 2);
+        "#;
+
+        let ast = parse(source).expect("parse");
+        let hir = lower(&ast).expect("lower");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
+        if let Some(graph) = &bytecode.accel_graph {
+            let groups = graph.detect_fusion_groups();
+            assert!(
+                groups
+                    .iter()
+                    .any(|g| matches!(g.kind, FusionKind::ElementwiseChain)),
+                "expected elementwise fusion group, got {:?}",
+                groups.iter().map(|g| g.kind.clone()).collect::<Vec<_>>()
+            );
+            let plan = runmat_accelerate::FusionPlan::from_graph(graph, &groups);
+            assert!(
+                plan.groups.iter().any(|g| g.kernel.supported),
+                "expected supported fusion plan, groups={:?} supported={:?}",
+                &bytecode.fusion_groups,
+                plan.groups
+                    .iter()
+                    .map(|g| g.kernel.supported)
+                    .collect::<Vec<_>>()
+            );
+        }
+        let vars = interpret(&bytecode).expect("interpret");
+
+        let y_index = bytecode
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::StoreVar(idx) => Some(*idx),
+                _ => None,
+            })
+            .next_back()
+            .expect("store var for y");
+
+        let tensor =
+            match gather_if_needed(vars.get(y_index).expect("value for y")).expect("gather y") {
+                Value::Tensor(tensor) => tensor,
+                Value::GpuTensor(_) => panic!("expected gathered tensor after gather_if_needed"),
+                other => panic!("expected gathered tensor, got {other:?}"),
+            };
+
+        let expected: Vec<f64> = [-2.5f64, -1.25, 0.5]
+            .iter()
+            .map(|x| x.signum() + x.trunc() + x.exp2() + x.hypot(2.0))
+            .collect();
+        assert_eq!(tensor.data.len(), expected.len());
+        for (actual, expect) in tensor.data.iter().zip(expected.iter()) {
+            assert!(
+                (actual - expect).abs() < 1e-9,
+                "mismatch: {actual} vs {expect}"
+            );
+        }
+    });
+}
+
+#[test]
+fn fused_inverse_hyperbolic_builtins_are_plannable() {
+    gc_test_context(|| {
+        ensure_provider_registered();
+
+        let source = r#"
+        x = [0.25, 0.5, 0.75];
+        y = asinh(x) + atanh(x) + acosh(x + 1);
+        "#;
+
+        let ast = parse(source).expect("parse");
+        let hir = lower(&ast).expect("lower");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
+        if let Some(graph) = &bytecode.accel_graph {
+            let groups = graph.detect_fusion_groups();
+            assert!(
+                groups
+                    .iter()
+                    .any(|g| matches!(g.kind, FusionKind::ElementwiseChain)),
+                "expected elementwise fusion group, got {:?}",
+                groups.iter().map(|g| g.kind.clone()).collect::<Vec<_>>()
+            );
+            let plan = runmat_accelerate::FusionPlan::from_graph(graph, &groups);
+            assert!(
+                plan.groups.iter().any(|g| g.kernel.supported),
+                "expected supported fusion plan, groups={:?} supported={:?}",
+                &bytecode.fusion_groups,
+                plan.groups
+                    .iter()
+                    .map(|g| g.kernel.supported)
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        let vars = interpret(&bytecode).expect("interpret");
+        let y_index = bytecode
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::StoreVar(idx) => Some(*idx),
+                _ => None,
+            })
+            .next_back()
+            .expect("store var for y");
+
+        let y_value = vars.get(y_index).expect("value for y");
+        let handle = match y_value {
+            Value::GpuTensor(handle) => handle,
+            other => panic!("expected GPU tensor, got {other:?}"),
+        };
+        assert!(fusion_residency::is_resident(handle));
+
+        let tensor = match gather_if_needed(y_value).expect("gather y") {
+            Value::Tensor(tensor) => tensor,
+            Value::GpuTensor(_) => panic!("expected gathered tensor after gather_if_needed"),
+            other => panic!("expected gathered tensor, got {other:?}"),
+        };
+
+        let expected: Vec<f64> = [0.25f64, 0.5, 0.75]
+            .iter()
+            .map(|x| x.asinh() + x.atanh() + (x + 1.0).acosh())
+            .collect();
+        assert_eq!(tensor.data.len(), expected.len());
+        for (actual, expect) in tensor.data.iter().zip(expected.iter()) {
+            assert!(
+                (actual - expect).abs() < 1e-9,
+                "mismatch: {actual} vs {expect}"
+            );
+        }
+    });
+}
+
+#[test]
+fn direct_execution_of_safe_followup_group_returns_gpu_tensor() {
+    gc_test_context(|| {
+        ensure_provider_registered();
+
+        let source = r#"
+        x = [-2.5, -1.25, 0.5];
+        y = sign(x) + fix(x) + pow2(x) + hypot(x, 2);
+        "#;
+
+        let ast = parse(source).expect("parse");
+        let hir = lower(&ast).expect("lower");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
+        let graph = bytecode.accel_graph.as_ref().expect("accel graph");
+        let groups = graph.detect_fusion_groups();
+        let plan = runmat_accelerate::FusionPlan::from_graph(graph, &groups);
+        let group_plan = plan
+            .groups
+            .iter()
+            .find(|g| matches!(g.group.kind, FusionKind::ElementwiseChain) && g.kernel.supported)
+            .expect("supported elementwise fusion group");
+
+        assert_eq!(
+            group_plan.inputs.len(),
+            2,
+            "expected x and scalar runtime inputs"
+        );
+
+        let x = Tensor::new(vec![-2.5, -1.25, 0.5], vec![1, 3]).expect("tensor x");
+        let result = execute_elementwise(FusionExecutionRequest {
+            plan: group_plan,
+            inputs: vec![Value::Tensor(x), Value::Num(2.0)],
+        })
+        .expect("direct fusion execution");
+
+        match result {
+            Value::GpuTensor(handle) => {
+                assert!(fusion_residency::is_resident(&handle));
+            }
+            other => panic!("expected direct execution to return GPU tensor, got {other:?}"),
+        }
+    });
+}
+
+#[test]
+fn fused_mod_and_rem_remain_resident() {
+    gc_test_context(|| {
+        ensure_provider_registered();
+
+        let source = r#"
+        x = [-5.5, -1.25, 5.5];
+        y = mod(x, 2) + rem(x, 2);
+        "#;
+
+        let ast = parse(source).expect("parse");
+        let hir = lower(&ast).expect("lower");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
+        if let Some(graph) = &bytecode.accel_graph {
+            let groups = graph.detect_fusion_groups();
+            assert!(
+                groups
+                    .iter()
+                    .any(|g| matches!(g.kind, FusionKind::ElementwiseChain)),
+                "expected elementwise fusion group, got {:?}",
+                groups.iter().map(|g| g.kind.clone()).collect::<Vec<_>>()
+            );
+            let plan = runmat_accelerate::FusionPlan::from_graph(graph, &groups);
+            assert!(
+                plan.groups.iter().any(|g| g.kernel.supported),
+                "expected supported fusion plan, groups={:?} supported={:?}",
+                &bytecode.fusion_groups,
+                plan.groups
+                    .iter()
+                    .map(|g| g.kernel.supported)
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        let vars = interpret(&bytecode).expect("interpret");
+        let y_index = bytecode
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::StoreVar(idx) => Some(*idx),
+                _ => None,
+            })
+            .next_back()
+            .expect("store var for y");
+
+        let y_value = vars.get(y_index).expect("value for y");
+        let handle = match y_value {
+            Value::GpuTensor(handle) => handle,
+            other => panic!("expected GPU tensor, got {other:?}"),
+        };
+        assert!(fusion_residency::is_resident(handle));
+
+        let tensor = match gather_if_needed(y_value).expect("gather y") {
+            Value::Tensor(tensor) => tensor,
+            Value::GpuTensor(_) => panic!("expected gathered tensor after gather_if_needed"),
+            other => panic!("expected gathered tensor, got {other:?}"),
+        };
+
+        let expected: Vec<f64> = [-5.5f64, -1.25, 5.5]
+            .iter()
+            .map(|x| x.rem_euclid(2.0) + (x - 2.0 * (x / 2.0).trunc()))
+            .collect();
+        assert_eq!(tensor.data.len(), expected.len());
+        for (actual, expect) in tensor.data.iter().zip(expected.iter()) {
+            assert!(
+                (actual - expect).abs() < 1e-9,
+                "mismatch: {actual} vs {expect}"
+            );
+        }
+    });
+}
+
+#[test]
+fn fused_mod_and_rem_broadcast_variants_remain_resident() {
+    gc_test_context(|| {
+        ensure_provider_registered();
+
+        let source = r#"
+        x = [-5.5, -1.25, 5.5];
+        d = [2, 3, 4];
+        y = mod(x, d) + rem(6, d);
+        "#;
+
+        let ast = parse(source).expect("parse");
+        let hir = lower(&ast).expect("lower");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
+        if let Some(graph) = &bytecode.accel_graph {
+            let groups = graph.detect_fusion_groups();
+            assert!(
+                groups
+                    .iter()
+                    .any(|g| matches!(g.kind, FusionKind::ElementwiseChain)),
+                "expected elementwise fusion group, got {:?}",
+                groups.iter().map(|g| g.kind.clone()).collect::<Vec<_>>()
+            );
+            let plan = runmat_accelerate::FusionPlan::from_graph(graph, &groups);
+            assert!(
+                plan.groups.iter().any(|g| g.kernel.supported),
+                "expected supported fusion plan, groups={:?} supported={:?}",
+                &bytecode.fusion_groups,
+                plan.groups
+                    .iter()
+                    .map(|g| g.kernel.supported)
+                    .collect::<Vec<_>>()
+            );
+        }
+
+        let vars = interpret(&bytecode).expect("interpret");
+        let y_index = bytecode
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::StoreVar(idx) => Some(*idx),
+                _ => None,
+            })
+            .next_back()
+            .expect("store var for y");
+
+        let y_value = vars.get(y_index).expect("value for y");
+        let handle = match y_value {
+            Value::GpuTensor(handle) => handle,
+            other => panic!("expected GPU tensor, got {other:?}"),
+        };
+        assert!(fusion_residency::is_resident(handle));
+
+        let tensor = match gather_if_needed(y_value).expect("gather y") {
+            Value::Tensor(tensor) => tensor,
+            Value::GpuTensor(_) => panic!("expected gathered tensor after gather_if_needed"),
+            other => panic!("expected gathered tensor, got {other:?}"),
+        };
+
+        let xs = [-5.5f64, -1.25, 5.5];
+        let ds = [2.0f64, 3.0, 4.0];
+        let expected: Vec<f64> = xs
+            .iter()
+            .zip(ds.iter())
+            .map(|(x, d)| x.rem_euclid(*d) + (6.0 - d * (6.0 / d).trunc()))
+            .collect();
+        assert_eq!(tensor.data.len(), expected.len());
+        for (actual, expect) in tensor.data.iter().zip(expected.iter()) {
+            assert!(
+                (actual - expect).abs() < 1e-9,
+                "mismatch: {actual} vs {expect}"
+            );
+        }
+    });
+}
+
+fn mod_real_expected(a: f64, b: f64) -> f64 {
+    if a.is_nan() || b.is_nan() {
+        return f64::NAN;
+    }
+    if b == 0.0 {
+        return f64::NAN;
+    }
+    if !a.is_finite() && b.is_finite() {
+        return f64::NAN;
+    }
+    let quotient = (a / b).floor();
+    let mut remainder = a - b * quotient;
+    if remainder == 0.0 {
+        remainder = 0.0;
+    }
+    if b.is_infinite() && a.is_finite() {
+        return a;
+    }
+    if !remainder.is_finite() && !a.is_finite() {
+        return f64::NAN;
+    }
+    let same_sign = remainder == 0.0 || remainder.signum() == b.signum();
+    if !same_sign {
+        remainder += b;
+    }
+    if remainder == -0.0 {
+        0.0
+    } else {
+        remainder
+    }
+}
+
+fn rem_real_expected(a: f64, b: f64) -> f64 {
+    if a.is_nan() || b.is_nan() {
+        return f64::NAN;
+    }
+    if b == 0.0 {
+        return f64::NAN;
+    }
+    if !a.is_finite() && b.is_finite() {
+        return f64::NAN;
+    }
+    if b.is_infinite() && a.is_finite() {
+        return if a == -0.0 { 0.0 } else { a };
+    }
+    let quotient = (a / b).trunc();
+    if !quotient.is_finite() && b.is_finite() {
+        return f64::NAN;
+    }
+    let remainder = a - b * quotient;
+    if remainder == -0.0 {
+        0.0
+    } else {
+        remainder
+    }
+}
+
+fn assert_real_sequence_matches(actual: &[f64], expected: &[f64]) {
+    assert_eq!(actual.len(), expected.len(), "length mismatch");
+    for (actual, expected) in actual.iter().zip(expected.iter()) {
+        if expected.is_nan() {
+            assert!(actual.is_nan(), "expected NaN, got {actual}");
+        } else {
+            assert!(
+                actual.to_bits() == expected.to_bits() || (actual - expected).abs() < 1e-9,
+                "expected {expected}, got {actual}"
+            );
+        }
+    }
+}
+
+fn compile_and_interpret_value(source: &str) -> (runmat_ignition::Bytecode, Value) {
+    let ast = parse(source).expect("parse");
+    let hir = lower(&ast).expect("lower");
+    let bytecode = compile(&hir, &HashMap::new()).expect("compile");
+    let vars = interpret(&bytecode).expect("interpret");
+    let y_index = bytecode
+        .instructions
+        .iter()
+        .filter_map(|instr| match instr {
+            Instr::StoreVar(idx) => Some(*idx),
+            _ => None,
+        })
+        .next_back()
+        .expect("store var for y");
+    (bytecode, vars.get(y_index).expect("value for y").clone())
+}
+
+#[test]
+fn mod_real_parity_matrix_matches_expected_values() {
+    gc_test_context(|| {
+        ensure_provider_registered();
+
+        struct Case {
+            source: &'static str,
+            expected: Vec<f64>,
+            expect_resident: bool,
+        }
+
+        let cases = vec![
+            Case {
+                source: "y = mod(-5.5, 2) + 0;",
+                expected: vec![mod_real_expected(-5.5, 2.0)],
+                expect_resident: false,
+            },
+            Case {
+                source: "x = [-5.5, -1.25, 5.5]; y = mod(x, 2) + 0;",
+                expected: vec![
+                    mod_real_expected(-5.5, 2.0),
+                    mod_real_expected(-1.25, 2.0),
+                    mod_real_expected(5.5, 2.0),
+                ],
+                expect_resident: true,
+            },
+            Case {
+                source: "d = [2, 3, 4]; y = mod(6, d) + 0;",
+                expected: vec![
+                    mod_real_expected(6.0, 2.0),
+                    mod_real_expected(6.0, 3.0),
+                    mod_real_expected(6.0, 4.0),
+                ],
+                expect_resident: true,
+            },
+            Case {
+                source: "x = [-5.5, -1.25, 5.5]; d = [2, 3, 4]; y = mod(x, d) + 0;",
+                expected: vec![
+                    mod_real_expected(-5.5, 2.0),
+                    mod_real_expected(-1.25, 3.0),
+                    mod_real_expected(5.5, 4.0),
+                ],
+                expect_resident: true,
+            },
+            Case {
+                source: "x = [6, 6, 6, 0/0, 5, 1/0, 4]; d = [0, 2, 1/0, 2, 1/0, 2, 0]; y = mod(x, d) + 0;",
+                expected: vec![
+                    mod_real_expected(6.0, 0.0),
+                    mod_real_expected(6.0, 2.0),
+                    mod_real_expected(6.0, f64::INFINITY),
+                    mod_real_expected(f64::NAN, 2.0),
+                    mod_real_expected(5.0, f64::INFINITY),
+                    mod_real_expected(f64::INFINITY, 2.0),
+                    mod_real_expected(4.0, 0.0),
+                ],
+                expect_resident: true,
+            },
+        ];
+
+        for case in cases {
+            let (_, value) = compile_and_interpret_value(case.source);
+            match &value {
+                Value::GpuTensor(handle) if case.expect_resident => {
+                    assert!(fusion_residency::is_resident(handle));
+                }
+                Value::GpuTensor(_) | Value::Tensor(_) | Value::Num(_) => {}
+                other => panic!("unexpected result kind: {other:?}"),
+            }
+            let gathered = gather_if_needed(&value).expect("gather result");
+            match gathered {
+                Value::Tensor(tensor) => assert_real_sequence_matches(&tensor.data, &case.expected),
+                Value::Num(num) => assert_real_sequence_matches(&[num], &case.expected),
+                other => panic!("expected real result, got {other:?}"),
+            }
+        }
+    });
+}
+
+#[test]
+fn rem_real_parity_matrix_matches_expected_values() {
+    gc_test_context(|| {
+        ensure_provider_registered();
+
+        struct Case {
+            source: &'static str,
+            expected: Vec<f64>,
+            expect_resident: bool,
+        }
+
+        let cases = vec![
+            Case {
+                source: "y = rem(-5.5, 2) + 0;",
+                expected: vec![rem_real_expected(-5.5, 2.0)],
+                expect_resident: false,
+            },
+            Case {
+                source: "x = [-5.5, -1.25, 5.5]; y = rem(x, 2) + 0;",
+                expected: vec![
+                    rem_real_expected(-5.5, 2.0),
+                    rem_real_expected(-1.25, 2.0),
+                    rem_real_expected(5.5, 2.0),
+                ],
+                expect_resident: true,
+            },
+            Case {
+                source: "d = [2, 3, 4]; y = rem(6, d) + 0;",
+                expected: vec![
+                    rem_real_expected(6.0, 2.0),
+                    rem_real_expected(6.0, 3.0),
+                    rem_real_expected(6.0, 4.0),
+                ],
+                expect_resident: true,
+            },
+            Case {
+                source: "x = [-5.5, -1.25, 5.5]; d = [2, 3, 4]; y = rem(x, d) + 0;",
+                expected: vec![
+                    rem_real_expected(-5.5, 2.0),
+                    rem_real_expected(-1.25, 3.0),
+                    rem_real_expected(5.5, 4.0),
+                ],
+                expect_resident: true,
+            },
+            Case {
+                source: "x = [6, 6, 6, 0/0, 5, 1/0, 4]; d = [0, 2, 1/0, 2, 1/0, 2, 0]; y = rem(x, d) + 0;",
+                expected: vec![
+                    rem_real_expected(6.0, 0.0),
+                    rem_real_expected(6.0, 2.0),
+                    rem_real_expected(6.0, f64::INFINITY),
+                    rem_real_expected(f64::NAN, 2.0),
+                    rem_real_expected(5.0, f64::INFINITY),
+                    rem_real_expected(f64::INFINITY, 2.0),
+                    rem_real_expected(4.0, 0.0),
+                ],
+                expect_resident: true,
+            },
+        ];
+
+        for case in cases {
+            let (_, value) = compile_and_interpret_value(case.source);
+            match &value {
+                Value::GpuTensor(handle) if case.expect_resident => {
+                    assert!(fusion_residency::is_resident(handle));
+                }
+                Value::GpuTensor(_) | Value::Tensor(_) | Value::Num(_) => {}
+                other => panic!("unexpected result kind: {other:?}"),
+            }
+            let gathered = gather_if_needed(&value).expect("gather result");
+            match gathered {
+                Value::Tensor(tensor) => assert_real_sequence_matches(&tensor.data, &case.expected),
+                Value::Num(num) => assert_real_sequence_matches(&[num], &case.expected),
+                other => panic!("expected real result, got {other:?}"),
+            }
+        }
     });
 }
 

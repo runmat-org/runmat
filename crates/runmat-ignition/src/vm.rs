@@ -15,7 +15,7 @@ use runmat_accelerate::{
 };
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
-    active_group_plan_clone, value_is_all_keyword, FusionKind, ReductionAxes, ShapeInfo,
+    active_group_plan_clone, value_is_all_keyword, FusionKind, InstrSpan, ReductionAxes, ShapeInfo,
     ValueOrigin, VarKind,
 };
 use runmat_builtins::{Type, Value};
@@ -2355,75 +2355,18 @@ async fn run_interpreter_inner(
                 #[cfg(feature = "native-accel")]
                 log_fusion_span_window(&plan, &bytecode, pc);
                 let span = plan.group.span.clone();
-                let mut has_barrier = false;
-                let mut stored_vars: HashSet<(bool, usize)> = HashSet::new();
-                if span.end < bytecode.instructions.len() && span.start <= span.end {
-                    for instr in &bytecode.instructions[span.start..=span.end] {
-                        if matches!(
-                            instr,
-                            Instr::StoreIndex(_)
-                                | Instr::StoreSlice(_, _, _, _)
-                                | Instr::StoreSliceExpr { .. }
-                                | Instr::StoreIndexCell(_)
-                                | Instr::StoreMember(_)
-                                | Instr::StoreMemberOrInit(_)
-                                | Instr::StoreMemberDynamic
-                                | Instr::StoreMemberDynamicOrInit
-                        ) {
-                            has_barrier = true;
-                            break;
-                        }
-                        match instr {
-                            Instr::StoreVar(idx) => {
-                                stored_vars.insert((false, *idx));
-                            }
-                            Instr::StoreLocal(idx) => {
-                                stored_vars.insert((true, *idx));
-                            }
-                            _ => {}
-                        }
-                    }
-                }
-                if !has_barrier
-                    && !stored_vars.is_empty()
-                    && span.end + 1 < bytecode.instructions.len()
-                {
-                    for instr in &bytecode.instructions[span.end + 1..] {
-                        match instr {
-                            Instr::LoadVar(idx) => {
-                                if stored_vars.contains(&(false, *idx)) {
-                                    has_barrier = true;
-                                    break;
-                                }
-                            }
-                            Instr::LoadLocal(idx) => {
-                                if stored_vars.contains(&(true, *idx)) {
-                                    has_barrier = true;
-                                    break;
-                                }
-                            }
-                            Instr::StoreVar(idx) => {
-                                stored_vars.remove(&(false, *idx));
-                            }
-                            Instr::StoreLocal(idx) => {
-                                stored_vars.remove(&(true, *idx));
-                            }
-                            _ => {}
-                        }
-                        if stored_vars.is_empty() {
-                            break;
-                        }
-                    }
-                }
+                let has_barrier = fusion_span_has_vm_barrier(&bytecode.instructions, &span);
+                let live_result_count =
+                    fusion_span_live_result_count(&bytecode.instructions, &span);
                 if fusion_debug_enabled() {
                     log::trace!(
-                        "fusion gate pc={} kind={:?} span={}..{} has_barrier={} stored_vars={:?}",
+                        "fusion gate pc={} kind={:?} span={}..{} has_barrier={} live_results={:?}",
                         pc,
                         plan.group.kind,
                         span.start,
                         span.end,
                         has_barrier,
-                        stored_vars
+                        live_result_count
                     );
                 }
                 let _fusion_span = info_span!(
@@ -11246,6 +11189,104 @@ fn summarize_value(i: usize, v: &Value) -> String {
         _ => format!("in#{i}:{}", value_kind(v)),
     }
 }
+
+#[cfg(feature = "native-accel")]
+fn fusion_span_live_result_count(instructions: &[Instr], span: &InstrSpan) -> Option<usize> {
+    if span.start > span.end || span.end >= instructions.len() {
+        return None;
+    }
+
+    let mut current_depth = 0usize;
+    for instr in &instructions[span.start..=span.end] {
+        let effect = instr.stack_effect()?;
+        if current_depth < effect.pops {
+            current_depth = effect.pops;
+        }
+        current_depth = current_depth - effect.pops + effect.pushes;
+    }
+    Some(current_depth)
+}
+
+#[cfg(feature = "native-accel")]
+fn fusion_span_has_observable_store_reuse(instructions: &[Instr], span: &InstrSpan) -> bool {
+    if span.start > span.end || span.end >= instructions.len() {
+        return true;
+    }
+
+    let mut stored_vars: HashSet<(bool, usize)> = HashSet::new();
+    for instr in &instructions[span.start..=span.end] {
+        match instr {
+            Instr::StoreVar(idx) => {
+                stored_vars.insert((false, *idx));
+            }
+            Instr::StoreLocal(idx) => {
+                stored_vars.insert((true, *idx));
+            }
+            _ => {}
+        }
+    }
+
+    if stored_vars.is_empty() || span.end + 1 >= instructions.len() {
+        return false;
+    }
+
+    for instr in &instructions[span.end + 1..] {
+        match instr {
+            Instr::LoadVar(idx) => {
+                if stored_vars.contains(&(false, *idx)) {
+                    return true;
+                }
+            }
+            Instr::LoadLocal(idx) => {
+                if stored_vars.contains(&(true, *idx)) {
+                    return true;
+                }
+            }
+            Instr::StoreVar(idx) => {
+                stored_vars.remove(&(false, *idx));
+            }
+            Instr::StoreLocal(idx) => {
+                stored_vars.remove(&(true, *idx));
+            }
+            _ => {}
+        }
+        if stored_vars.is_empty() {
+            return false;
+        }
+    }
+
+    false
+}
+
+#[cfg(feature = "native-accel")]
+fn fusion_span_has_vm_barrier(instructions: &[Instr], span: &InstrSpan) -> bool {
+    if span.start > span.end || span.end >= instructions.len() {
+        return true;
+    }
+
+    for instr in &instructions[span.start..=span.end] {
+        if matches!(
+            instr,
+            Instr::StoreIndex(_)
+                | Instr::StoreSlice(_, _, _, _)
+                | Instr::StoreSliceExpr { .. }
+                | Instr::StoreIndexCell(_)
+                | Instr::StoreMember(_)
+                | Instr::StoreMemberOrInit(_)
+                | Instr::StoreMemberDynamic
+                | Instr::StoreMemberDynamicOrInit
+        ) {
+            return true;
+        }
+    }
+
+    if fusion_span_live_result_count(instructions, span) != Some(1) {
+        return true;
+    }
+
+    fusion_span_has_observable_store_reuse(instructions, span)
+}
+
 #[cfg(feature = "native-accel")]
 struct StackSliceGuard<'a> {
     stack: *mut Vec<Value>,
@@ -12485,5 +12526,77 @@ mod scalar_index_tests {
                 panic!("expected empty indices selector")
             }
         }
+    }
+}
+
+#[cfg(all(test, feature = "native-accel"))]
+mod fusion_span_barrier_tests {
+    use super::*;
+    use runmat_accelerate::InstrSpan;
+
+    #[test]
+    fn store_reload_span_with_one_live_result_is_legal() {
+        let instructions = vec![
+            Instr::LoadVar(0),
+            Instr::LoadConst(0.0),
+            Instr::Add,
+            Instr::StoreVar(1),
+            Instr::LoadVar(1),
+        ];
+        let span = InstrSpan { start: 0, end: 4 };
+
+        assert_eq!(fusion_span_live_result_count(&instructions, &span), Some(1));
+        assert!(!fusion_span_has_vm_barrier(&instructions, &span));
+    }
+
+    #[test]
+    fn span_leaving_multiple_live_results_is_illegal() {
+        let instructions = vec![
+            Instr::LoadVar(0),
+            Instr::LoadConst(0.0),
+            Instr::Add,
+            Instr::LoadVar(1),
+        ];
+        let span = InstrSpan { start: 0, end: 3 };
+
+        assert_eq!(fusion_span_live_result_count(&instructions, &span), Some(2));
+        assert!(fusion_span_has_vm_barrier(&instructions, &span));
+    }
+
+    #[test]
+    fn stored_value_observed_after_span_is_illegal() {
+        let instructions = vec![
+            Instr::LoadVar(0),
+            Instr::LoadConst(0.0),
+            Instr::Add,
+            Instr::StoreVar(1),
+            Instr::LoadVar(1),
+            Instr::LoadVar(1),
+        ];
+        let span = InstrSpan { start: 0, end: 4 };
+
+        assert!(fusion_span_has_observable_store_reuse(&instructions, &span));
+        assert!(fusion_span_has_vm_barrier(&instructions, &span));
+    }
+
+    #[test]
+    fn overwritten_store_before_later_load_is_legal() {
+        let instructions = vec![
+            Instr::LoadVar(0),
+            Instr::LoadConst(0.0),
+            Instr::Add,
+            Instr::StoreVar(1),
+            Instr::LoadVar(1),
+            Instr::LoadConst(1.0),
+            Instr::StoreVar(1),
+            Instr::LoadVar(1),
+        ];
+        let span = InstrSpan { start: 0, end: 4 };
+
+        assert!(!fusion_span_has_observable_store_reuse(
+            &instructions,
+            &span
+        ));
+        assert!(!fusion_span_has_vm_barrier(&instructions, &span));
     }
 }
