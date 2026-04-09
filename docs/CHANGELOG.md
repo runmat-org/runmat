@@ -31,17 +31,18 @@ Plotting infrastructure:
 - Add 3D view controls: `view(az, el)`
 - Add world-space text annotations
 
+Numerical computing:
+- Implement correct matrix division semantics — `\`, `/`, `.\`, `./` now have distinct, correct semantics through parser, HIR, bytecode, VM, and GPU paths. `mldivide` and `mrdivide` support triangular solves, dense square solves, tall least-squares, wide minimum-norm solves, transpose variants, and Cholesky-backed solves with GPU-resident F32 execution
+- Implement full FFT/IFFT family — `fft`, `ifft`, `fft2`, `ifft2`, `fftn`, `ifftn` now fully implemented with underlying RustFFT for CPU paths and high-performance staged GPU shaders supporting power-of-two, radix-3, radix-5, mixed compositions, and Bluestein fallback for non-smooth/prime lengths. Complex array indexing now works throughout (`Y = fft(x); Y = Y(1:N/2)`)
+
 Other:
 - Add `clear`, `clc`, `close all` — session management commands now work in browser and native
 - Add duration display and datetime interop support
 - Add [`peaks`](/docs/matlab-function-reference) builtin — GPU-accelerated with mixed-residency tensor support and type inference
 
 #### Fixed
-- Fix `mldivide` (backslash) to solve linear systems instead of computing inverse
 - Fix struct field indexing — `s.arr(k)` and `s.arr(1:n)` now work with MATLAB-compatible semantics
 - Fix implicit struct creation — assigning to `r.x = 10` on an uninitialized variable now materializes a struct
-- Fix FFT complex array indexing — range-based indexing on complex results from `fft` now works (`Y = fft(x); Y = Y(1:N/2)`)
-- Fix double-precision FFT shader bindings
 - Fix `fprintf` compatibility for literal dollar signs and casted numeric inputs
 - Fix `atan2` stack underflow that crashed scripts calling `atan2` with compound expressions
 - Fix leading-dot floats — `.5` parsed as `0.5`
@@ -59,8 +60,6 @@ Other:
 - Fix `plot` 3-argument overload
 - Fix stem shader offset when baseline is hidden
 
-#### Changed
-- Improve matrix division operators in GPU execution layer
 
 ### Sandbox
 
@@ -107,12 +106,10 @@ Infrastructure changes only — no runtime or engine changes.
 
 _March 24, 2026_
 
-Major release — 558 commits across 3,100+ files.
-
 ### Runtime
 
 #### Added
-- Compile RunMat to WebAssembly — runs entirely in the [browser](/docs/desktop-browser-guide) with WebGPU acceleration, published as the `runmat` npm package
+- WebAssembly (WASM) compile target — RunMat now runs entirely in the [browser](/docs/desktop-browser-guide) with WebGPU acceleration, published as the `runmat` npm package
 - Add fused GPU rendering pipeline for 2D and 3D plots with zero-copy surface data path
 - Add 3D depth camera with reversed-Z and dynamic clip planes
 - Add type inference — context-aware shape resolvers track tensor shapes through the compiler
@@ -175,7 +172,7 @@ _December 22, 2025_
 _December 2, 2025_
 
 #### Added
-- Add anonymous usage telemetry (see [Telemetry](/docs/telemetry) for details)
+- Add anonymous telemetry to help improve RunMat. No code is ever captured — only internal error codes. See [Telemetry](/docs/telemetry) for details
 
 #### Fixed
 - Fix CLI version display
@@ -186,7 +183,7 @@ _December 2, 2025_
 
 _November 21 – 24, 2025_
 
-The GPU acceleration era. Covers [v0.2.0](https://github.com/runmat-org/runmat/compare/v0.0.4...v0.2.0) through v0.2.6.
+Covers [v0.2.0](https://github.com/runmat-org/runmat/compare/v0.0.4...v0.2.0) through v0.2.6.
 
 #### Added
 
@@ -198,13 +195,6 @@ _[Accelerate](/docs/accelerate/fusion-intro) (GPU backend):_
 _[Fusion engine](/docs/fusion-guide):_
 - Add computation graph pattern scanning — the runtime analyzes your code's computation graph, matches sequences against a library of fusible patterns, and replaces them with optimized GPU kernels automatically
 - Add 5–6 initial fusion operations including elementwise math chains, where multiple operations collapse into a single GPU kernel eliminating intermediate memory traffic
-
-- Add cross-compilation for macOS (x86_64 + aarch64), Linux (x86_64), Windows (x86_64)
-- Add macOS code signing and Apple notarization
-
-#### Fixed
-- Fix GPU tiling regression (v0.2.5)
-- Fix image normalization shader corner case (v0.2.6)
 
 ---
 
@@ -223,7 +213,7 @@ _August 25, 2025_
 _August 19, 2025_
 
 #### Added
-- Implement the MATLAB language grammar and semantic surface — parser, HIR, and VM cover the core language with ~98% real-world coverage; see [Language Coverage](/docs/language-coverage) for the full matrix
+- Implement interpretation for the core MATLAB language grammar and semantic surface, across the parser, HIR, and VM. See [Language Coverage](/docs/language-coverage) for the full matrix of implemented coverage
 
 ---
 
