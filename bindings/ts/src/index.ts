@@ -1126,8 +1126,8 @@ export async function importFigureScene(scene: Uint8Array): Promise<number | nul
   try {
     const handle = await native.importFigureScene(scene);
     return typeof handle === "number" ? handle : null;
-  } catch {
-    return null;
+  } catch (error) {
+    throw coerceFigureError(error);
   }
 }
 
@@ -1139,8 +1139,8 @@ export async function importFigureSceneFromPath(path: string): Promise<number | 
   try {
     const handle = await native.importFigureSceneFromPath(path);
     return typeof handle === "number" ? handle : null;
-  } catch {
-    return null;
+  } catch (error) {
+    throw coerceFigureError(error);
   }
 }
 
@@ -1283,8 +1283,8 @@ class WebRunMatSession implements RunMatSessionHandle {
     try {
       const handle = await this.native.importFigureScene(scene);
       return typeof handle === "number" ? handle : null;
-    } catch {
-      return null;
+    } catch (error) {
+      throw coerceFigureError(error);
     }
   }
 
@@ -1296,8 +1296,8 @@ class WebRunMatSession implements RunMatSessionHandle {
     try {
       const handle = await this.native.importFigureSceneFromPath(path);
       return typeof handle === "number" ? handle : null;
-    } catch {
-      return null;
+    } catch (error) {
+      throw coerceFigureError(error);
     }
   }
 

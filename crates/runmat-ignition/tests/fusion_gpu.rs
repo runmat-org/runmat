@@ -148,7 +148,11 @@ impl AccelProvider for TestProvider {
     fn download<'a>(&'a self, handle: &'a GpuTensorHandle) -> AccelDownloadFuture<'a> {
         Box::pin(async move {
             let (data, shape) = self.pull(handle)?;
-            Ok(HostTensorOwned { data, shape })
+            Ok(HostTensorOwned {
+                data,
+                shape,
+                storage: runmat_accelerate_api::GpuTensorStorage::Real,
+            })
         })
     }
 

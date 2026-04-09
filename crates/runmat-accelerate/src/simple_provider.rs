@@ -5,15 +5,15 @@ use anyhow::{anyhow, ensure, Result};
 use once_cell::sync::OnceCell;
 use runmat_accelerate_api::{
     AccelDownloadFuture, AccelProvider, AccelProviderFuture, CorrcoefOptions, CovarianceOptions,
-    FindDirection, FspecialRequest, GpuTensorHandle, HostTensorOwned, HostTensorView,
-    ImfilterOptions, PagefunRequest, ProviderBandwidth, ProviderCholResult, ProviderCondNorm,
-    ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation, ProviderEigResult,
-    ProviderFindResult, ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult,
-    ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult,
-    ProviderNanMode, ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient,
-    ProviderPrecision, ProviderQrOptions, ProviderQrPivot, ProviderQrResult, ProviderScanDirection,
-    ProviderSymmetryKind, SetdiffOptions, SetdiffResult, SortComparison, SortResult,
-    SortRowsColumnSpec, UniqueOptions, UniqueResult,
+    FindDirection, FspecialRequest, GpuTensorHandle, GpuTensorStorage, HostTensorOwned,
+    HostTensorView, ImfilterOptions, PagefunRequest, ProviderBandwidth, ProviderCholResult,
+    ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation,
+    ProviderEigResult, ProviderFindResult, ProviderHermitianKind, ProviderIirFilterOptions,
+    ProviderIirFilterResult, ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult,
+    ProviderLuResult, ProviderNanMode, ProviderNormOrder, ProviderPinvOptions,
+    ProviderPolyderQuotient, ProviderPrecision, ProviderQrOptions, ProviderQrPivot,
+    ProviderQrResult, ProviderScanDirection, ProviderSymmetryKind, SetdiffOptions, SetdiffResult,
+    SortComparison, SortResult, SortRowsColumnSpec, UniqueOptions, UniqueResult,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::array::sorting_sets::unique;
@@ -1319,6 +1319,7 @@ impl AccelProvider for InProcessProvider {
                 Ok(HostTensorOwned {
                     data: buf.clone(),
                     shape: h.shape.clone(),
+                    storage: runmat_accelerate_api::handle_storage(h),
                 })
             } else {
                 Err(anyhow::anyhow!("buffer not found: {}", h.buffer_id))
@@ -1330,6 +1331,7 @@ impl AccelProvider for InProcessProvider {
         let mut guard = registry().lock().unwrap_or_else(|e| e.into_inner());
         guard.remove(&h.buffer_id);
         runmat_accelerate_api::clear_handle_logical(h);
+        runmat_accelerate_api::clear_handle_storage(h);
         Ok(())
     }
 
@@ -1378,10 +1380,12 @@ impl AccelProvider for InProcessProvider {
                 values: HostTensorOwned {
                     data: values,
                     shape: handle.shape.clone(),
+                    storage: GpuTensorStorage::Real,
                 },
                 indices: HostTensorOwned {
                     data: indices,
                     shape: indices_shape,
+                    storage: GpuTensorStorage::Real,
                 },
             })
         })

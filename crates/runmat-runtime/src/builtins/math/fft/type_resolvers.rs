@@ -14,8 +14,16 @@ pub fn fft2_type(args: &[Type], _context: &ResolveContext) -> Type {
     fft_like_type(args, 2)
 }
 
+pub fn fftn_type(args: &[Type], _context: &ResolveContext) -> Type {
+    fft_like_type(args, 1)
+}
+
 pub fn ifft2_type(args: &[Type], _context: &ResolveContext) -> Type {
     fft_like_type(args, 2)
+}
+
+pub fn ifftn_type(args: &[Type], _context: &ResolveContext) -> Type {
+    fft_like_type(args, 1)
 }
 
 pub fn fftshift_type(args: &[Type], _context: &ResolveContext) -> Type {

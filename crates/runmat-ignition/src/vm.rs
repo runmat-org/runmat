@@ -1,6 +1,6 @@
 use crate::functions::{Bytecode, ExecutionContext, UserFunction};
 use crate::gc_roots::InterpretContext;
-use crate::instr::{EmitLabel, Instr};
+use crate::instr::{EmitLabel, EndExpr, Instr};
 use miette::{SourceOffset, SourceSpan};
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::fusion_exec::{
@@ -656,6 +656,48 @@ fn total_len_from_shape(shape: &[usize]) -> usize {
     }
 }
 
+#[derive(Clone, Copy)]
+struct IndexContext<'a> {
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    base_shape: &'a [usize],
+}
+
+impl<'a> IndexContext<'a> {
+    fn new(dims: usize, colon_mask: u32, end_mask: u32, base_shape: &'a [usize]) -> Self {
+        Self {
+            dims,
+            colon_mask,
+            end_mask,
+            base_shape,
+        }
+    }
+
+    fn dim_len_for_numeric_position(&self, numeric_position: usize) -> usize {
+        let mut seen_numeric = 0usize;
+        let mut dim_for_pos = 0usize;
+        for d in 0..self.dims {
+            let is_colon = (self.colon_mask & (1u32 << d)) != 0;
+            let is_end = (self.end_mask & (1u32 << d)) != 0;
+            if is_colon || is_end {
+                continue;
+            }
+            if seen_numeric == numeric_position {
+                dim_for_pos = d;
+                break;
+            }
+            seen_numeric += 1;
+        }
+        if self.dims == 1 {
+            let n = self.base_shape.iter().copied().product::<usize>();
+            n.max(1)
+        } else {
+            self.base_shape.get(dim_for_pos).copied().unwrap_or(1)
+        }
+    }
+}
+
 fn index_scalar_from_host_value(value: &Value) -> Option<i64> {
     match value {
         Value::Num(n) => Some(*n as i64),
@@ -1015,6 +1057,158 @@ fn gather_string_slice(sa: &runmat_builtins::StringArray, plan: &SlicePlan) -> V
     Ok(Value::StringArray(out_sa))
 }
 
+fn gather_complex_slice(ct: &runmat_builtins::ComplexTensor, plan: &SlicePlan) -> VmResult<Value> {
+    if plan.indices.is_empty() {
+        let empty = runmat_builtins::ComplexTensor::new(Vec::new(), plan.output_shape.clone())
+            .map_err(|e| format!("Slice error: {e}"))?;
+        return Ok(Value::ComplexTensor(empty));
+    }
+    if plan.indices.len() == 1 {
+        let lin = plan.indices[0] as usize;
+        let (re, im) = ct.data.get(lin).copied().ok_or_else(|| {
+            mex(
+                "IndexOutOfBounds",
+                "Slice error: complex index out of bounds",
+            )
+        })?;
+        return Ok(Value::Complex(re, im));
+    }
+    let mut out = Vec::with_capacity(plan.indices.len());
+    for &lin in &plan.indices {
+        let idx = lin as usize;
+        let value = ct.data.get(idx).copied().ok_or_else(|| {
+            mex(
+                "IndexOutOfBounds",
+                "Slice error: complex index out of bounds",
+            )
+        })?;
+        out.push(value);
+    }
+    let out_ct = runmat_builtins::ComplexTensor::new(out, plan.output_shape.clone())
+        .map_err(|e| format!("Slice error: {e}"))?;
+    Ok(Value::ComplexTensor(out_ct))
+}
+
+#[derive(Clone)]
+enum ComplexAssignView {
+    Scalar((f64, f64)),
+    Array {
+        data: Vec<(f64, f64)>,
+        shape: Vec<usize>,
+        strides: Vec<usize>,
+    },
+}
+
+fn build_complex_rhs_view(rhs: &Value, selection_lengths: &[usize]) -> VmResult<ComplexAssignView> {
+    let dims = selection_lengths.len().max(1);
+    match rhs {
+        Value::Complex(re, im) => Ok(ComplexAssignView::Scalar((*re, *im))),
+        Value::Num(n) => Ok(ComplexAssignView::Scalar((*n, 0.0))),
+        Value::Int(i) => Ok(ComplexAssignView::Scalar((i.to_f64(), 0.0))),
+        Value::Bool(b) => Ok(ComplexAssignView::Scalar((if *b { 1.0 } else { 0.0 }, 0.0))),
+        Value::Tensor(t) => {
+            let mut shape = t.shape.clone();
+            if shape.len() < dims {
+                shape.resize(dims, 1);
+            } else if shape.len() > dims {
+                if shape.iter().skip(dims).any(|&s| s != 1) {
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+                }
+                shape.truncate(dims);
+            }
+            for (rhs_len, sel_len) in shape.iter().zip(selection_lengths.iter()) {
+                if !(*rhs_len == 1 || *rhs_len == *sel_len) {
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+                }
+            }
+            let mut strides = vec![0usize; dims];
+            let mut acc = 1usize;
+            for d in 0..dims {
+                strides[d] = acc;
+                acc *= shape[d];
+            }
+            if acc != t.data.len() {
+                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+            }
+            let data: Vec<(f64, f64)> = t.data.iter().map(|&v| (v, 0.0)).collect();
+            Ok(ComplexAssignView::Array {
+                data,
+                shape,
+                strides,
+            })
+        }
+        Value::ComplexTensor(ct) => {
+            let mut shape = ct.shape.clone();
+            if shape.len() < dims {
+                shape.resize(dims, 1);
+            } else if shape.len() > dims {
+                if shape.iter().skip(dims).any(|&s| s != 1) {
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+                }
+                shape.truncate(dims);
+            }
+            for (rhs_len, sel_len) in shape.iter().zip(selection_lengths.iter()) {
+                if !(*rhs_len == 1 || *rhs_len == *sel_len) {
+                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+                }
+            }
+            let mut strides = vec![0usize; dims];
+            let mut acc = 1usize;
+            for d in 0..dims {
+                strides[d] = acc;
+                acc *= shape[d];
+            }
+            if acc != ct.data.len() {
+                return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+            }
+            Ok(ComplexAssignView::Array {
+                data: ct.data.clone(),
+                shape,
+                strides,
+            })
+        }
+        other => Err(mex(
+            "InvalidSliceAssignmentRhs",
+            &format!("slice assign: unsupported RHS type {:?}", other),
+        )),
+    }
+}
+
+fn scatter_complex_with_plan(
+    ct: &mut runmat_builtins::ComplexTensor,
+    plan: &SlicePlan,
+    view: &ComplexAssignView,
+) -> VmResult<()> {
+    if plan.indices.is_empty() {
+        return Ok(());
+    }
+    let mut idx_iter = plan.indices.iter();
+    cartesian_positions(&plan.selection_lengths, |position| {
+        if let Some(&lin) = idx_iter.next() {
+            let replacement = match view {
+                ComplexAssignView::Scalar(v) => *v,
+                ComplexAssignView::Array {
+                    data,
+                    shape,
+                    strides,
+                } => {
+                    let mut rlin = 0usize;
+                    for (d, &pos_val) in position.iter().enumerate() {
+                        let rhs_len = shape.get(d).copied().unwrap_or(1);
+                        let pos = if rhs_len == 1 { 0 } else { pos_val };
+                        rlin += pos * strides.get(d).copied().unwrap_or(1);
+                    }
+                    data.get(rlin).copied().unwrap_or((0.0, 0.0))
+                }
+            };
+            if let Some(slot) = ct.data.get_mut(lin as usize) {
+                *slot = replacement;
+            }
+        }
+    });
+    Ok(())
+}
+
 enum StringAssignView {
     Scalar(String),
     Array {
@@ -1123,37 +1317,234 @@ fn scatter_string_with_plan(
     Ok(())
 }
 
-fn apply_end_offsets_to_numeric(
-    numeric: &[Value],
-    dims: usize,
-    colon_mask: u32,
-    end_mask: u32,
-    end_offsets: &[(usize, i64)],
-    base_shape: &[usize],
-) -> Vec<Value> {
-    let mut adjusted = numeric.to_vec();
-    for (position, offset) in end_offsets {
-        if let Some(value) = adjusted.get_mut(*position) {
-            let mut seen_numeric = 0usize;
-            let mut dim_for_pos = 0usize;
-            for d in 0..dims {
-                let is_colon = (colon_mask & (1u32 << d)) != 0;
-                let is_end = (end_mask & (1u32 << d)) != 0;
-                if is_colon || is_end {
-                    continue;
-                }
-                if seen_numeric == *position {
-                    dim_for_pos = d;
-                    break;
-                }
-                seen_numeric += 1;
+fn apply_end_offsets_to_numeric<'a>(
+    numeric: &'a [Value],
+    ctx: IndexContext<'a>,
+    end_offsets: &'a [(usize, EndExpr)],
+    vars: &'a mut Vec<Value>,
+    functions: &'a HashMap<String, UserFunction>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = VmResult<Vec<Value>>> + 'a>> {
+    Box::pin(async move {
+        let mut adjusted = numeric.to_vec();
+        for (position, end_expr) in end_offsets {
+            if let Some(value) = adjusted.get_mut(*position) {
+                let dim_len = ctx.dim_len_for_numeric_position(*position);
+                let idx_val = resolve_range_end_index(dim_len, end_expr, vars, functions).await?;
+                *value = Value::Num(idx_val as f64);
             }
-            let dim_len = base_shape.get(dim_for_pos).copied().unwrap_or(1);
-            let idx_val = (dim_len as isize) - (*offset as isize);
-            *value = Value::Num(idx_val as f64);
         }
+        Ok(adjusted)
+    })
+}
+
+fn eval_end_expr_value<'a>(
+    expr: &'a EndExpr,
+    end_value: f64,
+    vars: &'a mut Vec<Value>,
+    functions: &'a HashMap<String, UserFunction>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = VmResult<f64>> + 'a>> {
+    Box::pin(async move {
+        match expr {
+            EndExpr::End => Ok(end_value),
+            EndExpr::Const(v) => Ok(*v),
+            EndExpr::Var(i) => {
+                let v = vars.get(*i).ok_or_else(|| {
+                    mex("MissingNumericIndex", "missing variable for end expression")
+                })?;
+                value_to_f64(v)
+                    .map_err(|_| mex("UnsupportedIndexType", "end expression must be numeric"))
+            }
+            EndExpr::Call(name, args) => {
+                let mut argv: Vec<Value> = Vec::with_capacity(args.len());
+                for a in args {
+                    let val = eval_end_expr_value(a, end_value, vars, functions).await?;
+                    argv.push(Value::Num(val));
+                }
+                let v = if let Ok(v) = call_builtin_vm!(name, &argv) {
+                    v
+                } else if functions.contains_key(name) {
+                    invoke_user_function_value(name, &argv, functions, vars).await?
+                } else {
+                    return Err(mex(
+                        "UndefinedFunction",
+                        &format!("Undefined function in end expression: {name}"),
+                    ));
+                };
+                value_to_f64(&v)
+                    .map_err(|_| mex("UnsupportedIndexType", "end call must return scalar"))
+            }
+            EndExpr::Add(a, b) => {
+                let lhs = eval_end_expr_value(a, end_value, vars, functions).await?;
+                let rhs = eval_end_expr_value(b, end_value, vars, functions).await?;
+                Ok(lhs + rhs)
+            }
+            EndExpr::Sub(a, b) => {
+                let lhs = eval_end_expr_value(a, end_value, vars, functions).await?;
+                let rhs = eval_end_expr_value(b, end_value, vars, functions).await?;
+                Ok(lhs - rhs)
+            }
+            EndExpr::Mul(a, b) => {
+                let lhs = eval_end_expr_value(a, end_value, vars, functions).await?;
+                let rhs = eval_end_expr_value(b, end_value, vars, functions).await?;
+                Ok(lhs * rhs)
+            }
+            EndExpr::Div(a, b) => {
+                let denom = eval_end_expr_value(b, end_value, vars, functions).await?;
+                if denom == 0.0 {
+                    return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+                }
+                let lhs = eval_end_expr_value(a, end_value, vars, functions).await?;
+                Ok(lhs / denom)
+            }
+            EndExpr::LeftDiv(a, b) => {
+                let denom = eval_end_expr_value(a, end_value, vars, functions).await?;
+                if denom == 0.0 {
+                    return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+                }
+                let rhs = eval_end_expr_value(b, end_value, vars, functions).await?;
+                Ok(rhs / denom)
+            }
+            EndExpr::Pow(a, b) => {
+                let lhs = eval_end_expr_value(a, end_value, vars, functions).await?;
+                let rhs = eval_end_expr_value(b, end_value, vars, functions).await?;
+                Ok(lhs.powf(rhs))
+            }
+            EndExpr::Neg(a) => Ok(-eval_end_expr_value(a, end_value, vars, functions).await?),
+            EndExpr::Pos(a) => Ok(eval_end_expr_value(a, end_value, vars, functions).await?),
+            EndExpr::Floor(a) => Ok(eval_end_expr_value(a, end_value, vars, functions)
+                .await?
+                .floor()),
+            EndExpr::Ceil(a) => Ok(eval_end_expr_value(a, end_value, vars, functions)
+                .await?
+                .ceil()),
+            EndExpr::Round(a) => Ok(eval_end_expr_value(a, end_value, vars, functions)
+                .await?
+                .round()),
+            EndExpr::Fix(a) => {
+                let v = eval_end_expr_value(a, end_value, vars, functions).await?;
+                Ok(if v >= 0.0 { v.floor() } else { v.ceil() })
+            }
+        }
+    })
+}
+
+fn value_to_f64(v: &Value) -> Result<f64, ()> {
+    match v {
+        Value::Num(n) => Ok(*n),
+        Value::Int(i) => Ok(i.to_f64()),
+        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
+        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
+        Value::Complex(re, im) if im.abs() < 1e-12 => Ok(*re),
+        Value::ComplexTensor(ct) if ct.data.len() == 1 && ct.data[0].1.abs() < 1e-12 => {
+            Ok(ct.data[0].0)
+        }
+        _ => Err(()),
     }
-    adjusted
+}
+
+async fn resolve_range_end_index(
+    dim_len: usize,
+    end_expr: &EndExpr,
+    vars: &mut Vec<Value>,
+    functions: &HashMap<String, UserFunction>,
+) -> VmResult<i64> {
+    let value = eval_end_expr_value(end_expr, dim_len as f64, vars, functions).await?;
+    Ok(value.floor() as i64)
+}
+
+fn encode_end_expr_value(expr: &EndExpr) -> VmResult<Value> {
+    fn mk_cell(items: Vec<Value>) -> VmResult<Value> {
+        let cols = items.len();
+        let cell = runmat_builtins::CellArray::new(items, 1, cols)
+            .map_err(|e| format!("end expression encoding: {e}"))?;
+        Ok(Value::Cell(cell))
+    }
+
+    match expr {
+        EndExpr::End => Ok(Value::String("end".to_string())),
+        EndExpr::Const(v) => Ok(Value::Num(*v)),
+        EndExpr::Var(i) => Ok(Value::String(format!("var:{i}"))),
+        EndExpr::Call(name, args) => {
+            let mut items = vec![
+                Value::String("call".to_string()),
+                Value::String(name.clone()),
+            ];
+            for a in args {
+                items.push(encode_end_expr_value(a)?);
+            }
+            mk_cell(items)
+        }
+        EndExpr::Add(a, b) => mk_cell(vec![
+            Value::String("+".to_string()),
+            encode_end_expr_value(a)?,
+            encode_end_expr_value(b)?,
+        ]),
+        EndExpr::Sub(a, b) => mk_cell(vec![
+            Value::String("-".to_string()),
+            encode_end_expr_value(a)?,
+            encode_end_expr_value(b)?,
+        ]),
+        EndExpr::Mul(a, b) => mk_cell(vec![
+            Value::String("*".to_string()),
+            encode_end_expr_value(a)?,
+            encode_end_expr_value(b)?,
+        ]),
+        EndExpr::Div(a, b) => mk_cell(vec![
+            Value::String("/".to_string()),
+            encode_end_expr_value(a)?,
+            encode_end_expr_value(b)?,
+        ]),
+        EndExpr::LeftDiv(a, b) => mk_cell(vec![
+            Value::String("\\".to_string()),
+            encode_end_expr_value(a)?,
+            encode_end_expr_value(b)?,
+        ]),
+        EndExpr::Pow(a, b) => mk_cell(vec![
+            Value::String("^".to_string()),
+            encode_end_expr_value(a)?,
+            encode_end_expr_value(b)?,
+        ]),
+        EndExpr::Neg(a) => mk_cell(vec![
+            Value::String("neg".to_string()),
+            encode_end_expr_value(a)?,
+        ]),
+        EndExpr::Pos(a) => mk_cell(vec![
+            Value::String("pos".to_string()),
+            encode_end_expr_value(a)?,
+        ]),
+        EndExpr::Floor(a) => mk_cell(vec![
+            Value::String("floor".to_string()),
+            encode_end_expr_value(a)?,
+        ]),
+        EndExpr::Ceil(a) => mk_cell(vec![
+            Value::String("ceil".to_string()),
+            encode_end_expr_value(a)?,
+        ]),
+        EndExpr::Round(a) => mk_cell(vec![
+            Value::String("round".to_string()),
+            encode_end_expr_value(a)?,
+        ]),
+        EndExpr::Fix(a) => mk_cell(vec![
+            Value::String("fix".to_string()),
+            encode_end_expr_value(a)?,
+        ]),
+    }
+}
+
+fn build_end_range_descriptor(start: Value, step: Value, end_expr: &EndExpr) -> VmResult<Value> {
+    let encoded_end = encode_end_expr_value(end_expr)?;
+    let cell = runmat_builtins::CellArray::new(
+        vec![
+            start,
+            step,
+            Value::String("end_expr".to_string()),
+            encoded_end,
+        ],
+        1,
+        4,
+    )
+    .map_err(|e| format!("obj range: {e}"))?;
+    Ok(Value::Cell(cell))
 }
 
 async fn materialize_rhs_linear(rhs: &Value, count: usize) -> VmResult<Vec<f64>> {
@@ -1191,6 +1582,47 @@ async fn materialize_rhs_linear(rhs: &Value, count: usize) -> VmResult<Vec<f64>>
             "InvalidSliceAssignmentRhs",
             &format!("slice assign: unsupported RHS type {:?}", other),
         )),
+    }
+}
+
+async fn value_to_complex_scalar(rhs: &Value) -> VmResult<(f64, f64)> {
+    match rhs {
+        Value::Complex(re, im) => Ok((*re, *im)),
+        Value::Num(n) => Ok((*n, 0.0)),
+        Value::Int(i) => Ok((i.to_f64(), 0.0)),
+        Value::Bool(b) => Ok((if *b { 1.0 } else { 0.0 }, 0.0)),
+        Value::Tensor(t) => {
+            if t.data.len() == 1 {
+                Ok((t.data[0], 0.0))
+            } else {
+                Err(mex("ScalarRequired", "RHS must be scalar"))
+            }
+        }
+        Value::ComplexTensor(ct) => {
+            if ct.data.len() == 1 {
+                Ok(ct.data[0])
+            } else {
+                Err(mex("ScalarRequired", "RHS must be scalar"))
+            }
+        }
+        Value::GpuTensor(h) => {
+            let total = h.shape.iter().copied().product::<usize>();
+            if total != 1 {
+                return Err(mex("ScalarRequired", "RHS must be scalar"));
+            }
+            let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+                mex(
+                    "AccelerationProviderUnavailable",
+                    "No acceleration provider registered",
+                )
+            })?;
+            let host = provider
+                .download(h)
+                .await
+                .map_err(|e| format!("gather rhs: {e}"))?;
+            Ok((host.data.first().copied().unwrap_or(0.0), 0.0))
+        }
+        _ => Err(mex("NumericRequired", "RHS must be numeric")),
     }
 }
 
@@ -1931,12 +2363,12 @@ async fn run_interpreter_inner(
                             instr,
                             Instr::StoreIndex(_)
                                 | Instr::StoreSlice(_, _, _, _)
-                                | Instr::StoreSliceEx(_, _, _, _, _)
-                                | Instr::StoreRangeEnd { .. }
-                                | Instr::StoreSlice1DRangeEnd { .. }
+                                | Instr::StoreSliceExpr { .. }
                                 | Instr::StoreIndexCell(_)
                                 | Instr::StoreMember(_)
+                                | Instr::StoreMemberOrInit(_)
                                 | Instr::StoreMemberDynamic
+                                | Instr::StoreMemberDynamicOrInit
                         ) {
                             has_barrier = true;
                             break;
@@ -1982,6 +2414,17 @@ async fn run_interpreter_inner(
                             break;
                         }
                     }
+                }
+                if fusion_debug_enabled() {
+                    log::trace!(
+                        "fusion gate pc={} kind={:?} span={}..{} has_barrier={} stored_vars={:?}",
+                        pc,
+                        plan.group.kind,
+                        span.start,
+                        span.end,
+                        has_barrier,
+                        stored_vars
+                    );
                 }
                 let _fusion_span = info_span!(
                     "fusion.execute",
@@ -5613,6 +6056,17 @@ async fn run_interpreter_inner(
                             }
                         }
                     }
+                    Value::ComplexTensor(ct) => {
+                        let selectors =
+                            build_slice_selectors(dims, colon_mask, end_mask, &numeric, &ct.shape)
+                                .await
+                                .map_err(|e| format!("slice: {e}"))?;
+                        let plan = build_slice_plan(&selectors, dims, &ct.shape)
+                            .map_err(|e| map_slice_plan_error("slice", e))?;
+                        let result =
+                            gather_complex_slice(&ct, &plan).map_err(|e| format!("slice: {e}"))?;
+                        stack.push(result);
+                    }
                     Value::GpuTensor(handle) => {
                         let provider = runmat_accelerate_api::provider().ok_or_else(|| {
                             mex(
@@ -5939,14 +6393,17 @@ async fn run_interpreter_inner(
                 }
                 bench_end("IndexSlice", __b);
             }
-            Instr::IndexRangeEnd {
+            Instr::IndexSliceExpr {
                 dims,
                 numeric_count,
                 colon_mask,
                 end_mask,
                 range_dims,
                 range_has_step,
-                end_offsets,
+                range_start_exprs,
+                range_step_exprs,
+                range_end_exprs,
+                end_numeric_exprs,
             } => {
                 // Pop any numeric scalar indices (reverse), then for each range in reverse push step (if has), start; then base
                 let mut numeric: Vec<Value> = Vec::with_capacity(numeric_count);
@@ -5992,6 +6449,41 @@ async fn run_interpreter_inner(
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 #[cfg(feature = "native-accel")]
                 clear_residency(&base);
+                if !end_numeric_exprs.is_empty() {
+                    numeric = match &base {
+                        Value::GpuTensor(handle) => {
+                            apply_end_offsets_to_numeric(
+                                &numeric,
+                                IndexContext::new(dims, colon_mask, end_mask, &handle.shape),
+                                &end_numeric_exprs,
+                                &mut vars,
+                                &context.functions,
+                            )
+                            .await?
+                        }
+                        Value::Tensor(t) => {
+                            apply_end_offsets_to_numeric(
+                                &numeric,
+                                IndexContext::new(dims, colon_mask, end_mask, &t.shape),
+                                &end_numeric_exprs,
+                                &mut vars,
+                                &context.functions,
+                            )
+                            .await?
+                        }
+                        Value::ComplexTensor(t) => {
+                            apply_end_offsets_to_numeric(
+                                &numeric,
+                                IndexContext::new(dims, colon_mask, end_mask, &t.shape),
+                                &end_numeric_exprs,
+                                &mut vars,
+                                &context.functions,
+                            )
+                            .await?
+                        }
+                        _ => numeric,
+                    };
+                }
                 if let Value::GpuTensor(handle) = &base {
                     if let Some(provider) = runmat_accelerate_api::provider() {
                         let normalized_numeric: Vec<Value> = {
@@ -6008,16 +6500,22 @@ async fn run_interpreter_inner(
                             }
                             out
                         };
-                        let attempt = (|| -> VmResult<(Vec<u32>, Vec<usize>)> {
+                        let attempt = async {
                             let rank = handle.shape.len();
                             #[derive(Clone)]
                             enum Sel {
                                 Colon,
                                 Scalar(usize),
                                 Indices(Vec<usize>),
-                                Range { start: i64, step: i64, end_off: i64 },
+                                Range {
+                                    start: i64,
+                                    step: i64,
+                                    end_off: EndExpr,
+                                },
                             }
-                            let full_shape: Vec<usize> = if rank < dims {
+                            let full_shape: Vec<usize> = if dims == 1 {
+                                vec![total_len_from_shape(&handle.shape)]
+                            } else if rank < dims {
                                 let mut s = handle.shape.clone();
                                 s.resize(dims, 1);
                                 s
@@ -6036,9 +6534,32 @@ async fn run_interpreter_inner(
                                     selectors.push(Sel::Scalar(*full_shape.get(d).unwrap_or(&1)));
                                 } else if let Some(pos) = range_dims.iter().position(|&rd| rd == d)
                                 {
-                                    let (st, sp) = range_params[rp_iter];
+                                    let (raw_st, raw_sp) = range_params[rp_iter];
+                                    let dim_len = *full_shape.get(d).unwrap_or(&1);
+                                    let st = if let Some(expr) = &range_start_exprs[rp_iter] {
+                                        resolve_range_end_index(
+                                            dim_len,
+                                            expr,
+                                            &mut vars,
+                                            &context.functions,
+                                        )
+                                        .await? as f64
+                                    } else {
+                                        raw_st
+                                    };
+                                    let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
+                                        resolve_range_end_index(
+                                            dim_len,
+                                            expr,
+                                            &mut vars,
+                                            &context.functions,
+                                        )
+                                        .await? as f64
+                                    } else {
+                                        raw_sp
+                                    };
                                     rp_iter += 1;
-                                    let off = end_offsets[pos];
+                                    let off = range_end_exprs[pos].clone();
                                     selectors.push(Sel::Range {
                                         start: st as i64,
                                         step: if sp >= 0.0 {
@@ -6046,7 +6567,7 @@ async fn run_interpreter_inner(
                                         } else {
                                             -(sp.abs() as i64)
                                         },
-                                        end_off: off,
+                                        end_off: off.clone(),
                                     });
                                 } else {
                                     let v = normalized_numeric.get(num_iter).ok_or(mex(
@@ -6115,7 +6636,13 @@ async fn run_interpreter_inner(
                                     } => {
                                         let mut v = Vec::new();
                                         let mut cur = *start;
-                                        let end_i = dim_len - *end_off;
+                                        let end_i = resolve_range_end_index(
+                                            dim_len as usize,
+                                            end_off,
+                                            &mut vars,
+                                            &context.functions,
+                                        )
+                                        .await?;
                                         if *step == 0 {
                                             return Err(mex(
                                                 "IndexStepZero",
@@ -6190,7 +6717,8 @@ async fn run_interpreter_inner(
                                 per_dim_indices.iter().map(|v| v.len().max(1)).collect()
                             };
                             Ok((indices, output_shape))
-                        })();
+                        }
+                        .await;
                         if let Ok((indices, output_shape)) = attempt {
                             if indices.is_empty() {
                                 if let Ok(zeros) = provider.zeros(&output_shape) {
@@ -6221,14 +6749,18 @@ async fn run_interpreter_inner(
                     }
                 }
                 match base {
-                    Value::Tensor(t) => {
+                    Value::ComplexTensor(t) => {
                         let rank = t.shape.len();
                         #[derive(Clone)]
                         enum Sel {
                             Colon,
                             Scalar(usize),
                             Indices(Vec<usize>),
-                            Range { start: i64, step: i64, end_off: i64 },
+                            Range {
+                                start: i64,
+                                step: i64,
+                                end_off: EndExpr,
+                            },
                         }
                         let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
                         let mut num_iter = 0usize;
@@ -6241,9 +6773,36 @@ async fn run_interpreter_inner(
                             } else if is_end {
                                 selectors.push(Sel::Scalar(*t.shape.get(d).unwrap_or(&1)));
                             } else if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
-                                let (st, sp) = range_params[rp_iter];
+                                let (raw_st, raw_sp) = range_params[rp_iter];
+                                let dim_len = if dims == 1 {
+                                    total_len_from_shape(&t.shape)
+                                } else {
+                                    *t.shape.get(d).unwrap_or(&1)
+                                };
+                                let st = if let Some(expr) = &range_start_exprs[rp_iter] {
+                                    resolve_range_end_index(
+                                        dim_len,
+                                        expr,
+                                        &mut vars,
+                                        &context.functions,
+                                    )
+                                    .await? as f64
+                                } else {
+                                    raw_st
+                                };
+                                let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
+                                    resolve_range_end_index(
+                                        dim_len,
+                                        expr,
+                                        &mut vars,
+                                        &context.functions,
+                                    )
+                                    .await? as f64
+                                } else {
+                                    raw_sp
+                                };
                                 rp_iter += 1;
-                                let off = end_offsets[pos];
+                                let off = range_end_exprs[pos].clone();
                                 selectors.push(Sel::Range {
                                     start: st as i64,
                                     step: if sp >= 0.0 {
@@ -6251,7 +6810,216 @@ async fn run_interpreter_inner(
                                     } else {
                                         -(sp.abs() as i64)
                                     },
-                                    end_off: off,
+                                    end_off: off.clone(),
+                                });
+                            } else {
+                                let v = numeric
+                                    .get(num_iter)
+                                    .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
+                                num_iter += 1;
+                                if let Some(idx) = index_scalar_from_value(v).await? {
+                                    if idx < 1 {
+                                        vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
+                                    }
+                                    selectors.push(Sel::Scalar(idx as usize));
+                                } else {
+                                    match v {
+                                        Value::Tensor(idx_t) => {
+                                            let dim_len = *t.shape.get(d).unwrap_or(&1);
+                                            let len = idx_t.shape.iter().product::<usize>();
+                                            if len == dim_len {
+                                                let mut v = Vec::new();
+                                                for (i, &val) in idx_t.data.iter().enumerate() {
+                                                    if val != 0.0 {
+                                                        v.push(i + 1);
+                                                    }
+                                                }
+                                                selectors.push(Sel::Indices(v));
+                                            } else {
+                                                let mut v = Vec::with_capacity(len);
+                                                for &val in &idx_t.data {
+                                                    let idx = val as isize;
+                                                    if idx < 1 {
+                                                        vm_bail!(mex(
+                                                            "IndexOutOfBounds",
+                                                            "Index out of bounds"
+                                                        ));
+                                                    }
+                                                    v.push(idx as usize);
+                                                }
+                                                selectors.push(Sel::Indices(v));
+                                            }
+                                        }
+                                        _ => {
+                                            vm_bail!(mex(
+                                                "UnsupportedIndexType",
+                                                "Unsupported index type"
+                                            ))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
+                        let mut selection_lengths: Vec<usize> = Vec::with_capacity(dims);
+                        let mut scalar_mask: Vec<bool> = Vec::with_capacity(dims);
+                        let full_shape: Vec<usize> = if dims == 1 {
+                            vec![total_len_from_shape(&t.shape)]
+                        } else if rank < dims {
+                            let mut s = t.shape.clone();
+                            s.resize(dims, 1);
+                            s
+                        } else {
+                            t.shape.clone()
+                        };
+                        for (d, sel) in selectors.iter().enumerate().take(dims) {
+                            let dim_len = full_shape[d] as i64;
+                            let idxs: Vec<usize> = match sel {
+                                Sel::Colon => (1..=full_shape[d]).collect(),
+                                Sel::Scalar(i) => vec![*i],
+                                Sel::Indices(v) => v.clone(),
+                                Sel::Range {
+                                    start,
+                                    step,
+                                    end_off,
+                                } => {
+                                    let mut v = Vec::new();
+                                    let mut cur = *start;
+                                    let stp = *step;
+                                    let end_i = resolve_range_end_index(
+                                        dim_len as usize,
+                                        end_off,
+                                        &mut vars,
+                                        &context.functions,
+                                    )
+                                    .await?;
+                                    if stp == 0 {
+                                        vm_bail!(mex("IndexStepZero", "Index step cannot be zero"));
+                                    }
+                                    if stp > 0 {
+                                        while cur <= end_i {
+                                            if cur < 1 || cur > dim_len {
+                                                break;
+                                            }
+                                            v.push(cur as usize);
+                                            cur += stp;
+                                        }
+                                    } else {
+                                        while cur >= end_i {
+                                            if cur < 1 || cur > dim_len {
+                                                break;
+                                            }
+                                            v.push(cur as usize);
+                                            cur += stp;
+                                        }
+                                    }
+                                    v
+                                }
+                            };
+                            if idxs.iter().any(|&i| i == 0 || i > full_shape[d]) {
+                                vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
+                            }
+                            selection_lengths.push(idxs.len());
+                            per_dim_indices.push(idxs);
+                            scalar_mask.push(matches!(sel, Sel::Scalar(_)));
+                        }
+
+                        let mut strides: Vec<usize> = vec![0; dims];
+                        let mut acc = 1usize;
+                        for (d, stride) in strides.iter_mut().enumerate().take(dims) {
+                            *stride = acc;
+                            acc *= full_shape[d];
+                        }
+                        let total_out: usize = per_dim_indices.iter().map(|v| v.len()).product();
+                        if total_out == 0 {
+                            let shape = matlab_squeezed_shape(&selection_lengths, &scalar_mask);
+                            let ct = runmat_builtins::ComplexTensor::new(Vec::new(), shape)
+                                .map_err(|e| format!("Slice error: {e}"))?;
+                            stack.push(Value::ComplexTensor(ct));
+                            pc += 1;
+                            continue;
+                        }
+                        let mut out_data: Vec<(f64, f64)> = Vec::with_capacity(total_out);
+                        cartesian_product(&per_dim_indices, |multi| {
+                            let mut lin = 0usize;
+                            for d in 0..dims {
+                                let i0 = multi[d] - 1;
+                                lin += i0 * strides[d];
+                            }
+                            out_data.push(t.data[lin]);
+                        });
+                        if out_data.len() == 1 {
+                            let (re, im) = out_data[0];
+                            stack.push(Value::Complex(re, im));
+                        } else {
+                            let shape = matlab_squeezed_shape(&selection_lengths, &scalar_mask);
+                            let ct = runmat_builtins::ComplexTensor::new(out_data, shape)
+                                .map_err(|e| format!("Slice error: {e}"))?;
+                            stack.push(Value::ComplexTensor(ct));
+                        }
+                    }
+                    Value::Tensor(t) => {
+                        let rank = t.shape.len();
+                        #[derive(Clone)]
+                        enum Sel {
+                            Colon,
+                            Scalar(usize),
+                            Indices(Vec<usize>),
+                            Range {
+                                start: i64,
+                                step: i64,
+                                end_off: EndExpr,
+                            },
+                        }
+                        let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
+                        let mut num_iter = 0usize;
+                        let mut rp_iter = 0usize;
+                        for d in 0..dims {
+                            let is_colon = (colon_mask & (1u32 << d)) != 0;
+                            let is_end = (end_mask & (1u32 << d)) != 0;
+                            if is_colon {
+                                selectors.push(Sel::Colon);
+                            } else if is_end {
+                                selectors.push(Sel::Scalar(*t.shape.get(d).unwrap_or(&1)));
+                            } else if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
+                                let (raw_st, raw_sp) = range_params[rp_iter];
+                                let dim_len = if dims == 1 {
+                                    total_len_from_shape(&t.shape)
+                                } else {
+                                    *t.shape.get(d).unwrap_or(&1)
+                                };
+                                let st = if let Some(expr) = &range_start_exprs[rp_iter] {
+                                    resolve_range_end_index(
+                                        dim_len,
+                                        expr,
+                                        &mut vars,
+                                        &context.functions,
+                                    )
+                                    .await? as f64
+                                } else {
+                                    raw_st
+                                };
+                                let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
+                                    resolve_range_end_index(
+                                        dim_len,
+                                        expr,
+                                        &mut vars,
+                                        &context.functions,
+                                    )
+                                    .await? as f64
+                                } else {
+                                    raw_sp
+                                };
+                                rp_iter += 1;
+                                let off = range_end_exprs[pos].clone();
+                                selectors.push(Sel::Range {
+                                    start: st as i64,
+                                    step: if sp >= 0.0 {
+                                        sp as i64
+                                    } else {
+                                        -(sp.abs() as i64)
+                                    },
+                                    end_off: off.clone(),
                                 });
                             } else {
                                 let v = numeric
@@ -6303,7 +7071,9 @@ async fn run_interpreter_inner(
                         let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
                         let mut selection_lengths: Vec<usize> = Vec::with_capacity(dims);
                         let mut scalar_mask: Vec<bool> = Vec::with_capacity(dims);
-                        let full_shape: Vec<usize> = if rank < dims {
+                        let full_shape: Vec<usize> = if dims == 1 {
+                            vec![total_len_from_shape(&t.shape)]
+                        } else if rank < dims {
                             let mut s = t.shape.clone();
                             s.resize(dims, 1);
                             s
@@ -6324,7 +7094,13 @@ async fn run_interpreter_inner(
                                     let mut v = Vec::new();
                                     let mut cur = *start;
                                     let stp = *step;
-                                    let end_i = dim_len - *end_off;
+                                    let end_i = resolve_range_end_index(
+                                        dim_len as usize,
+                                        end_off,
+                                        &mut vars,
+                                        &context.functions,
+                                    )
+                                    .await?;
                                     if stp == 0 {
                                         vm_bail!(mex("IndexStepZero", "Index step cannot be zero"));
                                     }
@@ -6369,6 +7145,7 @@ async fn run_interpreter_inner(
                                 runmat_builtins::Tensor::new(Vec::new(), shape)
                                     .map_err(|e| format!("Slice error: {e}"))?,
                             ));
+                            pc += 1;
                             continue;
                         }
                         let mut out_data: Vec<f64> = Vec::with_capacity(total_out);
@@ -6425,524 +7202,6 @@ async fn run_interpreter_inner(
                 }
             }
 
-            Instr::IndexSliceEx(dims, numeric_count, colon_mask, end_mask, end_offsets) => {
-                // Like IndexSlice, but apply end arithmetic to specified numeric indices
-                let mut numeric: Vec<Value> = Vec::with_capacity(numeric_count);
-                for _ in 0..numeric_count {
-                    numeric.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                numeric.reverse();
-                let mut base = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let mut numeric_values = numeric.clone();
-                if let Value::GpuTensor(handle) = &base {
-                    let adjusted = apply_end_offsets_to_numeric(
-                        &numeric_values,
-                        dims,
-                        colon_mask,
-                        end_mask,
-                        &end_offsets,
-                        &handle.shape,
-                    );
-                    if let Some(provider) = runmat_accelerate_api::provider() {
-                        if let Ok(selectors) = build_slice_selectors(
-                            dims,
-                            colon_mask,
-                            end_mask,
-                            &adjusted,
-                            &handle.shape,
-                        )
-                        .await
-                        {
-                            if let Ok(plan) = build_slice_plan(&selectors, dims, &handle.shape) {
-                                if plan.indices.is_empty() {
-                                    let zeros = provider
-                                        .zeros(&plan.output_shape)
-                                        .map_err(|e| format!("slice: {e}"))?;
-                                    stack.push(Value::GpuTensor(zeros));
-                                    pc += 1;
-                                    continue;
-                                } else {
-                                    let result = provider
-                                        .gather_linear(handle, &plan.indices, &plan.output_shape)
-                                        .map_err(|e| format!("slice: {e}"))?;
-                                    stack.push(Value::GpuTensor(result));
-                                    pc += 1;
-                                    continue;
-                                }
-                            }
-                        }
-                        let host = provider
-                            .download(handle)
-                            .await
-                            .map_err(|e| format!("slice: {e}"))?;
-                        let tensor = runmat_builtins::Tensor::new(host.data, host.shape)
-                            .map_err(|e| format!("slice: {e}"))?;
-                        base = Value::Tensor(tensor);
-                        numeric_values = adjusted;
-                    } else {
-                        return Err(mex(
-                            "AccelerationProviderUnavailable",
-                            "No acceleration provider registered",
-                        ));
-                    }
-                }
-                match base {
-                    Value::Tensor(t) => {
-                        let adjusted = apply_end_offsets_to_numeric(
-                            &numeric_values,
-                            dims,
-                            colon_mask,
-                            end_mask,
-                            &end_offsets,
-                            &t.shape,
-                        );
-                        // Build selectors identical to IndexSlice path
-                        let mut tmp_stack = Vec::new();
-                        tmp_stack.push(Value::Tensor(t));
-                        for v in adjusted {
-                            tmp_stack.push(v);
-                        }
-                        // Swap stacks for reuse: assign and then fallthrough to IndexSlice body via small duplication
-                        let mut numeric_vals: Vec<Value> = Vec::new();
-                        let count = numeric_count;
-                        let mut idx_iter = tmp_stack.into_iter();
-                        let base = idx_iter
-                            .next()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                        for _ in 0..count {
-                            match idx_iter.next() {
-                                Some(v) => numeric_vals.push(v),
-                                None => return Err(mex("StackUnderflow", "stack underflow")),
-                            }
-                        }
-                        match base {
-                            Value::Tensor(t2) => {
-                                // Inline small subset of IndexSlice gather for t2
-                                let rank = t2.shape.len();
-                                #[derive(Clone)]
-                                enum Sel {
-                                    Colon,
-                                    Scalar(usize),
-                                    Indices(Vec<usize>),
-                                }
-                                let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
-                                let mut num_iter = 0usize;
-                                if dims == 1 {
-                                    let total = t2.data.len();
-                                    let mut idxs: Vec<usize> = Vec::new();
-                                    let is_colon = (colon_mask & 1u32) != 0;
-                                    let is_end = (end_mask & 1u32) != 0;
-                                    if is_colon {
-                                        idxs = (1..=total).collect();
-                                    } else if is_end {
-                                        idxs = vec![total];
-                                    } else if let Some(v) = numeric_vals.first() {
-                                        if let Some(i) = index_scalar_from_value(v).await? {
-                                            if i < 1 {
-                                                vm_bail!(mex(
-                                                    "IndexOutOfBounds",
-                                                    "Index out of bounds"
-                                                ));
-                                            }
-                                            idxs = vec![i as usize];
-                                        } else {
-                                            match v {
-                                                Value::Tensor(idx_t) => {
-                                                    for &val in &idx_t.data {
-                                                        let i = val as isize;
-                                                        if i < 1 || (i as usize) > total {
-                                                            vm_bail!(mex(
-                                                                "IndexOutOfBounds",
-                                                                "Index out of bounds"
-                                                            ));
-                                                        }
-                                                        idxs.push(i as usize);
-                                                    }
-                                                }
-                                                Value::Bool(b) => {
-                                                    if *b {
-                                                        idxs = vec![1];
-                                                    }
-                                                }
-                                                Value::LogicalArray(la) => {
-                                                    if la.data.len() != total {
-                                                        vm_bail!(mex(
-                                                        "IndexShape",
-                                                        "Logical mask length mismatch for linear indexing"
-                                                    ));
-                                                    }
-                                                    for (i, &val) in la.data.iter().enumerate() {
-                                                        if val != 0 {
-                                                            idxs.push(i + 1);
-                                                        }
-                                                    }
-                                                }
-                                                _ => vm_bail!(mex(
-                                                    "UnsupportedIndexType",
-                                                    "Unsupported index type"
-                                                )),
-                                            }
-                                        }
-                                    } else {
-                                        vm_bail!(mex(
-                                            "MissingNumericIndex",
-                                            "missing numeric index"
-                                        ));
-                                    }
-                                    if idxs.iter().any(|&i| i == 0 || i > total) {
-                                        vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
-                                    }
-                                    if idxs.len() == 1 {
-                                        stack.push(Value::Num(t2.data[idxs[0] - 1]));
-                                    } else {
-                                        let mut out = Vec::with_capacity(idxs.len());
-                                        for &i in &idxs {
-                                            out.push(t2.data[i - 1]);
-                                        }
-                                        let tens =
-                                            runmat_builtins::Tensor::new(out, vec![idxs.len(), 1])
-                                                .map_err(|e| format!("Slice error: {e}"))?;
-                                        stack.push(Value::Tensor(tens));
-                                    }
-                                } else {
-                                    for d in 0..dims {
-                                        let is_colon = (colon_mask & (1u32 << d)) != 0;
-                                        let is_end = (end_mask & (1u32 << d)) != 0;
-                                        if is_colon {
-                                            selectors.push(Sel::Colon);
-                                        } else if is_end {
-                                            let dim_len = *t2.shape.get(d).unwrap_or(&1);
-                                            selectors.push(Sel::Scalar(dim_len));
-                                        } else {
-                                            let v = numeric_vals.get(num_iter).ok_or(mex(
-                                                "MissingNumericIndex",
-                                                "missing numeric index",
-                                            ))?;
-                                            num_iter += 1;
-                                            if let Some(idx) = index_scalar_from_value(v).await? {
-                                                if idx < 1 {
-                                                    return Err(mex(
-                                                        "IndexOutOfBounds",
-                                                        "Index out of bounds",
-                                                    ));
-                                                }
-                                                selectors.push(Sel::Scalar(idx as usize));
-                                            } else {
-                                                match v {
-                                                    Value::Tensor(idx_t) => {
-                                                        let dim_len =
-                                                            *t2.shape.get(d).unwrap_or(&1);
-                                                        let len =
-                                                            idx_t.shape.iter().product::<usize>();
-                                                        let mut indices = Vec::with_capacity(len);
-                                                        for &val in &idx_t.data {
-                                                            let idx = val as isize;
-                                                            if idx < 1 || (idx as usize) > dim_len {
-                                                                return Err(mex(
-                                                                    "IndexOutOfBounds",
-                                                                    "Index out of bounds",
-                                                                ));
-                                                            }
-                                                            indices.push(idx as usize);
-                                                        }
-                                                        selectors.push(Sel::Indices(indices));
-                                                    }
-                                                    Value::Bool(b) => {
-                                                        if *b {
-                                                            selectors.push(Sel::Indices(vec![1]));
-                                                        } else {
-                                                            selectors
-                                                                .push(Sel::Indices(Vec::new()));
-                                                        }
-                                                    }
-                                                    Value::LogicalArray(la) => {
-                                                        let dim_len =
-                                                            *t2.shape.get(d).unwrap_or(&1);
-                                                        if la.data.len() == dim_len {
-                                                            let mut indices = Vec::new();
-                                                            for (i, &b) in
-                                                                la.data.iter().enumerate()
-                                                            {
-                                                                if b != 0 {
-                                                                    indices.push(i + 1);
-                                                                }
-                                                            }
-                                                            selectors.push(Sel::Indices(indices));
-                                                        } else {
-                                                            return Err(mex(
-                                                                "IndexShape",
-                                                                "Logical mask shape mismatch",
-                                                            ));
-                                                        }
-                                                    }
-                                                    _ => {
-                                                        return Err(mex(
-                                                            "UnsupportedIndexType",
-                                                            "Unsupported index type",
-                                                        ))
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    let mut out_dims: Vec<usize> = Vec::new();
-                                    let mut per_dim_indices: Vec<Vec<usize>> =
-                                        Vec::with_capacity(dims);
-                                    for (d, sel) in selectors.iter().enumerate().take(dims) {
-                                        let dim_len = *t2.shape.get(d).unwrap_or(&1);
-                                        let idxs = match sel {
-                                            Sel::Colon => (1..=dim_len).collect::<Vec<usize>>(),
-                                            Sel::Scalar(i) => vec![*i],
-                                            Sel::Indices(v) => v.clone(),
-                                        };
-                                        if idxs.iter().any(|&i| i == 0 || i > dim_len) {
-                                            return Err(mex(
-                                                "IndexOutOfBounds",
-                                                "Index out of bounds",
-                                            ));
-                                        }
-                                        if idxs.len() > 1 {
-                                            out_dims.push(idxs.len());
-                                        } else {
-                                            out_dims.push(1);
-                                        }
-                                        per_dim_indices.push(idxs);
-                                    }
-                                    if dims == 2 {
-                                        match (
-                                            &per_dim_indices[0].as_slice(),
-                                            &per_dim_indices[1].as_slice(),
-                                        ) {
-                                            (i_list, j_list)
-                                                if i_list.len() > 1 && j_list.len() == 1 =>
-                                            {
-                                                out_dims = vec![i_list.len(), 1];
-                                            }
-                                            (i_list, j_list)
-                                                if i_list.len() == 1 && j_list.len() > 1 =>
-                                            {
-                                                out_dims = vec![1, j_list.len()];
-                                            }
-                                            _ => {}
-                                        }
-                                    }
-                                    let mut strides: Vec<usize> = vec![0; dims];
-                                    let full_shape: Vec<usize> = if rank < dims {
-                                        let mut s = t2.shape.clone();
-                                        s.resize(dims, 1);
-                                        s
-                                    } else {
-                                        t2.shape.clone()
-                                    };
-                                    let mut acc = 1usize;
-                                    for d in 0..dims {
-                                        strides[d] = acc;
-                                        acc *= full_shape[d];
-                                    }
-                                    let total_out: usize = out_dims.iter().product();
-                                    let mut out_data: Vec<f64> = Vec::with_capacity(total_out);
-                                    if out_dims.contains(&0) {
-                                        let out_tensor =
-                                            runmat_builtins::Tensor::new(out_data, out_dims)
-                                                .map_err(|e| format!("Slice error: {e}"))?;
-                                        stack.push(Value::Tensor(out_tensor));
-                                    } else {
-                                        fn cartesian<F: FnMut(&[usize])>(
-                                            lists: &[Vec<usize>],
-                                            mut f: F,
-                                        ) {
-                                            let dims = lists.len();
-                                            let mut idx = vec![0usize; dims];
-                                            loop {
-                                                let current: Vec<usize> =
-                                                    (0..dims).map(|d| lists[d][idx[d]]).collect();
-                                                f(&current);
-                                                let mut d = 0usize;
-                                                while d < dims {
-                                                    idx[d] += 1;
-                                                    if idx[d] < lists[d].len() {
-                                                        break;
-                                                    }
-                                                    idx[d] = 0;
-                                                    d += 1;
-                                                }
-                                                if d == dims {
-                                                    break;
-                                                }
-                                            }
-                                        }
-                                        cartesian(&per_dim_indices, |multi| {
-                                            let mut lin = 0usize;
-                                            for d in 0..dims {
-                                                let i0 = multi[d] - 1;
-                                                lin += i0 * strides[d];
-                                            }
-                                            out_data.push(t2.data[lin]);
-                                        });
-                                        if out_data.len() == 1 {
-                                            stack.push(Value::Num(out_data[0]));
-                                        } else {
-                                            let out_tensor =
-                                                runmat_builtins::Tensor::new(out_data, out_dims)
-                                                    .map_err(|e| format!("Slice error: {e}"))?;
-                                            stack.push(Value::Tensor(out_tensor));
-                                        }
-                                    }
-                                }
-                            }
-                            other => {
-                                stack.push(other);
-                            }
-                        }
-                    }
-                    other => {
-                        vm_bail!(mex(
-                            "SliceNonTensor",
-                            &format!("Slicing only supported on tensors: got {other:?}")
-                        ));
-                    }
-                }
-            }
-            Instr::Index1DRangeEnd { has_step, offset } => {
-                // Legacy 1-D path for end arithmetic
-                let step_val: f64 = if has_step {
-                    let v: f64 = (&stack
-                        .pop()
-                        .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                        .try_into()?;
-                    v
-                } else {
-                    1.0
-                };
-                let start_val: f64 = (&stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                    .try_into()?;
-                let mut base = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                if let Value::GpuTensor(handle) = &base {
-                    if let Some(provider) = runmat_accelerate_api::provider() {
-                        let attempt = (|| -> VmResult<(Vec<u32>, Vec<usize>)> {
-                            let total = total_len_from_shape(&handle.shape) as i64;
-                            let end_idx = total - offset;
-                            let mut cur = start_val as i64;
-                            let step_i = if step_val >= 0.0 {
-                                step_val as i64
-                            } else {
-                                -(step_val.abs() as i64)
-                            };
-                            if step_i == 0 {
-                                return Err(mex("IndexStepZero", "Index step cannot be zero"));
-                            }
-                            let mut indices: Vec<u32> = Vec::new();
-                            if step_i > 0 {
-                                while cur <= end_idx {
-                                    if cur < 1 || cur > total {
-                                        break;
-                                    }
-                                    indices.push((cur - 1) as u32);
-                                    cur += step_i;
-                                }
-                            } else {
-                                while cur >= end_idx {
-                                    if cur < 1 || cur > total {
-                                        break;
-                                    }
-                                    indices.push((cur - 1) as u32);
-                                    cur += step_i;
-                                }
-                            }
-                            let count = indices.len();
-                            let output_shape = if count == 0 {
-                                vec![0, 1]
-                            } else if count == 1 {
-                                vec![1, 1]
-                            } else {
-                                vec![count, 1]
-                            };
-                            Ok((indices, output_shape))
-                        })();
-                        if let Ok((indices, output_shape)) = attempt {
-                            if indices.is_empty() {
-                                if let Ok(zeros) = provider.zeros(&output_shape) {
-                                    stack.push(Value::GpuTensor(zeros));
-                                    pc += 1;
-                                    continue;
-                                }
-                            } else if let Ok(result) =
-                                provider.gather_linear(handle, &indices, &output_shape)
-                            {
-                                stack.push(Value::GpuTensor(result));
-                                pc += 1;
-                                continue;
-                            }
-                        }
-                        let host = provider
-                            .download(handle)
-                            .await
-                            .map_err(|e| format!("range slice: {e}"))?;
-                        let tensor = runmat_builtins::Tensor::new(host.data, host.shape)
-                            .map_err(|e| format!("range slice: {e}"))?;
-                        base = Value::Tensor(tensor);
-                    } else {
-                        return Err(mex(
-                            "AccelerationProviderUnavailable",
-                            "No acceleration provider registered",
-                        ));
-                    }
-                }
-                match base {
-                    Value::Tensor(t) => {
-                        let total = t.data.len();
-                        let end_idx = (total as i64) - offset; // inclusive
-                        let mut out: Vec<f64> = Vec::new();
-                        let mut cur = start_val as i64;
-                        let step_i = if step_val >= 0.0 {
-                            step_val as i64
-                        } else {
-                            -(step_val.abs() as i64)
-                        };
-                        if step_i == 0 {
-                            return Err(mex("IndexStepZero", "Index step cannot be zero"));
-                        }
-                        if step_i > 0 {
-                            while cur as i64 <= end_idx {
-                                let idx0 = cur as usize;
-                                if idx0 == 0 || idx0 > total {
-                                    break;
-                                }
-                                out.push(t.data[idx0 - 1]);
-                                cur += step_i;
-                            }
-                        } else {
-                            while (cur as i64) >= end_idx {
-                                let idx0 = cur as usize;
-                                if idx0 == 0 || idx0 > total {
-                                    break;
-                                }
-                                out.push(t.data[idx0 - 1]);
-                                cur += step_i;
-                            }
-                        }
-                        if out.len() == 1 {
-                            stack.push(Value::Num(out[0]));
-                        } else {
-                            let tens =
-                                runmat_builtins::Tensor::new(out.clone(), vec![out.len(), 1])
-                                    .map_err(|e| format!("Range slice error: {e}"))?;
-                            stack.push(Value::Tensor(tens));
-                        }
-                    }
-                    _ => vm_bail!(mex("SliceNonTensor", "Slicing only supported on tensors")),
-                }
-            }
             Instr::StoreSlice(dims, numeric_count, colon_mask, end_mask) => {
                 let __b = bench_start();
                 // RHS value to scatter, then numeric indices, then base
@@ -7867,6 +8126,28 @@ async fn run_interpreter_inner(
                             }
                         }
                     }
+                    Value::ComplexTensor(mut ct) => {
+                        let selectors =
+                            build_slice_selectors(dims, colon_mask, end_mask, &numeric, &ct.shape)
+                                .await
+                                .map_err(|e| format!("slice assign: {e}"))?;
+                        let plan = build_slice_plan(&selectors, dims, &ct.shape)
+                            .map_err(|e| map_slice_plan_error("slice assign", e))?;
+                        if plan.indices.is_empty() {
+                            stack.push(Value::ComplexTensor(ct));
+                            bench_end("StoreSlice", __b);
+                            pc += 1;
+                            continue;
+                        }
+                        let rhs_view = build_complex_rhs_view(&rhs, &plan.selection_lengths)
+                            .map_err(|e| format!("slice assign: {e}"))?;
+                        scatter_complex_with_plan(&mut ct, &plan, &rhs_view)
+                            .map_err(|e| format!("slice assign: {e}"))?;
+                        stack.push(Value::ComplexTensor(ct));
+                        bench_end("StoreSlice", __b);
+                        pc += 1;
+                        continue;
+                    }
                     Value::StringArray(mut sa) => {
                         let selectors =
                             build_slice_selectors(dims, colon_mask, end_mask, &numeric, &sa.shape)
@@ -7903,334 +8184,18 @@ async fn run_interpreter_inner(
                 }
                 bench_end("StoreSlice", __b);
             }
-            Instr::StoreSliceEx(dims, numeric_count, colon_mask, end_mask, end_offsets) => {
-                let rhs = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let mut numeric: Vec<Value> = Vec::with_capacity(numeric_count);
-                for _ in 0..numeric_count {
-                    numeric.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                numeric.reverse();
-                debug!(
-                    "StoreSlice: numeric_count={} numeric={:?} rhs={:?}",
-                    numeric_count, numeric, rhs
-                );
-                let mut base = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                if let Value::GpuTensor(handle) = &base {
-                    let adjusted = apply_end_offsets_to_numeric(
-                        &numeric,
-                        dims,
-                        colon_mask,
-                        end_mask,
-                        &end_offsets,
-                        &handle.shape,
-                    );
-                    if let Some(provider) = runmat_accelerate_api::provider() {
-                        if let Ok(selectors) = build_slice_selectors(
-                            dims,
-                            colon_mask,
-                            end_mask,
-                            &adjusted,
-                            &handle.shape,
-                        )
-                        .await
-                        {
-                            if let Ok(plan) = build_slice_plan(&selectors, dims, &handle.shape) {
-                                let values = if plan.dims == 1 {
-                                    let count =
-                                        plan.selection_lengths.first().copied().unwrap_or(0);
-                                    materialize_rhs_linear(&rhs, count).await
-                                } else {
-                                    materialize_rhs_nd(&rhs, &plan.selection_lengths).await
-                                }
-                                .map_err(|e| format!("slice assign: {e}"))?;
-                                if values.len() == plan.indices.len() {
-                                    let value_shape = vec![values.len().max(1), 1];
-                                    let upload_result = if values.is_empty() {
-                                        provider.zeros(&[0, 1])
-                                    } else {
-                                        provider.upload(&runmat_accelerate_api::HostTensorView {
-                                            data: &values,
-                                            shape: &value_shape,
-                                        })
-                                    };
-                                    if let Ok(values_handle) = upload_result {
-                                        if provider
-                                            .scatter_linear(handle, &plan.indices, &values_handle)
-                                            .is_ok()
-                                        {
-                                            stack.push(Value::GpuTensor(handle.clone()));
-                                            pc += 1;
-                                            continue;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        let host = provider
-                            .download(handle)
-                            .await
-                            .map_err(|e| format!("slice assign: {e}"))?;
-                        let tensor = runmat_builtins::Tensor::new(host.data, host.shape)
-                            .map_err(|e| format!("slice assign: {e}"))?;
-                        base = Value::Tensor(tensor);
-                    } else {
-                        return Err(mex(
-                            "AccelerationProviderUnavailable",
-                            "No acceleration provider registered",
-                        ));
-                    }
-                }
-                match base {
-                    Value::Tensor(t) => {
-                        // Adjust numeric indices for end offsets, mapping numeric position to actual dimension
-                        let mut adjusted = numeric.clone();
-                        for (pos, off) in end_offsets {
-                            if let Some(v) = adjusted.get_mut(pos) {
-                                // Map numeric index position to dimension index by skipping colon and plain end dims
-                                let mut seen_numeric = 0usize;
-                                let mut dim_for_pos = 0usize;
-                                for d in 0..dims {
-                                    let is_colon = (colon_mask & (1u32 << d)) != 0;
-                                    let is_end = (end_mask & (1u32 << d)) != 0;
-                                    if is_colon || is_end {
-                                        continue;
-                                    }
-                                    if seen_numeric == pos {
-                                        dim_for_pos = d;
-                                        break;
-                                    }
-                                    seen_numeric += 1;
-                                }
-                                let dim_len = *t.shape.get(dim_for_pos).unwrap_or(&1);
-                                let idx_val = (dim_len as isize) - (off as isize);
-                                *v = Value::Num(idx_val as f64);
-                            }
-                        }
-                        // Reuse StoreSlice by pushing base back along with adjusted numerics and rhs
-                        stack.push(Value::Tensor(t));
-                        for v in adjusted {
-                            stack.push(v);
-                        }
-                        stack.push(rhs);
-                        // Fallthrough emulation: replicate logic of StoreSlice with broadcasting
-                        let rhs = stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                        let mut numeric: Vec<Value> = Vec::with_capacity(numeric_count);
-                        for _ in 0..numeric_count {
-                            numeric.push(
-                                stack
-                                    .pop()
-                                    .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                            );
-                        }
-                        numeric.reverse();
-                        let base = stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                        match base {
-                            Value::Tensor(mut t) => {
-                                let mut selectors: Vec<SliceSelector> = Vec::with_capacity(dims);
-                                let mut num_iter = 0usize;
-                                for d in 0..dims {
-                                    let is_colon = (colon_mask & (1u32 << d)) != 0;
-                                    let is_end = (end_mask & (1u32 << d)) != 0;
-                                    if is_colon {
-                                        selectors.push(SliceSelector::Colon);
-                                    } else if is_end {
-                                        selectors.push(SliceSelector::Scalar(
-                                            *t.shape.get(d).unwrap_or(&1),
-                                        ));
-                                    } else {
-                                        let v = numeric.get(num_iter).ok_or(mex(
-                                            "MissingNumericIndex",
-                                            "missing numeric index",
-                                        ))?;
-                                        num_iter += 1;
-                                        let dim_len = *t.shape.get(d).unwrap_or(&1);
-                                        let selector =
-                                            match selector_from_value_dim(v, dim_len).await {
-                                                Ok(selector) => selector,
-                                                Err(err) => vm_bail!(err),
-                                            };
-                                        selectors.push(selector);
-                                    }
-                                }
-                                // Compute per-dim indices and strides
-                                let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
-                                for (d, sel) in selectors.iter().enumerate().take(dims) {
-                                    let dim_len = *t.shape.get(d).unwrap_or(&1);
-                                    let idxs = match sel {
-                                        SliceSelector::Colon => {
-                                            (1..=dim_len).collect::<Vec<usize>>()
-                                        }
-                                        SliceSelector::Scalar(i) => vec![*i],
-                                        SliceSelector::Indices(v) => v.clone(),
-                                        SliceSelector::LinearIndices { values: v, .. } => v.clone(),
-                                    };
-                                    per_dim_indices.push(idxs);
-                                }
-                                let mut strides: Vec<usize> = vec![0; dims];
-                                let mut acc = 1usize;
-                                for (d, stride) in strides.iter_mut().enumerate().take(dims) {
-                                    *stride = acc;
-                                    acc *= *t.shape.get(d).unwrap_or(&1);
-                                }
-                                // Build RHS view with broadcasting like StoreSlice
-                                enum RhsView {
-                                    Scalar(f64),
-                                    Tensor {
-                                        data: Vec<f64>,
-                                        shape: Vec<usize>,
-                                        strides: Vec<usize>,
-                                    },
-                                }
-                                let rhs_view =
-                                    match rhs {
-                                        Value::Num(n) => RhsView::Scalar(n),
-                                        Value::Tensor(rt) => {
-                                            let mut rshape = rt.shape.clone();
-                                            if rshape.len() < dims {
-                                                rshape.resize(dims, 1);
-                                            }
-                                            if rshape.len() > dims {
-                                                if rshape.iter().skip(dims).any(|&s| s != 1) {
-                                                    vm_bail!("shape mismatch for slice assign"
-                                                        .to_string());
-                                                }
-                                                rshape.truncate(dims);
-                                            }
-                                            for d in 0..dims {
-                                                let out_len = per_dim_indices[d].len();
-                                                let rhs_len = rshape[d];
-                                                if !(rhs_len == 1 || rhs_len == out_len) {
-                                                    vm_bail!("shape mismatch for slice assign"
-                                                        .to_string());
-                                                }
-                                            }
-                                            let mut rstrides = vec![0usize; dims];
-                                            let mut racc = 1usize;
-                                            for d in 0..dims {
-                                                rstrides[d] = racc;
-                                                racc *= rshape[d];
-                                            }
-                                            RhsView::Tensor {
-                                                data: rt.data,
-                                                shape: rshape,
-                                                strides: rstrides,
-                                            }
-                                        }
-                                        _ => vm_bail!("rhs must be numeric or tensor".to_string()),
-                                    };
-                                // Map absolute indices to selection positions per dimension
-                                use std::collections::HashMap;
-                                let mut pos_maps: Vec<HashMap<usize, usize>> =
-                                    Vec::with_capacity(dims);
-                                for (_d, dim_idxs) in per_dim_indices.iter().enumerate().take(dims)
-                                {
-                                    let mut m = HashMap::new();
-                                    for (p, &idx) in dim_idxs.iter().enumerate() {
-                                        m.insert(idx, p);
-                                    }
-                                    pos_maps.push(m);
-                                }
-                                fn cartesian2<F: FnMut(&[usize])>(lists: &[Vec<usize>], mut f: F) {
-                                    let dims = lists.len();
-                                    let mut idx = vec![0usize; dims];
-                                    loop {
-                                        let cur: Vec<usize> =
-                                            (0..dims).map(|d| lists[d][idx[d]]).collect();
-                                        f(&cur);
-                                        let mut d = 0usize;
-                                        while d < dims {
-                                            idx[d] += 1;
-                                            if idx[d] < lists[d].len() {
-                                                break;
-                                            }
-                                            idx[d] = 0;
-                                            d += 1;
-                                        }
-                                        if d == dims {
-                                            break;
-                                        }
-                                    }
-                                }
-                                cartesian2(&per_dim_indices, |multi| {
-                                    let mut lin = 0usize;
-                                    for d in 0..dims {
-                                        let i0 = multi[d] - 1;
-                                        lin += i0 * strides[d];
-                                    }
-                                    match &rhs_view {
-                                        RhsView::Scalar(v) => {
-                                            t.data[lin] = *v;
-                                        }
-                                        RhsView::Tensor {
-                                            data,
-                                            shape,
-                                            strides: rstrides,
-                                        } => {
-                                            let mut rlin = 0usize;
-                                            for d in 0..dims {
-                                                let rhs_len = shape[d];
-                                                let pos_in_dim = if rhs_len == 1 {
-                                                    0
-                                                } else {
-                                                    *pos_maps[d].get(&multi[d]).unwrap_or(&0)
-                                                };
-                                                rlin += pos_in_dim * rstrides[d];
-                                            }
-                                            t.data[lin] = data[rlin];
-                                        }
-                                    }
-                                });
-                                stack.push(Value::Tensor(t));
-                            }
-                            Value::StringArray(mut sa) => {
-                                let selectors = build_slice_selectors(
-                                    dims, colon_mask, end_mask, &numeric, &sa.shape,
-                                )
-                                .await
-                                .map_err(|e| format!("slice assign: {e}"))?;
-                                let plan = build_slice_plan(&selectors, dims, &sa.shape)
-                                    .map_err(|e| map_slice_plan_error("slice assign", e))?;
-                                if plan.indices.is_empty() {
-                                    stack.push(Value::StringArray(sa));
-                                    pc += 1;
-                                    continue;
-                                }
-                                let rhs_view = build_string_rhs_view(&rhs, &plan.selection_lengths)
-                                    .map_err(|e| format!("slice assign: {e}"))?;
-                                scatter_string_with_plan(&mut sa, &plan, &rhs_view)
-                                    .map_err(|e| format!("slice assign: {e}"))?;
-                                stack.push(Value::StringArray(sa));
-                                pc += 1;
-                                continue;
-                            }
-                            other => vm_bail!(format!("StoreSliceEx unsupported base: {other:?}")),
-                        }
-                    }
-                    other => vm_bail!(format!(
-                        "StoreSliceEx only supports tensors currently, got {other:?}"
-                    )),
-                }
-            }
-            Instr::StoreRangeEnd {
+
+            Instr::StoreSliceExpr {
                 dims,
                 numeric_count,
                 colon_mask,
                 end_mask,
                 range_dims,
                 range_has_step,
-                end_offsets,
+                range_start_exprs,
+                range_step_exprs,
+                range_end_exprs,
+                end_numeric_exprs,
             } => {
                 // RHS, range params (per range dim), then base with numeric scalar indices interleaved
                 let mut rhs = stack
@@ -8273,31 +8238,99 @@ async fn run_interpreter_inner(
                 // If base is not assignable but rhs is, swap them to handle reversed emission order
                 let base_assignable = matches!(
                     base,
-                    Value::Object(_) | Value::Tensor(_) | Value::GpuTensor(_)
+                    Value::Object(_)
+                        | Value::Tensor(_)
+                        | Value::ComplexTensor(_)
+                        | Value::GpuTensor(_)
                 );
                 if !base_assignable
                     && matches!(
                         rhs,
-                        Value::Object(_) | Value::Tensor(_) | Value::GpuTensor(_)
+                        Value::Object(_)
+                            | Value::Tensor(_)
+                            | Value::ComplexTensor(_)
+                            | Value::GpuTensor(_)
                     )
                 {
                     std::mem::swap(&mut base, &mut rhs);
                 }
+                if !end_numeric_exprs.is_empty() {
+                    numeric = match &base {
+                        Value::GpuTensor(handle) => {
+                            apply_end_offsets_to_numeric(
+                                &numeric,
+                                IndexContext::new(dims, colon_mask, end_mask, &handle.shape),
+                                &end_numeric_exprs,
+                                &mut vars,
+                                &context.functions,
+                            )
+                            .await?
+                        }
+                        Value::Tensor(t) => {
+                            apply_end_offsets_to_numeric(
+                                &numeric,
+                                IndexContext::new(dims, colon_mask, end_mask, &t.shape),
+                                &end_numeric_exprs,
+                                &mut vars,
+                                &context.functions,
+                            )
+                            .await?
+                        }
+                        Value::ComplexTensor(t) => {
+                            apply_end_offsets_to_numeric(
+                                &numeric,
+                                IndexContext::new(dims, colon_mask, end_mask, &t.shape),
+                                &end_numeric_exprs,
+                                &mut vars,
+                                &context.functions,
+                            )
+                            .await?
+                        }
+                        _ => numeric,
+                    };
+                }
                 match base {
-                    Value::Tensor(mut t) => {
+                    Value::ComplexTensor(mut t) => {
                         #[derive(Clone)]
                         enum Sel {
                             Colon,
                             Scalar(usize),
                             Indices(Vec<usize>),
-                            Range { start: i64, step: i64, end_off: i64 },
+                            Range {
+                                start: i64,
+                                step: i64,
+                                end_off: EndExpr,
+                            },
                         }
                         let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
                         let mut num_iter = 0usize;
                         let mut rp_iter = 0usize;
                         for d in 0..dims {
                             if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
-                                let (st, sp) = range_params[rp_iter];
+                                let (raw_st, raw_sp) = range_params[rp_iter];
+                                let dim_len = *t.shape.get(d).unwrap_or(&1);
+                                let st = if let Some(expr) = &range_start_exprs[rp_iter] {
+                                    resolve_range_end_index(
+                                        dim_len,
+                                        expr,
+                                        &mut vars,
+                                        &context.functions,
+                                    )
+                                    .await? as f64
+                                } else {
+                                    raw_st
+                                };
+                                let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
+                                    resolve_range_end_index(
+                                        dim_len,
+                                        expr,
+                                        &mut vars,
+                                        &context.functions,
+                                    )
+                                    .await? as f64
+                                } else {
+                                    raw_sp
+                                };
                                 rp_iter += 1;
                                 let step_i = if sp >= 0.0 {
                                     sp as i64
@@ -8307,7 +8340,7 @@ async fn run_interpreter_inner(
                                 selectors.push(Sel::Range {
                                     start: st as i64,
                                     step: step_i,
-                                    end_off: end_offsets[pos],
+                                    end_off: range_end_exprs[pos].clone(),
                                 });
                                 continue;
                             }
@@ -8318,7 +8351,12 @@ async fn run_interpreter_inner(
                                 continue;
                             }
                             if is_end {
-                                selectors.push(Sel::Scalar(*t.shape.get(d).unwrap_or(&1)));
+                                let dim_len = if dims == 1 {
+                                    total_len_from_shape(&t.shape)
+                                } else {
+                                    *t.shape.get(d).unwrap_or(&1)
+                                };
+                                selectors.push(Sel::Scalar(dim_len));
                                 continue;
                             }
                             let v = numeric
@@ -8333,7 +8371,217 @@ async fn run_interpreter_inner(
                             } else {
                                 match v {
                                     Value::Tensor(idx_t) => {
-                                        let dim_len = *t.shape.get(d).unwrap_or(&1);
+                                        let dim_len = if dims == 1 {
+                                            total_len_from_shape(&t.shape)
+                                        } else {
+                                            *t.shape.get(d).unwrap_or(&1)
+                                        };
+                                        let len = idx_t.shape.iter().product::<usize>();
+                                        let mut vi = Vec::with_capacity(len);
+                                        for &val in &idx_t.data {
+                                            let idx = val as isize;
+                                            if idx < 1 || (idx as usize) > dim_len {
+                                                vm_bail!(mex(
+                                                    "IndexOutOfBounds",
+                                                    "Index out of bounds"
+                                                ));
+                                            }
+                                            vi.push(idx as usize);
+                                        }
+                                        selectors.push(Sel::Indices(vi));
+                                    }
+                                    _ => {
+                                        vm_bail!(mex(
+                                            "UnsupportedIndexType",
+                                            "Unsupported index type"
+                                        ))
+                                    }
+                                }
+                            }
+                        }
+                        let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
+                        let mut selection_lengths: Vec<usize> = Vec::with_capacity(dims);
+                        let mut scalar_mask: Vec<bool> = Vec::with_capacity(dims);
+                        let full_shape: Vec<usize> = if t.shape.len() < dims {
+                            let mut s = t.shape.clone();
+                            s.resize(dims, 1);
+                            s
+                        } else {
+                            t.shape.clone()
+                        };
+                        for (d, sel) in selectors.iter().enumerate().take(dims) {
+                            let dim_len = full_shape[d];
+                            let idxs = match sel {
+                                Sel::Colon => (1..=dim_len).collect::<Vec<usize>>(),
+                                Sel::Scalar(i) => vec![*i],
+                                Sel::Indices(v) => v.clone(),
+                                Sel::Range {
+                                    start,
+                                    step,
+                                    end_off,
+                                } => {
+                                    let mut v = Vec::new();
+                                    let mut cur = *start;
+                                    let end_i = resolve_range_end_index(
+                                        dim_len,
+                                        end_off,
+                                        &mut vars,
+                                        &context.functions,
+                                    )
+                                    .await?;
+                                    let stp = *step;
+                                    if stp == 0 {
+                                        vm_bail!(mex("IndexStepZero", "Index step cannot be zero"));
+                                    }
+                                    if stp > 0 {
+                                        while cur <= end_i {
+                                            if cur < 1 || cur > dim_len as i64 {
+                                                break;
+                                            }
+                                            v.push(cur as usize);
+                                            cur += stp;
+                                        }
+                                    } else {
+                                        while cur >= end_i {
+                                            if cur < 1 || cur > dim_len as i64 {
+                                                break;
+                                            }
+                                            v.push(cur as usize);
+                                            cur += stp;
+                                        }
+                                    }
+                                    v
+                                }
+                            };
+                            if idxs.iter().any(|&i| i == 0 || i > dim_len) {
+                                vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
+                            }
+                            selection_lengths.push(idxs.len());
+                            per_dim_indices.push(idxs);
+                            scalar_mask.push(matches!(sel, Sel::Scalar(_)));
+                        }
+                        if per_dim_indices.iter().any(|v| v.is_empty()) {
+                            stack.push(Value::ComplexTensor(t));
+                        } else {
+                            let mut strides: Vec<usize> = vec![0; dims];
+                            let mut acc = 1usize;
+                            for (d, stride) in strides.iter_mut().enumerate().take(dims) {
+                                *stride = acc;
+                                acc *= full_shape[d];
+                            }
+                            let total_out: usize =
+                                per_dim_indices.iter().map(|v| v.len()).product();
+                            let mut indices: Vec<u32> = Vec::with_capacity(total_out);
+                            cartesian_product(&per_dim_indices, |multi| {
+                                let mut lin = 0usize;
+                                for d in 0..dims {
+                                    let i0 = multi[d] - 1;
+                                    lin += i0 * strides[d];
+                                }
+                                indices.push(lin as u32);
+                            });
+                            let plan = SlicePlan {
+                                indices,
+                                output_shape: matlab_squeezed_shape(
+                                    &selection_lengths,
+                                    &scalar_mask,
+                                ),
+                                selection_lengths,
+                                dims,
+                            };
+                            let rhs_view = build_complex_rhs_view(&rhs, &plan.selection_lengths)
+                                .map_err(|e| format!("slice assign: {e}"))?;
+                            scatter_complex_with_plan(&mut t, &plan, &rhs_view)
+                                .map_err(|e| format!("slice assign: {e}"))?;
+                            stack.push(Value::ComplexTensor(t));
+                        }
+                    }
+                    Value::Tensor(mut t) => {
+                        #[derive(Clone)]
+                        enum Sel {
+                            Colon,
+                            Scalar(usize),
+                            Indices(Vec<usize>),
+                            Range {
+                                start: i64,
+                                step: i64,
+                                end_off: EndExpr,
+                            },
+                        }
+                        let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
+                        let mut num_iter = 0usize;
+                        let mut rp_iter = 0usize;
+                        for d in 0..dims {
+                            if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
+                                let (raw_st, raw_sp) = range_params[rp_iter];
+                                let dim_len = *t.shape.get(d).unwrap_or(&1);
+                                let st = if let Some(expr) = &range_start_exprs[rp_iter] {
+                                    resolve_range_end_index(
+                                        dim_len,
+                                        expr,
+                                        &mut vars,
+                                        &context.functions,
+                                    )
+                                    .await? as f64
+                                } else {
+                                    raw_st
+                                };
+                                let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
+                                    resolve_range_end_index(
+                                        dim_len,
+                                        expr,
+                                        &mut vars,
+                                        &context.functions,
+                                    )
+                                    .await? as f64
+                                } else {
+                                    raw_sp
+                                };
+                                rp_iter += 1;
+                                let step_i = if sp >= 0.0 {
+                                    sp as i64
+                                } else {
+                                    -(sp.abs() as i64)
+                                };
+                                selectors.push(Sel::Range {
+                                    start: st as i64,
+                                    step: step_i,
+                                    end_off: range_end_exprs[pos].clone(),
+                                });
+                                continue;
+                            }
+                            let is_colon = (colon_mask & (1u32 << d)) != 0;
+                            let is_end = (end_mask & (1u32 << d)) != 0;
+                            if is_colon {
+                                selectors.push(Sel::Colon);
+                                continue;
+                            }
+                            if is_end {
+                                let dim_len = if dims == 1 {
+                                    total_len_from_shape(&t.shape)
+                                } else {
+                                    *t.shape.get(d).unwrap_or(&1)
+                                };
+                                selectors.push(Sel::Scalar(dim_len));
+                                continue;
+                            }
+                            let v = numeric
+                                .get(num_iter)
+                                .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
+                            num_iter += 1;
+                            if let Some(idx) = index_scalar_from_value(v).await? {
+                                if idx < 1 {
+                                    vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
+                                }
+                                selectors.push(Sel::Scalar(idx as usize));
+                            } else {
+                                match v {
+                                    Value::Tensor(idx_t) => {
+                                        let dim_len = if dims == 1 {
+                                            total_len_from_shape(&t.shape)
+                                        } else {
+                                            *t.shape.get(d).unwrap_or(&1)
+                                        };
                                         let len = idx_t.shape.iter().product::<usize>();
                                         let mut vi = Vec::with_capacity(len);
                                         for &val in &idx_t.data {
@@ -8361,7 +8609,11 @@ async fn run_interpreter_inner(
                         // debug removed
                         let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
                         for (d, sel) in selectors.iter().enumerate().take(dims) {
-                            let dim_len = *t.shape.get(d).unwrap_or(&1);
+                            let dim_len = if dims == 1 {
+                                total_len_from_shape(&t.shape)
+                            } else {
+                                *t.shape.get(d).unwrap_or(&1)
+                            };
                             let idxs = match sel {
                                 Sel::Colon => (1..=dim_len).collect::<Vec<usize>>(),
                                 Sel::Scalar(i) => vec![*i],
@@ -8373,7 +8625,13 @@ async fn run_interpreter_inner(
                                 } => {
                                     let mut v = Vec::new();
                                     let mut cur = *start;
-                                    let end_i = (dim_len as i64) - *end_off;
+                                    let end_i = resolve_range_end_index(
+                                        dim_len,
+                                        end_off,
+                                        &mut vars,
+                                        &context.functions,
+                                    )
+                                    .await?;
                                     let stp = *step;
                                     if stp == 0 {
                                         vm_bail!(mex("IndexStepZero", "Index step cannot be zero"));
@@ -8429,7 +8687,11 @@ async fn run_interpreter_inner(
                                         vm_bail!("shape mismatch for slice assign".to_string());
                                     }
                                     // Normalize RHS shape to dims by padding with ones or validating extra dims are ones
-                                    let mut rshape = rt.shape.clone();
+                                    let mut rshape = if dims == 1 {
+                                        vec![rt.data.len()]
+                                    } else {
+                                        rt.shape.clone()
+                                    };
                                     if rshape.len() < dims {
                                         rshape.resize(dims, 1);
                                     }
@@ -8560,14 +8822,41 @@ async fn run_interpreter_inner(
                             Colon,
                             Scalar(usize),
                             Indices(Vec<usize>),
-                            Range { start: i64, step: i64, end_off: i64 },
+                            Range {
+                                start: i64,
+                                step: i64,
+                                end_off: EndExpr,
+                            },
                         }
                         let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
                         let mut num_iter = 0usize;
                         let mut rp_iter = 0usize;
                         for d in 0..dims {
                             if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
-                                let (st, sp) = range_params[rp_iter];
+                                let (raw_st, raw_sp) = range_params[rp_iter];
+                                let dim_len = *t.shape.get(d).unwrap_or(&1);
+                                let st = if let Some(expr) = &range_start_exprs[rp_iter] {
+                                    resolve_range_end_index(
+                                        dim_len,
+                                        expr,
+                                        &mut vars,
+                                        &context.functions,
+                                    )
+                                    .await? as f64
+                                } else {
+                                    raw_st
+                                };
+                                let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
+                                    resolve_range_end_index(
+                                        dim_len,
+                                        expr,
+                                        &mut vars,
+                                        &context.functions,
+                                    )
+                                    .await? as f64
+                                } else {
+                                    raw_sp
+                                };
                                 rp_iter += 1;
                                 let step_i = if sp >= 0.0 {
                                     sp as i64
@@ -8577,7 +8866,7 @@ async fn run_interpreter_inner(
                                 selectors.push(Sel::Range {
                                     start: st as i64,
                                     step: step_i,
-                                    end_off: end_offsets[pos],
+                                    end_off: range_end_exprs[pos].clone(),
                                 });
                                 continue;
                             }
@@ -8641,7 +8930,11 @@ async fn run_interpreter_inner(
                         // debug removed
                         let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
                         for (d, sel) in selectors.iter().enumerate().take(dims) {
-                            let dim_len = *t.shape.get(d).unwrap_or(&1);
+                            let dim_len = if dims == 1 {
+                                total_len_from_shape(&t.shape)
+                            } else {
+                                *t.shape.get(d).unwrap_or(&1)
+                            };
                             let idxs = match sel {
                                 Sel::Colon => (1..=dim_len).collect::<Vec<usize>>(),
                                 Sel::Scalar(i) => vec![*i],
@@ -8653,7 +8946,13 @@ async fn run_interpreter_inner(
                                 } => {
                                     let mut v = Vec::new();
                                     let mut cur = *start;
-                                    let end_i = (dim_len as i64) - *end_off;
+                                    let end_i = resolve_range_end_index(
+                                        dim_len,
+                                        end_off,
+                                        &mut vars,
+                                        &context.functions,
+                                    )
+                                    .await?;
                                     let stp = *step;
                                     if stp == 0 {
                                         vm_bail!(mex("IndexStepZero", "Index step cannot be zero"));
@@ -8716,7 +9015,11 @@ async fn run_interpreter_inner(
                                         vm_bail!("shape mismatch for slice assign".to_string());
                                     }
                                     // Normalize RHS shape to dims by padding with ones or validating extra dims are ones
-                                    let mut rshape = rt.shape.clone();
+                                    let mut rshape = if dims == 1 {
+                                        vec![rt.data.len()]
+                                    } else {
+                                        rt.shape.clone()
+                                    };
                                     if rshape.len() < dims {
                                         rshape.resize(dims, 1);
                                     }
@@ -8851,21 +9154,20 @@ async fn run_interpreter_inner(
                                 continue;
                             }
                             if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
-                                let (st, sp) = range_params[rp_iter];
+                                let (raw_st, raw_sp) = range_params[rp_iter];
+                                let st = if let Some(expr) = &range_start_exprs[rp_iter] {
+                                    encode_end_expr_value(expr)?
+                                } else {
+                                    Value::Num(raw_st)
+                                };
+                                let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
+                                    encode_end_expr_value(expr)?
+                                } else {
+                                    Value::Num(raw_sp)
+                                };
                                 rp_iter += 1;
-                                let off = end_offsets[pos];
-                                let cell = runmat_builtins::CellArray::new(
-                                    vec![
-                                        Value::Num(st),
-                                        Value::Num(sp),
-                                        Value::String("end".to_string()),
-                                        Value::Num(off as f64),
-                                    ],
-                                    1,
-                                    4,
-                                )
-                                .map_err(|e| format!("obj range: {e}"))?;
-                                idx_values.push(Value::Cell(cell));
+                                let off = range_end_exprs[pos].clone();
+                                idx_values.push(build_end_range_descriptor(st, sp, &off)?);
                             } else {
                                 let v = numeric
                                     .get(num_iter)
@@ -8900,208 +9202,7 @@ async fn run_interpreter_inner(
                             Err(e) => vm_bail!(e),
                         }
                     }
-                    _ => vm_bail!("StoreRangeEnd only supports tensors currently".to_string()),
-                }
-            }
-            Instr::StoreSlice1DRangeEnd { has_step, offset } => {
-                // RHS, then start[, step], then base
-                let rhs = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let step_val: f64 = if has_step {
-                    let v: f64 = (&stack
-                        .pop()
-                        .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                        .try_into()?;
-                    v
-                } else {
-                    1.0
-                };
-                let start_val: f64 = (&stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                    .try_into()?;
-                let base = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                #[cfg(feature = "native-accel")]
-                clear_residency(&base);
-                match base {
-                    Value::Tensor(mut t) => {
-                        let total = t.data.len();
-                        let end_idx = (total as i64) - offset;
-                        let mut cur = start_val as i64;
-                        let step_i = if step_val >= 0.0 {
-                            step_val as i64
-                        } else {
-                            -(step_val.abs() as i64)
-                        };
-                        if step_i == 0 {
-                            return Err(mex("IndexStepZero", "Index step cannot be zero"));
-                        }
-                        // Broadcast rhs if scalar
-                        let rhs_vals: Vec<f64> = match rhs {
-                            Value::Num(n) => vec![n],
-                            Value::Tensor(rt) => rt.data.clone(),
-                            _ => vec![0.0],
-                        };
-                        let mut rpos = 0usize;
-                        if step_i > 0 {
-                            while cur as i64 <= end_idx {
-                                let idx0 = cur as usize;
-                                if idx0 == 0 || idx0 > total {
-                                    break;
-                                }
-                                let v = rhs_vals
-                                    .get(rpos)
-                                    .cloned()
-                                    .unwrap_or(*rhs_vals.last().unwrap_or(&0.0));
-                                t.data[idx0 - 1] = v;
-                                rpos += 1;
-                                cur += step_i;
-                            }
-                        } else {
-                            while (cur as i64) >= end_idx {
-                                let idx0 = cur as usize;
-                                if idx0 == 0 || idx0 > total {
-                                    break;
-                                }
-                                let v = rhs_vals
-                                    .get(rpos)
-                                    .cloned()
-                                    .unwrap_or(*rhs_vals.last().unwrap_or(&0.0));
-                                t.data[idx0 - 1] = v;
-                                rpos += 1;
-                                cur += step_i;
-                            }
-                        }
-                        stack.push(Value::Tensor(t));
-                    }
-                    Value::GpuTensor(handle) => {
-                        let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-                            mex(
-                                "AccelerationProviderUnavailable",
-                                "No acceleration provider registered",
-                            )
-                        })?;
-                        let attempt = (|| -> VmResult<Vec<u32>> {
-                            let total = total_len_from_shape(&handle.shape) as i64;
-                            let end_idx = total - offset;
-                            let mut cur = start_val as i64;
-                            let step_i = if step_val >= 0.0 {
-                                step_val as i64
-                            } else {
-                                -(step_val.abs() as i64)
-                            };
-                            if step_i == 0 {
-                                return Err(mex("IndexStepZero", "Index step cannot be zero"));
-                            }
-                            let mut indices: Vec<u32> = Vec::new();
-                            if step_i > 0 {
-                                while cur <= end_idx {
-                                    if cur < 1 || cur > total {
-                                        break;
-                                    }
-                                    indices.push((cur - 1) as u32);
-                                    cur += step_i;
-                                }
-                            } else {
-                                while cur >= end_idx {
-                                    if cur < 1 || cur > total {
-                                        break;
-                                    }
-                                    indices.push((cur - 1) as u32);
-                                    cur += step_i;
-                                }
-                            }
-                            Ok(indices)
-                        })();
-                        if let Ok(indices) = attempt {
-                            let values = materialize_rhs_linear(&rhs, indices.len())
-                                .await
-                                .map_err(|e| format!("range assign: {e}"))?;
-                            let value_shape = vec![values.len().max(1), 1];
-                            let upload_result = if values.is_empty() {
-                                provider.zeros(&[0, 1])
-                            } else {
-                                provider.upload(&runmat_accelerate_api::HostTensorView {
-                                    data: &values,
-                                    shape: &value_shape,
-                                })
-                            };
-                            if let Ok(values_handle) = upload_result {
-                                if provider
-                                    .scatter_linear(&handle, &indices, &values_handle)
-                                    .is_ok()
-                                {
-                                    stack.push(Value::GpuTensor(handle));
-                                    pc += 1;
-                                    continue;
-                                }
-                            }
-                        }
-                        let host = provider
-                            .download(&handle)
-                            .await
-                            .map_err(|e| format!("range assign: {e}"))?;
-                        let mut t = runmat_builtins::Tensor::new(host.data, host.shape)
-                            .map_err(|e| format!("range assign: {e}"))?;
-                        let total = t.data.len();
-                        let end_idx = (total as i64) - offset;
-                        let mut cur = start_val as i64;
-                        let step_i = if step_val >= 0.0 {
-                            step_val as i64
-                        } else {
-                            -(step_val.abs() as i64)
-                        };
-                        if step_i == 0 {
-                            return Err(mex("IndexStepZero", "Index step cannot be zero"));
-                        }
-                        let rhs_vals: Vec<f64> = match rhs {
-                            Value::Num(n) => vec![n],
-                            Value::Tensor(rt) => rt.data.clone(),
-                            _ => vec![0.0],
-                        };
-                        let mut rpos = 0usize;
-                        if step_i > 0 {
-                            while cur as i64 <= end_idx {
-                                let idx0 = cur as usize;
-                                if idx0 == 0 || idx0 > total {
-                                    break;
-                                }
-                                let v = rhs_vals
-                                    .get(rpos)
-                                    .cloned()
-                                    .unwrap_or(*rhs_vals.last().unwrap_or(&0.0));
-                                t.data[idx0 - 1] = v;
-                                rpos += 1;
-                                cur += step_i;
-                            }
-                        } else {
-                            while (cur as i64) >= end_idx {
-                                let idx0 = cur as usize;
-                                if idx0 == 0 || idx0 > total {
-                                    break;
-                                }
-                                let v = rhs_vals
-                                    .get(rpos)
-                                    .cloned()
-                                    .unwrap_or(*rhs_vals.last().unwrap_or(&0.0));
-                                t.data[idx0 - 1] = v;
-                                rpos += 1;
-                                cur += step_i;
-                            }
-                        }
-                        let view = runmat_accelerate_api::HostTensorView {
-                            data: &t.data,
-                            shape: &t.shape,
-                        };
-                        let new_h = provider
-                            .upload(&view)
-                            .map_err(|e| format!("reupload after range assign: {e}"))?;
-                        stack.push(Value::GpuTensor(new_h));
-                    }
-                    _ => vm_bail!("Store range with end only supported on tensors".to_string()),
+                    _ => vm_bail!("StoreSliceExpr only supports tensors currently".to_string()),
                 }
             }
             Instr::CreateCell2D(rows, cols) => {
@@ -9415,6 +9516,7 @@ async fn run_interpreter_inner(
                         Value::Object(_)
                             | Value::HandleObject(_)
                             | Value::Tensor(_)
+                            | Value::ComplexTensor(_)
                             | Value::GpuTensor(_)
                     )
                 };
@@ -9608,7 +9710,7 @@ async fn run_interpreter_inner(
                         }
                         // 1D linear or 2D scalar assignment only for now
                         if indices.len() == 1 {
-                            let total = t.rows() * t.cols();
+                            let total = t.rows * t.cols;
                             let idx = indices[0];
                             if idx == 0 || idx > total {
                                 return Err(mex("IndexOutOfBounds", "Index out of bounds"));
@@ -9619,8 +9721,8 @@ async fn run_interpreter_inner(
                         } else if indices.len() == 2 {
                             let i = indices[0];
                             let mut j = indices[1];
-                            let rows = t.rows();
-                            let cols = t.cols();
+                            let rows = t.rows;
+                            let cols = t.cols;
                             // Clamp column index within [1..cols] to accommodate end-offset semantics
                             if j == 0 {
                                 j = 1;
@@ -9645,6 +9747,41 @@ async fn run_interpreter_inner(
                             let idx = (i - 1) + (j - 1) * rows;
                             t.data[idx] = val;
                             stack.push(Value::Tensor(t));
+                        } else {
+                            return Err(mex(
+                                "UnsupportedAssignmentRank",
+                                "Only 1D/2D scalar assignment supported",
+                            ));
+                        }
+                    }
+                    Value::ComplexTensor(mut t) => {
+                        if indices.len() == 1 {
+                            let total = t.rows * t.cols;
+                            let idx = indices[0];
+                            if idx == 0 || idx > total {
+                                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
+                            }
+                            let val = value_to_complex_scalar(&rhs).await?;
+                            t.data[idx - 1] = val;
+                            stack.push(Value::ComplexTensor(t));
+                        } else if indices.len() == 2 {
+                            let i = indices[0];
+                            let mut j = indices[1];
+                            let rows = t.rows;
+                            let cols = t.cols;
+                            if j == 0 {
+                                j = 1;
+                            }
+                            if j > cols {
+                                j = cols;
+                            }
+                            if i == 0 || i > rows {
+                                return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
+                            }
+                            let val = value_to_complex_scalar(&rhs).await?;
+                            let idx = (i - 1) + (j - 1) * rows;
+                            t.data[idx] = val;
+                            stack.push(Value::ComplexTensor(t));
                         } else {
                             return Err(mex(
                                 "UnsupportedAssignmentRank",
@@ -9889,7 +10026,8 @@ async fn run_interpreter_inner(
                     }
                 }
             }
-            Instr::LoadMember(field) => {
+            Instr::LoadMember(field) | Instr::LoadMemberOrInit(field) => {
+                let allow_init = matches!(bytecode.instructions[pc], Instr::LoadMemberOrInit(_));
                 let base = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
@@ -9969,9 +10107,53 @@ async fn run_interpreter_inner(
                             Err(e) => vm_bail!(e.to_string()),
                         }
                     }
+                    Value::ClassRef(cls) => {
+                        if let Some((p, owner)) = runmat_builtins::lookup_property(&cls, &field) {
+                            if !p.is_static {
+                                vm_bail!(format!("Property '{}' is not static", field));
+                            }
+                            if p.get_access == runmat_builtins::Access::Private {
+                                vm_bail!(format!("Property '{}' is private", field))
+                            }
+                            if let Some(v) =
+                                runmat_builtins::get_static_property_value(&owner, &field)
+                            {
+                                stack.push(v);
+                            } else if let Some(v) = &p.default_value {
+                                stack.push(v.clone());
+                            } else {
+                                stack.push(Value::Num(0.0));
+                            }
+                        } else if let Some((m, _owner)) =
+                            runmat_builtins::lookup_method(&cls, &field)
+                        {
+                            if !m.is_static {
+                                vm_bail!(format!("Method '{}' is not static", field));
+                            }
+                            stack.push(Value::Closure(runmat_builtins::Closure {
+                                function_name: m.function_name,
+                                captures: vec![],
+                            }));
+                        } else {
+                            let qualified = format!("{cls}.{field}");
+                            if runmat_builtins::builtin_functions()
+                                .iter()
+                                .any(|b| b.name == qualified)
+                            {
+                                stack.push(Value::Closure(runmat_builtins::Closure {
+                                    function_name: qualified,
+                                    captures: vec![],
+                                }));
+                            } else {
+                                vm_bail!(format!("Unknown property '{}' on class {}", field, cls));
+                            }
+                        }
+                    }
                     Value::Struct(st) => {
                         if let Some(v) = st.fields.get(&field) {
                             stack.push(v.clone());
+                        } else if allow_init {
+                            stack.push(Value::Struct(runmat_builtins::StructValue::new()));
                         } else {
                             vm_bail!(format!("Undefined field '{}'", field));
                         }
@@ -10018,7 +10200,9 @@ async fn run_interpreter_inner(
                     _ => vm_bail!("LoadMember on non-object".to_string()),
                 }
             }
-            Instr::LoadMemberDynamic => {
+            Instr::LoadMemberDynamic | Instr::LoadMemberDynamicOrInit => {
+                let allow_init =
+                    matches!(bytecode.instructions[pc], Instr::LoadMemberDynamicOrInit);
                 let name_val = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
@@ -10081,9 +10265,53 @@ async fn run_interpreter_inner(
                             Err(e) => vm_bail!(e.to_string()),
                         }
                     }
+                    Value::ClassRef(cls) => {
+                        if let Some((p, owner)) = runmat_builtins::lookup_property(&cls, &name) {
+                            if !p.is_static {
+                                vm_bail!(format!("Property '{}' is not static", name));
+                            }
+                            if p.get_access == runmat_builtins::Access::Private {
+                                vm_bail!(format!("Property '{}' is private", name))
+                            }
+                            if let Some(v) =
+                                runmat_builtins::get_static_property_value(&owner, &name)
+                            {
+                                stack.push(v);
+                            } else if let Some(v) = &p.default_value {
+                                stack.push(v.clone());
+                            } else {
+                                stack.push(Value::Num(0.0));
+                            }
+                        } else if let Some((m, _owner)) =
+                            runmat_builtins::lookup_method(&cls, &name)
+                        {
+                            if !m.is_static {
+                                vm_bail!(format!("Method '{}' is not static", name));
+                            }
+                            stack.push(Value::Closure(runmat_builtins::Closure {
+                                function_name: m.function_name,
+                                captures: vec![],
+                            }));
+                        } else {
+                            let qualified = format!("{cls}.{name}");
+                            if runmat_builtins::builtin_functions()
+                                .iter()
+                                .any(|b| b.name == qualified)
+                            {
+                                stack.push(Value::Closure(runmat_builtins::Closure {
+                                    function_name: qualified,
+                                    captures: vec![],
+                                }));
+                            } else {
+                                vm_bail!(format!("Unknown property '{}' on class {}", name, cls));
+                            }
+                        }
+                    }
                     Value::Struct(st) => {
                         if let Some(v) = st.fields.get(&name) {
                             stack.push(v.clone());
+                        } else if allow_init {
+                            stack.push(Value::Struct(runmat_builtins::StructValue::new()));
                         } else {
                             vm_bail!(format!("Undefined field '{}'", name));
                         }
@@ -10109,7 +10337,8 @@ async fn run_interpreter_inner(
                     _ => vm_bail!("LoadMemberDynamic on non-struct/object".to_string()),
                 }
             }
-            Instr::StoreMember(field) => {
+            Instr::StoreMember(field) | Instr::StoreMemberOrInit(field) => {
+                let allow_init = matches!(bytecode.instructions[pc], Instr::StoreMemberOrInit(_));
                 let rhs = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
@@ -10251,10 +10480,17 @@ async fn run_interpreter_inner(
                         }
                         stack.push(Value::Cell(ca));
                     }
+                    Value::Num(0.0) if allow_init => {
+                        let mut st = runmat_builtins::StructValue::new();
+                        st.fields.insert(field, rhs);
+                        stack.push(Value::Struct(st));
+                    }
                     _ => vm_bail!("StoreMember on non-object".to_string()),
                 }
             }
-            Instr::StoreMemberDynamic => {
+            Instr::StoreMemberDynamic | Instr::StoreMemberDynamicOrInit => {
+                let allow_init =
+                    matches!(bytecode.instructions[pc], Instr::StoreMemberDynamicOrInit);
                 let rhs = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
@@ -10345,6 +10581,11 @@ async fn run_interpreter_inner(
                         }
                         stack.push(Value::Cell(ca));
                     }
+                    Value::Num(0.0) if allow_init => {
+                        let mut st = runmat_builtins::StructValue::new();
+                        st.fields.insert(name, rhs);
+                        stack.push(Value::Struct(st));
+                    }
                     _ => vm_bail!("StoreMemberDynamic on non-struct/object".to_string()),
                 }
             }
@@ -10382,6 +10623,7 @@ async fn run_interpreter_inner(
                             full_args.extend(args.into_iter());
                             let v = call_builtin_vm!(&m.function_name, &full_args)?;
                             stack.push(v);
+                            pc += 1;
                             continue;
                         }
                         let qualified = format!("{}.{}", obj.class_name, name);
@@ -10402,6 +10644,155 @@ async fn run_interpreter_inner(
                         }
                     }
                     _ => vm_bail!("CallMethod on non-object".to_string()),
+                }
+            }
+            Instr::CallMethodOrMemberIndex(name, arg_count) => {
+                let mut args = Vec::with_capacity(arg_count);
+                for _ in 0..arg_count {
+                    args.push(
+                        stack
+                            .pop()
+                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
+                    );
+                }
+                args.reverse();
+                let base = stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+
+                match base {
+                    Value::Object(obj) => {
+                        if let Some((m, _owner)) =
+                            runmat_builtins::lookup_method(&obj.class_name, &name)
+                        {
+                            if m.is_static {
+                                vm_bail!(format!(
+                                    "Method '{}' is static; use classref({}).{}",
+                                    name, obj.class_name, name
+                                ));
+                            }
+                            if m.access == runmat_builtins::Access::Private {
+                                vm_bail!(format!("Method '{}' is private", name))
+                            }
+                            let mut full_args = Vec::with_capacity(1 + args.len());
+                            full_args.push(Value::Object(obj));
+                            full_args.extend(args.into_iter());
+                            let v = call_builtin_vm!(&m.function_name, &full_args)?;
+                            stack.push(v);
+                            pc += 1;
+                            continue;
+                        }
+
+                        let mut method_args = Vec::with_capacity(1 + args.len());
+                        method_args.push(Value::Object(obj.clone()));
+                        method_args.extend(args.iter().cloned());
+
+                        let qualified = format!("{}.{}", obj.class_name, name);
+                        if let Ok(v) = call_builtin_vm!(&qualified, &method_args) {
+                            stack.push(v);
+                            pc += 1;
+                            continue;
+                        }
+                        if let Ok(v) = call_builtin_vm!(&name, &method_args) {
+                            stack.push(v);
+                            pc += 1;
+                            continue;
+                        }
+
+                        let mut getfield_args = Vec::with_capacity(3);
+                        getfield_args.push(Value::Object(obj));
+                        getfield_args.push(Value::String(name));
+                        if !args.is_empty() {
+                            let idx_cell = runmat_builtins::CellArray::new(args, 1, arg_count)
+                                .map_err(|e| format!("getfield idx build: {e}"))?;
+                            getfield_args.push(Value::Cell(idx_cell));
+                        }
+                        match call_builtin_vm!("getfield", &getfield_args) {
+                            Ok(v) => stack.push(v),
+                            Err(e) => vm_bail!(e.to_string()),
+                        }
+                    }
+                    Value::HandleObject(handle) => {
+                        let mut method_args = Vec::with_capacity(2 + args.len());
+                        method_args.push(Value::HandleObject(handle.clone()));
+                        method_args.push(Value::String(name.clone()));
+                        method_args.extend(args.iter().cloned());
+                        if let Ok(v) = call_builtin_vm!("call_method", &method_args) {
+                            stack.push(v);
+                            pc += 1;
+                            continue;
+                        }
+
+                        let mut getfield_args = Vec::with_capacity(3);
+                        getfield_args.push(Value::HandleObject(handle));
+                        getfield_args.push(Value::String(name));
+                        if !args.is_empty() {
+                            let idx_cell = runmat_builtins::CellArray::new(args, 1, arg_count)
+                                .map_err(|e| format!("getfield idx build: {e}"))?;
+                            getfield_args.push(Value::Cell(idx_cell));
+                        }
+                        match call_builtin_vm!("getfield", &getfield_args) {
+                            Ok(v) => stack.push(v),
+                            Err(e) => vm_bail!(e.to_string()),
+                        }
+                    }
+                    Value::ClassRef(cls) => {
+                        if let Some((m, _owner)) = runmat_builtins::lookup_method(&cls, &name) {
+                            if !m.is_static {
+                                vm_bail!(format!("Method '{}' is not static", name));
+                            }
+                            let v = call_builtin_vm!(&m.function_name, &args)?;
+                            stack.push(v);
+                            pc += 1;
+                            continue;
+                        }
+
+                        let qualified = format!("{cls}.{name}");
+                        if let Ok(v) = call_builtin_vm!(&qualified, &args) {
+                            stack.push(v);
+                            pc += 1;
+                            continue;
+                        }
+
+                        if args.is_empty() {
+                            if let Some((p, owner)) = runmat_builtins::lookup_property(&cls, &name)
+                            {
+                                if !p.is_static {
+                                    vm_bail!(format!("Property '{}' is not static", name));
+                                }
+                                if p.get_access == runmat_builtins::Access::Private {
+                                    vm_bail!(format!("Property '{}' is private", name))
+                                }
+                                if let Some(v) =
+                                    runmat_builtins::get_static_property_value(&owner, &name)
+                                {
+                                    stack.push(v);
+                                } else if let Some(v) = &p.default_value {
+                                    stack.push(v.clone());
+                                } else {
+                                    stack.push(Value::Num(0.0));
+                                }
+                                pc += 1;
+                                continue;
+                            }
+                        }
+
+                        vm_bail!(format!("Unknown static member '{}' on class {}", name, cls));
+                    }
+                    other => {
+                        let mut getfield_args = Vec::with_capacity(3);
+                        getfield_args.push(other);
+                        getfield_args.push(Value::String(name));
+                        if !args.is_empty() {
+                            let idx_cell = runmat_builtins::CellArray::new(args, 1, arg_count)
+                                .map_err(|e| format!("getfield idx build: {e}"))?;
+                            getfield_args.push(Value::Cell(idx_cell));
+                        }
+                        match call_builtin_vm!("getfield", &getfield_args) {
+                            Ok(v) => stack.push(v),
+                            Err(e) => vm_bail!(e.to_string()),
+                        }
+                    }
                 }
             }
             Instr::LoadMethod(name) => {

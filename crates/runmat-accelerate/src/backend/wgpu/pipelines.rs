@@ -21,6 +21,46 @@ const FLIP_SHADER_F64: &str = crate::backend::wgpu::shaders::flip::FLIP_SHADER_F
 const FLIP_SHADER_F32: &str = crate::backend::wgpu::shaders::flip::FLIP_SHADER_F32;
 const CIRCSHIFT_SHADER_F64: &str = crate::backend::wgpu::shaders::circshift::CIRCSHIFT_SHADER_F64;
 const CIRCSHIFT_SHADER_F32: &str = crate::backend::wgpu::shaders::circshift::CIRCSHIFT_SHADER_F32;
+const FFT_INIT_SHADER_F64: &str = crate::backend::wgpu::shaders::fft::FFT_INIT_SHADER_F64;
+const FFT_INIT_SHADER_F32: &str = crate::backend::wgpu::shaders::fft::FFT_INIT_SHADER_F32;
+const FFT_STAGE_SHADER_F64: &str = crate::backend::wgpu::shaders::fft::FFT_STAGE_SHADER_F64;
+const FFT_STAGE_SHADER_F32: &str = crate::backend::wgpu::shaders::fft::FFT_STAGE_SHADER_F32;
+const FFT_REORDER_SHADER_F64: &str = crate::backend::wgpu::shaders::fft::FFT_REORDER_SHADER_F64;
+const FFT_REORDER_SHADER_F32: &str = crate::backend::wgpu::shaders::fft::FFT_REORDER_SHADER_F32;
+const FFT_DIRECT_SHADER_F64: &str = crate::backend::wgpu::shaders::fft::FFT_DIRECT_SHADER_F64;
+const FFT_DIRECT_SHADER_F32: &str = crate::backend::wgpu::shaders::fft::FFT_DIRECT_SHADER_F32;
+const FFT_EXTRACT_REAL_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::fft::FFT_EXTRACT_REAL_SHADER_F64;
+const FFT_EXTRACT_REAL_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::fft::FFT_EXTRACT_REAL_SHADER_F32;
+const FFT_STAGE3_SHADER_F64: &str = crate::backend::wgpu::shaders::fft::FFT_STAGE3_SHADER_F64;
+const FFT_STAGE3_SHADER_F32: &str = crate::backend::wgpu::shaders::fft::FFT_STAGE3_SHADER_F32;
+const FFT_REORDER3_SHADER_F64: &str = crate::backend::wgpu::shaders::fft::FFT_REORDER3_SHADER_F64;
+const FFT_REORDER3_SHADER_F32: &str = crate::backend::wgpu::shaders::fft::FFT_REORDER3_SHADER_F32;
+const FFT_STAGE5_SHADER_F64: &str = crate::backend::wgpu::shaders::fft::FFT_STAGE5_SHADER_F64;
+const FFT_STAGE5_SHADER_F32: &str = crate::backend::wgpu::shaders::fft::FFT_STAGE5_SHADER_F32;
+const FFT_REORDER5_SHADER_F64: &str = crate::backend::wgpu::shaders::fft::FFT_REORDER5_SHADER_F64;
+const FFT_REORDER5_SHADER_F32: &str = crate::backend::wgpu::shaders::fft::FFT_REORDER5_SHADER_F32;
+const FFT_REORDER_MIXED_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::fft::FFT_REORDER_MIXED_SHADER_F64;
+const FFT_REORDER_MIXED_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::fft::FFT_REORDER_MIXED_SHADER_F32;
+const FFT_BLUESTEIN_PREP_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::fft::FFT_BLUESTEIN_PREP_SHADER_F64;
+const FFT_BLUESTEIN_PREP_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::fft::FFT_BLUESTEIN_PREP_SHADER_F32;
+const FFT_BLUESTEIN_KERNEL_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::fft::FFT_BLUESTEIN_KERNEL_SHADER_F64;
+const FFT_BLUESTEIN_KERNEL_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::fft::FFT_BLUESTEIN_KERNEL_SHADER_F32;
+const FFT_POINTWISE_BROADCAST_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::fft::FFT_POINTWISE_BROADCAST_SHADER_F64;
+const FFT_POINTWISE_BROADCAST_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::fft::FFT_POINTWISE_BROADCAST_SHADER_F32;
+const FFT_BLUESTEIN_FINALIZE_SHADER_F64: &str =
+    crate::backend::wgpu::shaders::fft::FFT_BLUESTEIN_FINALIZE_SHADER_F64;
+const FFT_BLUESTEIN_FINALIZE_SHADER_F32: &str =
+    crate::backend::wgpu::shaders::fft::FFT_BLUESTEIN_FINALIZE_SHADER_F32;
 const DIFF_SHADER_F64: &str = crate::backend::wgpu::shaders::diff::DIFF_SHADER_F64;
 const DIFF_SHADER_F32: &str = crate::backend::wgpu::shaders::diff::DIFF_SHADER_F32;
 const CUMSUM_SHADER_F64: &str = crate::backend::wgpu::shaders::scan::CUMSUM_SHADER_F64;
@@ -179,6 +219,20 @@ pub struct WgpuPipelines {
     pub cummin: PipelineBundle,
     pub cummax: PipelineBundle,
     pub circshift: PipelineBundle,
+    pub fft_init: PipelineBundle,
+    pub fft_stage: PipelineBundle,
+    pub fft_reorder: PipelineBundle,
+    pub fft_direct: PipelineBundle,
+    pub fft_extract_real: PipelineBundle,
+    pub fft_stage3: PipelineBundle,
+    pub fft_reorder3: PipelineBundle,
+    pub fft_stage5: PipelineBundle,
+    pub fft_reorder5: PipelineBundle,
+    pub fft_reorder_mixed: PipelineBundle,
+    pub fft_bluestein_prep: PipelineBundle,
+    pub fft_bluestein_kernel: PipelineBundle,
+    pub fft_pointwise_broadcast: PipelineBundle,
+    pub fft_bluestein_finalize: PipelineBundle,
     pub tril: PipelineBundle,
     pub triu: PipelineBundle,
     pub repmat: PipelineBundle,
@@ -508,6 +562,235 @@ impl WgpuPipelines {
             match precision {
                 NumericPrecision::F64 => CIRCSHIFT_SHADER_F64,
                 NumericPrecision::F32 => CIRCSHIFT_SHADER_F32,
+            },
+        );
+
+        let fft_init = create_pipeline(
+            device,
+            "runmat-fft-init-layout",
+            "runmat-fft-init-shader",
+            "runmat-fft-init-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => FFT_INIT_SHADER_F64,
+                NumericPrecision::F32 => FFT_INIT_SHADER_F32,
+            },
+        );
+
+        let fft_stage = create_pipeline(
+            device,
+            "runmat-fft-stage-layout",
+            "runmat-fft-stage-shader",
+            "runmat-fft-stage-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => FFT_STAGE_SHADER_F64,
+                NumericPrecision::F32 => FFT_STAGE_SHADER_F32,
+            },
+        );
+
+        let fft_reorder = create_pipeline(
+            device,
+            "runmat-fft-reorder-layout",
+            "runmat-fft-reorder-shader",
+            "runmat-fft-reorder-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => FFT_REORDER_SHADER_F64,
+                NumericPrecision::F32 => FFT_REORDER_SHADER_F32,
+            },
+        );
+
+        let fft_direct = create_pipeline(
+            device,
+            "runmat-fft-direct-layout",
+            "runmat-fft-direct-shader",
+            "runmat-fft-direct-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => FFT_DIRECT_SHADER_F64,
+                NumericPrecision::F32 => FFT_DIRECT_SHADER_F32,
+            },
+        );
+
+        let fft_extract_real = create_pipeline(
+            device,
+            "runmat-fft-extract-real-layout",
+            "runmat-fft-extract-real-shader",
+            "runmat-fft-extract-real-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => FFT_EXTRACT_REAL_SHADER_F64,
+                NumericPrecision::F32 => FFT_EXTRACT_REAL_SHADER_F32,
+            },
+        );
+
+        let fft_stage3 = create_pipeline(
+            device,
+            "runmat-fft-stage3-layout",
+            "runmat-fft-stage3-shader",
+            "runmat-fft-stage3-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                storage_read_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => FFT_STAGE3_SHADER_F64,
+                NumericPrecision::F32 => FFT_STAGE3_SHADER_F32,
+            },
+        );
+
+        let fft_reorder3 = create_pipeline(
+            device,
+            "runmat-fft-reorder3-layout",
+            "runmat-fft-reorder3-shader",
+            "runmat-fft-reorder3-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => FFT_REORDER3_SHADER_F64,
+                NumericPrecision::F32 => FFT_REORDER3_SHADER_F32,
+            },
+        );
+
+        let fft_stage5 = create_pipeline(
+            device,
+            "runmat-fft-stage5-layout",
+            "runmat-fft-stage5-shader",
+            "runmat-fft-stage5-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                storage_read_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => FFT_STAGE5_SHADER_F64,
+                NumericPrecision::F32 => FFT_STAGE5_SHADER_F32,
+            },
+        );
+
+        let fft_reorder5 = create_pipeline(
+            device,
+            "runmat-fft-reorder5-layout",
+            "runmat-fft-reorder5-shader",
+            "runmat-fft-reorder5-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => FFT_REORDER5_SHADER_F64,
+                NumericPrecision::F32 => FFT_REORDER5_SHADER_F32,
+            },
+        );
+
+        let fft_reorder_mixed = create_pipeline(
+            device,
+            "runmat-fft-reorder-mixed-layout",
+            "runmat-fft-reorder-mixed-shader",
+            "runmat-fft-reorder-mixed-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                storage_read_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => FFT_REORDER_MIXED_SHADER_F64,
+                NumericPrecision::F32 => FFT_REORDER_MIXED_SHADER_F32,
+            },
+        );
+
+        let fft_bluestein_prep = create_pipeline(
+            device,
+            "runmat-fft-bluestein-prep-layout",
+            "runmat-fft-bluestein-prep-shader",
+            "runmat-fft-bluestein-prep-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                storage_read_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => FFT_BLUESTEIN_PREP_SHADER_F64,
+                NumericPrecision::F32 => FFT_BLUESTEIN_PREP_SHADER_F32,
+            },
+        );
+
+        let fft_bluestein_kernel = create_pipeline(
+            device,
+            "runmat-fft-bluestein-kernel-layout",
+            "runmat-fft-bluestein-kernel-shader",
+            "runmat-fft-bluestein-kernel-pipeline",
+            vec![
+                storage_read_write_entry(0),
+                storage_read_entry(1),
+                uniform_entry(2),
+            ],
+            match precision {
+                NumericPrecision::F64 => FFT_BLUESTEIN_KERNEL_SHADER_F64,
+                NumericPrecision::F32 => FFT_BLUESTEIN_KERNEL_SHADER_F32,
+            },
+        );
+
+        let fft_pointwise_broadcast = create_pipeline(
+            device,
+            "runmat-fft-pointwise-broadcast-layout",
+            "runmat-fft-pointwise-broadcast-shader",
+            "runmat-fft-pointwise-broadcast-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_entry(1),
+                storage_read_write_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => FFT_POINTWISE_BROADCAST_SHADER_F64,
+                NumericPrecision::F32 => FFT_POINTWISE_BROADCAST_SHADER_F32,
+            },
+        );
+
+        let fft_bluestein_finalize = create_pipeline(
+            device,
+            "runmat-fft-bluestein-finalize-layout",
+            "runmat-fft-bluestein-finalize-shader",
+            "runmat-fft-bluestein-finalize-pipeline",
+            vec![
+                storage_read_entry(0),
+                storage_read_write_entry(1),
+                storage_read_entry(2),
+                uniform_entry(3),
+            ],
+            match precision {
+                NumericPrecision::F64 => FFT_BLUESTEIN_FINALIZE_SHADER_F64,
+                NumericPrecision::F32 => FFT_BLUESTEIN_FINALIZE_SHADER_F32,
             },
         );
 
@@ -1144,6 +1427,20 @@ impl WgpuPipelines {
             cummin,
             cummax,
             circshift,
+            fft_init,
+            fft_stage,
+            fft_reorder,
+            fft_direct,
+            fft_extract_real,
+            fft_stage3,
+            fft_reorder3,
+            fft_stage5,
+            fft_reorder5,
+            fft_reorder_mixed,
+            fft_bluestein_prep,
+            fft_bluestein_kernel,
+            fft_pointwise_broadcast,
+            fft_bluestein_finalize,
             tril,
             triu,
             repmat,

@@ -179,6 +179,12 @@ fn strip_expr(expr: &Expr) -> Expr {
             Box::new(strip_expr(name_expr)),
             Span::default(),
         ),
+        Expr::DottedInvoke(base, name, args, _) => Expr::DottedInvoke(
+            Box::new(strip_expr(base)),
+            name.clone(),
+            args.iter().map(strip_expr).collect(),
+            Span::default(),
+        ),
         Expr::MethodCall(base, name, args, _) => Expr::MethodCall(
             Box::new(strip_expr(base)),
             name.clone(),
