@@ -387,7 +387,7 @@ fn fft_end_arithmetic_supports_general_scalar_and_range_forms() {
         Y = fft(x);
         a = Y(end*1 - 3 + 2/2);
         h = Y(2:(end*1 - 1/2));
-        ok = (real(a) == -4) && (numel(h) == 6);
+        ok = (abs(real(a) + 4) < 1e-12) && (numel(h) == 6);
     "#;
     let ast = parse(input).expect("parse general end arithmetic script");
     let hir = lower(&ast).expect("lower general end arithmetic script");
@@ -489,7 +489,7 @@ fn fft_end_arithmetic_supports_variable_offsets() {
         Y = fft(x);
         a = Y(end - k);
         h = Y(1:(end - k));
-        ok = (real(a) == -4) && (numel(h) == 6);
+        ok = (abs(real(a) + 4) < 1e-12) && (numel(h) == 6);
     "#;
     let ast = parse(input).expect("parse variable end arithmetic script");
     let hir = lower(&ast).expect("lower variable end arithmetic script");
