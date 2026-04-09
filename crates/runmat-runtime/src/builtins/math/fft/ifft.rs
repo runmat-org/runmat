@@ -87,10 +87,6 @@ async fn ifft_gpu(
     symmetric: bool,
 ) -> BuiltinResult<Value> {
     let mut logical_shape = normalize_scalar_shape(&handle.shape);
-    if logical_shape.last() == Some(&2) {
-        logical_shape.pop();
-        logical_shape = normalize_scalar_shape(&logical_shape);
-    }
 
     let dim_one_based = match dimension {
         Some(0) => return Err(ifft_error("ifft: dimension must be >= 1")),

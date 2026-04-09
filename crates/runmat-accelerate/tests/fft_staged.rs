@@ -67,7 +67,7 @@ async fn staged_fft_forward_matches_cpu_for_pow2_family() {
         let host = p.download(&out).await.expect("download fft");
         let expected = cpu_fft_forward(&input);
 
-        assert_eq!(host.shape, vec![n, 2], "shape mismatch for n={n}");
+        assert_eq!(host.shape, vec![n], "shape mismatch for n={n}");
         for (idx, &(er, ei)) in expected.iter().enumerate() {
             let got_re = host.data[idx * 2];
             let got_im = host.data[idx * 2 + 1];
@@ -101,7 +101,7 @@ async fn staged_fft_ifft_roundtrip_recovers_input_for_pow2_family() {
         let back = p.ifft_dim(&freq, None, 0).await.expect("ifft_dim");
         let host = p.download(&back).await.expect("download ifft");
 
-        assert_eq!(host.shape, vec![n, 2], "shape mismatch for n={n}");
+        assert_eq!(host.shape, vec![n], "shape mismatch for n={n}");
         for (idx, &want) in input.iter().enumerate() {
             let got_re = host.data[idx * 2];
             let got_im = host.data[idx * 2 + 1];
@@ -136,7 +136,7 @@ async fn staged_fft_forward_matches_cpu_for_non_pow2_families() {
         let host = p.download(&out).await.expect("download fft");
         let expected = cpu_fft_forward(&input);
 
-        assert_eq!(host.shape, vec![n, 2], "shape mismatch for n={n}");
+        assert_eq!(host.shape, vec![n], "shape mismatch for n={n}");
         for (idx, &(er, ei)) in expected.iter().enumerate() {
             let got_re = host.data[idx * 2];
             let got_im = host.data[idx * 2 + 1];
@@ -170,7 +170,7 @@ async fn staged_fft_ifft_roundtrip_recovers_input_for_non_pow2_families() {
         let back = p.ifft_dim(&freq, None, 0).await.expect("ifft_dim");
         let host = p.download(&back).await.expect("download ifft");
 
-        assert_eq!(host.shape, vec![n, 2], "shape mismatch for n={n}");
+        assert_eq!(host.shape, vec![n], "shape mismatch for n={n}");
         for (idx, &want) in input.iter().enumerate() {
             let got_re = host.data[idx * 2];
             let got_im = host.data[idx * 2 + 1];

@@ -15,20 +15,20 @@ use rand::seq::SliceRandom;
 use runmat_accelerate_api::{
     AccelContextHandle, AccelContextKind, AccelDownloadFuture, AccelProvider, AccelProviderFuture,
     ApiDeviceInfo, CorrcoefNormalization, CorrcoefOptions, CorrcoefRows, CovNormalization, CovRows,
-    CovarianceOptions, FindDirection, FspecialRequest, GpuTensorHandle, HostTensorOwned,
-    HostTensorView, ImfilterOptions, ImfilterPadding, IsMemberOptions, IsMemberResult,
-    MeshgridAxisView, PagefunOp, PagefunRequest, ProviderBandwidth, ProviderCholResult,
-    ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode, ProviderConvOrientation,
-    ProviderCummaxResult, ProviderCumminResult, ProviderEigResult, ProviderFindResult,
-    ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult, ProviderInvOptions,
-    ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult, ProviderMeshgridResult,
-    ProviderNanMode, ProviderNormOrder, ProviderPinvOptions, ProviderPolyderQuotient,
-    ProviderPolyfitResult, ProviderPolyvalOptions, ProviderPrecision, ProviderQrOptions,
-    ProviderQrPivot, ProviderQrPowerIterResult, ProviderQrResult, ProviderScanDirection,
-    ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult, ReductionFlavor,
-    ReductionTwoPassMode, SetdiffOptions, SetdiffResult, SortComparison, SortOrder, SortResult,
-    SortRowsColumnSpec, UnionOptions, UnionResult, UniqueOptions, UniqueResult, WgpuBufferRef,
-    WgpuContextHandle,
+    CovarianceOptions, FindDirection, FspecialRequest, GpuTensorHandle, GpuTensorStorage,
+    HostTensorOwned, HostTensorView, ImfilterOptions, ImfilterPadding, IsMemberOptions,
+    IsMemberResult, MeshgridAxisView, PagefunOp, PagefunRequest, ProviderBandwidth,
+    ProviderCholResult, ProviderCondNorm, ProviderConv1dOptions, ProviderConvMode,
+    ProviderConvOrientation, ProviderCummaxResult, ProviderCumminResult, ProviderEigResult,
+    ProviderFindResult, ProviderHermitianKind, ProviderIirFilterOptions, ProviderIirFilterResult,
+    ProviderInvOptions, ProviderLinsolveOptions, ProviderLinsolveResult, ProviderLuResult,
+    ProviderMeshgridResult, ProviderNanMode, ProviderNormOrder, ProviderPinvOptions,
+    ProviderPolyderQuotient, ProviderPolyfitResult, ProviderPolyvalOptions, ProviderPrecision,
+    ProviderQrOptions, ProviderQrPivot, ProviderQrPowerIterResult, ProviderQrResult,
+    ProviderScanDirection, ProviderStdNormalization, ProviderSymmetryKind, ReduceDimResult,
+    ReductionFlavor, ReductionTwoPassMode, SetdiffOptions, SetdiffResult, SortComparison,
+    SortOrder, SortResult, SortRowsColumnSpec, UnionOptions, UnionResult, UniqueOptions,
+    UniqueResult, WgpuBufferRef, WgpuContextHandle,
 };
 use runmat_builtins::{Tensor, Value};
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
@@ -176,6 +176,7 @@ struct BufferEntry {
     buffer: Arc<wgpu::Buffer>,
     len: usize,
     shape: Vec<usize>,
+    storage: GpuTensorStorage,
     precision: NumericPrecision,
     usage: BufferUsageClass,
     last_submission_id: Option<u32>,
@@ -2837,11 +2838,44 @@ impl WgpuProvider {
         self.register_existing_buffer_with_usage(buffer, shape, len, BufferUsageClass::Generic)
     }
 
+    fn register_existing_buffer_with_storage(
+        &self,
+        buffer: Arc<wgpu::Buffer>,
+        shape: Vec<usize>,
+        len: usize,
+        storage: GpuTensorStorage,
+    ) -> GpuTensorHandle {
+        self.register_existing_buffer_with_usage_and_storage(
+            buffer,
+            shape,
+            len,
+            storage,
+            BufferUsageClass::Generic,
+        )
+    }
+
     fn register_existing_buffer_with_usage(
         &self,
         buffer: Arc<wgpu::Buffer>,
         shape: Vec<usize>,
         len: usize,
+        usage: BufferUsageClass,
+    ) -> GpuTensorHandle {
+        self.register_existing_buffer_with_usage_and_storage(
+            buffer,
+            shape,
+            len,
+            GpuTensorStorage::Real,
+            usage,
+        )
+    }
+
+    fn register_existing_buffer_with_usage_and_storage(
+        &self,
+        buffer: Arc<wgpu::Buffer>,
+        shape: Vec<usize>,
+        len: usize,
+        storage: GpuTensorStorage,
         usage: BufferUsageClass,
     ) -> GpuTensorHandle {
         let id = self
@@ -2851,6 +2885,7 @@ impl WgpuProvider {
             buffer,
             len,
             shape: shape.clone(),
+            storage: storage.clone(),
             precision: self.precision,
             usage,
             last_submission_id: None,
@@ -2866,6 +2901,7 @@ impl WgpuProvider {
             buffer_id: id,
         };
         runmat_accelerate_api::set_handle_logical(&handle, false);
+        runmat_accelerate_api::set_handle_storage(&handle, storage);
         runmat_accelerate_api::clear_handle_transpose(&handle);
         handle
     }
@@ -3405,6 +3441,7 @@ impl WgpuProvider {
                 buffer: entry.buffer.clone(),
                 len: entry.len,
                 shape: entry.shape.clone(),
+                storage: entry.storage.clone(),
                 precision: entry.precision,
                 usage: entry.usage,
                 last_submission_id: entry.last_submission_id,
@@ -5864,8 +5901,9 @@ impl WgpuProvider {
         handle: &GpuTensorHandle,
         offset: isize,
     ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { mut data, shape } =
-            <Self as AccelProvider>::download(self, handle).await?;
+        let HostTensorOwned {
+            mut data, shape, ..
+        } = <Self as AccelProvider>::download(self, handle).await?;
         apply_tril_mask_host(&mut data, &shape, offset)?;
         let view = HostTensorView {
             data: &data,
@@ -6005,8 +6043,9 @@ impl WgpuProvider {
         handle: &GpuTensorHandle,
         offset: isize,
     ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { mut data, shape } =
-            <Self as AccelProvider>::download(self, handle).await?;
+        let HostTensorOwned {
+            mut data, shape, ..
+        } = <Self as AccelProvider>::download(self, handle).await?;
         apply_triu_mask_host(&mut data, &shape, offset)?;
         let view = HostTensorView {
             data: &data,
@@ -13790,10 +13829,12 @@ impl AccelProvider for WgpuProvider {
                 values: HostTensorOwned {
                     data: values,
                     shape: shape.clone(),
+                    storage: GpuTensorStorage::Real,
                 },
                 indices: HostTensorOwned {
                     data: indices,
                     shape,
+                    storage: GpuTensorStorage::Real,
                 },
             })
         })
@@ -13815,10 +13856,12 @@ impl AccelProvider for WgpuProvider {
                 values: HostTensorOwned {
                     data: values,
                     shape: host.shape.clone(),
+                    storage: GpuTensorStorage::Real,
                 },
                 indices: HostTensorOwned {
                     data: indices,
                     shape: indices_shape,
+                    storage: GpuTensorStorage::Real,
                 },
             })
         })
@@ -13947,7 +13990,7 @@ impl AccelProvider for WgpuProvider {
     ) -> AccelProviderFuture<'a, UniqueResult> {
         Box::pin(async move {
             let host = <Self as AccelProvider>::download(self, handle).await?;
-            let HostTensorOwned { data, shape } = host;
+            let HostTensorOwned { data, shape, .. } = host;
             let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("unique: {e}"))?;
             let eval = match runmat_runtime::builtins::array::sorting_sets::unique::unique_numeric_from_tensor(
                 tensor, options,
@@ -15247,10 +15290,12 @@ impl AccelProvider for WgpuProvider {
             let HostTensorOwned {
                 data: lhs_data,
                 shape: lhs_shape,
+                ..
             } = <Self as AccelProvider>::download(self, lhs).await?;
             let HostTensorOwned {
                 data: rhs_data,
                 shape: rhs_shape,
+                ..
             } = <Self as AccelProvider>::download(self, rhs).await?;
 
             let lhs_tensor =
@@ -15282,7 +15327,7 @@ impl AccelProvider for WgpuProvider {
         _options: ProviderInvOptions,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let HostTensorOwned { data, shape } =
+            let HostTensorOwned { data, shape, .. } =
                 <Self as AccelProvider>::download(self, matrix).await?;
             let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("inv: {e}"))?;
             let result = inv_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
@@ -15299,7 +15344,7 @@ impl AccelProvider for WgpuProvider {
         options: ProviderPinvOptions,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let HostTensorOwned { data, shape } =
+            let HostTensorOwned { data, shape, .. } =
                 <Self as AccelProvider>::download(self, matrix).await?;
             let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("pinv: {e}"))?;
             let result = pinv_host_real_for_provider(&tensor, options.tolerance)
@@ -15317,7 +15362,7 @@ impl AccelProvider for WgpuProvider {
         norm: ProviderCondNorm,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let HostTensorOwned { data, shape } =
+            let HostTensorOwned { data, shape, .. } =
                 <Self as AccelProvider>::download(self, matrix).await?;
             let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("cond: {e}"))?;
             let cond_value =
@@ -15337,7 +15382,7 @@ impl AccelProvider for WgpuProvider {
         order: ProviderNormOrder,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let HostTensorOwned { data, shape } =
+            let HostTensorOwned { data, shape, .. } =
                 <Self as AccelProvider>::download(self, tensor).await?;
             let host_tensor = Tensor::new(data, shape).map_err(|e| anyhow!("norm: {e}"))?;
             let value =
@@ -15357,7 +15402,7 @@ impl AccelProvider for WgpuProvider {
         tolerance: Option<f64>,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let HostTensorOwned { data, shape } =
+            let HostTensorOwned { data, shape, .. } =
                 <Self as AccelProvider>::download(self, matrix).await?;
             let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("rank: {e}"))?;
             let rank =
@@ -15376,7 +15421,7 @@ impl AccelProvider for WgpuProvider {
         matrix: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         Box::pin(async move {
-            let HostTensorOwned { data, shape } =
+            let HostTensorOwned { data, shape, .. } =
                 <Self as AccelProvider>::download(self, matrix).await?;
             let tensor = Tensor::new(data, shape).map_err(|e| anyhow!("rcond: {e}"))?;
             let estimate = rcond_host_real_for_provider(&tensor).map_err(|e| anyhow!("{e}"))?;
@@ -15406,10 +15451,12 @@ impl AccelProvider for WgpuProvider {
             let HostTensorOwned {
                 data: lhs_data,
                 shape: lhs_shape,
+                ..
             } = <Self as AccelProvider>::download(self, lhs).await?;
             let HostTensorOwned {
                 data: rhs_data,
                 shape: rhs_shape,
+                ..
             } = <Self as AccelProvider>::download(self, rhs).await?;
 
             let lhs_tensor =
@@ -15445,10 +15492,12 @@ impl AccelProvider for WgpuProvider {
             let HostTensorOwned {
                 data: lhs_data,
                 shape: lhs_shape,
+                ..
             } = <Self as AccelProvider>::download(self, lhs).await?;
             let HostTensorOwned {
                 data: rhs_data,
                 shape: rhs_shape,
+                ..
             } = <Self as AccelProvider>::download(self, rhs).await?;
 
             let lhs_tensor =
@@ -16445,6 +16494,7 @@ impl AccelProvider for WgpuProvider {
                 return Ok(HostTensorOwned {
                     data: Vec::new(),
                     shape: h.shape.clone(),
+                    storage: runmat_accelerate_api::handle_storage(h),
                 });
             }
 
@@ -16511,7 +16561,11 @@ impl AccelProvider for WgpuProvider {
                         shape
                     );
 
-                    Ok(HostTensorOwned { data: out, shape })
+                    Ok(HostTensorOwned {
+                        data: out,
+                        shape,
+                        storage: runmat_accelerate_api::handle_storage(h),
+                    })
                 };
 
             log::trace!(
@@ -16584,6 +16638,7 @@ impl AccelProvider for WgpuProvider {
         }
         self.kernel_resources.clear_matmul_source(h.buffer_id);
         runmat_accelerate_api::clear_handle_logical(h);
+        runmat_accelerate_api::clear_handle_storage(h);
         runmat_accelerate_api::clear_handle_transpose(h);
         Ok(())
     }

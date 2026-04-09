@@ -1,8 +1,8 @@
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::tensor;
 use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
 use num_complex::Complex;
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorOwned};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
 use rustfft::FftPlanner;
 use std::borrow::Cow;
@@ -168,8 +168,12 @@ pub fn host_to_complex_tensor(
     host: HostTensorOwned,
     builtin: &str,
 ) -> BuiltinResult<ComplexTensor> {
-    let HostTensorOwned { data, shape } = host;
-    if shape.last() == Some(&2) {
+    let HostTensorOwned {
+        data,
+        shape,
+        storage,
+    } = host;
+    if storage == GpuTensorStorage::ComplexInterleaved {
         if data.len() % 2 != 0 {
             return Err(builtin_error(
                 builtin,
@@ -198,16 +202,18 @@ pub async fn gather_gpu_complex_tensor(
     handle: &GpuTensorHandle,
     builtin: &str,
 ) -> BuiltinResult<ComplexTensor> {
-    let tensor = gpu_helpers::gather_tensor_async(handle).await?;
-    if tensor.shape.last() == Some(&2) {
-        let host = HostTensorOwned {
-            data: tensor.data,
-            shape: tensor.shape,
-        };
-        host_to_complex_tensor(host, builtin)
-    } else {
-        tensor_to_complex_tensor(tensor, builtin)
-    }
+    let provider = runmat_accelerate_api::provider_for_handle(handle)
+        .or_else(runmat_accelerate_api::provider)
+        .ok_or_else(|| {
+            builtin_error(
+                builtin,
+                format!("{builtin}: no acceleration provider registered"),
+            )
+        })?;
+    let host = download_handle_async(provider, handle)
+        .await
+        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
+    host_to_complex_tensor(host, builtin)
 }
 
 pub async fn download_provider_complex_tensor(

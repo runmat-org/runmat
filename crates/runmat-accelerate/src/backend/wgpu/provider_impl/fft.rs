@@ -1,7 +1,7 @@
 use anyhow::{anyhow, ensure, Result};
 use bytemuck::{bytes_of, cast_slice, Pod};
 use num_complex::Complex;
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorOwned, HostTensorView};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned};
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 use rustfft::FftPlanner;
 use std::sync::Arc;
@@ -351,10 +351,8 @@ impl WgpuProvider {
         }
         let entry = self.get_entry(handle)?;
         let mut shape = handle.shape.clone();
-        let complex_axis = shape.last() == Some(&2);
-        if complex_axis {
-            shape.pop();
-        }
+        let complex_axis =
+            runmat_accelerate_api::handle_storage(handle) == GpuTensorStorage::ComplexInterleaved;
         if shape.is_empty() {
             let scalar_len = if complex_axis {
                 entry.len / 2
@@ -387,10 +385,13 @@ impl WgpuProvider {
         }
         if target_len == 0 || num_slices == 0 {
             fft_trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
-            let mut packed_shape = out_shape;
-            packed_shape.push(2);
             let buffer = self.create_storage_buffer(0, "runmat-fft-empty-native");
-            return Ok(Some(self.register_existing_buffer(buffer, packed_shape, 0)));
+            return Ok(Some(self.register_existing_buffer_with_storage(
+                buffer,
+                out_shape,
+                0,
+                GpuTensorStorage::ComplexInterleaved,
+            )));
         }
 
         let total_out = target_len.saturating_mul(num_slices);
@@ -738,12 +739,11 @@ impl WgpuProvider {
         self.fft_debug_dump_scalar_buffer("stage2:after_reorder", &stage_b, out_scalar_len);
 
         fft_trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
-        let mut packed_shape = out_shape;
-        packed_shape.push(2);
-        Ok(Some(self.register_existing_buffer(
+        Ok(Some(self.register_existing_buffer_with_storage(
             stage_b,
-            packed_shape,
+            out_shape,
             out_scalar_len,
+            GpuTensorStorage::ComplexInterleaved,
         )))
     }
 
@@ -778,8 +778,6 @@ impl WgpuProvider {
 
         let mut ext_shape = shape.clone();
         ext_shape[dim] = m_len;
-        let mut ext_shape_packed = ext_shape.clone();
-        ext_shape_packed.push(2);
 
         let m_total = m_len
             .checked_mul(num_slices)
@@ -928,9 +926,18 @@ impl WgpuProvider {
             boff += chunk_len;
         }
 
-        let a_handle =
-            self.register_existing_buffer(a_buffer, ext_shape_packed.clone(), m_out_scalar_len);
-        let b_handle = self.register_existing_buffer(b_buffer, vec![m_len, 2], b_scalar_len);
+        let a_handle = self.register_existing_buffer_with_storage(
+            a_buffer,
+            ext_shape.clone(),
+            m_out_scalar_len,
+            GpuTensorStorage::ComplexInterleaved,
+        );
+        let b_handle = self.register_existing_buffer_with_storage(
+            b_buffer,
+            vec![m_len],
+            b_scalar_len,
+            GpuTensorStorage::ComplexInterleaved,
+        );
         let Some(a_fft) = self.try_fft_dim_exec_native(&a_handle, Some(m_len), dim, false)? else {
             return Ok(None);
         };
@@ -995,8 +1002,12 @@ impl WgpuProvider {
             poff += chunk_len;
         }
 
-        let c_fft_handle =
-            self.register_existing_buffer(c_fft_buf, ext_shape_packed.clone(), m_out_scalar_len);
+        let c_fft_handle = self.register_existing_buffer_with_storage(
+            c_fft_buf,
+            ext_shape.clone(),
+            m_out_scalar_len,
+            GpuTensorStorage::ComplexInterleaved,
+        );
         let Some(c_time) = self.try_fft_dim_exec_native(&c_fft_handle, Some(m_len), dim, true)?
         else {
             return Ok(None);
@@ -1067,11 +1078,11 @@ impl WgpuProvider {
         let mut out_shape = shape;
         out_shape[dim] = target_len;
         fft_trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
-        out_shape.push(2);
-        Ok(Some(self.register_existing_buffer(
+        Ok(Some(self.register_existing_buffer_with_storage(
             out_buffer,
             out_shape,
             out_scalar_len,
+            GpuTensorStorage::ComplexInterleaved,
         )))
     }
 
@@ -1406,11 +1417,11 @@ impl WgpuProvider {
 
         shape[dim] = target_len;
         fft_trim_trailing_ones(&mut shape, origin_rank.max(dim + 1));
-        shape.push(2);
-        Ok(Some(self.register_existing_buffer(
+        Ok(Some(self.register_existing_buffer_with_storage(
             stage_b,
             shape,
             out_scalar_len,
+            GpuTensorStorage::ComplexInterleaved,
         )))
     }
 
@@ -1625,11 +1636,11 @@ impl WgpuProvider {
 
         shape[dim] = target_len;
         fft_trim_trailing_ones(&mut shape, origin_rank.max(dim + 1));
-        shape.push(2);
-        Ok(Some(self.register_existing_buffer(
+        Ok(Some(self.register_existing_buffer_with_storage(
             stage_b,
             shape,
             out_scalar_len,
+            GpuTensorStorage::ComplexInterleaved,
         )))
     }
 
@@ -1824,11 +1835,11 @@ impl WgpuProvider {
 
         shape[dim] = target_len;
         fft_trim_trailing_ones(&mut shape, origin_rank.max(dim + 1));
-        shape.push(2);
-        Ok(Some(self.register_existing_buffer(
+        Ok(Some(self.register_existing_buffer_with_storage(
             stage_b,
             shape,
             out_scalar_len,
+            GpuTensorStorage::ComplexInterleaved,
         )))
     }
 
@@ -1840,12 +1851,14 @@ impl WgpuProvider {
         dim: usize,
         inverse: bool,
     ) -> Result<GpuTensorHandle> {
-        let HostTensorOwned { data, mut shape } =
-            <Self as AccelProvider>::download(self, handle).await?;
+        let HostTensorOwned {
+            data,
+            mut shape,
+            storage,
+        } = <Self as AccelProvider>::download(self, handle).await?;
         let mut complex_axis = false;
-        if shape.last() == Some(&2) {
+        if storage == GpuTensorStorage::ComplexInterleaved {
             complex_axis = true;
-            shape.pop();
         }
         if shape.is_empty() {
             if complex_axis {
@@ -1883,10 +1896,13 @@ impl WgpuProvider {
 
         if target_len == 0 || num_slices == 0 {
             fft_trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
-            let mut packed_shape = out_shape.clone();
-            packed_shape.push(2);
             let buffer = self.create_storage_buffer(0, "runmat-fft-empty");
-            return Ok(self.register_existing_buffer(buffer, packed_shape, 0));
+            return Ok(self.register_existing_buffer_with_storage(
+                buffer,
+                out_shape,
+                0,
+                GpuTensorStorage::ComplexInterleaved,
+            ));
         }
 
         let total_elems = shape
@@ -1950,20 +1966,29 @@ impl WgpuProvider {
         }
 
         fft_trim_trailing_ones(&mut out_shape, origin_rank.max(dim + 1));
-        let mut packed_shape = out_shape.clone();
-        packed_shape.push(2);
-
         let mut packed = Vec::with_capacity(output.len() * 2);
         for complex in output {
             packed.push(complex.re);
             packed.push(complex.im);
         }
 
-        let view = HostTensorView {
-            data: &packed,
-            shape: &packed_shape,
-        };
-        let result = self.upload(&view)?;
-        Ok(result)
+        let buffer = self.create_storage_buffer(packed.len(), "runmat-fft-host-fallback-out");
+        match self.precision {
+            NumericPrecision::F64 => {
+                self.queue_ref()
+                    .write_buffer(buffer.as_ref(), 0, cast_slice(&packed))
+            }
+            NumericPrecision::F32 => {
+                let packed32: Vec<f32> = packed.iter().map(|&v| v as f32).collect();
+                self.queue_ref()
+                    .write_buffer(buffer.as_ref(), 0, cast_slice(&packed32));
+            }
+        }
+        Ok(self.register_existing_buffer_with_storage(
+            buffer,
+            out_shape,
+            packed.len(),
+            GpuTensorStorage::ComplexInterleaved,
+        ))
     }
 }

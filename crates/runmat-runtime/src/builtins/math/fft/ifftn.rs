@@ -91,9 +91,6 @@ async fn ifftn_gpu(
         let mut current = handle.clone();
         let mut ok = true;
         let mut logical_shape = current.shape.clone();
-        if logical_shape.last() == Some(&2) {
-            logical_shape.pop();
-        }
         if logical_shape.is_empty() {
             logical_shape.push(1);
         }

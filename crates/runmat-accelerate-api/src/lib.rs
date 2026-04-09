@@ -29,6 +29,8 @@ static TRANSPOSED_HANDLES: Lazy<RwLock<HashMap<u64, TransposeInfo>>> =
 
 static HANDLE_PRECISIONS: Lazy<RwLock<HashMap<u64, ProviderPrecision>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+static HANDLE_STORAGES: Lazy<RwLock<HashMap<u64, GpuTensorStorage>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TransposeInfo {
@@ -184,6 +186,18 @@ pub fn handle_is_transposed(handle: &GpuTensorHandle) -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum GpuTensorStorage {
+    Real,
+    ComplexInterleaved,
+}
+
+impl Default for GpuTensorStorage {
+    fn default() -> Self {
+        Self::Real
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GpuTensorHandle {
     pub shape: Vec<usize>,
     pub device_id: u32,
@@ -262,6 +276,26 @@ pub struct WgpuBufferRef {
     pub shape: Vec<usize>,
     pub element_size: usize,
     pub precision: ProviderPrecision,
+}
+
+pub fn set_handle_storage(handle: &GpuTensorHandle, storage: GpuTensorStorage) {
+    if let Ok(mut guard) = HANDLE_STORAGES.write() {
+        guard.insert(handle.buffer_id, storage);
+    }
+}
+
+pub fn handle_storage(handle: &GpuTensorHandle) -> GpuTensorStorage {
+    HANDLE_STORAGES
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(&handle.buffer_id).cloned())
+        .unwrap_or(GpuTensorStorage::Real)
+}
+
+pub fn clear_handle_storage(handle: &GpuTensorHandle) {
+    if let Ok(mut guard) = HANDLE_STORAGES.write() {
+        guard.remove(&handle.buffer_id);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -2518,6 +2552,7 @@ pub async fn try_elem_atan2(y: &GpuTensorHandle, x: &GpuTensorHandle) -> Option<
 pub struct HostTensorOwned {
     pub data: Vec<f64>,
     pub shape: Vec<usize>,
+    pub storage: GpuTensorStorage,
 }
 
 #[derive(Debug)]
