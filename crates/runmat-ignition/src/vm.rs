@@ -2563,8 +2563,12 @@ async fn run_interpreter_inner(
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 match (&a, &b) {
                     (Value::Object(obj), _) => {
-                        let args = vec![Value::Object(obj.clone()), b.clone()];
-                        match call_builtin_vm!("minus", &args) {
+                        let args = vec![
+                            Value::Object(obj.clone()),
+                            Value::String("minus".to_string()),
+                            b.clone(),
+                        ];
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let v = call_builtin_vm!("minus", &[a.clone(), b.clone()])?;
@@ -2573,8 +2577,12 @@ async fn run_interpreter_inner(
                         }
                     }
                     (_, Value::Object(obj)) => {
-                        let args = vec![Value::Object(obj.clone()), a.clone()];
-                        match call_builtin_vm!("uminus", &args) {
+                        let args = vec![
+                            Value::Object(obj.clone()),
+                            Value::String("minus".to_string()),
+                            a.clone(),
+                        ];
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let v = call_builtin_vm!("minus", &[a.clone(), b.clone()])?;

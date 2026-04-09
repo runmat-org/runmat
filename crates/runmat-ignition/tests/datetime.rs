@@ -69,3 +69,35 @@ fn datetime_comparisons_and_format_assignment_work() {
         _ => false,
     }));
 }
+
+#[test]
+fn datetime_addition_and_subtraction_return_day_deltas() {
+    let ast = parse(
+        "t0 = datetime(2024, 4, 9); \
+         t1 = t0 + 7; \
+         delta = t1 - t0;",
+    )
+    .unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(n) if (*n - 7.0).abs() < f64::EPSILON)));
+}
+
+#[test]
+fn datetime_subtraction_between_scalars_uses_object_overload_path() {
+    let ast = parse(
+        "t0 = datetime(2024, 4, 9); \
+         t1 = datetime(2024, 4, 16); \
+         delta = t1 - t0;",
+    )
+    .unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+
+    assert!(vars
+        .iter()
+        .any(|value| matches!(value, Value::Num(n) if (*n - 7.0).abs() < f64::EPSILON)));
+}
