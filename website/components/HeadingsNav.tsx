@@ -22,8 +22,11 @@ function extractHeadings(md: string): TocHeading[] {
   return out;
 }
 
-export function HeadingsNav({ source }: { source: string }) {
-  const headings = useMemo(() => extractHeadings(source), [source]);
+export function HeadingsNav({ source, maxDepth }: { source: string; maxDepth?: number }) {
+  const headings = useMemo(() => {
+    const all = extractHeadings(source);
+    return maxDepth ? all.filter((h) => h.depth <= maxDepth) : all;
+  }, [source, maxDepth]);
   return <OnThisPageNav headings={headings} />;
 }
 

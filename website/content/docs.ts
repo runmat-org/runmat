@@ -181,6 +181,17 @@ export const docsTree: DocsNode[] = [
   {
     title: "Meta",
     children: [
+      {
+        title: "Changelog",
+        slug: ["changelog"],
+        file: "docs/CHANGELOG.md",
+        seo: {
+          description: "What's new across the RunMat runtime, cloud, and sandbox — release notes, bug fixes, and new features.",
+          keywords: ["changelog", "release notes", "what's new", "RunMat updates", "version history"],
+          ogTitle: "RunMat Changelog",
+          ogDescription: "Track every update to the RunMat runtime, cloud, and sandbox.",
+        },
+      },
       { title: "License", slug: ["license"], file: "LICENSE.md", seo: { description: "RunMat software license." } },
       { title: "Terms and Conditions", slug: ["terms"], file: "docs/TERMS.md", seo: { description: "Dystr Terms and Conditions governing the use of the RunMat platform and related services.", keywords: ["terms and conditions", "terms of service", "legal", "RunMat", "Dystr"] } },
       { title: "Telemetry", slug: ["telemetry"], file: "docs/TELEMETRY.md", seo: { description: "RunMat telemetry: what information is collected and how it is used." } },

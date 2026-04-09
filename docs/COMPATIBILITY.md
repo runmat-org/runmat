@@ -24,13 +24,13 @@ Full details: [Language Coverage](/docs/language-coverage)
 
 ## Built-in functions
 
-RunMat includes 300+ core MATLAB built-in functions covering math, linear algebra, array creation and manipulation, string operations, file I/O, and more.
+RunMat includes 300+ core MATLAB built-in functions covering math, linear algebra, array creation and manipulation, string operations, file I/O, and more. Notable additions include `peaks` (GPU-accelerated), `clear`/`clc`/`close all` session management, and full `mldivide` (backslash) linear system solving.
 
 Browse the complete list: [Built-in Function Reference](/docs/matlab-function-reference)
 
 ## Plotting
 
-RunMat includes 36 plotting builtins with GPU-first rendering, interactive 3D camera, theming, and scene persistence.
+RunMat includes 40+ plotting builtins with GPU-first rendering, interactive 3D camera, theming, and scene persistence.
 
 **2D chart types:** `plot`, `scatter`, `bar`, `histogram`, `hist`, `area`, `stairs`, `stem`, `errorbar`, `pie`, `contour`, `contourf`, `image`, `imagesc`, `quiver`
 
