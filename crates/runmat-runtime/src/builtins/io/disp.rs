@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::char_row_to_string;
-use crate::console::{record_console_output, ConsoleStream};
+use crate::console::{record_console_line, ConsoleStream};
 use crate::gather_if_needed_async;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::disp")]
@@ -84,13 +84,8 @@ async fn disp_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         .map_err(|e| format!("disp: {e}"))?;
     let lines = format_for_disp(&host_value);
 
-    if lines.is_empty() {
-        record_console_output(ConsoleStream::Stdout, "");
-    } else {
-        for line in lines {
-            record_console_output(ConsoleStream::Stdout, line.as_str());
-        }
-    }
+    let body = lines.join("\n");
+    record_console_line(ConsoleStream::Stdout, body);
 
     Ok(empty_return_value())
 }

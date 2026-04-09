@@ -33,3 +33,11 @@ Elementwise chains represent one of the most common patterns in numerical comput
 - **Scalar options:** Remember that `single(x)`, `double(x)`, and logical casts are respected, but if you mix precisions the active provider must support the wider type (double on GPUs that expose it).
 
 If a workload should fuse but does not, enable `RUNMAT_DEBUG_FUSION=1` to have the planner print why a node was rejected, then compare against the criteria above.
+
+---
+
+## Related
+
+- [Introduction to RunMat Fusion](/docs/accelerate/fusion-intro) -- how RunMat manages GPU data residency.
+- [GPU Residency and Precision](/docs/accelerate/gpu-behavior) -- residency rules and precision guarantees.
+- [Reductions](/docs/fusion/reduction) -- fused sum, mean, and similar column/row reductions.

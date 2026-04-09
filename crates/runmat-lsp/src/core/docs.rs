@@ -147,10 +147,6 @@ fn render_builtin_hover_from_json(
         if let Some(category) = doc.category.as_deref().filter(|s| !s.trim().is_empty()) {
             let _ = writeln!(out, "**Category:** {category}\n");
         }
-        if let Some(keywords) = doc.keywords.as_ref().filter(|k| !k.is_empty()) {
-            let joined = keywords.join(", ");
-            let _ = writeln!(out, "**Keywords:** {joined}\n");
-        }
 
         if let Some(description) = description {
             let normalized = normalize_markdown(description.to_string());
@@ -309,9 +305,6 @@ pub fn build_builtin_hover(func: &BuiltinFunction) -> String {
         }
         if let Some(category) = meta.category {
             let _ = writeln!(out, "**Category:** {category}");
-        }
-        if let Some(keywords) = meta.keywords {
-            let _ = writeln!(out, "**Keywords:** {keywords}");
         }
         if let Some(errors) = meta.errors {
             let _ = writeln!(out, "**Errors:** {errors}");

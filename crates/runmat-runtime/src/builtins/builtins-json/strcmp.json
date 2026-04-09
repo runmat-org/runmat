@@ -17,7 +17,7 @@
     "reduction": false,
     "precisions": [],
     "broadcasting": "matlab",
-    "notes": "Executes on the CPU; GPU-resident inputs are gathered automatically so results match MATLAB behaviour exactly."
+    "notes": "Executes on the CPU; GPU-resident inputs are gathered automatically so results match MATLAB behaviour."
   },
   "fusion": {
     "elementwise": false,

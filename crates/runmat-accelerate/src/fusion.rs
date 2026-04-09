@@ -221,14 +221,13 @@ pub fn detect_fusion_groups(graph: &AccelGraph) -> Vec<FusionGroup> {
             if !next.is_elementwise() {
                 break;
             }
-            // Allow only primitive elementwise ops we can fold: add/sub/mul/div/elem variants
+            // Allow only primitive elementwise ops we can fold: add/sub/mul and elementwise divide
             let allowed = matches!(
                 next.label,
                 AccelNodeLabel::Primitive(PrimitiveOp::Add)
                     | AccelNodeLabel::Primitive(PrimitiveOp::Sub)
                     | AccelNodeLabel::Primitive(PrimitiveOp::Mul)
                     | AccelNodeLabel::Primitive(PrimitiveOp::ElemMul)
-                    | AccelNodeLabel::Primitive(PrimitiveOp::Div)
                     | AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv)
             );
             if !allowed {
@@ -825,7 +824,7 @@ fn log_plan_stack_pattern(stage: &str, plan: &FusionGroupPlan, graph: &AccelGrap
             pattern_meta.push(format!("#{}:input_idx={} vid=<missing>", pos, input_idx));
         }
     }
-    log::debug!(
+    log::trace!(
         "fusion plan {} {} stack_pattern={:?} meta={:?}",
         plan.index,
         stage,
@@ -902,7 +901,7 @@ impl FusionGroupPlan {
 
                     if fusion_debug_enabled() {
                         let origin = graph.value(*input).map(|v| v.origin.clone());
-                        log::debug!(
+                        log::trace!(
                             "fusion plan #{:?} consider input vid={} origin={:?} binding={:?} newly_added={} is_variable={} stack_candidate={}",
                             index,
                             input,
@@ -929,7 +928,7 @@ impl FusionGroupPlan {
                         if allow_stack {
                             stack_pattern.push(input_idx);
                         } else if fusion_debug_enabled() {
-                            log::debug!(
+                            log::trace!(
                                 "fusion plan {} skipping stack candidate vid={} origin_after_span",
                                 index,
                                 input
@@ -1089,7 +1088,6 @@ impl FusionGroupPlan {
                         match &node.label {
                             AccelNodeLabel::Primitive(PrimitiveOp::Mul)
                             | AccelNodeLabel::Primitive(PrimitiveOp::ElemMul)
-                            | AccelNodeLabel::Primitive(PrimitiveOp::Div)
                             | AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv)
                             | AccelNodeLabel::Primitive(PrimitiveOp::ElemLeftDiv)
                             | AccelNodeLabel::Primitive(PrimitiveOp::Add)
@@ -1819,7 +1817,7 @@ fn detect_centered_gram(
             AccelNodeLabel::Primitive(op) => op,
             _ => continue,
         };
-        if div_op != PrimitiveOp::Div && div_op != PrimitiveOp::ElemDiv {
+        if div_op != PrimitiveOp::ElemDiv {
             continue;
         }
         if div_node.inputs.len() != 2 {
@@ -2094,7 +2092,7 @@ fn detect_power_step_normalize(
             AccelNodeLabel::Primitive(op) => op,
             _ => continue,
         };
-        if div_op != PrimitiveOp::Div && div_op != PrimitiveOp::ElemDiv {
+        if div_op != PrimitiveOp::ElemDiv {
             continue;
         }
         if div_node.inputs.len() != 2 {
@@ -2599,7 +2597,7 @@ fn primitive_expr(
             let (lhs, rhs) = binary(exprs)?;
             Some(format!("({lhs} * {rhs})"))
         }
-        PrimitiveOp::Div | PrimitiveOp::ElemDiv | PrimitiveOp::ElemLeftDiv => {
+        PrimitiveOp::ElemDiv | PrimitiveOp::ElemLeftDiv => {
             let (lhs, rhs) = binary(exprs)?;
             Some(format!("({lhs} / {rhs})"))
         }
@@ -3002,8 +3000,7 @@ fn analyze_image_normalize(
         img_norm_fail!("div node already assigned");
     }
     match div_node.label {
-        AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv)
-        | AccelNodeLabel::Primitive(PrimitiveOp::Div) => {}
+        AccelNodeLabel::Primitive(PrimitiveOp::ElemDiv) => {}
         _ => img_norm_fail!("not div primitive"),
     }
     if div_node.inputs.len() != 2 {

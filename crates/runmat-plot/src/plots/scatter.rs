@@ -380,6 +380,7 @@ impl ScatterPlot {
     pub fn render_data(&mut self) -> RenderData {
         let using_gpu = self.gpu_vertices.is_some();
         let gpu_vertices = self.gpu_vertices.clone();
+        let bounds = self.bounds();
         let (vertices, vertex_count) = if using_gpu {
             let count = self
                 .gpu_point_count
@@ -445,7 +446,7 @@ impl ScatterPlot {
             vertices,
             indices: None,
             gpu_vertices,
-            bounds: None,
+            bounds: Some(bounds),
             material,
             draw_calls: vec![draw_call],
             image: None,

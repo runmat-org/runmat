@@ -65,6 +65,44 @@ fn function_scope_shadows_outer_variable() {
 }
 
 #[test]
+fn function_output_reuses_param_binding_when_names_match() {
+    let ast = parse("function x = bump(x); y = x; x = x + 1; end").unwrap();
+    let hir = lower(&ast, &LoweringContext::empty()).unwrap().hir;
+    let HirStmt::Function {
+        params,
+        outputs,
+        body,
+        ..
+    } = &hir.body[0]
+    else {
+        panic!("expected function");
+    };
+    assert_eq!(params.len(), 1);
+    assert_eq!(outputs.len(), 1);
+    assert_eq!(params[0], outputs[0]);
+
+    let HirStmt::Assign(_, first_expr, _, _) = &body[0] else {
+        panic!("expected first assignment");
+    };
+    let HirExprKind::Var(first_read) = first_expr.kind else {
+        panic!("expected body read to resolve to shared var");
+    };
+    assert_eq!(first_read, params[0]);
+
+    let HirStmt::Assign(assign_id, second_expr, _, _) = &body[1] else {
+        panic!("expected second assignment");
+    };
+    assert_eq!(*assign_id, params[0]);
+    let HirExprKind::Binary(left, _, _) = &second_expr.kind else {
+        panic!("expected binary update");
+    };
+    let HirExprKind::Var(update_read) = left.kind else {
+        panic!("expected update to read shared var");
+    };
+    assert_eq!(update_read, params[0]);
+}
+
+#[test]
 fn undefined_variable_in_function_errors() {
     let ast = parse("function y=f(); y=z; end").unwrap();
     assert!(lower(&ast, &LoweringContext::empty()).is_err());

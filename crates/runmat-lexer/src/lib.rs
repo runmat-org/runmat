@@ -218,6 +218,30 @@ pub fn tokenize_detailed(input: &str) -> Vec<SpannedToken> {
                 }
                 let span = lex.span();
 
+                if matches!(tok, Token::Dot) {
+                    let prev_is_adjacent_value = out
+                        .last()
+                        .map(|t| t.end == span.start && last_is_value_token(&t.token))
+                        .unwrap_or(false);
+                    if !prev_is_adjacent_value {
+                        let rem = lex.remainder();
+                        if let Some(len) = scan_leading_dot_float_suffix(rem) {
+                            let mut lexeme = format!(".{}", &rem[..len]);
+                            lexeme.retain(|c| c != '_');
+                            lex.bump(len);
+                            lex.extras.last_was_value = true;
+                            lex.extras.line_start = false;
+                            out.push(SpannedToken {
+                                token: Token::Float,
+                                lexeme,
+                                start: span.start,
+                                end: span.end + len,
+                            });
+                            continue;
+                        }
+                    }
+                }
+
                 // Handle contextual apostrophe before normal push logic
                 if matches!(tok, Token::Apostrophe) {
                     // Decide using adjacency + previous token category.
@@ -641,4 +665,53 @@ fn find_line_terminator(s: &str) -> Option<(usize, usize)> {
         }
     }
     None
+}
+
+fn scan_leading_dot_float_suffix(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut i = 0usize;
+    let mut saw_digit = false;
+
+    while i < bytes.len() {
+        match bytes[i] {
+            b'0'..=b'9' => {
+                saw_digit = true;
+                i += 1;
+            }
+            b'_' if i > 0 && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit() => {
+                i += 1;
+            }
+            _ => break,
+        }
+    }
+
+    if !saw_digit {
+        return None;
+    }
+
+    if i < bytes.len() && matches!(bytes[i], b'e' | b'E') {
+        let exp_start = i;
+        i += 1;
+        if i < bytes.len() && matches!(bytes[i], b'+' | b'-') {
+            i += 1;
+        }
+        let mut exp_digits = 0usize;
+        while i < bytes.len() {
+            match bytes[i] {
+                b'0'..=b'9' => {
+                    exp_digits += 1;
+                    i += 1;
+                }
+                b'_' if exp_digits > 0 && i + 1 < bytes.len() && bytes[i + 1].is_ascii_digit() => {
+                    i += 1;
+                }
+                _ => break,
+            }
+        }
+        if exp_digits == 0 {
+            i = exp_start;
+        }
+    }
+
+    Some(i)
 }

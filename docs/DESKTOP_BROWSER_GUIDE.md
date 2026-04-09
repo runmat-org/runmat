@@ -235,7 +235,7 @@ If WebGPU isn't available, RunMat falls back to CPU execution. You can still run
 
 Yes. RunMat supports standard `.m` file syntax. Many MATLAB scripts run with few or no changes.
 
-See the [Language Coverage](LANGUAGE_COVERAGE.md) guide for supported features.
+See the [Language Coverage](/docs/language-coverage) guide for supported features.
 
 ### How do I handle user input?
 

@@ -30,7 +30,7 @@
     "unit": "builtins::strings::transform::strrep::tests",
     "integration": "builtins::strings::transform::strrep::tests::strrep_cell_array_char_vectors, builtins::strings::transform::strrep::tests::strrep_wgpu_provider_fallback"
   },
-  "description": "`strrep(str, old, new)` replaces every non-overlapping instance of the substring `old` that appears in `str` with the text provided in `new`. The builtin accepts string scalars, string arrays, character arrays, and cell arrays of character vectors, matching MATLAB behaviour exactly.",
+  "description": "`strrep(str, old, new)` replaces every non-overlapping instance of the substring `old` that appears in `str` with the text provided in `new`. The builtin accepts string scalars, string arrays, character arrays, and cell arrays of character vectors, matching MATLAB behaviour.",
   "behaviors": [
     "String scalars remain strings. Missing string values (`<missing>`) propagate unchanged.",
     "String arrays are processed element-wise while preserving their full shape and orientation.",

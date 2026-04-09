@@ -1,7 +1,8 @@
 //! Contour plot implementation (iso-lines on a surface or base plane).
 
 use crate::core::{
-    BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData, Vertex,
+    vertex_utils, BoundingBox, DrawCall, GpuVertexBuffer, Material, PipelineType, RenderData,
+    Vertex,
 };
 use glam::{Vec3, Vec4};
 
@@ -10,6 +11,7 @@ pub struct ContourPlot {
     pub base_z: f32,
     pub label: Option<String>,
     pub visible: bool,
+    pub line_width: f32,
     vertices: Option<Vec<Vertex>>,
     gpu_vertices: Option<GpuVertexBuffer>,
     vertex_count: usize,
@@ -23,6 +25,7 @@ impl ContourPlot {
             base_z,
             label: None,
             visible: true,
+            line_width: 1.0,
             vertex_count: vertices.len(),
             vertices: Some(vertices),
             gpu_vertices: None,
@@ -41,6 +44,7 @@ impl ContourPlot {
             base_z,
             label: None,
             visible: true,
+            line_width: 1.0,
             vertex_count,
             vertices: None,
             gpu_vertices: Some(buffer),
@@ -57,6 +61,11 @@ impl ContourPlot {
         self.visible = visible;
     }
 
+    pub fn with_line_width(mut self, line_width: f32) -> Self {
+        self.line_width = line_width.max(0.5);
+        self
+    }
+
     pub fn vertices(&mut self) -> &Vec<Vertex> {
         if self.vertices.is_none() {
             self.vertices = Some(Vec::new());
@@ -68,18 +77,41 @@ impl ContourPlot {
         self.bounds.unwrap_or_default()
     }
 
-    pub fn render_data(&mut self) -> RenderData {
-        let using_gpu = self.gpu_vertices.is_some();
-        let (vertices, vertex_count, gpu_vertices) = if using_gpu {
-            (Vec::new(), self.vertex_count, self.gpu_vertices.clone())
+    pub fn cpu_vertices(&self) -> Option<&[Vertex]> {
+        self.vertices.as_deref()
+    }
+
+    pub fn render_data_with_viewport(&mut self, viewport_px: Option<(u32, u32)>) -> RenderData {
+        if self.gpu_vertices.is_some() {
+            return self.render_data();
+        }
+
+        let bounds = self.bounds();
+        let (vertices, vertex_count, pipeline_type) = if self.line_width > 1.0 {
+            let viewport_px = viewport_px.unwrap_or((600, 400));
+            let data_per_px = crate::core::data_units_per_px(&bounds, viewport_px);
+            let width_data = self.line_width.max(0.1) * data_per_px;
+            let verts = self.vertices().clone();
+            let mut thick = Vec::new();
+            for segment in verts.chunks_exact(2) {
+                let x = [segment[0].position[0] as f64, segment[1].position[0] as f64];
+                let y = [segment[0].position[1] as f64, segment[1].position[1] as f64];
+                let color = Vec4::from_array(segment[0].color);
+                thick.extend(vertex_utils::create_thick_polyline(
+                    &x, &y, color, width_data,
+                ));
+            }
+            let count = thick.len();
+            (thick, count, PipelineType::Triangles)
         } else {
             let verts = self.vertices().clone();
             let count = verts.len();
-            (verts, count, None)
+            (verts, count, PipelineType::Lines)
         };
 
         let material = Material {
             albedo: Vec4::ONE,
+            roughness: self.line_width.max(0.0),
             ..Default::default()
         };
 
@@ -92,11 +124,70 @@ impl ContourPlot {
         };
 
         RenderData {
-            pipeline_type: PipelineType::Lines,
+            pipeline_type,
+            vertices,
+            indices: None,
+            gpu_vertices: None,
+            bounds: Some(bounds),
+            material,
+            draw_calls: vec![draw_call],
+            image: None,
+        }
+    }
+
+    pub fn render_data(&mut self) -> RenderData {
+        let using_gpu = self.gpu_vertices.is_some();
+        let bounds = self.bounds();
+        let (vertices, vertex_count, gpu_vertices, pipeline_type) = if using_gpu {
+            (
+                Vec::new(),
+                self.vertex_count,
+                self.gpu_vertices.clone(),
+                PipelineType::Lines,
+            )
+        } else {
+            let verts = self.vertices().clone();
+            if self.line_width > 1.0 {
+                let mut thick = Vec::new();
+                for segment in verts.chunks_exact(2) {
+                    let x = [segment[0].position[0] as f64, segment[1].position[0] as f64];
+                    let y = [segment[0].position[1] as f64, segment[1].position[1] as f64];
+                    let color = Vec4::from_array(segment[0].color);
+                    thick.extend(vertex_utils::create_thick_polyline(
+                        &x,
+                        &y,
+                        color,
+                        self.line_width,
+                    ));
+                }
+                let count = thick.len();
+                (thick, count, None, PipelineType::Triangles)
+            } else {
+                let count = verts.len();
+                (verts, count, None, PipelineType::Lines)
+            }
+        };
+
+        let material = Material {
+            albedo: Vec4::ONE,
+            roughness: self.line_width.max(0.0),
+            ..Default::default()
+        };
+
+        let draw_call = DrawCall {
+            vertex_offset: 0,
+            vertex_count,
+            index_offset: None,
+            index_count: None,
+            instance_count: 1,
+        };
+
+        RenderData {
+            pipeline_type,
             vertices,
             indices: None,
             gpu_vertices,
-            bounds: None,
+            bounds: Some(bounds),
             material,
             draw_calls: vec![draw_call],
             image: None,

@@ -1,0 +1,72 @@
+{
+  "title": "stem",
+  "category": "plotting",
+  "keywords": [
+    "stem",
+    "stem plot",
+    "discrete signal plot",
+    "sequence visualization",
+    "matlab stem"
+  ],
+  "summary": "Create stem plots for discrete signals, sequence visualization, and MATLAB `stem` workflows.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`stem` has a dedicated GPU geometry path for stem segments and shared marker rendering for supported input combinations."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::stem::tests",
+    "integration": "runmat-plot/tests/renderer_tests.rs"
+  },
+  "description": "`stem` creates vertical stems from a baseline up to each sample value, making it a standard choice for discrete signals and sequence visualization. In RunMat it returns a first-class plot handle, supports MATLAB-style shorthand and explicit x/y forms, and uses the shared marker path so marker semantics stay aligned with the rest of the plotting system.",
+  "behaviors": [
+    "`stem(y)` uses implicit x-values `1:n`, while `stem(x, y)` uses explicit paired coordinates.",
+    "The returned value is a stem plot handle that works with `get` and `set`.",
+    "Baseline visibility, markers, fill behavior, display names, and line styling all flow through the shared plotting property model.",
+    "The plot remains subplot-local and composes naturally with legends and axes-local state.",
+    "GPU-backed geometry is used when plotting-compatible buffers are available, with marker rendering sharing the point/marker pipeline."
+  ],
+  "examples": [
+    {
+      "description": "Create a stem plot from y-values only",
+      "input": "stem([1 4 2 5 3]);"
+    },
+    {
+      "description": "Use explicit x-values and filled markers",
+      "input": "x = 0:5;\nh = stem(x, [0 1 0 2 0 3]);\nset(h, 'Filled', true, 'DisplayName', 'samples');\nlegend;"
+    },
+    {
+      "description": "Inspect a stem handle after plotting",
+      "input": "h = stem(1:5, [2 1 3 2 4]);\nget(h, 'Type')",
+      "output": "ans =\n    'stem'"
+    }
+  ],
+  "links": [
+    { "label": "stairs", "url": "./stairs" },
+    { "label": "errorbar", "url": "./errorbar" },
+    { "label": "legend", "url": "./legend" },
+    { "label": "get", "url": "./get" },
+    { "label": "set", "url": "./set" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/stem.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/stem.rs"
+  },
+  "gpu_residency": "`stem` preserves GPU residency when the direct stem packer path is available. Marker rendering stays on the shared marker path.",
+  "gpu_behavior": [
+    "Stem line geometry can be emitted directly from GPU buffers on the happy path.",
+    "Markers use the shared rendering path, which keeps style semantics aligned with the rest of the plotting stack."
+  ]
+}

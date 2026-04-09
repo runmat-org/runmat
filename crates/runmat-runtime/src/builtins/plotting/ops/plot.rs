@@ -13,6 +13,8 @@ use crate::builtins::common::spec::{
 };
 
 use super::common::numeric_pair;
+use super::op_common::line_inputs::NumericInput;
+use super::op_common::{apply_axes_target, split_leading_axes_handle};
 use super::plotting_error;
 use super::state::{
     current_axes_state, current_hold_enabled, next_line_style_for_axes, render_active_plot,
@@ -23,7 +25,7 @@ use super::style::{
     value_as_string, LineAppearance, LineStyleParseOptions, MarkerAppearance, MarkerColor,
     MarkerKind, DEFAULT_LINE_MARKER_SIZE,
 };
-use crate::builtins::plotting::type_resolvers::string_type;
+use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use std::convert::TryFrom;
 
 use crate::{BuiltinResult, RuntimeError};
@@ -31,7 +33,7 @@ use crate::{BuiltinResult, RuntimeError};
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::plotting::plot")]
 pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     name: "plot",
-    op_kind: GpuOpKind::Custom("plot-render"),
+    op_kind: GpuOpKind::PlotRender,
     supported_precisions: &[],
     broadcast: BroadcastSemantics::None,
     provider_hooks: &[],
@@ -67,15 +69,12 @@ const BUILTIN_NAME: &str = "plot";
     keywords = "plot,line,2d,visualization",
     sink = true,
     suppress_auto_output = true,
-    type_resolver(string_type),
+    type_resolver(handle_scalar_type),
     builtin_path = "crate::builtins::plotting::plot"
 )]
-pub async fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::BuiltinResult<String> {
-    let mut args = Vec::with_capacity(2 + rest.len());
-    args.push(x);
-    args.push(y);
-    args.extend(rest);
-
+pub async fn plot_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
+    let (axes_target, args) = split_leading_axes_handle(args, BUILTIN_NAME)?;
+    apply_axes_target(axes_target, BUILTIN_NAME)?;
     let (mut series_plans, line_style_order) = parse_series_specs(args)?;
     let axes = current_axes_state().active_index;
     let hold_enabled = current_hold_enabled();
@@ -124,12 +123,12 @@ pub async fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Builti
         } = plan;
 
         let x_kind = match &data.x {
-            LineInput::Host(_) => "Host",
-            LineInput::Gpu(_) => "Gpu",
+            NumericInput::Host(_) => "Host",
+            NumericInput::Gpu(_) => "Gpu",
         };
         let y_kind = match &data.y {
-            LineInput::Host(_) => "Host",
-            LineInput::Gpu(_) => "Gpu",
+            NumericInput::Host(_) => "Host",
+            NumericInput::Gpu(_) => "Gpu",
         };
         let gpu_pair = data.gpu_handles().map(|(x, y)| {
             format!(
@@ -176,14 +175,35 @@ pub async fn plot_builtin(x: Value, y: Value, rest: Vec<Value>) -> crate::Builti
     }
 
     let mut plots_opt = Some(plots);
-    let rendered = render_active_plot(BUILTIN_NAME, opts, move |figure, axes_index| {
+    let plot_index_out = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let plot_index_slot = std::rc::Rc::clone(&plot_index_out);
+    let figure_handle = crate::builtins::plotting::current_figure_handle();
+    let render_result = render_active_plot(BUILTIN_NAME, opts, move |figure, axes_index| {
         let plots = plots_opt.take().expect("plot series consumed exactly once");
-        for plot in plots {
-            figure.add_line_plot_on_axes(plot, axes_index);
+        for (idx, plot) in plots.into_iter().enumerate() {
+            let plot_index = figure.add_line_plot_on_axes(plot, axes_index);
+            if idx == 0 {
+                *plot_index_slot.borrow_mut() = Some((axes_index, plot_index));
+            }
         }
         Ok(())
-    })?;
-    Ok(rendered)
+    });
+    let Some((axes_index, plot_index)) = *plot_index_out.borrow() else {
+        return render_result.map(|_| f64::NAN);
+    };
+    let handle = crate::builtins::plotting::state::register_line_handle(
+        figure_handle,
+        axes_index,
+        plot_index,
+    );
+    if let Err(err) = render_result {
+        let lower = err.to_string().to_lowercase();
+        if lower.contains("plotting is unavailable") || lower.contains("non-main thread") {
+            return Ok(handle);
+        }
+        return Err(err);
+    }
+    Ok(handle)
 }
 
 fn build_line_plot(
@@ -205,32 +225,6 @@ fn build_line_plot(
     Ok(plot)
 }
 
-#[derive(Debug)]
-enum LineInput {
-    Host(Tensor),
-    Gpu(GpuTensorHandle),
-}
-
-impl LineInput {
-    fn from_value(value: Value) -> BuiltinResult<Self> {
-        match value {
-            Value::GpuTensor(handle) => Ok(Self::Gpu(handle)),
-            other => {
-                let tensor = Tensor::try_from(&other)
-                    .map_err(|e| plotting_error(BUILTIN_NAME, format!("plot: {e}")))?;
-                Ok(Self::Host(tensor))
-            }
-        }
-    }
-
-    fn gpu_handle(&self) -> Option<&GpuTensorHandle> {
-        match self {
-            Self::Gpu(handle) => Some(handle),
-            Self::Host(_) => None,
-        }
-    }
-}
-
 fn parse_series_specs(
     args: Vec<Value>,
 ) -> BuiltinResult<(Vec<SeriesRenderPlan>, Option<Vec<LineStyle>>)> {
@@ -244,22 +238,33 @@ fn parse_series_specs(
 
     let mut idx = 0usize;
     while idx < args.len() {
-        let x_val = args[idx].clone();
+        let first_val = args[idx].clone();
         idx += 1;
-        if !is_numeric_value(&x_val) {
+        if !is_numeric_value(&first_val) {
             return Err(plot_err(
                 "expected numeric X data before style arguments or options",
             ));
         }
-        if idx >= args.len() {
-            return Err(plot_err("expected Y argument after X data"));
-        }
-        let y_arg_index = idx;
-        let y_val = args[idx].clone();
-        idx += 1;
-        if !is_numeric_value(&y_val) {
-            return Err(plot_err("expected numeric Y argument after X data"));
-        }
+
+        let shorthand_plot_y = match args.get(idx) {
+            None => true,
+            Some(Value::String(_) | Value::CharArray(_)) => true,
+            Some(next) => !is_numeric_value(next),
+        };
+
+        let (x_val, y_val, y_arg_index) = if shorthand_plot_y {
+            let y_val = first_val;
+            let x_val = infer_plot_x_from_y(&y_val)?;
+            (x_val, y_val, idx.saturating_sub(1))
+        } else {
+            let y_arg_index = idx;
+            let y_val = args[idx].clone();
+            idx += 1;
+            if !is_numeric_value(&y_val) {
+                return Err(plot_err("expected numeric Y argument after X data"));
+            }
+            (first_val, y_val, y_arg_index)
+        };
 
         let series_input = PlotSeriesInput::new(x_val, y_val)?;
 
@@ -312,6 +317,25 @@ fn is_numeric_value(value: &Value) -> bool {
         value,
         Value::Tensor(_) | Value::GpuTensor(_) | Value::Num(_) | Value::Int(_) | Value::Bool(_)
     )
+}
+
+fn infer_plot_x_from_y(y: &Value) -> BuiltinResult<Value> {
+    let len = match y {
+        Value::GpuTensor(handle) => handle.shape.iter().copied().product::<usize>().max(1),
+        other => {
+            let tensor = Tensor::try_from(other)
+                .map_err(|e| plotting_error(BUILTIN_NAME, format!("plot: {e}")))?;
+            tensor.data.len().max(1)
+        }
+    };
+    let data = (1..=len).map(|i| i as f64).collect::<Vec<_>>();
+    Ok(Value::Tensor(Tensor {
+        data,
+        shape: vec![len],
+        rows: len,
+        cols: 1,
+        dtype: runmat_builtins::NumericDType::F64,
+    }))
 }
 
 fn plot_err(msg: impl Into<String>) -> RuntimeError {
@@ -482,8 +506,8 @@ async fn build_line_gpu_plot_async(
 
 #[derive(Debug)]
 struct PlotSeriesInput {
-    x: LineInput,
-    y: LineInput,
+    x: NumericInput,
+    y: NumericInput,
 }
 
 #[derive(Debug)]
@@ -499,8 +523,8 @@ struct SeriesRenderPlan {
 impl PlotSeriesInput {
     fn new(x: Value, y: Value) -> BuiltinResult<Self> {
         Ok(Self {
-            x: LineInput::from_value(x)?,
-            y: LineInput::from_value(y)?,
+            x: NumericInput::from_value(x, BUILTIN_NAME)?,
+            y: NumericInput::from_value(y, BUILTIN_NAME)?,
         })
     }
 
@@ -512,14 +536,8 @@ impl PlotSeriesInput {
     }
 
     async fn into_tensors_async(self, name: &'static str) -> BuiltinResult<(Tensor, Tensor)> {
-        let x = match self.x {
-            LineInput::Host(t) => t,
-            LineInput::Gpu(h) => super::gpu_helpers::gather_tensor_from_gpu_async(h, name).await?,
-        };
-        let y = match self.y {
-            LineInput::Host(t) => t,
-            LineInput::Gpu(h) => super::gpu_helpers::gather_tensor_from_gpu_async(h, name).await?,
-        };
+        let x = self.x.into_tensor_async(name).await?;
+        let y = self.y.into_tensor_async(name).await?;
         Ok((x, y))
     }
 }
@@ -527,22 +545,21 @@ impl PlotSeriesInput {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::builtins::plotting::state::{clear_figure, reset_hold_state_for_run};
-    use crate::builtins::plotting::tests::ensure_plot_test_env;
-    use crate::builtins::plotting::{clone_figure, current_figure_handle};
+    use crate::builtins::plotting::get::get_builtin;
+    use crate::builtins::plotting::set::set_builtin;
+    use crate::builtins::plotting::state::PlotTestLockGuard;
+    use crate::builtins::plotting::state::{
+        clear_figure, current_axes_handle_for_figure, reset_hold_state_for_run,
+    };
+    use crate::builtins::plotting::tests::{ensure_plot_test_env, lock_plot_registry};
+    use crate::builtins::plotting::{clone_figure, configure_subplot, current_figure_handle};
     use crate::RuntimeError;
     use futures::executor::block_on;
     use runmat_builtins::{ResolveContext, Type};
-    use std::sync::{Mutex, MutexGuard};
+    use runmat_plot::plots::PlotElement;
 
-    // All tests that touch the global figure registry must hold this guard for
-    // their entire duration. Without it, concurrent tests share one `current`
-    // figure handle and can stomp each other's `clear_figure` / `plot_builtin`
-    // calls, producing a spurious "Data" fallback label.
-    static PLOT_TEST_LOCK: Mutex<()> = Mutex::new(());
-
-    fn setup_plot_tests() -> MutexGuard<'static, ()> {
-        let guard = PLOT_TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    fn setup_plot_tests() -> PlotTestLockGuard {
+        let guard = lock_plot_registry();
         ensure_plot_test_env();
         reset_hold_state_for_run();
         let _ = clear_figure(None);
@@ -584,11 +601,10 @@ pub(crate) mod tests {
     #[test]
     fn plot_builtin_produces_figure_even_without_backend() {
         let _guard = setup_plot_tests();
-        let result = block_on(plot_builtin(
+        let result = block_on(plot_builtin(vec![
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[0.0, 1.0])),
-            Vec::new(),
-        ));
+        ]));
         if let Err(flow) = result {
             assert_plotting_unavailable(&flow);
         }
@@ -606,17 +622,50 @@ pub(crate) mod tests {
         ];
         let _callsite_guard = crate::callsite::push_callsite(None, Some(spans));
 
-        let _ = block_on(plot_builtin(
+        let _ = block_on(plot_builtin(vec![
             Value::Tensor(tensor_from(&[0.0, 1.0])),
             Value::Tensor(tensor_from(&[0.0, 1.0])),
-            Vec::new(),
-        ));
+        ]));
 
         let handle = current_figure_handle();
         let fig = clone_figure(handle).expect("figure exists");
         let entries = fig.legend_entries();
         assert!(!entries.is_empty(), "expected legend entries");
         assert_eq!(entries[0].label, "b");
+    }
+
+    #[test]
+    fn plot_returns_handle_and_supports_line_properties() {
+        let _guard = setup_plot_tests();
+        let handle = block_on(plot_builtin(vec![
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[1.0, 2.0])),
+        ]))
+        .expect("plot should return a handle");
+        assert_eq!(
+            get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap(),
+            Value::String("line".into())
+        );
+        set_builtin(vec![
+            Value::Num(handle),
+            Value::String("LineWidth".into()),
+            Value::Num(2.5),
+            Value::String("DisplayName".into()),
+            Value::String("Series A".into()),
+        ])
+        .unwrap();
+        assert_eq!(
+            get_builtin(vec![Value::Num(handle), Value::String("LineWidth".into())]).unwrap(),
+            Value::Num(2.5)
+        );
+        assert_eq!(
+            get_builtin(vec![
+                Value::Num(handle),
+                Value::String("DisplayName".into())
+            ])
+            .unwrap(),
+            Value::String("Series A".into())
+        );
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -646,7 +695,9 @@ pub(crate) mod tests {
             Value::String("linewidth".into()),
         ];
         let err = parse_series_specs(args).unwrap_err();
-        assert!(err.to_string().contains("expected numeric Y argument"));
+        assert!(err
+            .to_string()
+            .contains("name-value arguments must come in pairs"));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -681,13 +732,100 @@ pub(crate) mod tests {
     }
 
     #[test]
-    fn plot_type_is_string() {
+    fn plot_type_is_numeric_handle() {
         assert_eq!(
-            string_type(
+            handle_scalar_type(
                 &[Type::tensor(), Type::tensor()],
                 &ResolveContext::new(Vec::new())
             ),
-            Type::String
+            Type::Num
         );
+    }
+
+    #[test]
+    fn parse_series_specs_supports_plot_y_shorthand() {
+        let _guard = setup_plot_tests();
+        let args = vec![Value::Tensor(tensor_from(&[10.0, 20.0, 30.0]))];
+        let (plans, order) = parse_series_specs(args).expect("parsed");
+        assert!(order.is_none());
+        assert_eq!(plans.len(), 1);
+        let (x_tensor, y_tensor) = futures::executor::block_on(
+            plans
+                .into_iter()
+                .next()
+                .unwrap()
+                .data
+                .into_tensors_async("plot"),
+        )
+        .unwrap();
+        assert_eq!(x_tensor.data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(y_tensor.data, vec![10.0, 20.0, 30.0]);
+    }
+
+    #[test]
+    fn parse_series_specs_supports_plot_y_with_style() {
+        let _guard = setup_plot_tests();
+        let args = vec![
+            Value::Tensor(tensor_from(&[1.0, 2.0])),
+            Value::String("r--".into()),
+        ];
+        let (plans, order) = parse_series_specs(args).expect("parsed");
+        assert!(order.is_none());
+        assert_eq!(plans.len(), 1);
+        assert_eq!(plans[0].appearance.line_style, LineStyle::Dashed);
+    }
+
+    #[test]
+    fn plot_builtin_supports_plot_y_shorthand_end_to_end() {
+        let _guard = setup_plot_tests();
+        let result = block_on(plot_builtin(vec![Value::Tensor(tensor_from(&[
+            5.0, 6.0, 7.0,
+        ]))]));
+        if let Err(flow) = result {
+            assert_plotting_unavailable(&flow);
+        }
+        let handle = current_figure_handle();
+        let fig = clone_figure(handle).expect("figure exists");
+        let first_plot = fig.plots().next().expect("plot created");
+        let PlotElement::Line(line) = first_plot else {
+            panic!("expected line plot");
+        };
+        assert_eq!(line.x_data, vec![1.0, 2.0, 3.0]);
+        assert_eq!(line.y_data, vec![5.0, 6.0, 7.0]);
+    }
+
+    #[test]
+    fn plot_builtin_accepts_leading_axes_handle() {
+        let _guard = setup_plot_tests();
+        configure_subplot(1, 2, 1).unwrap();
+        let fig_handle = current_figure_handle();
+        let ax = current_axes_handle_for_figure(fig_handle).unwrap();
+        block_on(plot_builtin(vec![
+            Value::Num(ax),
+            Value::Tensor(tensor_from(&[0.0, 1.0])),
+            Value::Tensor(tensor_from(&[1.0, 2.0])),
+        ]))
+        .unwrap();
+        let fig = clone_figure(fig_handle).unwrap();
+        assert_eq!(fig.plot_axes_indices(), &[1]);
+    }
+
+    #[test]
+    fn plot_builtin_accepts_scalar_point_with_style_args() {
+        let _guard = setup_plot_tests();
+        block_on(plot_builtin(vec![
+            Value::Num(0.0),
+            Value::Num(1.5),
+            Value::String("o".into()),
+            Value::String("LineWidth".into()),
+            Value::Num(1.5),
+        ]))
+        .unwrap();
+        let fig = clone_figure(current_figure_handle()).unwrap();
+        let PlotElement::Line(line) = fig.plots().next().unwrap() else {
+            panic!("expected line")
+        };
+        assert_eq!(line.x_data, vec![0.0]);
+        assert_eq!(line.y_data, vec![1.5]);
     }
 }

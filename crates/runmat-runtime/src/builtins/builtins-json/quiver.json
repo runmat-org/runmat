@@ -1,0 +1,78 @@
+{
+  "title": "quiver",
+  "category": "plotting",
+  "keywords": [
+    "quiver",
+    "vector field",
+    "arrow plot",
+    "flow field",
+    "matlab quiver",
+    "direction field"
+  ],
+  "summary": "Visualize 2-D vector fields with scalable arrows, GPU-aware execution, and MATLAB `quiver` call forms.",
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "single",
+      "double"
+    ],
+    "broadcasting": "none",
+    "notes": "`quiver` uses a GPU-backed geometry path and can keep vector-field inputs resident on device when the shared plotting device is available."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 4,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::quiver::tests",
+    "integration": "runmat-plot/src/gpu/quiver.rs::tests"
+  },
+  "description": "`quiver` visualizes 2-D vector fields as arrows anchored at data points. In RunMat it returns a quiver handle, supports MATLAB-style `quiver(U, V)` and `quiver(X, Y, U, V)` call forms, and uses GPU-backed geometry generation together with the plotting object, replay, and export systems.",
+  "behaviors": [
+    "`quiver(U, V)` builds the default coordinate grid from the shape of `U` and `V`.",
+    "`quiver(X, Y, U, V)` accepts explicit coordinate vectors or meshgrid-style axes, depending on the input layout.",
+    "The returned value is a quiver-handle object that can be queried and updated through `get` and `set`.",
+    "Auto-scale factor, head size, line width, color, and display-name workflows are all part of the plotting property path.",
+    "Dedicated GPU geometry generation keeps vector-field rendering on device when plotting-compatible buffers are available."
+  ],
+  "options": [
+    "`'AutoScaleFactor'` / `'Scale'` controls arrow scaling.",
+    "`'MaxHeadSize'` / `'HeadSize'` controls the size of arrowheads.",
+    "Line-style color and width workflows are supported through the same style parsing and handle/property path used by other line-like plots."
+  ],
+  "examples": [
+    {
+      "description": "Create a vector field from `U` and `V` only",
+      "input": "[X, Y] = meshgrid(-2:0.5:2, -2:0.5:2);\nU = -Y;\nV = X;\nquiver(U, V);",
+      "output": "% RunMat infers the coordinate grid from the vector-field shape"
+    },
+    {
+      "description": "Provide explicit coordinates for a flow field",
+      "input": "[X, Y] = meshgrid(-2:0.5:2, -2:0.5:2);\nU = -Y;\nV = X;\nquiver(X, Y, U, V);"
+    },
+    {
+      "description": "Adjust arrow scaling and head size through the handle",
+      "input": "[X, Y] = meshgrid(-2:0.5:2, -2:0.5:2);\nU = -Y;\nV = X;\nh = quiver(X, Y, U, V);\nset(h, 'AutoScaleFactor', 1.5, 'MaxHeadSize', 0.2, 'DisplayName', 'rotation');\nlegend;"
+    }
+  ],
+  "links": [
+    { "label": "area", "url": "./area" },
+    { "label": "plot", "url": "./plot" },
+    { "label": "legend", "url": "./legend" },
+    { "label": "get", "url": "./get" },
+    { "label": "set", "url": "./set" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/quiver.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/quiver.rs"
+  },
+  "gpu_residency": "`quiver` preserves GPU residency on the direct path by building arrow geometry from exported GPU buffers. If the direct geometry path is unavailable for the active input combination, RunMat falls back while preserving the same quiver semantics and handle behavior.",
+  "gpu_behavior": [
+    "The direct quiver path emits renderer-ready arrow geometry from GPU buffers on the happy path.",
+    "Axes-local state, handle/property workflows, and replay/export behavior stay aligned across GPU and fallback rendering paths."
+  ]
+}

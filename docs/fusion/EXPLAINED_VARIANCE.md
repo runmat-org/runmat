@@ -26,3 +26,12 @@ Explained variance is a common metric in linear algebra and statistics. It shows
 - Debug printing can be enabled with `RUNMAT_DEBUG_EXPLAINED=1` to inspect shapes and sample data when parity issues arise.
 
 If a workload should fuse but does not, enable `RUNMAT_DEBUG_FUSION=1` to have the planner print why a node was rejected, then compare against the criteria above.
+
+---
+
+## Related
+
+- [Introduction to RunMat Fusion](/docs/accelerate/fusion-intro) -- how RunMat manages GPU data residency.
+- [GPU Residency and Precision](/docs/accelerate/gpu-behavior) -- residency rules and precision guarantees.
+- [Centered Gram / Covariance](/docs/fusion/centered-gram) -- fused mean-centering and covariance computation.
+- [Matmul Epilogues](/docs/fusion/matmul-epilogue) -- fused scalar and vector operations after matrix multiplication.

@@ -32,7 +32,7 @@
     "unit": "builtins::array::creation::meshgrid::tests",
     "integration": "builtins::array::creation::meshgrid::tests::meshgrid_gpu_inputs_roundtrip"
   },
-  "description": "`meshgrid` turns one-, two-, or three-dimensional vectors into coordinate arrays that span a rectangular grid, mirroring MathWorks MATLAB behaviour exactly. The first output replicates the `x` vector across rows, the second replicates the `y` vector across columns, and the optional third output expands a `z` vector across pages for volumetric grids.",
+  "description": "`meshgrid` turns one-, two-, or three-dimensional vectors into coordinate arrays that span a rectangular grid, mirroring MathWorks MATLAB behaviour. The first output replicates the `x` vector across rows, the second replicates the `y` vector across columns, and the optional third output expands a `z` vector across pages for volumetric grids.",
   "behaviors": [
     "`meshgrid(x)` is shorthand for `[X, Y] = meshgrid(x, x)`. It produces square 2-D grids.",
     "`meshgrid(x, y)` yields `X` of size `length(y) × length(x)` with rows copied from `x`, and `Y` of the same size with columns copied from `y`.",
@@ -55,8 +55,8 @@
     },
     {
       "description": "Creating a volumetric grid for 3-D plotting",
-      "input": "u = -1:1;\nv = 2:4;\nw = linspace(0, 1, 5);\n[U, V, W] = meshgrid(u, v, w)",
-      "output": "size(U) == [3 3 5]\nsize(V) == [3 3 5]\nsize(W) == [3 3 5]"
+      "input": "u = -1:1;\nv = 2:4;\nw = linspace(0, 1, 5);\n[U, V, W] = meshgrid(u, v, w);\nsize(U)",
+      "output": "ans =\n     3     3     5"
     },
     {
       "description": "Matching an existing GPU prototype",

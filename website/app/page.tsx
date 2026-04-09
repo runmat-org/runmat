@@ -6,9 +6,18 @@ import { Card, CardContent } from "@/components/ui/card";
 import { SiGithub } from "react-icons/si";
 import { Users, GitBranch, Camera, Lock, Shield, Eye, ClipboardCheck, Cpu, Monitor, HardDrive } from "lucide-react";
 
-import MatlabCodeCard from "@/components/MatlabCodeCard";
+import dynamic from "next/dynamic";
 import Hero from "@/components/Hero";
-import BenchmarkShowcaseBlock from "@/components/benchmarks/BenchmarkShowcaseBlock";
+import LazyVideo from "@/components/LazyVideo";
+
+const MatlabCodeCard = dynamic(() => import("@/components/MatlabCodeCard"), {
+  loading: () => <div className="w-full max-w-3xl h-[120px] rounded-3xl bg-muted/40 animate-pulse" />,
+});
+
+const BenchmarkShowcaseBlock = dynamic(
+  () => import("@/components/benchmarks/BenchmarkShowcaseBlock"),
+  { loading: () => <div className="w-full h-[300px] rounded-xl bg-muted/40 animate-pulse" /> },
+);
 
 const jsonLd = {
   "@context": "https://schema.org",
@@ -101,7 +110,7 @@ const jsonLd = {
       "@id": "https://runmat.com/#hero-video",
       "name": "RunMat wave interference simulation",
       "description": "GPU-accelerated wave interference simulation rendered in real time using RunMat's surf() function.",
-      "thumbnailUrl": "https://web.runmatstatic.com/video/posters/runmat-wave-simulation.png",
+      "thumbnailUrl": "https://web.runmatstatic.com/video/posters/runmat-wave-simulation.webp",
       "contentUrl": "https://web.runmatstatic.com/video/runmat-wave-simulation.mp4",
       "uploadDate": "2026-03-03T00:00:00Z",
       "duration": "PT10S"
@@ -204,19 +213,31 @@ export default function HomePage() {
           <div className="mx-auto max-w-3xl">
             <div className="rounded-xl border border-border overflow-hidden elevated-panel">
               <Link href="/sandbox" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-b-none rounded-t-xl overflow-hidden">
-                <video
+                <LazyVideo
                   className="w-full h-auto"
-                  autoPlay
                   muted
                   loop
                   playsInline
-                  poster="https://web.runmatstatic.com/video/posters/3d-interactive-plotting-runmat.png"
+                  poster="https://web.runmatstatic.com/video/posters/3d-interactive-plotting-runmat.webp"
                   aria-label="RunMat 3D interactive plotting demo"
                 >
                   <source src="https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.mp4" type="video/mp4" />
-                </video>
+                </LazyVideo>
               </Link>
             </div>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center flex-wrap text-center mt-8">
+            <Link href="/blog/matlab-plotting-guide" className="text-sm text-muted-foreground hover:text-foreground underline">
+              Plotting guide
+            </Link>
+            <span className="hidden sm:inline text-muted-foreground">•</span>
+            <Link href="/docs/plotting" className="text-sm text-muted-foreground hover:text-foreground underline">
+              Plotting documentation
+            </Link>
+            <span className="hidden sm:inline text-muted-foreground">•</span>
+            <Link href="/docs/matlab-function-reference#plotting" className="text-sm text-muted-foreground hover:text-foreground underline">
+              Plotting function reference
+            </Link>
           </div>
         </div>
       </section>
@@ -235,12 +256,18 @@ export default function HomePage() {
           <div className="flex justify-center w-full">
             <MatlabCodeCard />
           </div>
-          <div className="mt-8 text-center">
-            <Link className="underline" href="/docs/language-coverage">Language guide</Link>
-            <span className="hidden sm:inline text-muted-foreground"> • </span>
-            <Link className="underline" href="/docs/matlab-function-reference">Built-in function reference</Link>
-            <span className="hidden sm:inline text-muted-foreground"> • </span>
-            <Link className="underline" href="/blog/in-defense-of-matlab-whiteboard-style-code">Why whiteboard-style code still matters</Link>
+          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center flex-wrap text-center mt-8">
+            <Link href="/docs/language-coverage" className="text-sm text-muted-foreground hover:text-foreground underline">
+              Language guide
+            </Link>
+            <span className="hidden sm:inline text-muted-foreground">•</span>
+            <Link href="/docs/matlab-function-reference" className="text-sm text-muted-foreground hover:text-foreground underline">
+              Built-in function reference
+            </Link>
+            <span className="hidden sm:inline text-muted-foreground">•</span>
+            <Link href="/blog/in-defense-of-matlab-whiteboard-style-code" className="text-sm text-muted-foreground hover:text-foreground underline">
+              Why whiteboard-style code still matters
+            </Link>
           </div>
         </div>
       </section>
@@ -262,11 +289,11 @@ export default function HomePage() {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center flex-wrap text-center mt-8">
-            <Link href="/docs/accelerate/fusion-intro" className="text-sm hover:text-foreground text-muted-foreground transition-colors underline">
+            <Link href="/docs/accelerate/fusion-intro" className="text-sm text-muted-foreground hover:text-foreground underline">
               How fusion works
             </Link>
             <span className="hidden sm:inline text-muted-foreground">•</span>
-            <Link href="/benchmarks" className="text-sm hover:text-foreground text-muted-foreground transition-colors underline">
+            <Link href="/benchmarks" className="text-sm text-muted-foreground hover:text-foreground underline">
               See the benchmarks
             </Link>
           </div>
@@ -289,17 +316,16 @@ export default function HomePage() {
           <div className="mx-auto max-w-3xl">
             <div className="rounded-xl border border-border overflow-hidden elevated-panel">
               <Link href="/sandbox" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-b-none rounded-t-xl overflow-hidden">
-                <video
+                <LazyVideo
                   className="w-full h-auto"
-                  autoPlay
                   muted
                   loop
                   playsInline
-                  poster="https://web.runmatstatic.com/video/posters/runmat-shape-tracking.png"
+                  poster="https://web.runmatstatic.com/video/posters/runmat-shape-tracking.webp"
                   aria-label="RunMat shape tracking and type system demo"
                 >
                   <source src="https://web.runmatstatic.com/video/runmat-shape-tracking.mp4" type="video/mp4" />
-                </video>
+                </LazyVideo>
               </Link>
             </div>
           </div>
@@ -322,17 +348,16 @@ export default function HomePage() {
               href="/sandbox"
               className="rounded-2xl border border-border overflow-hidden min-h-[380px] md:row-span-3 bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
-              <video
+              <LazyVideo
                 className="w-full h-full min-h-[380px] object-cover object-left-top"
-                autoPlay
                 muted
                 loop
                 playsInline
-                poster="https://web.runmatstatic.com/video/posters/runmat-versioning.png"
+                poster="https://web.runmatstatic.com/video/posters/runmat-versioning.webp"
                 aria-label="RunMat versioning demo"
               >
                 <source src="https://web.runmatstatic.com/video/runmat-versioning.mp4" type="video/mp4" />
-              </video>
+              </LazyVideo>
             </Link>
             <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
               <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">

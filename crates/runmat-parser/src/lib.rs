@@ -53,6 +53,7 @@ pub enum Expr {
     Member(Box<Expr>, String, Span),
     // Dynamic field: s.(expr)
     MemberDynamic(Box<Expr>, Box<Expr>, Span),
+    DottedInvoke(Box<Expr>, String, Vec<Expr>, Span),
     MethodCall(Box<Expr>, String, Vec<Expr>, Span),
     AnonFunc {
         params: Vec<String>,
@@ -81,6 +82,7 @@ impl Expr {
             | Expr::FuncCall(_, _, span)
             | Expr::Member(_, _, span)
             | Expr::MemberDynamic(_, _, span)
+            | Expr::DottedInvoke(_, _, _, span)
             | Expr::MethodCall(_, _, _, span)
             | Expr::FuncHandle(_, span)
             | Expr::MetaClass(_, span) => *span,
@@ -105,6 +107,7 @@ impl Expr {
             Expr::FuncCall(name, args, _) => Expr::FuncCall(name, args, span),
             Expr::Member(base, name, _) => Expr::Member(base, name, span),
             Expr::MemberDynamic(base, name, _) => Expr::MemberDynamic(base, name, span),
+            Expr::DottedInvoke(base, name, args, _) => Expr::DottedInvoke(base, name, args, span),
             Expr::MethodCall(base, name, args, _) => Expr::MethodCall(base, name, args, span),
             Expr::AnonFunc { params, body, .. } => Expr::AnonFunc { params, body, span },
             Expr::FuncHandle(name, _) => Expr::FuncHandle(name, span),
@@ -118,7 +121,7 @@ pub enum BinOp {
     Add,
     Sub,
     Mul,
-    Div,
+    RightDiv,
     Pow,
     LeftDiv,
     Colon,
@@ -393,6 +396,7 @@ enum CommandArgKind {
         optional: bool,
     },
     Any,
+    StringifyWords,
 }
 
 const COMMAND_VERBS: &[CommandVerb] = &[
@@ -466,7 +470,11 @@ const COMMAND_VERBS: &[CommandVerb] = &[
     },
     CommandVerb {
         name: "close",
-        arg_kind: CommandArgKind::Any,
+        arg_kind: CommandArgKind::StringifyWords,
+    },
+    CommandVerb {
+        name: "clear",
+        arg_kind: CommandArgKind::StringifyWords,
     },
 ];
 
@@ -863,6 +871,20 @@ impl Parser {
             CommandArgKind::Any => {
                 // Accept general expressions; no normalization needed.
             }
+            CommandArgKind::StringifyWords => {
+                for arg in args {
+                    let span = arg.span();
+                    match arg {
+                        Expr::Ident(word, _) => {
+                            *arg = Expr::String(format!("\"{}\"", word), span);
+                        }
+                        Expr::EndKeyword(_) => {
+                            *arg = Expr::String("\"end\"".to_string(), span);
+                        }
+                        _ => {}
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -1135,7 +1157,7 @@ impl Parser {
             let op = match self.peek_token() {
                 Some(Token::Star) => BinOp::Mul,
                 Some(Token::DotStar) => BinOp::ElemMul,
-                Some(Token::Slash) => BinOp::Div,
+                Some(Token::Slash) => BinOp::RightDiv,
                 Some(Token::DotSlash) => BinOp::ElemDiv,
                 Some(Token::Backslash) => BinOp::LeftDiv,
                 Some(Token::DotBackslash) => BinOp::ElemLeftDiv,
@@ -1256,7 +1278,11 @@ impl Parser {
                     }
                     let end = self.last_token_end();
                     let span = self.span_from(expr.span().start, end);
-                    expr = Expr::MethodCall(Box::new(expr), name_token.0, args, span);
+                    if matches!(expr, Expr::MetaClass(_, _)) {
+                        expr = Expr::MethodCall(Box::new(expr), name_token.0, args, span);
+                    } else {
+                        expr = Expr::DottedInvoke(Box::new(expr), name_token.0, args, span);
+                    }
                 } else {
                     let span = self.span_from(expr.span().start, name_token.2);
                     expr = Expr::Member(Box::new(expr), name_token.0, span);

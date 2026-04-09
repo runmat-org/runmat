@@ -61,21 +61,27 @@ use runmat_plot::{
 };
 #[cfg(target_arch = "wasm32")]
 use runmat_runtime::builtins::plotting::{
-    bind_surface_to_figure as runtime_bind_surface_to_figure, clear_figure as runtime_clear_figure,
-    close_figure as runtime_close_figure, configure_subplot as runtime_configure_subplot,
-    context as plotting_context, current_axes_state as runtime_current_axes_state,
+    bind_surface_to_figure as runtime_bind_surface_to_figure,
+    clear_closed_figure_surfaces as runtime_clear_closed_figure_surfaces,
+    clear_figure as runtime_clear_figure, close_figure as runtime_close_figure,
+    configure_subplot as runtime_configure_subplot, context as plotting_context,
+    current_axes_state as runtime_current_axes_state,
     current_figure_handle as runtime_current_figure_handle,
     detach_surface as runtime_detach_surface, figure_handles as runtime_figure_handles,
     fit_surface_extents as runtime_fit_surface_extents,
     get_surface_camera_state as runtime_get_surface_camera_state,
     handle_plot_surface_event as runtime_handle_plot_surface_event,
     install_figure_observer as runtime_install_figure_observer,
-    install_surface as runtime_install_surface, new_figure_handle as runtime_new_figure_handle,
+    install_surface as runtime_install_surface,
+    invalidate_surface_revisions as runtime_invalidate_surface_revisions,
+    new_figure_handle as runtime_new_figure_handle,
     present_figure_on_surface as runtime_present_figure_on_surface,
     present_surface as runtime_present_surface,
     render_current_scene as runtime_render_current_scene,
     render_figure_snapshot as runtime_render_figure_snapshot,
+    render_figure_snapshot_with_camera_state as runtime_render_figure_snapshot_with_camera_state,
     reset_hold_state_for_run as runtime_reset_hold_state_for_run,
+    reset_plot_state as runtime_reset_plot_state,
     reset_surface_camera as runtime_reset_surface_camera, resize_surface as runtime_resize_surface,
     select_figure as runtime_select_figure, set_hold as runtime_set_hold,
     set_plot_theme_config as runtime_set_plot_theme_config,
@@ -583,6 +589,8 @@ impl RunMatWasm {
         }
         let mut slot = self.session.borrow_mut();
         *slot = session;
+        runtime_reset_plot_state();
+        runtime_invalidate_surface_revisions();
         Ok(())
     }
 
@@ -854,15 +862,32 @@ impl RunMatWasm {
     #[wasm_bindgen(js_name = exportFigureScene)]
     pub fn export_figure_scene(&self, handle: u32) -> Result<Option<Vec<u8>>, JsValue> {
         self.ensure_not_disposed()?;
+        log::debug!("RunMat wasm: exportFigureScene start handle={handle}");
         match runtime_plot_export_figure_scene(FigureHandle::from(handle)) {
-            Ok(Some(payload)) => Ok(Some(payload)),
+            Ok(Some(payload)) => {
+                log::debug!(
+                    "RunMat wasm: exportFigureScene ok handle={} bytes={}",
+                    handle,
+                    payload.len()
+                );
+                Ok(Some(payload))
+            }
             Ok(None) => {
+                log::debug!("RunMat wasm: exportFigureScene empty handle={}", handle);
                 let current = runtime_current_figure_handle();
                 if current.as_u32() == handle {
                     return Ok(None);
                 }
                 match runtime_plot_export_figure_scene(current) {
-                    Ok(payload) => Ok(payload),
+                    Ok(payload) => {
+                        log::debug!(
+                            "RunMat wasm: exportFigureScene fallback handle={} current_handle={} has_payload={}",
+                            handle,
+                            current.as_u32(),
+                            payload.as_ref().map(|bytes| bytes.len()).unwrap_or(0)
+                        );
+                        Ok(payload)
+                    }
                     Err(err) => {
                         warn!("RunMat wasm: fallback figure scene export rejected: {err}");
                         Ok(None)
@@ -879,16 +904,26 @@ impl RunMatWasm {
     #[wasm_bindgen(js_name = importFigureScene)]
     pub async fn import_figure_scene(&self, scene: &[u8]) -> Result<Option<u32>, JsValue> {
         self.ensure_not_disposed()?;
+        log::debug!("RunMat wasm: importFigureScene start bytes={}", scene.len());
         match runtime_plot_import_figure_scene_async(scene).await {
-            Ok(Some(handle)) => Ok(Some(handle.as_u32())),
-            Ok(None) => Ok(None),
+            Ok(Some(handle)) => {
+                log::debug!(
+                    "RunMat wasm: importFigureScene ok handle={}",
+                    handle.as_u32()
+                );
+                Ok(Some(handle.as_u32()))
+            }
+            Ok(None) => {
+                log::debug!("RunMat wasm: importFigureScene returned none");
+                Ok(None)
+            }
             Err(err) => {
                 if err.identifier() == Some(ReplayErrorKind::DecodeFailed.identifier()) {
                     warn!("RunMat wasm: figure scene decode failed: {err}");
                 } else {
                     warn!("RunMat wasm: figure scene import rejected: {err}");
                 }
-                Ok(None)
+                Err(runtime_error_to_js(&err))
             }
         }
     }
@@ -901,7 +936,7 @@ impl RunMatWasm {
             Ok(None) => Ok(None),
             Err(err) => {
                 warn!("RunMat wasm: figure scene import-from-path rejected: {err}");
-                Ok(None)
+                Err(runtime_error_to_js(&err))
             }
         }
     }
@@ -1354,11 +1389,79 @@ pub async fn wasm_render_figure_image(
     handle: JsValue,
     width: Option<u32>,
     height: Option<u32>,
+    textmark: Option<String>,
 ) -> Result<Uint8Array, JsValue> {
+    const DEFAULT_PREVIEW_WIDTH: u32 = 1280;
+    const DEFAULT_PREVIEW_HEIGHT: u32 = 720;
+    let _ = shared_webgpu_context();
     let target = parse_optional_handle(handle)?.unwrap_or_else(runtime_current_figure_handle);
-    let bytes = runtime_render_figure_snapshot(target, width.unwrap_or(0), height.unwrap_or(0))
+    let normalized_width = width.unwrap_or(0).max(1);
+    let normalized_height = height.unwrap_or(0).max(1);
+    let (render_width, render_height) = if normalized_width == 1 && normalized_height == 1 {
+        (DEFAULT_PREVIEW_WIDTH, DEFAULT_PREVIEW_HEIGHT)
+    } else {
+        (normalized_width, normalized_height)
+    };
+    log::debug!(
+        "RunMat wasm: renderFigureImage start handle={} width={} height={} textmark={}",
+        target.as_u32(),
+        render_width,
+        render_height,
+        textmark.as_deref().unwrap_or("")
+    );
+    let bytes = runtime_render_figure_snapshot(target, render_width, render_height, textmark)
         .await
         .map_err(runtime_flow_to_js)?;
+    log::debug!(
+        "RunMat wasm: renderFigureImage ok handle={} bytes={}",
+        target.as_u32(),
+        bytes.len()
+    );
+    Ok(Uint8Array::from(bytes.as_slice()))
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = renderFigureImageWithTextmark)]
+pub async fn wasm_render_figure_image_with_textmark(
+    handle: JsValue,
+    width: Option<u32>,
+    height: Option<u32>,
+    textmark: Option<String>,
+) -> Result<Uint8Array, JsValue> {
+    wasm_render_figure_image(handle, width, height, textmark).await
+}
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen(js_name = renderFigureImageWithCameraState)]
+pub async fn wasm_render_figure_image_with_camera_state(
+    handle: JsValue,
+    width: Option<u32>,
+    height: Option<u32>,
+    camera_state: JsValue,
+    textmark: Option<String>,
+) -> Result<Uint8Array, JsValue> {
+    const DEFAULT_PREVIEW_WIDTH: u32 = 1280;
+    const DEFAULT_PREVIEW_HEIGHT: u32 = 720;
+    let _ = shared_webgpu_context();
+    let target = parse_optional_handle(handle)?.unwrap_or_else(runtime_current_figure_handle);
+    let normalized_width = width.unwrap_or(0).max(1);
+    let normalized_height = height.unwrap_or(0).max(1);
+    let (render_width, render_height) = if normalized_width == 1 && normalized_height == 1 {
+        (DEFAULT_PREVIEW_WIDTH, DEFAULT_PREVIEW_HEIGHT)
+    } else {
+        (normalized_width, normalized_height)
+    };
+    let parsed: PlotSurfaceCameraState =
+        serde_wasm_bindgen::from_value(camera_state).map_err(|err| js_error(&err.to_string()))?;
+    let bytes = runtime_render_figure_snapshot_with_camera_state(
+        target,
+        render_width,
+        render_height,
+        parsed,
+        textmark,
+    )
+    .await
+    .map_err(runtime_flow_to_js)?;
     Ok(Uint8Array::from(bytes.as_slice()))
 }
 
@@ -1681,13 +1784,27 @@ async fn install_surface_renderer(surface_id: u32, canvas: WebCanvas) -> Result<
     );
     let renderer = match shared_webgpu_context() {
         Some(shared) => {
+            log::debug!(
+                "plot-web: install_surface_renderer using shared context surface_id={} canvas_kind={}",
+                surface_id,
+                canvas_kind
+            );
             WebRenderer::with_shared_context(canvas.clone(), options.clone(), shared).await
         }
-        None => WebRenderer::new(canvas, options).await,
+        None => {
+            log::debug!(
+                "plot-web: install_surface_renderer using dedicated context surface_id={} canvas_kind={}",
+                surface_id,
+                canvas_kind
+            );
+            WebRenderer::new(canvas, options).await
+        }
     }
     .map_err(|err| js_error(&format!("Failed to initialize plot renderer: {err}")))?;
+    log::debug!("plot-web: install_surface_renderer renderer_ready surface_id={surface_id}");
     runtime_install_surface(surface_id, renderer)
         .map_err(|err| js_error(&format!("Failed to register plot surface: {err}")))?;
+    log::debug!("plot-web: install_surface_renderer registered surface_id={surface_id}");
     Ok(())
 }
 
@@ -2077,6 +2194,7 @@ fn figure_error_to_js(err: FigureError) -> JsValue {
             "InvalidSubplotIndex"
         }
         FigureError::InvalidAxesHandle => "InvalidAxesHandle",
+        FigureError::InvalidPlotObjectHandle => "InvalidPlotObjectHandle",
         FigureError::RenderFailure { source } => {
             let details = source.to_string();
             let _ = Reflect::set(
@@ -2136,6 +2254,7 @@ fn axes_state_to_js(state: FigureAxesState) -> JsValue {
 fn emit_js_figure_event(event: FigureEventView<'_>) {
     if let FigureEventKind::Closed = event.kind {
         let handle = event.handle.as_u32();
+        let _ = runtime_clear_closed_figure_surfaces(handle);
         // Legacy API cleanup: if a figure-specific canvas was registered via the old handle-based
         // API, detach its surface when the figure is closed.
         let surface_id = LEGACY_FIGURE_SURFACES.with(|slot| slot.borrow_mut().remove(&handle));
@@ -2752,6 +2871,7 @@ impl From<ExecutionStreamEntry> for ConsoleStreamPayload {
         let stream = match entry.stream {
             ExecutionStreamKind::Stdout => "stdout",
             ExecutionStreamKind::Stderr => "stderr",
+            ExecutionStreamKind::ClearScreen => "clear",
         };
         Self {
             stream,
@@ -2766,6 +2886,7 @@ impl ConsoleStreamPayload {
         let stream = match entry.stream {
             runmat_runtime::console::ConsoleStream::Stdout => "stdout",
             runmat_runtime::console::ConsoleStream::Stderr => "stderr",
+            runmat_runtime::console::ConsoleStream::ClearScreen => "clear",
         };
         Self {
             stream,
@@ -3566,9 +3687,10 @@ mod replay_smoke_tests {
         let runtime = init_runmat(JsValue::NULL)
             .await
             .expect("initialize wasm runtime");
-        let handle = runtime
+        let error = runtime
             .import_figure_scene(br#"{"schemaVersion":99,"kind":"figure-scene"}"#)
-            .expect("figure scene import result");
-        assert!(handle.is_none());
+            .expect_err("figure scene import should reject invalid payload");
+        let message = error.as_string().unwrap_or_default();
+        assert!(message.contains("unsupported figure replay schema version"));
     }
 }

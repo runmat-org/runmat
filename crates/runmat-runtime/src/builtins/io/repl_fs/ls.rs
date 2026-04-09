@@ -18,7 +18,7 @@ use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
-use crate::console::{record_console_output, ConsoleStream};
+use crate::console::{record_console_line, ConsoleStream};
 use crate::output_context::requested_output_count;
 use crate::{build_runtime_error, gather_if_needed_async, BuiltinResult, RuntimeError};
 
@@ -238,7 +238,7 @@ fn emit_listing_stdout(rows: &[String]) {
         return;
     }
     let text = rows.join("\n");
-    record_console_output(ConsoleStream::Stdout, text);
+    record_console_line(ConsoleStream::Stdout, text);
 }
 
 fn should_emit_stdout() -> bool {

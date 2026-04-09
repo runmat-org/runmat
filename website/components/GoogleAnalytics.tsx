@@ -1,7 +1,6 @@
 "use client";
 
 import Script from 'next/script';
-import posthog from 'posthog-js';
 
 // Google Analytics Measurement ID
 // You'll need to replace this with your actual GA4 Measurement ID
@@ -64,7 +63,9 @@ export const trackWebsiteEvent = (event: string, properties: WebsiteEventPropert
     window.gtag('event', canonicalEvent, payload);
   }
   if (typeof window !== 'undefined') {
-    posthog.capture(canonicalEvent, payload);
+    import('posthog-js').then(({ default: posthog }) => {
+      posthog.capture(canonicalEvent, payload);
+    }).catch(() => {});
   }
 };
 

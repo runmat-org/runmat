@@ -1,0 +1,49 @@
+{
+  "title": "subplot",
+  "category": "plotting",
+  "keywords": [
+    "subplot",
+    "subplot grid",
+    "multi-panel chart",
+    "matlab subplot",
+    "figure layout"
+  ],
+  "summary": "Split a figure into subplot grids for multi-panel charts, side-by-side comparisons, and MATLAB `subplot` workflows.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::subplot::tests"
+  },
+  "description": "`subplot(m, n, p)` selects an axes location inside an `m` by `n` figure grid and returns an axes handle for that slot. In RunMat, subplot selection is the backbone for axes-local plot state: legends, labels, log modes, view angles, and plot children all attach to the currently selected subplot unless an explicit handle is passed.",
+  "behaviors": [
+    "The returned value is an axes handle that can be passed explicitly to later plotting commands.",
+    "Subplot-local metadata stays isolated per axes: titles, legends, limits, log modes, and 3-D view state are all tracked independently.",
+    "Subsequent plotting commands operate on the selected subplot unless another axes handle is passed explicitly.",
+    "Indices are one-based in the MATLAB style. `subplot(2, 2, 3)` selects the third slot in row-major order."
+  ],
+  "examples": [
+    {
+      "description": "Create a 2x2 subplot layout",
+      "input": "subplot(2, 2, 1);\nplot(0:0.1:1, (0:0.1:1).^2);\nsubplot(2, 2, 2);\nscatter(1:5, [5 4 3 2 1]);"
+    },
+    {
+      "description": "Capture and reuse an axes handle explicitly",
+      "input": "ax = subplot(1, 2, 2);\nplot(ax, 0:0.1:1, sin(0:0.1:1));\nget(ax, 'Type')",
+      "output": "ans =\n    'axes'"
+    },
+    {
+      "description": "Show that subplot-local state stays isolated",
+      "input": "subplot(1, 2, 1);\nsemilogx(logspace(0, 2, 50), logspace(0, 2, 50));\nsubplot(1, 2, 2);\nplot(1:5, 1:5);",
+      "output": "% Only the first subplot uses a logarithmic x-axis"
+    }
+  ],
+  "links": [
+    { "label": "plot", "url": "./plot" },
+    { "label": "legend", "url": "./legend" },
+    { "label": "get", "url": "./get" },
+    { "label": "set", "url": "./set" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/subplot.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/subplot.rs"
+  }
+}

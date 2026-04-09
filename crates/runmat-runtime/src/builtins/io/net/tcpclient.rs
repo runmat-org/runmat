@@ -557,10 +557,13 @@ pub(crate) mod tests {
     #[test]
     fn tcpclient_reports_connection_failure() {
         let _guard = net_guard();
-        // Assume nothing listens on port 65000.
+        let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind probe listener");
+        let port = listener.local_addr().expect("probe local addr").port();
+        drop(listener);
+
         let err = run_tcpclient(
             Value::from("127.0.0.1"),
-            Value::Int(IntValue::I32(65000)),
+            Value::Int(IntValue::I32(port as i32)),
             vec![Value::from("ConnectTimeout"), Value::Num(0.05)],
         )
         .unwrap_err();

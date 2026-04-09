@@ -205,6 +205,19 @@ impl DirectUniforms {
     }
 }
 
+pub fn marker_shape_code(style: crate::plots::scatter::MarkerStyle) -> u32 {
+    match style {
+        crate::plots::scatter::MarkerStyle::Circle => 0,
+        crate::plots::scatter::MarkerStyle::Square => 1,
+        crate::plots::scatter::MarkerStyle::Triangle => 2,
+        crate::plots::scatter::MarkerStyle::Diamond => 3,
+        crate::plots::scatter::MarkerStyle::Plus => 4,
+        crate::plots::scatter::MarkerStyle::Cross => 5,
+        crate::plots::scatter::MarkerStyle::Star => 6,
+        crate::plots::scatter::MarkerStyle::Hexagon => 7,
+    }
+}
+
 /// Rendering pipeline types
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PipelineType {
@@ -242,17 +255,23 @@ pub struct WgpuRenderer {
     grid_uniform_buffer: wgpu::Buffer,
     pub grid_uniform_bind_group: wgpu::BindGroup,
     grid_uniform_bind_group_layout: wgpu::BindGroupLayout,
+    axes_grid_uniform_buffers: Vec<wgpu::Buffer>,
+    axes_grid_uniform_bind_groups: Vec<wgpu::BindGroup>,
     grid_plane_pipeline: Option<wgpu::RenderPipeline>,
 
     // Uniform resources (traditional)
     uniform_buffer: wgpu::Buffer,
     uniform_bind_group: wgpu::BindGroup,
     uniform_bind_group_layout: wgpu::BindGroupLayout,
+    axes_uniform_buffers: Vec<wgpu::Buffer>,
+    axes_uniform_bind_groups: Vec<wgpu::BindGroup>,
 
     // Direct uniform resources (optimized coordinate transformation)
     direct_uniform_buffer: wgpu::Buffer,
     pub direct_uniform_bind_group: wgpu::BindGroup,
     direct_uniform_bind_group_layout: wgpu::BindGroupLayout,
+    axes_direct_uniform_buffers: Vec<wgpu::Buffer>,
+    axes_direct_uniform_bind_groups: Vec<wgpu::BindGroup>,
 
     // Current uniforms
     uniforms: Uniforms,
@@ -273,6 +292,108 @@ pub struct WgpuRenderer {
 }
 
 impl WgpuRenderer {
+    fn create_uniform_bind_group_for_buffer(
+        &self,
+        buffer: &wgpu::Buffer,
+        label: &str,
+    ) -> wgpu::BindGroup {
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &self.uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+            label: Some(label),
+        })
+    }
+
+    fn create_direct_uniform_bind_group_for_buffer(
+        &self,
+        buffer: &wgpu::Buffer,
+        label: &str,
+    ) -> wgpu::BindGroup {
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &self.direct_uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+            label: Some(label),
+        })
+    }
+
+    fn create_grid_uniform_bind_group_for_buffer(
+        &self,
+        buffer: &wgpu::Buffer,
+        label: &str,
+    ) -> wgpu::BindGroup {
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some(label),
+            layout: &self.grid_uniform_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+        })
+    }
+
+    pub fn ensure_axes_uniform_capacity(&mut self, axes_count: usize) {
+        while self.axes_uniform_buffers.len() < axes_count {
+            let idx = self.axes_uniform_buffers.len();
+            let buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("Axes Uniform Buffer {idx}")),
+                    contents: bytemuck::cast_slice(&[Uniforms::new()]),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+            let bind_group = self.create_uniform_bind_group_for_buffer(
+                &buffer,
+                &format!("axes_uniform_bind_group_{idx}"),
+            );
+            self.axes_uniform_buffers.push(buffer);
+            self.axes_uniform_bind_groups.push(bind_group);
+        }
+        while self.axes_direct_uniform_buffers.len() < axes_count {
+            let idx = self.axes_direct_uniform_buffers.len();
+            let buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("Axes Direct Uniform Buffer {idx}")),
+                    contents: bytemuck::cast_slice(&[DirectUniforms::new(
+                        [0.0, 0.0],
+                        [1.0, 1.0],
+                        [-1.0, -1.0],
+                        [1.0, 1.0],
+                        [1.0, 1.0],
+                    )]),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+            let bind_group = self.create_direct_uniform_bind_group_for_buffer(
+                &buffer,
+                &format!("axes_direct_uniform_bind_group_{idx}"),
+            );
+            self.axes_direct_uniform_buffers.push(buffer);
+            self.axes_direct_uniform_bind_groups.push(bind_group);
+        }
+        while self.axes_grid_uniform_buffers.len() < axes_count {
+            let idx = self.axes_grid_uniform_buffers.len();
+            let buffer = self
+                .device
+                .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some(&format!("Axes Grid Uniform Buffer {idx}")),
+                    contents: bytemuck::cast_slice(&[GridUniforms::default()]),
+                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+                });
+            let bind_group = self.create_grid_uniform_bind_group_for_buffer(
+                &buffer,
+                &format!("axes_grid_uniform_bind_group_{idx}"),
+            );
+            self.axes_grid_uniform_buffers.push(buffer);
+            self.axes_grid_uniform_bind_groups.push(bind_group);
+        }
+    }
+
     /// Create a new WGPU renderer
     pub async fn new(
         device: Arc<wgpu::Device>,
@@ -453,13 +574,19 @@ impl WgpuRenderer {
             grid_uniform_buffer,
             grid_uniform_bind_group,
             grid_uniform_bind_group_layout,
+            axes_grid_uniform_buffers: Vec::new(),
+            axes_grid_uniform_bind_groups: Vec::new(),
             grid_plane_pipeline: None,
             uniform_buffer,
             uniform_bind_group,
             uniform_bind_group_layout,
+            axes_uniform_buffers: Vec::new(),
+            axes_uniform_bind_groups: Vec::new(),
             direct_uniform_buffer,
             direct_uniform_bind_group,
             direct_uniform_bind_group_layout,
+            axes_direct_uniform_buffers: Vec::new(),
+            axes_direct_uniform_bind_groups: Vec::new(),
             uniforms,
             direct_uniforms,
             depth_texture: None,
@@ -478,6 +605,27 @@ impl WgpuRenderer {
             0,
             bytemuck::cast_slice(&[uniforms]),
         );
+        self.ensure_axes_uniform_capacity(1);
+        self.queue.write_buffer(
+            &self.axes_grid_uniform_buffers[0],
+            0,
+            bytemuck::cast_slice(&[uniforms]),
+        );
+    }
+
+    pub fn update_grid_uniforms_for_axes(&mut self, axes_index: usize, uniforms: GridUniforms) {
+        self.ensure_axes_uniform_capacity(axes_index + 1);
+        self.queue.write_buffer(
+            &self.axes_grid_uniform_buffers[axes_index],
+            0,
+            bytemuck::cast_slice(&[uniforms]),
+        );
+    }
+
+    pub fn get_grid_uniform_bind_group_for_axes(&self, axes_index: usize) -> &wgpu::BindGroup {
+        self.axes_grid_uniform_bind_groups
+            .get(axes_index)
+            .unwrap_or(&self.grid_uniform_bind_group)
     }
 
     pub fn set_depth_mode(&mut self, mode: DepthMode) {
@@ -734,11 +882,35 @@ impl WgpuRenderer {
             0,
             bytemuck::cast_slice(&[self.uniforms]),
         );
+        self.ensure_axes_uniform_capacity(1);
+        self.queue.write_buffer(
+            &self.axes_uniform_buffers[0],
+            0,
+            bytemuck::cast_slice(&[self.uniforms]),
+        );
+    }
+
+    pub fn update_uniforms_for_axes(&mut self, axes_index: usize, view_proj: Mat4, model: Mat4) {
+        self.ensure_axes_uniform_capacity(axes_index + 1);
+        let mut uniforms = Uniforms::new();
+        uniforms.update_view_proj(view_proj);
+        uniforms.update_model(model);
+        self.queue.write_buffer(
+            &self.axes_uniform_buffers[axes_index],
+            0,
+            bytemuck::cast_slice(&[uniforms]),
+        );
     }
 
     /// Get the uniform bind group for rendering
     pub fn get_uniform_bind_group(&self) -> &wgpu::BindGroup {
         &self.uniform_bind_group
+    }
+
+    pub fn get_uniform_bind_group_for_axes(&self, axes_index: usize) -> &wgpu::BindGroup {
+        self.axes_uniform_bind_groups
+            .get(axes_index)
+            .unwrap_or(&self.uniform_bind_group)
     }
 
     /// Ensure pipeline exists for the specified type
@@ -1413,6 +1585,37 @@ impl WgpuRenderer {
             0,
             bytemuck::cast_slice(&[self.direct_uniforms]),
         );
+        self.ensure_axes_uniform_capacity(1);
+        self.queue.write_buffer(
+            &self.axes_direct_uniform_buffers[0],
+            0,
+            bytemuck::cast_slice(&[self.direct_uniforms]),
+        );
+    }
+
+    pub fn update_direct_uniforms_for_axes(
+        &mut self,
+        axes_index: usize,
+        data_min: [f32; 2],
+        data_max: [f32; 2],
+        viewport_min: [f32; 2],
+        viewport_max: [f32; 2],
+        viewport_px: [f32; 2],
+    ) {
+        self.ensure_axes_uniform_capacity(axes_index + 1);
+        let uniforms =
+            DirectUniforms::new(data_min, data_max, viewport_min, viewport_max, viewport_px);
+        self.queue.write_buffer(
+            &self.axes_direct_uniform_buffers[axes_index],
+            0,
+            bytemuck::cast_slice(&[uniforms]),
+        );
+    }
+
+    pub fn get_direct_uniform_bind_group_for_axes(&self, axes_index: usize) -> &wgpu::BindGroup {
+        self.axes_direct_uniform_bind_groups
+            .get(axes_index)
+            .unwrap_or(&self.direct_uniform_bind_group)
     }
 }
 

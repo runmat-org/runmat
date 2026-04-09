@@ -3,22 +3,21 @@
   "category": "plotting",
   "keywords": [
     "surfc",
-    "surface",
-    "contour",
-    "gpuArray"
+    "surface with contour",
+    "composite surface plot",
+    "projected contour overlay",
+    "matlab surfc"
   ],
-  "summary": "Render a shaded surface with contour lines on the base plane.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/surfc.html"
-  ],
+  "summary": "Create composite surface-and-contour plots for scalar fields with MATLAB `surfc` semantics and projected contour overlays.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
     "precisions": [
-      "single"
+      "single",
+      "double"
     ],
     "broadcasting": "none",
-    "notes": "Single-precision gpuArray inputs stay on the device via the shared WebGPU renderer."
+    "notes": "`surfc` combines the shared surface path with the modern contour path instead of relying on a separate legacy composite implementation."
   },
   "fusion": {
     "elementwise": false,
@@ -30,62 +29,38 @@
   "tested": {
     "unit": "builtins::plotting::surfc::tests"
   },
-  "description": "`surfc(X, Y, Z)` draws a shaded surface and overlays contour lines projected onto the XY plane. RunMat reuses the same surface renderer as `surf` and complements it with GPU-generated iso-lines.",
-  "behaviors": [],
-  "examples": [],
-  "faqs": [],
-  "links": [
+  "description": "`surfc` is the composite member of the surface family: it combines a shaded `surf`-style surface with contour lines projected onto the base plane. In RunMat the returned handle is the primary surface handle, while the contour overlay is added as the secondary composite child. That keeps the composite behavior explicit without reintroducing a separate legacy plotting stack.",
+  "behaviors": [
+    "`surfc` shares the same surface semantics as `surf` for the primary surface object.",
+    "The returned handle is the surface handle for the composite result, while contour overlays are attached as the secondary composite plot content.",
+    "The contour overlay uses the same modern contour-generation path as `contour`, rather than a one-off composite implementation.",
+    "Colormap, colorbar, view, and subplot-local state all operate on the composite through the same shared axes metadata model.",
+    "GPU-aware execution applies to both the surface side and the contour side where supported."
+  ],
+  "examples": [
     {
-      "label": "bar",
-      "url": "./bar"
+      "description": "Create a shaded surface with projected contour lines",
+      "input": "[X, Y] = meshgrid(linspace(-2, 2, 60), linspace(-2, 2, 60));\nZ = X .* exp(-X.^2 - Y.^2);\nsurfc(X, Y, Z);"
     },
     {
-      "label": "contour",
-      "url": "./contour"
+      "description": "Style the composite with colormap and camera controls",
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 80), linspace(-3, 3, 80));\nZ = cos(X) .* sin(Y);\nh = surfc(X, Y, Z);\ncolormap('turbo');\ncolorbar;\nview(45, 25);"
     },
     {
-      "label": "contourf",
-      "url": "./contourf"
-    },
-    {
-      "label": "hist",
-      "url": "./hist"
-    },
-    {
-      "label": "mesh",
-      "url": "./mesh"
-    },
-    {
-      "label": "meshc",
-      "url": "./meshc"
-    },
-    {
-      "label": "plot",
-      "url": "./plot"
-    },
-    {
-      "label": "scatter",
-      "url": "./scatter"
-    },
-    {
-      "label": "scatter3",
-      "url": "./scatter3"
-    },
-    {
-      "label": "stairs",
-      "url": "./stairs"
-    },
-    {
-      "label": "surf",
-      "url": "./surf"
+      "description": "Inspect the returned primary surface handle",
+      "input": "[X, Y] = meshgrid(1:20, 1:20);\nZ = X + Y;\nh = surfc(X, Y, Z);\nget(h, 'Type')",
+      "output": "ans =\n    'surface'"
     }
+  ],
+  "links": [
+    { "label": "surf", "url": "./surf" },
+    { "label": "meshc", "url": "./meshc" },
+    { "label": "contour", "url": "./contour" },
+    { "label": "contourf", "url": "./contourf" },
+    { "label": "view", "url": "./view" }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/surfc.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/surfc.rs"
-  },
-  "gpu_behavior": [
-    "Single-precision gpuArrays stream directly into the shared WebGPU renderer.",
-    "Double-precision data falls back to the CPU path until SHADER_F64 is available."
-  ]
+  }
 }

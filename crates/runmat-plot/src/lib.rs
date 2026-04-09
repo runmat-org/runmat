@@ -50,7 +50,7 @@ pub use event::{
     FigureSnapshot, PlotDescriptor, PlotKind,
 };
 pub use plots::{
-    AreaPlot, ContourFillPlot, ContourPlot, Figure, ImagePlot, LinePlot, PieChart, QuiverPlot,
+    AreaPlot, ContourFillPlot, ContourPlot, Figure, Line3Plot, LinePlot, PieChart, QuiverPlot,
     Scatter3Plot, ScatterPlot, StairsPlot, StemPlot, SurfacePlot,
 };
 
