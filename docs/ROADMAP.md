@@ -18,7 +18,7 @@ The core language and runtime are complete. The major remaining items are:
 
 - The package manager needs to be implemented.
 - The JIT currently optimizes a subset of the language, with an interpreter fallback for operations that are currently not implemented in the JIT. Full JIT coverage will be implemented before the 1.0 release.
-- Continued expansion of built-in function coverage. RunMat ships 300+ built-in functions across arrays, linear algebra, FFT/signal processing, statistics, plotting, strings, and I/O. Additional functions continue to be added based on user needs.
+- Continued expansion of built-in function coverage. RunMat ships 330+ built-in functions across arrays, linear algebra, FFT/signal processing, statistics, plotting, strings, and I/O. Additional functions continue to be added based on user needs.
 
 The below tracks the progress of the project towards the 1.0 release to date.
 

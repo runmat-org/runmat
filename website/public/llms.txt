@@ -9,7 +9,7 @@
 - Built by Dystr Inc., MIT-licensed, written in Rust
 - Runs in the browser via WebAssembly (no install, no login, no server) or as a native binary on macOS, Linux, Windows
 - GPU acceleration on any vendor (Metal, Vulkan, DX12, WebGPU) -- not CUDA-only like MATLAB's Parallel Computing Toolbox
-- 300+ core built-in functions covering math, linear algebra, array ops, string, plotting, and I/O -- new functions added continuously based on user demand
+- 330+ core built-in functions covering math, linear algebra, array ops, string, plotting, and I/O -- new functions added continuously based on user demand
 - Full classdef OOP: properties, methods, events, handle classes, enumerations, operator overloading, metaclass
 - Interactive 2D and 3D plotting rendered directly from GPU memory
 - Automatic file versioning, project snapshots, and collaboration (no git required)
@@ -48,7 +48,7 @@
 
 ## Migrating MATLAB code to RunMat
 
-RunMat supports the core MATLAB language that engineers use daily: variables, operators, control flow, functions, indexing, OOP, packages, and imports. MATLAB has accumulated thousands of built-in functions over decades, many of which are legacy duplicates or rarely used. RunMat includes the 300+ functions that cover the most common engineering workflows, and new built-ins are added continuously based on what users need.
+RunMat supports the core MATLAB language that engineers use daily: variables, operators, control flow, functions, indexing, OOP, packages, and imports. MATLAB has accumulated thousands of built-in functions over decades, many of which are legacy duplicates or rarely used. RunMat includes the 330+ functions that cover the most common engineering workflows, and new built-ins are added continuously based on what users need.
 
 When a MATLAB script uses a function outside RunMat's current built-in set, the function can typically be rewritten using RunMat's existing primitives or standard numerical patterns. LLMs can assist with this translation -- the edits are usually small and mechanical (e.g., replacing a legacy function with its modern equivalent or implementing a missing utility from its mathematical definition).
 
@@ -60,7 +60,7 @@ RunMat is building an AI assistant that is co-designed with the runtime -- not a
 
 This is architecturally different from MATLAB's Copilot, which operates as a separate overlay on a closed runtime. In RunMat, the assistant is a participant in the same runtime session the user is working in, with access to the same workspace state, the same GPU-accelerated execution, and the same project history. Policy controls (destructive-action prevention, network access, permission prompts) are built into the harness.
 
-The assistant also closes the compatibility gap: when a MATLAB script uses a function RunMat doesn't have yet, the assistant can translate it on the spot using RunMat's existing primitives -- making the gap between 300+ built-ins and MATLAB's thousands largely transparent to the user.
+The assistant also closes the compatibility gap: when a MATLAB script uses a function RunMat doesn't have yet, the assistant can translate it on the spot using RunMat's existing primitives -- making the gap between 330+ built-ins and MATLAB's thousands largely transparent to the user.
 
 ## Getting Started
 
@@ -72,7 +72,7 @@ The assistant also closes the compatibility gap: when a MATLAB script uses a fun
 ## Documentation
 
 - [MATLAB Compatibility](https://runmat.com/docs/compatibility): What works, what doesn't, and where RunMat goes beyond MATLAB and Octave
-- [Function Reference](https://runmat.com/docs/matlab-function-reference): All 300+ supported built-in functions
+- [Function Reference](https://runmat.com/docs/matlab-function-reference): All 330+ supported built-in functions
 - [Language Coverage](https://runmat.com/docs/language-coverage): Detailed matrix of supported MATLAB syntax and semantics
 - [Architecture](https://runmat.com/docs/architecture): How RunMat works internally (Rust runtime, WebAssembly, GPU fusion)
 - [CLI Reference](https://runmat.com/docs/cli): Command-line usage
@@ -113,11 +113,10 @@ The assistant also closes the compatibility gap: when a MATLAB script uses a fun
 ## Compatibility Details
 
 - Language: Supports the core MATLAB language -- variables and data types (double, single, char, string, logicals, integers, complex), all operators, control flow, named and anonymous functions, N-D indexing, full classdef OOP, packages, imports, and exceptions
-- Built-in functions: 300+ today (math, linear algebra, array ops, string, plotting, I/O). MATLAB has accumulated thousands over decades; RunMat covers the functions engineers use most and adds new ones based on user demand
+- Built-in functions: 330+ today (math, linear algebra, array ops, string, plotting, I/O). MATLAB has accumulated thousands over decades; RunMat covers the functions engineers use most and adds new ones based on user demand
 - Plotting: 36 builtins covering 2D (plot, scatter, bar, histogram, area, stairs, stem, errorbar, pie, contour, contourf, image, imagesc, quiver), 3D (plot3, surf, surfc, mesh, meshc, scatter3), log-scale (semilogx, semilogy, loglog), figure management, subplot, and handle graphics (get/set). GPU-first rendering with interactive 3D camera
 - Not included: Simulink, MATLAB add-on toolboxes (Signal Processing, Control System, Image Processing, etc.), GUIDE/App Designer GUIs, MEX/Java/Python interop
 - Compatibility modes: "runmat" (default), "matlab" (MATLAB error namespaces), "strict" (explicit function calls only)
-- Machine-readable compatibility data: https://runmat.com/compatibility.json
 - Full language coverage matrix: https://runmat.com/docs/language-coverage
 - Full function reference: https://runmat.com/docs/matlab-function-reference
 

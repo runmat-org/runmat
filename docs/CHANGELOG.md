@@ -9,9 +9,6 @@ _What's new across the RunMat runtime, cloud, and sandbox._
 ### Runtime
 
 #### Added
-- Add `peaks` builtin — GPU-accelerated with mixed-residency tensor support and type inference
-- Add `clear`, `clc`, `close all` — session management commands now work in browser and native
-- Add duration display and datetime interop support
 
 New plot types:
 - Add `stem` with GPU-accelerated rendering
@@ -34,13 +31,23 @@ Plotting infrastructure:
 - Add 3D view controls: `view(az, el)`
 - Add world-space text annotations
 
+Other:
+- Add `clear`, `clc`, `close all` — session management commands now work in browser and native
+- Add duration display and datetime interop support
+- Add `peaks` builtin — GPU-accelerated with mixed-residency tensor support and type inference
+
 #### Fixed
+- Fix `mldivide` (backslash) to solve linear systems instead of computing inverse
+- Fix struct field indexing — `s.arr(k)` and `s.arr(1:n)` now work with MATLAB-compatible semantics
+- Fix implicit struct creation — assigning to `r.x = 10` on an uninitialized variable now materializes a struct
 - Fix FFT complex array indexing — range-based indexing on complex results from `fft` now works (`Y = fft(x); Y = Y(1:N/2)`)
 - Fix double-precision FFT shader bindings
 - Fix `fprintf` compatibility for literal dollar signs and casted numeric inputs
 - Fix `atan2` stack underflow that crashed scripts calling `atan2` with compound expressions
-- Fix struct field indexing — `s.arr(k)` and `s.arr(1:n)` now work with MATLAB-compatible semantics
-- Fix implicit struct creation — assigning to `r.x = 10` on an uninitialized variable now materializes a struct
+- Fix leading-dot floats — `.5` parsed as `0.5`
+- Fix GPU tensor to f64 conversion for iterative solve workflows
+- Fix range-indexing type errors
+- Fix GPU memory cleanup on QR and `mrdivide` errors
 - Fix `matmul` parameter caching
 - Fix histogram and bar charts not displaying
 - Fix right bar chart persisting after generating new charts
@@ -50,11 +57,6 @@ Plotting infrastructure:
 - Fix `stairs` 1-argument form
 - Fix Z-axis label styling
 - Fix `plot` 3-argument overload
-- Fix `mldivide` (backslash) to solve linear systems instead of computing inverse
-- Fix leading-dot floats — `.5` parsed as `0.5`
-- Fix GPU tensor to f64 conversion for iterative solve workflows
-- Fix range-indexing type errors
-- Fix GPU memory cleanup on QR and `mrdivide` errors
 - Fix stem shader offset when baseline is hidden
 
 #### Changed

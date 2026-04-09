@@ -106,7 +106,7 @@ export const docsTree: DocsNode[] = [
           ogDescription: "How compatible is RunMat with MATLAB? Language coverage, function reference, toolbox status, and GPU acceleration.",
         },
       },
-      { title: "Language Reference", slug: ["language"], file: "docs/LANGUAGE.md", seo: { description: "RunMat language compatibility modes and MATLAB syntax support.", keywords: ["language reference", "MATLAB syntax", "compatibility"] } },
+      { title: "Compatibility Modes", slug: ["language"], file: "docs/LANGUAGE.md", seo: { description: "RunMat compatibility modes: runmat, matlab, and strict — controlling command syntax and error namespaces.", keywords: ["compatibility modes", "MATLAB syntax", "strict mode", "command syntax"] } },
       { title: "Language Coverage", slug: ["language-coverage"], file: "docs/LANGUAGE_COVERAGE.md", seo: { description: "MATLAB language feature compatibility in RunMat with an Octave comparison.", keywords: ["MATLAB compatibility", "Octave compatibility", "language coverage", "MATLAB alternative", "Octave alternative"] } },
     ],
   },
