@@ -1,6 +1,6 @@
 # RunMat Changelog
 
-_What's new across the RunMat runtime, cloud, and sandbox._
+_What's new across the RunMat runtime, cloud, and sandbox. For technical runtime details and commit diffs, see [GitHub Releases](https://github.com/runmat-org/runmat/releases) (runtime only)._
 
 ---
 
@@ -10,7 +10,7 @@ _What's new across the RunMat runtime, cloud, and sandbox._
 
 #### Added
 
-New plot types:
+New [plot types](/docs/matlab-function-reference#plotting):
 - Add `stem` with GPU-accelerated rendering
 - Add `errorbar` visualization
 - Add `area` filled area plots
@@ -34,7 +34,7 @@ Plotting infrastructure:
 Other:
 - Add `clear`, `clc`, `close all` — session management commands now work in browser and native
 - Add duration display and datetime interop support
-- Add `peaks` builtin — GPU-accelerated with mixed-residency tensor support and type inference
+- Add [`peaks`](/docs/matlab-function-reference) builtin — GPU-accelerated with mixed-residency tensor support and type inference
 
 #### Fixed
 - Fix `mldivide` (backslash) to solve linear systems instead of computing inverse
@@ -65,9 +65,8 @@ Other:
 ### Sandbox
 
 #### Added
-- Add notebook editor — markdown cells alongside code cells with inline output
-- Add RunMat Agent v1 — full agent harness with typed protocol, config, ops, and event model
-- Add Google Tag Manager integration
+- Add notebook editor infrastructure — markdown cells alongside code cells (not yet user-facing)
+- Add RunMat Agent infrastructure — typed protocol, config, ops, and event model (not yet user-facing)
 
 #### Fixed
 - Fix artifact loading to return newest entry when an ID is reused
@@ -79,15 +78,12 @@ Other:
 - Improve auth flow — email verification now redirects directly to the sandbox with an auth modal
 - Improve Auth0 email login flow
 - Improve stdout deduplication and clear event handling
-- Split package into `pkg/pkg-web` for lighter browser builds
 
 ### Cloud
 
 #### Added
-- Add incremental streaming for the RunMat agent — true token-by-token streaming in the web host
-- Add durable persistence and replay — run artifacts stored and replayable
-- Define multi-tier persistence model for the agent harness
-- Define agent/editor/filesystem edit model for the harness
+- Add incremental streaming for the RunMat agent
+- Add durable persistence and replay for run artifacts
 
 ---
 
@@ -116,13 +112,13 @@ Major release — 558 commits across 3,100+ files.
 ### Runtime
 
 #### Added
-- Compile RunMat to WebAssembly — runs entirely in the browser with WebGPU acceleration, published as the `runmat` npm package
+- Compile RunMat to WebAssembly — runs entirely in the [browser](/docs/desktop-browser-guide) with WebGPU acceleration, published as the `runmat` npm package
 - Add fused GPU rendering pipeline for 2D and 3D plots with zero-copy surface data path
 - Add 3D depth camera with reversed-Z and dynamic clip planes
 - Add type inference — context-aware shape resolvers track tensor shapes through the compiler
 - Add builtins: `int32`, `uint16`, `isgpuarray`, `magic`, `empty`, `frewind`, `rand(m,n,p)`, `uint8` elementwise ops, `isequal`, `logical`, `cellfun` handle support, `fullfile`, `erase`, `atanh`, `tempname`
 - Add full call stack in error diagnostics with stack depth limit and source location tracking
-- Add MATLAB compatibility mode
+- Add [MATLAB compatibility mode](/docs/language)
 
 #### Changed
 - Migrate the entire VM, all builtins, and the GPU provider to async
@@ -134,10 +130,7 @@ Major release — 558 commits across 3,100+ files.
 ### Sandbox
 
 #### Added
-- Deploy sandbox web app on Vercel
-- Add service worker plotting with GPU acceleration
-- Add per-seat billing model
-- Add file upload progress indication
+- Launch browser sandbox at [runmat.com/sandbox](https://runmat.com/sandbox)
 
 #### Fixed
 - Fix save file behavior
@@ -145,50 +138,14 @@ Major release — 558 commits across 3,100+ files.
 - Fix variable inspector pagination — large vectors now paginate correctly
 - Fix variable inspector caching — stale values no longer shown after re-runs
 - Fix data file viewer error handling
-- Fix org admin member table column alignment
-- Fix editor reload flicker
-- Fix notification and variable inspector issues
-- Fix contact form company name field
-
 #### Changed
 - Show struct values before tensor values in the output panel
-- Add subtitles to inspector header
-- Add `SetWorkingDir` command for safe directory management
-- Hide persistence settings for logged-out users
-- Improve invite accept flow
-- Disable persist runs toggle (pending redesign)
-
-#### Removed
-- Remove pre-migration billing logic
-- Remove viewer invite options
+- Improve variable inspector layout
 
 ### Cloud
 
 #### Added
-- Complete server phase 3: orgs, projects, and memberships
-- Start LLM abstraction layer
-- Add OpenAPI spec and client generation
-- Add Docker Compose local development setup
-- Deploy dev infrastructure on GCP
-- Add Terraform modules: Cloud Run, Artifact Registry, IAM, networking, DNS, secrets, Postgres, observability, storage
-- Add contact sales modal via HubSpot integration
-- Add sales submission tracking
-
-#### Fixed
-- Fix duplicate scheduled Stripe cancellation events
-- Fix storage warning email destination
-- Fix billing proration behavior and storage accounting
-
-#### Changed
-- Reduce lifecycle notice log level
-- Track invite acceptance on both inviter and invitee timelines
-- Add invite recipient list to analytics event payload
-- Add additional metadata to Stripe subscription events
-- Add Postgres-triggered billing events
-- Migrate filesystem abstraction to async
-- Refactor server crate structure and filesystem
-- Improve logging and tracing across server
-- Consolidate route extraction and error helpers
+- Add organizations, projects, and team memberships
 
 ---
 
@@ -199,8 +156,7 @@ _December 22, 2025_
 #### Added
 - Add complex number support — complex arithmetic works throughout the runtime
 - Add non-conjugate transpose (`.'`) — apostrophe handling now distinguishes from conjugate transpose
-- Add Homebrew installation — `brew install runmat`
-- Begin initial WASM loading and init work
+- Add Homebrew installation — `brew install runmat` (see [CLI docs](/docs/cli))
 
 #### Changed
 - Replace manual REPL input with `rustyline` for line editing, command history, and formatting
@@ -219,9 +175,7 @@ _December 22, 2025_
 _December 2, 2025_
 
 #### Added
-- Add install-time and runtime usage telemetry
-- Add telemetry ingestion via Next.js ingress collector
-- Switch telemetry forwarding to GCP-based infrastructure
+- Add anonymous usage telemetry (see [Telemetry](/docs/telemetry) for details)
 
 #### Fixed
 - Fix CLI version display
@@ -236,12 +190,12 @@ The GPU acceleration era. Covers [v0.2.0](https://github.com/runmat-org/runmat/c
 
 #### Added
 
-_Accelerate (GPU backend):_
+_[Accelerate](/docs/accelerate/fusion-intro) (GPU backend):_
 - Add wgpu-based GPU backend — Metal (macOS), DirectX 12 (Windows), Vulkan (Linux)
 - Add cost model — runtime profiling routes work to CPU or GPU based on data size and transfer cost
 - Add f32/f64 compute shaders for a broad set of builtins — `ones`, `zeros`, `rand`, reductions, and many more now dispatch to the GPU automatically
 
-_Fusion engine:_
+_[Fusion engine](/docs/fusion-guide):_
 - Add computation graph pattern scanning — the runtime analyzes your code's computation graph, matches sequences against a library of fusible patterns, and replaces them with optimized GPU kernels automatically
 - Add 5–6 initial fusion operations including elementwise math chains, where multiple operations collapse into a single GPU kernel eliminating intermediate memory traffic
 
@@ -269,7 +223,7 @@ _August 25, 2025_
 _August 19, 2025_
 
 #### Added
-- Implement the MATLAB language grammar and semantic surface — parser, HIR, and VM cover the core language with ~98% real-world coverage; subsequent releases continue closing edge-case gaps
+- Implement the MATLAB language grammar and semantic surface — parser, HIR, and VM cover the core language with ~98% real-world coverage; see [Language Coverage](/docs/language-coverage) for the full matrix
 
 ---
 
@@ -281,6 +235,3 @@ _August 10, 2025_
 - Initial release — lexer, architecture plan, project scaffolding
 - Add release workflow with macOS signing, cross-compilation, crates.io publishing
 
----
-
-_Runtime release notes are also published on [GitHub Releases](https://github.com/runmat-org/runmat/releases)._
