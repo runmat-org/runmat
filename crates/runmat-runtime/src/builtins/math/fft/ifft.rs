@@ -610,9 +610,13 @@ pub(crate) mod tests {
                 ifft_builtin(Value::ComplexTensor(cpu_spectrum), Vec::new()).expect("cpu ifft");
             let gpu_ct = value_as_complex_tensor(gpu);
             let cpu_ct = value_as_complex_tensor(cpu);
+            let tol = match provider.precision() {
+                runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,
+                runmat_accelerate_api::ProviderPrecision::F32 => 1e-5,
+            };
             assert_eq!(gpu_ct.shape, cpu_ct.shape);
             for (a, b) in gpu_ct.data.iter().zip(cpu_ct.data.iter()) {
-                assert!(approx_eq(*a, *b, 1e-9), "{a:?} vs {b:?}");
+                assert!(approx_eq(*a, *b, tol), "{a:?} vs {b:?}");
             }
             provider.free(&handle).ok();
         }
