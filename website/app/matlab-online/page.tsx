@@ -3,8 +3,16 @@ import React from "react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import MatlabInlineCodeBlock from "@/components/MatlabInlineCodeBlock";
-import BenchmarkShowcaseBlock from "@/components/benchmarks/BenchmarkShowcaseBlock";
+import dynamic from "next/dynamic";
+
+const MatlabInlineCodeBlock = dynamic(() => import("@/components/MatlabInlineCodeBlock"), {
+  loading: () => <div className="w-full h-[60px] rounded-md bg-muted/40 animate-pulse" />,
+});
+
+const BenchmarkShowcaseBlock = dynamic(
+  () => import("@/components/benchmarks/BenchmarkShowcaseBlock"),
+  { loading: () => <div className="w-full h-[300px] rounded-xl bg-muted/40 animate-pulse" /> },
+);
 import {
   BarChart3,
   Globe,
@@ -61,7 +69,7 @@ export const metadata: Metadata = {
 };
 
 const heroVideoSrc = "https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.mp4";
-const heroPosterSrc = "https://web.runmatstatic.com/matlab-online-product-screenshot.png";
+const heroPosterSrc = "https://web.runmatstatic.com/video/posters/3d-interactive-plotting-runmat.webp";
 
 const faqItems: { question: string; answer: string; answerContent?: React.ReactNode }[] = [
   {
@@ -274,6 +282,11 @@ const jsonLd = {
 export default function MatlabOnlinePage() {
   return (
     <div className="min-h-screen bg-background">
+      <link
+        rel="preload"
+        as="image"
+        href="https://web.runmatstatic.com/video/posters/3d-interactive-plotting-runmat.webp"
+      />
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
