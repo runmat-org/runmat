@@ -267,9 +267,7 @@ _August 25, 2025_
 _August 19, 2025_
 
 #### Added
-- Implement the full MATLAB language grammar and semantic surface — parser, HIR, and VM cover the complete language surface
-
-> _Editor's note: v0.0.2 implemented the full MATLAB grammar, but real-world semantic coverage was closer to ~98%. Think web browser compatibility — the spec is implemented, but edge cases surface as real scripts exercise it. Subsequent releases have been steadily closing those gaps toward 99%+._
+- Implement the MATLAB language grammar and semantic surface — parser, HIR, and VM cover the core language with ~98% real-world coverage; subsequent releases continue closing edge-case gaps
 
 ---
 
