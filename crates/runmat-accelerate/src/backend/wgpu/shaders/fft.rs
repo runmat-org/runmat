@@ -1494,8 +1494,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if i >= params.len { return; }
   let idx = params.offset + i;
   if idx >= params.total { return; }
-  let p = (idx / params.inner_stride) % params.target_len;
-  let ib = idx * 2u;
+  let inner = idx % params.inner_stride;
+  let tmp = idx / params.inner_stride;
+  let p = tmp % params.target_len;
+  let outer = tmp / params.target_len;
+  let src = outer * params.m_len * params.inner_stride + inner + p * params.inner_stride;
+  let ib = src * 2u;
+  let ob = idx * 2u;
   let cb = p * 2u;
   let ar = Input.data[ib]; let ai = Input.data[ib+1u];
   let br = Chirp.data[cb]; let bi = Chirp.data[cb+1u];
@@ -1505,8 +1510,8 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let s = 1.0 / f64(params.target_len);
     rr = rr * s; ri = ri * s;
   }
-  Output.data[ib] = rr;
-  Output.data[ib+1u] = ri;
+  Output.data[ob] = rr;
+  Output.data[ob+1u] = ri;
 }
 "#;
 
@@ -1523,8 +1528,13 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
   if i >= params.len { return; }
   let idx = params.offset + i;
   if idx >= params.total { return; }
-  let p = (idx / params.inner_stride) % params.target_len;
-  let ib = idx * 2u;
+  let inner = idx % params.inner_stride;
+  let tmp = idx / params.inner_stride;
+  let p = tmp % params.target_len;
+  let outer = tmp / params.target_len;
+  let src = outer * params.m_len * params.inner_stride + inner + p * params.inner_stride;
+  let ib = src * 2u;
+  let ob = idx * 2u;
   let cb = p * 2u;
   let ar = Input.data[ib]; let ai = Input.data[ib+1u];
   let br = Chirp.data[cb]; let bi = Chirp.data[cb+1u];
@@ -1534,7 +1544,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     let s = 1.0 / f32(params.target_len);
     rr = rr * s; ri = ri * s;
   }
-  Output.data[ib] = rr;
-  Output.data[ib+1u] = ri;
+  Output.data[ob] = rr;
+  Output.data[ob+1u] = ri;
 }
 "#;

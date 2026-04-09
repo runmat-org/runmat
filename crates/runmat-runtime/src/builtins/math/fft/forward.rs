@@ -520,6 +520,29 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn fft_gpu_prime_length_on_non_last_dimension_matches_cpu() {
+        test_support::with_test_provider(|provider| {
+            let tensor = Tensor::new((1..=18).map(|v| v as f64).collect(), vec![2, 3, 3]).unwrap();
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &tensor.data,
+                shape: &tensor.shape,
+            };
+            let handle = provider.upload(&view).expect("upload");
+            let args = vec![Value::Int(IntValue::I32(7)), Value::Int(IntValue::I32(2))];
+            let gpu = fft_builtin_sync(Value::GpuTensor(handle.clone()), args.clone()).expect("fft gpu");
+            let cpu = fft_builtin_sync(Value::Tensor(tensor), args).expect("fft cpu");
+            let gpu_host = value_as_complex_tensor(gpu);
+            let cpu_host = value_as_complex_tensor(cpu);
+            assert_eq!(gpu_host.shape, cpu_host.shape);
+            for (a, b) in gpu_host.data.iter().zip(cpu_host.data.iter()) {
+                assert!(approx_eq(*a, *b, 1e-10), "{a:?} vs {b:?}");
+            }
+            provider.free(&handle).ok();
+        });
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     #[cfg(feature = "wgpu")]
     fn fft_wgpu_matches_cpu() {
         if let Some(provider) = runmat_accelerate::backend::wgpu::provider::ensure_wgpu_provider()
