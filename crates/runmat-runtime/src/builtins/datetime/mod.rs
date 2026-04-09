@@ -809,7 +809,10 @@ async fn second_builtin(value: Value) -> crate::BuiltinResult<Value> {
     })
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.subsref", builtin_path = "crate::builtins::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "datetime.subsref",
+    builtin_path = "crate::builtins::datetime"
+)]
 async fn datetime_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
     match kind.as_str() {
         "()" => datetime_indexing(obj, payload).await,
@@ -833,7 +836,10 @@ async fn datetime_subsref(obj: Value, kind: String, payload: Value) -> crate::Bu
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.subsasgn", builtin_path = "crate::builtins::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "datetime.subsasgn",
+    builtin_path = "crate::builtins::datetime"
+)]
 async fn datetime_subsasgn(
     obj: Value,
     kind: String,
@@ -936,11 +942,14 @@ async fn datetime_ge(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_datetime(lhs, rhs, "ge", |a, b| a >= b)
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.plus", builtin_path = "crate::builtins::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "datetime.plus",
+    builtin_path = "crate::builtins::datetime"
+)]
 async fn datetime_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let lhs_serials = serials_from_datetime_value(&lhs)?;
-    let rhs_numeric = if crate::duration::is_duration_object(&rhs) {
-        crate::duration::duration_tensor_from_duration_value(&rhs)?
+    let rhs_numeric = if crate::builtins::duration::is_duration_object(&rhs) {
+        crate::builtins::duration::duration_tensor_from_duration_value(&rhs)?
     } else {
         serial_tensor_from_value(rhs, "plus")?
     };
@@ -953,12 +962,15 @@ async fn datetime_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     datetime_object_from_serials(serials, shape, datetime_format_from_value(&lhs))
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.minus", builtin_path = "crate::builtins::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "datetime.minus",
+    builtin_path = "crate::builtins::datetime"
+)]
 async fn datetime_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let lhs_serials = serials_from_datetime_value(&lhs)?;
     match &rhs {
-        _ if crate::duration::is_duration_object(&rhs) => {
-            let rhs_days = crate::duration::duration_tensor_from_duration_value(&rhs)?;
+        _ if crate::builtins::duration::is_duration_object(&rhs) => {
+            let rhs_days = crate::builtins::duration::duration_tensor_from_duration_value(&rhs)?;
             let (left, right, shape) = binary_numeric_tensors(&lhs_serials, &rhs_days, "minus")?;
             let serials = left
                 .iter()
@@ -977,9 +989,9 @@ async fn datetime_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
                 .collect::<Vec<_>>();
             let tensor = Tensor::new(deltas, shape)
                 .map_err(|err| datetime_error(format!("minus: {err}")))?;
-            crate::duration::duration_object_from_days_tensor(
+            crate::builtins::duration::duration_object_from_days_tensor(
                 tensor,
-                crate::duration::DEFAULT_DURATION_FORMAT,
+                crate::builtins::duration::DEFAULT_DURATION_FORMAT,
             )
         }
         _ => {
@@ -1107,7 +1119,7 @@ mod tests {
         let rhs = run_datetime(vec![Value::Num(2024.0), Value::Num(1.0), Value::Num(2.0)]);
         let delta = futures::executor::block_on(datetime_minus(rhs.clone(), lhs.clone()))
             .expect("datetime minus datetime");
-        let delta_text = crate::duration::duration_display_text(&delta)
+        let delta_text = crate::builtins::duration::duration_display_text(&delta)
             .expect("duration display")
             .expect("duration text");
         assert_eq!(delta_text, "24:00:00");

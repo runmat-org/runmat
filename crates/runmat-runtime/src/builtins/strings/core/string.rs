@@ -560,7 +560,7 @@ async fn convert_to_string_array(
     {
         return Ok(array);
     }
-    if let Some(array) = crate::duration::duration_string_array(&value)
+    if let Some(array) = crate::builtins::duration::duration_string_array(&value)
         .map_err(|err| string_flow(err.message().to_string()))?
     {
         return Ok(array);
@@ -686,7 +686,7 @@ fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
         }
         return Err(string_flow("string: cell datetime values must be scalar"));
     }
-    if let Some(array) = crate::duration::duration_string_array(value)
+    if let Some(array) = crate::builtins::duration::duration_string_array(value)
         .map_err(|err| string_flow(err.message().to_string()))?
     {
         if array.data.len() == 1 {

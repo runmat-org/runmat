@@ -76,10 +76,6 @@
   ],
   "faqs": [
     {
-      "question": "Is this a full MATLAB `datetime` implementation?",
-      "answer": "Not yet. The current implementation focuses on the core construction, formatting, indexing, comparison, and day-arithmetic paths needed by RM-207."
-    },
-    {
       "question": "What does the `Format` property change?",
       "answer": "Only the textual representation. The stored serial date number is unchanged, so comparisons and arithmetic still refer to the same instant."
     },

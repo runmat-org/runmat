@@ -110,14 +110,14 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
                 .unwrap_or_else(|| value.to_string())],
         },
         Value::Object(obj) if obj.is_class("duration") => match mode {
-            RenderMode::TopLevel => crate::duration::duration_display_text(value)
+            RenderMode::TopLevel => crate::builtins::duration::duration_display_text(value)
                 .map(|text| text.unwrap_or_else(|| value.to_string()))
                 .unwrap_or_else(|_| value.to_string())
                 .lines()
                 .map(|line| line.to_string())
                 .collect(),
-            RenderMode::Nested => vec![crate::duration::duration_display_text(value)
-                .or_else(|_| crate::duration::duration_summary(value))
+            RenderMode::Nested => vec![crate::builtins::duration::duration_display_text(value)
+                .or_else(|_| crate::builtins::duration::duration_summary(value))
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| value.to_string())],

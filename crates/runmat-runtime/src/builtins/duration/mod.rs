@@ -514,7 +514,15 @@ async fn duration_indexing(obj: Value, payload: Value) -> BuiltinResult<Value> {
     duration_object_from_days_tensor(indexed_days, format)
 }
 
-#[runmat_macros::runtime_builtin(name = "duration", builtin_path = "crate::duration")]
+#[runmat_macros::runtime_builtin(
+    name = "duration",
+    builtin_path = "crate::builtins::duration",
+    category = "datetime",
+    summary = "Create MATLAB-compatible duration arrays from hour, minute, and second components.",
+    keywords = "duration,time span,elapsed time,Format",
+    related = "datetime,string,char,disp",
+    examples = "t = duration(1, 30, 45);"
+)]
 async fn duration_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     ensure_duration_class_registered();
     let args = gather_args(&args).await?;
@@ -529,7 +537,10 @@ async fn duration_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "duration.subsref", builtin_path = "crate::duration")]
+#[runmat_macros::runtime_builtin(
+    name = "duration.subsref",
+    builtin_path = "crate::builtins::duration"
+)]
 async fn duration_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
     match kind.as_str() {
         "()" => duration_indexing(obj, payload).await,
@@ -553,7 +564,10 @@ async fn duration_subsref(obj: Value, kind: String, payload: Value) -> crate::Bu
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "duration.subsasgn", builtin_path = "crate::duration")]
+#[runmat_macros::runtime_builtin(
+    name = "duration.subsasgn",
+    builtin_path = "crate::builtins::duration"
+)]
 async fn duration_subsasgn(
     obj: Value,
     kind: String,
@@ -587,41 +601,44 @@ async fn duration_subsasgn(
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "duration.eq", builtin_path = "crate::duration")]
+#[runmat_macros::runtime_builtin(name = "duration.eq", builtin_path = "crate::builtins::duration")]
 async fn duration_eq(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_duration(lhs, rhs, "eq", |a, b| (a - b).abs() <= 1e-12)
 }
 
-#[runmat_macros::runtime_builtin(name = "duration.ne", builtin_path = "crate::duration")]
+#[runmat_macros::runtime_builtin(name = "duration.ne", builtin_path = "crate::builtins::duration")]
 async fn duration_ne(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_duration(lhs, rhs, "ne", |a, b| (a - b).abs() > 1e-12)
 }
 
-#[runmat_macros::runtime_builtin(name = "duration.lt", builtin_path = "crate::duration")]
+#[runmat_macros::runtime_builtin(name = "duration.lt", builtin_path = "crate::builtins::duration")]
 async fn duration_lt(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_duration(lhs, rhs, "lt", |a, b| a < b)
 }
 
-#[runmat_macros::runtime_builtin(name = "duration.le", builtin_path = "crate::duration")]
+#[runmat_macros::runtime_builtin(name = "duration.le", builtin_path = "crate::builtins::duration")]
 async fn duration_le(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_duration(lhs, rhs, "le", |a, b| a <= b)
 }
 
-#[runmat_macros::runtime_builtin(name = "duration.gt", builtin_path = "crate::duration")]
+#[runmat_macros::runtime_builtin(name = "duration.gt", builtin_path = "crate::builtins::duration")]
 async fn duration_gt(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_duration(lhs, rhs, "gt", |a, b| a > b)
 }
 
-#[runmat_macros::runtime_builtin(name = "duration.ge", builtin_path = "crate::duration")]
+#[runmat_macros::runtime_builtin(name = "duration.ge", builtin_path = "crate::builtins::duration")]
 async fn duration_ge(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_duration(lhs, rhs, "ge", |a, b| a >= b)
 }
 
-#[runmat_macros::runtime_builtin(name = "duration.plus", builtin_path = "crate::duration")]
+#[runmat_macros::runtime_builtin(
+    name = "duration.plus",
+    builtin_path = "crate::builtins::duration"
+)]
 async fn duration_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let lhs_days = duration_tensor_from_duration_value(&lhs)?;
-    if crate::datetime::is_datetime_object(&rhs) {
-        let rhs_serials = crate::datetime::serials_from_datetime_value(&rhs)?;
+    if crate::builtins::datetime::is_datetime_object(&rhs) {
+        let rhs_serials = crate::builtins::datetime::serials_from_datetime_value(&rhs)?;
         let (left, right, shape) = binary_numeric_tensors(&lhs_days, &rhs_serials, "plus")?;
         let serials = left
             .iter()
@@ -630,9 +647,9 @@ async fn duration_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
             .collect::<Vec<_>>();
         let tensor =
             Tensor::new(serials, shape).map_err(|err| duration_error(format!("plus: {err}")))?;
-        return crate::datetime::datetime_object_from_serial_tensor(
+        return crate::builtins::datetime::datetime_object_from_serial_tensor(
             tensor,
-            crate::datetime::datetime_format_from_value(&rhs),
+            crate::builtins::datetime::datetime_format_from_value(&rhs),
         );
     }
 
@@ -646,7 +663,10 @@ async fn duration_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     duration_object_from_days(days, shape, duration_format_from_value(&lhs))
 }
 
-#[runmat_macros::runtime_builtin(name = "duration.minus", builtin_path = "crate::duration")]
+#[runmat_macros::runtime_builtin(
+    name = "duration.minus",
+    builtin_path = "crate::builtins::duration"
+)]
 async fn duration_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let lhs_days = duration_tensor_from_duration_value(&lhs)?;
     let rhs_days = duration_tensor_from_duration_value(&rhs)?;

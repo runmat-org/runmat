@@ -101,7 +101,7 @@ pub fn record_value_output(label: Option<&str>, value: &Value) {
                 .unwrap_or_else(|| value.to_string())
         }
         Value::Object(obj) if obj.is_class("duration") => {
-            crate::duration::duration_display_text(value)
+            crate::builtins::duration::duration_display_text(value)
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| value.to_string())
