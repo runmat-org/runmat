@@ -4,7 +4,7 @@ _What's new across the RunMat runtime, cloud, and sandbox._
 
 ---
 
-## [v0.4.0](https://github.com/runmat-org/runmat/compare/v0.3.2...HEAD) — Unreleased
+## [v0.4.0](https://github.com/runmat-org/runmat/compare/v0.3.2...HEAD)
 
 ### Runtime
 
