@@ -89,19 +89,25 @@ Plotting infrastructure:
 
 ---
 
-## [v0.3.2](https://github.com/runmat-org/runmat/compare/v0.3.1...v0.3.2) — 2026-03-24
+## [v0.3.2](https://github.com/runmat-org/runmat/compare/v0.3.1...v0.3.2)
+
+_March 24, 2026_
 
 Deployment improvements for macOS, Windows, and Linux — no runtime or engine changes.
 
 ---
 
-## [v0.3.1](https://github.com/runmat-org/runmat/compare/v0.3.0...v0.3.1) — 2026-03-24
+## [v0.3.1](https://github.com/runmat-org/runmat/compare/v0.3.0...v0.3.1)
+
+_March 24, 2026_
 
 Infrastructure changes only — no runtime or engine changes.
 
 ---
 
-## [v0.3.0](https://github.com/runmat-org/runmat/compare/v0.2.8...v0.3.0) — 2026-03-24
+## [v0.3.0](https://github.com/runmat-org/runmat/compare/v0.2.8...v0.3.0)
+
+_March 24, 2026_
 
 Major release — 558 commits across 3,100+ files.
 
@@ -184,7 +190,9 @@ Major release — 558 commits across 3,100+ files.
 
 ---
 
-## [v0.2.8](https://github.com/runmat-org/runmat/compare/v0.2.7...v0.2.8) — 2025-12-22
+## [v0.2.8](https://github.com/runmat-org/runmat/compare/v0.2.7...v0.2.8)
+
+_December 22, 2025_
 
 #### Added
 - Add complex number support — complex arithmetic works throughout the runtime
@@ -204,7 +212,9 @@ Major release — 558 commits across 3,100+ files.
 
 ---
 
-## [v0.2.7](https://github.com/runmat-org/runmat/compare/v0.2.6...v0.2.7) — 2025-12-02
+## [v0.2.7](https://github.com/runmat-org/runmat/compare/v0.2.6...v0.2.7)
+
+_December 2, 2025_
 
 #### Added
 - Add install-time and runtime usage telemetry
@@ -216,13 +226,13 @@ Major release — 558 commits across 3,100+ files.
 
 ---
 
-## [v0.2.0](https://github.com/runmat-org/runmat/compare/v0.0.4...v0.2.0) – [v0.2.6](https://github.com/runmat-org/runmat/compare/v0.2.5...v0.2.6) — 2025-11-21
+## [v0.2.6](https://github.com/runmat-org/runmat/compare/v0.0.4...v0.2.6)
 
-The GPU acceleration era.
+_November 21 – 24, 2025_
+
+The GPU acceleration era. Covers [v0.2.0](https://github.com/runmat-org/runmat/compare/v0.0.4...v0.2.0) through v0.2.6.
 
 #### Added
-
-**[v0.2.0](https://github.com/runmat-org/runmat/compare/v0.0.4...v0.2.0) — GPU Acceleration**
 
 _Accelerate (GPU backend):_
 - Add wgpu-based GPU backend — Metal (macOS), DirectX 12 (Windows), Vulkan (Linux)
@@ -237,14 +247,14 @@ _Fusion engine:_
 - Add macOS code signing and Apple notarization
 
 #### Fixed
-
-**[v0.2.5](https://github.com/runmat-org/runmat/compare/v0.2.4...v0.2.5)** — Fix GPU tiling regression
-
-**[v0.2.6](https://github.com/runmat-org/runmat/compare/v0.2.5...v0.2.6)** — Fix image normalization shader corner case
+- Fix GPU tiling regression (v0.2.5)
+- Fix image normalization shader corner case (v0.2.6)
 
 ---
 
-## [v0.0.3](https://github.com/runmat-org/runmat/compare/v0.0.2...v0.0.3) — 2025-08-25
+## [v0.0.3](https://github.com/runmat-org/runmat/compare/v0.0.2...v0.0.3)
+
+_August 25, 2025_
 
 #### Added
 - Add Jupyter kernel support — ZMQ transport so RunMat can serve as a Jupyter kernel
@@ -252,7 +262,9 @@ _Fusion engine:_
 
 ---
 
-## [v0.0.2](https://github.com/runmat-org/runmat/compare/v0.0.1...v0.0.2) — 2025-08-19
+## [v0.0.2](https://github.com/runmat-org/runmat/compare/v0.0.1...v0.0.2)
+
+_August 19, 2025_
 
 #### Added
 - Implement the full MATLAB language grammar and semantic surface — parser, HIR, and VM cover the complete language surface
@@ -261,7 +273,9 @@ _Fusion engine:_
 
 ---
 
-## [v0.0.1](https://github.com/runmat-org/runmat/releases/tag/v0.0.1) — 2025-08-10
+## [v0.0.1](https://github.com/runmat-org/runmat/releases/tag/v0.0.1)
+
+_August 10, 2025_
 
 #### Added
 - Initial release — lexer, architecture plan, project scaffolding
