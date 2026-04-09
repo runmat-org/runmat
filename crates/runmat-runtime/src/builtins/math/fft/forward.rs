@@ -529,7 +529,8 @@ pub(crate) mod tests {
             };
             let handle = provider.upload(&view).expect("upload");
             let args = vec![Value::Int(IntValue::I32(7)), Value::Int(IntValue::I32(2))];
-            let gpu = fft_builtin_sync(Value::GpuTensor(handle.clone()), args.clone()).expect("fft gpu");
+            let gpu =
+                fft_builtin_sync(Value::GpuTensor(handle.clone()), args.clone()).expect("fft gpu");
             let cpu = fft_builtin_sync(Value::Tensor(tensor), args).expect("fft cpu");
             let gpu_host = value_as_complex_tensor(gpu);
             let cpu_host = value_as_complex_tensor(cpu);
