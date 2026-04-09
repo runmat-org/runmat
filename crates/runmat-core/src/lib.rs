@@ -2462,6 +2462,23 @@ mod tests {
     }
 
     #[test]
+    fn workspace_reports_datetime_array_shape() {
+        let mut session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let result =
+            block_on(session.execute("d = datetime([739351; 739352], 'ConvertFrom', 'datenum');"))
+                .expect("exec succeeds");
+        let entry = result
+            .workspace
+            .values
+            .iter()
+            .find(|entry| entry.name == "d")
+            .expect("workspace entry for d");
+        assert_eq!(entry.class_name, "datetime");
+        assert_eq!(entry.shape, vec![2, 1]);
+    }
+
+    #[test]
     fn workspace_state_roundtrip_replace_only() {
         let mut source_session =
             RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");

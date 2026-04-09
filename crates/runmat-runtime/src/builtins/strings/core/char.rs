@@ -102,7 +102,7 @@ async fn char_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
 }
 
 fn value_to_char_rows(value: &Value) -> BuiltinResult<Vec<Vec<char>>> {
-    if let Some(array) = crate::datetime::datetime_char_array(value)
+    if let Some(array) = crate::builtins::datetime::datetime_char_array(value)
         .map_err(|err| char_flow(err.message().to_string()))?
     {
         return Ok(char_array_rows(&array));

@@ -689,7 +689,15 @@ async fn datetime_indexing(obj: Value, payload: Value) -> BuiltinResult<Value> {
     datetime_object_from_serial_tensor(indexed_serials, format)
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime", builtin_path = "crate::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "datetime",
+    builtin_path = "crate::builtins::datetime",
+    category = "datetime",
+    summary = "Create MATLAB-compatible datetime arrays from text, components, or serial date numbers.",
+    keywords = "datetime,date,time,datenum,Format",
+    related = "year,month,day,hour,minute,second,string,char,disp",
+    examples = "t = datetime(2024, 4, 9, 13, 30, 0);"
+)]
 async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     ensure_datetime_class_registered();
     let args = gather_args(&args).await?;
@@ -733,39 +741,75 @@ async fn datetime_builtin(args: Vec<Value>) -> crate::BuiltinResult<Value> {
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "year", builtin_path = "crate::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "year",
+    builtin_path = "crate::builtins::datetime",
+    category = "datetime",
+    summary = "Extract year numbers from datetime arrays.",
+    keywords = "year,datetime,date component"
+)]
 async fn year_builtin(value: Value) -> crate::BuiltinResult<Value> {
     component_tensor_from_datetime(&value, "year", |naive| naive.year() as f64)
 }
 
-#[runmat_macros::runtime_builtin(name = "month", builtin_path = "crate::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "month",
+    builtin_path = "crate::builtins::datetime",
+    category = "datetime",
+    summary = "Extract month numbers from datetime arrays.",
+    keywords = "month,datetime,date component"
+)]
 async fn month_builtin(value: Value) -> crate::BuiltinResult<Value> {
     component_tensor_from_datetime(&value, "month", |naive| naive.month() as f64)
 }
 
-#[runmat_macros::runtime_builtin(name = "day", builtin_path = "crate::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "day",
+    builtin_path = "crate::builtins::datetime",
+    category = "datetime",
+    summary = "Extract day-of-month numbers from datetime arrays.",
+    keywords = "day,datetime,date component"
+)]
 async fn day_builtin(value: Value) -> crate::BuiltinResult<Value> {
     component_tensor_from_datetime(&value, "day", |naive| naive.day() as f64)
 }
 
-#[runmat_macros::runtime_builtin(name = "hour", builtin_path = "crate::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "hour",
+    builtin_path = "crate::builtins::datetime",
+    category = "datetime",
+    summary = "Extract hour numbers from datetime arrays.",
+    keywords = "hour,datetime,time component"
+)]
 async fn hour_builtin(value: Value) -> crate::BuiltinResult<Value> {
     component_tensor_from_datetime(&value, "hour", |naive| naive.hour() as f64)
 }
 
-#[runmat_macros::runtime_builtin(name = "minute", builtin_path = "crate::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "minute",
+    builtin_path = "crate::builtins::datetime",
+    category = "datetime",
+    summary = "Extract minute numbers from datetime arrays.",
+    keywords = "minute,datetime,time component"
+)]
 async fn minute_builtin(value: Value) -> crate::BuiltinResult<Value> {
     component_tensor_from_datetime(&value, "minute", |naive| naive.minute() as f64)
 }
 
-#[runmat_macros::runtime_builtin(name = "second", builtin_path = "crate::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "second",
+    builtin_path = "crate::builtins::datetime",
+    category = "datetime",
+    summary = "Extract second values from datetime arrays.",
+    keywords = "second,datetime,time component"
+)]
 async fn second_builtin(value: Value) -> crate::BuiltinResult<Value> {
     component_tensor_from_datetime(&value, "second", |naive| {
         naive.second() as f64 + f64::from(naive.nanosecond()) / 1_000_000_000.0
     })
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.subsref", builtin_path = "crate::datetime")]
+#[runmat_macros::runtime_builtin(name = "datetime.subsref", builtin_path = "crate::builtins::datetime")]
 async fn datetime_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
     match kind.as_str() {
         "()" => datetime_indexing(obj, payload).await,
@@ -789,7 +833,7 @@ async fn datetime_subsref(obj: Value, kind: String, payload: Value) -> crate::Bu
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.subsasgn", builtin_path = "crate::datetime")]
+#[runmat_macros::runtime_builtin(name = "datetime.subsasgn", builtin_path = "crate::builtins::datetime")]
 async fn datetime_subsasgn(
     obj: Value,
     kind: String,
@@ -862,37 +906,37 @@ fn compare_datetime(
     tensor_or_scalar(out, shape)
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.eq", builtin_path = "crate::datetime")]
+#[runmat_macros::runtime_builtin(name = "datetime.eq", builtin_path = "crate::builtins::datetime")]
 async fn datetime_eq(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_datetime(lhs, rhs, "eq", |a, b| (a - b).abs() <= 1e-12)
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.ne", builtin_path = "crate::datetime")]
+#[runmat_macros::runtime_builtin(name = "datetime.ne", builtin_path = "crate::builtins::datetime")]
 async fn datetime_ne(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_datetime(lhs, rhs, "ne", |a, b| (a - b).abs() > 1e-12)
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.lt", builtin_path = "crate::datetime")]
+#[runmat_macros::runtime_builtin(name = "datetime.lt", builtin_path = "crate::builtins::datetime")]
 async fn datetime_lt(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_datetime(lhs, rhs, "lt", |a, b| a < b)
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.le", builtin_path = "crate::datetime")]
+#[runmat_macros::runtime_builtin(name = "datetime.le", builtin_path = "crate::builtins::datetime")]
 async fn datetime_le(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_datetime(lhs, rhs, "le", |a, b| a <= b)
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.gt", builtin_path = "crate::datetime")]
+#[runmat_macros::runtime_builtin(name = "datetime.gt", builtin_path = "crate::builtins::datetime")]
 async fn datetime_gt(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_datetime(lhs, rhs, "gt", |a, b| a > b)
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.ge", builtin_path = "crate::datetime")]
+#[runmat_macros::runtime_builtin(name = "datetime.ge", builtin_path = "crate::builtins::datetime")]
 async fn datetime_ge(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_datetime(lhs, rhs, "ge", |a, b| a >= b)
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.plus", builtin_path = "crate::datetime")]
+#[runmat_macros::runtime_builtin(name = "datetime.plus", builtin_path = "crate::builtins::datetime")]
 async fn datetime_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let lhs_serials = serials_from_datetime_value(&lhs)?;
     let rhs_numeric = serial_tensor_from_value(rhs, "plus")?;
@@ -905,7 +949,7 @@ async fn datetime_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     datetime_object_from_serials(serials, shape, datetime_format_from_value(&lhs))
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.minus", builtin_path = "crate::datetime")]
+#[runmat_macros::runtime_builtin(name = "datetime.minus", builtin_path = "crate::builtins::datetime")]
 async fn datetime_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let lhs_serials = serials_from_datetime_value(&lhs)?;
     match &rhs {
