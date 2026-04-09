@@ -535,7 +535,7 @@ pub fn datetime_display_text(value: &Value) -> BuiltinResult<Option<String>> {
     for col in 0..cols {
         for row in 0..rows {
             let idx = row + col * rows;
-            widths[col] = widths[col].max(array.data[idx].len());
+            widths[col] = widths[col].max(array.data[idx].chars().count());
         }
     }
 
@@ -549,7 +549,7 @@ pub fn datetime_display_text(value: &Value) -> BuiltinResult<Option<String>> {
             let idx = row + col * rows;
             let text = &array.data[idx];
             line.push_str(text);
-            let padding = widths[col].saturating_sub(text.len());
+            let padding = widths[col].saturating_sub(text.chars().count());
             if padding > 0 {
                 line.push_str(&" ".repeat(padding));
             }
@@ -988,7 +988,7 @@ pub fn datetime_char_array(value: &Value) -> BuiltinResult<Option<CharArray>> {
     let Some(array) = datetime_string_array(value)? else {
         return Ok(None);
     };
-    let width = array.data.iter().map(String::len).max().unwrap_or(0);
+    let width = array.data.iter().map(|s| s.chars().count()).max().unwrap_or(0);
     let rows = array.data.len();
     let mut data = vec![' '; rows * width];
     for (row, text) in array.data.iter().enumerate() {
