@@ -95,7 +95,7 @@ pub fn record_value_output(label: Option<&str>, value: &Value) {
     });
     let value_text = match value {
         Value::Object(obj) if obj.is_class("datetime") => {
-            crate::datetime::datetime_display_text(value)
+            crate::builtins::datetime::datetime_display_text(value)
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| value.to_string())

@@ -555,7 +555,7 @@ async fn convert_to_string_array(
     value: Value,
     encoding: StringEncoding,
 ) -> BuiltinResult<StringArray> {
-    if let Some(array) = crate::datetime::datetime_string_array(&value)
+    if let Some(array) = crate::builtins::datetime::datetime_string_array(&value)
         .map_err(|err| string_flow(err.message().to_string()))?
     {
         return Ok(array);
@@ -678,7 +678,7 @@ async fn cell_array_to_string_array(
 }
 
 fn cell_element_to_string(value: &Value) -> BuiltinResult<String> {
-    if let Some(array) = crate::datetime::datetime_string_array(value)
+    if let Some(array) = crate::builtins::datetime::datetime_string_array(value)
         .map_err(|err| string_flow(err.message().to_string()))?
     {
         if array.data.len() == 1 {

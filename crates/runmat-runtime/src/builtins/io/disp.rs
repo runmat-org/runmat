@@ -97,14 +97,14 @@ fn format_for_disp(value: &Value) -> Vec<String> {
 fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
     match value {
         Value::Object(obj) if obj.is_class("datetime") => match mode {
-            RenderMode::TopLevel => crate::datetime::datetime_display_text(value)
+            RenderMode::TopLevel => crate::builtins::datetime::datetime_display_text(value)
                 .map(|text| text.unwrap_or_else(|| value.to_string()))
                 .unwrap_or_else(|_| value.to_string())
                 .lines()
                 .map(|line| line.to_string())
                 .collect(),
-            RenderMode::Nested => vec![crate::datetime::datetime_display_text(value)
-                .or_else(|_| crate::datetime::datetime_summary(value))
+            RenderMode::Nested => vec![crate::builtins::datetime::datetime_display_text(value)
+                .or_else(|_| crate::builtins::datetime::datetime_summary(value))
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| value.to_string())],

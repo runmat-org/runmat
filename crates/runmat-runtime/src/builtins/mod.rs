@@ -6,6 +6,7 @@ pub mod array;
 pub mod cells;
 pub mod constants;
 pub mod containers;
+pub mod datetime;
 pub mod diagnostics;
 pub mod image;
 pub mod introspection;
