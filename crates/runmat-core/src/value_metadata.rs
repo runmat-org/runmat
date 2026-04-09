@@ -43,13 +43,11 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
         Value::ComplexTensor(t) => Some(t.shape.clone()),
         Value::Cell(ca) => Some(ca.shape.clone()),
         Value::GpuTensor(handle) => Some(handle.shape.clone()),
-        Value::Object(obj) if obj.is_class("datetime") => {
-            match obj.properties.get("__serial") {
-                Some(Value::Tensor(tensor)) => Some(tensor.shape.clone()),
-                Some(Value::Num(_)) => Some(vec![1, 1]),
-                _ => None,
-            }
-        }
+        Value::Object(obj) if obj.is_class("datetime") => match obj.properties.get("__serial") {
+            Some(Value::Tensor(tensor)) => Some(tensor.shape.clone()),
+            Some(Value::Num(_)) => Some(vec![1, 1]),
+            _ => None,
+        },
         _ => None,
     }
 }

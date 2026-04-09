@@ -65,10 +65,6 @@ fn ensure_datetime_class_registered() {
     });
 }
 
-pub fn is_datetime_object(value: &Value) -> bool {
-    matches!(value, Value::Object(obj) if obj.is_class(DATETIME_CLASS))
-}
-
 async fn gather_args(args: &[Value]) -> BuiltinResult<Vec<Value>> {
     let mut out = Vec::with_capacity(args.len());
     for arg in args {
@@ -809,7 +805,10 @@ async fn second_builtin(value: Value) -> crate::BuiltinResult<Value> {
     })
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.subsref", builtin_path = "crate::builtins::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "datetime.subsref",
+    builtin_path = "crate::builtins::datetime"
+)]
 async fn datetime_subsref(obj: Value, kind: String, payload: Value) -> crate::BuiltinResult<Value> {
     match kind.as_str() {
         "()" => datetime_indexing(obj, payload).await,
@@ -833,7 +832,10 @@ async fn datetime_subsref(obj: Value, kind: String, payload: Value) -> crate::Bu
     }
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.subsasgn", builtin_path = "crate::builtins::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "datetime.subsasgn",
+    builtin_path = "crate::builtins::datetime"
+)]
 async fn datetime_subsasgn(
     obj: Value,
     kind: String,
@@ -936,7 +938,10 @@ async fn datetime_ge(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     compare_datetime(lhs, rhs, "ge", |a, b| a >= b)
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.plus", builtin_path = "crate::builtins::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "datetime.plus",
+    builtin_path = "crate::builtins::datetime"
+)]
 async fn datetime_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let lhs_serials = serials_from_datetime_value(&lhs)?;
     let rhs_numeric = serial_tensor_from_value(rhs, "plus")?;
@@ -949,7 +954,10 @@ async fn datetime_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     datetime_object_from_serials(serials, shape, datetime_format_from_value(&lhs))
 }
 
-#[runmat_macros::runtime_builtin(name = "datetime.minus", builtin_path = "crate::builtins::datetime")]
+#[runmat_macros::runtime_builtin(
+    name = "datetime.minus",
+    builtin_path = "crate::builtins::datetime"
+)]
 async fn datetime_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let lhs_serials = serials_from_datetime_value(&lhs)?;
     match &rhs {
