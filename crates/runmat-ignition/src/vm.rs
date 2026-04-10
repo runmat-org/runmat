@@ -11297,7 +11297,7 @@ async fn try_execute_fusion_group(
     plan: &runmat_accelerate::FusionGroupPlan,
     graph: &runmat_accelerate::AccelGraph,
     stack: &mut Vec<Value>,
-    vars: &mut [Value],
+    vars: &mut Vec<Value>,
     context: &mut ExecutionContext,
 ) -> VmResult<Value> {
     if plan.group.stack_layout.is_none() && !plan.stack_pattern.is_empty() {
@@ -11557,18 +11557,39 @@ async fn try_execute_fusion_group(
                 for (store, value) in result.materialized_stores {
                     match store.binding.kind {
                         VarKind::Global => {
-                            if store.binding.index < vars.len() {
-                                vars[store.binding.index] = value;
+                            let i = store.binding.index;
+                            #[cfg(feature = "native-accel")]
+                            if i < vars.len() && !same_gpu_handle(&vars[i], &value) {
+                                clear_residency(&vars[i]);
                             }
+                            if i >= vars.len() {
+                                vars.resize(i + 1, Value::Num(0.0));
+                                refresh_workspace_state(vars);
+                            }
+                            vars[i] = value;
                         }
                         VarKind::Local => {
                             if let Some(frame) = context.call_stack.last() {
                                 let absolute = frame.locals_start + store.binding.index;
-                                if absolute < context.locals.len() {
-                                    context.locals[absolute] = value;
+                                while context.locals.len() <= absolute {
+                                    context.locals.push(Value::Num(0.0));
                                 }
-                            } else if store.binding.index < vars.len() {
-                                vars[store.binding.index] = value;
+                                #[cfg(feature = "native-accel")]
+                                if !same_gpu_handle(&context.locals[absolute], &value) {
+                                    clear_residency(&context.locals[absolute]);
+                                }
+                                context.locals[absolute] = value;
+                            } else {
+                                let i = store.binding.index;
+                                #[cfg(feature = "native-accel")]
+                                if i < vars.len() && !same_gpu_handle(&vars[i], &value) {
+                                    clear_residency(&vars[i]);
+                                }
+                                if i >= vars.len() {
+                                    vars.resize(i + 1, Value::Num(0.0));
+                                    refresh_workspace_state(vars);
+                                }
+                                vars[i] = value;
                             }
                         }
                     }
