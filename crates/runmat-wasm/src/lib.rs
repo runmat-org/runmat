@@ -923,7 +923,7 @@ impl RunMatWasm {
                 } else {
                     warn!("RunMat wasm: figure scene import rejected: {err}");
                 }
-                Ok(None)
+                Err(runtime_error_to_js(&err))
             }
         }
     }
@@ -936,7 +936,7 @@ impl RunMatWasm {
             Ok(None) => Ok(None),
             Err(err) => {
                 warn!("RunMat wasm: figure scene import-from-path rejected: {err}");
-                Ok(None)
+                Err(runtime_error_to_js(&err))
             }
         }
     }
@@ -3687,9 +3687,10 @@ mod replay_smoke_tests {
         let runtime = init_runmat(JsValue::NULL)
             .await
             .expect("initialize wasm runtime");
-        let handle = runtime
+        let error = runtime
             .import_figure_scene(br#"{"schemaVersion":99,"kind":"figure-scene"}"#)
-            .expect("figure scene import result");
-        assert!(handle.is_none());
+            .expect_err("figure scene import should reject invalid payload");
+        let message = error.as_string().unwrap_or_default();
+        assert!(message.contains("unsupported figure replay schema version"));
     }
 }

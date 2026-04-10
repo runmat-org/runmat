@@ -29,6 +29,8 @@ static TRANSPOSED_HANDLES: Lazy<RwLock<HashMap<u64, TransposeInfo>>> =
 
 static HANDLE_PRECISIONS: Lazy<RwLock<HashMap<u64, ProviderPrecision>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+static HANDLE_STORAGES: Lazy<RwLock<HashMap<u64, GpuTensorStorage>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TransposeInfo {
@@ -184,6 +186,18 @@ pub fn handle_is_transposed(handle: &GpuTensorHandle) -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum GpuTensorStorage {
+    Real,
+    ComplexInterleaved,
+}
+
+impl Default for GpuTensorStorage {
+    fn default() -> Self {
+        Self::Real
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GpuTensorHandle {
     pub shape: Vec<usize>,
     pub device_id: u32,
@@ -262,6 +276,26 @@ pub struct WgpuBufferRef {
     pub shape: Vec<usize>,
     pub element_size: usize,
     pub precision: ProviderPrecision,
+}
+
+pub fn set_handle_storage(handle: &GpuTensorHandle, storage: GpuTensorStorage) {
+    if let Ok(mut guard) = HANDLE_STORAGES.write() {
+        guard.insert(handle.buffer_id, storage);
+    }
+}
+
+pub fn handle_storage(handle: &GpuTensorHandle) -> GpuTensorStorage {
+    HANDLE_STORAGES
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(&handle.buffer_id).cloned())
+        .unwrap_or(GpuTensorStorage::Real)
+}
+
+pub fn clear_handle_storage(handle: &GpuTensorHandle) {
+    if let Ok(mut guard) = HANDLE_STORAGES.write() {
+        guard.remove(&handle.buffer_id);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1180,6 +1214,22 @@ pub trait AccelProvider: Send + Sync {
         Err(anyhow::anyhow!("fspecial not supported by provider"))
     }
 
+    /// Evaluate the `peaks` test surface on an n×n grid spanning [-3,3]×[-3,3].
+    /// Returns the Z matrix (n×n) as a GPU tensor.
+    fn peaks(&self, _n: usize) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("peaks not supported by provider"))
+    }
+
+    /// Evaluate the `peaks` formula element-wise on caller-supplied GPU coordinate tensors.
+    /// X and Y must have the same shape. Returns a Z tensor of the same shape.
+    fn peaks_xy(
+        &self,
+        _x: &GpuTensorHandle,
+        _y: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("peaks_xy not supported by provider"))
+    }
+
     /// Apply an N-D correlation/convolution with padding semantics matching MATLAB's `imfilter`.
     fn imfilter<'a>(
         &'a self,
@@ -1875,6 +1925,12 @@ pub trait AccelProvider: Send + Sync {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("ifft_dim not supported by provider")
     }
+    fn fft_extract_real<'a>(
+        &'a self,
+        _handle: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("fft_extract_real not supported by provider")
+    }
     fn unique<'a>(
         &'a self,
         _handle: &'a GpuTensorHandle,
@@ -2512,6 +2568,7 @@ pub async fn try_elem_atan2(y: &GpuTensorHandle, x: &GpuTensorHandle) -> Option<
 pub struct HostTensorOwned {
     pub data: Vec<f64>,
     pub shape: Vec<usize>,
+    pub storage: GpuTensorStorage,
 }
 
 #[derive(Debug)]

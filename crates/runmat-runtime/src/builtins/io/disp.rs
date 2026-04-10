@@ -103,8 +103,7 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
                 .lines()
                 .map(|line| line.to_string())
                 .collect(),
-            RenderMode::Nested => vec![crate::builtins::datetime::datetime_display_text(value)
-                .or_else(|_| crate::builtins::datetime::datetime_summary(value))
+            RenderMode::Nested => vec![crate::builtins::datetime::datetime_summary(value)
                 .ok()
                 .flatten()
                 .unwrap_or_else(|| value.to_string())],

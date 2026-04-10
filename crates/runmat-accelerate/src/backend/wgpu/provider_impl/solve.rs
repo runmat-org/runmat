@@ -55,7 +55,7 @@ impl WgpuProvider {
         label: &str,
         handle: &GpuTensorHandle,
     ) -> Result<Tensor> {
-        let HostTensorOwned { data, shape } =
+        let HostTensorOwned { data, shape, .. } =
             <Self as AccelProvider>::download(self, handle).await?;
         Tensor::new(data, shape).map_err(|e| anyhow!("{label}: {e}"))
     }

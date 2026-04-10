@@ -32,7 +32,7 @@
     "unit": "builtins::array::creation::meshgrid::tests",
     "integration": "builtins::array::creation::meshgrid::tests::meshgrid_gpu_inputs_roundtrip"
   },
-  "description": "`meshgrid` turns one-, two-, or three-dimensional vectors into coordinate arrays that span a rectangular grid, mirroring MathWorks MATLAB behaviour exactly. The first output replicates the `x` vector across rows, the second replicates the `y` vector across columns, and the optional third output expands a `z` vector across pages for volumetric grids.",
+  "description": "`meshgrid` turns one-, two-, or three-dimensional vectors into coordinate arrays that span a rectangular grid, mirroring MathWorks MATLAB behaviour. The first output replicates the `x` vector across rows, the second replicates the `y` vector across columns, and the optional third output expands a `z` vector across pages for volumetric grids.",
   "behaviors": [
     "`meshgrid(x)` is shorthand for `[X, Y] = meshgrid(x, x)`. It produces square 2-D grids.",
     "`meshgrid(x, y)` yields `X` of size `length(y) × length(x)` with rows copied from `x`, and `Y` of the same size with columns copied from `y`.",

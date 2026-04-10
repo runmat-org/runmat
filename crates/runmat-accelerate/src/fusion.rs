@@ -824,7 +824,7 @@ fn log_plan_stack_pattern(stage: &str, plan: &FusionGroupPlan, graph: &AccelGrap
             pattern_meta.push(format!("#{}:input_idx={} vid=<missing>", pos, input_idx));
         }
     }
-    log::debug!(
+    log::trace!(
         "fusion plan {} {} stack_pattern={:?} meta={:?}",
         plan.index,
         stage,
@@ -901,7 +901,7 @@ impl FusionGroupPlan {
 
                     if fusion_debug_enabled() {
                         let origin = graph.value(*input).map(|v| v.origin.clone());
-                        log::debug!(
+                        log::trace!(
                             "fusion plan #{:?} consider input vid={} origin={:?} binding={:?} newly_added={} is_variable={} stack_candidate={}",
                             index,
                             input,
@@ -928,7 +928,7 @@ impl FusionGroupPlan {
                         if allow_stack {
                             stack_pattern.push(input_idx);
                         } else if fusion_debug_enabled() {
-                            log::debug!(
+                            log::trace!(
                                 "fusion plan {} skipping stack candidate vid={} origin_after_span",
                                 index,
                                 input

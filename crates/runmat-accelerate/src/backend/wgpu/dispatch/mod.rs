@@ -6,6 +6,7 @@ pub mod creation;
 pub mod diag;
 pub mod diff;
 pub mod elementwise;
+pub mod fft;
 pub mod filter;
 pub mod find;
 pub mod flip;

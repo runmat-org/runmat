@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use runmat_accelerate_api::{
-    GpuTensorHandle, HostLogicalOwned, HostTensorOwned, IsMemberOptions as ProviderIsMemberOptions,
-    IsMemberResult,
+    GpuTensorHandle, GpuTensorStorage, HostLogicalOwned, HostTensorOwned,
+    IsMemberOptions as ProviderIsMemberOptions, IsMemberResult,
 };
 use runmat_builtins::{CharArray, ComplexTensor, LogicalArray, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -703,6 +703,7 @@ impl IsMemberEvaluation {
             loc: HostTensorOwned {
                 data: loc.data,
                 shape: loc.shape,
+                storage: GpuTensorStorage::Real,
             },
         })
     }

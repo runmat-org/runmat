@@ -133,6 +133,7 @@ describe("remote filesystem provider", () => {
 
     const unauth = createRemoteFsProvider({ baseUrl: server.baseUrl });
     await expect(unauth.readDir("/")).rejects.toThrow(/unauthorized/i);
+    await expect(unauth.readMany?.(["/secured/info.txt"]) ?? Promise.resolve([])).rejects.toThrow(/unauthorized/i);
   });
 
   it("propagates readonly flags", async () => {
@@ -142,6 +143,21 @@ describe("remote filesystem provider", () => {
     const meta = await provider.metadata("/reports/lock.txt");
     expect(meta.readonly).toBe(true);
     await expect(provider.writeFile("/reports/lock.txt", encoder.encode("fail"))).rejects.toThrow();
+  });
+
+  it("keeps readMany stable when method is unbound", async () => {
+    const provider = createRemoteFsProvider({ baseUrl: server.baseUrl });
+    await provider.writeFile("/reports/chunk.bin", encoder.encode("payload"));
+
+    const readMany = provider.readMany;
+    expect(typeof readMany).toBe("function");
+    if (!readMany) {
+      throw new Error("readMany is required for remote provider");
+    }
+
+    const [bytes] = await readMany(["/reports/chunk.bin"]);
+    expect(bytes).toBeInstanceOf(Uint8Array);
+    expect(toText(bytes as Uint8Array)).toBe("payload");
   });
 });
 

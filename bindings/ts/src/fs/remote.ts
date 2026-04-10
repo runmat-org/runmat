@@ -57,8 +57,15 @@ export function createRemoteFsProvider(options: RemoteProviderOptions): RunMatFi
       return Promise.all(
         paths.map(async (path) => {
           try {
-            return await this.readFile(path);
-          } catch {
+            const normalized = normalizePath(path);
+            if (normalized === "/") {
+              return null;
+            }
+            return await client.readFileAll(normalized);
+          } catch (error) {
+            if (!isNotFoundReadError(error)) {
+              throw error;
+            }
             return null;
           }
         })
@@ -346,6 +353,11 @@ function toRequestBody(
     return data;
   }
   return cloneViewToArrayBuffer(data);
+}
+
+function isNotFoundReadError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return message.includes("(404)") || message.toLowerCase().includes("not found");
 }
 
 function cloneViewToArrayBuffer(data: Uint8Array | ArrayBufferView): ArrayBuffer {

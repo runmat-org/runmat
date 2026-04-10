@@ -1,8 +1,13 @@
 use crate::builtins::common::tensor;
+use crate::dispatcher::download_handle_async;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::HostTensorOwned;
+use num_complex::Complex;
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned};
 use runmat_builtins::{ComplexTensor, Tensor, Value};
+use rustfft::FftPlanner;
+use std::borrow::Cow;
 use std::collections::HashSet;
+use std::sync::Arc;
 
 fn builtin_error(builtin: &str, message: impl Into<String>) -> RuntimeError {
     build_runtime_error(message).with_builtin(builtin).build()
@@ -150,14 +155,25 @@ pub fn tensor_to_complex_tensor(tensor: Tensor, builtin: &str) -> BuiltinResult<
         .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
 }
 
+pub fn complex_tensor_to_real_value(tensor: ComplexTensor, builtin: &str) -> BuiltinResult<Value> {
+    let data = tensor.data.iter().map(|(re, _)| *re).collect::<Vec<_>>();
+    let real = Tensor::new(data, tensor.shape.clone())
+        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
+    Ok(Value::Tensor(real))
+}
+
 /// Convert a downloaded host tensor into a complex tensor, interpreting a trailing
 /// dimension of size 2 as `[real, imag]` pairs.
 pub fn host_to_complex_tensor(
     host: HostTensorOwned,
     builtin: &str,
 ) -> BuiltinResult<ComplexTensor> {
-    let HostTensorOwned { data, shape } = host;
-    if shape.last() == Some(&2) {
+    let HostTensorOwned {
+        data,
+        shape,
+        storage,
+    } = host;
+    if storage == GpuTensorStorage::ComplexInterleaved {
         if data.len() % 2 != 0 {
             return Err(builtin_error(
                 builtin,
@@ -165,7 +181,6 @@ pub fn host_to_complex_tensor(
             ));
         }
         let mut complex_shape = shape;
-        complex_shape.pop();
         if complex_shape.is_empty() {
             complex_shape.push(1);
         }
@@ -180,6 +195,40 @@ pub fn host_to_complex_tensor(
             .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
         tensor_to_complex_tensor(tensor, builtin)
     }
+}
+
+pub async fn gather_gpu_complex_tensor(
+    handle: &GpuTensorHandle,
+    builtin: &str,
+) -> BuiltinResult<ComplexTensor> {
+    let provider = runmat_accelerate_api::provider_for_handle(handle)
+        .or_else(runmat_accelerate_api::provider)
+        .ok_or_else(|| {
+            builtin_error(
+                builtin,
+                format!("{builtin}: no acceleration provider registered"),
+            )
+        })?;
+    let host = download_handle_async(provider, handle)
+        .await
+        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
+    host_to_complex_tensor(host, builtin)
+}
+
+pub async fn download_provider_complex_tensor(
+    provider: &dyn AccelProvider,
+    handle: &GpuTensorHandle,
+    builtin: &str,
+    free_after_download: bool,
+) -> BuiltinResult<ComplexTensor> {
+    let host = download_handle_async(provider, handle)
+        .await
+        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
+    if free_after_download {
+        provider.free(handle).ok();
+    }
+    runmat_accelerate_api::clear_residency(handle);
+    host_to_complex_tensor(host, builtin)
 }
 
 /// Return the first non-singleton dimension (1-based), defaulting to 1.
@@ -199,6 +248,266 @@ pub fn trim_trailing_ones(shape: &mut Vec<usize>, minimum_rank: usize) {
     }
     if shape.is_empty() {
         shape.push(1);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransformDirection {
+    Forward,
+    Inverse,
+}
+
+pub fn transform_complex_tensor(
+    mut tensor: ComplexTensor,
+    length: Option<usize>,
+    dimension: Option<usize>,
+    direction: TransformDirection,
+    builtin: &str,
+) -> BuiltinResult<ComplexTensor> {
+    let origin_rank = tensor.shape.len();
+    if crate::builtins::common::shape::is_scalar_shape(&tensor.shape) {
+        tensor.shape = crate::builtins::common::shape::normalize_scalar_shape(&tensor.shape);
+        tensor.rows = tensor.shape.first().copied().unwrap_or(1);
+        tensor.cols = tensor.shape.get(1).copied().unwrap_or(1);
+    }
+
+    let mut shape = tensor.shape.clone();
+    let dim_index = match dimension {
+        Some(0) => {
+            return Err(builtin_error(
+                builtin,
+                format!("{builtin}: dimension must be >= 1"),
+            ))
+        }
+        Some(dim) => dim - 1,
+        None => default_dimension(&shape) - 1,
+    };
+
+    while shape.len() <= dim_index {
+        shape.push(1);
+    }
+
+    let current_len = shape[dim_index];
+    let target_len = length.unwrap_or(current_len);
+    if target_len == 0 {
+        let mut out_shape = shape;
+        out_shape[dim_index] = 0;
+        trim_trailing_ones(&mut out_shape, origin_rank);
+        return ComplexTensor::new(Vec::<(f64, f64)>::new(), out_shape)
+            .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")));
+    }
+
+    let inner_stride = shape[..dim_index]
+        .iter()
+        .copied()
+        .fold(1usize, |acc, dim| acc.saturating_mul(dim));
+    let outer_stride = shape[dim_index + 1..]
+        .iter()
+        .copied()
+        .fold(1usize, |acc, dim| acc.saturating_mul(dim));
+    let num_slices = inner_stride.saturating_mul(outer_stride);
+
+    let input = tensor
+        .data
+        .into_iter()
+        .map(|(re, im)| Complex::new(re, im))
+        .collect::<Vec<_>>();
+
+    if num_slices == 0 {
+        let mut out_shape = shape;
+        out_shape[dim_index] = target_len;
+        trim_trailing_ones(&mut out_shape, origin_rank.max(dim_index + 1));
+        return ComplexTensor::new(Vec::<(f64, f64)>::new(), out_shape)
+            .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")));
+    }
+
+    let output_len = target_len.saturating_mul(num_slices);
+    let mut output = vec![Complex::new(0.0, 0.0); output_len];
+
+    let mut planner = FftPlanner::<f64>::new();
+    let plan: Option<Arc<dyn rustfft::Fft<f64>>> = if target_len > 1 {
+        Some(match direction {
+            TransformDirection::Forward => planner.plan_fft_forward(target_len),
+            TransformDirection::Inverse => planner.plan_fft_inverse(target_len),
+        })
+    } else {
+        None
+    };
+
+    let copy_len = current_len.min(target_len);
+    let mut buffer = vec![Complex::new(0.0, 0.0); target_len];
+    let scale = match direction {
+        TransformDirection::Forward => 1.0,
+        TransformDirection::Inverse => 1.0 / (target_len as f64),
+    };
+
+    for outer in 0..outer_stride {
+        let base_in = outer.saturating_mul(current_len.saturating_mul(inner_stride));
+        let base_out = outer.saturating_mul(target_len.saturating_mul(inner_stride));
+        for inner in 0..inner_stride {
+            buffer.fill(Complex::new(0.0, 0.0));
+            for (k, slot) in buffer.iter_mut().enumerate().take(copy_len) {
+                let src_idx = base_in + inner + k * inner_stride;
+                if src_idx < input.len() {
+                    *slot = input[src_idx];
+                }
+            }
+            if let Some(p) = &plan {
+                p.process(&mut buffer);
+            }
+            for (k, value) in buffer.iter().enumerate().take(target_len) {
+                let dst_idx = base_out + inner + k * inner_stride;
+                if dst_idx < output.len() {
+                    output[dst_idx] = *value * scale;
+                }
+            }
+        }
+    }
+
+    let mut out_shape = shape;
+    out_shape[dim_index] = target_len;
+    trim_trailing_ones(&mut out_shape, origin_rank.max(dim_index + 1));
+
+    let data = output.into_iter().map(|c| (c.re, c.im)).collect::<Vec<_>>();
+    ComplexTensor::new(data, out_shape)
+        .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))
+}
+
+pub fn transform_nd_complex_tensor(
+    mut tensor: ComplexTensor,
+    sizes: Option<&[usize]>,
+    direction: TransformDirection,
+    builtin: &str,
+) -> BuiltinResult<ComplexTensor> {
+    let axis_count = sizes
+        .map(|v| v.len())
+        .unwrap_or_else(|| tensor.shape.len().max(1));
+    for axis in 0..axis_count {
+        let len = sizes.and_then(|v| v.get(axis).copied());
+        tensor = transform_complex_tensor(tensor, len, Some(axis + 1), direction, builtin)?;
+    }
+    Ok(tensor)
+}
+
+pub fn transform_axes_complex_tensor(
+    mut tensor: ComplexTensor,
+    lengths: &[Option<usize>],
+    direction: TransformDirection,
+    builtin: &str,
+) -> BuiltinResult<ComplexTensor> {
+    for (axis, &len) in lengths.iter().enumerate() {
+        tensor = transform_complex_tensor(tensor, len, Some(axis + 1), direction, builtin)?;
+    }
+    Ok(tensor)
+}
+
+pub fn parse_2d_lengths_from_data(
+    data: &[f64],
+    builtin: &str,
+) -> BuiltinResult<(Option<usize>, Option<usize>)> {
+    match data.len() {
+        0 => Ok((None, None)),
+        1 => {
+            let scalar = Value::Num(data[0]);
+            let len = parse_length(&scalar, builtin)?;
+            Ok((len, len))
+        }
+        2 => {
+            let first = Value::Num(data[0]);
+            let second = Value::Num(data[1]);
+            let len_rows = parse_length(&first, builtin)?;
+            let len_cols = parse_length(&second, builtin)?;
+            Ok((len_rows, len_cols))
+        }
+        _ => Err(builtin_error(
+            builtin,
+            format!("{builtin}: size vector must contain at most two elements"),
+        )),
+    }
+}
+
+pub fn parse_nd_sizes_value(value: &Value, builtin: &str) -> BuiltinResult<Vec<usize>> {
+    match value {
+        Value::Tensor(t) => parse_nd_sizes_data(&t.data, builtin),
+        Value::LogicalArray(logical) => {
+            let t = tensor::logical_to_tensor(logical)
+                .map_err(|e| builtin_error(builtin, format!("{builtin}: {e}")))?;
+            parse_nd_sizes_data(&t.data, builtin)
+        }
+        Value::Num(n) => parse_nd_sizes_data(&[*n], builtin),
+        Value::Int(i) => parse_nd_sizes_data(&[i.to_f64()], builtin),
+        Value::Complex(re, im) => {
+            if im.abs() > f64::EPSILON {
+                return Err(builtin_error(
+                    builtin,
+                    format!("{builtin}: SIZE must be real-valued"),
+                ));
+            }
+            parse_nd_sizes_data(&[*re], builtin)
+        }
+        Value::ComplexTensor(_) => Err(builtin_error(
+            builtin,
+            format!("{builtin}: SIZE must be real-valued"),
+        )),
+        _ => Err(builtin_error(
+            builtin,
+            format!("{builtin}: SIZE must be numeric"),
+        )),
+    }
+}
+
+fn parse_nd_sizes_data(data: &[f64], builtin: &str) -> BuiltinResult<Vec<usize>> {
+    let mut out = Vec::with_capacity(data.len());
+    for &v in data {
+        if !v.is_finite() {
+            return Err(builtin_error(
+                builtin,
+                format!("{builtin}: SIZE values must be finite"),
+            ));
+        }
+        if v < 0.0 {
+            return Err(builtin_error(
+                builtin,
+                format!("{builtin}: SIZE values must be non-negative"),
+            ));
+        }
+        let rounded = v.round();
+        if (rounded - v).abs() > f64::EPSILON {
+            return Err(builtin_error(
+                builtin,
+                format!("{builtin}: SIZE values must be integers"),
+            ));
+        }
+        out.push(rounded as usize);
+    }
+    Ok(out)
+}
+
+pub fn parse_symflag(value: &Value, builtin: &str) -> BuiltinResult<Option<bool>> {
+    let text: Option<Cow<'_, str>> = match value {
+        Value::String(s) => Some(Cow::Borrowed(s.as_str())),
+        Value::CharArray(ca) if ca.rows == 1 => {
+            let collected: String = ca.data.iter().collect();
+            Some(Cow::Owned(collected))
+        }
+        Value::StringArray(sa) if sa.data.len() == 1 => Some(Cow::Borrowed(sa.data[0].as_str())),
+        _ => None,
+    };
+
+    let Some(text) = text else {
+        return Ok(None);
+    };
+
+    let trimmed = text.trim();
+    if trimmed.eq_ignore_ascii_case("symmetric") {
+        Ok(Some(true))
+    } else if trimmed.eq_ignore_ascii_case("nonsymmetric") {
+        Ok(Some(false))
+    } else {
+        Err(builtin_error(
+            builtin,
+            format!("{builtin}: unrecognized option '{trimmed}'"),
+        ))
     }
 }
 
