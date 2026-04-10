@@ -22,6 +22,14 @@ impl WgpuProvider {
         if len == 0 {
             return Ok(self.register_existing_buffer(out_buffer, shape_vec, 0));
         }
+        if len == 1 {
+            let one = [1.0f64];
+            let uploaded = self.upload(&HostTensorView {
+                data: &one,
+                shape: &[1, 1],
+            })?;
+            return Ok(uploaded);
+        }
 
         let logical_u32 = len as u32;
         let total_u32 = if periodic {

@@ -168,6 +168,14 @@ mod tests {
             let tensor = test_support::gather(value).expect("gather");
             assert_eq!(tensor.shape, vec![8, 1]);
             assert!((tensor.data[3] - 0.9203636180999081).abs() < 1e-12);
+
+            let periodic_one = block_on(blackman_builtin(
+                Value::Num(1.0),
+                vec![Value::from("periodic")],
+            ))
+            .expect("blackman periodic len1 gpu");
+            let periodic_one = test_support::gather(periodic_one).expect("gather periodic len1");
+            assert_eq!(periodic_one.data, vec![1.0]);
         });
     }
 }

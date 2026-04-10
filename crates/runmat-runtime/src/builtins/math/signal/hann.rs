@@ -185,6 +185,12 @@ mod tests {
             let periodic = test_support::gather(periodic).expect("gather periodic");
             assert_eq!(periodic.shape, vec![4, 1]);
             assert!((periodic.data[1] - 0.5).abs() < 1e-12);
+
+            let periodic_one =
+                block_on(hann_builtin(Value::Num(1.0), vec![Value::from("periodic")]))
+                    .expect("hann periodic len1 gpu");
+            let periodic_one = test_support::gather(periodic_one).expect("gather periodic len1");
+            assert_eq!(periodic_one.data, vec![1.0]);
         });
     }
 }

@@ -153,6 +153,14 @@ mod tests {
             let tensor = test_support::gather(value).expect("gather");
             assert_eq!(tensor.shape, vec![8, 1]);
             assert!((tensor.data[0] - 0.08).abs() < 1e-12);
+
+            let periodic_one = block_on(hamming_builtin(
+                Value::Num(1.0),
+                vec![Value::from("periodic")],
+            ))
+            .expect("hamming periodic len1 gpu");
+            let periodic_one = test_support::gather(periodic_one).expect("gather periodic len1");
+            assert_eq!(periodic_one.data, vec![1.0]);
         });
     }
 }
