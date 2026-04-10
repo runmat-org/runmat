@@ -113,21 +113,11 @@ fn tensor_from_numeric(value: Value, context: &str) -> BuiltinResult<Tensor> {
         .map_err(|message| duration_error(format!("duration: {message}")))
 }
 
-fn default_shape_for(shape: &[usize], len: usize) -> Vec<usize> {
-    if len == 0 {
-        vec![0, 1]
-    } else if shape.is_empty() {
-        vec![1, 1]
-    } else {
-        shape.to_vec()
-    }
-}
-
 fn component_tensor(value: Value, context: &str) -> BuiltinResult<Tensor> {
     let tensor = tensor_from_numeric(value, context)?;
     Tensor::new(
         tensor.data.clone(),
-        default_shape_for(&tensor.shape, tensor.data.len()),
+        tensor::default_shape_for(&tensor.shape, tensor.data.len()),
     )
     .map_err(|err| duration_error(format!("duration: {err}")))
 }
@@ -200,7 +190,7 @@ fn broadcast_component_data(
     for array in arrays {
         let len = array.data.len();
         if len > 1 {
-            let shape = default_shape_for(&array.shape, len);
+            let shape = tensor::default_shape_for(&array.shape, len);
             if target_len == 1 {
                 target_len = len;
                 target_shape = shape;
@@ -256,26 +246,6 @@ fn build_from_components(args: Vec<Value>, format: Option<String>) -> BuiltinRes
         shape,
         format.unwrap_or_else(|| DEFAULT_DURATION_FORMAT.to_string()),
     )
-}
-
-fn binary_numeric_tensors(
-    lhs: &Tensor,
-    rhs: &Tensor,
-    context: &str,
-) -> BuiltinResult<(Vec<f64>, Vec<f64>, Vec<usize>)> {
-    let lhs_shape = default_shape_for(&lhs.shape, lhs.data.len());
-    let rhs_shape = default_shape_for(&rhs.shape, rhs.data.len());
-    match (lhs.data.len(), rhs.data.len()) {
-        (1, 1) => Ok((vec![lhs.data[0]], vec![rhs.data[0]], vec![1, 1])),
-        (1, len) => Ok((vec![lhs.data[0]; len], rhs.data.clone(), rhs_shape)),
-        (len, 1) => Ok((lhs.data.clone(), vec![rhs.data[0]; len], lhs_shape)),
-        (left, right) if left == right && lhs_shape == rhs_shape => {
-            Ok((lhs.data.clone(), rhs.data.clone(), lhs_shape))
-        }
-        _ => Err(duration_error(format!(
-            "{context}: operands must be scalar or have matching sizes"
-        ))),
-    }
 }
 
 fn format_seconds_field(seconds: f64) -> String {
@@ -354,7 +324,7 @@ pub fn duration_string_array(value: &Value) -> BuiltinResult<Option<StringArray>
     for value in &days.data {
         strings.push(format_duration_value(*value, &format)?);
     }
-    let shape = default_shape_for(&days.shape, days.data.len());
+    let shape = tensor::default_shape_for(&days.shape, days.data.len());
     let array = StringArray::new(strings, shape)
         .map_err(|err| duration_error(format!("duration: {err}")))?;
     Ok(Some(array))
@@ -410,7 +380,7 @@ pub fn duration_summary(value: &Value) -> BuiltinResult<Option<String>> {
     if days.data.len() == 1 {
         return duration_display_text(value);
     }
-    let shape = default_shape_for(&days.shape, days.data.len());
+    let shape = tensor::default_shape_for(&days.shape, days.data.len());
     Ok(Some(format!(
         "[{} duration]",
         shape
@@ -446,7 +416,8 @@ fn compare_duration(
 ) -> BuiltinResult<Value> {
     let lhs_days = duration_tensor_from_duration_value(&lhs)?;
     let rhs_days = duration_tensor_from_duration_value(&rhs)?;
-    let (left, right, shape) = binary_numeric_tensors(&lhs_days, &rhs_days, op)?;
+    let (left, right, shape) =
+        tensor::binary_numeric_tensors(&lhs_days, &rhs_days, op, BUILTIN_NAME)?;
     let out = left
         .iter()
         .zip(right.iter())
@@ -639,7 +610,8 @@ async fn duration_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let lhs_days = duration_tensor_from_duration_value(&lhs)?;
     if crate::builtins::datetime::is_datetime_object(&rhs) {
         let rhs_serials = crate::builtins::datetime::serials_from_datetime_value(&rhs)?;
-        let (left, right, shape) = binary_numeric_tensors(&lhs_days, &rhs_serials, "plus")?;
+        let (left, right, shape) =
+            tensor::binary_numeric_tensors(&lhs_days, &rhs_serials, "plus", BUILTIN_NAME)?;
         let serials = left
             .iter()
             .zip(right.iter())
@@ -654,7 +626,8 @@ async fn duration_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     }
 
     let rhs_days = duration_tensor_from_duration_value(&rhs)?;
-    let (left, right, shape) = binary_numeric_tensors(&lhs_days, &rhs_days, "plus")?;
+    let (left, right, shape) =
+        tensor::binary_numeric_tensors(&lhs_days, &rhs_days, "plus", BUILTIN_NAME)?;
     let days = left
         .iter()
         .zip(right.iter())
@@ -670,7 +643,8 @@ async fn duration_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 async fn duration_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let lhs_days = duration_tensor_from_duration_value(&lhs)?;
     let rhs_days = duration_tensor_from_duration_value(&rhs)?;
-    let (left, right, shape) = binary_numeric_tensors(&lhs_days, &rhs_days, "minus")?;
+    let (left, right, shape) =
+        tensor::binary_numeric_tensors(&lhs_days, &rhs_days, "minus", BUILTIN_NAME)?;
     let days = left
         .iter()
         .zip(right.iter())
