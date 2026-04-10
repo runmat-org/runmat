@@ -987,12 +987,7 @@ async fn datetime_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
                 .zip(right.iter())
                 .map(|(a, b)| a - b)
                 .collect::<Vec<_>>();
-            let tensor = Tensor::new(deltas, shape)
-                .map_err(|err| datetime_error(format!("minus: {err}")))?;
-            crate::builtins::duration::duration_object_from_days_tensor(
-                tensor,
-                crate::builtins::duration::DEFAULT_DURATION_FORMAT,
-            )
+            tensor_or_scalar(deltas, shape)
         }
         _ => {
             let rhs_numeric = serial_tensor_from_value(rhs, "minus")?;
@@ -1124,20 +1119,23 @@ mod tests {
         let rhs = run_datetime(vec![Value::Num(2024.0), Value::Num(1.0), Value::Num(2.0)]);
         let delta = futures::executor::block_on(datetime_minus(rhs.clone(), lhs.clone()))
             .expect("datetime minus datetime");
-        let delta_text = crate::builtins::duration::duration_display_text(&delta)
-            .expect("duration display")
-            .expect("duration text");
-        assert_eq!(delta_text, "24:00:00");
+        assert_eq!(delta, Value::Num(1.0));
 
-        let round_trip =
-            futures::executor::block_on(datetime_plus(lhs.clone(), delta.clone())).expect("plus");
+        let duration = crate::builtins::duration::duration_object_from_days_tensor(
+            Tensor::new(vec![1.0], vec![1, 1]).unwrap(),
+            crate::builtins::duration::DEFAULT_DURATION_FORMAT,
+        )
+        .expect("duration");
+
+        let round_trip = futures::executor::block_on(datetime_plus(lhs.clone(), duration.clone()))
+            .expect("plus");
         let round_trip_text = datetime_display_text(&round_trip)
             .expect("datetime display")
             .expect("datetime text");
         assert_eq!(round_trip_text, "02-Jan-2024");
 
         let restored =
-            futures::executor::block_on(datetime_minus(rhs, delta)).expect("minus duration");
+            futures::executor::block_on(datetime_minus(rhs, duration)).expect("minus duration");
         let restored_text = datetime_display_text(&restored)
             .expect("datetime display")
             .expect("datetime text");
