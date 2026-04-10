@@ -17,14 +17,14 @@ struct WindowParams {
 @group(0) @binding(0) var<storage, read_write> Out: Tensor;
 @group(0) @binding(1) var<uniform> params: WindowParams;
 
-fn coeff(kind: u32, idx: u32, len: u32) -> f64 {
-    if (len == 0u) {
+fn coeff(kind: u32, idx: u32, total: u32) -> f64 {
+    if (total == 0u) {
         return 0.0;
     }
-    if (len == 1u) {
+    if (total == 1u) {
         return 1.0;
     }
-    let phase = 2.0 * 3.141592653589793 * f64(idx) / f64(len - 1u);
+    let phase = 2.0 * 3.141592653589793 * f64(idx) / f64(total - 1u);
     switch kind {
         case 0u: { return 0.5 - 0.5 * cos(phase); }
         case 1u: { return 0.54 - 0.46 * cos(phase); }
@@ -42,10 +42,10 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
     let idx = params.offset + local;
-    if (idx >= params.total) {
+    if (idx >= params.len) {
         return;
     }
-    Out.data[idx] = coeff(params.kind, idx, params.len);
+    Out.data[idx] = coeff(params.kind, idx, params.total);
 }
 "#;
 
@@ -68,14 +68,14 @@ struct WindowParams {
 @group(0) @binding(0) var<storage, read_write> Out: Tensor;
 @group(0) @binding(1) var<uniform> params: WindowParams;
 
-fn coeff(kind: u32, idx: u32, len: u32) -> f32 {
-    if (len == 0u) {
+fn coeff(kind: u32, idx: u32, total: u32) -> f32 {
+    if (total == 0u) {
         return 0.0;
     }
-    if (len == 1u) {
+    if (total == 1u) {
         return 1.0;
     }
-    let phase = 2.0 * 3.1415927 * f32(idx) / f32(len - 1u);
+    let phase = 2.0 * 3.1415927 * f32(idx) / f32(total - 1u);
     switch kind {
         case 0u: { return 0.5 - 0.5 * cos(phase); }
         case 1u: { return 0.54 - 0.46 * cos(phase); }
@@ -93,9 +93,9 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
         return;
     }
     let idx = params.offset + local;
-    if (idx >= params.total) {
+    if (idx >= params.len) {
         return;
     }
-    Out.data[idx] = coeff(params.kind, idx, params.len);
+    Out.data[idx] = coeff(params.kind, idx, params.total);
 }
 "#;

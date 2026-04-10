@@ -32,8 +32,8 @@ impl WgpuProvider {
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
             * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
         let mut offset = 0usize;
-        while offset < total_u32 as usize {
-            let chunk_len = ((total_u32 as usize) - offset).min(chunk_capacity).max(1);
+        while offset < len {
+            let chunk_len = (len - offset).min(chunk_capacity).max(1);
             let params_buffer = match self.precision {
                 NumericPrecision::F64 => {
                     let params = crate::backend::wgpu::params::WindowParamsF64 {
