@@ -122,7 +122,7 @@ async fn pow2_binary(mantissa: Value, exponent: Value) -> BuiltinResult<Value> {
 async fn pow2_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
     if let Some(provider) = runmat_accelerate_api::provider_for_handle(&handle) {
         if let Ok(out) = provider.unary_pow2(&handle).await {
-            return Ok(Value::GpuTensor(out));
+            return Ok(gpu_helpers::resident_gpu_value(out));
         }
     }
     let tensor = gpu_helpers::gather_tensor_async(&handle)
@@ -139,7 +139,7 @@ async fn pow2_gpu_scale(
         if let Some(provider) = runmat_accelerate_api::provider_for_handle(&mantissa) {
             if mantissa.shape == exponent.shape {
                 if let Ok(out) = provider.pow2_scale(&mantissa, &exponent) {
-                    return Ok(Value::GpuTensor(out));
+                    return Ok(gpu_helpers::resident_gpu_value(out));
                 }
             }
         }

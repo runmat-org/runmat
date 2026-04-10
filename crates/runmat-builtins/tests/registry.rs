@@ -1,4 +1,6 @@
-use runmat_builtins::{builtin_functions, CellArray, Tensor, Value};
+use runmat_builtins::{
+    builtin_function_by_name, builtin_functions, AccelTag, CellArray, Tensor, Value,
+};
 use runmat_macros::runtime_builtin;
 
 #[runtime_builtin(name = "add", builtin_path = "tests::add")]
@@ -21,6 +23,11 @@ fn str_length(s: String) -> Result<i32, String> {
     Ok(s.len() as i32)
 }
 
+#[runtime_builtin(name = "mul_add", accel = "binary", builtin_path = "tests::mul_add")]
+fn mul_add(x: f64, y: f64) -> Result<f64, String> {
+    Ok(x + y)
+}
+
 #[test]
 fn contains_registered_functions() {
     let names: Vec<&str> = builtin_functions().into_iter().map(|b| b.name).collect();
@@ -28,6 +35,13 @@ fn contains_registered_functions() {
     assert!(names.contains(&"sub"));
     assert!(names.contains(&"matrix_sum"));
     assert!(names.contains(&"str_length"));
+    assert!(names.contains(&"mul_add"));
+}
+
+#[test]
+fn binary_accel_metadata_maps_to_elementwise_tag() {
+    let builtin = builtin_function_by_name("mul_add").expect("registered builtin");
+    assert_eq!(builtin.accel_tags, &[AccelTag::Elementwise]);
 }
 
 #[test]

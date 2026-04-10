@@ -13,10 +13,12 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
 
+type ResidencyMarkFn = fn(&GpuTensorHandle);
 type ResidencyClearFn = fn(&GpuTensorHandle);
 type SequenceThresholdFn = fn() -> Option<usize>;
 type WorkgroupSizeHintFn = fn() -> Option<u32>;
 
+static RESIDENCY_MARK: OnceCell<ResidencyMarkFn> = OnceCell::new();
 static RESIDENCY_CLEAR: OnceCell<ResidencyClearFn> = OnceCell::new();
 static SEQUENCE_THRESHOLD_PROVIDER: OnceCell<SequenceThresholdFn> = OnceCell::new();
 static WORKGROUP_SIZE_HINT_PROVIDER: OnceCell<WorkgroupSizeHintFn> = OnceCell::new();
@@ -36,6 +38,20 @@ static HANDLE_STORAGES: Lazy<RwLock<HashMap<u64, GpuTensorStorage>>> =
 pub struct TransposeInfo {
     pub base_rows: usize,
     pub base_cols: usize,
+}
+
+/// Register a callback used to mark residency tracking when GPU tensors are
+/// created or returned by device-side execution paths.
+pub fn register_residency_mark(handler: ResidencyMarkFn) {
+    let _ = RESIDENCY_MARK.set(handler);
+}
+
+/// Mark residency metadata for the provided GPU tensor handle, if a backend
+/// has registered a handler via [`register_residency_mark`].
+pub fn mark_residency(handle: &GpuTensorHandle) {
+    if let Some(handler) = RESIDENCY_MARK.get() {
+        handler(handle);
+    }
 }
 
 /// Register a callback used to clear residency tracking when GPU tensors are
@@ -1230,6 +1246,18 @@ pub trait AccelProvider: Send + Sync {
         Err(anyhow::anyhow!("peaks_xy not supported by provider"))
     }
 
+    fn hann_window(&self, _len: usize, _periodic: bool) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("hann_window not supported by provider"))
+    }
+
+    fn hamming_window(&self, _len: usize, _periodic: bool) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("hamming_window not supported by provider"))
+    }
+
+    fn blackman_window(&self, _len: usize, _periodic: bool) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("blackman_window not supported by provider"))
+    }
+
     /// Apply an N-D correlation/convolution with padding semantics matching MATLAB's `imfilter`.
     fn imfilter<'a>(
         &'a self,
@@ -1652,6 +1680,12 @@ pub trait AccelProvider: Send + Sync {
         _a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("unary_pow2 not supported by provider")
+    }
+    fn unary_nextpow2<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_nextpow2 not supported by provider")
     }
     fn pow2_scale(
         &self,
@@ -2204,6 +2238,27 @@ pub trait AccelProvider: Send + Sync {
     ) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!(
             "fused_elementwise not supported by provider"
+        ))
+    }
+
+    /// Execute a single fused elementwise kernel that writes `num_outputs` output buffers in one
+    /// dispatch. The shader is expected to declare `output0`, `output1`, … `output{N-1}` storage
+    /// bindings (at binding indices `inputs.len()` through `inputs.len() + num_outputs - 1`) and a
+    /// uniform `params` binding at `inputs.len() + num_outputs`.
+    ///
+    /// Providers that do not override this method fall back to calling `fused_elementwise` once
+    /// per output, which preserves correctness at the cost of the O(N²) dispatch overhead this
+    /// method is designed to eliminate.
+    fn fused_elementwise_multi(
+        &self,
+        _shader: &str,
+        _inputs: &[GpuTensorHandle],
+        _output_shape: &[usize],
+        _len: usize,
+        _num_outputs: usize,
+    ) -> anyhow::Result<Vec<GpuTensorHandle>> {
+        Err(anyhow::anyhow!(
+            "fused_elementwise_multi not supported by provider"
         ))
     }
 

@@ -43,6 +43,11 @@ pub fn value_shape(value: &Value) -> Option<Vec<usize>> {
         Value::ComplexTensor(t) => Some(t.shape.clone()),
         Value::Cell(ca) => Some(ca.shape.clone()),
         Value::GpuTensor(handle) => Some(handle.shape.clone()),
+        Value::Object(obj) if obj.is_class("datetime") => match obj.properties.get("__serial") {
+            Some(Value::Tensor(tensor)) => Some(tensor.shape.clone()),
+            Some(Value::Num(_)) => Some(vec![1, 1]),
+            _ => None,
+        },
         _ => None,
     }
 }
@@ -115,4 +120,21 @@ fn preview_logical_slice(arr: &LogicalArray, limit: usize) -> (Vec<f64>, bool) {
         preview.push(if *value == 0 { 0.0 } else { 1.0 });
     }
     (preview, truncated)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use runmat_builtins::{ObjectInstance, Tensor};
+
+    #[test]
+    fn datetime_object_shape_comes_from_internal_serial_tensor() {
+        let mut object = ObjectInstance::new("datetime".to_string());
+        object.properties.insert(
+            "__serial".to_string(),
+            Value::Tensor(Tensor::new(vec![739351.0, 739352.0], vec![2, 1]).expect("tensor")),
+        );
+
+        assert_eq!(value_shape(&Value::Object(object)), Some(vec![2, 1]));
+    }
 }

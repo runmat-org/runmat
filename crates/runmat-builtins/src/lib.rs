@@ -2083,6 +2083,10 @@ impl ObjectInstance {
             properties: HashMap::new(),
         }
     }
+
+    pub fn is_class(&self, name: &str) -> bool {
+        self.class_name == name
+    }
 }
 
 // -------- Class registry (scaffolding) --------

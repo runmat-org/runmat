@@ -501,9 +501,13 @@ async fn sum_gpu_with_omitnan(
     }
 
     // Replace NaNs with 0 on device, then reduce along requested dims.
-    let cleaned = provider
-        .map_nan_to_zero(&handle)
-        .map_err(|e| sum_error(format!("sum: {e}")))?;
+    let cleaned = match provider.map_nan_to_zero(&handle) {
+        Ok(cleaned) => cleaned,
+        Err(err) => {
+            log::trace!("sum: provider omitnan cleanup fallback triggered: {err}");
+            return sum_gpu_fallback(&handle, parsed).await;
+        }
+    };
 
     // Reduce along requested dimensions iteratively on device.
     let mut current = cleaned.clone();

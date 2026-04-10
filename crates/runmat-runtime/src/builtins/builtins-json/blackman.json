@@ -1,0 +1,50 @@
+{
+  "title": "blackman",
+  "category": "math/signal",
+  "keywords": ["blackman", "window", "signal processing", "dsp", "fft"],
+  "summary": "Generate a Blackman window as an N-by-1 real column vector.",
+  "description": "`blackman` generates Blackman windows for signal-processing workflows where lower spectral leakage is desired. RunMat supports the common MATLAB symmetric and periodic forms, including optional single-precision output.",
+  "behaviors": [
+    "`blackman(L)` returns an `L x 1` symmetric Blackman window.",
+    "`blackman(L, 'periodic')` returns the periodic form used in spectral-analysis workflows.",
+    "`blackman(..., 'single')` returns a single-precision window; `'double'` is the default.",
+    "If `L` is noninteger, RunMat rounds it to the nearest integer before constructing the window.",
+    "`blackman(0)` returns an empty `0 x 1` tensor.",
+    "`blackman(1)` returns `1`.",
+    "For the symmetric case and `L > 1`, coefficients follow `0.42 - 0.5*cos(2*pi*n/(L-1)) + 0.08*cos(4*pi*n/(L-1))`.",
+    "The periodic form is constructed by evaluating a symmetric window of length `L + 1` and dropping the final sample."
+  ],
+  "examples": [
+    {
+      "description": "Generate a short Blackman window",
+      "input": "w = blackman(8);\ndisp(w')"
+    },
+    {
+      "description": "Generate a periodic Blackman window",
+      "input": "w = blackman(8, 'periodic');\ndisp(w')"
+    },
+    {
+      "description": "Generate a single-precision Blackman window",
+      "input": "w = blackman(8, 'single');\nclass(w)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why would I use `blackman` instead of `hann` or `hamming`?",
+      "answer": "A Blackman window is often used when you want lower spectral leakage at the cost of a wider main lobe. It is a common tradeoff choice in spectral analysis workflows."
+    },
+    {
+      "question": "What is the difference between the symmetric and periodic Blackman window?",
+      "answer": "Use the symmetric form for filter-design style workflows. Use `'periodic'` for FFT-based spectral analysis, where RunMat constructs a symmetric window of length `L + 1` and removes the final sample."
+    },
+    {
+      "question": "Does `blackman` support single precision?",
+      "answer": "Yes. Pass `'single'` as the final option to request a single-precision output. The default output type is double precision."
+    }
+  ],
+  "links": [
+    { "label": "hann", "url": "./hann" },
+    { "label": "hamming", "url": "./hamming" },
+    { "label": "fft", "url": "./fft" }
+  ]
+}
