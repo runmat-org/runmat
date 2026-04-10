@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::graph::{
     AccelGraph, AccelNode, AccelNodeLabel, AccelOpCategory, InstrSpan, NodeId, PrimitiveOp,
-    ShapeInfo, ValueId, ValueInfo, ValueOrigin,
+    ShapeInfo, ValueId, ValueInfo, ValueOrigin, VarBinding,
 };
 use crate::reduction_meta::{detect_reduction_signature, ReductionAxes, ReductionBehavior};
 use runmat_accelerate_api::CovNormalization;
@@ -611,6 +611,7 @@ pub struct FusionGroupPlan {
     pub stack_pattern: Vec<usize>,
     pub constants: HashMap<usize, Value>,
     pub const_values: HashMap<ValueId, Value>,
+    pub materialized_stores: Vec<FusionStoreMaterialization>,
     pub output: Option<ValueId>,
     pub kernel: FusionKernelSpec,
     // For reductions: track the ValueId of the data tensor being reduced, if identifiable
@@ -622,6 +623,12 @@ pub struct FusionGroupPlan {
     // For reductions: axis selection metadata (e.g., explicit dims vs 'all')
     pub reduction_axes: Option<ReductionAxes>,
     pub pattern: Option<FusionPattern>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FusionStoreMaterialization {
+    pub value_id: ValueId,
+    pub binding: VarBinding,
 }
 
 #[derive(Debug, Clone)]
@@ -990,6 +997,7 @@ impl FusionGroupPlan {
             stack_pattern,
             constants,
             const_values,
+            materialized_stores: Vec::new(),
             inputs,
             output,
             kernel: FusionKernelSpec::new(kind, true),
@@ -1342,6 +1350,24 @@ impl FusionGroupPlan {
             );
         }
 
+        if plan.group.kind.is_elementwise() {
+            let mut stores = Vec::new();
+            for op in &plan.operations {
+                let output = match op {
+                    FusionOp::Primitive { output, .. } => *output,
+                    FusionOp::Builtin { output, .. } => *output,
+                };
+                let Some(value_id) = output else {
+                    continue;
+                };
+                let Some(binding) = graph.var_binding(value_id).cloned() else {
+                    continue;
+                };
+                stores.push(FusionStoreMaterialization { value_id, binding });
+            }
+            plan.materialized_stores = stores;
+        }
+
         log_plan_stack_pattern("final", &plan, graph);
 
         // If the plan requires any unsupported operations, mark kernel as unsupported
@@ -1374,13 +1400,16 @@ impl FusionGroupPlan {
     }
 
     pub fn generate_wgsl(&self, scalar_ty: &str) -> Option<String> {
+        self.generate_wgsl_for_output(self.output?, scalar_ty)
+    }
+
+    pub fn generate_wgsl_for_output(&self, output_id: ValueId, scalar_ty: &str) -> Option<String> {
         if !self.kernel.kind.is_elementwise() {
             return None;
         }
         if !self.kernel.supported {
             return None;
         }
-        let output_id = self.output?;
         let mut exprs: HashMap<ValueId, String> = HashMap::new();
         for (idx, input_id) in self.inputs.iter().enumerate() {
             // Placeholder; will be replaced by broadcasted index variable i{idx}

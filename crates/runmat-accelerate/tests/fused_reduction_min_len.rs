@@ -90,6 +90,7 @@ fn fused_single_pass_reduce_len_1_no_alias() {
             cv.insert(vid_dim, Value::Num(1.0));
             cv
         },
+        materialized_stores: Vec::new(),
         output: Some(vid_sum),
         kernel: FusionKernelSpec {
             kind: FusionKind::Reduction,

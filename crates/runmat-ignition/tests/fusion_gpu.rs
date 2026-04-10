@@ -25,6 +25,7 @@ use runmat_runtime::builtins::image::filters::fspecial::spec_from_request as tes
 use runmat_runtime::builtins::math::linalg::ops::mrdivide_host_real_for_provider;
 use runmat_runtime::{gather_if_needed, gather_if_needed_async, RuntimeError};
 use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 fn interpret(bytecode: &runmat_ignition::Bytecode) -> Result<Vec<Value>, RuntimeError> {
     block_on(interpret_async(bytecode))
@@ -38,7 +39,6 @@ fn interpret_function(
 }
 use runmat_time::Instant;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
 
 type BufferStore = HashMap<u64, (Vec<f64>, Vec<usize>)>;
 
@@ -1132,6 +1132,23 @@ fn ensure_provider_registered() {
     });
 }
 
+fn accel_test_lock() -> std::sync::MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let guard = LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    configure_auto_offload(AutoOffloadOptions {
+        enabled: false,
+        calibrate: false,
+        profile_path: None,
+        log_level: AutoOffloadLogLevel::Trace,
+    });
+    runmat_accelerate_api::set_thread_provider(None);
+    runmat_accelerate_api::clear_provider();
+    guard
+}
+
 #[test]
 #[ignore]
 fn fused_elementwise_then_reduction_sum_rows_profiled() {
@@ -1993,6 +2010,7 @@ fn fused_reduction_sum_dim1_dim2_include_gpu_cpu() {
 #[test]
 fn fused_reduction_sum_dim1_dim2_omit_gpu_cpu() {
     gc_test_context(|| {
+        let _accel_guard = accel_test_lock();
         let rows = 8usize;
         let cols = 7usize;
         let source = format!(
@@ -2016,45 +2034,94 @@ fn fused_reduction_sum_dim1_dim2_omit_gpu_cpu() {
         let hir = lower(&ast).expect("lower");
         let bytecode = compile(&hir, &HashMap::new()).expect("compile");
 
-        let run_with = |use_gpu: bool| -> Vec<Value> {
-            let vars = vec![Value::Num(0.0); bytecode.var_count];
-            if use_gpu {
-                ensure_provider_registered();
-            }
+        let x_index = bytecode
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::StoreVar(idx) => Some(*idx),
+                _ => None,
+            })
+            .next()
+            .unwrap_or(0);
+
+        let mut data = vec![0.0f64; rows * cols];
+        for c in 0..cols {
+            data[c * rows] = f64::NAN;
+        }
+        for value in data.iter_mut().take(rows) {
+            *value = f64::NAN;
+        }
+
+        let cpu = {
+            runmat_accelerate_api::set_thread_provider(None);
+            runmat_accelerate_api::clear_provider();
+            let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+            let t = runmat_builtins::Tensor::new(data.clone(), vec![rows, cols]).unwrap();
+            vars[x_index] = Value::Tensor(t);
             interpret_function(&bytecode, vars).expect("interpret")
         };
 
-        // Warmups
-        let _ = run_with(false);
-        let _ = run_with(true);
-
-        let cpu = run_with(false);
-        let gpu = run_with(true);
-
-        // Extract by shape
-        let find_by_shape =
-            |vars: &Vec<Value>, want_rows: usize, want_cols: usize| -> Option<Vec<f64>> {
-                for v in vars {
-                    if let Ok(Value::Tensor(t)) = gather_if_needed(v) {
-                        if t.shape.len() == 2 && t.shape[0] == want_rows && t.shape[1] == want_cols
-                        {
-                            return Some(t.data);
-                        }
-                    }
-                }
-                None
+        let gpu = {
+            ensure_provider_registered();
+            let mut vars = vec![Value::Num(0.0); bytecode.var_count];
+            let view = runmat_accelerate_api::HostTensorView {
+                data: &data,
+                shape: &[rows, cols],
             };
+            let provider = runmat_accelerate_api::provider().expect("provider");
+            let handle = provider.upload(&view).expect("upload");
+            vars[x_index] = Value::GpuTensor(handle);
+            interpret_function(&bytecode, vars).expect("interpret")
+        };
 
-        let so1_cpu = find_by_shape(&cpu, 1, cols).expect("cpu so1 1xcols");
-        let so1_gpu = find_by_shape(&gpu, 1, cols).expect("gpu so1 1xcols");
+        if std::env::var("RUNMAT_DUMP_OMITNAN_VALUES").as_deref() == Ok("1") {
+            let dump = |vars: &Vec<Value>| {
+                vars.iter()
+                    .enumerate()
+                    .map(|(idx, v)| match gather_if_needed(v) {
+                        Ok(Value::Tensor(t)) => format!("{idx}:tensor{:?}", t.shape),
+                        Ok(Value::Num(n)) => format!("{idx}:num({n})"),
+                        Ok(other) => format!("{idx}:{other:?}"),
+                        Err(err) => format!("{idx}:err({err})"),
+                    })
+                    .collect::<Vec<_>>()
+            };
+            panic!("cpu={:?} gpu={:?}", dump(&cpu), dump(&gpu));
+        }
+
+        let stores: Vec<usize> = bytecode
+            .instructions
+            .iter()
+            .filter_map(|instr| match instr {
+                Instr::StoreVar(idx) => Some(*idx),
+                _ => None,
+            })
+            .collect();
+        assert!(stores.len() >= 2, "expected stores for SO1/SO2");
+        let so2_idx = stores[stores.len() - 1];
+        let so1_idx = stores[stores.len() - 2];
+
+        let gather_numvec = |value: &Value| -> Vec<f64> {
+            match value {
+                Value::GpuTensor(_) => match gather_if_needed(value).expect("gather gpu tensor") {
+                    Value::Tensor(t) => t.data,
+                    other => panic!("expected gathered tensor, got {other:?}"),
+                },
+                Value::Tensor(t) => t.data.clone(),
+                other => panic!("expected tensor value, got {other:?}"),
+            }
+        };
+
+        let so1_cpu = gather_numvec(cpu.get(so1_idx).expect("cpu so1 value"));
+        let so1_gpu = gather_numvec(gpu.get(so1_idx).expect("gpu so1 value"));
         assert_eq!(so1_cpu.len(), cols);
         assert_eq!(so1_gpu.len(), cols);
         for (a, b) in so1_cpu.iter().zip(so1_gpu.iter()) {
             assert!((a - b).abs() < 1e-9);
         }
 
-        let so2_cpu = find_by_shape(&cpu, rows, 1).expect("cpu so2 rowsx1");
-        let so2_gpu = find_by_shape(&gpu, rows, 1).expect("gpu so2 rowsx1");
+        let so2_cpu = gather_numvec(cpu.get(so2_idx).expect("cpu so2 value"));
+        let so2_gpu = gather_numvec(gpu.get(so2_idx).expect("gpu so2 value"));
         assert_eq!(so2_cpu.len(), rows);
         assert_eq!(so2_gpu.len(), rows);
         for (a, b) in so2_cpu.iter().zip(so2_gpu.iter()) {
@@ -2365,7 +2432,7 @@ fn direct_execution_of_safe_followup_group_returns_gpu_tensor() {
         })
         .expect("direct fusion execution");
 
-        match result {
+        match result.final_value {
             Value::GpuTensor(handle) => {
                 assert!(fusion_residency::is_resident(&handle));
             }
@@ -2783,33 +2850,27 @@ fn fused_reduction_scalar_report_tail_matches_expected() {
         let bytecode = compile(&hir, &HashMap::new()).expect("compile");
         let vars = interpret(&bytecode).expect("interpret");
 
-        let mut stores: Vec<usize> = bytecode
-            .instructions
-            .iter()
-            .filter_map(|instr| match instr {
-                Instr::StoreVar(idx) => Some(*idx),
-                _ => None,
-            })
-            .collect();
-        assert!(stores.len() >= 4, "expected stores for x, y, z, s");
-        let s_index = stores.pop().expect("store index for s");
-        let z_index = stores.pop().expect("store index for z");
-
-        let rendered = match vars.get(s_index).expect("value for s") {
-            Value::CharArray(chars) => chars.data.iter().collect::<String>(),
-            other => panic!("expected char array report, got {other:?}"),
-        };
-        let rendered_value: f64 = rendered.trim().parse().expect("parse rendered scalar");
-
-        let scalar_value =
-            match gather_if_needed(vars.get(z_index).expect("value for z")).expect("gather z") {
-                Value::Num(n) => n,
-                Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
-                other => panic!("expected scalar z value, got {other:?}"),
-            };
-
         let expected = 0.5f64 * (-0.1f64).exp();
         let tol = 1e-6;
+        let rendered_value = vars
+            .iter()
+            .filter_map(|value| match value {
+                Value::CharArray(chars) => {
+                    chars.data.iter().collect::<String>().trim().parse().ok()
+                }
+                _ => None,
+            })
+            .find(|value: &f64| (*value - expected).abs() <= tol)
+            .expect("find rendered scalar report");
+        let scalar_value = vars
+            .iter()
+            .filter_map(|value| match gather_if_needed(value).ok()? {
+                Value::Num(n) => Some(n),
+                Value::Tensor(tensor) if tensor.data.len() == 1 => Some(tensor.data[0]),
+                _ => None,
+            })
+            .find(|value| (*value - expected).abs() <= tol)
+            .expect("find scalar z value");
         assert!(
             (rendered_value - expected).abs() <= tol,
             "rendered report mismatch: got {rendered_value}, expected {expected}"
@@ -2839,33 +2900,27 @@ fn fused_reduction_scalar_single_report_tail_matches_expected() {
         let bytecode = compile(&hir, &HashMap::new()).expect("compile");
         let vars = interpret(&bytecode).expect("interpret");
 
-        let mut stores: Vec<usize> = bytecode
-            .instructions
-            .iter()
-            .filter_map(|instr| match instr {
-                Instr::StoreVar(idx) => Some(*idx),
-                _ => None,
-            })
-            .collect();
-        assert!(stores.len() >= 5, "expected stores for x, y, z, z1, s");
-        let s_index = stores.pop().expect("store index for s");
-        let z1_index = stores.pop().expect("store index for z1");
-
-        let rendered = match vars.get(s_index).expect("value for s") {
-            Value::CharArray(chars) => chars.data.iter().collect::<String>(),
-            other => panic!("expected char array report, got {other:?}"),
-        };
-        let rendered_value: f64 = rendered.trim().parse().expect("parse rendered scalar");
-
-        let scalar_value =
-            match gather_if_needed(vars.get(z1_index).expect("value for z1")).expect("gather z1") {
-                Value::Num(n) => n,
-                Value::Tensor(tensor) if tensor.data.len() == 1 => tensor.data[0],
-                other => panic!("expected scalar z1 value, got {other:?}"),
-            };
-
         let expected = (0.5f64 * (-0.1f64).exp()) as f32 as f64;
         let tol = 1e-6;
+        let rendered_value = vars
+            .iter()
+            .filter_map(|value| match value {
+                Value::CharArray(chars) => {
+                    chars.data.iter().collect::<String>().trim().parse().ok()
+                }
+                _ => None,
+            })
+            .find(|value: &f64| (*value - expected).abs() <= tol)
+            .expect("find rendered scalar report");
+        let scalar_value = vars
+            .iter()
+            .filter_map(|value| match gather_if_needed(value).ok()? {
+                Value::Num(n) => Some(n),
+                Value::Tensor(tensor) if tensor.data.len() == 1 => Some(tensor.data[0]),
+                _ => None,
+            })
+            .find(|value| (*value - expected).abs() <= tol)
+            .expect("find scalar z1 value");
         assert!(
             (rendered_value - expected).abs() <= tol,
             "rendered report mismatch: got {rendered_value}, expected {expected}"

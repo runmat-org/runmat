@@ -1,6 +1,8 @@
 use anyhow::{anyhow, Result};
 
-use crate::fusion::{FusionGroupPlan, FusionKind, FusionPattern, ImageScalar};
+use crate::fusion::{
+    FusionGroupPlan, FusionKind, FusionPattern, FusionStoreMaterialization, ImageScalar,
+};
 use crate::fusion_residency;
 use crate::graph;
 use crate::graph::{ShapeInfo, ValueId};
@@ -14,6 +16,7 @@ use runmat_builtins::{NumericDType, Value};
 use runmat_runtime::builtins::common::shape::normalize_scalar_shape;
 use runmat_runtime::gather_if_needed;
 use runmat_time::Instant;
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 struct PreparedInput {
@@ -24,6 +27,11 @@ struct PreparedInput {
 pub struct FusionExecutionRequest<'a> {
     pub plan: &'a FusionGroupPlan,
     pub inputs: Vec<Value>,
+}
+
+pub struct ElementwiseExecutionResult {
+    pub final_value: Value,
+    pub materialized_stores: Vec<(FusionStoreMaterialization, Value)>,
 }
 
 #[inline]
@@ -185,7 +193,10 @@ fn resolve_image_scalar_value(
     }
 }
 
-pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value> {
+fn execute_elementwise_outputs(
+    request: &FusionExecutionRequest<'_>,
+    output_ids: &[ValueId],
+) -> Result<HashMap<ValueId, Value>> {
     crate::ensure_residency_hooks();
     if !request.plan.group.kind.is_elementwise() {
         return Err(anyhow!("unsupported fusion kind"));
@@ -233,16 +244,25 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
         Some(out)
     }
     // Determine output shape from the fusion plan and derive the element count from it.
+    let runtime_shape = runtime_broadcast_shape(&request.inputs);
     let mut output_shape = match &request.plan.group.shape {
+        ShapeInfo::Tensor(dims) if !dims.is_empty() && dims.iter().all(|d| d.is_some()) => {
+            dims.iter().map(|d| d.unwrap_or(1)).collect()
+        }
         ShapeInfo::Tensor(dims) if !dims.is_empty() => {
-            let resolved: Vec<usize> = dims.iter().map(|d| d.unwrap_or(1)).collect();
-            resolved
+            let rt_shape = runtime_shape
+                .clone()
+                .ok_or_else(|| anyhow!("fusion: unknown output shape"))?;
+            if rt_shape.len() != dims.len() {
+                rt_shape
+            } else {
+                dims.iter()
+                    .zip(rt_shape.iter())
+                    .map(|(planned, runtime)| planned.unwrap_or(*runtime))
+                    .collect()
+            }
         }
-        _ => {
-            // Fallback to runtime broadcasting inference
-            runtime_broadcast_shape(&request.inputs)
-                .ok_or_else(|| anyhow!("fusion: unknown output shape"))?
-        }
+        _ => runtime_shape.ok_or_else(|| anyhow!("fusion: unknown output shape"))?,
     };
     let mut len: usize = output_shape.iter().copied().product();
     if len == 0 {
@@ -337,16 +357,21 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
         ProviderPrecision::F32 => "f32",
         ProviderPrecision::F64 => "f64",
     };
-    let shader = request
-        .plan
-        .generate_wgsl(scalar_ty)
-        .ok_or_else(|| anyhow!("fusion: WGSL generation failed"))?;
-    timer.mark("generate_wgsl");
-
     let handles: Vec<GpuTensorHandle> = prepared.iter().map(|p| p.handle.clone()).collect();
-    let output = provider.fused_elementwise(&shader, &handles, &output_shape, len)?;
+    let mut outputs = HashMap::new();
+    for (idx, output_id) in output_ids.iter().copied().enumerate() {
+        let shader = request
+            .plan
+            .generate_wgsl_for_output(output_id, scalar_ty)
+            .ok_or_else(|| anyhow!("fusion: WGSL generation failed for output {output_id}"))?;
+        if idx == 0 {
+            timer.mark("generate_wgsl");
+        }
+        let output = provider.fused_elementwise(&shader, &handles, &output_shape, len)?;
+        fusion_residency::mark(&output);
+        outputs.insert(output_id, Value::GpuTensor(output));
+    }
     timer.mark("dispatch");
-    fusion_residency::mark(&output);
 
     // Clean up temporary uploads
     for input in prepared {
@@ -357,7 +382,40 @@ pub fn execute_elementwise(request: FusionExecutionRequest<'_>) -> Result<Value>
     timer.mark("cleanup");
     timer.finish();
 
-    Ok(Value::GpuTensor(output))
+    Ok(outputs)
+}
+
+pub fn execute_elementwise(
+    request: FusionExecutionRequest<'_>,
+) -> Result<ElementwiseExecutionResult> {
+    let final_output = request
+        .plan
+        .output
+        .ok_or_else(|| anyhow!("fusion: missing final output value id"))?;
+    let mut output_ids = vec![final_output];
+    for store in &request.plan.materialized_stores {
+        if !output_ids.contains(&store.value_id) {
+            output_ids.push(store.value_id);
+        }
+    }
+    let mut outputs = execute_elementwise_outputs(&request, &output_ids)?;
+    let final_value = outputs
+        .remove(&final_output)
+        .ok_or_else(|| anyhow!("fusion: final output materialization missing"))?;
+    let materialized_stores = request
+        .plan
+        .materialized_stores
+        .iter()
+        .filter_map(|store| {
+            outputs
+                .remove(&store.value_id)
+                .map(|value| (store.clone(), value))
+        })
+        .collect();
+    Ok(ElementwiseExecutionResult {
+        final_value,
+        materialized_stores,
+    })
 }
 
 pub fn execute_reduction(

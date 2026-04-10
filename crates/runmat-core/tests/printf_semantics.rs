@@ -58,7 +58,11 @@ fn disp_inline_cast_argument_is_stable_end_to_end() {
         .trim()
         .parse()
         .expect("disp output should parse as f64");
-    let expected = f64::from(3.14f32);
+    let expected = f64::from(
+        "3.14"
+            .parse::<f32>()
+            .expect("parse single precision literal"),
+    );
     assert!(
         (parsed - expected).abs() < 1e-6,
         "expected {expected}, got {parsed}"

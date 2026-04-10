@@ -136,6 +136,7 @@ async fn fused_square_mean_all_matches_cpu() {
             cv.insert(v_all, Value::String("all".to_string()));
             cv
         },
+        materialized_stores: Vec::new(),
         output: Some(v_mean),
         kernel: FusionKernelSpec {
             kind: FusionKind::Reduction,

@@ -151,6 +151,7 @@ fn fused_mean_all_codegen_and_exec_on_vector() {
             cv.insert(v_all, Value::String("all".to_string()));
             cv
         },
+        materialized_stores: Vec::new(),
         output: Some(v_mse),
         kernel: FusionKernelSpec {
             kind: FusionKind::Reduction,
