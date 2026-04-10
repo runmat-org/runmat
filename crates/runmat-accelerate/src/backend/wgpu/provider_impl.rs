@@ -38,6 +38,7 @@ use runmat_runtime::builtins::image::filters::fspecial::{
 use runmat_runtime::builtins::image::filters::imfilter::{
     apply_imfilter_tensor as runtime_apply_imfilter_tensor, build_imfilter_plan,
 };
+
 use runmat_runtime::builtins::math::linalg::ops::{
     mldivide_host_real_for_provider, mrdivide_host_real_for_provider,
 };
@@ -73,6 +74,9 @@ use wgpu::util::DeviceExt;
 
 mod fft;
 mod solve;
+mod window;
+
+use self::window::WindowKind;
 
 use crate::backend::wgpu::autotune::AutotuneController;
 use crate::backend::wgpu::cache::{
@@ -13630,6 +13634,18 @@ impl AccelProvider for WgpuProvider {
         self.peaks_xy_exec(x, y)
     }
 
+    fn hann_window(&self, len: usize, periodic: bool) -> Result<GpuTensorHandle> {
+        self.window_exec(WindowKind::Hann, len, periodic)
+    }
+
+    fn hamming_window(&self, len: usize, periodic: bool) -> Result<GpuTensorHandle> {
+        self.window_exec(WindowKind::Hamming, len, periodic)
+    }
+
+    fn blackman_window(&self, len: usize, periodic: bool) -> Result<GpuTensorHandle> {
+        self.window_exec(WindowKind::Blackman, len, periodic)
+    }
+
     fn imfilter<'a>(
         &'a self,
         image: &'a GpuTensorHandle,
@@ -14173,6 +14189,15 @@ impl AccelProvider for WgpuProvider {
                 map.insert(out.buffer_id, a.buffer_id);
             }
             Ok(out)
+        })
+    }
+
+    fn unary_nextpow2<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            self.unary_op_exec(crate::backend::wgpu::types::UnaryOpCode::NextPow2, a)
         })
     }
 

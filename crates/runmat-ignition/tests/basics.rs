@@ -22,6 +22,16 @@ fn arithmetic_and_assignment() {
 }
 
 #[test]
+fn nextpow2_supports_common_fft_zero_padding_pattern() {
+    let input = "x = [1 2 3 4 5 6 7 8 9]; N = 2^nextpow2(length(x));";
+    let ast = parse(input).unwrap();
+    let hir = lower(&ast).unwrap();
+    let vars = execute(&hir).unwrap();
+    let n: f64 = (&vars[1]).try_into().unwrap();
+    assert_eq!(n, 16.0);
+}
+
+#[test]
 fn call_builtin_multi_output_advances_pc_for_zero_outputs() {
     let input = "disp('hi'); x = 42;";
     let ast = parse(input).expect("parse disp script");

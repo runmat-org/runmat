@@ -827,6 +827,32 @@ pub struct LinspaceParamsF32 {
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
+pub struct WindowParamsF64 {
+    pub len: u32,
+    pub total: u32,
+    pub chunk: u32,
+    pub offset: u32,
+    pub kind: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub _pad2: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct WindowParamsF32 {
+    pub len: u32,
+    pub total: u32,
+    pub chunk: u32,
+    pub offset: u32,
+    pub kind: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub _pad2: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
 pub struct PeaksParamsF64 {
     pub n: u32,
     pub total: u32,

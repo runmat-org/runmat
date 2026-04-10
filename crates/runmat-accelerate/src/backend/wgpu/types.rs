@@ -60,6 +60,7 @@ pub enum UnaryOpCode {
     Gamma = 29,
     Factorial = 30,
     Single = 31,
+    NextPow2 = 32,
 }
 
 #[derive(Clone, Copy)]
