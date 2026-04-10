@@ -407,9 +407,14 @@ pub fn execute_elementwise(
         .materialized_stores
         .iter()
         .filter_map(|store| {
-            outputs
-                .remove(&store.value_id)
-                .map(|value| (store.clone(), value))
+            // A store whose value_id equals final_output was already consumed above;
+            // reuse a clone of final_value rather than silently dropping the store.
+            let value = if store.value_id == final_output {
+                Some(final_value.clone())
+            } else {
+                outputs.remove(&store.value_id)
+            };
+            value.map(|v| (store.clone(), v))
         })
         .collect();
     Ok(ElementwiseExecutionResult {
