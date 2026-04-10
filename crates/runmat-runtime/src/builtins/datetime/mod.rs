@@ -488,6 +488,10 @@ fn numeric_value_to_datetime(value: Value, format: Option<String>) -> BuiltinRes
     )
 }
 
+pub fn is_datetime_object(value: &Value) -> bool {
+    matches!(value, Value::Object(obj) if obj.is_class(DATETIME_CLASS))
+}
+
 pub(crate) fn serials_from_datetime_value(value: &Value) -> BuiltinResult<Tensor> {
     match value {
         Value::Object(obj) if obj.is_class(DATETIME_CLASS) => serial_tensor_for_object(obj),
