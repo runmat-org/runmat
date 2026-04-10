@@ -9,6 +9,7 @@
     "The transform is applied elementwise for array inputs.",
     "Zero maps to `0`.",
     "Negative values use `abs(X)` before computing the exponent.",
+    "`Inf` remains infinite and `NaN` remains `NaN`.",
     "GPU tensors use a unary provider hook when available and otherwise gather to the host.",
     "The output preserves the input's scalar/tensor shape."
   ],
@@ -16,6 +17,25 @@
     {
       "description": "Compute an FFT-friendly zero-padding length",
       "input": "x = rand(1000, 1);\nN = 2^nextpow2(length(x))"
+    },
+    {
+      "description": "Apply nextpow2 elementwise to an array",
+      "input": "p = nextpow2([0 1 3 9])",
+      "output": "p = [0 0 2 4]"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Why does `nextpow2` return an exponent instead of the actual power of two?",
+      "answer": "That matches MATLAB semantics. To get the actual power of two, use `2^nextpow2(x)` for a scalar or `2.^nextpow2(X)` elementwise for arrays."
+    },
+    {
+      "question": "How is `nextpow2` used in FFT workflows?",
+      "answer": "A common pattern is `N = 2^nextpow2(length(x))`, which computes a power-of-two transform length suitable for zero padding before an FFT."
+    },
+    {
+      "question": "Does `nextpow2` preserve array shape?",
+      "answer": "Yes. The transform is elementwise and the output has the same scalar/tensor shape as the input."
     }
   ],
   "links": [

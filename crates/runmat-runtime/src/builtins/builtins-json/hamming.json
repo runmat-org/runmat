@@ -3,18 +3,38 @@
   "category": "math/signal",
   "keywords": ["hamming", "window", "signal processing", "dsp", "fft"],
   "summary": "Generate a Hamming window as an N-by-1 real column vector.",
-  "description": "`hamming(N)` returns an `N x 1` real column vector containing the symmetric Hamming window coefficients used in standard DSP and FFT preprocessing workflows.",
+  "description": "`hamming` generates Hamming windows for signal-processing workflows such as spectral analysis and filter design. RunMat supports the standard MATLAB symmetric and periodic forms.",
   "behaviors": [
-    "`hamming(N)` expects a nonnegative scalar integer length.",
+    "`hamming(L)` returns an `L x 1` symmetric Hamming window.",
+    "`hamming(L, 'periodic')` returns the periodic form used in spectral-analysis workflows.",
+    "If `L` is noninteger, RunMat rounds it to the nearest integer before constructing the window.",
     "`hamming(0)` returns an empty `0 x 1` tensor.",
     "`hamming(1)` returns `1`.",
-    "For `N > 1`, coefficients follow the symmetric Hamming formula `0.54 - 0.46*cos(2*pi*n/(N-1))`.",
-    "This currently documents the common one-argument symmetric form."
+    "For the symmetric case and `L > 1`, coefficients follow `0.54 - 0.46*cos(2*pi*n/(L-1))`.",
+    "The periodic form is constructed by evaluating a symmetric window of length `L + 1` and dropping the final sample."
   ],
   "examples": [
     {
       "description": "Generate a short Hamming window",
       "input": "w = hamming(8);\ndisp(w')"
+    },
+    {
+      "description": "Generate a periodic Hamming window",
+      "input": "w = hamming(8, 'periodic');\ndisp(w')"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I use the periodic Hamming window?",
+      "answer": "Use `'periodic'` when the window will be paired with FFT-based spectral analysis. The periodic form is built from a symmetric window of length `L + 1` with the final sample removed."
+    },
+    {
+      "question": "What shape does `hamming(L)` return?",
+      "answer": "It returns an `L x 1` column vector."
+    },
+    {
+      "question": "Does RunMat support a `typeName` overload for `hamming`?",
+      "answer": "RunMat currently implements the documented `hamming(L)` and `hamming(L, sflag)` forms."
     }
   ],
   "links": [
