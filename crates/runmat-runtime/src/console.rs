@@ -93,7 +93,15 @@ pub fn record_value_output(label: Option<&str>, value: &Value) {
     LAST_VALUE_OUTPUT.with(|last| {
         *last.borrow_mut() = Some(value.clone());
     });
-    let value_text = value.to_string();
+    let value_text = match value {
+        Value::Object(obj) if obj.is_class("datetime") => {
+            crate::builtins::datetime::datetime_display_text(value)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| value.to_string())
+        }
+        _ => value.to_string(),
+    };
     let text = if let Some(name) = label {
         if is_unlabeled_nd_page_display(&value_text) {
             inject_label_into_nd_page_headers(name, &value_text)

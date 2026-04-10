@@ -3006,8 +3006,12 @@ async fn run_interpreter_inner(
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 match (&a, &b) {
                     (Value::Object(obj), _) => {
-                        let args = vec![Value::Object(obj.clone()), b.clone()];
-                        match call_builtin_vm!("minus", &args) {
+                        let args = vec![
+                            Value::Object(obj.clone()),
+                            Value::String("minus".to_string()),
+                            b.clone(),
+                        ];
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let v = call_builtin_vm!("minus", &[a.clone(), b.clone()])?;
@@ -3016,8 +3020,12 @@ async fn run_interpreter_inner(
                         }
                     }
                     (_, Value::Object(obj)) => {
-                        let args = vec![Value::Object(obj.clone()), a.clone()];
-                        match call_builtin_vm!("uminus", &args) {
+                        // Subtraction is non-commutative: dispatch to b's class method with (a, b)
+                        // in the original order so the method receives lhs=a, rhs=b and computes
+                        // a - b. Using call_method here would be wrong because call_method always
+                        // prepends the object as the first argument, computing b - a instead.
+                        let qualified = format!("{}.minus", obj.class_name);
+                        match call_builtin_vm!(&qualified, &[a.clone(), b.clone()]) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let v = call_builtin_vm!("minus", &[a.clone(), b.clone()])?;
