@@ -1459,11 +1459,19 @@ impl FusionGroupPlan {
         if scalar_ty == "f32" {
             shader.push_str("fn isNan(x: f32) -> bool { return x != x; }\n");
             shader.push_str("fn isFinite(x: f32) -> bool { return (x == x) && (abs(x) < 3.4028234663852886e38); }\n");
-            shader.push_str("fn isInf(x: f32) -> bool { return (x == x) && !(abs(x) < 3.4028234663852886e38); }\n\n");
+            shader.push_str("fn isInf(x: f32) -> bool { return (x == x) && !(abs(x) < 3.4028234663852886e38); }\n");
+            // hypot is not a WGSL builtin; define it explicitly
+            shader.push_str(
+                "fn hypot(a: f32, b: f32) -> f32 { return sqrt((a * a) + (b * b)); }\n\n",
+            );
         } else {
             shader.push_str("fn isNan(x: f64) -> bool { return x != x; }\n");
             shader.push_str("fn isFinite(x: f64) -> bool { return (x == x) && (abs(x) < f64(1.7976931348623157e308)); }\n");
-            shader.push_str("fn isInf(x: f64) -> bool { return (x == x) && !(abs(x) < f64(1.7976931348623157e308)); }\n\n");
+            shader.push_str("fn isInf(x: f64) -> bool { return (x == x) && !(abs(x) < f64(1.7976931348623157e308)); }\n");
+            // hypot is not a WGSL builtin; define it explicitly
+            shader.push_str(
+                "fn hypot(a: f64, b: f64) -> f64 { return sqrt((a * a) + (b * b)); }\n\n",
+            );
         }
         for (idx, _) in self.inputs.iter().enumerate() {
             shader.push_str(&format!(
