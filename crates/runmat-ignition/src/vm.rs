@@ -2731,7 +2731,9 @@ async fn run_interpreter_inner(
                 }
                 if i < vars.len() {
                     #[cfg(feature = "native-accel")]
-                    clear_residency(&vars[i]);
+                    if !same_gpu_handle(&vars[i], &val) {
+                        clear_residency(&vars[i]);
+                    }
                 }
                 if i >= vars.len() {
                     vars.resize(i + 1, Value::Num(0.0));
@@ -2783,7 +2785,9 @@ async fn run_interpreter_inner(
                         context.locals.push(Value::Num(0.0));
                     }
                     #[cfg(feature = "native-accel")]
-                    if local_index < context.locals.len() {
+                    if local_index < context.locals.len()
+                        && !same_gpu_handle(&context.locals[local_index], &val)
+                    {
                         clear_residency(&context.locals[local_index]);
                     }
                     context.locals[local_index] = val;
@@ -2793,7 +2797,7 @@ async fn run_interpreter_inner(
                         refresh_workspace_state(&vars);
                     }
                     #[cfg(feature = "native-accel")]
-                    if offset < vars.len() {
+                    if offset < vars.len() && !same_gpu_handle(&vars[offset], &val) {
                         clear_residency(&vars[offset]);
                     }
                     vars[offset] = val;
@@ -12182,6 +12186,14 @@ fn clear_residency(value: &Value) {
     if let Value::GpuTensor(handle) = value {
         fusion_residency::clear(handle);
     }
+}
+
+#[cfg(feature = "native-accel")]
+fn same_gpu_handle(lhs: &Value, rhs: &Value) -> bool {
+    matches!(
+        (lhs, rhs),
+        (Value::GpuTensor(left), Value::GpuTensor(right)) if left.buffer_id == right.buffer_id
+    )
 }
 
 fn parse_exception(err: &runmat_runtime::RuntimeError) -> runmat_builtins::MException {

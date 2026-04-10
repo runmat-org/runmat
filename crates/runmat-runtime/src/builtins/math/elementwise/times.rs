@@ -180,7 +180,7 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
         ));
     };
     match value {
-        Value::GpuTensor(handle) => Ok(Value::GpuTensor(handle)),
+        Value::GpuTensor(handle) => Ok(gpu_helpers::resident_gpu_value(handle)),
         Value::Tensor(tensor) => {
             let view = HostTensorView {
                 data: &tensor.data,
@@ -189,7 +189,7 @@ fn convert_to_gpu(value: Value) -> BuiltinResult<Value> {
             let handle = provider
                 .upload(&view)
                 .map_err(|e| builtin_error(format!("times: failed to upload GPU result: {e}")))?;
-            Ok(Value::GpuTensor(handle))
+            Ok(gpu_helpers::resident_gpu_value(handle))
         }
         Value::Num(n) => {
             let tensor = Tensor::new(vec![n], vec![1, 1])
@@ -308,7 +308,7 @@ async fn times_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinRe
     if let Some(provider) = runmat_accelerate_api::provider() {
         if lhs.shape == rhs.shape {
             if let Ok(handle) = provider.elem_mul(&lhs, &rhs).await {
-                return Ok(Value::GpuTensor(handle));
+                return Ok(gpu_helpers::resident_gpu_value(handle));
             }
         }
         // Attempt N-D broadcast via repmat on device
@@ -341,7 +341,7 @@ async fn times_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinRe
             }
             if let Ok(handle) = result {
                 if handle.shape == out_shape {
-                    return Ok(Value::GpuTensor(handle));
+                    return Ok(gpu_helpers::resident_gpu_value(handle));
                 } else {
                     let _ = provider.free(&handle);
                 }
@@ -350,14 +350,14 @@ async fn times_gpu_pair(lhs: GpuTensorHandle, rhs: GpuTensorHandle) -> BuiltinRe
         if is_scalar_shape(&lhs.shape) {
             if let Some(scalar) = gpu_scalar_value(&lhs).await? {
                 if let Ok(handle) = provider.scalar_mul(&rhs, scalar) {
-                    return Ok(Value::GpuTensor(handle));
+                    return Ok(gpu_helpers::resident_gpu_value(handle));
                 }
             }
         }
         if is_scalar_shape(&rhs.shape) {
             if let Some(scalar) = gpu_scalar_value(&rhs).await? {
                 if let Ok(handle) = provider.scalar_mul(&lhs, scalar) {
-                    return Ok(Value::GpuTensor(handle));
+                    return Ok(gpu_helpers::resident_gpu_value(handle));
                 }
             }
         }
@@ -405,7 +405,7 @@ async fn times_gpu_host_left(lhs: GpuTensorHandle, rhs: Value) -> BuiltinResult<
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&rhs)? {
             if let Ok(handle) = provider.scalar_mul(&lhs, scalar) {
-                return Ok(Value::GpuTensor(handle));
+                return Ok(gpu_helpers::resident_gpu_value(handle));
             }
         }
     }
@@ -419,7 +419,7 @@ async fn times_gpu_host_right(lhs: Value, rhs: GpuTensorHandle) -> BuiltinResult
     if let Some(provider) = runmat_accelerate_api::provider() {
         if let Some(scalar) = extract_scalar_f64(&lhs)? {
             if let Ok(handle) = provider.scalar_mul(&rhs, scalar) {
-                return Ok(Value::GpuTensor(handle));
+                return Ok(gpu_helpers::resident_gpu_value(handle));
             }
         }
     }

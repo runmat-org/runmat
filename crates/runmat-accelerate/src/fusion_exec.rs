@@ -359,17 +359,55 @@ fn execute_elementwise_outputs(
     };
     let handles: Vec<GpuTensorHandle> = prepared.iter().map(|p| p.handle.clone()).collect();
     let mut outputs = HashMap::new();
-    for (idx, output_id) in output_ids.iter().copied().enumerate() {
+
+    if output_ids.len() == 1 {
+        // Fast path: single output, use the existing single-dispatch API.
+        let output_id = output_ids[0];
         let shader = request
             .plan
             .generate_wgsl_for_output(output_id, scalar_ty)
             .ok_or_else(|| anyhow!("fusion: WGSL generation failed for output {output_id}"))?;
-        if idx == 0 {
-            timer.mark("generate_wgsl");
-        }
+        timer.mark("generate_wgsl");
         let output = provider.fused_elementwise(&shader, &handles, &output_shape, len)?;
         fusion_residency::mark(&output);
         outputs.insert(output_id, Value::GpuTensor(output));
+    } else {
+        // Multi-output path: generate one shader that writes all outputs in a single dispatch,
+        // reducing O(N²) GPU work (N full-chain recomputations) to O(N).
+        let shader = request
+            .plan
+            .generate_wgsl_for_outputs(output_ids, scalar_ty)
+            .ok_or_else(|| anyhow!("fusion: multi-output WGSL generation failed"))?;
+        timer.mark("generate_wgsl");
+        match provider.fused_elementwise_multi(
+            &shader,
+            &handles,
+            &output_shape,
+            len,
+            output_ids.len(),
+        ) {
+            Ok(out_handles) => {
+                for (output_id, handle) in output_ids.iter().copied().zip(out_handles) {
+                    fusion_residency::mark(&handle);
+                    outputs.insert(output_id, Value::GpuTensor(handle));
+                }
+            }
+            Err(_) => {
+                // Provider does not support multi-output dispatch; fall back to N single dispatches.
+                for output_id in output_ids.iter().copied() {
+                    let single_shader = request
+                        .plan
+                        .generate_wgsl_for_output(output_id, scalar_ty)
+                        .ok_or_else(|| {
+                            anyhow!("fusion: WGSL generation failed for output {output_id}")
+                        })?;
+                    let output =
+                        provider.fused_elementwise(&single_shader, &handles, &output_shape, len)?;
+                    fusion_residency::mark(&output);
+                    outputs.insert(output_id, Value::GpuTensor(output));
+                }
+            }
+        }
     }
     timer.mark("dispatch");
 
