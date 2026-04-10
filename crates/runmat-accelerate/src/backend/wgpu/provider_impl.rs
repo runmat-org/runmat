@@ -10576,26 +10576,13 @@ impl WgpuProvider {
             let offset_u32 = offset as u32;
             let chunk_u32 = chunk_len as u32;
 
-            let params_buffer = match self.precision {
-                NumericPrecision::F64 => {
-                    let params = crate::backend::wgpu::params::PeaksParamsF64 {
-                        n: n_u32,
-                        total: total_u32,
-                        chunk: chunk_u32,
-                        offset: offset_u32,
-                    };
-                    self.uniform_buffer(&params, "runmat-peaks-params-f64")
-                }
-                NumericPrecision::F32 => {
-                    let params = crate::backend::wgpu::params::PeaksParamsF32 {
-                        n: n_u32,
-                        total: total_u32,
-                        chunk: chunk_u32,
-                        offset: offset_u32,
-                    };
-                    self.uniform_buffer(&params, "runmat-peaks-params-f32")
-                }
+            let params = crate::backend::wgpu::params::PeaksParams {
+                n: n_u32,
+                total: total_u32,
+                chunk: chunk_u32,
+                offset: offset_u32,
             };
+            let params_buffer = self.uniform_buffer(&params, "runmat-peaks-params");
 
             let bind_group = self
                 .device_ref()

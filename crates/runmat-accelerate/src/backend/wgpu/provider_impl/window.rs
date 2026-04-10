@@ -16,17 +16,16 @@ impl WgpuProvider {
     ) -> Result<GpuTensorHandle> {
         let (logical_u32, total_u32) = window_lengths(len, periodic)?;
         let shape_vec = vec![len, 1];
+        if len == 1 {
+            let one = [1.0f64];
+            return self.upload(&HostTensorView {
+                data: &one,
+                shape: &[1, 1],
+            });
+        }
         let out_buffer = self.create_storage_buffer_checked(len, "runmat-window-out")?;
         if len == 0 {
             return Ok(self.register_existing_buffer(out_buffer, shape_vec, 0));
-        }
-        if len == 1 {
-            let one = [1.0f64];
-            let uploaded = self.upload(&HostTensorView {
-                data: &one,
-                shape: &[1, 1],
-            })?;
-            return Ok(uploaded);
         }
 
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
@@ -34,34 +33,17 @@ impl WgpuProvider {
         let mut offset = 0usize;
         while offset < len {
             let chunk_len = (len - offset).min(chunk_capacity).max(1);
-            let params_buffer = match self.precision {
-                NumericPrecision::F64 => {
-                    let params = crate::backend::wgpu::params::WindowParamsF64 {
-                        len: logical_u32,
-                        total: total_u32,
-                        chunk: chunk_len as u32,
-                        offset: offset as u32,
-                        kind: kind as u32,
-                        _pad0: 0,
-                        _pad1: 0,
-                        _pad2: 0,
-                    };
-                    self.uniform_buffer(&params, "runmat-window-params-f64")
-                }
-                NumericPrecision::F32 => {
-                    let params = crate::backend::wgpu::params::WindowParamsF32 {
-                        len: logical_u32,
-                        total: total_u32,
-                        chunk: chunk_len as u32,
-                        offset: offset as u32,
-                        kind: kind as u32,
-                        _pad0: 0,
-                        _pad1: 0,
-                        _pad2: 0,
-                    };
-                    self.uniform_buffer(&params, "runmat-window-params-f32")
-                }
+            let params = crate::backend::wgpu::params::WindowParams {
+                len: logical_u32,
+                total: total_u32,
+                chunk: chunk_len as u32,
+                offset: offset as u32,
+                kind: kind as u32,
+                _pad0: 0,
+                _pad1: 0,
+                _pad2: 0,
             };
+            let params_buffer = self.uniform_buffer(&params, "runmat-window-params");
 
             let bind_group = self
                 .device_ref()
