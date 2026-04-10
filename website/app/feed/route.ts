@@ -1,5 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
+import { slugifyHeading } from "@/lib/utils";
 
 const SITE_URL = "https://runmat.com";
 
@@ -28,10 +29,7 @@ function parseChangelog(md: string): FeedEntry[] {
     const linkMatch = firstLine.match(/^\[([^\]]+)\]/);
     const title = linkMatch ? linkMatch[1] : firstLine.replace(/---+/g, "").trim();
 
-    const slug = title
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "-")
-      .replace(/^-|-$/g, "");
+    const slug = slugifyHeading(title);
 
     const body = section.split("\n").slice(1).join("\n").trim();
     const bullets = body
