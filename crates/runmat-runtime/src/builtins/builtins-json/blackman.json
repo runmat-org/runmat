@@ -1,0 +1,25 @@
+{
+  "title": "blackman",
+  "category": "math/signal",
+  "keywords": ["blackman", "window", "signal processing", "dsp", "fft"],
+  "summary": "Generate a Blackman window as an N-by-1 real column vector.",
+  "description": "`blackman(N)` returns an `N x 1` real column vector containing the symmetric Blackman window coefficients commonly used when lower spectral leakage is desired.",
+  "behaviors": [
+    "`blackman(N)` expects a nonnegative scalar integer length.",
+    "`blackman(0)` returns an empty `0 x 1` tensor.",
+    "`blackman(1)` returns `1`.",
+    "For `N > 1`, coefficients follow the symmetric Blackman formula `0.42 - 0.5*cos(2*pi*n/(N-1)) + 0.08*cos(4*pi*n/(N-1))`.",
+    "This currently documents the common one-argument symmetric form."
+  ],
+  "examples": [
+    {
+      "description": "Generate a short Blackman window",
+      "input": "w = blackman(8);\ndisp(w')"
+    }
+  ],
+  "links": [
+    { "label": "hann", "url": "./hann" },
+    { "label": "hamming", "url": "./hamming" },
+    { "label": "fft", "url": "./fft" }
+  ]
+}

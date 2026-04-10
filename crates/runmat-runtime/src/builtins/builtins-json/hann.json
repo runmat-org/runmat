@@ -1,0 +1,25 @@
+{
+  "title": "hann",
+  "category": "math/signal",
+  "keywords": ["hann", "window", "signal processing", "dsp", "fft"],
+  "summary": "Generate a Hann window as an N-by-1 real column vector.",
+  "description": "`hann(N)` returns an `N x 1` real column vector containing the symmetric Hann window coefficients commonly used in signal-processing workflows before spectral analysis.",
+  "behaviors": [
+    "`hann(N)` expects a nonnegative scalar integer length.",
+    "`hann(0)` returns an empty `0 x 1` tensor.",
+    "`hann(1)` returns `1`.",
+    "For `N > 1`, coefficients follow the standard symmetric Hann formula `0.5 - 0.5*cos(2*pi*n/(N-1))`.",
+    "This currently documents the common one-argument symmetric form."
+  ],
+  "examples": [
+    {
+      "description": "Generate a short Hann window",
+      "input": "w = hann(8);\ndisp(w')"
+    }
+  ],
+  "links": [
+    { "label": "hamming", "url": "./hamming" },
+    { "label": "blackman", "url": "./blackman" },
+    { "label": "fft", "url": "./fft" }
+  ]
+}

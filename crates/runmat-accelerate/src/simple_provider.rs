@@ -58,6 +58,40 @@ fn registry() -> &'static Mutex<HashMap<u64, Vec<f64>>> {
 
 const POLYDER_EPS: f64 = 1.0e-12;
 const FACTORIAL_MAX_HOST: usize = 170;
+
+#[derive(Clone, Copy)]
+enum WindowKind {
+    Hann,
+    Hamming,
+    Blackman,
+}
+
+fn generate_window_data(kind: WindowKind, len: usize, periodic: bool) -> Vec<f64> {
+    match len {
+        0 => Vec::new(),
+        1 => vec![1.0],
+        _ => {
+            let effective_len = if periodic { len + 1 } else { len };
+            let denom = (effective_len - 1) as f64;
+            let mut data = (0..effective_len)
+                .map(|idx| {
+                    let phase = 2.0 * std::f64::consts::PI * idx as f64 / denom;
+                    match kind {
+                        WindowKind::Hann => 0.5 - 0.5 * phase.cos(),
+                        WindowKind::Hamming => 0.54 - 0.46 * phase.cos(),
+                        WindowKind::Blackman => {
+                            0.42 - 0.5 * phase.cos() + 0.08 * (2.0 * phase).cos()
+                        }
+                    }
+                })
+                .collect::<Vec<_>>();
+            if periodic {
+                data.pop();
+            }
+            data
+        }
+    }
+}
 const FACTORIAL_INT_TOL: f64 = 1.0e-10;
 
 fn runtime_flow_to_anyhow(_context: &str, err: RuntimeError) -> anyhow::Error {
@@ -3271,6 +3305,38 @@ impl AccelProvider for InProcessProvider {
         })
     }
 
+    fn unary_nextpow2<'a>(
+        &'a self,
+        a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        Box::pin(async move {
+            let guard = registry().lock().unwrap();
+            let abuf = guard
+                .get(&a.buffer_id)
+                .ok_or_else(|| anyhow::anyhow!("buffer not found: {}", a.buffer_id))?;
+            let out: Vec<f64> = abuf
+                .iter()
+                .map(|&x| {
+                    let ax = x.abs();
+                    if ax == 0.0 {
+                        0.0
+                    } else {
+                        ax.log2().ceil()
+                    }
+                })
+                .collect();
+            drop(guard);
+            let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+            let mut guard2 = registry().lock().unwrap();
+            guard2.insert(id, out);
+            Ok(GpuTensorHandle {
+                shape: a.shape.clone(),
+                device_id: 0,
+                buffer_id: id,
+            })
+        })
+    }
+
     fn pow2_scale(
         &self,
         mantissa: &GpuTensorHandle,
@@ -3839,6 +3905,27 @@ impl AccelProvider for InProcessProvider {
         }
         let rotated = circshift_data(&data, &shape, &full_shifts)?;
         Ok(self.allocate_tensor(rotated, shape))
+    }
+
+    fn hann_window(&self, len: usize, periodic: bool) -> Result<GpuTensorHandle> {
+        Ok(self.allocate_tensor(
+            generate_window_data(WindowKind::Hann, len, periodic),
+            vec![len, 1],
+        ))
+    }
+
+    fn hamming_window(&self, len: usize, periodic: bool) -> Result<GpuTensorHandle> {
+        Ok(self.allocate_tensor(
+            generate_window_data(WindowKind::Hamming, len, periodic),
+            vec![len, 1],
+        ))
+    }
+
+    fn blackman_window(&self, len: usize, periodic: bool) -> Result<GpuTensorHandle> {
+        Ok(self.allocate_tensor(
+            generate_window_data(WindowKind::Blackman, len, periodic),
+            vec![len, 1],
+        ))
     }
 
     fn diff_dim(

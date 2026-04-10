@@ -1,0 +1,26 @@
+{
+  "title": "nextpow2",
+  "category": "math/elementwise",
+  "keywords": ["nextpow2", "power of two", "fft", "zero padding", "gpu"],
+  "summary": "Return the exponent p such that 2^p is the next power of two greater than or equal to abs(n).",
+  "description": "`nextpow2(X)` applies the standard power-of-two exponent transform elementwise, returning `ceil(log2(abs(X)))` with zero mapped to zero. This is commonly used in FFT workflows such as `2^nextpow2(length(x))`.",
+  "behaviors": [
+    "`nextpow2` accepts real numeric scalars and tensors.",
+    "The transform is applied elementwise for array inputs.",
+    "Zero maps to `0`.",
+    "Negative values use `abs(X)` before computing the exponent.",
+    "GPU tensors use a unary provider hook when available and otherwise gather to the host.",
+    "The output preserves the input's scalar/tensor shape."
+  ],
+  "examples": [
+    {
+      "description": "Compute an FFT-friendly zero-padding length",
+      "input": "x = rand(1000, 1);\nN = 2^nextpow2(length(x))"
+    }
+  ],
+  "links": [
+    { "label": "fft", "url": "./fft" },
+    { "label": "pow2", "url": "./pow2" },
+    { "label": "length", "url": "./length" }
+  ]
+}

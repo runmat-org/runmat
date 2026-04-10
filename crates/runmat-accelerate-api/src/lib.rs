@@ -1230,6 +1230,18 @@ pub trait AccelProvider: Send + Sync {
         Err(anyhow::anyhow!("peaks_xy not supported by provider"))
     }
 
+    fn hann_window(&self, _len: usize, _periodic: bool) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("hann_window not supported by provider"))
+    }
+
+    fn hamming_window(&self, _len: usize, _periodic: bool) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("hamming_window not supported by provider"))
+    }
+
+    fn blackman_window(&self, _len: usize, _periodic: bool) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("blackman_window not supported by provider"))
+    }
+
     /// Apply an N-D correlation/convolution with padding semantics matching MATLAB's `imfilter`.
     fn imfilter<'a>(
         &'a self,
@@ -1652,6 +1664,12 @@ pub trait AccelProvider: Send + Sync {
         _a: &'a GpuTensorHandle,
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("unary_pow2 not supported by provider")
+    }
+    fn unary_nextpow2<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_nextpow2 not supported by provider")
     }
     fn pow2_scale(
         &self,

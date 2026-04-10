@@ -1,0 +1,25 @@
+{
+  "title": "hamming",
+  "category": "math/signal",
+  "keywords": ["hamming", "window", "signal processing", "dsp", "fft"],
+  "summary": "Generate a Hamming window as an N-by-1 real column vector.",
+  "description": "`hamming(N)` returns an `N x 1` real column vector containing the symmetric Hamming window coefficients used in standard DSP and FFT preprocessing workflows.",
+  "behaviors": [
+    "`hamming(N)` expects a nonnegative scalar integer length.",
+    "`hamming(0)` returns an empty `0 x 1` tensor.",
+    "`hamming(1)` returns `1`.",
+    "For `N > 1`, coefficients follow the symmetric Hamming formula `0.54 - 0.46*cos(2*pi*n/(N-1))`.",
+    "This currently documents the common one-argument symmetric form."
+  ],
+  "examples": [
+    {
+      "description": "Generate a short Hamming window",
+      "input": "w = hamming(8);\ndisp(w')"
+    }
+  ],
+  "links": [
+    { "label": "hann", "url": "./hann" },
+    { "label": "blackman", "url": "./blackman" },
+    { "label": "fft", "url": "./fft" }
+  ]
+}
