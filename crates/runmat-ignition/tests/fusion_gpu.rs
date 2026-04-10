@@ -2605,7 +2605,11 @@ fn mod_real_expected(a: f64, b: f64) -> f64 {
         remainder = 0.0;
     }
     if b.is_infinite() && a.is_finite() {
-        return a;
+        // MATLAB sign-correction: same-sign → a, different-sign → b (±Inf).
+        if a == 0.0 {
+            return 0.0;
+        }
+        return if a.signum() == b.signum() { a } else { b };
     }
     if !remainder.is_finite() && !a.is_finite() {
         return f64::NAN;
@@ -2731,6 +2735,18 @@ fn mod_real_parity_matrix_matches_expected_values() {
                     mod_real_expected(5.0, f64::INFINITY),
                     mod_real_expected(f64::INFINITY, 2.0),
                     mod_real_expected(4.0, 0.0),
+                ],
+                expect_resident: true,
+            },
+            // (finite, -Inf) sign-correction: positive lhs → -Inf, negative lhs → -Inf matches.
+            Case {
+                source: "x = [5, -5, 5, -5, 0]; d = [-1/0, -1/0, 1/0, 1/0, -1/0]; y = mod(x, d) + 0;",
+                expected: vec![
+                    mod_real_expected(5.0, f64::NEG_INFINITY),
+                    mod_real_expected(-5.0, f64::NEG_INFINITY),
+                    mod_real_expected(5.0, f64::INFINITY),
+                    mod_real_expected(-5.0, f64::INFINITY),
+                    mod_real_expected(0.0, f64::NEG_INFINITY),
                 ],
                 expect_resident: true,
             },
