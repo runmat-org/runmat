@@ -1473,7 +1473,10 @@ impl RunMatSession {
 
             // For expressions, modify bytecode to store result in a temp variable instead of using stack
             let mut execution_bytecode = bytecode.clone();
-            if is_expression_stmt && !execution_bytecode.instructions.is_empty() {
+            if is_expression_stmt
+                && matches!(final_stmt_emit, FinalStmtEmitDisposition::Inline)
+                && !execution_bytecode.instructions.is_empty()
+            {
                 execution_bytecode.instructions.pop(); // Remove the Pop instruction
 
                 // Add StoreVar instruction to store the result in a temporary variable
@@ -1538,6 +1541,7 @@ impl RunMatSession {
 
                     // For expressions, get the result from the temporary variable (capture for both display and type info)
                     if is_expression_stmt
+                        && matches!(final_stmt_emit, FinalStmtEmitDisposition::Inline)
                         && !execution_bytecode.instructions.is_empty()
                         && result_value.is_none()
                         && suppressed_value.is_none()

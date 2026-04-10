@@ -93,7 +93,7 @@ async fn sqrt_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         match detect_gpu_requires_complex(provider, &handle).await {
             Ok(false) => {
                 if let Ok(out) = provider.unary_sqrt(&handle).await {
-                    return Ok(Value::GpuTensor(out));
+                    return Ok(gpu_helpers::resident_gpu_value(out));
                 }
             }
             Ok(true) => {

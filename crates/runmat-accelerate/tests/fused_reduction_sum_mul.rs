@@ -88,6 +88,7 @@ async fn fused_sum_mul_dim0_matches_manual() {
         stack_pattern: vec![],
         constants,
         const_values: HashMap::new(),
+        materialized_stores: Vec::new(),
         output: None,
         kernel: FusionKernelSpec {
             kind: FusionKind::Reduction,
@@ -183,6 +184,7 @@ async fn fused_mean_mul_dim0_matches_manual() {
         stack_pattern: vec![],
         constants,
         const_values: HashMap::new(),
+        materialized_stores: Vec::new(),
         output: None,
         kernel: FusionKernelSpec {
             kind: FusionKind::Reduction,
@@ -275,6 +277,7 @@ async fn fused_sum_mul_dim1_matches_manual() {
         stack_pattern: vec![],
         constants,
         const_values: HashMap::new(),
+        materialized_stores: Vec::new(),
         output: None,
         kernel: FusionKernelSpec {
             kind: FusionKind::Reduction,
