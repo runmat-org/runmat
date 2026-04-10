@@ -116,7 +116,7 @@ async fn mod_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
                                     let _ = provider.free(&div);
                                     let _ = provider.free(&floored);
                                     let _ = provider.free(&mul);
-                                    return Ok(Value::GpuTensor(out));
+                                    return Ok(gpu_helpers::resident_gpu_value(out));
                                 }
                                 Err(_) => {
                                     let _ = provider.free(&mul);
@@ -208,7 +208,11 @@ fn mod_real_scalar(a: f64, b: f64) -> f64 {
         remainder = 0.0;
     }
     if b.is_infinite() && a.is_finite() {
-        return a;
+        // MATLAB sign-correction: mod(a, ±Inf) returns a when signs match, ±Inf otherwise.
+        if a == 0.0 {
+            return 0.0;
+        }
+        return if a.signum() == b.signum() { a } else { b };
     }
     if !remainder.is_finite() && !a.is_finite() {
         return f64::NAN;

@@ -108,10 +108,24 @@ fn telemetry_records_chunked_matmul_activity() {
         "expected matmul dispatch count > 0 for chunked matmul, got {}",
         telemetry.matmul.count
     );
+    let bind_group_cache_activity =
+        telemetry.bind_group_cache_hits + telemetry.bind_group_cache_misses;
     assert!(
-        telemetry.bind_group_cache_misses > 0,
-        "expected bind group cache misses > 0 for chunked matmul, got {}",
+        bind_group_cache_activity > 0,
+        "expected bind group cache activity > 0 for chunked matmul, got hits={} misses={}",
+        telemetry.bind_group_cache_hits,
         telemetry.bind_group_cache_misses
+    );
+    assert!(
+        telemetry.kernel_launches.iter().any(|launch| {
+            launch.kernel == "matmul"
+                && launch
+                    .tuning
+                    .iter()
+                    .any(|attr| attr.key == "chunked" && attr.value == 1)
+        }),
+        "expected chunked matmul kernel launch telemetry, got {:?}",
+        telemetry.kernel_launches
     );
 
     let _ = provider.free(&a);

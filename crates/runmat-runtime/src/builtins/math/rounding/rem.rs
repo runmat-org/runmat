@@ -110,7 +110,7 @@ async fn rem_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult<V
                                     let _ = provider.free(&div);
                                     let _ = provider.free(&fixed);
                                     let _ = provider.free(&mul);
-                                    return Ok(Value::GpuTensor(out));
+                                    return Ok(gpu_helpers::resident_gpu_value(out));
                                 }
                                 Err(_) => {
                                     let _ = provider.free(&mul);

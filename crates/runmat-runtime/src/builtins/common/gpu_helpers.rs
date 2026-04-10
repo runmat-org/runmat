@@ -46,9 +46,16 @@ pub async fn gather_value_async(value: &Value) -> crate::BuiltinResult<Value> {
     crate::dispatcher::gather_if_needed_async(value).await
 }
 
+/// Wrap a GPU tensor handle, marking it as resident for downstream fusion-aware
+/// consumers and tests.
+pub fn resident_gpu_value(handle: GpuTensorHandle) -> Value {
+    runmat_accelerate_api::mark_residency(&handle);
+    Value::GpuTensor(handle)
+}
+
 /// Wrap a GPU tensor handle as a logical gpuArray value, recording metadata so that
 /// predicates like `islogical` can inspect the handle without downloading it.
 pub fn logical_gpu_value(handle: GpuTensorHandle) -> Value {
     runmat_accelerate_api::set_handle_logical(&handle, true);
-    Value::GpuTensor(handle)
+    resident_gpu_value(handle)
 }

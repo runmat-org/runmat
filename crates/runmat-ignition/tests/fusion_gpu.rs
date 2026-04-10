@@ -73,11 +73,13 @@ impl TestProvider {
             .lock()
             .unwrap()
             .insert(id, (data, shape.clone()));
-        GpuTensorHandle {
+        let handle = GpuTensorHandle {
             shape,
             device_id: 0,
             buffer_id: id,
-        }
+        };
+        runmat_accelerate_api::mark_residency(&handle);
+        handle
     }
 }
 
@@ -613,6 +615,74 @@ impl AccelProvider for TestProvider {
         Ok(self.push(out, shape))
     }
 
+    fn fused_elementwise_multi(
+        &self,
+        shader: &str,
+        inputs: &[GpuTensorHandle],
+        output_shape: &[usize],
+        len: usize,
+        num_outputs: usize,
+    ) -> anyhow::Result<Vec<GpuTensorHandle>> {
+        let parsed = ParsedShader::parse(shader)?;
+        if parsed.output_exprs.len() != num_outputs {
+            bail!(
+                "test provider: multi-output shader has {} output expressions, expected {}",
+                parsed.output_exprs.len(),
+                num_outputs
+            );
+        }
+        if parsed.tmp_exprs.len() > 1024 {
+            bail!(
+                "test provider: excessive temporary count {}",
+                parsed.tmp_exprs.len()
+            );
+        }
+
+        let mut input_values: Vec<Vec<f64>> = Vec::with_capacity(inputs.len());
+        for handle in inputs {
+            let (data, _shape) = self.pull(handle)?;
+            input_values.push(data);
+        }
+
+        let max_input_len = input_values.iter().map(|d| d.len()).max().unwrap_or(0);
+        let output_elements = output_shape.iter().product::<usize>();
+        let total = output_elements.max(len).max(max_input_len).max(1);
+
+        let shape = if output_elements == 0 {
+            inputs
+                .first()
+                .map(|h| h.shape.clone())
+                .unwrap_or_else(|| vec![total])
+        } else {
+            output_shape.to_vec()
+        };
+
+        let mut per_output: Vec<Vec<f64>> = vec![Vec::with_capacity(total); num_outputs];
+        for idx in 0..total {
+            let mut tmp_values: Vec<Option<f64>> = vec![None; parsed.tmp_exprs.len()];
+            for (slot, expr) in parsed.tmp_exprs.iter().enumerate() {
+                let value = evaluate_expression(expr, idx, &input_values, &tmp_values)
+                    .with_context(|| format!("evaluating tmp{slot} for idx {idx}"))?;
+                tmp_values[slot] = Some(value);
+            }
+            for (k, out_expr) in parsed.output_exprs.iter().enumerate() {
+                let result = evaluate_expression(out_expr, idx, &input_values, &tmp_values)
+                    .with_context(|| format!("evaluating output{k} expression for idx {idx}"))?;
+                per_output[k].push(result);
+            }
+        }
+
+        let mut handles = Vec::with_capacity(num_outputs);
+        for out_data in per_output {
+            let mut out_shape = shape.clone();
+            if out_shape.iter().product::<usize>() != total {
+                out_shape = vec![total];
+            }
+            handles.push(self.push(out_data, out_shape));
+        }
+        Ok(handles)
+    }
+
     fn transpose(&self, handle: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         let (data, shape) = self.pull(handle)?;
         if shape.len() < 2 {
@@ -717,13 +787,18 @@ impl AccelProvider for TestProvider {
 
 struct ParsedShader {
     tmp_exprs: Vec<String>,
+    /// Single-output shaders populate `output_expr`; multi-output shaders use `output_exprs`.
     output_expr: String,
+    /// Non-empty only for multi-output shaders (`output0.data[g] = …`, `output1.data[g] = …`, …).
+    output_exprs: Vec<String>,
 }
 
 impl ParsedShader {
     fn parse(shader: &str) -> anyhow::Result<Self> {
         let mut tmp_exprs = Vec::new();
         let mut output_expr: Option<String> = None;
+        let mut output_exprs_map: std::collections::BTreeMap<usize, String> =
+            std::collections::BTreeMap::new();
         for line in shader.lines() {
             let trimmed = line.trim();
             if let Some(rest) = trimmed.strip_prefix("let ") {
@@ -742,13 +817,35 @@ impl ParsedShader {
             {
                 let expr = rest.trim().trim_end_matches(';').trim().to_string();
                 output_expr = Some(expr);
+            } else {
+                // Multi-output: `outputK.data[g] = <expr>;`
+                if let Some(rest) = trimmed.strip_prefix("output") {
+                    if let Some(dot_pos) = rest.find(".data[") {
+                        let idx_str = &rest[..dot_pos];
+                        if let Ok(k) = idx_str.parse::<usize>() {
+                            let after = &rest[dot_pos + ".data[".len()..];
+                            // find `] =`
+                            if let Some(bracket_pos) = after.find("] =") {
+                                let rhs = after[bracket_pos + "] =".len()..].trim();
+                                let expr = rhs.trim_end_matches(';').trim().to_string();
+                                output_exprs_map.insert(k, expr);
+                            }
+                        }
+                    }
+                }
             }
         }
+
+        let output_exprs: Vec<String> = output_exprs_map.into_values().collect();
         let output_expr =
-            output_expr.ok_or_else(|| anyhow!("failed to locate fused output expression"))?;
+            output_expr.unwrap_or_else(|| output_exprs.first().cloned().unwrap_or_default());
+        if output_expr.is_empty() && output_exprs.is_empty() {
+            bail!("failed to locate fused output expression");
+        }
         Ok(Self {
             tmp_exprs,
             output_expr,
+            output_exprs,
         })
     }
 }
@@ -865,7 +962,17 @@ impl<'a> ExprParser<'a> {
     }
 
     fn parse_expression(&mut self) -> anyhow::Result<f64> {
-        self.parse_logical_and()
+        self.parse_logical_or()
+    }
+
+    fn parse_logical_or(&mut self) -> anyhow::Result<f64> {
+        let mut value = self.parse_logical_and()?;
+        while self.match_symbol('|') {
+            self.expect_symbol('|')?;
+            let rhs = self.parse_logical_and()?;
+            value = if value != 0.0 || rhs != 0.0 { 1.0 } else { 0.0 };
+        }
+        Ok(value)
     }
 
     fn parse_logical_and(&mut self) -> anyhow::Result<f64> {
@@ -1034,6 +1141,9 @@ impl<'a> ExprParser<'a> {
             "sinh" => Ok(arg(0)?.sinh()),
             "cosh" => Ok(arg(0)?.cosh()),
             "tanh" => Ok(arg(0)?.tanh()),
+            "asinh" => Ok(arg(0)?.asinh()),
+            "acosh" => Ok(arg(0)?.acosh()),
+            "atanh" => Ok(arg(0)?.atanh()),
             "exp" => Ok(arg(0)?.exp()),
             "exp2" => Ok(arg(0)?.exp2()),
             "log" => Ok(arg(0)?.ln()),
@@ -2442,6 +2552,82 @@ fn direct_execution_of_safe_followup_group_returns_gpu_tensor() {
 }
 
 #[test]
+fn direct_execution_of_inverse_hyperbolic_group_returns_gpu_tensor() {
+    gc_test_context(|| {
+        ensure_provider_registered();
+
+        let source = r#"
+        x = [0.25, 0.5, 0.75];
+        y = asinh(x) + atanh(x) + acosh(x + 1);
+        "#;
+
+        let ast = parse(source).expect("parse");
+        let hir = lower(&ast).expect("lower");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
+        let graph = bytecode.accel_graph.as_ref().expect("accel graph");
+        let groups = graph.detect_fusion_groups();
+        let plan = runmat_accelerate::FusionPlan::from_graph(graph, &groups);
+        let group_plan = plan
+            .groups
+            .iter()
+            .find(|g| matches!(g.group.kind, FusionKind::ElementwiseChain) && g.kernel.supported)
+            .expect("supported elementwise fusion group");
+
+        let x = Tensor::new(vec![0.25, 0.5, 0.75], vec![1, 3]).expect("tensor x");
+        let result = execute_elementwise(FusionExecutionRequest {
+            plan: group_plan,
+            inputs: vec![Value::Tensor(x), Value::Num(1.0)],
+        })
+        .expect("direct fusion execution");
+
+        match result.final_value {
+            Value::GpuTensor(handle) => {
+                assert!(fusion_residency::is_resident(&handle));
+            }
+            other => panic!("expected direct execution to return GPU tensor, got {other:?}"),
+        }
+    });
+}
+
+#[test]
+fn direct_execution_of_mod_and_rem_group_returns_gpu_tensor() {
+    gc_test_context(|| {
+        ensure_provider_registered();
+
+        let source = r#"
+        x = [-5.5, -1.25, 5.5];
+        y = mod(x, 2) + rem(x, 2);
+        "#;
+
+        let ast = parse(source).expect("parse");
+        let hir = lower(&ast).expect("lower");
+        let bytecode = compile(&hir, &HashMap::new()).expect("compile");
+        let graph = bytecode.accel_graph.as_ref().expect("accel graph");
+        let groups = graph.detect_fusion_groups();
+        let plan = runmat_accelerate::FusionPlan::from_graph(graph, &groups);
+        let group_plan = plan
+            .groups
+            .iter()
+            .find(|g| matches!(g.group.kind, FusionKind::ElementwiseChain) && g.kernel.supported)
+            .expect("supported elementwise fusion group");
+
+        let x = Tensor::new(vec![-5.5, -1.25, 5.5], vec![1, 3]).expect("tensor x");
+        let result = execute_elementwise(FusionExecutionRequest {
+            plan: group_plan,
+            inputs: vec![Value::Tensor(x), Value::Num(2.0), Value::Num(2.0)],
+        })
+        .expect("direct fusion execution");
+
+        match result.final_value {
+            Value::GpuTensor(handle) => {
+                assert!(fusion_residency::is_resident(&handle));
+            }
+            other => panic!("expected direct execution to return GPU tensor, got {other:?}"),
+        }
+    });
+}
+
+#[test]
 fn fused_mod_and_rem_remain_resident() {
     gc_test_context(|| {
         ensure_provider_registered();
@@ -2605,7 +2791,11 @@ fn mod_real_expected(a: f64, b: f64) -> f64 {
         remainder = 0.0;
     }
     if b.is_infinite() && a.is_finite() {
-        return a;
+        // MATLAB sign-correction: same-sign → a, different-sign → b (±Inf).
+        if a == 0.0 {
+            return 0.0;
+        }
+        return if a.signum() == b.signum() { a } else { b };
     }
     if !remainder.is_finite() && !a.is_finite() {
         return f64::NAN;
@@ -2731,6 +2921,18 @@ fn mod_real_parity_matrix_matches_expected_values() {
                     mod_real_expected(5.0, f64::INFINITY),
                     mod_real_expected(f64::INFINITY, 2.0),
                     mod_real_expected(4.0, 0.0),
+                ],
+                expect_resident: true,
+            },
+            // (finite, -Inf) sign-correction: positive lhs → -Inf, negative lhs → -Inf matches.
+            Case {
+                source: "x = [5, -5, 5, -5, 0]; d = [-1/0, -1/0, 1/0, 1/0, -1/0]; y = mod(x, d) + 0;",
+                expected: vec![
+                    mod_real_expected(5.0, f64::NEG_INFINITY),
+                    mod_real_expected(-5.0, f64::NEG_INFINITY),
+                    mod_real_expected(5.0, f64::INFINITY),
+                    mod_real_expected(-5.0, f64::INFINITY),
+                    mod_real_expected(0.0, f64::NEG_INFINITY),
                 ],
                 expect_resident: true,
             },

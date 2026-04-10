@@ -1403,6 +1403,144 @@ impl FusionGroupPlan {
         self.generate_wgsl_for_output(self.output?, scalar_ty)
     }
 
+    /// Generate a single WGSL shader that writes all `output_ids` in one compute pass,
+    /// eliminating the O(N²) redundant dispatches that arise from calling
+    /// `generate_wgsl_for_output` N times.
+    ///
+    /// Binding layout:
+    ///   0 .. inputs.len()-1          → read-only input tensors
+    ///   inputs.len() + k             → read_write output tensor k
+    ///   inputs.len() + output_ids.len() → uniform Params
+    pub fn generate_wgsl_for_outputs(
+        &self,
+        output_ids: &[ValueId],
+        scalar_ty: &str,
+    ) -> Option<String> {
+        if output_ids.is_empty() {
+            return None;
+        }
+        if output_ids.len() == 1 {
+            return self.generate_wgsl_for_output(output_ids[0], scalar_ty);
+        }
+        if !self.kernel.kind.is_elementwise() {
+            return None;
+        }
+        if !self.kernel.supported {
+            return None;
+        }
+
+        let mut exprs: HashMap<ValueId, String> = HashMap::new();
+        for (idx, input_id) in self.inputs.iter().enumerate() {
+            exprs.insert(*input_id, format!("input{idx}.data[i{idx}]"));
+        }
+
+        let mut body = String::new();
+        for (node_idx, op) in self.operations.iter().enumerate() {
+            let tmp_name = format!("tmp{node_idx}");
+            match op {
+                FusionOp::Primitive { op, inputs, output } => {
+                    let expr = primitive_expr(*op, inputs, &exprs)?;
+                    body.push_str(&format!("    let {tmp_name}: {scalar_ty} = {expr};\n"));
+                    if let Some(out) = output {
+                        exprs.insert(*out, tmp_name.clone());
+                    }
+                }
+                FusionOp::Builtin {
+                    name,
+                    inputs,
+                    output,
+                } => {
+                    let expr = builtin_expr(name, inputs, &exprs, scalar_ty)?;
+                    body.push_str(&format!("    let {tmp_name}: {scalar_ty} = {expr};\n"));
+                    if let Some(out) = output {
+                        exprs.insert(*out, tmp_name.clone());
+                    }
+                }
+            }
+        }
+
+        let mut final_exprs = Vec::with_capacity(output_ids.len());
+        for output_id in output_ids {
+            let expr = exprs.get(output_id)?.clone();
+            final_exprs.push(expr);
+        }
+
+        let num_outputs = output_ids.len();
+        let mut shader = String::new();
+        shader.push_str("const MAX_RANK: u32 = 128u;\n");
+        shader.push_str("struct PackedValue { value: u32, _pad0: u32, _pad1: u32, _pad2: u32 };\n");
+        shader.push_str("alias PackedArray = array<PackedValue, MAX_RANK>;\n\n");
+        shader.push_str(&format!("struct Tensor {{ data: array<{scalar_ty}>, }};\n"));
+        shader.push_str("struct Params {\n    len: u32,\n    offset: u32,\n    rank: u32,\n    _pad: u32,\n    out_shape: PackedArray,\n");
+        for idx in 0..self.inputs.len() {
+            shader.push_str(&format!("    in{}_shape: PackedArray,\n", idx));
+            shader.push_str(&format!("    in{}_stride: PackedArray,\n", idx));
+        }
+        shader.push_str("}\n\n");
+        if scalar_ty == "f32" {
+            shader.push_str("fn isNan(x: f32) -> bool { return x != x; }\n");
+            shader.push_str("fn isFinite(x: f32) -> bool { return (x == x) && (abs(x) < 3.4028234663852886e38); }\n");
+            shader.push_str("fn isInf(x: f32) -> bool { return (x == x) && !(abs(x) < 3.4028234663852886e38); }\n");
+            shader.push_str(concat!(
+                "fn hypot(a: f32, b: f32) -> f32 {\n",
+                "    let lo = min(abs(a), abs(b));\n",
+                "    let hi = max(abs(a), abs(b));\n",
+                "    if hi == 0.0 { return 0.0; }\n",
+                "    if isInf(hi) { return hi; }\n",
+                "    let r = lo / hi;\n",
+                "    return hi * sqrt(1.0 + r * r);\n",
+                "}\n\n",
+            ));
+        } else {
+            shader.push_str("fn isNan(x: f64) -> bool { return x != x; }\n");
+            shader.push_str("fn isFinite(x: f64) -> bool { return (x == x) && (abs(x) < f64(1.7976931348623157e308)); }\n");
+            shader.push_str("fn isInf(x: f64) -> bool { return (x == x) && !(abs(x) < f64(1.7976931348623157e308)); }\n");
+            shader.push_str(concat!(
+                "fn hypot(a: f64, b: f64) -> f64 {\n",
+                "    let lo = min(abs(a), abs(b));\n",
+                "    let hi = max(abs(a), abs(b));\n",
+                "    if hi == f64(0.0) { return f64(0.0); }\n",
+                "    if isInf(hi) { return hi; }\n",
+                "    let r = lo / hi;\n",
+                "    return hi * sqrt(f64(1.0) + r * r);\n",
+                "}\n\n",
+            ));
+        }
+        for (idx, _) in self.inputs.iter().enumerate() {
+            shader.push_str(&format!(
+                "@group(0) @binding({}) var<storage, read> input{}: Tensor;\n",
+                idx, idx
+            ));
+        }
+        for k in 0..num_outputs {
+            shader.push_str(&format!(
+                "@group(0) @binding({}) var<storage, read_write> output{}: Tensor;\n",
+                self.inputs.len() + k,
+                k,
+            ));
+        }
+        shader.push_str(&format!(
+            "@group(0) @binding({}) var<uniform> params: Params;\n\n",
+            self.inputs.len() + num_outputs
+        ));
+        shader.push_str("@compute @workgroup_size(@WG@)\nfn main(@builtin(global_invocation_id) gid: vec3<u32>) {\n");
+        shader.push_str("    let idx = gid.x;\n    if (idx >= params.len) { return; }\n");
+        shader.push_str("    let g = idx + params.offset;\n");
+        shader.push_str("    // Compute N-D coordinates from global index (with chunk offset)\n    var coord: array<u32, MAX_RANK>;\n    var tmp: u32 = g;\n    var d: u32 = 0u;\n    loop { if d >= params.rank { break; } let dim = params.out_shape[d].value; if dim == 0u { coord[d] = 0u; } else { coord[d] = tmp % dim; tmp = tmp / dim; } d = d + 1u; }\n");
+        for (idx, _) in self.inputs.iter().enumerate() {
+            shader.push_str(&format!(
+                "    var i{}: u32 = 0u; d = 0u; loop {{ if d >= params.rank {{ break; }} let sd = params.in{}_shape[d].value; let st = params.in{}_stride[d].value; let c = select(coord[d], 0u, sd == 1u); i{} = i{} + c * st; d = d + 1u; }}\n",
+                idx, idx, idx, idx, idx
+            ));
+        }
+        shader.push_str(&body);
+        for (k, final_expr) in final_exprs.iter().enumerate() {
+            shader.push_str(&format!("    output{k}.data[g] = {final_expr};\n"));
+        }
+        shader.push_str("}\n");
+        Some(shader)
+    }
+
     pub fn generate_wgsl_for_output(&self, output_id: ValueId, scalar_ty: &str) -> Option<String> {
         if !self.kernel.kind.is_elementwise() {
             return None;
@@ -1459,11 +1597,40 @@ impl FusionGroupPlan {
         if scalar_ty == "f32" {
             shader.push_str("fn isNan(x: f32) -> bool { return x != x; }\n");
             shader.push_str("fn isFinite(x: f32) -> bool { return (x == x) && (abs(x) < 3.4028234663852886e38); }\n");
-            shader.push_str("fn isInf(x: f32) -> bool { return (x == x) && !(abs(x) < 3.4028234663852886e38); }\n\n");
+            shader.push_str("fn isInf(x: f32) -> bool { return (x == x) && !(abs(x) < 3.4028234663852886e38); }\n");
+            // hypot is not a WGSL builtin; define it explicitly.
+            // Use the scaling form max*sqrt(1+(min/max)²) to avoid overflow when
+            // a² or b² exceeds the representable range.
+            // Guard against Inf inputs: Inf/Inf = NaN, so return hi early when
+            // it is already infinite (IEEE 754 requires hypot(Inf,*) = Inf).
+            shader.push_str(concat!(
+                "fn hypot(a: f32, b: f32) -> f32 {\n",
+                "    let lo = min(abs(a), abs(b));\n",
+                "    let hi = max(abs(a), abs(b));\n",
+                "    if hi == 0.0 { return 0.0; }\n",
+                "    if isInf(hi) { return hi; }\n",
+                "    let r = lo / hi;\n",
+                "    return hi * sqrt(1.0 + r * r);\n",
+                "}\n\n",
+            ));
         } else {
             shader.push_str("fn isNan(x: f64) -> bool { return x != x; }\n");
             shader.push_str("fn isFinite(x: f64) -> bool { return (x == x) && (abs(x) < f64(1.7976931348623157e308)); }\n");
-            shader.push_str("fn isInf(x: f64) -> bool { return (x == x) && !(abs(x) < f64(1.7976931348623157e308)); }\n\n");
+            shader.push_str("fn isInf(x: f64) -> bool { return (x == x) && !(abs(x) < f64(1.7976931348623157e308)); }\n");
+            // hypot is not a WGSL builtin; define it explicitly.
+            // Use the scaling form max*sqrt(1+(min/max)²) to avoid overflow.
+            // Guard against Inf inputs: Inf/Inf = NaN, so return hi early when
+            // it is already infinite (IEEE 754 requires hypot(Inf,*) = Inf).
+            shader.push_str(concat!(
+                "fn hypot(a: f64, b: f64) -> f64 {\n",
+                "    let lo = min(abs(a), abs(b));\n",
+                "    let hi = max(abs(a), abs(b));\n",
+                "    if hi == f64(0.0) { return f64(0.0); }\n",
+                "    if isInf(hi) { return hi; }\n",
+                "    let r = lo / hi;\n",
+                "    return hi * sqrt(f64(1.0) + r * r);\n",
+                "}\n\n",
+            ));
         }
         for (idx, _) in self.inputs.iter().enumerate() {
             shader.push_str(&format!(
@@ -2662,8 +2829,11 @@ fn builtin_expr(
         "mod" => {
             let lhs = exprs.get(inputs.first()?).cloned()?;
             let rhs = exprs.get(inputs.get(1)?).cloned()?;
+            // When rhs is infinite and lhs is finite, MATLAB sign-corrects: returns lhs when
+            // signs match, rhs (±Inf) when they differ. The general formula produces NaN here
+            // (inf * 0 = NaN), so we must short-circuit.
             return Some(format!(
-                "select(({lhs} - {rhs} * floor({lhs} / {rhs})), {lhs}, (isInf({rhs}) && isFinite({lhs})))"
+                "select(({lhs} - {rhs} * floor({lhs} / {rhs})), select({rhs}, {lhs}, ({lhs} == 0.0 || sign({lhs}) == sign({rhs}))), (isInf({rhs}) && isFinite({lhs})))"
             ));
         }
         "rem" => {
@@ -2700,28 +2870,13 @@ fn builtin_expr(
         "ceil" => "ceil",
         "round" => "round",
         "trunc" => "trunc",
+        "asinh" => return builtin_unary_call("asinh", inputs, exprs),
+        "acosh" => return builtin_unary_call("acosh", inputs, exprs),
+        "atanh" => return builtin_unary_call("atanh", inputs, exprs),
         "max" => return builtin_binary("max", inputs, exprs),
         "min" => return builtin_binary("min", inputs, exprs),
         _ => {
             return match name.to_ascii_lowercase().as_str() {
-                "asinh" => {
-                    let arg = exprs.get(inputs.first()?).cloned()?;
-                    let one = cast_literal(scalar_ty, "1.0");
-                    Some(format!("log({arg} + sqrt(({arg} * {arg}) + {one}))"))
-                }
-                "acosh" => {
-                    let arg = exprs.get(inputs.first()?).cloned()?;
-                    let one = cast_literal(scalar_ty, "1.0");
-                    Some(format!(
-                        "log({arg} + sqrt(({arg} - {one}) * ({arg} + {one})))"
-                    ))
-                }
-                "atanh" => {
-                    let arg = exprs.get(inputs.first()?).cloned()?;
-                    let one = cast_literal(scalar_ty, "1.0");
-                    let half = cast_literal(scalar_ty, "0.5");
-                    Some(format!("({half} * log(({one} + {arg}) / ({one} - {arg})))"))
-                }
                 "log10" => {
                     let arg = exprs.get(inputs.first()?).cloned()?;
                     let constant = cast_literal(scalar_ty, "0.4342944819032518");
@@ -3375,13 +3530,13 @@ mod tests {
         assert_eq!(atan2.unwrap(), "atan2(v0, v1)");
 
         let asinh = super::builtin_expr("asinh", &[0], &exprs, "f32");
-        assert!(asinh.unwrap().contains("sqrt"));
+        assert_eq!(asinh.unwrap(), "asinh(v0)");
 
         let acosh = super::builtin_expr("acosh", &[0], &exprs, "f32");
-        assert!(acosh.unwrap().contains("sqrt"));
+        assert_eq!(acosh.unwrap(), "acosh(v0)");
 
         let atanh = super::builtin_expr("atanh", &[0], &exprs, "f32");
-        assert!(atanh.unwrap().contains("log"));
+        assert_eq!(atanh.unwrap(), "atanh(v0)");
 
         let hypot = super::builtin_expr("hypot", &[0, 1], &exprs, "f32");
         assert_eq!(hypot.unwrap(), "hypot(v0, v1)");

@@ -2731,7 +2731,9 @@ async fn run_interpreter_inner(
                 }
                 if i < vars.len() {
                     #[cfg(feature = "native-accel")]
-                    clear_residency(&vars[i]);
+                    if !same_gpu_handle(&vars[i], &val) {
+                        clear_residency(&vars[i]);
+                    }
                 }
                 if i >= vars.len() {
                     vars.resize(i + 1, Value::Num(0.0));
@@ -2783,7 +2785,9 @@ async fn run_interpreter_inner(
                         context.locals.push(Value::Num(0.0));
                     }
                     #[cfg(feature = "native-accel")]
-                    if local_index < context.locals.len() {
+                    if local_index < context.locals.len()
+                        && !same_gpu_handle(&context.locals[local_index], &val)
+                    {
                         clear_residency(&context.locals[local_index]);
                     }
                     context.locals[local_index] = val;
@@ -2793,7 +2797,7 @@ async fn run_interpreter_inner(
                         refresh_workspace_state(&vars);
                     }
                     #[cfg(feature = "native-accel")]
-                    if offset < vars.len() {
+                    if offset < vars.len() && !same_gpu_handle(&vars[offset], &val) {
                         clear_residency(&vars[offset]);
                     }
                     vars[offset] = val;
@@ -2955,8 +2959,12 @@ async fn run_interpreter_inner(
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 match (&a, &b) {
                     (Value::Object(obj), _) => {
-                        let args = vec![Value::Object(obj.clone()), b.clone()];
-                        match call_builtin_vm!("minus", &args) {
+                        let args = vec![
+                            Value::Object(obj.clone()),
+                            Value::String("minus".to_string()),
+                            b.clone(),
+                        ];
+                        match call_builtin_vm!("call_method", &args) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let v = call_builtin_vm!("minus", &[a.clone(), b.clone()])?;
@@ -2965,8 +2973,12 @@ async fn run_interpreter_inner(
                         }
                     }
                     (_, Value::Object(obj)) => {
-                        let args = vec![Value::Object(obj.clone()), a.clone()];
-                        match call_builtin_vm!("uminus", &args) {
+                        // Subtraction is non-commutative: dispatch to b's class method with (a, b)
+                        // in the original order so the method receives lhs=a, rhs=b and computes
+                        // a - b. Using call_method here would be wrong because call_method always
+                        // prepends the object as the first argument, computing b - a instead.
+                        let qualified = format!("{}.minus", obj.class_name);
+                        match call_builtin_vm!(&qualified, &[a.clone(), b.clone()]) {
                             Ok(v) => stack.push(v),
                             Err(_) => {
                                 let v = call_builtin_vm!("minus", &[a.clone(), b.clone()])?;
@@ -11285,7 +11297,7 @@ async fn try_execute_fusion_group(
     plan: &runmat_accelerate::FusionGroupPlan,
     graph: &runmat_accelerate::AccelGraph,
     stack: &mut Vec<Value>,
-    vars: &mut [Value],
+    vars: &mut Vec<Value>,
     context: &mut ExecutionContext,
 ) -> VmResult<Value> {
     if plan.group.stack_layout.is_none() && !plan.stack_pattern.is_empty() {
@@ -11545,18 +11557,39 @@ async fn try_execute_fusion_group(
                 for (store, value) in result.materialized_stores {
                     match store.binding.kind {
                         VarKind::Global => {
-                            if store.binding.index < vars.len() {
-                                vars[store.binding.index] = value;
+                            let i = store.binding.index;
+                            #[cfg(feature = "native-accel")]
+                            if i < vars.len() && !same_gpu_handle(&vars[i], &value) {
+                                clear_residency(&vars[i]);
                             }
+                            if i >= vars.len() {
+                                vars.resize(i + 1, Value::Num(0.0));
+                                refresh_workspace_state(vars);
+                            }
+                            vars[i] = value;
                         }
                         VarKind::Local => {
                             if let Some(frame) = context.call_stack.last() {
                                 let absolute = frame.locals_start + store.binding.index;
-                                if absolute < context.locals.len() {
-                                    context.locals[absolute] = value;
+                                while context.locals.len() <= absolute {
+                                    context.locals.push(Value::Num(0.0));
                                 }
-                            } else if store.binding.index < vars.len() {
-                                vars[store.binding.index] = value;
+                                #[cfg(feature = "native-accel")]
+                                if !same_gpu_handle(&context.locals[absolute], &value) {
+                                    clear_residency(&context.locals[absolute]);
+                                }
+                                context.locals[absolute] = value;
+                            } else {
+                                let i = store.binding.index;
+                                #[cfg(feature = "native-accel")]
+                                if i < vars.len() && !same_gpu_handle(&vars[i], &value) {
+                                    clear_residency(&vars[i]);
+                                }
+                                if i >= vars.len() {
+                                    vars.resize(i + 1, Value::Num(0.0));
+                                    refresh_workspace_state(vars);
+                                }
+                                vars[i] = value;
                             }
                         }
                     }
@@ -12174,6 +12207,14 @@ fn clear_residency(value: &Value) {
     if let Value::GpuTensor(handle) = value {
         fusion_residency::clear(handle);
     }
+}
+
+#[cfg(feature = "native-accel")]
+fn same_gpu_handle(lhs: &Value, rhs: &Value) -> bool {
+    matches!(
+        (lhs, rhs),
+        (Value::GpuTensor(left), Value::GpuTensor(right)) if left.buffer_id == right.buffer_id
+    )
 }
 
 fn parse_exception(err: &runmat_runtime::RuntimeError) -> runmat_builtins::MException {
