@@ -2708,28 +2708,13 @@ fn builtin_expr(
         "ceil" => "ceil",
         "round" => "round",
         "trunc" => "trunc",
+        "asinh" => return builtin_unary_call("asinh", inputs, exprs),
+        "acosh" => return builtin_unary_call("acosh", inputs, exprs),
+        "atanh" => return builtin_unary_call("atanh", inputs, exprs),
         "max" => return builtin_binary("max", inputs, exprs),
         "min" => return builtin_binary("min", inputs, exprs),
         _ => {
             return match name.to_ascii_lowercase().as_str() {
-                "asinh" => {
-                    let arg = exprs.get(inputs.first()?).cloned()?;
-                    let one = cast_literal(scalar_ty, "1.0");
-                    Some(format!("log({arg} + sqrt(({arg} * {arg}) + {one}))"))
-                }
-                "acosh" => {
-                    let arg = exprs.get(inputs.first()?).cloned()?;
-                    let one = cast_literal(scalar_ty, "1.0");
-                    Some(format!(
-                        "log({arg} + sqrt(({arg} - {one}) * ({arg} + {one})))"
-                    ))
-                }
-                "atanh" => {
-                    let arg = exprs.get(inputs.first()?).cloned()?;
-                    let one = cast_literal(scalar_ty, "1.0");
-                    let half = cast_literal(scalar_ty, "0.5");
-                    Some(format!("({half} * log(({one} + {arg}) / ({one} - {arg})))"))
-                }
                 "log10" => {
                     let arg = exprs.get(inputs.first()?).cloned()?;
                     let constant = cast_literal(scalar_ty, "0.4342944819032518");
@@ -3383,13 +3368,13 @@ mod tests {
         assert_eq!(atan2.unwrap(), "atan2(v0, v1)");
 
         let asinh = super::builtin_expr("asinh", &[0], &exprs, "f32");
-        assert!(asinh.unwrap().contains("sqrt"));
+        assert_eq!(asinh.unwrap(), "asinh(v0)");
 
         let acosh = super::builtin_expr("acosh", &[0], &exprs, "f32");
-        assert!(acosh.unwrap().contains("sqrt"));
+        assert_eq!(acosh.unwrap(), "acosh(v0)");
 
         let atanh = super::builtin_expr("atanh", &[0], &exprs, "f32");
-        assert!(atanh.unwrap().contains("log"));
+        assert_eq!(atanh.unwrap(), "atanh(v0)");
 
         let hypot = super::builtin_expr("hypot", &[0, 1], &exprs, "f32");
         assert_eq!(hypot.unwrap(), "hypot(v0, v1)");
