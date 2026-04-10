@@ -1,0 +1,109 @@
+{
+  "title": "duration",
+  "category": "datetime",
+  "keywords": [
+    "duration",
+    "elapsed time",
+    "time span",
+    "Format",
+    "MATLAB compatibility"
+  ],
+  "summary": "Create MATLAB-compatible duration arrays from hour, minute, and second components.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/duration.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "duration values are host-side objects backed by day-count tensors; there is no GPU-resident duration type."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::duration::tests"
+  },
+  "description": "`duration` constructs MATLAB-style duration objects from numeric hour, minute, and second components. Scalar component inputs expand to match non-scalar arrays, the resulting object stores elapsed time internally as days, and the writable `Format` property controls display, `string`, and `char` conversion.",
+  "behaviors": [
+    "`duration(H)` treats the input as hours.",
+    "`duration(H, M)` treats the inputs as hours and minutes.",
+    "`duration(H, M, S)` treats the inputs as hours, minutes, and seconds.",
+    "Scalar component inputs broadcast to match non-scalar component arrays; non-scalar inputs must share the same shape.",
+    "The `Format` property controls text rendering. Supported values are `hh:mm:ss`, `hh:mm`, `mm:ss`, `s`, and `ss`.",
+    "Linear indexing `d(k)` is supported and returns duration values.",
+    "Comparison operators and `plus`/`minus` duration arithmetic are supported.",
+    "Adding a duration to a datetime returns a datetime shifted by that elapsed time."
+  ],
+  "examples": [
+    {
+      "description": "Constructing a scalar duration from numeric components",
+      "input": "t = duration(1, 30, 45)",
+      "output": "t =\n  01:30:45"
+    },
+    {
+      "description": "Broadcasting scalar minutes across an hour vector",
+      "input": "t = duration([1 2], 15)",
+      "output": "t =\n01:15:00  02:15:00"
+    },
+    {
+      "description": "Changing the display format without changing the stored value",
+      "input": "t = duration(1, 5, 0);\nt.Format = 'hh:mm';\ndisp(t)",
+      "output": "01:05"
+    },
+    {
+      "description": "Adding a duration to a datetime",
+      "input": "t0 = datetime(2024, 4, 9, 8, 0, 0);\nt1 = t0 + duration(1, 30, 0)",
+      "output": "t1 =\n  09-Apr-2024 09:30:00"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does the `Format` property change?",
+      "answer": "Only the textual representation. The stored elapsed time is unchanged, so comparisons and arithmetic still refer to the same duration."
+    },
+    {
+      "question": "Can I index duration arrays?",
+      "answer": "Yes. Linear `()` indexing is supported and preserves the duration type."
+    },
+    {
+      "question": "Does `duration` run on the GPU?",
+      "answer": "No. duration values are represented as host-side objects. Numeric inputs may be gathered first, but the resulting duration object remains on the CPU."
+    },
+    {
+      "question": "Can I add a duration to a datetime?",
+      "answer": "Yes. RunMat supports `datetime + duration` and returns a datetime shifted by the specified elapsed time."
+    }
+  ],
+  "links": [
+    {
+      "label": "datetime",
+      "url": "./datetime"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    },
+    {
+      "label": "disp",
+      "url": "./disp"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/duration/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/duration/mod.rs"
+  },
+  "gpu_residency": "No. RunMat represents `duration` values as host-side objects with an internal day-count tensor and a `Format` property. Even when the constructor receives gathered numeric data, the resulting object remains resident on the CPU.",
+  "gpu_behavior": [
+    "`duration` does not allocate GPU objects or invoke provider kernels. If a numeric input originates on the GPU, RunMat gathers it before building the duration object."
+  ]
+}
