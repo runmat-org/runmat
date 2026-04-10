@@ -14,9 +14,7 @@ impl WgpuProvider {
         len: usize,
         periodic: bool,
     ) -> Result<GpuTensorHandle> {
-        if len > u32::MAX as usize {
-            return Err(anyhow!("window: length exceeds GPU limits"));
-        }
+        let (logical_u32, total_u32) = window_lengths(len, periodic)?;
         let shape_vec = vec![len, 1];
         let out_buffer = self.create_storage_buffer_checked(len, "runmat-window-out")?;
         if len == 0 {
@@ -31,12 +29,6 @@ impl WgpuProvider {
             return Ok(uploaded);
         }
 
-        let logical_u32 = len as u32;
-        let total_u32 = if periodic {
-            logical_u32 + 1
-        } else {
-            logical_u32
-        };
         let chunk_capacity = (crate::backend::wgpu::config::MAX_DISPATCH_WORKGROUPS as usize)
             * crate::backend::wgpu::config::WORKGROUP_SIZE as usize;
         let mut offset = 0usize;
@@ -105,5 +97,36 @@ impl WgpuProvider {
         }
 
         Ok(self.register_existing_buffer(out_buffer, shape_vec, len))
+    }
+}
+
+fn window_lengths(len: usize, periodic: bool) -> Result<(u32, u32)> {
+    if len > u32::MAX as usize || (periodic && len == u32::MAX as usize) {
+        return Err(anyhow!("window: length exceeds GPU limits"));
+    }
+    let logical_u32 = len as u32;
+    let total_u32 = if periodic {
+        logical_u32 + 1
+    } else {
+        logical_u32
+    };
+    Ok((logical_u32, total_u32))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::window_lengths;
+
+    #[test]
+    fn periodic_window_rejects_u32_max_len() {
+        let err = window_lengths(u32::MAX as usize, true).expect_err("expected overflow guard");
+        assert!(err.to_string().contains("length exceeds GPU limits"));
+    }
+
+    #[test]
+    fn symmetric_window_allows_u32_max_len() {
+        let (logical, total) = window_lengths(u32::MAX as usize, false).expect("symmetric max len");
+        assert_eq!(logical, u32::MAX);
+        assert_eq!(total, u32::MAX);
     }
 }
