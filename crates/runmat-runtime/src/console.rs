@@ -100,6 +100,12 @@ pub fn record_value_output(label: Option<&str>, value: &Value) {
                 .flatten()
                 .unwrap_or_else(|| value.to_string())
         }
+        Value::Object(obj) if obj.is_class("duration") => {
+            crate::builtins::duration::duration_display_text(value)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| value.to_string())
+        }
         _ => value.to_string(),
     };
     let text = if let Some(name) = label {

@@ -108,6 +108,18 @@ fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
                 .flatten()
                 .unwrap_or_else(|| value.to_string())],
         },
+        Value::Object(obj) if obj.is_class("duration") => match mode {
+            RenderMode::TopLevel => crate::builtins::duration::duration_display_text(value)
+                .map(|text| text.unwrap_or_else(|| value.to_string()))
+                .unwrap_or_else(|_| value.to_string())
+                .lines()
+                .map(|line| line.to_string())
+                .collect(),
+            RenderMode::Nested => vec![crate::builtins::duration::duration_summary(value)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| value.to_string())],
+        },
         Value::String(text) => match mode {
             RenderMode::TopLevel => split_lines(text),
             RenderMode::Nested => vec![quote_double(text)],

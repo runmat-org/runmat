@@ -118,21 +118,11 @@ fn tensor_from_numeric(value: Value, context: &str) -> BuiltinResult<Tensor> {
         .map_err(|message| datetime_error(format!("datetime: {message}")))
 }
 
-fn default_shape_for(shape: &[usize], len: usize) -> Vec<usize> {
-    if len == 0 {
-        vec![0, 1]
-    } else if shape.is_empty() {
-        vec![1, 1]
-    } else {
-        shape.to_vec()
-    }
-}
-
 fn serial_tensor_from_value(value: Value, context: &str) -> BuiltinResult<Tensor> {
     let tensor = tensor_from_numeric(value, context)?;
     Tensor::new(
         tensor.data.clone(),
-        default_shape_for(&tensor.shape, tensor.data.len()),
+        tensor::default_shape_for(&tensor.shape, tensor.data.len()),
     )
     .map_err(|err| datetime_error(format!("datetime: {err}")))
 }
@@ -158,7 +148,7 @@ fn serial_tensor_for_object(obj: &ObjectInstance) -> BuiltinResult<Tensor> {
     }
 }
 
-fn datetime_object_from_serial_tensor(
+pub(crate) fn datetime_object_from_serial_tensor(
     serials: Tensor,
     format: impl Into<String>,
 ) -> BuiltinResult<Value> {
@@ -306,7 +296,7 @@ fn parse_text_input(value: Value) -> BuiltinResult<(Vec<f64>, Vec<usize>, String
             }
             Ok((
                 serials,
-                default_shape_for(&array.shape, array.data.len()),
+                tensor::default_shape_for(&array.shape, array.data.len()),
                 if has_time {
                     DEFAULT_DATETIME_FORMAT.to_string()
                 } else {
@@ -406,7 +396,7 @@ fn broadcast_component_data(
     for array in arrays {
         let len = array.data.len();
         if len > 1 {
-            let shape = default_shape_for(&array.shape, len);
+            let shape = tensor::default_shape_for(&array.shape, len);
             if target_len == 1 {
                 target_len = len;
                 target_shape = shape;
@@ -439,7 +429,7 @@ fn component_tensor(value: Value, context: &str) -> BuiltinResult<Tensor> {
     let tensor = tensor_from_numeric(value, context)?;
     Tensor::new(
         tensor.data.clone(),
-        default_shape_for(&tensor.shape, tensor.data.len()),
+        tensor::default_shape_for(&tensor.shape, tensor.data.len()),
     )
     .map_err(|err| datetime_error(format!("datetime: {err}")))
 }
@@ -488,14 +478,18 @@ fn numeric_value_to_datetime(value: Value, format: Option<String>) -> BuiltinRes
     )
 }
 
-fn serials_from_datetime_value(value: &Value) -> BuiltinResult<Tensor> {
+pub fn is_datetime_object(value: &Value) -> bool {
+    matches!(value, Value::Object(obj) if obj.is_class(DATETIME_CLASS))
+}
+
+pub(crate) fn serials_from_datetime_value(value: &Value) -> BuiltinResult<Tensor> {
     match value {
         Value::Object(obj) if obj.is_class(DATETIME_CLASS) => serial_tensor_for_object(obj),
         _ => Err(datetime_error("datetime: expected a datetime value")),
     }
 }
 
-fn datetime_format_from_value(value: &Value) -> String {
+pub(crate) fn datetime_format_from_value(value: &Value) -> String {
     match value {
         Value::Object(obj) if obj.is_class(DATETIME_CLASS) => format_for_object(obj),
         _ => DEFAULT_DATETIME_FORMAT.to_string(),
@@ -515,7 +509,7 @@ pub fn datetime_string_array(value: &Value) -> BuiltinResult<Option<StringArray>
     for serial in &serials.data {
         strings.push(format_serial(*serial, &format)?);
     }
-    let shape = default_shape_for(&serials.shape, serials.data.len());
+    let shape = tensor::default_shape_for(&serials.shape, serials.data.len());
     let array = StringArray::new(strings, shape)
         .map_err(|err| datetime_error(format!("datetime: {err}")))?;
     Ok(Some(array))
@@ -570,7 +564,7 @@ pub fn datetime_summary(value: &Value) -> BuiltinResult<Option<String>> {
     if serials.data.len() == 1 {
         return datetime_display_text(value);
     }
-    let shape = default_shape_for(&serials.shape, serials.data.len());
+    let shape = tensor::default_shape_for(&serials.shape, serials.data.len());
     Ok(Some(format!(
         "[{} datetime]",
         shape
@@ -595,30 +589,10 @@ fn component_tensor_from_datetime(
     if out.len() == 1 {
         Ok(Value::Num(out[0]))
     } else {
-        let shape = default_shape_for(&serials.shape, serials.data.len());
+        let shape = tensor::default_shape_for(&serials.shape, serials.data.len());
         let tensor =
             Tensor::new(out, shape).map_err(|err| datetime_error(format!("{label}: {err}")))?;
         Ok(Value::Tensor(tensor))
-    }
-}
-
-fn binary_numeric_tensors(
-    lhs: &Tensor,
-    rhs: &Tensor,
-    context: &str,
-) -> BuiltinResult<(Vec<f64>, Vec<f64>, Vec<usize>)> {
-    let lhs_shape = default_shape_for(&lhs.shape, lhs.data.len());
-    let rhs_shape = default_shape_for(&rhs.shape, rhs.data.len());
-    match (lhs.data.len(), rhs.data.len()) {
-        (1, 1) => Ok((vec![lhs.data[0]], vec![rhs.data[0]], vec![1, 1])),
-        (1, len) => Ok((vec![lhs.data[0]; len], rhs.data.clone(), rhs_shape)),
-        (len, 1) => Ok((lhs.data.clone(), vec![rhs.data[0]; len], lhs_shape)),
-        (left, right) if left == right && lhs_shape == rhs_shape => {
-            Ok((lhs.data.clone(), rhs.data.clone(), lhs_shape))
-        }
-        _ => Err(datetime_error(format!(
-            "{context}: operands must be scalar or have matching sizes"
-        ))),
     }
 }
 
@@ -879,7 +853,8 @@ fn datetime_binary_serials(
         Value::Object(obj) if obj.is_class(DATETIME_CLASS) => serial_tensor_for_object(obj)?,
         _ => serial_tensor_from_value(rhs, context)?,
     };
-    let (left, right, shape) = binary_numeric_tensors(&lhs_serials, &rhs_serials, context)?;
+    let (left, right, shape) =
+        tensor::binary_numeric_tensors(&lhs_serials, &rhs_serials, context, BUILTIN_NAME)?;
     let left_tensor = Tensor::new(left, shape.clone())
         .map_err(|err| datetime_error(format!("{context}: {err}")))?;
     let right_tensor = Tensor::new(right, shape.clone())
@@ -944,8 +919,13 @@ async fn datetime_ge(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 )]
 async fn datetime_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let lhs_serials = serials_from_datetime_value(&lhs)?;
-    let rhs_numeric = serial_tensor_from_value(rhs, "plus")?;
-    let (left, right, shape) = binary_numeric_tensors(&lhs_serials, &rhs_numeric, "plus")?;
+    let rhs_numeric = if crate::builtins::duration::is_duration_object(&rhs) {
+        crate::builtins::duration::duration_tensor_from_duration_value(&rhs)?
+    } else {
+        serial_tensor_from_value(rhs, "plus")?
+    };
+    let (left, right, shape) =
+        tensor::binary_numeric_tensors(&lhs_serials, &rhs_numeric, "plus", BUILTIN_NAME)?;
     let serials = left
         .iter()
         .zip(right.iter())
@@ -961,9 +941,21 @@ async fn datetime_plus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
 async fn datetime_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let lhs_serials = serials_from_datetime_value(&lhs)?;
     match &rhs {
+        _ if crate::builtins::duration::is_duration_object(&rhs) => {
+            let rhs_days = crate::builtins::duration::duration_tensor_from_duration_value(&rhs)?;
+            let (left, right, shape) =
+                tensor::binary_numeric_tensors(&lhs_serials, &rhs_days, "minus", BUILTIN_NAME)?;
+            let serials = left
+                .iter()
+                .zip(right.iter())
+                .map(|(a, b)| a - b)
+                .collect::<Vec<_>>();
+            datetime_object_from_serials(serials, shape, datetime_format_from_value(&lhs))
+        }
         Value::Object(obj) if obj.is_class(DATETIME_CLASS) => {
             let rhs_serials = serial_tensor_for_object(obj)?;
-            let (left, right, shape) = binary_numeric_tensors(&lhs_serials, &rhs_serials, "minus")?;
+            let (left, right, shape) =
+                tensor::binary_numeric_tensors(&lhs_serials, &rhs_serials, "minus", BUILTIN_NAME)?;
             let deltas = left
                 .iter()
                 .zip(right.iter())
@@ -973,7 +965,8 @@ async fn datetime_minus(lhs: Value, rhs: Value) -> crate::BuiltinResult<Value> {
         }
         _ => {
             let rhs_numeric = serial_tensor_from_value(rhs, "minus")?;
-            let (left, right, shape) = binary_numeric_tensors(&lhs_serials, &rhs_numeric, "minus")?;
+            let (left, right, shape) =
+                tensor::binary_numeric_tensors(&lhs_serials, &rhs_numeric, "minus", BUILTIN_NAME)?;
             let serials = left
                 .iter()
                 .zip(right.iter())
@@ -1093,5 +1086,34 @@ mod tests {
         let rhs = run_datetime(vec![Value::Num(2024.0), Value::Num(1.0), Value::Num(2.0)]);
         let cmp = futures::executor::block_on(datetime_lt(lhs, rhs)).expect("lt");
         assert_eq!(cmp, Value::Num(1.0));
+    }
+
+    #[test]
+    fn datetime_and_duration_interoperate() {
+        let lhs = run_datetime(vec![Value::Num(2024.0), Value::Num(1.0), Value::Num(1.0)]);
+        let rhs = run_datetime(vec![Value::Num(2024.0), Value::Num(1.0), Value::Num(2.0)]);
+        let delta = futures::executor::block_on(datetime_minus(rhs.clone(), lhs.clone()))
+            .expect("datetime minus datetime");
+        assert_eq!(delta, Value::Num(1.0));
+
+        let duration = crate::builtins::duration::duration_object_from_days_tensor(
+            Tensor::new(vec![1.0], vec![1, 1]).unwrap(),
+            crate::builtins::duration::DEFAULT_DURATION_FORMAT,
+        )
+        .expect("duration");
+
+        let round_trip = futures::executor::block_on(datetime_plus(lhs.clone(), duration.clone()))
+            .expect("plus");
+        let round_trip_text = datetime_display_text(&round_trip)
+            .expect("datetime display")
+            .expect("datetime text");
+        assert_eq!(round_trip_text, "02-Jan-2024");
+
+        let restored =
+            futures::executor::block_on(datetime_minus(rhs, duration)).expect("minus duration");
+        let restored_text = datetime_display_text(&restored)
+            .expect("datetime display")
+            .expect("datetime text");
+        assert_eq!(restored_text, "01-Jan-2024");
     }
 }

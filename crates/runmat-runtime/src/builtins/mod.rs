@@ -8,6 +8,7 @@ pub mod constants;
 pub mod containers;
 pub mod datetime;
 pub mod diagnostics;
+pub mod duration;
 pub mod image;
 pub mod introspection;
 pub mod io;
