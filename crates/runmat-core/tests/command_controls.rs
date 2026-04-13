@@ -85,6 +85,30 @@ fn clear_multiple_named_variables_accepts_multiple_inputs() {
 }
 
 #[test]
+fn clear_followed_by_assignments_shows_vars_in_workspace() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    // Variables assigned after clear() in the same execution block must appear
+    // in the workspace snapshot – the bug was that StoreVar did not re-register
+    // names into ws.idx_to_name after workspace_clear() wiped the map.
+    let result = block_on(engine.execute(
+        "clear();\nXRange = -2:0.02:2;\nYRange = -2:0.02:2;\ndisp(YRange);",
+    ))
+    .unwrap();
+
+    assert!(result.error.is_none());
+    let names: Vec<&str> = result.workspace.values.iter().map(|e| e.name.as_str()).collect();
+    assert!(
+        names.contains(&"XRange"),
+        "XRange should be in workspace after clear(); XRange = ...; got: {names:?}"
+    );
+    assert!(
+        names.contains(&"YRange"),
+        "YRange should be in workspace after clear(); YRange = ...; got: {names:?}"
+    );
+}
+
+#[test]
 fn clc_emits_clear_screen_control_stream() {
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
 
