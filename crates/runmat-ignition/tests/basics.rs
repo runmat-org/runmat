@@ -571,3 +571,108 @@ fn fftn_and_ifftn_execute_with_size_vector_and_indexing() {
         "expected true/equivalent marker in vars, got {vars:?}"
     );
 }
+
+/// Regression test for cross-platform FFT floating-point comparison.
+///
+/// FFT computations can produce slightly different floating-point results
+/// across platforms (e.g. different CPU architectures, BLAS/LAPACK
+/// implementations, or compiler optimisations).  A previous version of
+/// the test suite used exact equality (`real(a) == -4`) which passed on
+/// some platforms but failed on others where the result was
+/// approximately –4 but not bit-for-bit equal (e.g. `-3.9999999999999996`).
+///
+/// This test exercises the two scenarios that were fixed in commit
+/// 628c1d62 and explicitly verifies that tolerance-based comparison
+/// (`abs(… ) < tol`) is used instead of exact equality for FFT results.
+/// It also checks that real and imaginary parts individually satisfy
+/// their expected approximate values, which exact `==` would reject on
+/// affected platforms.
+#[test]
+fn fft_real_part_comparison_uses_tolerance_not_exact_equality() {
+    // Scenario 1 — scalar indexing into FFT output at end/2.
+    // For x = [1 2 3 4 5 6 7 8], Y = fft(x), Y(4) should have
+    // real ≈ -4 and imag ≈ +1.6569…  On some platforms real(Y(4)) is
+    // not bit-for-bit -4.0, so we must compare with tolerance.
+    let input = r#"
+        x = [1 2 3 4 5 6 7 8];
+        Y = fft(x);
+        a = Y(end/2);
+        re = real(a);
+        im = imag(a);
+    "#;
+    let ast = parse(input).expect("parse fft tolerance regression script");
+    let hir = lower(&ast).expect("lower fft tolerance regression script");
+    let vars = execute(&hir).expect("fft tolerance regression should execute");
+
+    // Extract the real and imaginary parts (last two scalar outputs).
+    let re: f64 = (&vars[vars.len() - 2])
+        .try_into()
+        .expect("convert real part to f64");
+    let im: f64 = (&vars[vars.len() - 1])
+        .try_into()
+        .expect("convert imag part to f64");
+
+    // Tolerance-based check — this is exactly the pattern that the
+    // cross-platform fix enforces.  Exact `re == -4.0` would fail on
+    // platforms where the FFT returns e.g. -3.9999999999999996.
+    assert!(
+        (re + 4.0).abs() < 1e-10,
+        "real(Y(end/2)) should be ≈ -4, got {re}"
+    );
+    assert!(
+        (im - 1.6568542494923806).abs() < 1e-6,
+        "imag(Y(end/2)) should be ≈ 1.6569, got {im}"
+    );
+}
+
+/// Regression test for cross-platform FFT real-part equality across
+/// different end-arithmetic indexing paths.
+///
+/// A previous version compared `real(a) == real(b)` and
+/// `real(c) == real(Y(2))` for FFT values obtained via `round`,
+/// `floor`, and `fix` end-arithmetic.  On some platforms the tiny
+/// floating-point differences between these code-paths made exact
+/// equality fail.  This test verifies the tolerance-based pattern holds.
+#[test]
+fn fft_end_arithmetic_real_parts_compared_with_tolerance() {
+    let input = r#"
+        x = [1 2 3 4 5 6 7 8];
+        Y = fft(x);
+        a = Y(round(end^1 / 2));
+        b = Y(floor(end ./ 2));
+        c = Y(fix(2 \ end));
+        re_a = real(a);
+        re_b = real(b);
+        re_c = real(c);
+        re_y2 = real(Y(2));
+    "#;
+    let ast = parse(input).expect("parse fft end-arith tolerance regression script");
+    let hir = lower(&ast).expect("lower fft end-arith tolerance regression script");
+    let vars = execute(&hir).expect("fft end-arith tolerance regression should execute");
+
+    // The last four scalar outputs are re_a, re_b, re_c, re_y2.
+    let re_a: f64 = (&vars[vars.len() - 4])
+        .try_into()
+        .expect("convert re_a to f64");
+    let re_b: f64 = (&vars[vars.len() - 3])
+        .try_into()
+        .expect("convert re_b to f64");
+    let re_c: f64 = (&vars[vars.len() - 2])
+        .try_into()
+        .expect("convert re_c to f64");
+    let re_y2: f64 = (&vars[vars.len() - 1])
+        .try_into()
+        .expect("convert re_y2 to f64");
+
+    // round(end^1/2) and floor(end./2) should resolve to the same bin,
+    // so their real parts must be approximately equal.
+    assert!(
+        (re_a - re_b).abs() < 1e-10,
+        "real(Y(round(end^1/2))) should ≈ real(Y(floor(end./2))), got {re_a} vs {re_b}"
+    );
+    // fix(2\end) should resolve to index 2, matching Y(2).
+    assert!(
+        (re_c - re_y2).abs() < 1e-10,
+        "real(Y(fix(2\\end))) should ≈ real(Y(2)), got {re_c} vs {re_y2}"
+    );
+}
