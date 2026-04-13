@@ -6021,6 +6021,7 @@ dependencies = [
 name = "runmat-vm"
 version = "0.4.0"
 dependencies = [
+ "log",
  "miette",
  "once_cell",
  "runmat-accelerate",
@@ -6029,6 +6030,7 @@ dependencies = [
  "runmat-parser",
  "runmat-runtime",
  "runmat-thread-local",
+ "runmat-time",
  "serde",
 ]
 
