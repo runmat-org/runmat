@@ -157,7 +157,18 @@ export const docsTree: DocsNode[] = [
   {
     title: "Language",
     children: [
-      { title: "Language Reference", slug: ["language"], file: "docs/LANGUAGE.md", seo: { description: "RunMat language compatibility modes and MATLAB syntax support.", keywords: ["language reference", "MATLAB syntax", "compatibility"] } },
+      {
+        title: "MATLAB Compatibility",
+        slug: ["compatibility"],
+        file: "docs/COMPATIBILITY.md",
+        seo: {
+          description: "RunMat MATLAB compatibility: language coverage, 300+ built-in functions, plotting, toolbox status, and known limitations.",
+          keywords: ["MATLAB compatibility", "MATLAB alternative", "RunMat compatibility", "Octave alternative", "MATLAB migration"],
+          ogTitle: "MATLAB Compatibility",
+          ogDescription: "How compatible is RunMat with MATLAB? Language coverage, function reference, toolbox status, and GPU acceleration.",
+        },
+      },
+      { title: "Compatibility Modes", slug: ["language"], file: "docs/LANGUAGE.md", seo: { description: "RunMat compatibility modes: runmat, matlab, and strict — controlling command syntax and error namespaces.", keywords: ["compatibility modes", "MATLAB syntax", "strict mode", "command syntax"] } },
       { title: "Language Coverage", slug: ["language-coverage"], file: "docs/LANGUAGE_COVERAGE.md", seo: { description: "MATLAB language feature compatibility in RunMat with an Octave comparison.", keywords: ["MATLAB compatibility", "Octave compatibility", "language coverage", "MATLAB alternative", "Octave alternative"] } },
     ],
   },
@@ -232,6 +243,17 @@ export const docsTree: DocsNode[] = [
   {
     title: "Meta",
     children: [
+      {
+        title: "Changelog",
+        slug: ["changelog"],
+        file: "docs/CHANGELOG.md",
+        seo: {
+          description: "What's new across the RunMat runtime, cloud, and sandbox — release notes, bug fixes, and new features.",
+          keywords: ["changelog", "release notes", "what's new", "RunMat updates", "version history"],
+          ogTitle: "RunMat Changelog",
+          ogDescription: "Track every update to the RunMat runtime, cloud, and sandbox.",
+        },
+      },
       { title: "License", slug: ["license"], file: "LICENSE.md", seo: { description: "RunMat software license." } },
       { title: "Terms and Conditions", slug: ["terms"], file: "docs/TERMS.md", seo: { description: "Dystr Terms and Conditions governing the use of the RunMat platform and related services.", keywords: ["terms and conditions", "terms of service", "legal", "RunMat", "Dystr"] } },
       { title: "Telemetry", slug: ["telemetry"], file: "docs/TELEMETRY.md", seo: { description: "RunMat telemetry: what information is collected and how it is used." } },

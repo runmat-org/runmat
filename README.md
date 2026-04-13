@@ -422,6 +422,7 @@ If you write math in MATLAB and hit performance walls on CPU, RunMat is built fo
   - [Configuration](docs/CONFIG.md)
 
 - **Language & runtime**
+  - [MATLAB compatibility](docs/COMPATIBILITY.md)
   - [Language reference](docs/LANGUAGE.md)
   - [Language coverage](docs/LANGUAGE_COVERAGE.md)
   - [Built-in function library](docs/LIBRARY.md)

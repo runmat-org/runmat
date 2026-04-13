@@ -15,15 +15,21 @@ function extractHeadings(md: string): TocHeading[] {
     const m = /^(#{2,6})\s+(.+)$/.exec(line);
     if (!m) continue;
     const depth = m[1].length;
-    const text = m[2].replace(/`/g, "").replace(/\*\*/g, "");
+    const text = m[2]
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+      .replace(/`/g, "")
+      .replace(/\*\*/g, "");
     const id = slugifyHeading(text);
     out.push({ depth, text, id });
   }
   return out;
 }
 
-export function HeadingsNav({ source }: { source: string }) {
-  const headings = useMemo(() => extractHeadings(source), [source]);
+export function HeadingsNav({ source, maxDepth }: { source: string; maxDepth?: number }) {
+  const headings = useMemo(() => {
+    const all = extractHeadings(source);
+    return maxDepth ? all.filter((h) => h.depth <= maxDepth) : all;
+  }, [source, maxDepth]);
   return <OnThisPageNav headings={headings} />;
 }
 
