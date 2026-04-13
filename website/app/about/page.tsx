@@ -302,7 +302,8 @@ export default function AboutPage() {
                   muted
                   loop
                   playsInline
-                  poster="https://web.runmatstatic.com/video/posters/3d-interactive-plotting-runmat.png"
+                  preload="none"
+                  poster="https://web.runmatstatic.com/video/posters/3d-interactive-plotting-runmat.webp"
                   aria-label="RunMat 3D interactive plotting demo"
                 >
                   <source src="https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.mp4" type="video/mp4" />
