@@ -22,6 +22,7 @@ members = [
     "crates/runmat-logging",
     "crates/runmat-lsp",
     "crates/runmat-cli",
+    "crates/runmat-server-client",
     "crates/runmat-core",
     "crates/runmat-time",
     "crates/runmat-wasm",

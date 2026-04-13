@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::PathBuf;
@@ -10,9 +11,6 @@ fn is_success_status(code: &openapiv3::StatusCode) -> bool {
 }
 
 fn normalize_responses_for_progenitor(responses: &mut openapiv3::Responses) {
-    // Progenitor currently expects at most one "success" response type per operation.
-    // Some specs include multiple 2xx responses (or multiple content types), which makes
-    // the generator panic. Prefer 200, otherwise keep the lowest 2xx code/range.
     let mut success_keys: Vec<openapiv3::StatusCode> = responses
         .responses
         .keys()
@@ -20,7 +18,6 @@ fn normalize_responses_for_progenitor(responses: &mut openapiv3::Responses) {
         .cloned()
         .collect();
     if success_keys.len() <= 1 {
-        // Still normalize the single response content types if possible.
         if let Some(code) = success_keys.pop() {
             if let Some(openapiv3::ReferenceOr::Item(response)) = responses.responses.get_mut(&code)
             {
@@ -57,7 +54,6 @@ fn normalize_responses_for_progenitor(responses: &mut openapiv3::Responses) {
         .cloned()
         .unwrap_or_else(|| success_keys[0].clone());
 
-    // Drop all other success responses.
     let drop_keys: Vec<openapiv3::StatusCode> = responses
         .responses
         .keys()
@@ -68,7 +64,6 @@ fn normalize_responses_for_progenitor(responses: &mut openapiv3::Responses) {
         let _ = responses.responses.shift_remove(&key);
     }
 
-    // Normalize kept response content types if needed.
     if let Some(openapiv3::ReferenceOr::Item(response)) = responses.responses.get_mut(&keep) {
         if response.content.len() > 1 {
             if let Some(mt) = response.content.shift_remove("application/json") {
@@ -84,35 +79,49 @@ fn normalize_responses_for_progenitor(responses: &mut openapiv3::Responses) {
     }
 }
 
+fn operation_suffix(method: &str, path: &str) -> String {
+    let normalized = path
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+        .collect::<String>();
+    format!("{}_{}", method, normalized)
+}
+
 fn normalize_openapi_for_progenitor(spec: &mut openapiv3::OpenAPI) {
-    for (_path, item) in spec.paths.paths.iter_mut() {
+    let mut seen_operation_ids = HashSet::new();
+    for (path, item) in spec.paths.paths.iter_mut() {
         let openapiv3::ReferenceOr::Item(item) = item else {
             continue;
         };
-        for op in [
-            item.get.as_mut(),
-            item.put.as_mut(),
-            item.post.as_mut(),
-            item.delete.as_mut(),
-            item.options.as_mut(),
-            item.head.as_mut(),
-            item.patch.as_mut(),
-            item.trace.as_mut(),
-        ]
-        .into_iter()
-        .flatten()
-        {
+        for (method, op) in [
+            ("get", item.get.as_mut()),
+            ("put", item.put.as_mut()),
+            ("post", item.post.as_mut()),
+            ("delete", item.delete.as_mut()),
+            ("options", item.options.as_mut()),
+            ("head", item.head.as_mut()),
+            ("patch", item.patch.as_mut()),
+            ("trace", item.trace.as_mut()),
+        ] {
+            let Some(op) = op else {
+                continue;
+            };
+            if let Some(operation_id) = op.operation_id.clone() {
+                if !seen_operation_ids.insert(operation_id.clone()) {
+                    let replacement =
+                        format!("{}_{}", operation_id, operation_suffix(method, path));
+                    op.operation_id = Some(replacement.clone());
+                    seen_operation_ids.insert(replacement);
+                }
+            }
             normalize_responses_for_progenitor(&mut op.responses);
         }
     }
 }
 
-fn main() {
-    let spec_path = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest"))
-        .join("../../openapi/runmat-public.yaml");
-    println!("cargo:rerun-if-changed={}", spec_path.display());
-
-    let spec_text = fs::read_to_string(&spec_path).expect("read openapi spec");
+fn generate_spec(input_path: PathBuf, output_name: &str) {
+    println!("cargo:rerun-if-changed={}", input_path.display());
+    let spec_text = fs::read_to_string(&input_path).expect("read openapi spec");
     let mut spec: openapiv3::OpenAPI =
         serde_yaml::from_str(&spec_text).expect("parse openapi spec");
     normalize_openapi_for_progenitor(&mut spec);
@@ -124,6 +133,14 @@ fn main() {
         .expect("generate client tokens");
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("out dir"));
-    let out_file = out_dir.join("runmat_public.rs");
+    let out_file = out_dir.join(output_name);
     fs::write(&out_file, tokens.to_string()).expect("write openapi client");
+}
+
+fn main() {
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest"));
+    generate_spec(
+        manifest_dir.join("../../openapi/runmat-public.yaml"),
+        "runmat_public.rs",
+    );
 }

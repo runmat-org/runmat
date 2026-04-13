@@ -227,7 +227,7 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
         {/* Client search/results overlay */}
         <DocsContentSwitch source={body} />
       </article>
-      <HeadingsNav source={body} />
+      <HeadingsNav source={body} maxDepth={slug.join("/") === "changelog" ? 2 : undefined} />
     </div>
   );
 }

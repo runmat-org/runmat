@@ -332,6 +332,29 @@ fn fft2_output_supports_two_dimensional_indexing() {
 }
 
 #[test]
+fn fft_output_accepts_gpu_backed_range_selector() {
+    let input = r#"
+        fs = 1000;
+        t = (0:fs-1)'/fs;
+        x = 0.8*sin(2*pi*120*t) + 0.35*sin(2*pi*260*t);
+        N = 2^nextpow2(length(x));
+        X = fft(x, N);
+        k = floor(N/2) + 1;
+        Y = X(1:k);
+        ok = (numel(Y) == 513);
+    "#;
+    let ast = parse(input).expect("parse fft gpu-backed range script");
+    let hir = lower(&ast).expect("lower fft gpu-backed range script");
+    let vars = execute(&hir).expect("fft gpu-backed range indexing should execute");
+    assert!(
+        vars.iter().any(|v| {
+            matches!(v, Value::Bool(true)) || matches!(v, Value::Num(n) if (*n - 1.0).abs() < 1e-12)
+        }),
+        "expected true/equivalent marker in vars, got {vars:?}"
+    );
+}
+
+#[test]
 fn fft_output_supports_scalar_end_div_indexing() {
     let input = r#"
         x = [1 2 3 4 5 6 7 8];

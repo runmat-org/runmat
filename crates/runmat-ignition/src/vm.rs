@@ -599,6 +599,15 @@ async fn index_scalar_from_value(value: &Value) -> VmResult<Option<i64>> {
     Ok(index_scalar_from_host_value(value))
 }
 
+async fn materialize_index_value(value: &Value) -> VmResult<Value> {
+    if matches!(value, Value::GpuTensor(_)) {
+        return gather_if_needed_async(value)
+            .await
+            .map_err(|e| mex("IndexGather", &format!("Failed to gather index value: {e}")));
+    }
+    Ok(value.clone())
+}
+
 async fn indices_from_value_linear(value: &Value, total_len: usize) -> VmResult<Vec<usize>> {
     if let Value::Bool(b) = value {
         return Ok(if *b { vec![1] } else { Vec::new() });
@@ -614,6 +623,13 @@ async fn indices_from_value_linear(value: &Value, total_len: usize) -> VmResult<
         }
         return Ok(vec![idx_val as usize]);
     }
+    let materialized;
+    let value = if matches!(value, Value::GpuTensor(_)) {
+        materialized = materialize_index_value(value).await?;
+        &materialized
+    } else {
+        value
+    };
     match value {
         Value::Tensor(idx_t) => {
             let len = idx_t.shape.iter().product::<usize>();
@@ -670,6 +686,13 @@ async fn selector_from_value_dim(value: &Value, dim_len: usize) -> VmResult<Slic
         }
         return Ok(SliceSelector::Scalar(idx_val as usize));
     }
+    let materialized;
+    let value = if matches!(value, Value::GpuTensor(_)) {
+        materialized = materialize_index_value(value).await?;
+        &materialized
+    } else {
+        value
+    };
     match value {
         Value::Tensor(idx_t) => {
             let len = idx_t.shape.iter().product::<usize>();
@@ -729,7 +752,8 @@ async fn build_slice_selectors(
                 "missing numeric index for linear slice",
             )
         })?;
-        if let Value::Tensor(idx_t) = value {
+        let materialized = materialize_index_value(value).await?;
+        if let Value::Tensor(idx_t) = &materialized {
             let len = idx_t.shape.iter().product::<usize>();
             let mut indices = Vec::with_capacity(len);
             for &val in &idx_t.data {
@@ -744,7 +768,7 @@ async fn build_slice_selectors(
                 output_shape: idx_t.shape.clone(),
             });
         } else {
-            let idxs = indices_from_value_linear(value, total_len).await?;
+            let idxs = indices_from_value_linear(&materialized, total_len).await?;
             selectors.push(SliceSelector::Indices(idxs));
         }
         return Ok(selectors);
@@ -5294,13 +5318,14 @@ async fn run_interpreter_inner(
                             } else if is_end {
                                 idxs = vec![total];
                             } else if let Some(v) = numeric.first() {
-                                if let Some(i) = index_scalar_from_value(v).await? {
+                                let materialized = materialize_index_value(v).await?;
+                                if let Some(i) = index_scalar_from_value(&materialized).await? {
                                     if i < 1 {
                                         vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
                                     }
                                     idxs = vec![i as usize];
                                 } else {
-                                    match v {
+                                    match &materialized {
                                         Value::Tensor(idx_t) => {
                                             idx_shape = Some(idx_t.shape.clone());
                                             for &val in &idx_t.data {
@@ -5383,7 +5408,10 @@ async fn run_interpreter_inner(
                                         "missing numeric index",
                                     ))?;
                                     num_iter += 1;
-                                    if let Some(idx) = index_scalar_from_value(v).await? {
+                                    let materialized = materialize_index_value(v).await?;
+                                    if let Some(idx) =
+                                        index_scalar_from_value(&materialized).await?
+                                    {
                                         if idx < 1 {
                                             return Err(mex(
                                                 "IndexOutOfBounds",
@@ -5392,7 +5420,7 @@ async fn run_interpreter_inner(
                                         }
                                         selectors.push(Sel::Scalar(idx as usize));
                                     } else {
-                                        match v {
+                                        match &materialized {
                                             Value::Tensor(idx_t) => {
                                                 let dim_len = *t.shape.get(d).unwrap_or(&1);
                                                 let len = idx_t.shape.iter().product::<usize>();
@@ -5723,13 +5751,14 @@ async fn run_interpreter_inner(
                             } else if is_end {
                                 idxs = vec![total];
                             } else if let Some(v) = numeric.first() {
-                                if let Some(i) = index_scalar_from_value(v).await? {
+                                let materialized = materialize_index_value(v).await?;
+                                if let Some(i) = index_scalar_from_value(&materialized).await? {
                                     if i < 1 {
                                         vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
                                     }
                                     idxs = vec![i as usize];
                                 } else {
-                                    match v {
+                                    match &materialized {
                                         Value::Tensor(idx_t) => {
                                             let len = idx_t.shape.iter().product::<usize>();
                                             if len == total {
@@ -5791,7 +5820,10 @@ async fn run_interpreter_inner(
                                         "missing numeric index",
                                     ))?;
                                     num_iter += 1;
-                                    if let Some(idx) = index_scalar_from_value(v).await? {
+                                    let materialized = materialize_index_value(v).await?;
+                                    if let Some(idx) =
+                                        index_scalar_from_value(&materialized).await?
+                                    {
                                         if idx < 1 {
                                             return Err(mex(
                                                 "IndexOutOfBounds",
@@ -5800,7 +5832,7 @@ async fn run_interpreter_inner(
                                         }
                                         selectors.push(Sel::Scalar(idx as usize));
                                     } else {
-                                        match v {
+                                        match &materialized {
                                             Value::Tensor(idx_t) => {
                                                 let dim_len = *sa.shape.get(d).unwrap_or(&1);
                                                 let len = idx_t.shape.iter().product::<usize>();

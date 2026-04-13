@@ -78,6 +78,38 @@ paths:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
       security:
       - {}
+  /v1/lifecycle/intake:
+    post:
+      tags:
+      - intake
+      operationId: submit_web_intake
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebIntakeRequest'
+        required: true
+      responses:
+        '202':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebIntakeResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '500':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security:
+      - {}
   /v1/orgs:
     get:
       tags:
@@ -217,6 +249,66 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/projects/import-git:
+    post:
+      tags:
+      - orgs::projects
+      operationId: create_project_import
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectImportGitRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectImportGitResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/upgrade-request:
+    post:
+      tags:
+      - orgs::usage
+      operationId: create_upgrade_request
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpgradeRequestCreateRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpgradeRequestCreateResponse'
   /v1/orgs/{orgId}/usage:
     get:
       tags:
@@ -247,6 +339,26 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/UsagePeriodResponse'
+  /v1/orgs/{orgId}/usage/notices:
+    get:
+      tags:
+      - orgs::usage
+      operationId: list_usage_notices
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UsageNoticeResponse'
   /v1/orgs/{orgId}/usage/rollup:
     post:
       tags:
@@ -277,6 +389,59 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/data/chunks/upload-targets:
+    post:
+      tags:
+      - filesystem::data
+      operationId: chunk_upload_targets
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DataChunkUploadTargetsRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataChunkUploadTargetsResponse'
+  /v1/projects/{projectId}/data/manifest:
+    get:
+      tags:
+      - filesystem::data
+      operationId: manifest
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: version
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataManifestDescriptorResponse'
   /v1/projects/{projectId}/fs/canonicalize:
     get:
       tags:
@@ -708,6 +873,10 @@ paths:
     get:
       tags:
       - filesystem::io
+      summary: Reads file bytes from the project filesystem. This endpoint also accepts
+      description: |-
+        readonly reference paths like `reference:runmat/docs/search.md`, resolving
+        them through the bound RunMat reference variant.
       operationId: read
       parameters:
       - name: path
@@ -724,10 +893,11 @@ paths:
           minimum: 0
       - name: length
         in: query
-        required: true
+        required: false
         schema:
           type: integer
           format: int64
+          nullable: true
           minimum: 0
       - name: projectId
         in: path
@@ -819,6 +989,61 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FsRetentionResponse'
+  /v1/projects/{projectId}/fs/runs/index:
+    get:
+      tags:
+      - filesystem::runs
+      operationId: index
+      parameters:
+      - name: artifactRoot
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          nullable: true
+          minimum: 0
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: docPath
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: include
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsRunsIndexResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/projects/{projectId}/fs/set-readonly:
     post:
       tags:
@@ -1096,6 +1321,66 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FsSnapshotTagResponse'
+  /v1/projects/{projectId}/fs/storage-summary:
+    get:
+      tags:
+      - filesystem::storage
+      operationId: storage_summary
+      parameters:
+      - name: artifactRoot
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsStorageSummaryResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/fs/storage/delete-category:
+    post:
+      tags:
+      - filesystem::storage
+      operationId: delete_storage_category
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsStorageDeleteCategoryRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsStorageDeleteCategoryResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/projects/{projectId}/fs/upload-session:
     post:
       tags:
@@ -1380,6 +1665,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/FsCommitResponse'
+  /v1/projects/{projectId}/import:
+    get:
+      tags:
+      - orgs::projects
+      operationId: get_project_import_status
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ProjectImportStatusResponse'
+                nullable: true
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
   /v1/projects/{projectId}/memberships:
     get:
       tags:
@@ -1509,6 +1826,38 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/t:
+    post:
+      tags:
+      - telemetry
+      operationId: ingest_telemetry
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelemetryIngestRequest'
+        required: true
+      responses:
+        '202':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryIngestResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '500':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security:
+      - {}
 components:
   schemas:
     AuthMeResponse:
@@ -1539,23 +1888,122 @@ components:
           type: boolean
     AuthResolveRequest:
       type: object
-      required:
-      - email
       properties:
+        client_kind:
+          type: string
+          nullable: true
         email:
           type: string
+          nullable: true
     AuthResolveResponse:
       type: object
       required:
       - mode
       - redirect_url
       properties:
+        audience:
+          type: string
+          nullable: true
+        client_id:
+          type: string
+          nullable: true
         mode:
           type: string
         org_id:
           type: string
           nullable: true
         redirect_url:
+          type: string
+        scope:
+          type: string
+          nullable: true
+    DataChunkDescriptor:
+      type: object
+      required:
+      - key
+      - object_id
+      - hash
+      - bytes_raw
+      - bytes_stored
+      properties:
+        bytes_raw:
+          type: integer
+          format: int64
+          minimum: 0
+        bytes_stored:
+          type: integer
+          format: int64
+          minimum: 0
+        hash:
+          type: string
+        key:
+          type: string
+        object_id:
+          type: string
+    DataChunkUploadTargetResponse:
+      type: object
+      required:
+      - key
+      - method
+      - upload_url
+      - headers
+      properties:
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        key:
+          type: string
+        method:
+          type: string
+        upload_url:
+          type: string
+    DataChunkUploadTargetsRequest:
+      type: object
+      required:
+      - dataset_path
+      - array
+      - chunks
+      properties:
+        array:
+          type: string
+        chunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataChunkDescriptor'
+        dataset_path:
+          type: string
+    DataChunkUploadTargetsResponse:
+      type: object
+      required:
+      - targets
+      properties:
+        targets:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataChunkUploadTargetResponse'
+    DataManifestDescriptorResponse:
+      type: object
+      required:
+      - schema_version
+      - format
+      - dataset_id
+      - updated_at
+      - txn_sequence
+      properties:
+        dataset_id:
+          type: string
+        format:
+          type: string
+        schema_version:
+          type: integer
+          format: int32
+          minimum: 0
+        txn_sequence:
+          type: integer
+          format: int64
+          minimum: 0
+        updated_at:
           type: string
     ErrorBody:
       type: object
@@ -1655,6 +2103,39 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/FsGitRefEntry'
+    FsHistoryEntryResponse:
+      type: object
+      required:
+      - id
+      - projectId
+      - path
+      - blobKey
+      - size
+      - createdAt
+      properties:
+        blobKey:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+          nullable: true
+        etag:
+          type: string
+          nullable: true
+        hash:
+          type: string
+          nullable: true
+        id:
+          type: string
+        path:
+          type: string
+        projectId:
+          type: string
+        size:
+          type: integer
+          format: int64
     FsHistoryListResponse:
       type: object
       required:
@@ -1664,25 +2145,6 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/FsHistoryEntryResponse'
-    FsHistoryEntryResponse:
-      type: object
-      required:
-      - id
-      - path
-      - size
-      - createdAt
-      properties:
-        id:
-          type: string
-          format: uuid
-        path:
-          type: string
-        size:
-          type: integer
-          format: int64
-        createdAt:
-          type: string
-          format: date-time
     FsHistoryRestoreRequest:
       type: object
       required:
@@ -1842,6 +2304,78 @@ components:
         maxVersions:
           type: integer
           minimum: 0
+    FsRunIndexItemResponse:
+      type: object
+      required:
+      - runId
+      - manifestPath
+      - createdAt
+      - cancelled
+      - schemaVersion
+      - summary
+      properties:
+        cancelled:
+          type: boolean
+        createdAt:
+          type: string
+        docPath:
+          type: string
+          nullable: true
+        manifest:
+          type: object
+        manifestPath:
+          type: string
+        runId:
+          type: string
+        runtimeFingerprint:
+          type: string
+          nullable: true
+        schemaVersion:
+          type: integer
+          format: int32
+        summary:
+          $ref: '#/components/schemas/FsRunIndexSummaryResponse'
+    FsRunIndexSummaryResponse:
+      type: object
+      required:
+      - cellCount
+      - figureCount
+      - hasWorkspace
+      - hasTrace
+      - hasLogs
+      - totalBytes
+      properties:
+        cellCount:
+          type: integer
+          minimum: 0
+        figureCount:
+          type: integer
+          minimum: 0
+        hasLogs:
+          type: boolean
+        hasTrace:
+          type: boolean
+        hasWorkspace:
+          type: boolean
+        totalBytes:
+          type: integer
+          format: int64
+          minimum: 0
+    FsRunsIndexResponse:
+      type: object
+      required:
+      - artifactRoot
+      - items
+      properties:
+        artifactRoot:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsRunIndexItemResponse'
+        nextCursor:
+          type: string
+          nullable: true
     FsSetReadonlyRequest:
       type: object
       required:
@@ -2090,6 +2624,103 @@ components:
           type: string
         tag:
           type: string
+    FsStorageBucketSummaryResponse:
+      type: object
+      required:
+      - key
+      - bytes
+      - count
+      properties:
+        bytes:
+          type: integer
+          format: int64
+        count:
+          type: integer
+          format: int64
+        key:
+          type: string
+    FsStorageCategorySummaryResponse:
+      type: object
+      required:
+      - key
+      - bytes
+      - count
+      properties:
+        bytes:
+          type: integer
+          format: int64
+        count:
+          type: integer
+          format: int64
+        key:
+          type: string
+    FsStorageDeleteCategoryRequest:
+      type: object
+      required:
+      - category
+      properties:
+        category:
+          type: string
+    FsStorageDeleteCategoryResponse:
+      type: object
+      required:
+      - category
+      - deletedCount
+      properties:
+        category:
+          type: string
+        deletedCount:
+          type: integer
+          format: int64
+    FsStorageSummaryResponse:
+      type: object
+      required:
+      - projectId
+      - totalBytes
+      - fileCount
+      - currentLiveBytes
+      - retainedTotalBytes
+      - retainedFsVersionBytes
+      - retainedChunkBytes
+      - categories
+      - buckets
+      - modelVersion
+      - updatedAt
+      properties:
+        buckets:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsStorageBucketSummaryResponse'
+        categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsStorageCategorySummaryResponse'
+        currentLiveBytes:
+          type: integer
+          format: int64
+        fileCount:
+          type: integer
+          format: int64
+        modelVersion:
+          type: integer
+          format: int32
+        projectId:
+          type: string
+        retainedChunkBytes:
+          type: integer
+          format: int64
+        retainedFsVersionBytes:
+          type: integer
+          format: int64
+        retainedTotalBytes:
+          type: integer
+          format: int64
+        totalBytes:
+          type: integer
+          format: int64
+        updatedAt:
+          type: string
+          format: date-time
     FsUploadSessionAbortRequest:
       type: object
       required:
@@ -2373,6 +3004,13 @@ components:
           nullable: true
         featureFlags:
           nullable: true
+        llmSpendCapAmount:
+          type: number
+          format: double
+          nullable: true
+        llmSpendCapCurrency:
+          type: string
+          nullable: true
         orgId:
           type: string
         planTier:
@@ -2383,20 +3021,13 @@ components:
           nullable: true
         source:
           type: string
-        storageLimitGb:
+        storagePolicyCapGb:
           type: number
           format: double
           nullable: true
         updatedAt:
           type: string
           format: date-time
-        usageCapAmount:
-          type: number
-          format: double
-          nullable: true
-        usageCapCurrency:
-          type: string
-          nullable: true
     ProjectCreateRequest:
       type: object
       required:
@@ -2404,6 +3035,89 @@ components:
       properties:
         name:
           type: string
+    ProjectImportGitRequest:
+      type: object
+      required:
+      - url
+      properties:
+        name:
+          type: string
+          nullable: true
+        url:
+          type: string
+    ProjectImportGitResponse:
+      type: object
+      required:
+      - project
+      - import
+      properties:
+        import:
+          $ref: '#/components/schemas/ProjectImportStatusResponse'
+        project:
+          $ref: '#/components/schemas/server_org.Project'
+    ProjectImportStatusResponse:
+      type: object
+      required:
+      - project_id
+      - status
+      - phase
+      - source_url
+      - repo_host
+      - repo_owner
+      - repo_name
+      - files_written
+      - bytes_written
+      - error_details
+      - updated_at
+      properties:
+        bytes_written:
+          type: integer
+          format: int64
+        default_branch:
+          type: string
+          nullable: true
+        error_code:
+          type: string
+          nullable: true
+        error_details:
+          type: object
+        error_message:
+          type: string
+          nullable: true
+        estimated_total_bytes:
+          type: integer
+          format: int64
+          nullable: true
+        estimated_total_files:
+          type: integer
+          format: int64
+          nullable: true
+        files_written:
+          type: integer
+          format: int64
+        message:
+          type: string
+          nullable: true
+        phase:
+          type: string
+        project_id:
+          type: string
+        repo_host:
+          type: string
+        repo_name:
+          type: string
+        repo_owner:
+          type: string
+        resolved_commit_sha:
+          type: string
+          nullable: true
+        source_url:
+          type: string
+        status:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
     ProjectListResponse:
       type: object
       required:
@@ -2445,6 +3159,179 @@ components:
       properties:
         role:
           $ref: '#/components/schemas/server_org.ProjectRole'
+    TelemetryIngestRequest:
+      type: object
+      required:
+      - properties
+      - context
+      - payload
+      properties:
+        arch:
+          type: string
+          nullable: true
+        context:
+          type: object
+        currentUrl:
+          type: string
+          nullable: true
+        distinctId:
+          type: string
+          nullable: true
+        event:
+          type: string
+          nullable: true
+        eventLabel:
+          type: string
+          nullable: true
+        method:
+          type: string
+          nullable: true
+        os:
+          type: string
+          nullable: true
+        payload:
+          type: object
+        properties:
+          type: object
+        release:
+          type: string
+          nullable: true
+        runKind:
+          type: string
+          nullable: true
+        sessionId:
+          type: string
+          nullable: true
+        source:
+          type: string
+          nullable: true
+        success:
+          type: boolean
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+          nullable: true
+        uuid:
+          type: string
+          nullable: true
+    TelemetryIngestResponse:
+      type: object
+      required:
+      - accepted
+      - event
+      properties:
+        accepted:
+          type: boolean
+        event:
+          type: string
+    UpgradeRequestCreateRequest:
+      type: object
+      required:
+      - noticeChannel
+      - noticeCode
+      properties:
+        noticeChannel:
+          type: string
+        noticeCode:
+          type: string
+        usageCurrent:
+          type: number
+          format: double
+          nullable: true
+        usageLimit:
+          type: number
+          format: double
+          nullable: true
+        usageUnit:
+          type: string
+          nullable: true
+    UpgradeRequestCreateResponse:
+      type: object
+      required:
+      - status
+      - deduped
+      - notifiedAdminCount
+      properties:
+        deduped:
+          type: boolean
+        notifiedAdminCount:
+          type: integer
+          minimum: 0
+        status:
+          type: string
+    UsageNoticeCtaResponse:
+      type: object
+      required:
+      - kind
+      properties:
+        href:
+          type: string
+          nullable: true
+        kind:
+          type: string
+    UsageNoticeResponse:
+      type: object
+      required:
+      - id
+      - orgId
+      - channel
+      - code
+      - blocking
+      - audienceRole
+      - cta
+      - usage
+      - windowStart
+      - windowEnd
+      - firstEmittedAt
+      - lastEmittedAt
+      properties:
+        audienceRole:
+          type: string
+        blocking:
+          type: boolean
+        channel:
+          type: string
+        code:
+          type: string
+        cta:
+          $ref: '#/components/schemas/UsageNoticeCtaResponse'
+        firstEmittedAt:
+          type: string
+          format: date-time
+        id:
+          type: string
+        lastEmittedAt:
+          type: string
+          format: date-time
+        orgId:
+          type: string
+        projectId:
+          type: string
+          nullable: true
+        usage:
+          $ref: '#/components/schemas/UsageNoticeUsageResponse'
+        windowEnd:
+          type: string
+          format: date-time
+        windowStart:
+          type: string
+          format: date-time
+    UsageNoticeUsageResponse:
+      type: object
+      required:
+      - current
+      - limit
+      - unit
+      properties:
+        current:
+          type: number
+          format: double
+        limit:
+          type: number
+          format: double
+        unit:
+          type: string
     UsagePeriodResponse:
       type: object
       required:
@@ -2459,10 +3346,6 @@ components:
           nullable: true
         costCurrency:
           type: string
-          nullable: true
-        egressGb:
-          type: number
-          format: double
           nullable: true
         orgId:
           type: string
@@ -2479,10 +3362,6 @@ components:
         seats:
           type: integer
           format: int32
-          nullable: true
-        storageGbMonth:
-          type: number
-          format: double
           nullable: true
         tokensIn:
           type: integer
@@ -2515,6 +3394,107 @@ components:
         windowStart:
           type: string
           format: date-time
+    WebAttribution:
+      type: object
+      properties:
+        capturedAt:
+          type: string
+          format: date-time
+          nullable: true
+        fbclid:
+          type: string
+          nullable: true
+        gaClientId:
+          type: string
+          nullable: true
+        gbraid:
+          type: string
+          nullable: true
+        gclid:
+          type: string
+          nullable: true
+        landingPageUrl:
+          type: string
+          nullable: true
+        liFatId:
+          type: string
+          nullable: true
+        msclkid:
+          type: string
+          nullable: true
+        pageReferrer:
+          type: string
+          nullable: true
+        ttclid:
+          type: string
+          nullable: true
+        utmCampaign:
+          type: string
+          nullable: true
+        utmContent:
+          type: string
+          nullable: true
+        utmMedium:
+          type: string
+          nullable: true
+        utmSource:
+          type: string
+          nullable: true
+        utmTerm:
+          type: string
+          nullable: true
+        wbraid:
+          type: string
+          nullable: true
+    WebIntakeKind:
+      type: string
+      enum:
+      - newsletter
+      - contact
+      - desktop_access
+    WebIntakeRequest:
+      type: object
+      required:
+      - kind
+      - email
+      - runmat_source
+      properties:
+        attribution:
+          allOf:
+          - $ref: '#/components/schemas/WebAttribution'
+          nullable: true
+        campaign:
+          type: string
+          nullable: true
+        email:
+          type: string
+        firstname:
+          type: string
+          nullable: true
+        kind:
+          $ref: '#/components/schemas/WebIntakeKind'
+        lastname:
+          type: string
+          nullable: true
+        message:
+          type: string
+          nullable: true
+        name:
+          type: string
+          nullable: true
+        runmat_source:
+          type: string
+    WebIntakeResponse:
+      type: object
+      required:
+      - accepted
+      - queuedJobs
+      properties:
+        accepted:
+          type: boolean
+        queuedJobs:
+          type: integer
+          minimum: 0
     crate.errors.ErrorResponse:
       type: object
       required:
