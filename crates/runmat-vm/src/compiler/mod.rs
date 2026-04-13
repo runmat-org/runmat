@@ -6,5 +6,3 @@ pub mod imports;
 pub mod lvalues;
 pub mod patterns;
 pub mod statements;
-
-pub use runmat_ignition::bytecode::compile;

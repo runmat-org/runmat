@@ -5667,6 +5667,7 @@ dependencies = [
  "runmat-runtime",
  "runmat-thread-local",
  "runmat-time",
+ "runmat-vm",
  "serde",
  "tracing",
 ]
@@ -5993,9 +5994,12 @@ dependencies = [
 
 [[package]]
 name = "runmat-vm"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
- "runmat-ignition",
+ "runmat-accelerate",
+ "runmat-builtins",
+ "runmat-hir",
+ "serde",
 ]
 
 [[package]]

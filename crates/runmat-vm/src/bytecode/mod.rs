@@ -1,4 +1,5 @@
 pub mod instr;
 pub mod program;
 
-pub use program::{Bytecode, ExecutionContext, UserFunction};
+pub use instr::{ArgSpec, EmitLabel, EndExpr, Instr, StackEffect};
+pub use program::{Bytecode, CallFrame, ExecutionContext, UserFunction};

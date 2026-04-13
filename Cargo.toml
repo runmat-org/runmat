@@ -65,6 +65,7 @@ runmat-lexer = { version = "=0.4.0", path = "crates/runmat-lexer" }
 runmat-parser = { version = "=0.4.0", path = "crates/runmat-parser" }
 runmat-hir = { version = "=0.4.0", path = "crates/runmat-hir" }
 runmat-ignition = { version = "=0.4.0", path = "crates/runmat-ignition" }
+runmat-vm = { version = "=0.4.0", path = "crates/runmat-vm" }
 runmat-async = { version = "=0.4.0", path = "crates/runmat-async" }
 runmat-telemetry = { version = "=0.4.0", path = "crates/runmat-telemetry" }
 runmat-core = { version = "=0.4.0", path = "crates/runmat-core", default-features = false }
