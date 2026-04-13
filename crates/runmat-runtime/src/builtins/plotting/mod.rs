@@ -12,6 +12,8 @@ pub(crate) mod gpu_helpers;
 pub(crate) mod perf;
 #[path = "core/point.rs"]
 pub(crate) mod point;
+#[path = "core/properties.rs"]
+pub(crate) mod properties;
 #[path = "core/state.rs"]
 pub(crate) mod state;
 #[path = "core/style.rs"]
@@ -22,10 +24,16 @@ pub mod web;
 #[path = "type_resolvers.rs"]
 pub(crate) mod type_resolvers;
 
+#[path = "ops/area.rs"]
+pub(crate) mod area;
 #[path = "ops/bar.rs"]
 pub(crate) mod bar;
+#[path = "ops/caxis.rs"]
+pub(crate) mod caxis;
 #[path = "ops/clf.rs"]
 pub(crate) mod clf;
+#[path = "ops/clim.rs"]
+pub(crate) mod clim;
 #[path = "ops/close.rs"]
 pub(crate) mod close;
 #[path = "ops/cmds.rs"]
@@ -36,53 +44,105 @@ pub(crate) mod contour;
 pub(crate) mod contourf;
 #[path = "ops/drawnow.rs"]
 pub(crate) mod drawnow;
+#[path = "ops/errorbar.rs"]
+pub(crate) mod errorbar;
 #[path = "ops/figure.rs"]
 pub(crate) mod figure;
 #[path = "ops/gca.rs"]
 pub(crate) mod gca;
 #[path = "ops/gcf.rs"]
 pub(crate) mod gcf;
-#[path = "ops/handle_args.rs"]
-pub(crate) mod handle_args;
+#[path = "ops/get.rs"]
+pub(crate) mod get;
 #[path = "ops/hist.rs"]
 pub mod hist;
+#[path = "ops/histogram.rs"]
+pub(crate) mod histogram;
 #[path = "ops/hold.rs"]
 pub(crate) mod hold;
+#[path = "ops/image.rs"]
+pub(crate) mod image;
+#[path = "ops/imagesc.rs"]
+pub(crate) mod imagesc;
+#[path = "ops/isgraphics.rs"]
+pub(crate) mod isgraphics;
+#[path = "ops/ishandle.rs"]
+pub(crate) mod ishandle;
+#[path = "ops/legend.rs"]
+pub(crate) mod legend;
+#[path = "ops/loglog.rs"]
+pub(crate) mod loglog;
 #[path = "ops/mesh.rs"]
 pub(crate) mod mesh;
 #[path = "ops/meshc.rs"]
 pub(crate) mod meshc;
+#[path = "ops/common/mod.rs"]
+pub(crate) mod op_common;
+#[path = "ops/pie.rs"]
+pub(crate) mod pie;
 #[path = "ops/plot.rs"]
 pub(crate) mod plot;
+#[path = "ops/plot3.rs"]
+pub(crate) mod plot3;
+#[path = "ops/quiver.rs"]
+pub(crate) mod quiver;
 #[path = "ops/scatter.rs"]
 pub(crate) mod scatter;
 #[path = "ops/scatter3.rs"]
 pub(crate) mod scatter3;
+#[path = "ops/semilogx.rs"]
+pub(crate) mod semilogx;
+#[path = "ops/semilogy.rs"]
+pub(crate) mod semilogy;
+#[path = "ops/set.rs"]
+pub(crate) mod set;
 #[path = "ops/stairs.rs"]
 pub(crate) mod stairs;
+#[path = "ops/stem.rs"]
+pub(crate) mod stem;
 #[path = "ops/subplot.rs"]
 pub(crate) mod subplot;
 #[path = "ops/surf.rs"]
 pub(crate) mod surf;
 #[path = "ops/surfc.rs"]
 pub(crate) mod surfc;
+#[path = "ops/text.rs"]
+pub(crate) mod text;
+#[path = "ops/title.rs"]
+pub(crate) mod title;
+#[path = "ops/view.rs"]
+pub(crate) mod view;
+#[path = "ops/xlabel.rs"]
+pub(crate) mod xlabel;
+#[path = "ops/xlim.rs"]
+pub(crate) mod xlim;
+#[path = "ops/ylabel.rs"]
+pub(crate) mod ylabel;
+#[path = "ops/ylim.rs"]
+pub(crate) mod ylim;
+#[path = "ops/zlabel.rs"]
+pub(crate) mod zlabel;
+#[path = "ops/zlim.rs"]
+pub(crate) mod zlim;
 
 pub use perf::{set_scatter_target_points, set_surface_vertex_budget};
+pub use properties::resolve_plot_handle;
 pub use state::{
     clear_figure, clone_figure, close_figure, configure_subplot, current_axes_state,
     current_figure_handle, figure_handles, import_figure, install_figure_observer,
-    new_figure_handle, reset_hold_state_for_run, reset_recent_figures, select_figure, set_hold,
-    take_recent_figures, FigureAxesState, FigureError, FigureEventKind, FigureEventView,
-    FigureHandle, HoldMode,
+    new_figure_handle, reset_hold_state_for_run, reset_plot_state, reset_recent_figures,
+    select_axes_for_figure, select_figure, set_hold, take_recent_figures, FigureAxesState,
+    FigureError, FigureEventKind, FigureEventView, FigureHandle, HoldMode,
 };
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 use web::present_figure_on_surface as web_present_figure_on_surface;
 pub use web::{
-    bind_surface_to_figure, detach_surface, fit_surface_extents, get_surface_camera_state,
-    install_surface, present_surface, render_current_scene, reset_surface_camera, resize_surface,
-    set_plot_theme_config, set_surface_camera_state, web_renderer_ready, PlotCameraProjection,
-    PlotCameraState, PlotSurfaceCameraState,
+    bind_surface_to_figure, clear_closed_figure_surfaces, detach_surface, fit_surface_extents,
+    get_surface_camera_state, install_surface, invalidate_surface_revisions, present_surface,
+    render_current_scene, reset_surface_camera, resize_surface, set_plot_theme_config,
+    set_surface_camera_state, web_renderer_ready, PlotCameraProjection, PlotCameraState,
+    PlotSurfaceCameraState,
 };
 
 #[cfg(all(target_arch = "wasm32", feature = "plot-web"))]
@@ -192,7 +252,7 @@ pub use engine::{
     render_figure_png_bytes, render_figure_png_bytes_with_axes_cameras,
     render_figure_png_bytes_with_camera, render_figure_rgba_bytes,
     render_figure_rgba_bytes_with_axes_cameras, render_figure_rgba_bytes_with_camera,
-    render_figure_snapshot,
+    render_figure_snapshot, render_figure_snapshot_with_camera_state,
 };
 
 pub mod ops {
@@ -209,5 +269,9 @@ pub(crate) mod tests {
         INIT.call_once(|| {
             state::disable_rendering_for_tests();
         });
+    }
+
+    pub(crate) fn lock_plot_registry() -> state::PlotTestLockGuard {
+        state::lock_plot_test_registry()
     }
 }

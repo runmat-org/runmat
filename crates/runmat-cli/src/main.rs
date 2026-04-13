@@ -1665,12 +1665,32 @@ async fn process_repl_line(
 }
 
 fn emit_execution_streams(streams: &[ExecutionStreamEntry]) {
+    let mut stdout = io::stdout();
+    let mut stderr = io::stderr();
     for entry in streams {
         match entry.stream {
-            ExecutionStreamKind::Stdout => println!("{}", entry.text),
-            ExecutionStreamKind::Stderr => eprintln!("{}", entry.text),
+            ExecutionStreamKind::Stdout | ExecutionStreamKind::Stderr => {
+                let bytes = entry.text.as_bytes();
+                let write_result = match entry.stream {
+                    ExecutionStreamKind::Stdout => stdout.write_all(bytes),
+                    ExecutionStreamKind::Stderr => stderr.write_all(bytes),
+                    ExecutionStreamKind::ClearScreen => unreachable!(),
+                };
+                if let Err(err) = write_result {
+                    eprintln!("Failed to write execution stream: {err}");
+                    break;
+                }
+            }
+            ExecutionStreamKind::ClearScreen => {
+                if atty::is(atty::Stream::Stdout) {
+                    print!("\x1B[2J\x1B[H");
+                    let _ = io::stdout().flush();
+                }
+            }
         }
     }
+    let _ = stdout.flush();
+    let _ = stderr.flush();
 }
 
 fn finalize_repl_session(
@@ -2912,6 +2932,27 @@ async fn show_accel_info(json: bool, reset: bool) -> Result<()> {
                 telemetry.matmul.count,
                 to_ms(telemetry.matmul.total_wall_time_ns)
             );
+            println!(
+                "  linsolve: count={} wall_ms={:.3}",
+                telemetry.linsolve.count,
+                to_ms(telemetry.linsolve.total_wall_time_ns)
+            );
+            println!(
+                "  mldivide: count={} wall_ms={:.3}",
+                telemetry.mldivide.count,
+                to_ms(telemetry.mldivide.total_wall_time_ns)
+            );
+            println!(
+                "  mrdivide: count={} wall_ms={:.3}",
+                telemetry.mrdivide.count,
+                to_ms(telemetry.mrdivide.total_wall_time_ns)
+            );
+            if !telemetry.solve_fallbacks.is_empty() {
+                println!("  solve_fallbacks:");
+                for fallback in &telemetry.solve_fallbacks {
+                    println!("    {} => {}", fallback.reason, fallback.count);
+                }
+            }
 
             if let Some(report) = runmat_accelerate::auto_offload_report() {
                 println!("Auto-offload:");

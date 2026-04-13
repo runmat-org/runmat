@@ -181,6 +181,51 @@ pub async fn perform_indexing(base: &Value, indices: &[f64]) -> Result<Value, Ru
                 )))
             }
         }
+        Value::ComplexTensor(tensor) => {
+            if indices.is_empty() {
+                return Err(indexing_error("At least one index is required"));
+            }
+
+            if indices.len() == 1 {
+                let idx = indices[0] as usize;
+                if idx < 1 || idx > tensor.data.len() {
+                    return Err(indexing_error_with_identifier(
+                        format!("Index {} out of bounds (1 to {})", idx, tensor.data.len()),
+                        "RunMat:IndexOutOfBounds",
+                    ));
+                }
+                let (re, im) = tensor.data[idx - 1];
+                Ok(Value::Complex(re, im))
+            } else if indices.len() == 2 {
+                let row = indices[0] as usize;
+                let col = indices[1] as usize;
+                let shape = normalize_scalar_shape(&tensor.shape);
+                let rows = shape.first().copied().unwrap_or(1);
+                let cols = shape.get(1).copied().unwrap_or(1);
+
+                if row < 1 || row > rows {
+                    return Err(indexing_error_with_identifier(
+                        format!("Row index {} out of bounds (1 to {})", row, rows),
+                        "RunMat:IndexOutOfBounds",
+                    ));
+                }
+                if col < 1 || col > cols {
+                    return Err(indexing_error_with_identifier(
+                        format!("Column index {} out of bounds (1 to {})", col, cols),
+                        "RunMat:IndexOutOfBounds",
+                    ));
+                }
+
+                let linear_idx = (row - 1) + (col - 1) * rows;
+                let (re, im) = tensor.data[linear_idx];
+                Ok(Value::Complex(re, im))
+            } else {
+                Err(indexing_error(format!(
+                    "Complex tensors support 1 or 2 indices, got {}",
+                    indices.len()
+                )))
+            }
+        }
         Value::StringArray(sa) => {
             if indices.is_empty() {
                 return Err(indexing_error("At least one index is required"));

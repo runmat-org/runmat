@@ -27,3 +27,11 @@ It is also generally a pattern that shows up in pipelines outside of imaging, su
 - At present only the canonical builtin path recognises this pattern; other custom normalisers must be lowered to the same graph shape to benefit.
 
 If a workload should fuse but does not, enable `RUNMAT_DEBUG_FUSION=1` to have the planner print why a node was rejected, then compare against the criteria above.
+
+---
+
+## Related
+
+- [Introduction to RunMat Fusion](/docs/accelerate/fusion-intro) -- how RunMat manages GPU data residency.
+- [GPU Residency and Precision](/docs/accelerate/gpu-behavior) -- residency rules and precision guarantees.
+- [Elementwise Chains](/docs/fusion/elementwise) -- fused arithmetic and transcendental expressions.

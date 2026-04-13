@@ -3,20 +3,22 @@
   "category": "plotting",
   "keywords": [
     "scatter3",
-    "3-D scatter",
+    "3-D scatter plot",
     "point cloud",
-    "gpuArray"
+    "matlab scatter3",
+    "spatial data visualization",
+    "gpu plotting"
   ],
-  "summary": "Create MATLAB-compatible 3-D scatter plots.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/scatter3.html"
-  ],
+  "summary": "Create 3-D scatter plots for spatial point clouds, encoded markers, and MATLAB `scatter3` workflows.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
-    "precisions": [],
+    "precisions": [
+      "single",
+      "double"
+    ],
     "broadcasting": "none",
-    "notes": "Rendering runs on the host or WebGPU canvas after gathering gpuArray data when necessary."
+    "notes": "`scatter3` is a rendering sink. GPU inputs can stay resident when the shared plotting device consumes exported buffers directly."
   },
   "fusion": {
     "elementwise": false,
@@ -26,70 +28,46 @@
   },
   "requires_feature": null,
   "tested": {
-    "unit": "builtins::plotting::scatter3::tests"
+    "unit": "builtins::plotting::scatter3::tests",
+    "integration": "runmat-plot/tests/renderer_tests.rs"
   },
-  "description": "`scatter3(x, y, z)` plots points in 3-D space using MATLAB-compatible defaults. Each input must contain the same number of elements; row and column vectors are both accepted.",
+  "description": "`scatter3` creates 3-D marker plots from matching x, y, and z coordinates. In RunMat it participates in the handle-returning plotting system, which means you can combine it with `subplot`, inspect the figure with `get`, adjust camera angles with `view`, and keep GPU-resident inputs on device when the shared rendering path is available.",
   "behaviors": [
-    "Inputs may be real doubles, single-precision tensors, or gathered gpuArray values. Complex data currently raises an error matching MATLAB.",
-    "Points inherit MATLAB’s default styling: blue markers with mild transparency. Future work will add size/color arguments, but existing scripts using the basic call form work today.",
-    "Fusion graphs terminate at `scatter3`, and gpuArray inputs are gathered so the renderer can access dense host memory or a shared WebGPU buffer depending on the build."
+    "`scatter3(x, y, z)` requires matching element counts across all three inputs.",
+    "The builtin returns a scatter handle for the created plot object.",
+    "3-D scatter plots work naturally with `view` and `zlabel`, and all camera state remains subplot-local.",
+    "GPU-resident coordinate buffers can feed the renderer directly on the happy path; otherwise RunMat gathers once before plotting.",
+    "Marker size and display-name style workflows are handled through the shared plotting object/property system."
   ],
   "examples": [
     {
-      "description": "",
-      "input": "t = linspace(0, 4*pi, 200);\nscatter3(cos(t), sin(t), t)"
+      "description": "Plot a 3-D helix as a point cloud",
+      "input": "t = linspace(0, 6*pi, 300);\nscatter3(cos(t), sin(t), t);"
+    },
+    {
+      "description": "Style a 3-D scatter plot and change the camera view",
+      "input": "t = linspace(0, 4*pi, 200);\nh = scatter3(cos(t), sin(t), t);\nset(h, 'DisplayName', 'helix', 'SizeData', 10);\nview(45, 25);"
+    },
+    {
+      "description": "Use subplot-local camera state with multiple 3-D plots",
+      "input": "subplot(1, 2, 1);\nscatter3(1:10, rand(1,10), rand(1,10));\nview(3);\nsubplot(1, 2, 2);\nscatter3(rand(1,10), rand(1,10), rand(1,10));\nview(2);",
+      "output": "% The two subplots keep independent 3-D view state"
     }
   ],
-  "faqs": [],
   "links": [
-    {
-      "label": "bar",
-      "url": "./bar"
-    },
-    {
-      "label": "contour",
-      "url": "./contour"
-    },
-    {
-      "label": "contourf",
-      "url": "./contourf"
-    },
-    {
-      "label": "hist",
-      "url": "./hist"
-    },
-    {
-      "label": "mesh",
-      "url": "./mesh"
-    },
-    {
-      "label": "meshc",
-      "url": "./meshc"
-    },
-    {
-      "label": "plot",
-      "url": "./plot"
-    },
-    {
-      "label": "scatter",
-      "url": "./scatter"
-    },
-    {
-      "label": "stairs",
-      "url": "./stairs"
-    },
-    {
-      "label": "surf",
-      "url": "./surf"
-    },
-    {
-      "label": "surfc",
-      "url": "./surfc"
-    }
+    { "label": "plot3", "url": "./plot3" },
+    { "label": "scatter", "url": "./scatter" },
+    { "label": "view", "url": "./view" },
+    { "label": "zlabel", "url": "./zlabel" },
+    { "label": "subplot", "url": "./subplot" }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/scatter3.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/scatter3.rs"
   },
-  "gpu_residency": "`scatter3` gathers GPU tensors before plotting today. The new shared-device renderer keeps future implementations zero-copy. Until that lands, expect the builtin to behave like MATLAB: data moves to the host, rendering completes, and execution returns immediately."
+  "gpu_residency": "`scatter3` preserves GPU residency when the plotting path can consume exported coordinate buffers directly. If a direct GPU path is not available for the active combination, RunMat gathers once and renders the same plot semantics on the host path.",
+  "gpu_behavior": [
+    "The preferred path keeps point buffers on the device and emits renderer-ready geometry without a full host round-trip.",
+    "Subplot, view, and object-handle behavior is the same on both the GPU and fallback host paths."
+  ]
 }

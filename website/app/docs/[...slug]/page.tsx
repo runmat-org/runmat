@@ -148,18 +148,42 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
   const pageDescription = data.description || (node as DocsNode).seo?.description;
   const pageJsonLd = {
     "@context": "https://schema.org",
-    "@type": "WebPage",
-    "@id": `${pageUrl}#webpage`,
+    "@type": "TechArticle",
+    "@id": `${pageUrl}#article`,
     url: pageUrl,
-    name: pageTitle,
+    headline: pageTitle,
     ...(pageDescription ? { description: pageDescription } : {}),
     inLanguage: "en",
     isPartOf: { "@id": "https://runmat.com/#website" },
     author: { "@id": "https://runmat.com/#organization" },
     publisher: { "@id": "https://runmat.com/#organization" },
+    mainEntityOfPage: { "@id": pageUrl },
   };
   const pageJsonLdString = JSON.stringify(pageJsonLd).replace(/<\//g, "<\\/");
   const crumbs = findPathBySlug(slug) ?? [];
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Docs", item: `${baseUrl}/docs` },
+      ...crumbs
+        .filter((c) => c.title)
+        .map((c, i) => {
+          const item = c.slug
+            ? `${baseUrl}/docs/${c.slug.join("/")}`
+            : c.externalHref
+              ? `${baseUrl}${c.externalHref}`
+              : undefined;
+          return {
+            "@type": "ListItem" as const,
+            position: i + 2,
+            name: c.title,
+            ...(item ? { item } : {}),
+          };
+        }),
+    ],
+  };
+  const breadcrumbJsonLdString = JSON.stringify(breadcrumbJsonLd).replace(/<\//g, "<\\/");
   return (
     <div className="grid lg:grid-cols-[minmax(0,1fr)_220px] gap-8 lg:items-start overflow-visible">
       <article className="prose dark:prose-invert max-w-none scroll-smooth min-w-0">
@@ -183,10 +207,13 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
               </span>
             ))}
         </nav>
-        {/* Title is already conveyed by breadcrumbs and in-page H1 within markdown, avoid duplication */}
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: pageJsonLdString }}
+        />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: breadcrumbJsonLdString }}
         />
         {jsonLdString && (
           <script

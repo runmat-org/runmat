@@ -980,6 +980,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn qr_wgpu_matches_cpu() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         )
@@ -1024,6 +1025,7 @@ pub(crate) mod tests {
     #[test]
     #[cfg(feature = "wgpu")]
     fn qr_wgpu_economy_device_path() {
+        let _accel_guard = test_support::accel_test_lock();
         std::env::set_var("RUNMAT_WGPU_FORCE_PRECISION", "f32");
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),

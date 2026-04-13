@@ -44,7 +44,7 @@ jsonLd:
       description: "RunMat is a modern, open-source runtime that executes MATLAB code quickly using a Rust-based engine, tiered JIT execution, and automatic GPU acceleration."
       image: "https://runmat.com/plot-example.jpg"
       datePublished: "2025-08-07T00:00:00Z"
-      dateModified: "2025-08-07T00:00:00Z"
+      dateModified: "2026-04-01T00:00:00Z"
       author:
         "@type": "Person"
         name: "Nabeel Allana"
@@ -234,7 +234,18 @@ Documentation is generated from runtime metadata, so everything you add shows up
 
 If your code relies on many niche built-ins, the recommended path is to move those pieces into packages. The docs call out differences and migration notes where they exist.
 
-A note about about plotting: RunMat's plot package is a work in progress. It's near-complete, but not yet ready for production use. We're working on it, and will have a complete plotting system in the next few releases.
+> **Editor's note (April 2026):** A lot has changed since this launch post. Here is a summary of what has shipped since August 2025:
+>
+> - **Plotting** is no longer a work in progress. RunMat now supports [17+ GPU-accelerated plot types](/docs/matlab-function-reference#plotting) including `surf`, `contour`, `bar`, `pie`, `quiver`, `stem`, `area`, `errorbar`, and full 3D variants, with graphics handles, styling, and figure export. See the [plotting guide](/blog/matlab-plotting-guide) for runnable examples or the [plotting docs](/docs/plotting) for reference.
+> - **Browser sandbox** — A full browser-based IDE is now available at [runmat.com/sandbox](https://runmat.com/sandbox), running entirely client-side via WebAssembly and WebGPU. See the [browser guide](/docs/desktop-browser-guide).
+> - **LSP and IDE support** — A first-party language server and [VS Code / Cursor extension](https://marketplace.visualstudio.com/items?itemName=runmat.runmat-vscode) now provide diagnostics, completions, hover, and document symbols.
+> - **~330+ builtins** are now documented in the [function reference](/docs/matlab-function-reference), covering arrays, linear algebra, FFT/signal, statistics, strings, I/O, and plotting.
+> - **GPU fusion** now has [dedicated documentation](/docs/fusion-guide) covering 7 fusion patterns: elementwise chains, reductions, matmul epilogues, covariance, power-step normalization, explained variance, and image normalization.
+> - **Collaboration and teams** — Organizations, project roles, real-time sync, and API keys are now available through [RunMat Cloud](/docs/collaboration).
+> - **Versioning** — Automatic per-file versioning, project snapshots, and [git export](/docs/versioning) are built in.
+> - **Desktop app** — A native desktop application is in active development.
+>
+> The runtime is now at **v0.3.2**. The original content below reflects the state at launch and remains accurate for the core architecture and design philosophy.
 
 ---
 

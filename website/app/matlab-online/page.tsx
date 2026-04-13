@@ -128,7 +128,8 @@ const faqItems: { question: string; answer: string; answerContent?: React.ReactN
   {
     question: "Does RunMat support plotting?",
     answer:
-      "Yes. RunMat supports interactive 2D and 3D plotting. 3D surface plots can be rotated, zoomed, and panned directly in the browser. Additional chart types are being added.",
+      "Yes. RunMat supports 17+ interactive plot types including plot, scatter, hist, surf, contour, bar, pie, stem, quiver, area, and errorbar, all GPU-accelerated. 3D surface plots can be rotated, zoomed, and panned directly in the browser.",
+    answerContent: <>Yes. RunMat supports 17+ interactive plot types including plot, scatter, hist, surf, contour, bar, pie, stem, quiver, area, and errorbar, all GPU-accelerated. 3D surface plots can be rotated, zoomed, and panned directly in the browser. See the <Link href="/blog/matlab-plotting-guide" className="underline hover:text-foreground">plotting guide</Link> for runnable examples.</>,
   },
 ];
 
@@ -830,7 +831,7 @@ export default function MatlabOnlinePage() {
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-green-300">•</span>
-                  <p>Interactive 2D and 3D plotting (rotate, zoom, pan)</p>
+                  <p>17+ plot types (plot, scatter, surf, contour, bar, pie, stem, quiver, and more) with GPU acceleration, subplots, figure handles, and interactive 3D camera</p>
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-green-300">•</span>
@@ -859,10 +860,6 @@ export default function MatlabOnlinePage() {
                 <div>
                   <h4 className="text-lg font-semibold text-gray-100 mb-2">In progress</h4>
                   <div className="space-y-2">
-                    <div className="flex items-start gap-2">
-                      <span className="mt-1 text-amber-300">•</span>
-                      <p>Advanced plotting (subplots, additional chart types, figure handles)</p>
-                    </div>
                     <div className="flex items-start gap-2">
                       <span className="mt-1 text-amber-300">•</span>
                       <p>Extensible package support (signal processing, optimization, etc.)</p>

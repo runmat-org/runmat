@@ -89,7 +89,69 @@ export const docsTree: DocsNode[] = [
       },
       { title: "CLI Reference", slug: ["cli"], file: "docs/CLI.md", seo: { description: "RunMat CLI commands, flags, environment variables, and examples.", keywords: ["RunMat CLI", "command line", "flags"] } },
       { title: "Configuration", slug: ["configuration"], file: "docs/CONFIG.md", seo: { description: "Configure RunMat: files, environment overrides, and precedence.", keywords: ["RunMat config", "configuration", "YAML", "TOML", "JSON"] } },
-      { title: "Plotting", slug: ["plotting"], file: "docs/PLOTTING.md", seo: { description: "How RunMat plotting works: MATLAB-familiar API, GPU-first rendering, drawnow/pause semantics.", keywords: ["plotting", "GPU plotting", "MATLAB plot", "3D visualization", "drawnow"] } },
+      {
+        title: "Plotting",
+        slug: ["plotting"],
+        file: "docs/PLOTTING.md",
+        seo: { description: "How RunMat plotting works: MATLAB-familiar API, GPU-first rendering, drawnow/pause semantics.", keywords: ["plotting", "GPU plotting", "MATLAB plot", "3D visualization", "drawnow"] },
+        children: [
+          {
+            title: "Plotting in RunMat",
+            slug: ["plotting", "plotting-in-runmat"],
+            file: "docs/plotting/PLOTTING_IN_RUNMAT.md",
+            seo: {
+              description: "Building figures in RunMat: axes, plot families, subplot workflows, and refining figures from first command to finished output.",
+              keywords: ["RunMat plotting", "figure", "axes", "subplot", "MATLAB plot workflow"],
+              ogTitle: "Plotting in RunMat",
+              ogDescription: "How to build, organize, and refine figures using RunMat's MATLAB-compatible plotting system.",
+            },
+          },
+          {
+            title: "Choosing the Right Plot Type",
+            slug: ["plotting", "choosing-the-right-plot-type"],
+            file: "docs/plotting/CHOOSING_THE_RIGHT_PLOT_TYPE.md",
+            seo: {
+              description: "When to use plot vs scatter, surf vs mesh, imagesc vs contourf, and how to match plot families to the structure of your data.",
+              keywords: ["plot types", "scatter", "surf", "contour", "bar", "histogram", "MATLAB chart types"],
+              ogTitle: "Choosing the Right Plot Type",
+              ogDescription: "Pick the right plot family for your data: continuity, categories, fields, distributions, and more.",
+            },
+          },
+          {
+            title: "Styling Plots and Axes",
+            slug: ["plotting", "styling-plots-and-axes"],
+            file: "docs/plotting/STYLING_PLOTS_AND_AXES.md",
+            seo: {
+              description: "Labels, limits, legends, colormaps, grids, and view configuration for readable RunMat figures.",
+              keywords: ["plot styling", "labels", "legend", "colormap", "axis limits", "MATLAB figure styling"],
+              ogTitle: "Styling Plots and Axes",
+              ogDescription: "Make figures readable with labels, legends, colormaps, and coordinated styling across plot objects and axes.",
+            },
+          },
+          {
+            title: "Graphics Handles",
+            slug: ["plotting", "graphics-handles"],
+            file: "docs/plotting/GRAPHICS_HANDLES.md",
+            seo: {
+              description: "How RunMat's graphics object model works: figures, axes, plot objects, handles, get/set, and subplot state.",
+              keywords: ["graphics handles", "get", "set", "gcf", "gca", "figure handle", "MATLAB graphics objects"],
+              ogTitle: "Graphics Handles and Plot Objects",
+              ogDescription: "Inspect and update plot objects with handles. Understand figures, axes, legends, and the stateful graphics system.",
+            },
+          },
+          {
+            title: "Plot Replay and Export",
+            slug: ["plotting", "plot-replay-and-export"],
+            file: "docs/plotting/PLOT_REPLAY_AND_EXPORT.md",
+            seo: {
+              description: "How RunMat figures persist as scene state, how replay differs from recomputation, and how to export figures.",
+              keywords: ["plot export", "figure replay", "scene state", "save figure", "MATLAB figure export"],
+              ogTitle: "Plot Replay and Export",
+              ogDescription: "Persist, replay, and export RunMat figures. Understand the difference between scene state and rendered output.",
+            },
+          },
+        ],
+      },
     ],
   },
   {

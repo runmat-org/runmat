@@ -141,6 +141,72 @@ fn nested_function_calls() {
 }
 
 #[test]
+fn shared_input_output_name_updates_in_place() {
+    let program = r#"
+        function x = bump(x)
+            x = x + 1;
+        end
+        r = bump(4);
+    "#;
+    let hir = lower(&parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
+}
+
+#[test]
+fn shared_input_output_name_multi_output_reads_original_input() {
+    let program = r#"
+        function [x, y] = bump_and_copy(x)
+            y = x;
+            x = x + 1;
+        end
+        [a, b] = bump_and_copy(4);
+    "#;
+    let hir = lower(&parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 5.0).abs() < 1e-9)));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 4.0).abs() < 1e-9)));
+}
+
+#[test]
+fn fprintf_inline_cast_argument_does_not_stack_underflow() {
+    let program = r#"
+        x = single(3.14);
+        fprintf("Value: %.4f\n", double(x));
+    "#;
+    let hir = lower(&parse(program).unwrap()).unwrap();
+    let result = execute(&hir);
+    assert!(
+        result.is_ok(),
+        "inline cast in fprintf should execute without stack underflow: {result:?}"
+    );
+}
+
+#[test]
+fn sprintf_inline_cast_argument_formats_value() {
+    let program = r#"
+        x = single(3.14);
+        s = sprintf("Value: %.4f", double(x));
+    "#;
+    let hir = lower(&parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).expect("sprintf with inline cast should succeed");
+    assert!(vars.iter().any(|value| {
+        if let runmat_builtins::Value::CharArray(chars) = value {
+            let rendered: String = chars.data.iter().collect();
+            rendered == "Value: 3.1400"
+        } else {
+            false
+        }
+    }));
+}
+
+#[test]
 fn member_get_set_and_method_call_skeleton() {
     let input = "obj = new_object('Point'); obj = setfield(obj, 'x', 3); ax = getfield(obj, 'x');";
     let ast = parse(input).unwrap();
@@ -161,6 +227,112 @@ fn member_get_set_and_method_call_skeleton() {
     assert!(vars2
         .iter()
         .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < f64::EPSILON)));
+}
+
+#[test]
+fn implicit_struct_creation_for_root_variable_assignment() {
+    let input = "s.x = 10; s.y = 20; v = getfield(s, 'x') + getfield(s, 'y');";
+    let hir = lower(&parse(input).unwrap()).unwrap();
+    let vars = execute(&hir).expect("implicit struct creation should succeed");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 30.0).abs() < 1e-9)));
+}
+
+#[test]
+fn implicit_struct_creation_for_function_output_variable() {
+    let input = r#"
+        function r = make_result()
+            r.x = 10;
+            r.y = 20;
+        end
+        s = make_result();
+        x = getfield(s, 'x');
+        y = getfield(s, 'y');
+    "#;
+    let hir = lower(&parse(input).unwrap()).unwrap();
+    let vars = execute(&hir).expect("function output struct materialization should succeed");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
+}
+
+#[test]
+fn nested_member_assignment_materializes_missing_intermediate_structs() {
+    let input = "s = struct(); s.a.b = 1; v = getfield(getfield(s, 'a'), 'b');";
+    let hir = lower(&parse(input).unwrap()).unwrap();
+    let vars = execute(&hir).expect("nested member assignment should succeed");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 1.0).abs() < 1e-9)));
+}
+
+#[test]
+fn struct_field_indexing_read_path_uses_member_then_index_semantics() {
+    let input =
+        "s = struct(); s.arr = [10 20 30]; x = s.arr(2); y = s.arr(1:2); y1 = y(1); y2 = y(2);";
+    let hir = lower(&parse(input).unwrap()).unwrap();
+    let vars = execute(&hir).expect("struct field indexing reads should succeed");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 10.0).abs() < 1e-9)));
+}
+
+#[test]
+fn dotted_invoke_preserves_object_method_dispatch() {
+    let input = "obj = new_object('Point'); obj = setfield(obj,'x',5); obj = setfield(obj,'y',7); obj = obj.move(1,2); rx = getfield(obj,'x'); ry = getfield(obj,'y');";
+    let hir = lower(&parse(input).unwrap()).unwrap();
+    let vars = execute(&hir).expect("object method dispatch should succeed");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 6.0).abs() < 1e-9)));
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 9.0).abs() < 1e-9)));
+}
+
+#[test]
+fn dotted_invoke_runtime_struct_dispatch_when_base_type_unknown() {
+    let input = r#"
+        function y = pick(s)
+            y = s.arr(2);
+        end
+        s = struct();
+        s.arr = [10 20 30];
+        z = pick(s);
+    "#;
+    let hir = lower(&parse(input).unwrap()).unwrap();
+    let vars = execute(&hir).expect("runtime dotted invoke struct dispatch should succeed");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 20.0).abs() < 1e-9)));
+}
+
+#[test]
+fn nested_dynamic_member_assignment_materializes_and_writes_back() {
+    let input =
+        "s = struct(); f1 = 'a'; f2 = 'b'; s.(f1).(f2) = 3; v = getfield(getfield(s, 'a'), 'b');";
+    let hir = lower(&parse(input).unwrap()).unwrap();
+    let vars = execute(&hir).expect("nested dynamic member assignment should succeed");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 3.0).abs() < 1e-9)));
+}
+
+#[test]
+fn mixed_member_cell_and_index_read_chain() {
+    let input = "s = struct(); s.arr = {[10 20], [30 40]}; v = s.arr{2}(1);";
+    let hir = lower(&parse(input).unwrap()).unwrap();
+    let vars = execute(&hir).expect("mixed member/cell/index chain should succeed");
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n - 30.0).abs() < 1e-9)));
 }
 
 #[test]
@@ -1450,6 +1622,59 @@ fn string_array_literal_concat_index_and_compare() {
         }
     }
     assert!(saw_a && saw_x && saw_b && saw_c && saw_e1 && saw_e2);
+}
+
+#[test]
+fn string_literal_and_num2str_horzcat_promotes_and_runs() {
+    let program = r#"
+        wn = 6;
+        label = ["wn = ", num2str(wn), " rad/s"];
+    "#;
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    let mut saw_label = false;
+    for value in vars {
+        if let runmat_builtins::Value::StringArray(sa) = value {
+            if sa.shape == vec![1, 3] && sa.data == vec!["wn = ", "6", " rad/s"] {
+                saw_label = true;
+            }
+        }
+    }
+    assert!(saw_label, "expected label string-array concat to succeed");
+}
+
+#[test]
+fn computed_integer_indices_work_for_column_slice_read_and_assign() {
+    let program = r#"
+        A = [1, 2, 3; 4, 5, 6];
+        j = length(1:2);
+        c = A(:, j);
+
+        B = zeros(2, 3);
+        B(:, j) = [7; 9];
+        d = B(:, j);
+    "#;
+    let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+
+    let mut saw_read = false;
+    let mut saw_assign = false;
+    for value in vars {
+        if let runmat_builtins::Value::Tensor(t) = value {
+            if t.shape == vec![2, 1] && t.data == vec![2.0, 5.0] {
+                saw_read = true;
+            }
+            if t.shape == vec![2, 1] && t.data == vec![7.0, 9.0] {
+                saw_assign = true;
+            }
+        }
+    }
+
+    assert!(saw_read, "expected computed integer slice read to succeed");
+    assert!(
+        saw_assign,
+        "expected computed integer slice assign to succeed"
+    );
 }
 
 #[test]

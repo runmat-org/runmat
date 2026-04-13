@@ -12,7 +12,7 @@ use crate::builtins::common::spec::{
 };
 use crate::builtins::common::tensor;
 use crate::builtins::strings::common::char_row_to_string;
-use crate::console::{record_console_output, ConsoleStream};
+use crate::console::{record_console_line, ConsoleStream};
 use crate::gather_if_needed_async;
 
 #[runmat_macros::register_gpu_spec(builtin_path = "crate::builtins::io::disp")]
@@ -84,13 +84,8 @@ async fn disp_builtin(value: Value, rest: Vec<Value>) -> crate::BuiltinResult<Va
         .map_err(|e| format!("disp: {e}"))?;
     let lines = format_for_disp(&host_value);
 
-    if lines.is_empty() {
-        record_console_output(ConsoleStream::Stdout, "");
-    } else {
-        for line in lines {
-            record_console_output(ConsoleStream::Stdout, line.as_str());
-        }
-    }
+    let body = lines.join("\n");
+    record_console_line(ConsoleStream::Stdout, body);
 
     Ok(empty_return_value())
 }
@@ -101,6 +96,30 @@ fn format_for_disp(value: &Value) -> Vec<String> {
 
 fn render_value(value: &Value, mode: RenderMode) -> Vec<String> {
     match value {
+        Value::Object(obj) if obj.is_class("datetime") => match mode {
+            RenderMode::TopLevel => crate::builtins::datetime::datetime_display_text(value)
+                .map(|text| text.unwrap_or_else(|| value.to_string()))
+                .unwrap_or_else(|_| value.to_string())
+                .lines()
+                .map(|line| line.to_string())
+                .collect(),
+            RenderMode::Nested => vec![crate::builtins::datetime::datetime_summary(value)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| value.to_string())],
+        },
+        Value::Object(obj) if obj.is_class("duration") => match mode {
+            RenderMode::TopLevel => crate::builtins::duration::duration_display_text(value)
+                .map(|text| text.unwrap_or_else(|| value.to_string()))
+                .unwrap_or_else(|_| value.to_string())
+                .lines()
+                .map(|line| line.to_string())
+                .collect(),
+            RenderMode::Nested => vec![crate::builtins::duration::duration_summary(value)
+                .ok()
+                .flatten()
+                .unwrap_or_else(|| value.to_string())],
+        },
         Value::String(text) => match mode {
             RenderMode::TopLevel => split_lines(text),
             RenderMode::Nested => vec![quote_double(text)],

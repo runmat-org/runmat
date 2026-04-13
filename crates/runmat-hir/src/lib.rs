@@ -135,6 +135,7 @@ pub enum HirExprKind {
     End,
     Member(Box<HirExpr>, String),
     MemberDynamic(Box<HirExpr>, Box<HirExpr>),
+    DottedInvoke(Box<HirExpr>, String, Vec<HirExpr>),
     MethodCall(Box<HirExpr>, String, Vec<HirExpr>),
     AnonFunc {
         params: Vec<VarId>,
@@ -452,7 +453,7 @@ pub fn eval_const_num(expr: &HirExpr) -> Option<f64> {
                 parser::BinOp::Add => Some(a + b),
                 parser::BinOp::Sub => Some(a - b),
                 parser::BinOp::Mul | parser::BinOp::ElemMul => Some(a * b),
-                parser::BinOp::Div | parser::BinOp::ElemDiv => Some(a / b),
+                parser::BinOp::RightDiv | parser::BinOp::ElemDiv => Some(a / b),
                 parser::BinOp::LeftDiv | parser::BinOp::ElemLeftDiv => Some(b / a),
                 parser::BinOp::Pow | parser::BinOp::ElemPow => Some(a.powf(b)),
                 _ => None,
@@ -689,7 +690,7 @@ pub fn infer_expr_type_with_env(
                 parser::BinOp::LeftDiv => {
                     runmat_builtins::shape_rules::left_divide_output_type(&ta, &tb)
                 }
-                parser::BinOp::Div => {
+                parser::BinOp::RightDiv => {
                     runmat_builtins::shape_rules::right_divide_output_type(&ta, &tb)
                 }
                 parser::BinOp::Add
@@ -856,7 +857,7 @@ pub fn infer_expr_type_with_env(
                 }
             }
         }
-        K::MethodCall(base, method, args) => {
+        K::MethodCall(base, method, args) | K::DottedInvoke(base, method, args) => {
             let base_ty = infer_expr_type_with_env(base, env, func_returns);
             if let Type::DataDataset { arrays } = &base_ty {
                 match method.as_str() {
@@ -2911,6 +2912,11 @@ pub mod remapping {
                 Box::new(remap_expr(base, var_map)),
                 Box::new(remap_expr(name, var_map)),
             ),
+            HirExprKind::DottedInvoke(base, name, args) => HirExprKind::DottedInvoke(
+                Box::new(remap_expr(base, var_map)),
+                name.clone(),
+                args.iter().map(|a| remap_expr(a, var_map)).collect(),
+            ),
             HirExprKind::MethodCall(base, name, args) => HirExprKind::MethodCall(
                 Box::new(remap_expr(base, var_map)),
                 name.clone(),
@@ -3122,7 +3128,7 @@ pub mod remapping {
                 collect_expr_variables(base, vars);
                 collect_expr_variables(name, vars);
             }
-            HirExprKind::MethodCall(base, _, args) => {
+            HirExprKind::MethodCall(base, _, args) | HirExprKind::DottedInvoke(base, _, args) => {
                 collect_expr_variables(base, vars);
                 for a in args {
                     collect_expr_variables(a, vars);
@@ -3255,6 +3261,11 @@ impl Ctx {
         self.var_types.push(Type::Unknown);
         self.var_names.push(Some(name));
         id
+    }
+
+    fn lookup_current_scope(&self, name: &str) -> Option<VarId> {
+        let current = self.scopes.len() - 1;
+        self.scopes[current].bindings.get(name).copied()
     }
 
     fn lookup(&self, name: &str) -> Option<VarId> {
@@ -3491,8 +3502,13 @@ impl Ctx {
             } => {
                 self.push_scope();
                 let param_ids: Vec<VarId> = params.iter().map(|p| self.define(p.clone())).collect();
-                let output_ids: Vec<VarId> =
-                    outputs.iter().map(|o| self.define(o.clone())).collect();
+                let output_ids: Vec<VarId> = outputs
+                    .iter()
+                    .map(|o| {
+                        self.lookup_current_scope(o)
+                            .unwrap_or_else(|| self.define(o.clone()))
+                    })
+                    .collect();
                 let body_hir = self.lower_stmts(body)?;
                 self.pop_scope();
 
@@ -3695,7 +3711,7 @@ impl Ctx {
                     BinOp::Add
                     | BinOp::Sub
                     | BinOp::Mul
-                    | BinOp::Div
+                    | BinOp::RightDiv
                     | BinOp::Pow
                     | BinOp::LeftDiv => {
                         if matches!(left_ty, Type::Tensor { .. })
@@ -3885,6 +3901,61 @@ impl Ctx {
                     HirExprKind::MemberDynamic(Box::new(b), Box::new(n)),
                     Type::Unknown,
                 )
+            }
+            DottedInvoke(base, name, args, _) => {
+                if let Ident(class_name, _) = &**base {
+                    let dotted_name = format!("{class_name}.{name}");
+                    if self.is_builtin_function(&dotted_name) {
+                        let lowered_args: Result<Vec<_>, _> =
+                            args.iter().map(|arg| self.lower_expr(arg)).collect();
+                        let lowered_args = lowered_args?;
+                        return Ok(HirExpr {
+                            kind: HirExprKind::FuncCall(dotted_name, lowered_args),
+                            ty: Type::Unknown,
+                            span,
+                        });
+                    }
+                    if self.is_static_method_class(class_name) {
+                        let metaclass = HirExpr {
+                            kind: HirExprKind::MetaClass(class_name.clone()),
+                            ty: Type::String,
+                            span: base.span(),
+                        };
+                        let lowered_args: Result<Vec<_>, _> =
+                            args.iter().map(|a| self.lower_expr(a)).collect();
+                        return Ok(HirExpr {
+                            kind: HirExprKind::MethodCall(
+                                Box::new(metaclass),
+                                name.clone(),
+                                lowered_args?,
+                            ),
+                            ty: Type::Unknown,
+                            span,
+                        });
+                    }
+                }
+                let b = self.lower_expr(base)?;
+                let lowered_args: Result<Vec<_>, _> =
+                    args.iter().map(|a| self.lower_expr(a)).collect();
+                let lowered_args = lowered_args?;
+                if matches!(b.ty, Type::Struct { .. }) {
+                    (
+                        HirExprKind::Index(
+                            Box::new(HirExpr {
+                                kind: HirExprKind::Member(Box::new(b), name.clone()),
+                                ty: Type::Unknown,
+                                span,
+                            }),
+                            lowered_args,
+                        ),
+                        Type::Unknown,
+                    )
+                } else {
+                    (
+                        HirExprKind::DottedInvoke(Box::new(b), name.clone(), lowered_args),
+                        Type::Unknown,
+                    )
+                }
             }
             MethodCall(base, name, args, _) => {
                 // Check if base is an identifier that should be treated as a class reference

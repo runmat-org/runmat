@@ -521,9 +521,15 @@ pub(crate) mod tests {
     use futures::executor::block_on;
     use runmat_builtins::Tensor;
 
+    fn clear_accel_provider_state() {
+        runmat_accelerate_api::set_thread_provider(None);
+        runmat_accelerate_api::clear_provider();
+    }
+
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_default_scalar() {
+        clear_accel_provider_state();
         let result = block_on(zeros_builtin(Vec::new())).expect("zeros");
         assert_eq!(result, Value::Num(0.0));
     }
@@ -559,6 +565,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_square_from_single_dimension() {
+        clear_accel_provider_state();
         let args = vec![Value::Num(3.0)];
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
@@ -569,6 +576,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_rectangular_from_dims() {
+        clear_accel_provider_state();
         let args = vec![Value::Num(2.0), Value::Num(4.0)];
         let result = block_on(zeros_builtin(args)).expect("zeros");
         let tensor = test_support::gather(result).expect("gather tensor");
@@ -579,6 +587,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_from_size_vector() {
+        clear_accel_provider_state();
         let size_vec = Tensor::new(vec![2.0, 3.0], vec![2, 1]).unwrap();
         let args = vec![Value::Tensor(size_vec)];
         let result = block_on(zeros_builtin(args)).expect("zeros");
@@ -589,6 +598,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_logical_output() {
+        clear_accel_provider_state();
         let args = vec![Value::Num(2.0), Value::Num(2.0), Value::from("logical")];
         let result = block_on(zeros_builtin(args)).expect("zeros");
         match result {
@@ -603,6 +613,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_like_tensor_infers_shape() {
+        clear_accel_provider_state();
         let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::Tensor(tensor)];
         let result = block_on(zeros_builtin(args)).expect("zeros");
@@ -614,6 +625,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_like_complex_scalar() {
+        clear_accel_provider_state();
         let args = vec![
             Value::Num(3.0),
             Value::from("like"),
@@ -632,6 +644,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_like_uses_shape_argument_when_combined_with_like() {
+        clear_accel_provider_state();
         let shape_source = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
         let proto = Tensor::new(vec![7.0, 8.0], vec![1, 2]).unwrap();
         let args = vec![
@@ -648,6 +661,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_like_without_explicit_shape_uses_prototype_shape() {
+        clear_accel_provider_state();
         let proto = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let args = vec![Value::from("like"), Value::Tensor(proto)];
         let result = block_on(zeros_builtin(args)).expect("zeros");
@@ -659,6 +673,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_empty_input_returns_empty_matrix() {
+        clear_accel_provider_state();
         let empty = Tensor::new(Vec::<f64>::new(), vec![0, 0]).unwrap();
         let result = block_on(zeros_builtin(vec![Value::Tensor(empty)])).expect("zeros");
         match result {
@@ -673,6 +688,7 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn zeros_conflicting_like_and_logical_is_error() {
+        clear_accel_provider_state();
         let proto = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap();
         let args = vec![
             Value::Num(2.0),

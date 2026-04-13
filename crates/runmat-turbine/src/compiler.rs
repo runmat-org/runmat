@@ -344,10 +344,10 @@ impl BytecodeCompiler {
                         let result = Self::call_runtime_mul_static(builder, a, b);
                         local_stack.push(result);
                     }
-                    Instr::Div => {
-                        let (a, b) = local_stack.pop_two()?;
-                        let result = Self::call_runtime_div_static(builder, a, b);
-                        local_stack.push(result);
+                    Instr::RightDiv | Instr::LeftDiv => {
+                        return Err(execution_error(
+                            "Matrix division not supported in JIT mode".to_string(),
+                        ));
                     }
                     Instr::Pow => {
                         let (a, b) = local_stack.pop_two()?;
@@ -617,19 +617,20 @@ impl BytecodeCompiler {
                     | Instr::UPlus
                     | Instr::AndAnd(_)
                     | Instr::OrOr(_)
-                    | Instr::IndexSliceEx(_, _, _, _, _)
-                    | Instr::IndexRangeEnd { .. }
-                    | Instr::Index1DRangeEnd { .. }
-                    | Instr::StoreRangeEnd { .. }
+                    | Instr::IndexSliceExpr { .. }
+                    | Instr::StoreSliceExpr { .. }
                     | Instr::StoreSlice(_, _, _, _)
-                    | Instr::StoreSliceEx(_, _, _, _, _)
-                    | Instr::StoreSlice1DRangeEnd { .. }
                     | Instr::LoadMember(_)
+                    | Instr::LoadMemberOrInit(_)
                     | Instr::LoadMemberDynamic
+                    | Instr::LoadMemberDynamicOrInit
                     | Instr::StoreMember(_)
+                    | Instr::StoreMemberOrInit(_)
                     | Instr::StoreMemberDynamic
+                    | Instr::StoreMemberDynamicOrInit
                     | Instr::CreateClosure(_, _)
                     | Instr::CallMethod(_, _)
+                    | Instr::CallMethodOrMemberIndex(_, _)
                     | Instr::IndexCellExpand(_, _)
                     | Instr::StoreIndex(_)
                     | Instr::StoreIndexCell(_)
@@ -837,10 +838,6 @@ impl BytecodeCompiler {
 
     fn call_runtime_mul_static(builder: &mut FunctionBuilder, a: Value, b: Value) -> Value {
         builder.ins().fmul(a, b)
-    }
-
-    fn call_runtime_div_static(builder: &mut FunctionBuilder, a: Value, b: Value) -> Value {
-        builder.ins().fdiv(a, b)
     }
 
     fn call_runtime_pow_static(builder: &mut FunctionBuilder, a: Value, b: Value) -> Value {

@@ -490,3 +490,11 @@ runmat run simple_intro.m
 - Use `runmat info` to view effective configuration and environment.
 - If a config file fails to parse, the CLI prints a precise error with file
   path and format (YAML/JSON/TOML) context.
+
+---
+
+## Related
+
+- [CLI Reference](/docs/cli) -- commands, flags, environment variables, and examples.
+- [Browser Guide](/docs/desktop-browser-guide) -- the browser-based sandbox IDE.
+- [GPU Residency and Precision](/docs/accelerate/gpu-behavior) -- GPU residency rules and acceleration environment variables.

@@ -3,14 +3,12 @@
   "category": "plotting",
   "keywords": [
     "contourf",
-    "contour",
-    "filled",
-    "gpuArray"
+    "filled contour plot",
+    "level regions",
+    "scalar field heatmap",
+    "matlab contourf"
   ],
-  "summary": "Render MATLAB-compatible filled contour plots.",
-  "references": [
-    "https://www.mathworks.com/help/matlab/ref/contourf.html"
-  ],
+  "summary": "Create filled contour plots for level regions, scalar fields, and MATLAB `contourf` workflows.",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -19,7 +17,7 @@
       "double"
     ],
     "broadcasting": "none",
-    "notes": "Single/double-precision gpuArray grids stay on the device; CPU fallbacks mirror MATLAB semantics."
+    "notes": "`contourf` uses the shared filled-contour pipeline and returns a contour-fill handle."
   },
   "fusion": {
     "elementwise": false,
@@ -31,62 +29,38 @@
   "tested": {
     "unit": "builtins::plotting::contourf::tests"
   },
-  "description": "`contourf(X, Y, Z)` fills the regions between contour levels with solid colors. When the axes are omitted, RunMat assumes `1:m` and `1:n` just like MATLAB. The default level count matches MATLAB's behaviour (10).",
-  "behaviors": [],
-  "examples": [],
-  "faqs": [],
-  "links": [
+  "description": "`contourf` creates filled contour plots by coloring the regions between contour levels. In RunMat it returns a contour-fill handle, shares the contour level-generation path with `contour`, and acts as the filled-region counterpart to line-oriented contour plots.",
+  "behaviors": [
+    "`contourf(Z)` uses implicit axes, while `contourf(X, Y, Z)` accepts explicit coordinates.",
+    "The returned value is a contour-fill handle in the plotting object system.",
+    "Level-list, level-count, and related contour workflows mirror the broader contour family semantics.",
+    "`contourf` works naturally with `colorbar` and `colormap` because filled regions are fundamentally color-mapped scalar ranges.",
+    "Filled contours and optional line overlays are handled through the shared contour stack."
+  ],
+  "examples": [
     {
-      "label": "bar",
-      "url": "./bar"
+      "description": "Create a filled contour plot",
+      "input": "[X, Y] = meshgrid(-2:0.25:2, -2:0.25:2);\nZ = X .* exp(-X.^2 - Y.^2);\ncontourf(X, Y, Z);\ncolorbar;"
     },
     {
-      "label": "contour",
-      "url": "./contour"
+      "description": "Use explicit levels with a colormap",
+      "input": "[X, Y] = meshgrid(-3:0.2:3, -3:0.2:3);\nZ = cos(X) .* sin(Y);\ncontourf(X, Y, Z, [-0.75 -0.25 0 0.25 0.75]);\ncolormap('turbo');"
     },
     {
-      "label": "hist",
-      "url": "./hist"
-    },
-    {
-      "label": "mesh",
-      "url": "./mesh"
-    },
-    {
-      "label": "meshc",
-      "url": "./meshc"
-    },
-    {
-      "label": "plot",
-      "url": "./plot"
-    },
-    {
-      "label": "scatter",
-      "url": "./scatter"
-    },
-    {
-      "label": "scatter3",
-      "url": "./scatter3"
-    },
-    {
-      "label": "stairs",
-      "url": "./stairs"
-    },
-    {
-      "label": "surf",
-      "url": "./surf"
-    },
-    {
-      "label": "surfc",
-      "url": "./surfc"
+      "description": "Inspect the returned contour-fill handle",
+      "input": "[X, Y] = meshgrid(1:20, 1:20);\nZ = X - Y;\nh = contourf(X, Y, Z);\nget(h, 'Type')",
+      "output": "ans =\n    'contour'"
     }
+  ],
+  "links": [
+    { "label": "contour", "url": "./contour" },
+    { "label": "colorbar", "url": "./colorbar" },
+    { "label": "colormap", "url": "./colormap" },
+    { "label": "surfc", "url": "./surfc" },
+    { "label": "meshc", "url": "./meshc" }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/contourf.rs`",
     "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/contourf.rs"
-  },
-  "gpu_behavior": [
-    "Single/double-precision gpuArrays feed a compute shader that emits renderer-ready triangles on the shared WebGPU device.",
-    "When GPU support is unavailable, tensors gather to host memory and rendering proceeds on the CPU path with identical results."
-  ]
+  }
 }

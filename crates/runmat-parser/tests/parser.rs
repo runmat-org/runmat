@@ -179,6 +179,12 @@ fn strip_expr(expr: &Expr) -> Expr {
             Box::new(strip_expr(name_expr)),
             Span::default(),
         ),
+        Expr::DottedInvoke(base, name, args, _) => Expr::DottedInvoke(
+            Box::new(strip_expr(base)),
+            name.clone(),
+            args.iter().map(strip_expr).collect(),
+            Span::default(),
+        ),
         Expr::MethodCall(base, name, args, _) => Expr::MethodCall(
             Box::new(strip_expr(base)),
             name.clone(),
@@ -398,6 +404,28 @@ fn parse_imaginary_unit_adjacent_number_in_matrix() {
         panic!("expected 4*j");
     };
     assert!(matches!(**rhs_l, Expr::Number(ref n, _) if n == "4"));
+    assert!(matches!(**rhs_r, Expr::Ident(ref n, _) if n == "j"));
+}
+
+#[test]
+fn parse_imaginary_unit_adjacent_leading_dot_number_in_matrix() {
+    let program = parse("A = [.1i .5e-2j];").unwrap();
+    let Stmt::Assign(_, Expr::Tensor(rows, _), _, _) = &program.body[0] else {
+        panic!("expected matrix assignment");
+    };
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].len(), 2);
+
+    let Expr::Binary(lhs_l, BinOp::Mul, lhs_r, _) = &rows[0][0] else {
+        panic!("expected .1*i");
+    };
+    assert!(matches!(**lhs_l, Expr::Number(ref n, _) if n == ".1"));
+    assert!(matches!(**lhs_r, Expr::Ident(ref n, _) if n == "i"));
+
+    let Expr::Binary(rhs_l, BinOp::Mul, rhs_r, _) = &rows[0][1] else {
+        panic!("expected .5e-2*j");
+    };
+    assert!(matches!(**rhs_l, Expr::Number(ref n, _) if n == ".5e-2"));
     assert!(matches!(**rhs_r, Expr::Ident(ref n, _) if n == "j"));
 }
 

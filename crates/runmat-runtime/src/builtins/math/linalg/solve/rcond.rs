@@ -202,6 +202,7 @@ async fn rcond_gpu_via_linsolve(
     };
 
     let options = runmat_accelerate_api::ProviderLinsolveOptions {
+        need_rcond: true,
         rcond: None,
         ..Default::default()
     };

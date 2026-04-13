@@ -13,7 +13,7 @@ use crate::builtins::common::spec::{
     ReductionNaN, ResidencyPolicy, ShapeRequirements,
 };
 use crate::builtins::diagnostics::type_resolvers::warning_type;
-use crate::console::{record_console_output, ConsoleStream};
+use crate::console::{record_console_line, ConsoleStream};
 use crate::warning_store;
 use crate::{build_runtime_error, RuntimeError};
 use tracing;
@@ -206,7 +206,7 @@ fn print_warning(identifier: &str, message: &str) {
 
 fn emit_stderr_line(line: String) {
     tracing::warn!("{line}");
-    record_console_output(ConsoleStream::Stderr, line);
+    record_console_line(ConsoleStream::Stderr, line);
 }
 
 fn reissue_exception(mex: &runmat_builtins::MException) -> crate::BuiltinResult<Value> {

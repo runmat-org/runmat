@@ -47,6 +47,38 @@ fn test_assignment_with_semicolon() {
 }
 
 #[test]
+fn test_repeated_unsuppressed_assignment_does_not_duplicate_stdout() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    let first = block_on(engine.execute("x = 42")).unwrap();
+    let second = block_on(engine.execute("x = 42")).unwrap();
+    let third = block_on(engine.execute("x = 42")).unwrap();
+
+    assert_eq!(collect_stdout_texts(&first), vec!["x = 42"]);
+    assert_eq!(collect_stdout_texts(&second), vec!["x = 42"]);
+    assert_eq!(collect_stdout_texts(&third), vec!["x = 42"]);
+}
+
+#[test]
+fn test_repeated_arrayfun_assignment_does_not_duplicate_stdout() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+
+    let source = "A = [1 2 3; 4 5 6];\nB = arrayfun(@(x) x.^2, A)";
+
+    let first = block_on(engine.execute(source)).unwrap();
+    let second = block_on(engine.execute(source)).unwrap();
+    let third = block_on(engine.execute(source)).unwrap();
+
+    let first_stdout = collect_stdout_texts(&first);
+    let second_stdout = collect_stdout_texts(&second);
+    let third_stdout = collect_stdout_texts(&third);
+
+    assert_eq!(first_stdout.len(), 1);
+    assert_eq!(second_stdout, first_stdout);
+    assert_eq!(third_stdout, first_stdout);
+}
+
+#[test]
 fn test_semicolon_with_trailing_newline_is_suppressed() {
     let mut engine = gc_test_context(RunMatSession::new).unwrap();
     let result = block_on(engine.execute("z = 5;\n")).unwrap();
@@ -87,6 +119,22 @@ fn test_fprintf_does_not_print_ans() {
     let stdout = collect_stdout_texts(&result);
     assert_eq!(stdout, vec!["foo"]);
     assert!(stdout.iter().all(|line| !line.contains("ans =")));
+}
+
+#[test]
+fn test_disp_streams_include_line_breaks() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+    let result = block_on(engine.execute("disp('alpha')\ndisp('beta')")).unwrap();
+    let stdout = collect_stdout_stream(&result);
+    assert_eq!(stdout, "alpha\nbeta\n");
+}
+
+#[test]
+fn test_fprintf_streams_remain_exact_chunks() {
+    let mut engine = gc_test_context(RunMatSession::new).unwrap();
+    let result = block_on(engine.execute("fprintf('a'); fprintf('b');")).unwrap();
+    let stdout = collect_stdout_stream(&result);
+    assert_eq!(stdout, "ab");
 }
 
 /// Test semicolon suppression with function calls
@@ -210,6 +258,15 @@ fn collect_stdout_texts(result: &ExecutionResult) -> Vec<String> {
         .filter(|entry| entry.stream == ExecutionStreamKind::Stdout)
         .map(|entry| entry.text.trim().to_string())
         .collect()
+}
+
+fn collect_stdout_stream(result: &ExecutionResult) -> String {
+    result
+        .streams
+        .iter()
+        .filter(|entry| entry.stream == ExecutionStreamKind::Stdout)
+        .map(|entry| entry.text.as_str())
+        .collect::<String>()
 }
 
 #[test]

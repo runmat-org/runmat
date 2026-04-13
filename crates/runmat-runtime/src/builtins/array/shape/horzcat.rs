@@ -328,6 +328,27 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn string_and_char_arrays_concatenate() {
+        let left = StringArray::new(vec!["wn = ".into()], vec![1, 1]).unwrap();
+        let mid = CharArray::new_row("6");
+        let right = StringArray::new(vec![" rad/s".into()], vec![1, 1]).unwrap();
+        let result = horzcat_builtin(vec![
+            Value::StringArray(left),
+            Value::CharArray(mid),
+            Value::StringArray(right),
+        ])
+        .expect("horzcat mixed");
+        match result {
+            Value::StringArray(arr) => {
+                assert_eq!(arr.shape, vec![1, 3]);
+                assert_eq!(arr.data, vec!["wn = ", "6", " rad/s"]);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn mismatched_rows_error_mentions_horzcat() {
         let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let b = Tensor::new(vec![3.0, 4.0, 5.0], vec![3, 1]).unwrap();

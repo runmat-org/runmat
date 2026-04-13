@@ -1,0 +1,101 @@
+{
+  "title": "clc",
+  "category": "io",
+  "keywords": [
+    "clc",
+    "clear console",
+    "command window",
+    "console",
+    "screen"
+  ],
+  "summary": "Request that the host clear the visible Command Window or console display.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/clc.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Runs entirely on the host. It emits a control event rather than operating on array data."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": null,
+    "integration": "command_controls::clc_emits_clear_screen_control_stream"
+  },
+  "description": "`clc` clears the visible console by emitting a clear-screen control event that the active host interprets. In terminal hosts this maps to an ANSI clear sequence, and in WASM hosts it is surfaced as a `clear` stream entry so the embedding UI can wipe its displayed output.",
+  "behaviors": [
+    "`clc` accepts no input arguments.",
+    "The builtin does not print text itself. Instead it records a clear-screen control event in the execution stream.",
+    "Terminal hosts may translate that control event into an ANSI screen clear, while WASM hosts receive it as a stream entry with `stream = 'clear'`.",
+    "`clc` affects the visible console display only. It does not change workspace variables, figures, or execution state.",
+    "Passing any input arguments raises a MATLAB-style builtin error."
+  ],
+  "examples": [
+    {
+      "description": "Clear the command window after printing a message",
+      "input": "disp('hello');\nclc;",
+      "output": "% The host clears the visible console after displaying hello"
+    },
+    {
+      "description": "Use clc between interactive steps",
+      "input": "disp('Step 1 complete');\nclc;\ndisp('Ready for the next command')",
+      "output": "% Only the later output remains visible if the host honors clear-screen events"
+    },
+    {
+      "description": "Calling clc with inputs is invalid",
+      "input": "clc(1)",
+      "output": "clc: expected no input arguments"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `clc` delete previous output permanently?",
+      "answer": "It requests that the active host clear the visible console. Whether historical output remains available elsewhere depends on the host application."
+    },
+    {
+      "question": "What does WASM receive for `clc`?",
+      "answer": "WASM hosts receive a stdout-like stream entry with `stream = 'clear'`, which the embedding UI should interpret by wiping its rendered console output."
+    },
+    {
+      "question": "Does `clc` change variables or figures?",
+      "answer": "No. `clc` only targets the visible console. Use `clear` for workspace variables and `close all` for figures."
+    },
+    {
+      "question": "Can I pass arguments to `clc`?",
+      "answer": "No. The current implementation matches MATLAB's zero-input usage and raises an error when arguments are supplied."
+    },
+    {
+      "question": "Does GPU residency matter for `clc`?",
+      "answer": "No. `clc` is purely a host-side control event and never interacts with GPU providers."
+    }
+  ],
+  "links": [
+    {
+      "label": "disp",
+      "url": "./disp"
+    },
+    {
+      "label": "clear",
+      "url": "./clear"
+    },
+    {
+      "label": "close",
+      "url": "./close"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/io/clc.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/io/clc.rs"
+  },
+  "gpu_behavior": [
+    "`clc` is a host-side control builtin. It emits a clear-screen event and does not perform numeric computation, array traversal, or GPU provider calls."
+  ]
+}

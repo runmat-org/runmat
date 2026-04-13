@@ -967,6 +967,11 @@ async fn overidx_rdivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> 
     Ok(Value::Num(k / r))
 }
 
+#[runmat_macros::runtime_builtin(name = "OverIdx.mrdivide", builtin_path = "crate")]
+async fn overidx_mrdivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+    overidx_rdivide(obj, rhs).await
+}
+
 #[runmat_macros::runtime_builtin(name = "OverIdx.ldivide", builtin_path = "crate")]
 async fn overidx_ldivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
     let o = match obj {
@@ -980,6 +985,11 @@ async fn overidx_ldivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> 
     };
     let r: f64 = (&rhs).try_into()?;
     Ok(Value::Num(r / k))
+}
+
+#[runmat_macros::runtime_builtin(name = "OverIdx.mldivide", builtin_path = "crate")]
+async fn overidx_mldivide(obj: Value, rhs: Value) -> crate::BuiltinResult<Value> {
+    overidx_ldivide(obj, rhs).await
 }
 
 #[runmat_macros::runtime_builtin(name = "OverIdx.and", builtin_path = "crate")]

@@ -171,6 +171,7 @@ impl Scatter3Plot {
 
     /// Generate render data for the renderer.
     pub fn render_data(&mut self) -> RenderData {
+        let bounds = self.bounds();
         let vertex_count = self.gpu_point_count.unwrap_or_else(|| {
             self.ensure_vertices();
             self.vertices
@@ -191,7 +192,7 @@ impl Scatter3Plot {
             vertices,
             indices: None,
             gpu_vertices: self.gpu_vertices.clone(),
-            bounds: None,
+            bounds: Some(bounds),
             material: Material {
                 albedo: Vec4::ONE,
                 roughness: 0.0,

@@ -1,0 +1,49 @@
+{
+  "title": "legend",
+  "category": "plotting",
+  "keywords": [
+    "legend",
+    "chart legend",
+    "display names",
+    "matlab legend",
+    "series labels"
+  ],
+  "summary": "Show and configure plot legends for labeled series, display names, and MATLAB `legend` workflows.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::legend::tests"
+  },
+  "description": "`legend` creates or updates the legend attached to the current axes, or to an explicit axes handle when one is passed. In RunMat, legends are subplot-local and participate in the plotting object system: the builtin returns a legend handle, display names from plotted objects are used automatically, and legend styling can be inspected or updated through `get` and `set`.",
+  "behaviors": [
+    "Calling `legend` with no label arguments uses plotted object display names when they are available.",
+    "Labels can be passed as separate strings, string arrays, or cell arrays, following common MATLAB `legend` workflows.",
+    "Legend visibility and style are axes-local, so enabling or hiding a legend in one subplot does not mutate every axes in the figure.",
+    "The returned handle can be used with `get` and `set` to inspect or update location, orientation, box visibility, font styling, and related legend properties."
+  ],
+  "examples": [
+    {
+      "description": "Build a legend from display names",
+      "input": "x = linspace(0, 2*pi, 200);\nh1 = plot(x, sin(x));\nset(h1, 'DisplayName', 'sin(x)');\nhold on;\nh2 = plot(x, cos(x));\nset(h2, 'DisplayName', 'cos(x)');\nlegend;"
+    },
+    {
+      "description": "Pass labels explicitly and position the legend",
+      "input": "plot(1:5, [1 2 3 4 5]);\nhold on;\nplot(1:5, [5 4 3 2 1]);\nlg = legend('rising', 'falling', 'Location', 'southwest');\nget(lg, 'Type')",
+      "output": "ans =\n    'legend'"
+    },
+    {
+      "description": "Keep legends subplot-local",
+      "input": "subplot(1, 2, 1);\nplot(1:5, 1:5);\nlegend('left');\nsubplot(1, 2, 2);\nplot(1:5, [5 4 3 2 1]);",
+      "output": "% Only the left subplot shows a legend"
+    }
+  ],
+  "links": [
+    { "label": "subplot", "url": "./subplot" },
+    { "label": "get", "url": "./get" },
+    { "label": "set", "url": "./set" },
+    { "label": "plot", "url": "./plot" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/legend.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/legend.rs"
+  }
+}

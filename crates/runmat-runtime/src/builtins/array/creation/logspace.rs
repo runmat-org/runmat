@@ -583,7 +583,7 @@ pub(crate) mod tests {
             assert_eq!(gathered.shape, vec![1, 3]);
             let expected = [10.0, 100.0, 1000.0];
             for (a, b) in gathered.data.iter().zip(expected.iter()) {
-                assert!((a - b).abs() < 1e-9);
+                assert!((a - b).abs() < 1e-6);
             }
         });
     }

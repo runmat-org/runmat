@@ -1,16 +1,19 @@
 //! MATLAB-compatible `fft2` builtin with GPU-aware semantics for RunMat.
 
-use super::common::{parse_length, tensor_to_complex_tensor, value_to_complex_tensor};
-use super::fft::{fft_complex_tensor, fft_download_gpu_result};
+use super::common::{
+    download_provider_complex_tensor, gather_gpu_complex_tensor, parse_2d_lengths_from_data,
+    parse_length, transform_axes_complex_tensor, value_to_complex_tensor, TransformDirection,
+};
+use super::fft::fft_complex_tensor;
 use crate::builtins::common::random_args::complex_tensor_into_value;
 use crate::builtins::common::spec::{
     BroadcastSemantics, BuiltinFusionSpec, BuiltinGpuSpec, ConstantStrategy, GpuOpKind,
     ProviderHook, ReductionNaN, ResidencyPolicy, ScalarType, ShapeRequirements,
 };
-use crate::builtins::common::{gpu_helpers, tensor};
+use crate::builtins::common::tensor;
 use crate::builtins::math::fft::type_resolvers::fft2_type;
 use crate::{build_runtime_error, BuiltinResult, RuntimeError};
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle};
+use runmat_accelerate_api::GpuTensorHandle;
 use runmat_builtins::{ComplexTensor, Value};
 use runmat_macros::runtime_builtin;
 
@@ -88,11 +91,12 @@ async fn fft2_gpu(
                         provider.free(&first).ok();
                         runmat_accelerate_api::clear_residency(&first);
                     }
-                    let complex = fft2_download_gpu_result(provider, &second).await?;
-                    return Ok(complex_tensor_into_value(complex));
+                    return Ok(Value::GpuTensor(second));
                 }
                 Err(_) => {
-                    let partial = fft2_download_gpu_result(provider, &first).await?;
+                    let partial =
+                        download_provider_complex_tensor(provider, &first, BUILTIN_NAME, true)
+                            .await?;
                     let completed = fft_complex_tensor(partial, lengths.1, Some(2))?;
                     return Ok(complex_tensor_into_value(completed));
                 }
@@ -103,19 +107,11 @@ async fn fft2_gpu(
     fft2_gpu_fallback(handle, lengths).await
 }
 
-async fn fft2_download_gpu_result(
-    provider: &dyn AccelProvider,
-    handle: &GpuTensorHandle,
-) -> BuiltinResult<ComplexTensor> {
-    fft_download_gpu_result(provider, handle, BUILTIN_NAME).await
-}
-
 async fn fft2_gpu_fallback(
     handle: GpuTensorHandle,
     lengths: (Option<usize>, Option<usize>),
 ) -> BuiltinResult<Value> {
-    let tensor = gpu_helpers::gather_tensor_async(&handle).await?;
-    let complex = tensor_to_complex_tensor(tensor, BUILTIN_NAME)?;
+    let complex = gather_gpu_complex_tensor(&handle, BUILTIN_NAME).await?;
     let transformed = fft2_complex_tensor(complex, lengths)?;
     Ok(complex_tensor_into_value(transformed))
 }
@@ -125,8 +121,12 @@ fn fft2_complex_tensor(
     lengths: (Option<usize>, Option<usize>),
 ) -> BuiltinResult<ComplexTensor> {
     let (len_rows, len_cols) = lengths;
-    let first = fft_complex_tensor(tensor, len_rows, Some(1))?;
-    fft_complex_tensor(first, len_cols, Some(2))
+    transform_axes_complex_tensor(
+        tensor,
+        &[len_rows, len_cols],
+        TransformDirection::Forward,
+        BUILTIN_NAME,
+    )
 }
 
 fn parse_fft2_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<usize>)> {
@@ -146,11 +146,11 @@ fn parse_fft2_arguments(args: &[Value]) -> BuiltinResult<(Option<usize>, Option<
 
 fn parse_fft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usize>)> {
     match value {
-        Value::Tensor(tensor) => parse_length_pair(&tensor.data, BUILTIN_NAME),
+        Value::Tensor(tensor) => parse_2d_lengths_from_data(&tensor.data, BUILTIN_NAME),
         Value::LogicalArray(logical) => {
             let tensor = tensor::logical_to_tensor(logical)
                 .map_err(|e| fft2_error(format!("{BUILTIN_NAME}: {e}")))?;
-            parse_length_pair(&tensor.data, BUILTIN_NAME)
+            parse_2d_lengths_from_data(&tensor.data, BUILTIN_NAME)
         }
         Value::Num(_) | Value::Int(_) => {
             let len = parse_length(value, BUILTIN_NAME)?;
@@ -185,32 +185,14 @@ fn parse_fft2_single(value: &Value) -> BuiltinResult<(Option<usize>, Option<usiz
     }
 }
 
-fn parse_length_pair(data: &[f64], builtin: &str) -> BuiltinResult<(Option<usize>, Option<usize>)> {
-    match data.len() {
-        0 => Ok((None, None)),
-        1 => {
-            let scalar = Value::Num(data[0]);
-            let len = parse_length(&scalar, builtin)?;
-            Ok((len, len))
-        }
-        2 => {
-            let first = Value::Num(data[0]);
-            let second = Value::Num(data[1]);
-            let len_rows = parse_length(&first, builtin)?;
-            let len_cols = parse_length(&second, builtin)?;
-            Ok((len_rows, len_cols))
-        }
-        _ => Err(fft2_error(format!(
-            "{builtin}: size vector must contain at most two elements"
-        ))),
-    }
-}
-
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
+    use crate::builtins::math::fft::common;
     use futures::executor::block_on;
+    #[cfg(feature = "wgpu")]
+    use runmat_accelerate_api::AccelProvider;
     use runmat_accelerate_api::HostTensorView;
     use runmat_builtins::{IntValue, ResolveContext, Tensor, Type};
 
@@ -220,6 +202,20 @@ pub(crate) mod tests {
 
     fn error_message(error: crate::RuntimeError) -> String {
         error.message().to_string()
+    }
+
+    fn value_to_host_complex(value: Value) -> ComplexTensor {
+        match value {
+            Value::ComplexTensor(ct) => ct,
+            Value::GpuTensor(handle) => {
+                let provider = runmat_accelerate_api::provider_for_handle(&handle)
+                    .or_else(runmat_accelerate_api::provider)
+                    .expect("provider for gpu handle");
+                let host = block_on(provider.download(&handle)).expect("download gpu fft2 output");
+                common::host_to_complex_tensor(host, BUILTIN_NAME).expect("decode gpu complex")
+            }
+            other => panic!("expected complex value, got {other:?}"),
+        }
     }
 
     #[test]
@@ -333,15 +329,12 @@ pub(crate) mod tests {
             let handle = provider.upload(&view).expect("upload");
             let gpu = fft2_builtin(Value::GpuTensor(handle), Vec::new()).expect("fft2 gpu");
             let cpu = fft2_builtin(Value::Tensor(tensor), Vec::new()).expect("fft2 cpu");
-            match (gpu, cpu) {
-                (Value::ComplexTensor(g), Value::ComplexTensor(c)) => {
-                    assert_eq!(g.shape, c.shape);
-                    let tol = 1e-10;
-                    for (lhs, rhs) in g.data.iter().zip(c.data.iter()) {
-                        assert!(approx_eq(*lhs, *rhs, tol), "{lhs:?} vs {rhs:?}");
-                    }
-                }
-                other => panic!("unexpected results {other:?}"),
+            let g = value_to_host_complex(gpu);
+            let c = value_to_host_complex(cpu);
+            assert_eq!(g.shape, c.shape);
+            let tol = 1e-10;
+            for (lhs, rhs) in g.data.iter().zip(c.data.iter()) {
+                assert!(approx_eq(*lhs, *rhs, tol), "{lhs:?} vs {rhs:?}");
             }
         });
     }
@@ -423,8 +416,8 @@ pub(crate) mod tests {
         let gpu_value =
             fft2_builtin(Value::GpuTensor(handle.clone()), Vec::new()).expect("fft2 gpu");
         let cpu_value = fft2_builtin(Value::Tensor(tensor_cpu), Vec::new()).expect("fft2 cpu");
-        let gpu_ct = value_to_complex_tensor(gpu_value, "fft2").expect("gpu complex tensor");
-        let cpu_ct = value_to_complex_tensor(cpu_value, "fft2").expect("cpu complex tensor");
+        let gpu_ct = value_to_host_complex(gpu_value);
+        let cpu_ct = value_to_host_complex(cpu_value);
         assert_eq!(gpu_ct.shape, cpu_ct.shape);
         let tol = match provider.precision() {
             runmat_accelerate_api::ProviderPrecision::F64 => 1e-10,

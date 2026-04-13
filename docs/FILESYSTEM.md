@@ -269,3 +269,12 @@ For high-throughput ingestion, `/fs/manifest/urls` returns presigned URLs for ea
 | `RUNMAT_FS_SHARD_THRESHOLD_BYTES` | Size at which sharding begins | No | `4294967296` (4 GB) |
 | `RUNMAT_FS_SHARD_SIZE_BYTES` | Shard size for large datasets | No | `536870912` (512 MB) |
 | `RUNMAT_FS_VERSION_RETENTION_MAX_VERSIONS` | Default history limit per file (0 = unlimited) | No | `0` |
+
+---
+
+## Related
+
+- [Versioning and History](/docs/versioning) -- automatic versioning, snapshots, and git export.
+- [Large Dataset Persistence](/docs/large-dataset-persistence) -- chunked, content-addressed storage for large arrays.
+- [CLI Reference](/docs/cli) -- filesystem subcommands and project management.
+- [Collaboration and Teams](/docs/collaboration) -- shared projects and real-time sync.

@@ -50,10 +50,12 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   return {
     title,
     description: guide.frontmatter.description,
+    alternates: { canonical: `https://runmat.com/resources/guides/${slug}` },
     openGraph: {
       title,
       description: guide.frontmatter.description,
       type: "article",
+      url: `https://runmat.com/resources/guides/${slug}`,
     },
   };
 }

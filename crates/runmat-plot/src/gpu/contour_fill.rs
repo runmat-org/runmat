@@ -1,5 +1,5 @@
 use crate::core::renderer::Vertex;
-use crate::core::scene::GpuVertexBuffer;
+use crate::core::scene::{DrawIndirectArgsRaw, GpuVertexBuffer};
 use crate::gpu::axis::{axis_storage_buffer, AxisData};
 use crate::gpu::shaders;
 use crate::gpu::{tuning, ScalarType};
@@ -30,12 +30,12 @@ struct ContourFillUniforms {
     x_len: u32,
     y_len: u32,
     color_table_len: u32,
-    level_count: u32,
+    band_count: u32,
     cell_count: u32,
     _pad: u32,
 }
 
-const TRI_VERTICES: usize = 6;
+const MAX_VERTICES_PER_INVOCATION: u32 = 36;
 
 pub fn pack_contour_fill_vertices(
     device: &Arc<wgpu::Device>,
@@ -61,8 +61,15 @@ pub fn pack_contour_fill_vertices(
     if cell_count == 0 {
         return Err("contourf: no cells available for fill generation".to_string());
     }
-    let vertex_count = cell_count
-        .checked_mul(TRI_VERTICES as u32)
+    let band_count = (inputs.level_values.len() as u32).saturating_sub(1);
+    if band_count == 0 {
+        return Err("contourf: at least one fill band is required".to_string());
+    }
+    let total_invocations = cell_count
+        .checked_mul(band_count)
+        .ok_or_else(|| "contourf: invocation count overflowed".to_string())?;
+    let vertex_count = total_invocations
+        .checked_mul(MAX_VERTICES_PER_INVOCATION)
         .ok_or_else(|| "contourf: vertex count overflowed".to_string())?;
 
     let workgroup_size = tuning::effective_workgroup_size();
@@ -97,13 +104,29 @@ pub fn pack_contour_fill_vertices(
         mapped_at_creation: false,
     }));
 
+    let indirect_args = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("contourf-gpu-indirect-args"),
+        size: std::mem::size_of::<DrawIndirectArgsRaw>() as u64,
+        usage: wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::INDIRECT
+            | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    }));
+    let init = DrawIndirectArgsRaw {
+        vertex_count: 0,
+        instance_count: 1,
+        first_vertex: 0,
+        first_instance: 0,
+    };
+    queue.write_buffer(&indirect_args, 0, bytemuck::bytes_of(&init));
+
     let uniforms = ContourFillUniforms {
         base_z: params.base_z,
         alpha: params.alpha,
         x_len: inputs.x_len,
         y_len: inputs.y_len,
         color_table_len: inputs.color_table.len() as u32,
-        level_count: inputs.level_values.len() as u32,
+        band_count,
         cell_count,
         _pad: 0,
     };
@@ -187,6 +210,16 @@ pub fn pack_contour_fill_vertices(
                 },
                 count: None,
             },
+            wgpu::BindGroupLayoutEntry {
+                binding: 7,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
         ],
     });
 
@@ -235,6 +268,10 @@ pub fn pack_contour_fill_vertices(
                 binding: 6,
                 resource: uniform_buffer.as_entire_binding(),
             },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: indirect_args.as_ref().as_entire_binding(),
+            },
         ],
     });
 
@@ -248,12 +285,16 @@ pub fn pack_contour_fill_vertices(
         });
         pass.set_pipeline(&pipeline);
         pass.set_bind_group(0, &bind_group, &[]);
-        let workgroups = cell_count.div_ceil(workgroup_size).max(1);
+        let workgroups = total_invocations.div_ceil(workgroup_size).max(1);
         pass.dispatch_workgroups(workgroups, 1, 1);
     }
     queue.submit(Some(encoder.finish()));
 
-    Ok(GpuVertexBuffer::new(output_buffer, vertex_count as usize))
+    Ok(GpuVertexBuffer::with_indirect(
+        output_buffer,
+        vertex_count as usize,
+        indirect_args,
+    ))
 }
 
 fn compile_shader(

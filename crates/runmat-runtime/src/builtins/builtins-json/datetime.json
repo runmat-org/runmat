@@ -1,0 +1,141 @@
+{
+  "title": "datetime",
+  "category": "datetime",
+  "keywords": [
+    "datetime",
+    "date",
+    "time",
+    "serial date number",
+    "datenum",
+    "Format",
+    "MATLAB compatibility"
+  ],
+  "summary": "Create MATLAB-compatible datetime arrays from components, text, or serial date numbers.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/datetime.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "datetime values are host-side objects backed by serial date tensors; there is no GPU-resident datetime type."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "integration": "runmat-ignition/tests/datetime.rs"
+  },
+  "description": "`datetime` constructs MATLAB-style datetime objects. RunMat currently supports creation from year-month-day component inputs, from text scalars or text arrays, from serial date numbers, and from numeric inputs marked with `ConvertFrom='datenum'`. The resulting object stores serial dates internally and exposes a writable `Format` property used by display, `string`, and `char` conversion.",
+  "behaviors": [
+    "`datetime()` with no arguments returns the current local date and time.",
+    "`datetime(Y, M, D)` and `datetime(Y, M, D, H, MN, S)` construct datetimes from numeric components. Scalar inputs expand to match non-scalar component arrays.",
+    "`datetime(text)` accepts string scalars, string arrays, and character vectors. Supported text includes common ISO-like forms, `dd-MMM-yyyy` forms, and `now`.",
+    "`datetime(serials, 'ConvertFrom', 'datenum')` interprets numeric values as MATLAB serial date numbers.",
+    "`datetime(serials)` also accepts raw serial date numbers for the current implementation, producing datetime values directly from those serials.",
+    "The `Format` property controls text rendering. Assigning `t.Format = 'yyyy-MM-dd HH:mm:ss'` updates how the object displays without changing the stored point in time.",
+    "Linear indexing `t(k)` is supported and returns datetime values.",
+    "Comparison operators and `plus`/`minus` day arithmetic are supported. Subtracting two datetime values returns numeric day deltas."
+  ],
+  "examples": [
+    {
+      "description": "Constructing a scalar datetime from numeric components",
+      "input": "t = datetime(2024, 4, 9, 13, 30, 0)",
+      "output": "t =\n  09-Apr-2024 13:30:00"
+    },
+    {
+      "description": "Parsing text into datetimes",
+      "input": "t = datetime([\"2024-04-09 13:30:00\"; \"2024-04-10 08:15:00\"])",
+      "output": "t =\n09-Apr-2024 13:30:00\n10-Apr-2024 08:15:00"
+    },
+    {
+      "description": "Creating datetimes from serial date numbers",
+      "input": "d = datetime([739351; 739352], 'ConvertFrom', 'datenum')",
+      "output": "d =\n09-Apr-2024 00:00:00\n10-Apr-2024 00:00:00"
+    },
+    {
+      "description": "Changing display format without changing the stored value",
+      "input": "t = datetime(2024, 4, 9, 13, 30, 0);\nt.Format = 'yyyy-MM-dd HH:mm:ss';\ndisp(t)",
+      "output": "2024-04-09 13:30:00"
+    },
+    {
+      "description": "Extracting calendar and clock components",
+      "input": "t = datetime(2024, 4, 9, 13, 30, 5);\ny = year(t)\nm = month(t)\nd = day(t)\nh = hour(t)",
+      "output": "y = 2024\nm = 4\nd = 9\nh = 13"
+    },
+    {
+      "description": "Adding days and subtracting datetimes",
+      "input": "t0 = datetime(2024, 4, 9);\nt1 = t0 + 7;\ndelta = t1 - t0",
+      "output": "delta = 7"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What does the `Format` property change?",
+      "answer": "Only the textual representation. The stored serial date number is unchanged, so comparisons and arithmetic still refer to the same instant."
+    },
+    {
+      "question": "How is subtraction interpreted?",
+      "answer": "Subtracting one datetime from another returns a numeric delta measured in days. Subtracting a numeric value from a datetime shifts it backward by that many days."
+    },
+    {
+      "question": "Can I index datetime arrays?",
+      "answer": "Yes. Linear `()` indexing is supported and preserves the datetime type."
+    },
+    {
+      "question": "Does `datetime` run on the GPU?",
+      "answer": "No. datetime values are represented as host-side objects. Numeric inputs may be gathered first, but the resulting datetime object remains on the CPU."
+    }
+  ],
+  "links": [
+    {
+      "label": "year",
+      "url": "./year"
+    },
+    {
+      "label": "month",
+      "url": "./month"
+    },
+    {
+      "label": "day",
+      "url": "./day"
+    },
+    {
+      "label": "hour",
+      "url": "./hour"
+    },
+    {
+      "label": "minute",
+      "url": "./minute"
+    },
+    {
+      "label": "second",
+      "url": "./second"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    },
+    {
+      "label": "disp",
+      "url": "./disp"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/datetime/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/datetime/mod.rs"
+  },
+  "gpu_residency": "No. RunMat represents `datetime` values as host-side objects with an internal serial-date tensor and a `Format` property. Even when the constructor receives gathered numeric data, the resulting object remains resident on the CPU.",
+  "gpu_behavior": [
+    "`datetime` does not allocate GPU objects or invoke provider kernels. If a numeric input originates on the GPU, RunMat gathers it before building the datetime object."
+  ]
+}

@@ -25,3 +25,11 @@ Power-step normalisation is a common pattern in iterative solvers. It shows up i
 - Very large `lhs`/`rhs` shapes may trip the provider’s matmul guardrails and force a fallback.
 
 If a workload should fuse but does not, enable `RUNMAT_DEBUG_FUSION=1` to have the planner print why a node was rejected, then compare against the criteria above.
+
+---
+
+## Related
+
+- [Introduction to RunMat Fusion](/docs/accelerate/fusion-intro) -- how RunMat manages GPU data residency.
+- [GPU Residency and Precision](/docs/accelerate/gpu-behavior) -- residency rules and precision guarantees.
+- [Matmul Epilogues](/docs/fusion/matmul-epilogue) -- fused scalar and vector operations after matrix multiplication.

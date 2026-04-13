@@ -20,6 +20,7 @@ pub struct NativeSurfaceRenderContext {
     config: PlotRenderConfig,
     pixels_per_point: f32,
     background_policy: BackgroundPolicy,
+    textmark: Option<String>,
     #[cfg(feature = "egui-overlay")]
     overlay: Option<NativeOverlayState>,
 }
@@ -82,6 +83,7 @@ impl NativeSurfaceRenderContext {
             config,
             pixels_per_point: 1.0,
             background_policy: BackgroundPolicy::ThemeDriven,
+            textmark: None,
             #[cfg(feature = "egui-overlay")]
             overlay,
         })
@@ -106,6 +108,13 @@ impl NativeSurfaceRenderContext {
         self.renderer.theme = theme.clone();
         self.config.theme = theme;
         self.apply_background_policy();
+    }
+
+    pub fn set_textmark(&mut self, textmark: Option<&str>) {
+        self.textmark = textmark
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned);
     }
 
     /// Render a figure directly into an externally-owned texture view.
@@ -141,6 +150,13 @@ impl NativeSurfaceRenderContext {
         camera: Option<&Camera>,
         axes_cameras: Option<&[Camera]>,
     ) -> Result<Vec<u8>, String> {
+        log::debug!(
+            "runmat-plot: native_surface.render_to_rgba.start width={} height={} axes={} overrides={}",
+            self.config.width.max(1),
+            self.config.height.max(1),
+            figure.axes_metadata.len(),
+            axes_cameras.map(|items| items.len()).unwrap_or(0)
+        );
         self.prepare_scene(figure, camera, axes_cameras);
 
         let width = self.config.width.max(1);
@@ -168,7 +184,13 @@ impl NativeSurfaceRenderContext {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("Native Surface RGBA Render Encoder"),
         });
+        log::debug!(
+            "runmat-plot: native_surface.render_to_rgba.render_scene width={} height={}",
+            width,
+            height
+        );
         self.render_scene_with_overlay(&mut encoder, &color_view)?;
+        log::debug!("runmat-plot: native_surface.render_to_rgba.render_scene_ok");
         queue.submit(std::iter::once(encoder.finish()));
 
         let bytes_per_pixel = 4u32;
@@ -206,9 +228,15 @@ impl NativeSurfaceRenderContext {
             },
         );
         queue.submit(std::iter::once(copy_encoder.finish()));
+        log::debug!(
+            "runmat-plot: native_surface.render_to_rgba.copy_submitted padded_bytes_per_row={} height={}",
+            padded_bytes_per_row,
+            height
+        );
 
         let slice = output_buffer.slice(..);
         map_read_async(device.as_ref(), &slice).await?;
+        log::debug!("runmat-plot: native_surface.render_to_rgba.readback_ready");
         let data = slice.get_mapped_range();
         let mut pixels = vec![0u8; (width * height * 4) as usize];
         for row in 0..height as usize {
@@ -219,6 +247,10 @@ impl NativeSurfaceRenderContext {
         }
         drop(data);
         output_buffer.unmap();
+        log::debug!(
+            "runmat-plot: native_surface.render_to_rgba.ok bytes={}",
+            pixels.len()
+        );
         Ok(pixels)
     }
 
@@ -261,6 +293,9 @@ impl NativeSurfaceRenderContext {
         #[cfg(feature = "egui-overlay")]
         {
             let Some(overlay) = self.overlay.as_mut() else {
+                log::debug!(
+                    "runmat-plot: native_surface.render_scene_with_overlay.branch_no_overlay"
+                );
                 return self
                     .renderer
                     .render_scene_to_target(encoder, target_view, &self.config)
@@ -268,6 +303,12 @@ impl NativeSurfaceRenderContext {
             };
 
             let start_time = Instant::now();
+            log::debug!(
+                "runmat-plot: native_surface.render_scene_with_overlay.start width={} height={} ppp={}",
+                self.config.width,
+                self.config.height,
+                self.pixels_per_point
+            );
             let mut plot_area_points: Option<egui::Rect> = None;
             let scene_stats = self.renderer.scene.statistics();
             let _ = self.renderer.calculate_data_bounds();
@@ -329,6 +370,31 @@ impl NativeSurfaceRenderContext {
                         &overlay_config,
                         overlay_metrics,
                     );
+                    if let Some(textmark) = self.textmark.as_deref() {
+                        let screen = ctx.screen_rect();
+                        let anchor = egui::pos2(screen.max.x - 8.0, screen.max.y - 6.0);
+                        let font =
+                            egui::FontId::proportional(11.0 * overlay_config.font_scale.max(0.8));
+                        let layer = egui::LayerId::new(
+                            egui::Order::Foreground,
+                            egui::Id::new("runmat_export_textmark"),
+                        );
+                        let painter = ctx.layer_painter(layer);
+                        painter.text(
+                            anchor + egui::vec2(1.0, 1.0),
+                            egui::Align2::RIGHT_BOTTOM,
+                            textmark,
+                            font.clone(),
+                            egui::Color32::from_rgba_premultiplied(0, 0, 0, 72),
+                        );
+                        painter.text(
+                            anchor,
+                            egui::Align2::RIGHT_BOTTOM,
+                            textmark,
+                            font,
+                            egui::Color32::from_rgba_premultiplied(226, 234, 245, 96),
+                        );
+                    }
                     plot_area_points = frame_info.plot_area;
                 },
             );
@@ -380,7 +446,16 @@ impl NativeSurfaceRenderContext {
             }
 
             let (rows, cols) = self.renderer.figure_axes_grid();
+            log::debug!(
+                "runmat-plot: native_surface.render_scene_with_overlay.axes_grid rows={} cols={} plot_area_present={}",
+                rows,
+                cols,
+                plot_area_points.is_some()
+            );
             if rows * cols > 1 {
+                log::debug!(
+                    "runmat-plot: native_surface.render_scene_with_overlay.branch_subplot_axes"
+                );
                 let rect_points = plot_area_points.unwrap_or_else(|| {
                     egui::Rect::from_min_size(
                         egui::Pos2::new(0.0, 0.0),
@@ -390,14 +465,51 @@ impl NativeSurfaceRenderContext {
                         ),
                     )
                 });
-                let rects =
-                    overlay
-                        .plot_overlay
-                        .compute_subplot_rects(rect_points, rows, cols, 8.0, 8.0);
+                let existing_rect_count = overlay.plot_overlay.axes_plot_rects().len();
+                log::debug!(
+                    "runmat-plot: native_surface.render_scene_with_overlay.subplot_rect_source rows={} cols={} existing_rects={} expected_rects={}",
+                    rows,
+                    cols,
+                    existing_rect_count,
+                    rows * cols
+                );
+                let rects = if overlay.plot_overlay.axes_plot_rects().len() == rows * cols {
+                    log::debug!(
+                        "runmat-plot: native_surface.render_scene_with_overlay.subplot_rect_source_existing rects={}",
+                        existing_rect_count
+                    );
+                    overlay.plot_overlay.axes_plot_rects().to_vec()
+                } else {
+                    log::debug!(
+                        "runmat-plot: native_surface.render_scene_with_overlay.subplot_rect_source_compute rect_points=({}, {})..({}, {})",
+                        rect_points.min.x,
+                        rect_points.min.y,
+                        rect_points.max.x,
+                        rect_points.max.y
+                    );
+                    overlay.plot_overlay.compute_subplot_plot_rects_snapped(
+                        rect_points,
+                        &self.renderer,
+                        1.0,
+                        ppp,
+                    )
+                };
+                log::debug!(
+                    "runmat-plot: native_surface.render_scene_with_overlay.subplot_rects_ready rects={}",
+                    rects.len()
+                );
                 let sw = self.config.width as f32;
                 let sh = self.config.height as f32;
                 let mut viewports: Vec<(u32, u32, u32, u32)> = Vec::with_capacity(rects.len());
-                for r in rects {
+                for (rect_index, r) in rects.into_iter().enumerate() {
+                    log::debug!(
+                        "runmat-plot: native_surface.render_scene_with_overlay.subplot_rect viewport_index={} rect=({}, {})..({}, {})",
+                        rect_index,
+                        r.min.x,
+                        r.min.y,
+                        r.max.x,
+                        r.max.y
+                    );
                     let mut rx = (r.min.x * ppp).round().max(0.0);
                     let mut ry = (r.min.y * ppp).round().max(0.0);
                     let mut rw = (r.width() * ppp).round().max(1.0);
@@ -415,7 +527,19 @@ impl NativeSurfaceRenderContext {
                         rh = (sh - ry).max(1.0);
                     }
                     viewports.push((rx as u32, ry as u32, rw as u32, rh as u32));
+                    log::debug!(
+                        "runmat-plot: native_surface.render_scene_with_overlay.subplot_viewport viewport_index={} viewport=({}, {}, {}, {})",
+                        rect_index,
+                        rx as u32,
+                        ry as u32,
+                        rw as u32,
+                        rh as u32
+                    );
                 }
+                log::debug!(
+                    "runmat-plot: native_surface.render_scene_with_overlay.subplot_viewports_ready count={}",
+                    viewports.len()
+                );
                 self.renderer
                     .render_axes_to_viewports(
                         encoder,
@@ -425,7 +549,14 @@ impl NativeSurfaceRenderContext {
                         &self.config,
                     )
                     .map_err(|err| format!("native surface subplot render failed: {err}"))?;
+                log::debug!(
+                    "runmat-plot: native_surface.render_scene_with_overlay.subplot_render_ok viewports={}",
+                    viewports.len()
+                );
             } else {
+                log::debug!(
+                    "runmat-plot: native_surface.render_scene_with_overlay.branch_single_axes"
+                );
                 {
                     let clear_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("runmat-native-single-axes-clear"),
@@ -452,10 +583,25 @@ impl NativeSurfaceRenderContext {
                 let mut cfg = self.config.clone();
                 cfg.width = vw.max(1);
                 cfg.height = vh.max(1);
-                let cam = self.renderer.camera().clone();
+                let cam = self
+                    .renderer
+                    .axes_camera(0)
+                    .cloned()
+                    .unwrap_or_else(|| self.renderer.camera().clone());
                 self.renderer
-                    .render_camera_to_viewport(encoder, target_view, (vx, vy, vw, vh), &cfg, &cam)
+                    .render_camera_to_viewport(
+                        encoder,
+                        target_view,
+                        (vx, vy, vw, vh),
+                        &cfg,
+                        &cam,
+                        0,
+                        true,
+                    )
                     .map_err(|err| format!("native surface viewport render failed: {err}"))?;
+                log::debug!(
+                    "runmat-plot: native_surface.render_scene_with_overlay.single_axes_render_ok"
+                );
             }
 
             {
@@ -476,6 +622,12 @@ impl NativeSurfaceRenderContext {
                 overlay
                     .egui_renderer
                     .render(&mut render_pass, &paint_jobs, &screen_descriptor);
+                log::debug!(
+                    "runmat-plot: native_surface.render_scene_with_overlay.overlay_ok paint_jobs={} textures_set={} textures_free={}",
+                    paint_jobs.len(),
+                    full_output.textures_delta.set.len(),
+                    full_output.textures_delta.free.len()
+                );
             }
 
             for id in &full_output.textures_delta.free {
@@ -521,10 +673,24 @@ async fn create_headless_context(
     width: u32,
     height: u32,
 ) -> Result<NativeSurfaceRenderContext, String> {
-    let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+    // Export paths provide theme/plot colors in display (sRGB) space, just like interactive
+    // surface rendering on most backends. Using an sRGB attachment here applies an extra
+    // linear->sRGB conversion and visibly washes out captures.
+    let format = wgpu::TextureFormat::Rgba8Unorm;
     if let Some(ctx) = crate::context::shared_wgpu_context() {
+        log::debug!(
+            "runmat-plot: native_surface.headless_context.branch_shared_context width={} height={}",
+            width,
+            height
+        );
         return NativeSurfaceRenderContext::new(ctx.device, ctx.queue, width, height, format).await;
     }
+
+    log::debug!(
+        "runmat-plot: native_surface.headless_context.branch_dedicated_context width={} height={}",
+        width,
+        height
+    );
 
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::default());
     let adapter = instance
@@ -539,7 +705,15 @@ async fn create_headless_context(
         .request_device(&wgpu::DeviceDescriptor::default(), None)
         .await
         .map_err(|err| format!("Failed to create device: {err}"))?;
-    NativeSurfaceRenderContext::new(Arc::new(device), Arc::new(queue), width, height, format).await
+    let context =
+        NativeSurfaceRenderContext::new(Arc::new(device), Arc::new(queue), width, height, format)
+            .await?;
+    log::debug!(
+        "runmat-plot: native_surface.headless_context.ready width={} height={}",
+        width,
+        height
+    );
+    Ok(context)
 }
 
 pub async fn render_figure_rgba_bytes_interactive_with_camera(
@@ -613,7 +787,12 @@ pub async fn render_figure_rgba_bytes_interactive_and_theme(
 fn encode_png_bytes(width: u32, height: u32, rgba: &[u8]) -> Result<Vec<u8>, String> {
     use image::{ImageBuffer, ImageFormat, Rgba};
 
-    let image = ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, rgba.to_vec())
+    let mut opaque = rgba.to_vec();
+    for pixel in opaque.chunks_exact_mut(4) {
+        pixel[3] = 255;
+    }
+
+    let image = ImageBuffer::<Rgba<u8>, _>::from_raw(width, height, opaque)
         .ok_or_else(|| "Failed to create image buffer for PNG encoding".to_string())?;
     let mut out = std::io::Cursor::new(Vec::new());
     image
@@ -641,6 +820,36 @@ pub async fn render_figure_png_bytes_interactive_and_theme(
     encode_png_bytes(width.max(1), height.max(1), &rgba)
 }
 
+pub async fn render_figure_png_bytes_interactive_and_theme_and_textmark(
+    figure: Figure,
+    width: u32,
+    height: u32,
+    theme: PlotThemeConfig,
+    textmark: Option<&str>,
+) -> Result<Vec<u8>, String> {
+    log::debug!(
+        "runmat-plot: render_figure_png_bytes_interactive_and_theme_and_textmark.start width={} height={} axes={} textmark={}",
+        width,
+        height,
+        figure.axes_metadata.len(),
+        textmark.unwrap_or("")
+    );
+    let mut context = create_headless_context(width.max(1), height.max(1)).await?;
+    log::debug!(
+        "runmat-plot: render_figure_png_bytes_interactive_and_theme_and_textmark.context_ready width={} height={}",
+        width.max(1),
+        height.max(1)
+    );
+    context.set_theme_config(theme);
+    context.set_textmark(textmark);
+    let rgba = context.render_to_rgba(&figure, None, None).await?;
+    log::debug!(
+        "runmat-plot: render_figure_png_bytes_interactive_and_theme_and_textmark.rgba_ready bytes={}",
+        rgba.len()
+    );
+    encode_png_bytes(width.max(1), height.max(1), &rgba)
+}
+
 pub async fn render_figure_png_bytes_interactive_with_camera(
     figure: Figure,
     width: u32,
@@ -663,6 +872,21 @@ pub async fn render_figure_png_bytes_interactive_with_camera_and_theme(
         figure, width, height, camera, theme,
     )
     .await?;
+    encode_png_bytes(width.max(1), height.max(1), &rgba)
+}
+
+pub async fn render_figure_png_bytes_interactive_with_camera_and_theme_and_textmark(
+    figure: Figure,
+    width: u32,
+    height: u32,
+    camera: &Camera,
+    theme: PlotThemeConfig,
+    textmark: Option<&str>,
+) -> Result<Vec<u8>, String> {
+    let mut context = create_headless_context(width.max(1), height.max(1)).await?;
+    context.set_theme_config(theme);
+    context.set_textmark(textmark);
+    let rgba = context.render_to_rgba(&figure, Some(camera), None).await?;
     encode_png_bytes(width.max(1), height.max(1), &rgba)
 }
 
@@ -693,5 +917,39 @@ pub async fn render_figure_png_bytes_interactive_with_axes_cameras_and_theme(
         theme,
     )
     .await?;
+    encode_png_bytes(width.max(1), height.max(1), &rgba)
+}
+
+pub async fn render_figure_png_bytes_interactive_with_axes_cameras_and_theme_and_textmark(
+    figure: Figure,
+    width: u32,
+    height: u32,
+    axes_cameras: &[Camera],
+    theme: PlotThemeConfig,
+    textmark: Option<&str>,
+) -> Result<Vec<u8>, String> {
+    log::debug!(
+        "runmat-plot: render_figure_png_bytes_interactive_with_axes_cameras_and_theme_and_textmark.start width={} height={} axes={} camera_overrides={} textmark={}",
+        width,
+        height,
+        figure.axes_metadata.len(),
+        axes_cameras.len(),
+        textmark.unwrap_or("")
+    );
+    let mut context = create_headless_context(width.max(1), height.max(1)).await?;
+    log::debug!(
+        "runmat-plot: render_figure_png_bytes_interactive_with_axes_cameras_and_theme_and_textmark.context_ready width={} height={}",
+        width.max(1),
+        height.max(1)
+    );
+    context.set_theme_config(theme);
+    context.set_textmark(textmark);
+    let rgba = context
+        .render_to_rgba(&figure, None, Some(axes_cameras))
+        .await?;
+    log::debug!(
+        "runmat-plot: render_figure_png_bytes_interactive_with_axes_cameras_and_theme_and_textmark.rgba_ready bytes={}",
+        rgba.len()
+    );
     encode_png_bytes(width.max(1), height.max(1), &rgba)
 }

@@ -26,3 +26,12 @@ This fusion targets covariance or Gram-matrix construction where a tall matrix i
 - Very large matrices may still trigger size guardrails in `provider_impl.rs`, forcing a fallback to the CPU implementation.
 
 If your program follows the pattern above and still falls back, confirm that the divisor literal matches either `size(X,1)` or `size(X,1)-1` exactly; otherwise the planner cannot classify the normalization.
+
+---
+
+## Related
+
+- [Introduction to RunMat Fusion](/docs/accelerate/fusion-intro) -- how RunMat manages GPU data residency.
+- [GPU Residency and Precision](/docs/accelerate/gpu-behavior) -- residency rules and precision guarantees.
+- [Explained Variance](/docs/fusion/explained-variance) -- keeping diag(Q' * G * Q) diagnostics on GPU.
+- [Reductions](/docs/fusion/reduction) -- fused sum, mean, and similar column/row reductions.

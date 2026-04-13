@@ -175,6 +175,7 @@ async fn fused_sum_mul_dim_n_equals_manual_for_n1_and_n2() {
                 cv.insert(v_dim, Value::Num(dim_val));
                 cv
             },
+            materialized_stores: Vec::new(),
             output: Some(v_y),
             kernel: FusionKernelSpec {
                 kind: FusionKind::Reduction,

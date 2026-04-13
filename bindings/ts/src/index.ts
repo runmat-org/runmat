@@ -140,6 +140,7 @@ export interface FigurePlotDescriptor {
 
 export type FigurePlotKind =
   | "line"
+  | "line3"
   | "scatter"
   | "bar"
   | "error_bar"
@@ -148,7 +149,6 @@ export type FigurePlotKind =
   | "area"
   | "quiver"
   | "pie"
-  | "image"
   | "surface"
   | "scatter3"
   | "contour"
@@ -202,7 +202,7 @@ export type PlotSurfaceEvent =
       metaKey?: boolean;
     };
 
-export type StdoutStreamKind = "stdout" | "stderr";
+export type StdoutStreamKind = "stdout" | "stderr" | "clear";
 
 export interface StdoutEntry {
   stream: StdoutStreamKind;
@@ -283,6 +283,39 @@ export interface FigureImageOptions {
   handle?: number;
   width?: number;
   height?: number;
+  cameraState?: FigureImageCameraState;
+  textmark?: string;
+}
+
+export type FigureImageCameraProjectionState =
+  | {
+      kind: "perspective";
+      fov: number;
+      near: number;
+      far: number;
+    }
+  | {
+      kind: "orthographic";
+      left: number;
+      right: number;
+      bottom: number;
+      top: number;
+      near: number;
+      far: number;
+    };
+
+export interface FigureImageAxesCameraState {
+  position: [number, number, number];
+  target: [number, number, number];
+  up: [number, number, number];
+  zoom: number;
+  aspectRatio: number;
+  projection: FigureImageCameraProjectionState;
+}
+
+export interface FigureImageCameraState {
+  activeAxes: number;
+  axes: FigureImageAxesCameraState[];
 }
 
 export interface FigureBindingError extends Error {
@@ -675,6 +708,19 @@ interface RunMatNativeModule {
   closeFigure?: (handle: number | null) => number;
   currentAxesInfo?: () => AxesInfo;
   renderFigureImage?: (handle: number | null, width: number, height: number) => Promise<Uint8Array>;
+  renderFigureImageWithTextmark?: (
+    handle: number | null,
+    width: number,
+    height: number,
+    textmark?: string
+  ) => Promise<Uint8Array>;
+  renderFigureImageWithCameraState?: (
+    handle: number | null,
+    width: number,
+    height: number,
+    cameraState: FigureImageCameraState,
+    textmark?: string
+  ) => Promise<Uint8Array>;
   subscribeStdout?: (listener: (entry: StdoutEntry) => void) => number;
   unsubscribeStdout?: (id: number) => void;
   subscribeRuntimeLog?: (listener: (entry: RuntimeLogEntry) => void) => number;
@@ -1025,8 +1071,28 @@ export async function renderFigureImage(options: FigureImageOptions = {}): Promi
   const handle = typeof options.handle === "number" ? options.handle : null;
   const width = options.width ?? 0;
   const height = options.height ?? 0;
+  const hasTextmark = typeof options.textmark === "string";
+  const textmark = hasTextmark ? options.textmark : undefined;
   try {
-    const bytes = await native.renderFigureImage(handle, width, height);
+    let bytes: Uint8Array | ArrayLike<number> | null | undefined;
+    if (options.cameraState) {
+        if (typeof native.renderFigureImageWithCameraState !== "function") {
+          throw new Error(
+            "The loaded runmat-wasm module does not support renderFigureImageWithCameraState yet."
+          );
+        }
+        bytes = await native.renderFigureImageWithCameraState(
+          handle,
+          width,
+          height,
+          options.cameraState,
+          textmark
+        );
+    } else if (hasTextmark && typeof native.renderFigureImageWithTextmark === "function") {
+      bytes = await native.renderFigureImageWithTextmark(handle, width, height, textmark);
+    } else {
+      bytes = await native.renderFigureImage(handle, width, height);
+    }
     if (bytes instanceof Uint8Array) {
       return bytes;
     }
@@ -1060,8 +1126,8 @@ export async function importFigureScene(scene: Uint8Array): Promise<number | nul
   try {
     const handle = await native.importFigureScene(scene);
     return typeof handle === "number" ? handle : null;
-  } catch {
-    return null;
+  } catch (error) {
+    throw coerceFigureError(error);
   }
 }
 
@@ -1073,8 +1139,8 @@ export async function importFigureSceneFromPath(path: string): Promise<number | 
   try {
     const handle = await native.importFigureSceneFromPath(path);
     return typeof handle === "number" ? handle : null;
-  } catch {
-    return null;
+  } catch (error) {
+    throw coerceFigureError(error);
   }
 }
 
@@ -1217,8 +1283,8 @@ class WebRunMatSession implements RunMatSessionHandle {
     try {
       const handle = await this.native.importFigureScene(scene);
       return typeof handle === "number" ? handle : null;
-    } catch {
-      return null;
+    } catch (error) {
+      throw coerceFigureError(error);
     }
   }
 
@@ -1230,8 +1296,8 @@ class WebRunMatSession implements RunMatSessionHandle {
     try {
       const handle = await this.native.importFigureSceneFromPath(path);
       return typeof handle === "number" ? handle : null;
-    } catch {
-      return null;
+    } catch (error) {
+      throw coerceFigureError(error);
     }
   }
 

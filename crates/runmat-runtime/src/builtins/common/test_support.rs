@@ -1,6 +1,7 @@
 use crate::build_runtime_error;
 use futures::executor::block_on;
 use runmat_builtins::{LogicalArray, Tensor, Value};
+use std::sync::{Mutex, MutexGuard, OnceLock};
 
 pub mod fs {
     use std::io;
@@ -33,10 +34,33 @@ pub mod fs {
 
 /// Ensure an in-process acceleration provider is registered for tests,
 /// invoking the supplied closure with the provider trait object.
+pub struct AccelTestGuard {
+    _guard: MutexGuard<'static, ()>,
+}
+
+impl Drop for AccelTestGuard {
+    fn drop(&mut self) {
+        runmat_accelerate_api::set_thread_provider(None);
+        runmat_accelerate_api::clear_provider();
+    }
+}
+
+pub fn accel_test_lock() -> AccelTestGuard {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    let guard = LOCK
+        .get_or_init(|| Mutex::new(()))
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    runmat_accelerate_api::set_thread_provider(None);
+    runmat_accelerate_api::clear_provider();
+    AccelTestGuard { _guard: guard }
+}
+
 pub fn with_test_provider<F, R>(f: F) -> R
 where
     F: FnOnce(&'static dyn runmat_accelerate_api::AccelProvider) -> R,
 {
+    let _guard = accel_test_lock();
     for _ in 0..5 {
         runmat_accelerate::simple_provider::register_inprocess_provider();
         runmat_accelerate::simple_provider::reset_inprocess_rng();

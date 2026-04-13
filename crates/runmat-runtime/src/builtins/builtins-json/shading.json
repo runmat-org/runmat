@@ -1,0 +1,43 @@
+{
+  "title": "shading",
+  "category": "plotting",
+  "keywords": [
+    "shading",
+    "surface shading",
+    "shading interp",
+    "shading flat",
+    "matlab shading"
+  ],
+  "summary": "Control flat, interpolated, or faceted surface shading with MATLAB `shading` workflows.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::cmds"
+  },
+  "description": "`shading` controls how surfaces and related scalar-field plots interpolate or facet their color/geometry presentation. In RunMat it is most relevant for the surface family (`surf`, `mesh`, `surfc`, `meshc`) and complements colormap-driven visualization workflows with the standard MATLAB `shading flat`, `shading interp`, and `shading faceted` styles.",
+  "behaviors": [
+    "`shading flat` uses flat shading across faces.",
+    "`shading interp` enables interpolated/smooth shading across the rendered surface.",
+    "`shading faceted` restores faceted surface presentation.",
+    "Shading state is subplot-local through the shared plotting metadata model."
+  ],
+  "examples": [
+    {
+      "description": "Apply interpolated shading to a surface",
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 50), linspace(-3, 3, 50));\nZ = sin(X) .* cos(Y);\nsurf(X, Y, Z);\nshading interp;"
+    },
+    {
+      "description": "Compare flat and faceted shading across subplots",
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 40), linspace(-3, 3, 40));\nZ = sin(X) .* cos(Y);\nsubplot(1, 2, 1);\nsurf(X, Y, Z);\nshading flat;\nsubplot(1, 2, 2);\nsurf(X, Y, Z);\nshading faceted;"
+    }
+  ],
+  "links": [
+    { "label": "surf", "url": "./surf" },
+    { "label": "mesh", "url": "./mesh" },
+    { "label": "colormap", "url": "./colormap" },
+    { "label": "colorbar", "url": "./colorbar" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs"
+  }
+}

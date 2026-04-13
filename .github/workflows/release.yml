@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to test
+        required: true
+        default: main
 
 permissions:
   contents: write
@@ -15,7 +21,183 @@ env:
   VERSION: ${{ github.ref_name }}
 
 jobs:
+  build-and-test:
+    runs-on: ["self-hosted", "windows", "GCP"]
+    env:
+      # Enable backtraces on CI to aid debugging of panics/segfaults
+      RUST_BACKTRACE: 1
+      MATRIX_NAME: windows-x86_64
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.inputs.ref || github.ref_name }}
+
+      - name: Validate Rust toolchain (Windows self-hosted)
+        shell: pwsh
+        env:
+          RUST_TOOLCHAIN: 1.90.0-x86_64-pc-windows-msvc
+          RUST_COMPONENTS: rustfmt clippy
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $toolchain = $env:RUST_TOOLCHAIN
+          $components = $env:RUST_COMPONENTS.Split(' ')
+          $userProfile = [Environment]::GetFolderPath('UserProfile')
+          $cargoHome = Join-Path $userProfile '.cargo'
+          $rustupHome = Join-Path $userProfile '.rustup'
+          $cargoBin = Join-Path $cargoHome 'bin'
+          $rustup = Join-Path $cargoBin 'rustup.exe'
+          $cargo = Join-Path $cargoBin 'cargo.exe'
+
+          if (-not (Test-Path $rustup)) {
+            throw "Missing rustup at $rustup. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+          }
+          if (-not (Test-Path $cargo)) {
+            throw "Missing cargo at $cargo. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+          }
+          $unexpectedCargoHome = [Environment]::GetEnvironmentVariable('CARGO_HOME', 'Machine')
+          if ($unexpectedCargoHome -and $unexpectedCargoHome -ne $cargoHome) {
+            throw "Machine CARGO_HOME is '$unexpectedCargoHome', but the runner account Rust install must live at $cargoHome."
+          }
+          $unexpectedRustupHome = [Environment]::GetEnvironmentVariable('RUSTUP_HOME', 'Machine')
+          if ($unexpectedRustupHome -and $unexpectedRustupHome -ne $rustupHome) {
+            throw "Machine RUSTUP_HOME is '$unexpectedRustupHome', but the runner account Rust install must live at $rustupHome."
+          }
+
+          Add-Content -Path $env:GITHUB_ENV -Value "CARGO_HOME=$cargoHome"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUSTUP_HOME=$rustupHome"
+          Add-Content -Path $env:GITHUB_ENV -Value "RUSTUP_TOOLCHAIN=$toolchain"
+          Add-Content -Path $env:GITHUB_PATH -Value $cargoBin
+
+          & $rustup which --toolchain $toolchain cargo | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "rustup which failed (exit $LASTEXITCODE) — toolchain $toolchain may not be installed." }
+          $installedComponents = & $rustup component list --toolchain $toolchain --installed
+          if ($LASTEXITCODE -ne 0) { throw "rustup component list failed (exit $LASTEXITCODE)." }
+          foreach ($component in $components) {
+            $componentPattern = '^{0}-' -f [regex]::Escape($component)
+            if (-not ($installedComponents | Select-String -Pattern $componentPattern -Quiet)) {
+              throw "Missing Rust component '$component' for toolchain $toolchain. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+            }
+          }
+          & $cargo -V
+          if ($LASTEXITCODE -ne 0) { throw "cargo -V failed (exit $LASTEXITCODE) — toolchain may be broken." }
+          & (Join-Path $cargoBin 'rustc.exe') -V
+          if ($LASTEXITCODE -ne 0) { throw "rustc -V failed (exit $LASTEXITCODE) — toolchain may be broken." }
+
+
+      - name: Validate Windows runner dependencies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $triplet = 'x64-windows'
+          $vcpkgRoot = if ($env:VCPKG_ROOT) { $env:VCPKG_ROOT } else { 'C:\vcpkg' }
+          $prefix = Join-Path $vcpkgRoot "installed\$triplet"
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+
+          if (-not (Test-Path $vswhere)) {
+            throw "vswhere.exe was not found. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+          }
+          $vsInstall = & $vswhere `
+            -latest `
+            -products * `
+            -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 `
+            -property installationPath
+          if (-not $vsInstall) {
+            throw "Visual Studio C++ Build Tools were not detected. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+          }
+          if (-not (Get-Command pkg-config -ErrorAction SilentlyContinue)) {
+            throw "pkg-config was not found on PATH. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+          }
+          if (-not (Get-Command perl -ErrorAction SilentlyContinue)) {
+            throw "Perl was not found on PATH. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+          }
+
+          $required = @(
+            (Join-Path $vcpkgRoot 'vcpkg.exe'),
+            (Join-Path $prefix 'include\zmq.h'),
+            (Join-Path $prefix 'lib\openblas.lib'),
+            (Join-Path $prefix 'lib\lapack.lib'),
+            (Join-Path $prefix 'lib\pkgconfig\libzmq.pc')
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) {
+              throw "Missing required Windows dependency artifact: $path. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+            }
+          }
+          $zmqImportLibs = Get-ChildItem -Path (Join-Path $prefix 'lib') -Filter '*zmq*.lib' -ErrorAction SilentlyContinue
+          if (-not $zmqImportLibs) {
+            throw "Missing required ZeroMQ import library under $prefix\lib. Provision the runner with scripts/bootstrap-windows-runner.ps1."
+          }
+
+          Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_ROOT=$vcpkgRoot"
+          Add-Content -Path $env:GITHUB_ENV -Value "VCPKG_DEFAULT_TRIPLET=$triplet"
+          Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_TRIPLET=$triplet"
+          Add-Content -Path $env:GITHUB_ENV -Value "VCPKGRS_DYNAMIC=1"
+          Add-Content -Path $env:GITHUB_ENV -Value "INCLUDE=$prefix\include;$env:INCLUDE"
+          Add-Content -Path $env:GITHUB_ENV -Value "LIB=$prefix\lib;$env:LIB"
+          Add-Content -Path $env:GITHUB_ENV -Value "ZMQ_PATH=$prefix"
+          Add-Content -Path $env:GITHUB_ENV -Value "ZMQ_INCLUDE_DIR=$prefix\include"
+          Add-Content -Path $env:GITHUB_ENV -Value "ZMQ_LIB_DIR=$prefix\lib"
+          Add-Content -Path $env:GITHUB_ENV -Value "PKG_CONFIG_PATH=$prefix\lib\pkgconfig"
+          Add-Content -Path $env:GITHUB_PATH -Value $vcpkgRoot
+          Add-Content -Path $env:GITHUB_PATH -Value "$prefix\bin"
+          Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIB_DIR=$prefix\lib"
+          Add-Content -Path $env:GITHUB_ENV -Value "BLAS_LIBS=openblas"
+          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIB_DIR=$prefix\lib"
+          Add-Content -Path $env:GITHUB_ENV -Value "LAPACK_LIBS=lapack;openblas"
+          Add-Content -Path $env:GITHUB_ENV -Value "OPENBLAS_DIR=$prefix"
+
+      - name: Format
+        run: cargo fmt -- --check
+
+      - name: Clippy (Windows)
+        shell: pwsh
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Test (Windows)
+        shell: pwsh
+        env:
+          RUST_BACKTRACE: 1
+          RUST_TEST_THREADS: 1
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo test --all-targets --all-features 2>&1 | Tee-Object -FilePath test.log
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Test Summary
+        if: always() && hashFiles('test.log') != ''
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const log = fs.readFileSync('test.log', 'utf8');
+            const matrixName = process.env.MATRIX_NAME || 'matrix';
+            let totalPassed = 0;
+            let totalFailed = 0;
+            let current = '';
+            const details = [];
+            for (const line of log.split('\n')) {
+              const run = line.match(/Running .*deps\/(.+?)-[a-f0-9]+\)/);
+              if (run) current = run[1];
+              const m = line.match(/test result: .*?(\d+) passed; (\d+) failed.*finished in ([0-9.]+)s/);
+              if (m) {
+                const passed = parseInt(m[1], 10);
+                const failed = parseInt(m[2], 10);
+                totalPassed += passed;
+                totalFailed += failed;
+                details.push(`- ${matrixName} / ${current || 'crate'}: ${passed} passed, ${failed} failed (${m[3]}s)`);
+                current = '';
+              }
+            }
+            let body = '**Test Summary**\n';
+            body += details.join('\n');
+            body += `\n**Totals**: ${totalPassed} passed, ${totalFailed} failed`;
+            console.log(body);
+  
   build-release:
+    if: github.event_name == 'push'
     environment: Production
     name: Build ${{ matrix.platform.release_for }}
     env:
@@ -251,8 +433,9 @@ jobs:
             runmat-*.zip
 
   create-release:
+    if: github.event_name == 'push'
     name: Create Release
-    needs: [build-release]
+    needs: [build-and-test, build-release]
     environment: Production
     runs-on: ubuntu-latest
     steps:
@@ -301,6 +484,7 @@ jobs:
           prerelease: false
 
   publish-crates:
+    if: github.event_name == 'push'
     name: Publish crates to crates.io
     needs: [create-release]
     environment: Production
@@ -364,6 +548,7 @@ jobs:
             --token "$CARGO_REGISTRY_TOKEN"
 
   publish-bindings:
+    if: github.event_name == 'push'
     name: Test & publish wasm bindings to npm
     needs: [create-release]
     environment: Production

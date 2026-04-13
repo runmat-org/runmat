@@ -1086,3 +1086,206 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
     }
 }
 "#;
+
+// ---------------------------------------------------------------------------
+// peaks – generate Z from an n×n grid spanning [-3, 3] × [-3, 3]
+// Column-major storage: element (row, col) lives at index row + col * n.
+// X axis (columns) and Y axis (rows) are both linspace(-3, 3, n).
+// ---------------------------------------------------------------------------
+
+pub const PEAKS_SHADER_F64: &str = r#"
+struct Tensor {
+    data: array<f64>,
+};
+
+struct PeaksParams {
+    n: u32,
+    total: u32,
+    chunk: u32,
+    offset: u32,
+};
+
+@group(0) @binding(0) var<storage, read_write> Out: Tensor;
+@group(0) @binding(1) var<uniform> params: PeaksParams;
+
+fn peaks_at(x: f64, y: f64) -> f64 {
+    let one_minus_x = 1.0 - x;
+    let y_plus_one  = y + 1.0;
+    let x_plus_one  = x + 1.0;
+    let a = 3.0 * one_minus_x * one_minus_x * exp(-x * x - y_plus_one * y_plus_one);
+    let b = 10.0 * (x / 5.0 - x * x * x - y * y * y * y * y) * exp(-x * x - y * y);
+    let c = exp(-x_plus_one * x_plus_one - y * y) / 3.0;
+    return a - b - c;
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let local = gid.x;
+    if local >= params.chunk {
+        return;
+    }
+    let idx = params.offset + local;
+    if idx >= params.total {
+        return;
+    }
+    let n = params.n;
+    if n == 0u {
+        return;
+    }
+    let row = idx % n;
+    let col = idx / n;
+    var x: f64;
+    var y: f64;
+    if n == 1u {
+        x = 3.0;
+        y = 3.0;
+    } else {
+        let nm1 = f64(n - 1u);
+        x = -3.0 + 6.0 * f64(col) / nm1;
+        y = -3.0 + 6.0 * f64(row) / nm1;
+    }
+    Out.data[idx] = peaks_at(x, y);
+}
+"#;
+
+pub const PEAKS_SHADER_F32: &str = r#"
+struct Tensor {
+    data: array<f32>,
+};
+
+struct PeaksParams {
+    n: u32,
+    total: u32,
+    chunk: u32,
+    offset: u32,
+};
+
+@group(0) @binding(0) var<storage, read_write> Out: Tensor;
+@group(0) @binding(1) var<uniform> params: PeaksParams;
+
+fn peaks_at(x: f32, y: f32) -> f32 {
+    let one_minus_x = 1.0 - x;
+    let y_plus_one  = y + 1.0;
+    let x_plus_one  = x + 1.0;
+    let a = 3.0 * one_minus_x * one_minus_x * exp(-x * x - y_plus_one * y_plus_one);
+    let b = 10.0 * (x / 5.0 - x * x * x - y * y * y * y * y) * exp(-x * x - y * y);
+    let c = exp(-x_plus_one * x_plus_one - y * y) / 3.0;
+    return a - b - c;
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let local = gid.x;
+    if local >= params.chunk {
+        return;
+    }
+    let idx = params.offset + local;
+    if idx >= params.total {
+        return;
+    }
+    let n = params.n;
+    if n == 0u {
+        return;
+    }
+    let row = idx % n;
+    let col = idx / n;
+    var x: f32;
+    var y: f32;
+    if n == 1u {
+        x = 3.0;
+        y = 3.0;
+    } else {
+        let nm1 = f32(n - 1u);
+        x = -3.0 + 6.0 * f32(col) / nm1;
+        y = -3.0 + 6.0 * f32(row) / nm1;
+    }
+    Out.data[idx] = peaks_at(x, y);
+}
+"#;
+
+// ---------------------------------------------------------------------------
+// peaks_xy – evaluate the peaks formula at caller-supplied X, Y GPU tensors
+// Binding layout: 0=X (read), 1=Y (read), 2=Out (read_write), 3=params (uniform)
+// ---------------------------------------------------------------------------
+
+pub const PEAKS_XY_SHADER_F64: &str = r#"
+struct Tensor {
+    data: array<f64>,
+};
+
+struct PeaksXYParams {
+    total: u32,
+    chunk: u32,
+    offset: u32,
+    _pad: u32,
+};
+
+@group(0) @binding(0) var<storage, read> X: Tensor;
+@group(0) @binding(1) var<storage, read> Y: Tensor;
+@group(0) @binding(2) var<storage, read_write> Out: Tensor;
+@group(0) @binding(3) var<uniform> params: PeaksXYParams;
+
+fn peaks_at(x: f64, y: f64) -> f64 {
+    let one_minus_x = 1.0 - x;
+    let y_plus_one  = y + 1.0;
+    let x_plus_one  = x + 1.0;
+    let a = 3.0 * one_minus_x * one_minus_x * exp(-x * x - y_plus_one * y_plus_one);
+    let b = 10.0 * (x / 5.0 - x * x * x - y * y * y * y * y) * exp(-x * x - y * y);
+    let c = exp(-x_plus_one * x_plus_one - y * y) / 3.0;
+    return a - b - c;
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let local = gid.x;
+    if local >= params.chunk {
+        return;
+    }
+    let idx = params.offset + local;
+    if idx >= params.total {
+        return;
+    }
+    Out.data[idx] = peaks_at(X.data[idx], Y.data[idx]);
+}
+"#;
+
+pub const PEAKS_XY_SHADER_F32: &str = r#"
+struct Tensor {
+    data: array<f32>,
+};
+
+struct PeaksXYParams {
+    total: u32,
+    chunk: u32,
+    offset: u32,
+    _pad: u32,
+};
+
+@group(0) @binding(0) var<storage, read> X: Tensor;
+@group(0) @binding(1) var<storage, read> Y: Tensor;
+@group(0) @binding(2) var<storage, read_write> Out: Tensor;
+@group(0) @binding(3) var<uniform> params: PeaksXYParams;
+
+fn peaks_at(x: f32, y: f32) -> f32 {
+    let one_minus_x = 1.0 - x;
+    let y_plus_one  = y + 1.0;
+    let x_plus_one  = x + 1.0;
+    let a = 3.0 * one_minus_x * one_minus_x * exp(-x * x - y_plus_one * y_plus_one);
+    let b = 10.0 * (x / 5.0 - x * x * x - y * y * y * y * y) * exp(-x * x - y * y);
+    let c = exp(-x_plus_one * x_plus_one - y * y) / 3.0;
+    return a - b - c;
+}
+
+@compute @workgroup_size(@WG@)
+fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let local = gid.x;
+    if local >= params.chunk {
+        return;
+    }
+    let idx = params.offset + local;
+    if idx >= params.total {
+        return;
+    }
+    Out.data[idx] = peaks_at(X.data[idx], Y.data[idx]);
+}
+"#;

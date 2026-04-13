@@ -31,7 +31,7 @@ pub const GPU_SPEC: BuiltinGpuSpec = BuiltinGpuSpec {
     two_pass_threshold: None,
     workgroup_size: None,
     accepts_nan_mode: false,
-    notes: "Prefers the provider `mrdivide` hook; the WGPU provider currently performs the solve on the host and re-uploads the result.",
+    notes: "Prefers the provider `mrdivide` hook; WGPU currently supports selected real F32 device-resident square and rectangular solve cases, otherwise it performs the solve on the host and re-uploads the result.",
 };
 
 fn builtin_error(message: impl Into<String>) -> RuntimeError {
@@ -429,9 +429,28 @@ pub(crate) mod tests {
     use super::*;
     use crate::builtins::common::test_support;
     use futures::executor::block_on;
+    use runmat_accelerate_api::ProviderTelemetry;
     use runmat_builtins::{ResolveContext, Type};
     fn unwrap_error(err: crate::RuntimeError) -> crate::RuntimeError {
         err
+    }
+
+    fn fallback_count(telemetry: &ProviderTelemetry, reason: &str) -> u64 {
+        telemetry
+            .solve_fallbacks
+            .iter()
+            .find(|entry| entry.reason == reason)
+            .map(|entry| entry.count)
+            .unwrap_or(0)
+    }
+
+    fn host_mrdivide_real(lhs: &Tensor, rhs: &Tensor) -> Tensor {
+        super::mrdivide_host_real_for_provider(lhs, rhs).expect("host mrdivide")
+    }
+
+    fn clear_accel_provider_state() {
+        runmat_accelerate_api::set_thread_provider(None);
+        runmat_accelerate_api::clear_provider();
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -479,6 +498,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn solves_square_system() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
         let a = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![5.0, 7.0, 6.0, 8.0], vec![2, 2]).unwrap();
         let result = mrdivide_builtin(Value::Tensor(a), Value::Tensor(b)).expect("mrdivide");
@@ -493,14 +514,20 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn solves_least_squares() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
         let a = Tensor::new(vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0], vec![2, 3]).unwrap();
         let b = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![2, 3]).unwrap();
-        let result = mrdivide_builtin(Value::Tensor(a), Value::Tensor(b)).expect("mrdivide");
+        let result =
+            mrdivide_builtin(Value::Tensor(a.clone()), Value::Tensor(b.clone())).expect("mrdivide");
         let gathered = test_support::gather(result).expect("gather");
-        let expected = vec![1.0, 3.0, 2.0, 4.0];
-        assert_eq!(gathered.shape, vec![2, 2]);
-        for (val, exp) in gathered.data.iter().zip(expected.into_iter()) {
-            assert!((val - exp).abs() < 1e-10);
+        let expected = host_mrdivide_real(&a, &b);
+        assert_eq!(gathered.shape, expected.shape);
+        for (actual, expected) in gathered.data.iter().zip(expected.data.iter()) {
+            assert!(
+                (actual - expected).abs() < 1e-10,
+                "actual={actual} expected={expected}"
+            );
         }
     }
 
@@ -584,10 +611,175 @@ pub(crate) mod tests {
         });
     }
 
+    #[test]
+    fn provider_telemetry_records_gpu_host_reupload_path() {
+        test_support::with_test_provider(|provider| {
+            provider.reset_telemetry();
+            let a = Tensor::new(vec![1.0, 3.0, 2.0, 4.0], vec![2, 2]).unwrap();
+            let b = Tensor::new(vec![1.0, 0.0, 0.0, 1.0], vec![2, 2]).unwrap();
+            let ha = provider
+                .upload(&HostTensorView {
+                    data: &a.data,
+                    shape: &a.shape,
+                })
+                .expect("upload A");
+            let hb = provider
+                .upload(&HostTensorView {
+                    data: &b.data,
+                    shape: &b.shape,
+                })
+                .expect("upload B");
+
+            let _ = mrdivide_eval(&Value::GpuTensor(ha.clone()), &Value::GpuTensor(hb.clone()))
+                .expect("gpu mrdivide");
+
+            let telemetry = provider.telemetry_snapshot();
+            assert_eq!(telemetry.mrdivide.count, 1);
+            assert!(telemetry.upload_bytes > 0);
+            assert!(telemetry.download_bytes > 0);
+            assert_eq!(fallback_count(&telemetry, "mrdivide:host_reupload"), 1);
+
+            let _ = provider.free(&ha);
+            let _ = provider.free(&hb);
+        });
+    }
+
+    #[test]
+    fn scalar_gpu_rhs_falls_back_without_provider_solve_dispatch() {
+        test_support::with_test_provider(|provider| {
+            provider.reset_telemetry();
+            let matrix = Tensor::new(vec![2.0, 4.0, 6.0], vec![1, 3]).unwrap();
+            let scalar = Tensor::new(vec![2.0], vec![1, 1]).unwrap();
+            let hm = provider
+                .upload(&HostTensorView {
+                    data: &matrix.data,
+                    shape: &matrix.shape,
+                })
+                .expect("upload matrix");
+            let hs = provider
+                .upload(&HostTensorView {
+                    data: &scalar.data,
+                    shape: &scalar.shape,
+                })
+                .expect("upload scalar");
+
+            let result =
+                mrdivide_eval(&Value::GpuTensor(hm.clone()), &Value::GpuTensor(hs.clone()))
+                    .expect("fallback mrdivide");
+            let gathered = test_support::gather(result).expect("gather fallback");
+            assert_eq!(gathered.data, vec![1.0, 2.0, 3.0]);
+
+            let telemetry = provider.telemetry_snapshot();
+            assert_eq!(telemetry.mrdivide.count, 0);
+            assert_eq!(fallback_count(&telemetry, "mrdivide:host_reupload"), 0);
+            assert!(telemetry.download_bytes > 0);
+
+            let _ = provider.free(&hm);
+            let _ = provider.free(&hs);
+        });
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn wgpu_wide_path_avoids_host_reupload_fallback() {
+        let _accel_guard = test_support::accel_test_lock();
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let provider = match runmat_accelerate_api::provider() {
+            Some(p) => p,
+            None => panic!("wgpu provider not available"),
+        };
+        if provider.precision() != runmat_accelerate_api::ProviderPrecision::F32 {
+            return;
+        }
+        provider.reset_telemetry();
+
+        let a = Tensor::new(vec![1.0, 2.0, 2.0], vec![1, 3]).unwrap();
+        let b = Tensor::new(vec![1.0, 0.0, 0.0, 1.0, 1.0, 1.0], vec![2, 3]).unwrap();
+        let cpu_tensor = host_mrdivide_real(&a, &b);
+        provider.reset_telemetry();
+
+        let view_a = HostTensorView {
+            data: &a.data,
+            shape: &a.shape,
+        };
+        let view_b = HostTensorView {
+            data: &b.data,
+            shape: &b.shape,
+        };
+        let ha = provider.upload(&view_a).expect("upload A");
+        let hb = provider.upload(&view_b).expect("upload B");
+        let gpu_value = mrdivide_eval(&Value::GpuTensor(ha.clone()), &Value::GpuTensor(hb.clone()))
+            .expect("gpu mrdivide");
+        let gathered = test_support::gather(gpu_value).expect("gather");
+        let _ = provider.free(&ha);
+        let _ = provider.free(&hb);
+
+        assert_eq!(gathered.shape, cpu_tensor.shape);
+        assert!(gathered.data.iter().all(|value| value.is_finite()));
+
+        let telemetry = provider.telemetry_snapshot();
+        assert_eq!(telemetry.mrdivide.count, 1);
+        assert_eq!(fallback_count(&telemetry, "mrdivide:host_reupload"), 0);
+    }
+
+    #[cfg(feature = "wgpu")]
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn wgpu_square_path_avoids_host_reupload_fallback() {
+        let _accel_guard = test_support::accel_test_lock();
+        let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
+            runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
+        );
+        let provider = match runmat_accelerate_api::provider() {
+            Some(p) => p,
+            None => panic!("wgpu provider not available"),
+        };
+        if provider.precision() != runmat_accelerate_api::ProviderPrecision::F32 {
+            return;
+        }
+        provider.reset_telemetry();
+
+        let a = Tensor::new(vec![7.0, 8.0], vec![1, 2]).unwrap();
+        let b = Tensor::new(vec![3.0, 2.0, 1.0, 4.0], vec![2, 2]).unwrap();
+        let cpu = mrdivide_builtin(Value::Tensor(a.clone()), Value::Tensor(b.clone()))
+            .expect("cpu mrdivide");
+        let cpu_tensor = test_support::gather(cpu).expect("cpu gather");
+        provider.reset_telemetry();
+
+        let view_a = HostTensorView {
+            data: &a.data,
+            shape: &a.shape,
+        };
+        let view_b = HostTensorView {
+            data: &b.data,
+            shape: &b.shape,
+        };
+        let ha = provider.upload(&view_a).expect("upload A");
+        let hb = provider.upload(&view_b).expect("upload B");
+        let gpu_value = mrdivide_eval(&Value::GpuTensor(ha.clone()), &Value::GpuTensor(hb.clone()))
+            .expect("gpu mrdivide");
+        let gathered = test_support::gather(gpu_value).expect("gather");
+        let _ = provider.free(&ha);
+        let _ = provider.free(&hb);
+
+        assert_eq!(gathered.shape, cpu_tensor.shape);
+        for (gpu, cpu) in gathered.data.iter().zip(cpu_tensor.data.iter()) {
+            assert!((gpu - cpu).abs() < 1e-4, "gpu={gpu} cpu={cpu}");
+        }
+
+        let telemetry = provider.telemetry_snapshot();
+        assert_eq!(telemetry.mrdivide.count, 1);
+        assert_eq!(fallback_count(&telemetry, "mrdivide:host_reupload"), 0);
+    }
+
     #[cfg(feature = "wgpu")]
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn wgpu_round_trip_matches_cpu() {
+        let _accel_guard = test_support::accel_test_lock();
         let _ = runmat_accelerate::backend::wgpu::provider::register_wgpu_provider(
             runmat_accelerate::backend::wgpu::provider::WgpuProviderOptions::default(),
         );

@@ -7,6 +7,10 @@ import Link from "next/link";
 export const metadata: Metadata = {
   title: "RunMat License",
   description: "RunMat is licensed under the MIT License with Attribution Requirements and Commercial Scientific Software Company Copyleft Provisions. See runmat.com/license for the full license text.",
+  alternates: { canonical: "https://runmat.com/license" },
+  openGraph: {
+    url: "https://runmat.com/license",
+  },
 };
 
 const jsonLd = {

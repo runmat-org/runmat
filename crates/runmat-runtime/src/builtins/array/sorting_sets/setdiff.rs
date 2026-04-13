@@ -9,7 +9,7 @@ use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 
 use runmat_accelerate_api::{
-    GpuTensorHandle, HostTensorOwned, SetdiffOptions, SetdiffOrder, SetdiffResult,
+    GpuTensorHandle, GpuTensorStorage, HostTensorOwned, SetdiffOptions, SetdiffOrder, SetdiffResult,
 };
 use runmat_builtins::{CharArray, ComplexTensor, StringArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
@@ -1096,10 +1096,12 @@ impl SetdiffEvaluation {
             values: HostTensorOwned {
                 data: values_tensor.data,
                 shape: values_tensor.shape,
+                storage: GpuTensorStorage::Real,
             },
             ia: HostTensorOwned {
                 data: ia.data,
                 shape: ia.shape,
+                storage: GpuTensorStorage::Real,
             },
         })
     }

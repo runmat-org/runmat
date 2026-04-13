@@ -337,6 +337,22 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn string_and_char_arrays_vertical_concat() {
+        let top = StringArray::new(vec!["alpha".into()], vec![1, 1]).unwrap();
+        let bottom = CharArray::new_row("beta");
+        let result = vertcat_builtin(vec![Value::StringArray(top), Value::CharArray(bottom)])
+            .expect("vertcat mixed");
+        match result {
+            Value::StringArray(arr) => {
+                assert_eq!(arr.shape, vec![2, 1]);
+                assert_eq!(arr.data, vec!["alpha", "beta"]);
+            }
+            other => panic!("expected string array, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn mismatched_columns_error_mentions_vertcat() {
         let a = Tensor::new(vec![1.0, 2.0], vec![2, 1]).unwrap();
         let b = Tensor::new(vec![3.0, 4.0, 5.0, 6.0], vec![2, 2]).unwrap();

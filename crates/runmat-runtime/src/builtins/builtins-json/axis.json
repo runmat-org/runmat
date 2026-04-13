@@ -1,0 +1,48 @@
+{
+  "title": "axis",
+  "category": "plotting",
+  "keywords": [
+    "axis",
+    "axis limits",
+    "axis equal",
+    "axis tight",
+    "matlab axis"
+  ],
+  "summary": "Control axis limits, aspect behavior, and automatic fitting with MATLAB `axis` semantics.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::cmds"
+  },
+  "description": "`axis` is the compact plotting command for changing axes limits and aspect behavior. In RunMat it operates on the active axes state, so it is naturally used after plotting calls or within a selected subplot to reproduce MATLAB `axis` workflows such as `axis([xmin xmax ymin ymax])`, `axis equal`, `axis auto`, and `axis tight`.",
+  "behaviors": [
+    "Passing a four-element numeric vector sets `[xmin xmax ymin ymax]` directly.",
+    "`axis equal` enables equal aspect behavior on the current axes.",
+    "`axis auto` clears explicit limits and returns to automatic fitting.",
+    "`axis tight` uses data-driven fitting behavior while leaving figure-local plot contents unchanged.",
+    "Axis settings are subplot-local because they act on the active axes state."
+  ],
+  "examples": [
+    {
+      "description": "Set explicit x and y limits",
+      "input": "plot(0:0.1:10, sin(0:0.1:10));\naxis([0 10 -1 1]);"
+    },
+    {
+      "description": "Force equal axis scaling",
+      "input": "t = linspace(0, 2*pi, 200);\nplot(cos(t), sin(t));\naxis equal;"
+    },
+    {
+      "description": "Return to automatic fitting inside a subplot",
+      "input": "subplot(1, 2, 1);\nplot(1:5, [1 4 2 5 3]);\naxis tight;\nsubplot(1, 2, 2);\nplot(1:5, [5 4 3 2 1]);\naxis auto;"
+    }
+  ],
+  "links": [
+    { "label": "grid", "url": "./grid" },
+    { "label": "box", "url": "./box" },
+    { "label": "subplot", "url": "./subplot" },
+    { "label": "plot", "url": "./plot" }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs"
+  }
+}

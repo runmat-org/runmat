@@ -64,3 +64,11 @@ RunMat supports command-style invocation for the verbs below when `compat = "mat
 
 ### Future compatibility surfaces
 - New divergences or compat shims (e.g., potential Julia-inspired interop/syntax in the future) will be documented here as they are added.
+
+---
+
+## Related
+
+- [Language Coverage](/docs/language-coverage) -- MATLAB feature compatibility with an Octave comparison.
+- [Plotting](/docs/plotting) -- GPU-first plotting with MATLAB-familiar API.
+- [Configuration](/docs/configuration) -- configure RunMat files, environment overrides, and precedence.

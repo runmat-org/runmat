@@ -87,4 +87,13 @@ global and bypasses the accuracy protection described above.
 If you notice a workflow where these rules don’t line up with what you expect,
 file an issue and include the minimal script along with the provider telemetry
 (`runmat accel-info --json`). Keeping the policy simple and documented makes it
-easier for us to extend RunMat to new hardware without surprising anyone.*** End Patch
+easier for us to extend RunMat to new hardware without surprising anyone.
+
+---
+
+## Related
+
+- [Introduction to RunMat Fusion](/docs/accelerate/fusion-intro) -- how RunMat manages GPU data residency.
+- [Elementwise Chains](/docs/fusion/elementwise) -- fused arithmetic and transcendental expressions.
+- [Reductions](/docs/fusion/reduction) -- fused sum, mean, and similar column/row reductions.
+- [Configuration](/docs/configuration) -- configure RunMat files, environment overrides, and precedence.
