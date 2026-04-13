@@ -2766,8 +2766,19 @@ async fn run_interpreter_inner(
                 vars[i] = val;
                 WORKSPACE_STATE.with(|state| {
                     if let Some(ws) = state.borrow_mut().as_mut() {
-                        if let Some(name) = ws.idx_to_name.get(&i) {
-                            ws.assigned.insert(name.clone());
+                        let name = ws.idx_to_name.get(&i).cloned().or_else(|| {
+                            // After clear() the idx_to_name map is wiped, but the compiled
+                            // bytecode still uses the same slot indices.  Re-register the
+                            // name→idx mapping from the static bytecode var_names table so
+                            // that post-clear assignments are visible in the workspace.
+                            bytecode.var_names.get(&i).map(|n| {
+                                ws.names.entry(n.clone()).or_insert(i);
+                                ws.idx_to_name.entry(i).or_insert_with(|| n.clone());
+                                n.clone()
+                            })
+                        });
+                        if let Some(name) = name {
+                            ws.assigned.insert(name);
                         }
                     }
                 });
