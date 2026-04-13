@@ -161,26 +161,31 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
   };
   const pageJsonLdString = JSON.stringify(pageJsonLd).replace(/<\//g, "<\\/");
   const crumbs = findPathBySlug(slug) ?? [];
+  const breadcrumbItems = crumbs
+    .filter((c) => c.title)
+    .map((c) => {
+      const item = c.slug
+        ? `${baseUrl}/docs/${c.slug.join("/")}`
+        : c.externalHref
+          ? `${baseUrl}${c.externalHref}`
+          : undefined;
+      if (!item) return undefined;
+      return {
+        "@type": "ListItem" as const,
+        name: c.title,
+        item,
+      };
+    })
+    .filter((entry): entry is { "@type": "ListItem"; name: string; item: string } => Boolean(entry?.item));
   const breadcrumbJsonLd = {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
       { "@type": "ListItem", position: 1, name: "Docs", item: `${baseUrl}/docs` },
-      ...crumbs
-        .filter((c) => c.title)
-        .map((c, i) => {
-          const item = c.slug
-            ? `${baseUrl}/docs/${c.slug.join("/")}`
-            : c.externalHref
-              ? `${baseUrl}${c.externalHref}`
-              : undefined;
-          return {
-            "@type": "ListItem" as const,
-            position: i + 2,
-            name: c.title,
-            ...(item ? { item } : {}),
-          };
-        }),
+      ...breadcrumbItems.map((entry, i) => ({
+        ...entry,
+        position: i + 2,
+      })),
     ],
   };
   const breadcrumbJsonLdString = JSON.stringify(breadcrumbJsonLd).replace(/<\//g, "<\\/");
