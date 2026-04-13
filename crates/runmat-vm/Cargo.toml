@@ -1,0 +1,28 @@
+[package]
+name = "runmat-vm"
+version = "0.3.2"
+edition = "2021"
+authors = ["Dystr Team"]
+license-file = "../../LICENSE.md"
+description = "RunMat virtual machine and bytecode interpreter"
+homepage = "https://runmat.com"
+repository = "https://github.com/runmat-org/runmat"
+
+[dependencies]
+runmat-accelerate = { workspace = true, optional = true }
+runmat-builtins = { workspace = true }
+runmat-hir = { workspace = true }
+runmat-parser = { workspace = true }
+runmat-runtime = { workspace = true, default-features = false }
+runmat-thread-local = { workspace = true }
+runmat-time = { workspace = true }
+once_cell = { workspace = true }
+miette = { workspace = true }
+log = { workspace = true }
+serde = { version = "1.0", features = ["derive"] }
+
+[features]
+default = ["native-accel"]
+test-classes = []
+native-accel = ["dep:runmat-accelerate"]
+plot-core = []
