@@ -14,6 +14,7 @@ runmat-builtins = { workspace = true }
 runmat-hir = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-runtime = { workspace = true, default-features = false }
+runmat-thread-local = { workspace = true }
 once_cell = { workspace = true }
 miette = { workspace = true }
 serde = { version = "1.0", features = ["derive"] }

@@ -6003,6 +6003,7 @@ dependencies = [
  "runmat-hir",
  "runmat-parser",
  "runmat-runtime",
+ "runmat-thread-local",
  "serde",
 ]
 
