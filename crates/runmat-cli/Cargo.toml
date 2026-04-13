@@ -43,6 +43,7 @@ base64 = "0.22"
 rand = "0.8"
 sha2 = "0.10"
 webbrowser = "0.8"
+runmat-server-client = { workspace = true }
 
 # Ensure vendored OpenSSL can be enabled for cross targets (feature unification)
 openssl = { version = "0.10", optional = true }
@@ -81,8 +82,3 @@ vendored-openssl = ["openssl/vendored", "openssl-sys/vendored"]
 tempfile = "3.12" 
 serde_json = { workspace = true }
 openapiv3 = "2.0"
-
-[build-dependencies]
-progenitor = "0.11"
-openapiv3 = "2.0"
-serde_yaml = "0.9"
