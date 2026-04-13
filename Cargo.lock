@@ -5992,6 +5992,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-vm"
+version = "0.3.2"
+dependencies = [
+ "runmat-ignition",
+]
+
+[[package]]
 name = "runmat-wasm"
 version = "0.4.0"
 dependencies = [

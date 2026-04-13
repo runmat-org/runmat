@@ -5,6 +5,7 @@ members = [
     "crates/runmat-parser",
     "crates/runmat-hir",
     "crates/runmat-ignition",
+    "crates/runmat-vm",
     "crates/runmat-telemetry",
     "crates/runmat-accelerate-api",
     "crates/runmat-accelerate",
