@@ -91,13 +91,18 @@ fn clear_followed_by_assignments_shows_vars_in_workspace() {
     // Variables assigned after clear() in the same execution block must appear
     // in the workspace snapshot – the bug was that StoreVar did not re-register
     // names into ws.idx_to_name after workspace_clear() wiped the map.
-    let result = block_on(engine.execute(
-        "clear();\nXRange = -2:0.02:2;\nYRange = -2:0.02:2;\ndisp(YRange);",
-    ))
+    let result = block_on(
+        engine.execute("clear();\nXRange = -2:0.02:2;\nYRange = -2:0.02:2;\ndisp(YRange);"),
+    )
     .unwrap();
 
     assert!(result.error.is_none());
-    let names: Vec<&str> = result.workspace.values.iter().map(|e| e.name.as_str()).collect();
+    let names: Vec<&str> = result
+        .workspace
+        .values
+        .iter()
+        .map(|e| e.name.as_str())
+        .collect();
     assert!(
         names.contains(&"XRange"),
         "XRange should be in workspace after clear(); XRange = ...; got: {names:?}"
