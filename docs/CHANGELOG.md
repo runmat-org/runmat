@@ -4,7 +4,9 @@ _What's new across the RunMat runtime, cloud, and sandbox. For technical runtime
 
 ---
 
-## [v0.4.0](https://github.com/runmat-org/runmat/compare/v0.3.2...HEAD)
+## [v0.4.0](https://github.com/runmat-org/runmat/compare/v0.3.2...v0.4.0)
+
+_April 13, 2026_
 
 ### Runtime
 
@@ -38,7 +40,8 @@ Numerical computing:
 
 Other:
 - Add `clear`, `clc`, `close all` — session management commands now work in browser and native
-- Add duration display and datetime interop support
+- Add `datetime` — MATLAB-compatible construction, formatting, string conversion, and subtraction
+- Add `duration` — display, arithmetic, and datetime interop
 - Add [`peaks`](/docs/matlab-function-reference) builtin — GPU-accelerated with mixed-residency tensor support and type inference
 
 #### Changed
@@ -85,24 +88,15 @@ Other:
 ### Cloud
 
 #### Added
-- Add incremental streaming for the RunMat agent
 - Add durable persistence and replay for run artifacts
 
 ---
 
-## [v0.3.2](https://github.com/runmat-org/runmat/compare/v0.3.1...v0.3.2)
+## [v0.3.2](https://github.com/runmat-org/runmat/compare/v0.3.0...v0.3.2)
 
 _March 24, 2026_
 
-Deployment improvements for macOS, Windows, and Linux — no runtime or engine changes.
-
----
-
-## [v0.3.1](https://github.com/runmat-org/runmat/compare/v0.3.0...v0.3.1)
-
-_March 24, 2026_
-
-Infrastructure changes only — no runtime or engine changes.
+Deployment and infrastructure improvements for macOS, Windows, and Linux — no runtime or engine changes. Covers v0.3.1 through v0.3.2.
 
 ---
 
