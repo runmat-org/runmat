@@ -34,7 +34,10 @@ pub use runmat_vm::interpreter::api::{
     take_updated_workspace_state, InterpreterOutcome, InterpreterState, PendingWorkspaceGuard,
     DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
 };
-use runmat_vm::interpreter::errors::{attach_span_at, attach_span_from_pc, set_vm_pc};
+use runmat_vm::interpreter::errors::{
+    attach_span_at, attach_span_from_pc, ensure_runtime_error_identifier, mex, set_vm_pc,
+};
+use runmat_vm::interpreter::stack::{pop2, pop_args, pop_value};
 use runmat_vm::interpreter::timing::InterpreterTiming;
 use runmat_vm::runtime::call_stack::{
     attach_call_frames, error_namespace, push_call_frame,
@@ -317,19 +320,6 @@ fn log_fusion_span_window(
 }
 
 type VmResult<T> = Result<T, RuntimeError>;
-
-#[inline]
-fn mex(id: &str, msg: &str) -> RuntimeError {
-    // Normalize identifier to always use the configured namespace prefix.
-    // If caller passes "Namespace:suffix", strip the namespace and re-prefix with error_namespace().
-    let suffix = match id.find(':') {
-        Some(pos) => &id[pos + 1..],
-        None => id,
-    };
-    let ident = format!("{}:{suffix}", error_namespace());
-    let message = msg.to_string();
-    build_runtime_error(message).with_identifier(ident).build()
-}
 
 #[derive(Clone)]
 enum SliceSelector {
@@ -1629,7 +1619,7 @@ fn rel_binary_use_builtin(a: &Value, b: &Value) -> bool {
 }
 
 macro_rules! handle_rel_binary { ($op:tt, $name:literal, $stack:ident) => {{
-    let b = $stack.pop().ok_or(mex("StackUnderflow","stack underflow"))?; let a = $stack.pop().ok_or(mex("StackUnderflow","stack underflow"))?;
+    let (a, b) = pop2(&mut $stack)?;
     match (&a, &b) {
         (Value::Object(obj), _) => { let args = vec![Value::Object(obj.clone()), Value::String($name.to_string()), b.clone()]; match call_builtin_vm!("call_method", &args) { Ok(v) => $stack.push(v), Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; $stack.push(Value::Num(if aa $op bb {1.0}else{0.0})) } } }
         (_, Value::Object(obj)) => { let rev = match $name { "lt" => "gt", "le" => "ge", "gt" => "lt", "ge" => "le", other => other };
@@ -1788,10 +1778,7 @@ async fn run_interpreter_inner(
     let mut interpreter_timing = InterpreterTiming::new();
     macro_rules! vm_bail {
         ($err:expr) => {{
-            let mut err: RuntimeError = $err.into();
-            if err.identifier.is_none() {
-                err.identifier = Some(format!("{}:RuntimeError", error_namespace()));
-            }
+            let err: RuntimeError = ensure_runtime_error_identifier(($err).into());
             let err = attach_span_at(&bytecode, pc, err);
             if let Some((catch_pc, catch_var)) = try_stack.pop() {
                 if let Some(var_idx) = catch_var {
@@ -1918,50 +1905,27 @@ async fn run_interpreter_inner(
                 }
             }
             Instr::AndAnd(target) => {
-                let lhs: f64 = (&stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                    .try_into()?;
+                let lhs: f64 = (&pop_value(&mut stack)?).try_into()?;
                 if lhs == 0.0 {
                     pc = target;
                     continue;
                 }
             }
             Instr::OrOr(target) => {
-                let lhs: f64 = (&stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                    .try_into()?;
+                let lhs: f64 = (&pop_value(&mut stack)?).try_into()?;
                 if lhs != 0.0 {
                     pc = target;
                     continue;
                 }
             }
             Instr::Swap => {
-                let a = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let b = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let (b, a) = pop2(&mut stack)?;
                 stack.push(a);
                 stack.push(b);
             }
             Instr::CallFeval(argc) => {
-                // Pop explicit args
-                let mut args = Vec::with_capacity(argc);
-                for _ in 0..argc {
-                    args.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                args.reverse();
-                // Pop function value
-                let func_val = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let args = pop_args(&mut stack, argc)?;
+                let func_val = pop_value(&mut stack)?;
                 match func_val {
                     Value::Closure(c) => {
                         // User-defined function via closure: prepend captures then dispatch like CallFunction
