@@ -8,10 +8,10 @@ use clap::{Parser, Subcommand, ValueEnum};
 use env_logger::Env;
 use log::{debug, error, info, warn};
 use miette::{SourceOffset, SourceSpan};
+use runmat_server_client::auth::CredentialStoreMode;
 use std::env;
 use uuid::Uuid;
 
-mod public_api;
 mod remote;
 mod telemetry_sink;
 use runmat_accelerate::AccelerateInitOptions;
@@ -499,6 +499,9 @@ enum Commands {
         /// Email for interactive login
         #[arg(long)]
         email: Option<String>,
+        /// Credential storage mode: auto, secure, file, memory
+        #[arg(long, default_value = "file")]
+        credential_store: CredentialStoreMode,
         /// Default organization id
         #[arg(long)]
         org: Option<Uuid>,
@@ -1445,9 +1448,13 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatConfig) ->
             server,
             api_key,
             email,
+            credential_store,
             org,
             project,
-        } => remote::execute_login(server, api_key, email, org, project).await,
+        } => {
+            remote::execute_login_command(server, api_key, email, credential_store, org, project)
+                .await
+        }
         Commands::Org { org_command } => remote::execute_org_command(org_command).await,
         Commands::Project { project_command } => {
             remote::execute_project_command(project_command).await
