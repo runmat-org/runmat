@@ -120,5 +120,5 @@ The fastest way to find out:
 
 Your code stays local. Nothing is sent to a server.
 
-If something doesn't work, [open an issue](https://github.com/Dystr-Inc/runmat/issues) with a minimal reproducer and we'll add a conformance test.
+If something doesn't work, [open an issue](https://github.com/runmat-org/runmat/issues) with a minimal reproducer and we'll add a conformance test.
 
