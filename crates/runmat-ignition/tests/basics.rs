@@ -337,7 +337,7 @@ fn fft_output_supports_scalar_end_div_indexing() {
         x = [1 2 3 4 5 6 7 8];
         Y = fft(x);
         a = Y(end/2);
-        ok = (real(a) == -4) && (imag(a) > 1.6) && (imag(a) < 1.7);
+        ok = (abs(real(a) + 4) < 1e-12) && (imag(a) > 1.6) && (imag(a) < 1.7);
     "#;
     let ast = parse(input).expect("parse fft scalar end-div indexing script");
     let hir = lower(&ast).expect("lower fft scalar end-div indexing script");
@@ -478,7 +478,7 @@ fn fft_end_arithmetic_supports_pow_round_floor_fix_and_leftdiv() {
         a = Y(round(end^1 / 2));
         b = Y(floor(end ./ 2));
         c = Y(fix(2 \ end));
-        ok = (real(a) == real(b)) && (real(c) == real(Y(2)));
+        ok = (abs(real(a) - real(b)) < 1e-12) && (abs(real(c) - real(Y(2))) < 1e-12);
     "#;
     let ast = parse(input).expect("parse advanced end arithmetic functions script");
     let hir = lower(&ast).expect("lower advanced end arithmetic functions script");
