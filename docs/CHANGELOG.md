@@ -34,11 +34,15 @@ Plotting infrastructure:
 Numerical computing:
 - Implement correct matrix division semantics — `\`, `/`, `.\`, `./` now have distinct, correct semantics through parser, HIR, bytecode, VM, and GPU paths. `mldivide` and `mrdivide` support triangular solves, dense square solves, tall least-squares, wide minimum-norm solves, transpose variants, and Cholesky-backed solves with GPU-resident F32 execution
 - Implement full FFT/IFFT family — `fft`, `ifft`, `fft2`, `ifft2`, `fftn`, `ifftn` now fully implemented with underlying RustFFT for CPU paths and high-performance staged GPU shaders supporting power-of-two, radix-3, radix-5, mixed compositions, and Bluestein fallback for non-smooth/prime lengths. Complex array indexing now works throughout (`Y = fft(x); Y = Y(1:N/2)`)
+- Add signal processing helpers — `hann`, `hamming`, `blackman` windowing functions and `nextpow2`, all with GPU acceleration. Supports `symmetric`/`periodic` modes and output type selection
 
 Other:
 - Add `clear`, `clc`, `close all` — session management commands now work in browser and native
 - Add duration display and datetime interop support
 - Add [`peaks`](/docs/matlab-function-reference) builtin — GPU-accelerated with mixed-residency tensor support and type inference
+
+#### Changed
+- Expand GPU fusion coverage — `sign`, `fix`, `hypot`, `pow2`, `asinh`, `acosh`, `atanh`, `mod`, `rem` now fuse into single GPU kernels automatically
 
 #### Fixed
 - Fix struct field indexing — `s.arr(k)` and `s.arr(1:n)` now work with MATLAB-compatible semantics

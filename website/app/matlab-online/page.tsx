@@ -341,7 +341,7 @@ export default function MatlabOnlinePage() {
                 muted
                 loop
                 playsInline
-                preload="metadata"
+                preload="none"
                 poster={heroPosterSrc}
                 aria-label="RunMat MATLAB-style code example demo"
               >
