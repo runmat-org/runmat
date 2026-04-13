@@ -1,7 +1,6 @@
 use crate::functions::{Bytecode, ExecutionContext, UserFunction};
 use crate::gc_roots::InterpretContext;
 use crate::instr::{EmitLabel, EndExpr, Instr};
-use miette::{SourceOffset, SourceSpan};
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::fusion_exec::{
     execute_centered_gram, execute_elementwise, execute_explained_variance,
@@ -10,8 +9,7 @@ use runmat_accelerate::fusion_exec::{
 };
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
-    activate_fusion_plan, deactivate_fusion_plan, fusion_residency, prepare_fusion_plan,
-    set_current_pc, FusionPlan,
+    activate_fusion_plan, deactivate_fusion_plan, fusion_residency, set_current_pc,
 };
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
@@ -28,14 +26,32 @@ use runmat_runtime::{
     output_context::push_output_count,
     user_functions,
     workspace::{self as runtime_workspace, WorkspaceResolver},
-    CallFrame, RuntimeError,
+    RuntimeError,
 };
 use runmat_thread_local::runmat_thread_local;
+pub use runmat_vm::interpreter::api::{
+    push_pending_workspace, set_call_stack_limit, set_error_namespace,
+    take_updated_workspace_state, InterpreterOutcome, InterpreterState, PendingWorkspaceGuard,
+    DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
+};
+use runmat_vm::interpreter::errors::{
+    attach_span_at, attach_span_from_pc, ensure_runtime_error_identifier, mex, set_vm_pc,
+};
+use runmat_vm::interpreter::stack::{pop2, pop_args, pop_value};
+use runmat_vm::interpreter::timing::InterpreterTiming;
+use runmat_vm::runtime::call_stack::{
+    attach_call_frames, error_namespace, push_call_frame,
+};
+use runmat_vm::runtime::workspace::{
+    ensure_workspace_slot_name, mark_workspace_assigned, refresh_workspace_state,
+    set_workspace_state, take_pending_workspace_state, workspace_assign, workspace_clear,
+    workspace_lookup, workspace_remove, workspace_snapshot,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_time::Instant;
 #[cfg(target_arch = "wasm32")]
 type Instant = ();
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryInto;
 use std::sync::Arc;
@@ -43,167 +59,6 @@ use std::sync::Once;
 #[cfg(feature = "native-accel")]
 use std::sync::OnceLock;
 use tracing::{debug, info_span, warn};
-
-runmat_thread_local! {
-    static CURRENT_PC: Cell<usize> = const { Cell::new(0) };
-}
-
-#[inline]
-fn set_vm_pc(pc: usize) {
-    CURRENT_PC.with(|cell| cell.set(pc));
-}
-
-#[inline]
-fn current_vm_pc() -> usize {
-    CURRENT_PC.with(|cell| cell.get())
-}
-
-fn attach_span_at(bytecode: &Bytecode, pc: usize, mut err: RuntimeError) -> RuntimeError {
-    if err.span.is_none() {
-        if let Some(span) = bytecode.instr_spans.get(pc) {
-            let len = span.end.saturating_sub(span.start).max(1);
-            err.span = Some(SourceSpan::new(SourceOffset::from(span.start), len));
-        }
-    }
-    err
-}
-
-pub const DEFAULT_CALLSTACK_LIMIT: usize = 200;
-
-fn attach_span_from_pc(bytecode: &Bytecode, err: RuntimeError) -> RuntimeError {
-    let pc = current_vm_pc();
-    attach_span_at(bytecode, pc, err)
-}
-
-struct CallFrameGuard;
-
-impl Drop for CallFrameGuard {
-    fn drop(&mut self) {
-        pop_call_frame();
-    }
-}
-
-#[derive(Default, Clone)]
-struct CallStackState {
-    frames: Vec<CallFrame>,
-    depth: usize,
-}
-
-fn callstack_limit() -> usize {
-    CALL_STACK_LIMIT.with(|limit| limit.get())
-}
-
-fn error_namespace() -> String {
-    let ns = ERROR_NAMESPACE.with(|ns| ns.borrow().clone());
-    if ns.trim().is_empty() {
-        DEFAULT_ERROR_NAMESPACE.to_string()
-    } else {
-        ns
-    }
-}
-
-pub fn set_error_namespace(namespace: &str) {
-    let namespace = if namespace.trim().is_empty() {
-        DEFAULT_ERROR_NAMESPACE
-    } else {
-        namespace
-    };
-    ERROR_NAMESPACE.with(|ns| {
-        *ns.borrow_mut() = namespace.to_string();
-    });
-}
-
-pub fn set_call_stack_limit(limit: usize) {
-    CALL_STACK_LIMIT.with(|cell| cell.set(limit));
-    CALL_STACK.with(|stack| {
-        let mut stack = stack.borrow_mut();
-        if limit == 0 {
-            stack.frames.clear();
-        } else if stack.frames.len() > limit {
-            while stack.frames.len() > limit {
-                stack.frames.remove(0);
-            }
-        }
-    });
-}
-
-fn push_call_frame(name: &str, bytecode: &Bytecode, pc: usize) -> CallFrameGuard {
-    let span = bytecode
-        .instr_spans
-        .get(pc)
-        .map(|span| (span.start, span.end));
-    let frame = CallFrame {
-        function: name.to_string(),
-        source_id: bytecode.source_id.map(|id| id.0),
-        span,
-    };
-    CALL_STACK.with(|stack| {
-        let mut stack = stack.borrow_mut();
-        stack.depth = stack.depth.saturating_add(1);
-        let limit = callstack_limit();
-        if limit == 0 {
-            return;
-        }
-        if stack.frames.len() == limit {
-            stack.frames.remove(0);
-        }
-        stack.frames.push(frame);
-    });
-    CallFrameGuard
-}
-
-fn pop_call_frame() {
-    CALL_STACK.with(|stack| {
-        let mut stack = stack.borrow_mut();
-        if stack.depth > 0 {
-            stack.depth -= 1;
-        }
-        if !stack.frames.is_empty() {
-            stack.frames.pop();
-        }
-    });
-}
-
-fn attach_call_frames(
-    bytecode: &Bytecode,
-    current_function_name: &str,
-    mut err: RuntimeError,
-) -> RuntimeError {
-    if !err.context.call_frames.is_empty() || !err.context.call_stack.is_empty() {
-        return err;
-    }
-    let (mut frames, depth) = CALL_STACK.with(|stack| {
-        let stack = stack.borrow();
-        let frames = stack.frames.clone();
-        (frames, stack.depth)
-    });
-    let limit = callstack_limit();
-    if frames.is_empty() {
-        if limit == 0 {
-            return err;
-        }
-        let span = err.span.as_ref().map(|span| {
-            let start = span.offset();
-            let end = start + span.len();
-            (start, end)
-        });
-        if span.is_some() || !current_function_name.is_empty() {
-            frames.push(CallFrame {
-                function: current_function_name.to_string(),
-                source_id: bytecode.source_id.map(|id| id.0),
-                span,
-            });
-        }
-    }
-    let elided = if frames.is_empty() {
-        0
-    } else {
-        depth.saturating_sub(frames.len())
-    };
-    err.context.call_frames = frames;
-    err.context.call_frames_elided = elided;
-    err
-}
 
 #[cfg(feature = "native-accel")]
 struct FusionPlanGuard;
@@ -213,106 +68,6 @@ impl Drop for FusionPlanGuard {
     fn drop(&mut self) {
         deactivate_fusion_plan();
     }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-struct InterpreterTiming {
-    enabled: bool,
-    host_span_start: Option<(Instant, usize)>,
-    host_span_last_pc: Option<usize>,
-    host_span_instrs: u64,
-    seq: u64,
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl InterpreterTiming {
-    fn new() -> Self {
-        let enabled = std::env::var("RUNMAT_INTERPRETER_TIMING")
-            .map(|v| v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"))
-            .unwrap_or(false);
-        Self {
-            enabled,
-            host_span_start: None,
-            host_span_last_pc: None,
-            host_span_instrs: 0,
-            seq: 0,
-        }
-    }
-
-    fn note_host_instr(&mut self, pc: usize) {
-        if !self.enabled {
-            return;
-        }
-        if self.host_span_start.is_none() {
-            self.host_span_start = Some((Instant::now(), pc));
-            self.host_span_instrs = 0;
-        }
-        self.host_span_instrs += 1;
-        self.host_span_last_pc = Some(pc);
-    }
-
-    fn flush_host_span(&mut self, reason: &str, detail: Option<&str>) {
-        if !self.enabled {
-            return;
-        }
-        let Some((start, start_pc)) = self.host_span_start.take() else {
-            return;
-        };
-        let duration = start.elapsed();
-        let end_pc = self.host_span_last_pc.unwrap_or(start_pc);
-        let instrs = self.host_span_instrs.max(1);
-        if let Some(extra) = detail {
-            log::debug!(
-                "interpreter_host_span seq={} reason={} detail={} pc_span=[{}..{}] instrs={} duration_ns={}",
-                self.seq,
-                reason,
-                extra,
-                start_pc,
-                end_pc,
-                instrs,
-                duration.as_nanos()
-            );
-        } else {
-            log::debug!(
-                "interpreter_host_span seq={} reason={} pc_span=[{}..{}] instrs={} duration_ns={}",
-                self.seq,
-                reason,
-                start_pc,
-                end_pc,
-                instrs,
-                duration.as_nanos()
-            );
-        }
-        self.seq += 1;
-        self.host_span_last_pc = None;
-        self.host_span_instrs = 0;
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl Drop for InterpreterTiming {
-    fn drop(&mut self) {
-        self.flush_host_span("drop", None);
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-struct InterpreterTiming;
-
-#[cfg(target_arch = "wasm32")]
-impl InterpreterTiming {
-    fn new() -> Self {
-        Self
-    }
-
-    fn note_host_instr(&mut self, _pc: usize) {}
-
-    fn flush_host_span(&mut self, _reason: &str, _detail: Option<&str>) {}
-}
-
-#[cfg(target_arch = "wasm32")]
-impl Drop for InterpreterTiming {
-    fn drop(&mut self) {}
 }
 
 #[derive(Clone, Copy)]
@@ -564,23 +319,7 @@ fn log_fusion_span_window(
     );
 }
 
-// Namespace used for error identifiers (e.g., "RunMat:..." or custom override)
-pub const DEFAULT_ERROR_NAMESPACE: &str = "RunMat";
-
 type VmResult<T> = Result<T, RuntimeError>;
-
-#[inline]
-fn mex(id: &str, msg: &str) -> RuntimeError {
-    // Normalize identifier to always use the configured namespace prefix.
-    // If caller passes "Namespace:suffix", strip the namespace and re-prefix with error_namespace().
-    let suffix = match id.find(':') {
-        Some(pos) => &id[pos + 1..],
-        None => id,
-    };
-    let ident = format!("{}:{suffix}", error_namespace());
-    let message = msg.to_string();
-    build_runtime_error(message).with_identifier(ident).build()
-}
 
 #[derive(Clone)]
 enum SliceSelector {
@@ -1788,173 +1527,6 @@ runmat_thread_local! {
     static PERSISTENTS_BY_NAME: RefCell<HashMap<(String, String), Value>> = RefCell::new(HashMap::new());
 }
 
-struct WorkspaceState {
-    names: HashMap<String, usize>,
-    assigned: HashSet<String>,
-    idx_to_name: HashMap<usize, String>,
-    data_ptr: *const Value,
-    len: usize,
-}
-
-type WorkspaceSnapshot = (HashMap<String, usize>, HashSet<String>);
-
-runmat_thread_local! {
-    static WORKSPACE_STATE: RefCell<Option<WorkspaceState>> = const { RefCell::new(None) };
-    static PENDING_WORKSPACE: RefCell<Option<WorkspaceSnapshot>> = const { RefCell::new(None) };
-    static LAST_WORKSPACE_STATE: RefCell<Option<WorkspaceSnapshot>> = const { RefCell::new(None) };
-    static WORKSPACE_VARS: RefCell<Option<*mut Vec<Value>>> = const { RefCell::new(None) };
-}
-
-struct WorkspaceStateGuard;
-
-impl Drop for WorkspaceStateGuard {
-    fn drop(&mut self) {
-        WORKSPACE_STATE.with(|state| {
-            let mut state_mut = state.borrow_mut();
-            if let Some(ws) = state_mut.take() {
-                LAST_WORKSPACE_STATE.with(|slot| {
-                    *slot.borrow_mut() = Some((ws.names, ws.assigned));
-                });
-            }
-        });
-        WORKSPACE_VARS.with(|slot| {
-            slot.borrow_mut().take();
-        });
-    }
-}
-
-fn set_workspace_state(
-    names: HashMap<String, usize>,
-    assigned: HashSet<String>,
-    vars: &mut Vec<Value>,
-) -> WorkspaceStateGuard {
-    let idx_to_name: HashMap<usize, String> = names.iter().map(|(k, &v)| (v, k.clone())).collect();
-    WORKSPACE_STATE.with(|state| {
-        *state.borrow_mut() = Some(WorkspaceState {
-            names,
-            assigned,
-            idx_to_name,
-            data_ptr: vars.as_ptr(),
-            len: vars.len(),
-        });
-    });
-    let vars_ptr = vars as *mut Vec<Value>;
-    WORKSPACE_VARS.with(|slot| {
-        *slot.borrow_mut() = Some(vars_ptr);
-    });
-    WorkspaceStateGuard
-}
-
-fn refresh_workspace_state(vars: &[Value]) {
-    WORKSPACE_STATE.with(|state| {
-        if let Some(ws) = state.borrow_mut().as_mut() {
-            ws.data_ptr = vars.as_ptr();
-            ws.len = vars.len();
-        }
-    });
-}
-
-fn workspace_lookup(name: &str) -> Option<Value> {
-    WORKSPACE_STATE.with(|state| {
-        let state_ref = state.borrow();
-        let ws = state_ref.as_ref()?;
-        let idx = ws.names.get(name)?;
-        if !ws.assigned.contains(name) {
-            return None;
-        }
-        if *idx >= ws.len {
-            return None;
-        }
-        unsafe {
-            let ptr = ws.data_ptr.add(*idx);
-            Some((*ptr).clone())
-        }
-    })
-}
-
-fn workspace_assign(name: &str, value: Value) -> Result<(), String> {
-    let vars_ptr = WORKSPACE_VARS.with(|slot| *slot.borrow());
-    let Some(vars_ptr) = vars_ptr else {
-        return Err("load: workspace state unavailable".to_string());
-    };
-    let vars = unsafe { &mut *vars_ptr };
-    set_workspace_variable(name, value, vars).map_err(|e| e.to_string())
-}
-
-fn workspace_clear() -> Result<(), String> {
-    let vars_ptr = WORKSPACE_VARS.with(|slot| *slot.borrow());
-    let Some(vars_ptr) = vars_ptr else {
-        return Err("clear: workspace state unavailable".to_string());
-    };
-    let vars = unsafe { &mut *vars_ptr };
-
-    WORKSPACE_STATE.with(|state| {
-        let mut state_mut = state.borrow_mut();
-        let Some(ws) = state_mut.as_mut() else {
-            return Err("clear: workspace state unavailable".to_string());
-        };
-        vars.clear();
-        ws.names.clear();
-        ws.assigned.clear();
-        ws.idx_to_name.clear();
-        ws.data_ptr = vars.as_ptr();
-        ws.len = vars.len();
-        Ok(())
-    })
-}
-
-fn workspace_remove(name: &str) -> Result<(), String> {
-    let vars_ptr = WORKSPACE_VARS.with(|slot| *slot.borrow());
-    let Some(vars_ptr) = vars_ptr else {
-        return Err("clear: workspace state unavailable".to_string());
-    };
-    let vars = unsafe { &mut *vars_ptr };
-
-    WORKSPACE_STATE.with(|state| {
-        let mut state_mut = state.borrow_mut();
-        let Some(ws) = state_mut.as_mut() else {
-            return Err("clear: workspace state unavailable".to_string());
-        };
-        if let Some(idx) = ws.names.remove(name) {
-            if idx < vars.len() {
-                vars[idx] = Value::Num(0.0);
-            }
-            ws.assigned.remove(name);
-            ws.idx_to_name.remove(&idx);
-            ws.data_ptr = vars.as_ptr();
-            ws.len = vars.len();
-        }
-        Ok(())
-    })
-}
-
-fn workspace_snapshot() -> Vec<(String, Value)> {
-    WORKSPACE_STATE.with(|state| {
-        if let Some(ws) = state.borrow().as_ref() {
-            let mut entries: Vec<(String, Value)> = ws
-                .names
-                .iter()
-                .filter_map(|(name, idx)| {
-                    if *idx >= ws.len {
-                        return None;
-                    }
-                    if !ws.assigned.contains(name) {
-                        return None;
-                    }
-                    unsafe {
-                        let ptr = ws.data_ptr.add(*idx);
-                        Some((name.clone(), (*ptr).clone()))
-                    }
-                })
-                .collect();
-            entries.sort_by(|a, b| a.0.cmp(&b.0));
-            entries
-        } else {
-            Vec::new()
-        }
-    })
-}
-
 fn workspace_global_names() -> Vec<String> {
     let mut names = Vec::new();
     GLOBALS.with(|globals| {
@@ -1967,39 +1539,6 @@ fn workspace_global_names() -> Vec<String> {
     });
     names.sort();
     names
-}
-
-fn set_workspace_variable(name: &str, value: Value, vars: &mut Vec<Value>) -> VmResult<()> {
-    let mut result = Ok(());
-    WORKSPACE_STATE.with(|state| {
-        let mut state_mut = state.borrow_mut();
-        match state_mut.as_mut() {
-            Some(ws) => {
-                let idx = if let Some(idx) = ws.names.get(name).copied() {
-                    idx
-                } else {
-                    let idx = vars.len();
-                    ws.names.insert(name.to_string(), idx);
-                    ws.idx_to_name.insert(idx, name.to_string());
-                    idx
-                };
-                if idx >= vars.len() {
-                    vars.resize(idx + 1, Value::Num(0.0));
-                }
-                vars[idx] = value;
-                ws.data_ptr = vars.as_ptr();
-                ws.len = vars.len();
-                ws.assigned.insert(name.to_string());
-            }
-            None => {
-                result = Err(mex(
-                    "WorkspaceUnavailable",
-                    "load: workspace state unavailable",
-                ));
-            }
-        }
-    });
-    result
 }
 
 fn ensure_workspace_resolver_registered() {
@@ -2026,43 +1565,9 @@ fn ensure_wasm_builtins_registered() {
     }
 }
 
-pub struct PendingWorkspaceGuard;
-
-impl Drop for PendingWorkspaceGuard {
-    fn drop(&mut self) {
-        PENDING_WORKSPACE.with(|slot| {
-            slot.borrow_mut().take();
-        });
-    }
-}
-
-pub fn push_pending_workspace(
-    names: HashMap<String, usize>,
-    assigned: HashSet<String>,
-) -> PendingWorkspaceGuard {
-    PENDING_WORKSPACE.with(|slot| {
-        *slot.borrow_mut() = Some((names, assigned));
-    });
-    PendingWorkspaceGuard
-}
-
-pub fn take_updated_workspace_state() -> Option<(HashMap<String, usize>, HashSet<String>)> {
-    LAST_WORKSPACE_STATE.with(|slot| slot.borrow_mut().take())
-}
-
 runmat_thread_local! {
     // (nargin, nargout) for current call
     static CALL_COUNTS: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
-    static CALL_STACK: RefCell<CallStackState> = const {
-        RefCell::new(CallStackState {
-            frames: Vec::new(),
-            depth: 0,
-        })
-    };
-    static CALL_STACK_LIMIT: Cell<usize> = const { Cell::new(DEFAULT_CALLSTACK_LIMIT) };
-    static ERROR_NAMESPACE: RefCell<String> = const {
-        RefCell::new(String::new())
-    };
 }
 
 runmat_thread_local! {
@@ -2086,69 +1591,6 @@ fn install_user_function_vars(vars: &mut Vec<Value>) -> UserFunctionVarsGuard {
     let vars_ptr = vars as *mut Vec<Value>;
     let previous = USER_FUNCTION_VARS.with(|slot| slot.borrow_mut().replace(vars_ptr));
     UserFunctionVarsGuard { previous }
-}
-
-#[derive(Debug)]
-pub enum InterpreterOutcome {
-    Completed(Vec<Value>),
-}
-
-#[derive(Debug)]
-pub struct InterpreterState {
-    bytecode: Bytecode,
-    stack: Vec<Value>,
-    vars: Vec<Value>,
-    pc: usize,
-    context: ExecutionContext,
-    try_stack: Vec<(usize, Option<usize>)>,
-    last_exception: Option<runmat_builtins::MException>,
-    imports: Vec<(Vec<String>, bool)>,
-    global_aliases: HashMap<usize, String>,
-    persistent_aliases: HashMap<usize, String>,
-    current_function_name: String,
-    call_counts: Vec<(usize, usize)>,
-    #[cfg(feature = "native-accel")]
-    fusion_plan: Option<Arc<FusionPlan>>,
-}
-
-impl InterpreterState {
-    fn new(
-        bytecode: Bytecode,
-        initial_vars: &mut [Value],
-        current_function_name: Option<&str>,
-    ) -> Self {
-        let mut vars = initial_vars.to_vec();
-        if vars.len() < bytecode.var_count {
-            vars.resize(bytecode.var_count, Value::Num(0.0));
-        }
-        let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
-        Self {
-            stack: Vec::new(),
-            context: ExecutionContext {
-                call_stack: Vec::new(),
-                locals: Vec::new(),
-                instruction_pointer: 0,
-                functions: bytecode.functions.clone(),
-            },
-            try_stack: Vec::new(),
-            last_exception: None,
-            imports: Vec::new(),
-            global_aliases: HashMap::new(),
-            persistent_aliases: HashMap::new(),
-            vars,
-            pc: 0,
-            call_counts,
-            current_function_name: current_function_name
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| "<main>".to_string()),
-            #[cfg(feature = "native-accel")]
-            fusion_plan: prepare_fusion_plan(
-                bytecode.accel_graph.as_ref(),
-                &bytecode.fusion_groups,
-            ),
-            bytecode,
-        }
-    }
 }
 
 fn sync_initial_vars(initial: &mut [Value], vars: &[Value]) {
@@ -2177,7 +1619,7 @@ fn rel_binary_use_builtin(a: &Value, b: &Value) -> bool {
 }
 
 macro_rules! handle_rel_binary { ($op:tt, $name:literal, $stack:ident) => {{
-    let b = $stack.pop().ok_or(mex("StackUnderflow","stack underflow"))?; let a = $stack.pop().ok_or(mex("StackUnderflow","stack underflow"))?;
+    let (a, b) = pop2(&mut $stack)?;
     match (&a, &b) {
         (Value::Object(obj), _) => { let args = vec![Value::Object(obj.clone()), Value::String($name.to_string()), b.clone()]; match call_builtin_vm!("call_method", &args) { Ok(v) => $stack.push(v), Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; $stack.push(Value::Num(if aa $op bb {1.0}else{0.0})) } } }
         (_, Value::Object(obj)) => { let rev = match $name { "lt" => "gt", "le" => "ge", "gt" => "lt", "ge" => "le", other => other };
@@ -2199,10 +1641,12 @@ pub async fn interpret_with_vars(
     initial_vars: &mut [Value],
     current_function_name: Option<&str>,
 ) -> VmResult<InterpreterOutcome> {
+    let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
     let state = Box::new(InterpreterState::new(
         bytecode.clone(),
         initial_vars,
         current_function_name,
+        call_counts,
     ));
     match Box::pin(run_interpreter(state, initial_vars)).await {
         Ok(outcome) => Ok(outcome),
@@ -2276,7 +1720,7 @@ async fn run_interpreter_inner(
     CALL_COUNTS.with(|cc| {
         *cc.borrow_mut() = call_counts.clone();
     });
-    let pending_state = PENDING_WORKSPACE.with(|slot| slot.borrow_mut().take());
+    let pending_state = take_pending_workspace_state();
     let _workspace_guard = pending_state.map(|(names, assigned)| {
         let filtered_assigned: HashSet<String> = assigned
             .into_iter()
@@ -2334,10 +1778,7 @@ async fn run_interpreter_inner(
     let mut interpreter_timing = InterpreterTiming::new();
     macro_rules! vm_bail {
         ($err:expr) => {{
-            let mut err: RuntimeError = $err.into();
-            if err.identifier.is_none() {
-                err.identifier = Some(format!("{}:RuntimeError", error_namespace()));
-            }
+            let err: RuntimeError = ensure_runtime_error_identifier(($err).into());
             let err = attach_span_at(&bytecode, pc, err);
             if let Some((catch_pc, catch_var)) = try_stack.pop() {
                 if let Some(var_idx) = catch_var {
@@ -2464,50 +1905,27 @@ async fn run_interpreter_inner(
                 }
             }
             Instr::AndAnd(target) => {
-                let lhs: f64 = (&stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                    .try_into()?;
+                let lhs: f64 = (&pop_value(&mut stack)?).try_into()?;
                 if lhs == 0.0 {
                     pc = target;
                     continue;
                 }
             }
             Instr::OrOr(target) => {
-                let lhs: f64 = (&stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                    .try_into()?;
+                let lhs: f64 = (&pop_value(&mut stack)?).try_into()?;
                 if lhs != 0.0 {
                     pc = target;
                     continue;
                 }
             }
             Instr::Swap => {
-                let a = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let b = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let (b, a) = pop2(&mut stack)?;
                 stack.push(a);
                 stack.push(b);
             }
             Instr::CallFeval(argc) => {
-                // Pop explicit args
-                let mut args = Vec::with_capacity(argc);
-                for _ in 0..argc {
-                    args.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                args.reverse();
-                // Pop function value
-                let func_val = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
+                let args = pop_args(&mut stack, argc)?;
+                let func_val = pop_value(&mut stack)?;
                 match func_val {
                     Value::Closure(c) => {
                         // User-defined function via closure: prepend captures then dispatch like CallFunction
@@ -2764,24 +2182,14 @@ async fn run_interpreter_inner(
                     refresh_workspace_state(&vars);
                 }
                 vars[i] = val;
-                WORKSPACE_STATE.with(|state| {
-                    if let Some(ws) = state.borrow_mut().as_mut() {
-                        let name = ws.idx_to_name.get(&i).cloned().or_else(|| {
-                            // After clear() the idx_to_name map is wiped, but the compiled
-                            // bytecode still uses the same slot indices.  Re-register the
-                            // name→idx mapping from the static bytecode var_names table so
-                            // that post-clear assignments are visible in the workspace.
-                            bytecode.var_names.get(&i).map(|n| {
-                                ws.names.entry(n.clone()).or_insert(i);
-                                ws.idx_to_name.entry(i).or_insert_with(|| n.clone());
-                                n.clone()
-                            })
-                        });
-                        if let Some(name) = name {
-                            ws.assigned.insert(name);
-                        }
-                    }
-                });
+                // After clear() the idx_to_name map is wiped, but the compiled bytecode still
+                // uses the same slot indices. Re-register the static var name so post-clear
+                // assignments remain visible in the workspace view.
+                if let Some(name) = bytecode.var_names.get(&i) {
+                    ensure_workspace_slot_name(i, name);
+                }
+                mark_workspace_assigned(i);
+
                 // If this var is declared global, update the global table entry
                 // We optimistically write-through whenever StoreVar happens and a global exists for this name
                 let key = format!("var_{i}");
