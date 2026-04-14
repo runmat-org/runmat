@@ -85,6 +85,7 @@ pub async fn dispatch_instruction(
     global_aliases: &mut HashMap<usize, String>,
     persistent_aliases: &mut HashMap<usize, String>,
     pc: &mut usize,
+    mut clear_value_residency: impl FnMut(&Value),
     mut store_var_before_overwrite: impl FnMut(&Value, &Value),
     mut store_var_after_store: impl FnMut(usize, &Value),
     mut store_local_before_local_overwrite: impl FnMut(&Value, &Value),
@@ -92,7 +93,7 @@ pub async fn dispatch_instruction(
     mut store_local_after_fallback_store: impl FnMut(&str, usize, &Value),
 ) -> Result<Option<DispatchHandled>, RuntimeError> {
     match instr {
-        _ if indexing::dispatch_indexing(instr, stack).await? => {
+        _ if indexing::dispatch_indexing(instr, stack, *pc, &mut clear_value_residency).await? => {
             Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         _ if object::dispatch_object(instr, stack).await? => {

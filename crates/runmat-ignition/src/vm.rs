@@ -46,7 +46,6 @@ use runmat_vm::call::{builtins as call_builtins, feval as call_feval, user as ca
 use runmat_vm::indexing::end_expr as idx_end_expr;
 use runmat_vm::indexing::read_slice as idx_read_slice;
 use runmat_vm::indexing::selectors as idx_selectors;
-use runmat_vm::indexing::write_linear as idx_write_linear;
 use runmat_vm::indexing::write_slice as idx_write_slice;
 use runmat_vm::ops::cells as cell_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
@@ -652,6 +651,10 @@ async fn run_interpreter_inner(
             &mut global_aliases,
             &mut persistent_aliases,
             &mut pc,
+            |value| {
+                #[cfg(feature = "native-accel")]
+                clear_residency(value);
+            },
             |current, incoming| {
                 #[cfg(feature = "native-accel")]
                 if !same_gpu_handle(current, incoming) {
@@ -754,6 +757,7 @@ async fn run_interpreter_inner(
             | Instr::Index(_)
             | Instr::IndexCell(_)
             | Instr::IndexCellExpand(_, _)
+            | Instr::StoreIndex(_)
             | Instr::StoreIndexCell(_)
             | Instr::Add
             | Instr::Sub
@@ -2477,231 +2481,7 @@ async fn run_interpreter_inner(
                 stack.push(cell);
             }
             
-            Instr::StoreIndex(num_indices) => {
-                // RHS to assign, then indices, then base
-                // Debug snapshot of top-of-stack types before mutation
-                #[allow(unused)]
-                if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
-                    let snap = stack
-                        .iter()
-                        .rev()
-                        .take(6)
-                        .map(|v| match v {
-                            Value::Object(_) => "Object",
-                            Value::HandleObject(_) => "HandleObject",
-                            Value::Tensor(t) => {
-                                debug!(shape = ?t.shape, "[vm] StoreIndex pre-snap tensor");
-                                "Tensor"
-                            }
-                            Value::GpuTensor(h) => {
-                                debug!(shape = ?h.shape, "[vm] StoreIndex pre-snap GPU tensor");
-                                "GpuTensor"
-                            }
-                            Value::Num(_) => "Num",
-                            Value::Int(_) => "Int",
-                            Value::String(_) => "String",
-                            Value::Cell(_) => "Cell",
-                            _ => "Other",
-                        })
-                        .collect::<Vec<_>>();
-                    debug!(pc, stack_top_types = ?snap, "[vm] StoreIndex pre-snap");
-                }
-                let rhs = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                // We will determine indices relative to the base location to avoid RHS temporaries interfering
-                // Select the correct base: scan from top for the first assignable container (Object/Tensor/GpuTensor)
-                let assignable = |v: &Value| {
-                    matches!(
-                        v,
-                        Value::Object(_)
-                            | Value::HandleObject(_)
-                            | Value::Tensor(_)
-                            | Value::ComplexTensor(_)
-                            | Value::GpuTensor(_)
-                    )
-                };
-                let base_idx_opt = (0..stack.len()).rev().find(|&j| assignable(&stack[j]));
-                let base_pos = if let Some(j) = base_idx_opt {
-                    j
-                } else {
-                    return Err(mex(
-                        "IndexAssignmentUnsupportedBase",
-                        "Index assignment only for tensors",
-                    ));
-                };
-                let base = stack.remove(base_pos);
-                #[cfg(feature = "native-accel")]
-                clear_residency(&base);
-                // Deterministically extract indices: take exactly `num_indices` numeric values
-                // that were immediately above the base position.
-                let mut indices: Vec<usize> = Vec::new();
-                if num_indices > 0 {
-                    let mut contiguous_ok = true;
-                    if base_pos + num_indices > stack.len() {
-                        contiguous_ok = false;
-                    } else {
-                        for k in 0..num_indices {
-                            let idx_pos = base_pos + k;
-                            let idx_val = match index_scalar_from_value(&stack[idx_pos]).await {
-                                Ok(Some(val)) => val,
-                                Ok(None) => {
-                                    contiguous_ok = false;
-                                    indices.clear();
-                                    break;
-                                }
-                                Err(err) => vm_bail!(err),
-                            };
-                            let idx_val = if idx_val <= 0 { 0 } else { idx_val as usize };
-                            indices.push(idx_val);
-                        }
-                    }
-                    if contiguous_ok {
-                        // Remove the consumed index values from the stack (highest index first)
-                        for k in (0..num_indices).rev() {
-                            stack.remove(base_pos + k);
-                        }
-                    } else {
-                        indices.clear();
-                    }
-                }
-                // Determine expected bounds for fast validation
-                let (rows_opt, cols_opt) = match &base {
-                    Value::Tensor(t) => (Some(t.rows()), Some(t.cols())),
-                    Value::GpuTensor(h) => (
-                        Some(h.shape.first().copied().unwrap_or(1).max(1)),
-                        Some(h.shape.get(1).copied().unwrap_or(1).max(1)),
-                    ),
-                    _ => (None, None),
-                };
-                // If deterministic path failed (unexpected stack form), fall back to nearest-fit heuristic
-                if indices.is_empty() {
-                    let mut numeric_above: Vec<(usize, usize)> = Vec::new(); // (stack_index, value)
-                    let mut scan_limit = 12usize;
-                    let mut kk = stack.len();
-                    while kk > 0 && scan_limit > 0 {
-                        let idx = kk - 1;
-                        if assignable(&stack[idx]) {
-                            break;
-                        }
-                        if let Some(v) = index_scalar_from_value(&stack[idx]).await? {
-                            let v = if v <= 0 { 0 } else { v as usize };
-                            numeric_above.push((idx, v));
-                        }
-                        kk -= 1;
-                        scan_limit -= 1;
-                    }
-                    if numeric_above.len() >= 2 {
-                        let mut picked: Option<((usize, usize), (usize, usize))> = None;
-                        for w in (1..numeric_above.len()).rev() {
-                            let (j_idx, j_val) = numeric_above[w];
-                            let (i_idx, i_val) = numeric_above[w - 1];
-                            let fits = match (rows_opt, cols_opt) {
-                                (Some(r), Some(c)) => {
-                                    i_val >= 1 && i_val <= r && j_val >= 1 && j_val <= c
-                                }
-                                _ => true,
-                            };
-                            if fits {
-                                picked = Some(((i_idx, i_val), (j_idx, j_val)));
-                                break;
-                            }
-                        }
-                        if let Some(((i_idx, i_val), (j_idx, j_val))) = picked {
-                            let mut to_remove = [i_idx, j_idx];
-                            to_remove.sort_unstable();
-                            stack.remove(to_remove[1]);
-                            stack.remove(to_remove[0]);
-                            indices = vec![i_val, j_val];
-                        }
-                    } else if numeric_above.len() == 1 {
-                        let (k_idx, k_val) = numeric_above[0];
-                        stack.remove(k_idx);
-                        indices = vec![k_val];
-                    }
-                }
-                if indices.is_empty() {
-                    return Err(mex(
-                        "IndexAssignmentUnsupportedBase",
-                        "Index assignment only for tensors",
-                    ));
-                }
-                // TODO(GC): write barrier hook if base is in older generation and rhs/indices reference younger objects
-                match base {
-                    Value::Object(obj) => {
-                        // subsasgn(obj, '()', {indices...}, rhs)
-                        let cell = call_builtin_vm!(
-                            "__make_cell",
-                            &indices
-                                .iter()
-                                .map(|n| Value::Num(*n as f64))
-                                .collect::<Vec<_>>(),
-                        )?;
-                        match call_builtin_vm!(
-                            "call_method",
-                            &[
-                                Value::Object(obj),
-                                Value::String("subsasgn".to_string()),
-                                Value::String("()".to_string()),
-                                cell,
-                                rhs,
-                            ],
-                        ) {
-                            Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e.to_string()),
-                        }
-                    }
-                    Value::HandleObject(handle) => {
-                        // subsasgn(obj, '()', {indices...}, rhs)
-                        let cell = call_builtin_vm!(
-                            "__make_cell",
-                            &indices
-                                .iter()
-                                .map(|n| Value::Num(*n as f64))
-                                .collect::<Vec<_>>(),
-                        )?;
-                        match call_builtin_vm!(
-                            "call_method",
-                            &[
-                                Value::HandleObject(handle),
-                                Value::String("subsasgn".to_string()),
-                                Value::String("()".to_string()),
-                                cell,
-                                rhs,
-                            ],
-                        ) {
-                            Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e.to_string()),
-                        }
-                    }
-                    Value::Tensor(t) => stack.push(idx_write_linear::assign_tensor_scalar(t, &indices, &rhs).await?),
-                    Value::ComplexTensor(t) => stack.push(idx_write_linear::assign_complex_scalar(t, &indices, &rhs).await?),
-                    Value::GpuTensor(h) => stack.push(idx_write_linear::assign_gpu_scalar(&h, &indices, &rhs).await?),
-                    _ => {
-                        if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
-                            let kind = |v: &Value| match v {
-                                Value::Object(_) => "Object",
-                                Value::Tensor(_) => "Tensor",
-                                Value::GpuTensor(_) => "GpuTensor",
-                                Value::Num(_) => "Num",
-                                Value::Int(_) => "Int",
-                                _ => "Other",
-                            };
-                            debug!(
-                                pc,
-                                base_kind = kind(&base),
-                                rhs_kind = kind(&rhs),
-                                ?indices,
-                                "[vm] StoreIndex default branch"
-                            );
-                        }
-                        return Err(mex(
-                            "IndexAssignmentUnsupportedBase",
-                            "Index assignment only for tensors",
-                        ));
-                    }
-                }
-            }
+            
             Instr::CallMethod(name, arg_count) => {
                 match interp_dispatch::handle_method_call(&mut stack, &name, arg_count).await {
                     Ok(interp_dispatch::MethodHandling::Completed) => {}
