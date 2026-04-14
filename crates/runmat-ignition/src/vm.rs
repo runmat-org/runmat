@@ -44,6 +44,8 @@ use runmat_vm::call::builtins::ImportedBuiltinResolution;
 use runmat_vm::call::closures as call_closures;
 use runmat_vm::call::feval::FevalDispatch;
 use runmat_vm::indexing::end_expr as idx_end_expr;
+use runmat_vm::indexing::read_linear as idx_read_linear;
+use runmat_vm::indexing::read_slice as idx_read_slice;
 use runmat_vm::indexing::selectors as idx_selectors;
 use runmat_vm::ops::control_flow::{self, ControlFlowAction};
 use runmat_vm::ops::stack as stack_ops;
@@ -3794,32 +3796,7 @@ async fn run_interpreter_inner(
                 }
             }
             Instr::Index(num_indices) => {
-                let mut indices = Vec::new();
-                let count = num_indices;
-                for _ in 0..count {
-                    let mut index_value = stack
-                        .pop()
-                        .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                    let original_value = index_value.clone();
-                    if matches!(index_value, Value::GpuTensor(_)) {
-                        index_value =
-                            runmat_runtime::dispatcher::gather_if_needed_async(&index_value)
-                                .await?;
-                    }
-                    let index_val = match index_scalar_from_value(&index_value).await? {
-                        Some(val) => val as f64,
-                        None => {
-                            return Err(mex(
-                                "UnsupportedIndexType",
-                                &format!(
-                                    "Unsupported index type: expected numeric scalar, got {original_value:?}"
-                                ),
-                            ))
-                        }
-                    };
-                    indices.push(index_val);
-                }
-                indices.reverse();
+                let indices = idx_read_linear::collect_linear_indices(&mut stack, num_indices).await?;
                 let base = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
@@ -3827,19 +3804,14 @@ async fn run_interpreter_inner(
                 clear_residency(&base);
                 match base {
                     Value::Object(obj) => {
-                        let cell = runmat_builtins::CellArray::new(
-                            indices.iter().map(|n| Value::Num(*n)).collect(),
-                            1,
-                            indices.len(),
-                        )
-                        .map_err(|e| format!("subsref build error: {e}"))?;
+                        let cell = idx_read_linear::build_object_subsref_cell(&indices)?;
                         match call_builtin_vm!(
                             "call_method",
                             &[
                                 Value::Object(obj),
                                 Value::String("subsref".to_string()),
                                 Value::String("()".to_string()),
-                                Value::Cell(cell),
+                                cell,
                             ],
                         ) {
                             Ok(v) => stack.push(v),
@@ -3847,19 +3819,14 @@ async fn run_interpreter_inner(
                         }
                     }
                     Value::HandleObject(handle) => {
-                        let cell = runmat_builtins::CellArray::new(
-                            indices.iter().map(|n| Value::Num(*n)).collect(),
-                            1,
-                            indices.len(),
-                        )
-                        .map_err(|e| format!("subsref build error: {e}"))?;
+                        let cell = idx_read_linear::build_object_subsref_cell(&indices)?;
                         match call_builtin_vm!(
                             "call_method",
                             &[
                                 Value::HandleObject(handle),
                                 Value::String("subsref".to_string()),
                                 Value::String("()".to_string()),
-                                Value::Cell(cell),
+                                cell,
                             ],
                         ) {
                             Ok(v) => stack.push(v),
@@ -3867,8 +3834,7 @@ async fn run_interpreter_inner(
                         }
                     }
                     other => {
-                        let result = match runmat_runtime::perform_indexing(&other, &indices).await
-                        {
+                        let result = match idx_read_linear::generic_index(&other, &indices).await {
                             Ok(v) => v,
                             Err(e) => vm_bail!(e),
                         };
@@ -3908,35 +3874,20 @@ async fn run_interpreter_inner(
                 };
                 match base {
                     Value::Object(obj) => {
-                        let cell =
-                            runmat_builtins::CellArray::new(numeric.to_vec(), 1, numeric.len())
-                                .map_err(|e| format!("subsref build error: {e}"))?;
-                        match call_builtin_vm!(
-                            "call_method",
-                            &[
-                                Value::Object(obj),
-                                Value::String("subsref".to_string()),
-                                Value::String("()".to_string()),
-                                Value::Cell(cell),
-                            ],
-                        ) {
+                        match idx_read_slice::object_subsref_paren(Value::Object(obj), &numeric)
+                            .await
+                        {
                             Ok(v) => stack.push(v),
                             Err(e) => vm_bail!(e.to_string()),
                         }
                     }
                     Value::HandleObject(handle) => {
-                        let cell =
-                            runmat_builtins::CellArray::new(numeric.to_vec(), 1, numeric.len())
-                                .map_err(|e| format!("subsref build error: {e}"))?;
-                        match call_builtin_vm!(
-                            "call_method",
-                            &[
-                                Value::HandleObject(handle),
-                                Value::String("subsref".to_string()),
-                                Value::String("()".to_string()),
-                                Value::Cell(cell),
-                            ],
-                        ) {
+                        match idx_read_slice::object_subsref_paren(
+                            Value::HandleObject(handle),
+                            &numeric,
+                        )
+                        .await
+                        {
                             Ok(v) => stack.push(v),
                             Err(e) => vm_bail!(e.to_string()),
                         }
@@ -3953,92 +3904,16 @@ async fn run_interpreter_inner(
                         let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
                         let mut num_iter = 0usize;
                         if dims == 1 {
-                            let total = t.data.len();
-                            let mut idxs: Vec<usize> = Vec::new();
-                            // For tensor indices, mirror the index shape in the output so that
-                            // A([1 3 5]) (row index) → row result and A(1:0) (1×0 index) → 1×0.
-                            // None means no tensor index was used; fall back to defaults.
-                            let mut idx_shape: Option<Vec<usize>> = None;
-                            let is_colon = (colon_mask & 1u32) != 0;
-                            let is_end = (end_mask & 1u32) != 0;
-                            if is_colon {
-                                idxs = (1..=total).collect();
-                            } else if is_end {
-                                idxs = vec![total];
-                            } else if let Some(v) = numeric.first() {
-                                let materialized = materialize_index_value(v).await?;
-                                if let Some(i) = index_scalar_from_value(&materialized).await? {
-                                    if i < 1 {
-                                        vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
-                                    }
-                                    idxs = vec![i as usize];
-                                } else {
-                                    match &materialized {
-                                        Value::Tensor(idx_t) => {
-                                            idx_shape = Some(idx_t.shape.clone());
-                                            for &val in &idx_t.data {
-                                                let i = val as isize;
-                                                if i < 1 || (i as usize) > total {
-                                                    vm_bail!(mex(
-                                                        "IndexOutOfBounds",
-                                                        "Index out of bounds"
-                                                    ));
-                                                }
-                                                idxs.push(i as usize);
-                                            }
-                                        }
-                                        Value::Bool(b) => {
-                                            if *b {
-                                                idxs = vec![1];
-                                            }
-                                        }
-                                        Value::LogicalArray(la) => {
-                                            if la.data.len() != total {
-                                                vm_bail!(mex(
-                                                "IndexShape",
-                                                "Logical mask length mismatch for linear indexing"
-                                            ));
-                                            }
-                                            for (i, &val) in la.data.iter().enumerate() {
-                                                if val != 0 {
-                                                    idxs.push(i + 1);
-                                                }
-                                            }
-                                        }
-                                        _ => vm_bail!(mex(
-                                            "UnsupportedIndexType",
-                                            "Unsupported index type"
-                                        )),
-                                    }
-                                }
-                            } else {
-                                vm_bail!(mex("MissingNumericIndex", "missing numeric index"));
-                            }
-                            if idxs.iter().any(|&i| i == 0 || i > total) {
-                                vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
-                            }
-                            if idxs.len() == 1 {
-                                stack.push(Value::Num(t.data[idxs[0] - 1]));
-                            } else if idxs.is_empty() {
-                                // For tensor indices (e.g. 1:0 → [1,0]) mirror the index shape.
-                                // For all other empty cases (colon on empty source, logical mask
-                                // with no true values) fall back to [0,1] — a 0×1 column vector,
-                                // matching MATLAB's A(:) on an empty source.
-                                let shape = idx_shape.unwrap_or_else(|| vec![0, 1]);
-                                let tens = runmat_builtins::Tensor::new(vec![], shape)
-                                    .map_err(|e| format!("Slice error: {e}"))?;
-                                stack.push(Value::Tensor(tens));
-                            } else {
-                                let mut out = Vec::with_capacity(idxs.len());
-                                for &i in &idxs {
-                                    out.push(t.data[i - 1]);
-                                }
-                                // Mirror the index tensor's shape so A([1 3 5]) (row index) gives
-                                // a row result, and A([1;3;5]) (column index) gives a column.
-                                let shape = idx_shape.unwrap_or_else(|| vec![idxs.len(), 1]);
-                                let tens = runmat_builtins::Tensor::new(out, shape)
-                                    .map_err(|e| format!("Slice error: {e}"))?;
-                                stack.push(Value::Tensor(tens));
+                            match idx_read_slice::read_tensor_slice_1d(
+                                &t,
+                                colon_mask,
+                                end_mask,
+                                &numeric,
+                            )
+                            .await
+                            {
+                                Ok(v) => stack.push(v),
+                                Err(e) => vm_bail!(e),
                             }
                         } else {
                             for d in 0..dims {
