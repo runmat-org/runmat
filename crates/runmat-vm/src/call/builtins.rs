@@ -62,3 +62,94 @@ pub fn single_result_output_list(result: Value, out_count: usize) -> Value {
     }
     Value::OutputList(outputs)
 }
+
+pub enum ImportedBuiltinResolution {
+    Resolved(Value),
+    Ambiguous(String),
+    NotFound,
+}
+
+pub async fn resolve_imported_builtin(
+    name: &str,
+    imports: &[(Vec<String>, bool)],
+    prepared_primary: &[Value],
+    requested_outputs: Option<usize>,
+) -> Result<ImportedBuiltinResolution, RuntimeError> {
+    let mut specific_matches: Vec<(String, Value)> = Vec::new();
+    for (path, wildcard) in imports {
+        if *wildcard {
+            continue;
+        }
+        if path.last().map(|s| s.as_str()) == Some(name) {
+            let qual = path.join(".");
+            let qual_args = prepare_builtin_args(&qual, prepared_primary).await?;
+            let result = match requested_outputs {
+                Some(count) => runmat_runtime::call_builtin_async_with_outputs(&qual, &qual_args, count).await,
+                None => runmat_runtime::call_builtin_async(&qual, &qual_args).await,
+            };
+            if let Ok(value) = result {
+                specific_matches.push((qual, value));
+            }
+        }
+    }
+    if specific_matches.len() > 1 {
+        let msg = specific_matches
+            .iter()
+            .map(|(q, _)| q.clone())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Ok(ImportedBuiltinResolution::Ambiguous(format!(
+            "ambiguous builtin '{}' via imports: {}",
+            name, msg
+        )));
+    }
+    if let Some((_, value)) = specific_matches.pop() {
+        return Ok(ImportedBuiltinResolution::Resolved(value));
+    }
+
+    let mut wildcard_matches: Vec<(String, Value)> = Vec::new();
+    for (path, wildcard) in imports {
+        if !*wildcard || path.is_empty() {
+            continue;
+        }
+        let qual = format!("{}.{}", path.join("."), name);
+        let qual_args = prepare_builtin_args(&qual, prepared_primary).await?;
+        let result = match requested_outputs {
+            Some(count) => runmat_runtime::call_builtin_async_with_outputs(&qual, &qual_args, count).await,
+            None => runmat_runtime::call_builtin_async(&qual, &qual_args).await,
+        };
+        if let Ok(value) = result {
+            wildcard_matches.push((qual, value));
+        }
+    }
+    if wildcard_matches.len() > 1 {
+        let msg = wildcard_matches
+            .iter()
+            .map(|(q, _)| q.clone())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Ok(ImportedBuiltinResolution::Ambiguous(format!(
+            "ambiguous builtin '{}' via wildcard imports: {}",
+            name, msg
+        )));
+    }
+    if let Some((_, value)) = wildcard_matches.pop() {
+        return Ok(ImportedBuiltinResolution::Resolved(value));
+    }
+
+    Ok(ImportedBuiltinResolution::NotFound)
+}
+
+pub fn rethrow_without_explicit_exception(
+    name: &str,
+    args: &[Value],
+    last_identifier: Option<&str>,
+    last_message: Option<&str>,
+) -> Option<RuntimeError> {
+    if name == "rethrow" && args.is_empty() {
+        if let (Some(identifier), Some(message)) = (last_identifier, last_message) {
+            return Some(format!("{}: {}", identifier, message).to_string().into());
+        }
+    }
+    None
+}

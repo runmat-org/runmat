@@ -40,6 +40,7 @@ use runmat_vm::interpreter::errors::{
 use runmat_vm::interpreter::stack::{pop2, pop_value};
 use runmat_vm::call::shared as call_shared;
 use runmat_vm::call::{builtins as call_builtins, feval as call_feval, user as call_user};
+use runmat_vm::call::builtins::ImportedBuiltinResolution;
 use runmat_vm::ops::control_flow::{self, ControlFlowAction};
 use runmat_vm::ops::stack as stack_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
@@ -3211,12 +3212,8 @@ async fn run_interpreter_inner(
                 let prepared_primary = call_builtins::prepare_builtin_args(&name, &args).await?;
                 let result = match requested_outputs {
                     Some(count) => {
-                        runmat_runtime::call_builtin_async_with_outputs(
-                            &name,
-                            &prepared_primary,
-                            count,
-                        )
-                        .await
+                        runmat_runtime::call_builtin_async_with_outputs(&name, &prepared_primary, count)
+                            .await
                     }
                     None => runmat_runtime::call_builtin_async(&name, &prepared_primary).await,
                 };
@@ -3224,102 +3221,24 @@ async fn run_interpreter_inner(
                     Ok(result) => stack.push(result),
                     Err(e) => {
                         let e = e;
-                        // Specific-import matches: import pkg.foo; name == foo
-                        let mut specific_matches: Vec<(String, Vec<Value>, Value)> = Vec::new();
-                        for (path, wildcard) in &imports {
-                            if *wildcard {
-                                continue;
-                            }
-                            if path.last().map(|s| s.as_str()) == Some(name.as_str()) {
-                                let qual = path.join(".");
-                                let qual_args =
-                                    accel_prepare_args(&qual, &prepared_primary).await?;
-                                let result = match requested_outputs {
-                                    Some(count) => {
-                                        runmat_runtime::call_builtin_async_with_outputs(
-                                            &qual, &qual_args, count,
-                                        )
-                                        .await
-                                    }
-                                    None => {
-                                        runmat_runtime::call_builtin_async(&qual, &qual_args).await
-                                    }
-                                };
-                                match result {
-                                    Ok(value) => specific_matches.push((qual, qual_args, value)),
-                                    Err(_err) => {}
-                                }
-                            }
-                        }
-                        if specific_matches.len() > 1 {
-                            let msg = specific_matches
-                                .iter()
-                                .map(|(q, _, _)| q.clone())
-                                .collect::<Vec<_>>()
-                                .join(", ");
-                            vm_bail!(format!("ambiguous builtin '{}' via imports: {}", name, msg)
-                                .to_string());
-                        }
-                        if let Some((_, _, value)) = specific_matches.pop() {
-                            stack.push(value);
-                        } else {
-                            // Wildcard-import matches: import pkg.*; try pkg.name
-                            let mut wildcard_matches: Vec<(String, Vec<Value>, Value)> = Vec::new();
-                            for (path, wildcard) in &imports {
-                                if !*wildcard {
-                                    continue;
-                                }
-                                if path.is_empty() {
-                                    continue;
-                                }
-                                let mut qual = String::new();
-                                for (i, part) in path.iter().enumerate() {
-                                    if i > 0 {
-                                        qual.push('.');
-                                    }
-                                    qual.push_str(part);
-                                }
-                                qual.push('.');
-                                qual.push_str(&name);
-                                let qual_args =
-                                    accel_prepare_args(&qual, &prepared_primary).await?;
-                                let result = match requested_outputs {
-                                    Some(count) => {
-                                        runmat_runtime::call_builtin_async_with_outputs(
-                                            &qual, &qual_args, count,
-                                        )
-                                        .await
-                                    }
-                                    None => {
-                                        runmat_runtime::call_builtin_async(&qual, &qual_args).await
-                                    }
-                                };
-                                match result {
-                                    Ok(value) => wildcard_matches.push((qual, qual_args, value)),
-                                    Err(_err) => {}
-                                }
-                            }
-                            if wildcard_matches.len() > 1 {
-                                let msg = wildcard_matches
-                                    .iter()
-                                    .map(|(q, _, _)| q.clone())
-                                    .collect::<Vec<_>>()
-                                    .join(", ");
-                                vm_bail!(format!(
-                                    "ambiguous builtin '{}' via wildcard imports: {}",
-                                    name, msg
-                                )
-                                .to_string());
-                            }
-                            if let Some((_, _, value)) = wildcard_matches.pop() {
-                                stack.push(value);
-                            } else {
-                                // Special-case: rethrow() without explicit e uses last caught
-                                if name == "rethrow" && args.is_empty() {
-                                    if let Some(le) = &last_exception {
-                                        vm_bail!(format!("{}: {}", le.identifier, le.message)
-                                            .to_string());
-                                    }
+                        let imported = call_builtins::resolve_imported_builtin(
+                            &name,
+                            &imports,
+                            &prepared_primary,
+                            requested_outputs,
+                        )
+                        .await?;
+                        match imported {
+                            ImportedBuiltinResolution::Resolved(value) => stack.push(value),
+                            ImportedBuiltinResolution::Ambiguous(message) => vm_bail!(message),
+                            ImportedBuiltinResolution::NotFound => {
+                                if let Some(err) = call_builtins::rethrow_without_explicit_exception(
+                                    &name,
+                                    &args,
+                                    last_exception.as_ref().map(|e| e.identifier.as_str()),
+                                    last_exception.as_ref().map(|e| e.message.as_str()),
+                                ) {
+                                    vm_bail!(err);
                                 }
                                 if let Some((catch_pc, catch_var)) = try_stack.pop() {
                                     if let Some(var_idx) = catch_var {
