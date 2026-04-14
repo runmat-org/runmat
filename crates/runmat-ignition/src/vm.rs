@@ -3287,57 +3287,8 @@ async fn run_interpreter_inner(
                 fixed.reverse();
                 // Evaluate cell indexing, then flatten cell contents to extend args
                 let expanded = match (base, indices.len()) {
-                    (Value::Cell(ca), 1) => {
-                        match &indices[0] {
-                            Value::Num(n) => {
-                                let i = *n as usize;
-                                if i == 0 || i > ca.data.len() {
-                                    return Err(mex(
-                                        "CellIndexOutOfBounds",
-                                        "Cell index out of bounds",
-                                    ));
-                                }
-                                vec![(*ca.data[i - 1]).clone()]
-                            }
-                            Value::Int(i) => {
-                                let iu = i.to_i64() as usize;
-                                if iu == 0 || iu > ca.data.len() {
-                                    return Err(mex(
-                                        "CellIndexOutOfBounds",
-                                        "Cell index out of bounds",
-                                    ));
-                                }
-                                vec![(*ca.data[iu - 1]).clone()]
-                            }
-                            Value::Tensor(t) => {
-                                // Treat as list of 1-based indices; expand each
-                                let mut out: Vec<Value> = Vec::with_capacity(t.data.len());
-                                for &val in &t.data {
-                                    let iu = val as usize;
-                                    if iu == 0 || iu > ca.data.len() {
-                                        return Err(mex(
-                                            "CellIndexOutOfBounds",
-                                            "Cell index out of bounds",
-                                        ));
-                                    }
-                                    out.push((*ca.data[iu - 1]).clone());
-                                }
-                                out
-                            }
-                            _ => return Err(mex("CellIndexType", "Unsupported cell index type")),
-                        }
-                    }
-                    (Value::Cell(ca), 2) => {
-                        let r: f64 = (&indices[0]).try_into()?;
-                        let c: f64 = (&indices[1]).try_into()?;
-                        let (ir, ic) = (r as usize, c as usize);
-                        if ir == 0 || ir > ca.rows || ic == 0 || ic > ca.cols {
-                            return Err(mex(
-                                "CellSubscriptOutOfBounds",
-                                "Cell subscript out of bounds",
-                            ));
-                        }
-                        vec![(*ca.data[(ir - 1) * ca.cols + (ic - 1)]).clone()]
+                    (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => {
+                        call_shared::expand_cell_indices(&ca, &indices)?
                     }
                     (other, _) => {
                         // Route to subsref(obj,'{}',{indices...}) if object
@@ -3414,54 +3365,8 @@ async fn run_interpreter_inner(
                 }
                 before.reverse();
                 let expanded = match (base, indices.len()) {
-                    (Value::Cell(ca), 1) => match &indices[0] {
-                        Value::Num(n) => {
-                            let idx = *n as usize;
-                            if idx == 0 || idx > ca.data.len() {
-                                return Err(mex(
-                                    "CellIndexOutOfBounds",
-                                    "Cell index out of bounds",
-                                ));
-                            }
-                            vec![(*ca.data[idx - 1]).clone()]
-                        }
-                        Value::Int(i) => {
-                            let idx = i.to_i64() as usize;
-                            if idx == 0 || idx > ca.data.len() {
-                                return Err(mex(
-                                    "CellIndexOutOfBounds",
-                                    "Cell index out of bounds",
-                                ));
-                            }
-                            vec![(*ca.data[idx - 1]).clone()]
-                        }
-                        Value::Tensor(t) => {
-                            let mut out: Vec<Value> = Vec::with_capacity(t.data.len());
-                            for &val in &t.data {
-                                let iu = val as usize;
-                                if iu == 0 || iu > ca.data.len() {
-                                    return Err(mex(
-                                        "CellIndexOutOfBounds",
-                                        "Cell index out of bounds",
-                                    ));
-                                }
-                                out.push((*ca.data[iu - 1]).clone());
-                            }
-                            out
-                        }
-                        _ => return Err(mex("CellIndexType", "Unsupported cell index type")),
-                    },
-                    (Value::Cell(ca), 2) => {
-                        let r: f64 = (&indices[0]).try_into()?;
-                        let c: f64 = (&indices[1]).try_into()?;
-                        let (ir, ic) = (r as usize, c as usize);
-                        if ir == 0 || ir > ca.rows || ic == 0 || ic > ca.cols {
-                            return Err(mex(
-                                "CellSubscriptOutOfBounds",
-                                "Cell subscript out of bounds",
-                            ));
-                        }
-                        vec![(*ca.data[(ir - 1) * ca.cols + (ic - 1)]).clone()]
+                    (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => {
+                        call_shared::expand_cell_indices(&ca, &indices)?
                     }
                     (Value::Object(obj), _) => {
                         let idx_vals: Vec<Value> = indices
@@ -3523,9 +3428,7 @@ async fn run_interpreter_inner(
                         clear_residency(&base);
                         let expanded = if spec.expand_all {
                             match base {
-                                Value::Cell(ca) => {
-                                    ca.data.iter().map(|p| (*(*p)).clone()).collect()
-                                }
+                                Value::Cell(ca) => call_shared::expand_all_cell(&ca),
                                 Value::Object(obj) => {
                                     // subsref(obj,'{}', {}) with empty indices; expect a cell or value
                                     let empty = runmat_builtins::CellArray::new(vec![], 1, 0)
@@ -3543,9 +3446,7 @@ async fn run_interpreter_inner(
                                         Err(e) => vm_bail!(e),
                                     };
                                     match v {
-                                        Value::Cell(ca) => {
-                                            ca.data.iter().map(|p| (*(*p)).clone()).collect()
-                                        }
+                                        Value::Cell(ca) => call_shared::expand_all_cell(&ca),
                                         other => vec![other],
                                     }
                                 }
@@ -3556,59 +3457,8 @@ async fn run_interpreter_inner(
                             }
                         } else {
                             match (base, indices.len()) {
-                                (Value::Cell(ca), 1) => match &indices[0] {
-                                    Value::Num(n) => {
-                                        let idx = *n as usize;
-                                        if idx == 0 || idx > ca.data.len() {
-                                            return Err(mex(
-                                                "CellIndexOutOfBounds",
-                                                "Cell index out of bounds",
-                                            ));
-                                        }
-                                        vec![(*ca.data[idx - 1]).clone()]
-                                    }
-                                    Value::Int(i) => {
-                                        let idx = i.to_i64() as usize;
-                                        if idx == 0 || idx > ca.data.len() {
-                                            return Err(mex(
-                                                "CellIndexOutOfBounds",
-                                                "Cell index out of bounds",
-                                            ));
-                                        }
-                                        vec![(*ca.data[idx - 1]).clone()]
-                                    }
-                                    Value::Tensor(t) => {
-                                        let mut out: Vec<Value> = Vec::with_capacity(t.data.len());
-                                        for &val in &t.data {
-                                            let iu = val as usize;
-                                            if iu == 0 || iu > ca.data.len() {
-                                                return Err(mex(
-                                                    "CellIndexOutOfBounds",
-                                                    "Cell index out of bounds",
-                                                ));
-                                            }
-                                            out.push((*ca.data[iu - 1]).clone());
-                                        }
-                                        out
-                                    }
-                                    _ => {
-                                        return Err(mex(
-                                            "CellIndexType",
-                                            "Unsupported cell index type",
-                                        ))
-                                    }
-                                },
-                                (Value::Cell(ca), 2) => {
-                                    let r: f64 = (&indices[0]).try_into()?;
-                                    let c: f64 = (&indices[1]).try_into()?;
-                                    let (ir, ic) = (r as usize, c as usize);
-                                    if ir == 0 || ir > ca.rows || ic == 0 || ic > ca.cols {
-                                        return Err(mex(
-                                            "CellSubscriptOutOfBounds",
-                                            "Cell subscript out of bounds",
-                                        ));
-                                    }
-                                    vec![(*ca.data[(ir - 1) * ca.cols + (ic - 1)]).clone()]
+                                (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => {
+                                    call_shared::expand_cell_indices(&ca, &indices)?
                                 }
                                 (Value::Object(obj), _) => {
                                     let idx_vals: Vec<Value> = indices
@@ -3928,54 +3778,8 @@ async fn run_interpreter_inner(
                 }
                 before.reverse();
                 let expanded = match (base, indices.len()) {
-                    (Value::Cell(ca), 1) => match &indices[0] {
-                        Value::Num(n) => {
-                            let idx = *n as usize;
-                            if idx == 0 || idx > ca.data.len() {
-                                return Err(mex(
-                                    "CellIndexOutOfBounds",
-                                    "Cell index out of bounds",
-                                ));
-                            }
-                            vec![(*ca.data[idx - 1]).clone()]
-                        }
-                        Value::Int(i) => {
-                            let idx = i.to_i64() as usize;
-                            if idx == 0 || idx > ca.data.len() {
-                                return Err(mex(
-                                    "CellIndexOutOfBounds",
-                                    "Cell index out of bounds",
-                                ));
-                            }
-                            vec![(*ca.data[idx - 1]).clone()]
-                        }
-                        Value::Tensor(t) => {
-                            let mut out: Vec<Value> = Vec::with_capacity(t.data.len());
-                            for &val in &t.data {
-                                let iu = val as usize;
-                                if iu == 0 || iu > ca.data.len() {
-                                    return Err(mex(
-                                        "CellIndexOutOfBounds",
-                                        "Cell index out of bounds",
-                                    ));
-                                }
-                                out.push((*ca.data[iu - 1]).clone());
-                            }
-                            out
-                        }
-                        _ => return Err(mex("CellIndexType", "Unsupported cell index type")),
-                    },
-                    (Value::Cell(ca), 2) => {
-                        let r: f64 = (&indices[0]).try_into()?;
-                        let c: f64 = (&indices[1]).try_into()?;
-                        let (ir, ic) = (r as usize, c as usize);
-                        if ir == 0 || ir > ca.rows || ic == 0 || ic > ca.cols {
-                            return Err(mex(
-                                "CellSubscriptOutOfBounds",
-                                "Cell subscript out of bounds",
-                            ));
-                        }
-                        vec![(*ca.data[(ir - 1) * ca.cols + (ic - 1)]).clone()]
+                    (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => {
+                        call_shared::expand_cell_indices(&ca, &indices)?
                     }
                     (Value::Object(obj), _) => {
                         let cell =
