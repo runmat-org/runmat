@@ -15,6 +15,20 @@ The rule for this migration is simple: preserve semantics first, improve structu
 
 Until the port is complete, `runmat-ignition` remains the behavior source of truth.
 
+## Migration status
+
+Substantial ownership has already moved into `runmat-vm` for the following areas:
+
+- `bytecode/`: `Instr`, `Bytecode`, `UserFunction`, `ExecutionContext`, `CompileError`, and `compile(...)`.
+- `runtime/`: call-stack limit/namespace state and workspace import/export state.
+- `interpreter/`: public interpreter state types, current-PC/span helpers, timing helpers, stack helpers, and runtime error helpers.
+- `ops/`: stack op family, control-flow op family, and cell creation/read/write helpers.
+- `call/`: builtin shell helpers, user-function prep/output shaping, `feval` helpers, closure/method/static call helpers, and expansion helpers.
+- `indexing/`: selector normalization, `end` evaluation, linear read, most slice reads, cell indexing helpers, linear writes, and most slice writes.
+- `object/`: member read/write resolution, static property/method resolution, and runtime class registration.
+
+This means `runmat-ignition/src/vm.rs` is now primarily retaining execution shells and a shrinking set of fallback paths rather than owning the full subsystem logic.
+
 Key current files:
 
 - `runmat-ignition/src/instr.rs`: bytecode IR contract.
@@ -148,6 +162,13 @@ Port source:
 - Exists because call semantics are currently duplicated in several paths.
 - `shared.rs` is the home for argument collection, expansion handling, frame setup, and output shaping.
 
+Current migrated ownership:
+
+- builtin shell helpers and import-resolution helpers in `builtins.rs`
+- user-function prep/output shaping in `shared.rs`
+- closure/method/static dispatch helpers in `closures.rs`
+- `feval` dispatch helpers in `feval.rs`
+
 Port source:
 
 - call-related sections from `runmat-ignition/src/vm.rs`
@@ -157,6 +178,15 @@ Port source:
 - Owns selector normalization, `end` evaluation, slice read/write, and linear read/write.
 - This is one of the highest-risk areas and gets its own top-level subtree.
 - `selectors.rs` is the home for selector materialization, selector classification, and shared index planning.
+
+Current migrated ownership:
+
+- selector normalization and slice-plan building in `selectors.rs`
+- runtime `end` expression evaluation in `end_expr.rs`
+- linear reads in `read_linear.rs`
+- most read-side slice handling in `read_slice.rs`
+- linear writes in `write_linear.rs`
+- most slice writes in `write_slice.rs`
 
 Port source:
 
@@ -168,6 +198,12 @@ Port source:
 - Owns object, struct, member, method, static dispatch, and class registration behavior.
 - Keeps class semantics away from generic stack dispatch.
 - `resolve.rs` is the shared semantic center for field, property, method, and static target resolution.
+
+Current migrated ownership:
+
+- member read/write resolution in `resolve.rs`
+- static property/member resolution in `resolve.rs`
+- runtime class registration in `class_def.rs`
 
 Port source:
 
