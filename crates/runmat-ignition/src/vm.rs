@@ -47,6 +47,7 @@ use runmat_vm::indexing::end_expr as idx_end_expr;
 use runmat_vm::indexing::read_linear as idx_read_linear;
 use runmat_vm::indexing::read_slice as idx_read_slice;
 use runmat_vm::indexing::selectors as idx_selectors;
+use runmat_vm::ops::cells as cell_ops;
 use runmat_vm::ops::control_flow::{self, ControlFlowAction};
 use runmat_vm::ops::stack as stack_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
@@ -4281,16 +4282,15 @@ async fn run_interpreter_inner(
                         }
                         .await;
                         if let Ok((indices, output_shape)) = attempt {
-                            if indices.is_empty() {
-                                if let Ok(zeros) = provider.zeros(&output_shape) {
-                                    stack.push(Value::GpuTensor(zeros));
-                                    pc += 1;
-                                    continue;
-                                }
-                            } else if let Ok(result) =
-                                provider.gather_linear(handle, &indices, &output_shape)
+                            let vm_plan = idx_selectors::SlicePlan {
+                                indices,
+                                output_shape,
+                                selection_lengths: Vec::new(),
+                                dims,
+                            };
+                            if let Ok(result) = idx_read_slice::read_gpu_slice_from_plan(handle, &vm_plan)
                             {
-                                stack.push(Value::GpuTensor(result));
+                                stack.push(result);
                                 pc += 1;
                                 continue;
                             }
@@ -6398,8 +6398,7 @@ async fn run_interpreter_inner(
                     );
                 }
                 elems.reverse();
-                let cell = runmat_runtime::make_cell_with_shape(elems, vec![rows, cols])
-                    .map_err(|e| format!("Cell creation error: {e}"))?;
+                let cell = cell_ops::create_cell_2d(elems, rows, cols)?;
                 stack.push(cell);
             }
             Instr::IndexCell(num_indices) => {
@@ -6461,35 +6460,7 @@ async fn run_interpreter_inner(
                             Err(e) => vm_bail!(e),
                         }
                     }
-                    Value::Cell(ca) => match indices.len() {
-                        1 => {
-                            let i = indices[0];
-                            if i == 0 || i > ca.data.len() {
-                                return Err(mex(
-                                    "CellIndexOutOfBounds",
-                                    "Cell index out of bounds",
-                                ));
-                            }
-                            stack.push((*ca.data[i - 1]).clone());
-                        }
-                        2 => {
-                            let r = indices[0];
-                            let c = indices[1];
-                            if r == 0 || r > ca.rows || c == 0 || c > ca.cols {
-                                return Err(mex(
-                                    "CellSubscriptOutOfBounds",
-                                    "Cell subscript out of bounds",
-                                ));
-                            }
-                            stack.push((*ca.data[(r - 1) * ca.cols + (c - 1)]).clone());
-                        }
-                        _ => {
-                            return Err(mex(
-                                "UnsupportedCellIndexCount",
-                                "Unsupported number of cell indices",
-                            ))
-                        }
-                    },
+                    Value::Cell(ca) => stack.push(cell_ops::index_cell_value(&ca, &indices)?),
                     _ => return Err(mex("CellIndexingOnNonCell", "Cell indexing on non-cell")),
                 }
             }
@@ -6511,54 +6482,9 @@ async fn run_interpreter_inner(
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 match base {
                     Value::Cell(ca) => {
-                        // Expand in column-major order up to out_count elements
-                        let mut values: Vec<Value> = Vec::new();
-                        if indices.is_empty() {
-                            // Expand all elements in column-major order
-                            values.extend(ca.data.iter().map(|p| (*(*p)).clone()));
-                        } else {
-                            match indices.len() {
-                                1 => {
-                                    let i = indices[0];
-                                    if i == 0 || i > ca.data.len() {
-                                        return Err(mex(
-                                            "CellIndexOutOfBounds",
-                                            "Cell index out of bounds",
-                                        ));
-                                    }
-                                    values.push((*ca.data[i - 1]).clone());
-                                }
-                                2 => {
-                                    let r = indices[0];
-                                    let c = indices[1];
-                                    if r == 0 || r > ca.rows || c == 0 || c > ca.cols {
-                                        return Err(mex(
-                                            "CellSubscriptOutOfBounds",
-                                            "Cell subscript out of bounds",
-                                        ));
-                                    }
-                                    values.push((*ca.data[(r - 1) * ca.cols + (c - 1)]).clone());
-                                }
-                                _ => {
-                                    return Err(mex(
-                                        "UnsupportedCellIndexCount",
-                                        "Unsupported number of cell indices",
-                                    ))
-                                }
-                            }
-                        }
-                        // Pad or truncate to out_count
-                        if values.len() >= out_count {
-                            for v in values.iter().take(out_count) {
-                                stack.push(v.clone());
-                            }
-                        } else {
-                            for v in &values {
-                                stack.push(v.clone());
-                            }
-                            for _ in values.len()..out_count {
-                                stack.push(Value::Num(0.0));
-                            }
+                        let values = cell_ops::expand_cell_values(&ca, &indices, out_count)?;
+                        for v in values {
+                            stack.push(v);
                         }
                     }
                     Value::Object(obj) => {

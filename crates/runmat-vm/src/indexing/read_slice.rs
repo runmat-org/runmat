@@ -333,15 +333,22 @@ pub async fn read_gpu_slice(
     end_mask: u32,
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
+    let base_shape = handle.shape.clone();
+    let selectors = build_slice_selectors(dims, colon_mask, end_mask, numeric, &base_shape).await?;
+    let plan = build_slice_plan(&selectors, dims, &base_shape)?;
+    read_gpu_slice_from_plan(handle, &plan)
+}
+
+pub fn read_gpu_slice_from_plan(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    plan: &SlicePlan,
+) -> Result<Value, RuntimeError> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
         crate::interpreter::errors::mex(
             "AccelerationProviderUnavailable",
             "No acceleration provider registered",
         )
     })?;
-    let base_shape = handle.shape.clone();
-    let selectors = build_slice_selectors(dims, colon_mask, end_mask, numeric, &base_shape).await?;
-    let plan = build_slice_plan(&selectors, dims, &base_shape)?;
     if plan.indices.is_empty() {
         let zeros = provider
             .zeros(&plan.output_shape)
