@@ -1250,6 +1250,57 @@ impl RunMatSession {
         let _async_input_guard =
             runmat_runtime::interaction::replace_async_handler(Some(runtime_async_handler));
 
+        // Install a stateless expression evaluator for `input()` numeric parsing.
+        // The closure uses parse → lower → compile → interpret on an empty scope so
+        // that users can type expressions like `[1 2 3]`, `pi`, `42`, `[1 2; 3 4]`
+        // at an `input()` prompt and have them evaluated correctly.
+        //
+        // We wrap the user expression in an explicit assignment so that we can
+        // reliably extract the result from the returned variable array by index.
+        // `lowering.variables` maps name → var index, which is exactly what we need.
+        let compat = self.compat_mode;
+        let _eval_hook_guard =
+            runmat_runtime::interaction::replace_eval_hook(Some(std::sync::Arc::new(
+                move |expr: String| -> runmat_runtime::interaction::EvalHookFuture {
+                    Box::pin(async move {
+                        let wrapped = format!("__runmat_input_result__ = ({expr});");
+                        let ast =
+                            parse_with_options(&wrapped, ParserOptions::new(compat)).map_err(
+                                |e| {
+                                    build_runtime_error(format!("input: parse error: {e}"))
+                                        .with_identifier("RunMat:input:ParseError")
+                                        .build()
+                                },
+                            )?;
+                        let lowering = runmat_hir::lower(
+                            &ast,
+                            &LoweringContext::new(&HashMap::new(), &HashMap::new()),
+                        )
+                        .map_err(|e| {
+                            build_runtime_error(format!("input: lowering error: {e}"))
+                                .with_identifier("RunMat:input:LowerError")
+                                .build()
+                        })?;
+                        // lowering.variables maps variable name → slot index.
+                        let result_idx = lowering
+                            .variables
+                            .get("__runmat_input_result__")
+                            .copied();
+                        let bc = runmat_ignition::compile(&lowering.hir, &HashMap::new())
+                            .map_err(RuntimeError::from)?;
+                        // interpret() returns the final variable slot array.
+                        let vars = runmat_ignition::interpret(&bc).await?;
+                        result_idx
+                            .and_then(|idx| vars.get(idx).cloned())
+                            .ok_or_else(|| {
+                                build_runtime_error("input: expression produced no value")
+                                    .with_identifier("RunMat:input:NoValue")
+                                    .build()
+                            })
+                    })
+                },
+            )));
+
         if self.verbose {
             debug!("Executing: {}", input.trim());
         }

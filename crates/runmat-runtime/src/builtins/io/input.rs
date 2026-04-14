@@ -167,6 +167,19 @@ async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
     if trimmed.is_empty() || trimmed == "[]" {
         return Ok(Value::Tensor(Tensor::zeros(vec![0, 0])));
     }
+    // Use the eval hook installed by runmat-core if available. This lets users
+    // type full MATLAB expressions: `[1 2 3]`, `pi`, `3+4`, `ones(3)`, etc.
+    if let Some(hook) = interaction::current_eval_hook() {
+        return hook(trimmed.to_string()).await.map_err(|err| {
+            let message = err.message().to_string();
+            build_runtime_error(format!("input: invalid expression ({message})"))
+                .with_identifier("RunMat:input:EvalFailed")
+                .with_source(err)
+                .with_builtin("input")
+                .build()
+        });
+    }
+    // Fallback when no eval hook is installed (e.g. in unit tests or native REPL).
     call_builtin_async("str2double", &[Value::String(trimmed.to_string())])
         .await
         .map_err(|err| {
@@ -210,6 +223,22 @@ pub(crate) mod tests {
         match value {
             Value::Tensor(t) => assert!(t.data.is_empty()),
             other => panic!("expected empty tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn matrix_input_falls_through_to_str2double_without_hook() {
+        // Without the eval hook (unit-test context), `[1 2 3]` is not a scalar
+        // so str2double returns NaN. This test documents that the hook path is
+        // needed for matrix literals and that the fallback returns NaN (not an error).
+        push_queued_response(Ok(InteractionResponse::Line("[1 2 3]".into())));
+        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        // str2double("[1 2 3]") returns NaN — the eval hook is required for the
+        // real result; this test just confirms no panic or hard error occurs.
+        match value {
+            Value::Num(f) => assert!(f.is_nan()),
+            other => panic!("expected NaN scalar, got {other:?}"),
         }
     }
 
