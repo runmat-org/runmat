@@ -37,8 +37,9 @@ pub use runmat_vm::interpreter::api::{
 use runmat_vm::interpreter::errors::{
     attach_span_at, attach_span_from_pc, ensure_runtime_error_identifier, mex, set_vm_pc,
 };
-use runmat_vm::interpreter::stack::{pop2, pop_args, pop_value};
+use runmat_vm::interpreter::stack::{pop2, pop_value};
 use runmat_vm::call::shared as call_shared;
+use runmat_vm::call::{builtins as call_builtins, feval as call_feval, user as call_user};
 use runmat_vm::ops::control_flow::{self, ControlFlowAction};
 use runmat_vm::ops::stack as stack_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
@@ -1897,156 +1898,27 @@ async fn run_interpreter_inner(
                 stack_ops::swap(&mut stack)?;
             }
             Instr::CallFeval(argc) => {
-                let args = pop_args(&mut stack, argc)?;
+                let args = call_builtins::collect_call_args(&mut stack, argc)?;
                 let func_val = pop_value(&mut stack)?;
                 match func_val {
                     Value::Closure(c) => {
-                        // User-defined function via closure: prepend captures then dispatch like CallFunction
-                        let name = c.function_name;
-                        let mut call_args = c.captures.clone();
-                        call_args.extend(args);
-                        // Try runtime builtin target for closures (e.g., call_method)
-                        if let Ok(result) = call_builtin_vm!(&name, &call_args) {
+                        let (name, call_args) = call_feval::closure_call_args(&c, args);
+                        if let Some(result) = call_feval::try_closure_builtin_fallback(&name, &call_args).await? {
                             stack.push(result);
                             pc += 1;
                             continue;
                         }
-                        let func: UserFunction = match context
-                            .functions
-                            .get(&name)
-                            .or_else(|| bytecode.functions.get(&name))
-                        {
-                            Some(f) => f.clone(),
-                            None => vm_bail!(mex(
-                                "UndefinedFunction",
-                                &format!("Undefined function: {name}")
-                            )),
-                        };
-                        let arg_count = call_args.len();
-                        if !func.has_varargin {
-                            if arg_count < func.params.len() {
-                                vm_bail!(mex(
-                                    "NotEnoughInputs",
-                                    &format!(
-                                        "Function '{name}' expects {} inputs, got {arg_count}",
-                                        func.params.len()
-                                    )
-                                ));
-                            }
-                            if arg_count > func.params.len() {
-                                vm_bail!(mex(
-                                    "TooManyInputs",
-                                    &format!(
-                                        "Function '{name}' expects {} inputs, got {arg_count}",
-                                        func.params.len()
-                                    )
-                                ));
-                            }
+                        let mut functions = bytecode.functions.clone();
+                        for (k, v) in &context.functions {
+                            functions.insert(k.clone(), v.clone());
                         }
-                        let var_map = runmat_hir::remapping::create_complete_function_var_map(
-                            &func.params,
-                            &func.outputs,
-                            &func.body,
-                        );
-                        let local_var_count = var_map.len();
-                        let remapped_body =
-                            runmat_hir::remapping::remap_function_body(&func.body, &var_map);
-                        let func_vars_count = local_var_count.max(func.params.len());
-                        let mut func_vars = vec![Value::Num(0.0); func_vars_count];
-                        if func.has_varargin {
-                            let fixed = func.params.len().saturating_sub(1);
-                            for i in 0..fixed {
-                                if i < call_args.len() && i < func_vars.len() {
-                                    func_vars[i] = call_args[i].clone();
-                                }
-                            }
-                            let mut rest: Vec<Value> = if call_args.len() > fixed {
-                                call_args[fixed..].to_vec()
-                            } else {
-                                Vec::new()
-                            };
-                            let cell = runmat_builtins::CellArray::new(
-                                std::mem::take(&mut rest),
-                                1,
-                                if call_args.len() > fixed {
-                                    call_args.len() - fixed
-                                } else {
-                                    0
-                                },
-                            )
-                            .map_err(|e| format!("varargin: {e}"))?;
-                            if fixed < func_vars.len() {
-                                func_vars[fixed] = Value::Cell(cell);
-                            }
-                        } else {
-                            for (i, _param_id) in func.params.iter().enumerate() {
-                                if i < call_args.len() && i < func_vars.len() {
-                                    func_vars[i] = call_args[i].clone();
-                                }
-                            }
-                        }
-                        // Copy referenced globals into local frame
-                        for (original_var_id, local_var_id) in &var_map {
-                            let local_index = local_var_id.0;
-                            let global_index = original_var_id.0;
-                            if local_index < func_vars.len() && global_index < vars.len() {
-                                let is_parameter = func
-                                    .params
-                                    .iter()
-                                    .any(|param_id| param_id == original_var_id);
-                                if !is_parameter {
-                                    func_vars[local_index] = vars[global_index].clone();
-                                }
-                            }
-                        }
-                        // Initialize varargout if needed
-                        if func.has_varargout {
-                            if let Some(varargout_oid) = func.outputs.last() {
-                                if let Some(local_id) = var_map.get(varargout_oid) {
-                                    if local_id.0 < func_vars.len() {
-                                        let empty = runmat_builtins::CellArray::new(vec![], 1, 0)
-                                            .map_err(|e| format!("varargout init: {e}"))?;
-                                        func_vars[local_id.0] = Value::Cell(empty);
-                                    }
-                                }
-                            }
-                        }
-                        let mut func_var_types = func.var_types.clone();
-                        if func_var_types.len() < local_var_count {
-                            func_var_types.resize(local_var_count, Type::Unknown);
-                        }
-                        let func_program = runmat_hir::HirProgram {
-                            body: remapped_body,
-                            var_types: func_var_types,
-                        };
-                        let func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
-                        // Merge nested functions into current execution context for future closure calls
-                        for (k, v) in func_bytecode.functions.iter() {
-                            context.functions.insert(k.clone(), v.clone());
-                        }
-                        let func_result_vars =
-                            match Box::pin(interpret_function(&func_bytecode, func_vars)).await {
-                                Ok(v) => v,
-                                Err(e) => vm_bail!(e),
-                            };
-                        if let Some(output_var_id) = func.outputs.first() {
-                            let local_output_index =
-                                var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
-                            if local_output_index < func_result_vars.len() {
-                                stack.push(func_result_vars[local_output_index].clone());
-                            } else {
-                                stack.push(Value::Num(0.0));
-                            }
-                        } else {
-                            stack.push(Value::Num(0.0));
+                        match invoke_user_function_value(&name, &call_args, &functions, &mut vars).await {
+                            Ok(value) => stack.push(value),
+                            Err(e) => vm_bail!(e),
                         }
                     }
                     other => {
-                        // Forward to runtime feval for string/char handles and builtins
-                        let mut argv = Vec::with_capacity(1 + args.len());
-                        argv.push(other);
-                        argv.extend(args);
-                        match call_builtin_vm!("feval", &argv) {
+                        match call_feval::forward_builtin_feval(other, args).await {
                             Ok(result) => stack.push(result),
                             Err(err) => vm_bail!(err),
                         }
@@ -3320,40 +3192,14 @@ async fn run_interpreter_inner(
                         "[vm] CallBuiltin"
                     );
                 }
-                if name == "nargin" {
-                    if arg_count != 0 {
-                        vm_bail!(mex("TooManyInputs", "nargin takes no arguments"));
-                    }
-                    let (nin, _) =
-                        CALL_COUNTS.with(|cc| cc.borrow().last().cloned().unwrap_or((0, 0)));
-                    stack.push(Value::Num(nin as f64));
+                let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
+                if let Some(value) = call_builtins::special_counter_builtin(&name, arg_count, &call_counts)? {
+                    stack.push(value);
                     pc += 1;
                     continue;
                 }
-                if name == "nargout" {
-                    if arg_count != 0 {
-                        vm_bail!(mex("TooManyInputs", "nargout takes no arguments"));
-                    }
-                    let (_, nout) =
-                        CALL_COUNTS.with(|cc| cc.borrow().last().cloned().unwrap_or((0, 0)));
-                    stack.push(Value::Num(nout as f64));
-                    pc += 1;
-                    continue;
-                }
-                let requested_outputs = match bytecode.instructions.get(pc + 1) {
-                    Some(Instr::Unpack(count)) => Some(*count),
-                    _ => None,
-                };
-                let mut args = Vec::new();
-
-                for _ in 0..arg_count {
-                    args.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                args.reverse();
+                let requested_outputs = call_builtins::requested_output_count(&bytecode.instructions, pc);
+                let args = call_builtins::collect_call_args(&mut stack, arg_count)?;
 
                 let _callsite_guard = runmat_runtime::callsite::push_callsite(
                     bytecode.source_id,
@@ -3362,7 +3208,7 @@ async fn run_interpreter_inner(
                 let output_hint = output_hint_for_single_result(&bytecode, pc);
                 let _output_guard = push_output_count(output_hint);
 
-                let prepared_primary = accel_prepare_args(&name, &args).await?;
+                let prepared_primary = call_builtins::prepare_builtin_args(&name, &args).await?;
                 let result = match requested_outputs {
                     Some(count) => {
                         runmat_runtime::call_builtin_async_with_outputs(
@@ -4307,25 +4153,13 @@ async fn run_interpreter_inner(
             Instr::CallFunction(name, arg_count) => {
                 // First, try runtime builtin fallback (some helpers like call_method)
                 {
-                    let mut args = Vec::new();
-                    for _ in 0..arg_count {
-                        args.push(
-                            stack
-                                .pop()
-                                .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                        );
-                    }
-                    args.reverse();
-                    let prepared_primary = accel_prepare_args(&name, &args).await?;
-                    if let Ok(result) = call_builtin_vm!(&name, &prepared_primary) {
+                    let args = call_builtins::collect_call_args(&mut stack, arg_count)?;
+                    if let Some(result) = call_user::try_builtin_fallback_single(&name, &args).await? {
                         stack.push(result);
                         pc += 1;
                         continue;
                     }
-                    // Put args back if not a builtin: we'll handle as user function below
-                    for v in prepared_primary.into_iter().rev() {
-                        stack.push(v);
-                    }
+                    for v in args.into_iter().rev() { stack.push(v); }
                 }
                 let func = match call_shared::lookup_user_function(&name, &bytecode.functions) {
                     Ok(func) => func,
@@ -4403,32 +4237,13 @@ async fn run_interpreter_inner(
             Instr::CallFunctionMulti(name, arg_count, out_count) => {
                 // First, try runtime builtin fallback (some helpers like call_method)
                 {
-                    let mut args = Vec::new();
-                    for _ in 0..arg_count {
-                        args.push(
-                            stack
-                                .pop()
-                                .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                        );
-                    }
-                    args.reverse();
-                    let prepared_primary = accel_prepare_args(&name, &args).await?;
-                    if let Ok(result) = call_builtin_vm!(&name, &prepared_primary) {
-                        let mut outputs = Vec::with_capacity(out_count);
-                        if out_count > 0 {
-                            outputs.push(result);
-                            for _ in 1..out_count {
-                                outputs.push(Value::Num(0.0));
-                            }
-                        }
-                        stack.push(Value::OutputList(outputs));
+                    let args = call_builtins::collect_call_args(&mut stack, arg_count)?;
+                    if let Some(result) = call_user::try_builtin_fallback_multi(&name, &args, out_count).await? {
+                        stack.push(result);
                         pc += 1;
                         continue;
                     }
-                    // Put args back if not a builtin: we'll handle as user function below
-                    for v in prepared_primary.into_iter().rev() {
-                        stack.push(v);
-                    }
+                    for v in args.into_iter().rev() { stack.push(v); }
                 }
                 let func = match call_shared::lookup_user_function(&name, &bytecode.functions) {
                     Ok(func) => func,
