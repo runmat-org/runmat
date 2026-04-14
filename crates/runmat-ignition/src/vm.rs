@@ -49,6 +49,7 @@ use runmat_vm::indexing::read_slice as idx_read_slice;
 use runmat_vm::indexing::selectors as idx_selectors;
 use runmat_vm::indexing::write_linear as idx_write_linear;
 use runmat_vm::indexing::write_slice as idx_write_slice;
+use runmat_vm::object::{class_def as obj_class_def, resolve as obj_resolve};
 use runmat_vm::ops::cells as cell_ops;
 use runmat_vm::ops::control_flow::{self, ControlFlowAction};
 use runmat_vm::ops::stack as stack_ops;
@@ -4824,173 +4825,9 @@ async fn run_interpreter_inner(
                 let base = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match base {
-                    Value::Object(obj) => {
-                        if let Some((p, _owner)) =
-                            runmat_builtins::lookup_property(&obj.class_name, &field)
-                        {
-                            if p.is_static {
-                                vm_bail!(format!(
-                                    "Property '{}' is static; use classref('{}').{}",
-                                    field, obj.class_name, field
-                                ));
-                            }
-                            if p.get_access == runmat_builtins::Access::Private {
-                                vm_bail!(format!("Property '{}' is private", field))
-                            }
-                            if p.is_dependent {
-                                // Call get.<field>(obj)
-                                let getter = format!("get.{field}");
-                                match call_builtin_vm!(&getter, &[Value::Object(obj.clone())],) {
-                                    Ok(v) => {
-                                        stack.push(v);
-                                        continue;
-                                    }
-                                    Err(_e) => {}
-                                }
-                            }
-                        }
-                        if let Some(v) = obj.properties.get(&field) {
-                            stack.push(v.clone());
-                        } else if let Some((p2, _)) =
-                            runmat_builtins::lookup_property(&obj.class_name, &field)
-                        {
-                            if p2.is_dependent {
-                                let backing = format!("{field}_backing");
-                                if let Some(vb) = obj.properties.get(&backing) {
-                                    stack.push(vb.clone());
-                                    continue;
-                                }
-                            }
-                        } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
-                            if cls.methods.contains_key("subsref") {
-                                match call_builtin_vm!(
-                                    "call_method",
-                                    &[
-                                        Value::Object(obj),
-                                        Value::String("subsref".to_string()),
-                                        Value::String(".".to_string()),
-                                        Value::String(field),
-                                    ],
-                                ) {
-                                    Ok(v) => stack.push(v),
-                                    Err(e) => vm_bail!(e.to_string()),
-                                }
-                            } else {
-                                vm_bail!(format!(
-                                    "Undefined property '{}' for class {}",
-                                    field, obj.class_name
-                                ));
-                            }
-                        } else {
-                            vm_bail!(format!("Unknown class {}", obj.class_name));
-                        }
-                    }
-                    Value::HandleObject(handle) => {
-                        match call_builtin_vm!(
-                            "call_method",
-                            &[
-                                Value::HandleObject(handle),
-                                Value::String("subsref".to_string()),
-                                Value::String(".".to_string()),
-                                Value::String(field),
-                            ],
-                        ) {
-                            Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e.to_string()),
-                        }
-                    }
-                    Value::ClassRef(cls) => {
-                        if let Some((p, owner)) = runmat_builtins::lookup_property(&cls, &field) {
-                            if !p.is_static {
-                                vm_bail!(format!("Property '{}' is not static", field));
-                            }
-                            if p.get_access == runmat_builtins::Access::Private {
-                                vm_bail!(format!("Property '{}' is private", field))
-                            }
-                            if let Some(v) =
-                                runmat_builtins::get_static_property_value(&owner, &field)
-                            {
-                                stack.push(v);
-                            } else if let Some(v) = &p.default_value {
-                                stack.push(v.clone());
-                            } else {
-                                stack.push(Value::Num(0.0));
-                            }
-                        } else if let Some((m, _owner)) =
-                            runmat_builtins::lookup_method(&cls, &field)
-                        {
-                            if !m.is_static {
-                                vm_bail!(format!("Method '{}' is not static", field));
-                            }
-                            stack.push(Value::Closure(runmat_builtins::Closure {
-                                function_name: m.function_name,
-                                captures: vec![],
-                            }));
-                        } else {
-                            let qualified = format!("{cls}.{field}");
-                            if runmat_builtins::builtin_functions()
-                                .iter()
-                                .any(|b| b.name == qualified)
-                            {
-                                stack.push(Value::Closure(runmat_builtins::Closure {
-                                    function_name: qualified,
-                                    captures: vec![],
-                                }));
-                            } else {
-                                vm_bail!(format!("Unknown property '{}' on class {}", field, cls));
-                            }
-                        }
-                    }
-                    Value::Struct(st) => {
-                        if let Some(v) = st.fields.get(&field) {
-                            stack.push(v.clone());
-                        } else if allow_init {
-                            stack.push(Value::Struct(runmat_builtins::StructValue::new()));
-                        } else {
-                            vm_bail!(format!("Undefined field '{}'", field));
-                        }
-                    }
-                    Value::Cell(ca) => {
-                        // Extract field from each struct element; build a cell with same shape
-                        let mut out: Vec<Value> = Vec::with_capacity(ca.data.len());
-                        for v in &ca.data {
-                            match &**v {
-                                Value::Struct(st) => {
-                                    if let Some(fv) = st.fields.get(&field) {
-                                        out.push(fv.clone());
-                                    } else {
-                                        out.push(Value::Num(0.0));
-                                    }
-                                }
-                                other => {
-                                    out.push(other.clone());
-                                }
-                            }
-                        }
-                        let new_cell = runmat_builtins::CellArray::new(out, ca.rows, ca.cols)
-                            .map_err(|e| format!("cell field gather: {e}"))?;
-                        stack.push(Value::Cell(new_cell));
-                    }
-                    Value::MException(mex) => {
-                        let value = match field.as_str() {
-                            "identifier" => Value::String(mex.identifier.clone()),
-                            "message" => Value::String(mex.message.clone()),
-                            "stack" => {
-                                let values: Vec<Value> =
-                                    mex.stack.iter().map(|s| Value::String(s.clone())).collect();
-                                let rows = values.len();
-                                let cell = runmat_builtins::CellArray::new(values, rows, 1)
-                                    .map_err(|e| format!("MException.stack: {e}"))?;
-                                Value::Cell(cell)
-                            }
-                            other => {
-                                vm_bail!(format!("Reference to non-existent field '{}'.", other))
-                            }
-                        };
-                        stack.push(value);
-                    }
-                    _ => vm_bail!("LoadMember on non-object".to_string()),
+                match obj_resolve::load_member(base, field, allow_init).await {
+                    Ok(v) => stack.push(v),
+                    Err(e) => vm_bail!(e),
                 }
             }
             Instr::LoadMemberDynamic | Instr::LoadMemberDynamicOrInit => {
@@ -5003,131 +4840,9 @@ async fn run_interpreter_inner(
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 let name: String = (&name_val).try_into()?;
-                match base {
-                    Value::Object(obj) => {
-                        if let Some((p, _owner)) =
-                            runmat_builtins::lookup_property(&obj.class_name, &name)
-                        {
-                            if p.is_static {
-                                vm_bail!(format!(
-                                    "Property '{}' is static; use classref('{}').{}",
-                                    name, obj.class_name, name
-                                ));
-                            }
-                            if p.get_access == runmat_builtins::Access::Private {
-                                vm_bail!(format!("Property '{}' is private", name))
-                            }
-                        }
-                        if let Some(v) = obj.properties.get(&name) {
-                            stack.push(v.clone());
-                        } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
-                            if cls.methods.contains_key("subsref") {
-                                match call_builtin_vm!(
-                                    "call_method",
-                                    &[
-                                        Value::Object(obj),
-                                        Value::String("subsref".to_string()),
-                                        Value::String(".".to_string()),
-                                        Value::String(name),
-                                    ],
-                                ) {
-                                    Ok(v) => stack.push(v),
-                                    Err(e) => vm_bail!(e.to_string()),
-                                }
-                            } else {
-                                vm_bail!(format!(
-                                    "Undefined property '{}' for class {}",
-                                    name, obj.class_name
-                                ));
-                            }
-                        } else {
-                            vm_bail!(format!("Unknown class {}", obj.class_name));
-                        }
-                    }
-                    Value::HandleObject(handle) => {
-                        match call_builtin_vm!(
-                            "call_method",
-                            &[
-                                Value::HandleObject(handle),
-                                Value::String("subsref".to_string()),
-                                Value::String(".".to_string()),
-                                Value::String(name),
-                            ],
-                        ) {
-                            Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e.to_string()),
-                        }
-                    }
-                    Value::ClassRef(cls) => {
-                        if let Some((p, owner)) = runmat_builtins::lookup_property(&cls, &name) {
-                            if !p.is_static {
-                                vm_bail!(format!("Property '{}' is not static", name));
-                            }
-                            if p.get_access == runmat_builtins::Access::Private {
-                                vm_bail!(format!("Property '{}' is private", name))
-                            }
-                            if let Some(v) =
-                                runmat_builtins::get_static_property_value(&owner, &name)
-                            {
-                                stack.push(v);
-                            } else if let Some(v) = &p.default_value {
-                                stack.push(v.clone());
-                            } else {
-                                stack.push(Value::Num(0.0));
-                            }
-                        } else if let Some((m, _owner)) =
-                            runmat_builtins::lookup_method(&cls, &name)
-                        {
-                            if !m.is_static {
-                                vm_bail!(format!("Method '{}' is not static", name));
-                            }
-                            stack.push(Value::Closure(runmat_builtins::Closure {
-                                function_name: m.function_name,
-                                captures: vec![],
-                            }));
-                        } else {
-                            let qualified = format!("{cls}.{name}");
-                            if runmat_builtins::builtin_functions()
-                                .iter()
-                                .any(|b| b.name == qualified)
-                            {
-                                stack.push(Value::Closure(runmat_builtins::Closure {
-                                    function_name: qualified,
-                                    captures: vec![],
-                                }));
-                            } else {
-                                vm_bail!(format!("Unknown property '{}' on class {}", name, cls));
-                            }
-                        }
-                    }
-                    Value::Struct(st) => {
-                        if let Some(v) = st.fields.get(&name) {
-                            stack.push(v.clone());
-                        } else if allow_init {
-                            stack.push(Value::Struct(runmat_builtins::StructValue::new()));
-                        } else {
-                            vm_bail!(format!("Undefined field '{}'", name));
-                        }
-                    }
-                    Value::MException(mex) => {
-                        let value = match name.as_str() {
-                            "identifier" => Value::String(mex.identifier.clone()),
-                            "message" => Value::String(mex.message.clone()),
-                            "stack" => {
-                                let values: Vec<Value> =
-                                    mex.stack.iter().map(|s| Value::String(s.clone())).collect();
-                                let rows = values.len();
-                                let cell = runmat_builtins::CellArray::new(values, rows, 1)
-                                    .map_err(|e| format!("MException.stack: {e}"))?;
-                                Value::Cell(cell)
-                            }
-                            other => {
-                                vm_bail!(format!("Reference to non-existent field '{}'.", other))
-                            }
-                        };
-                        stack.push(value);
-                    }
-                    _ => vm_bail!("LoadMemberDynamic on non-struct/object".to_string()),
+                match obj_resolve::load_member_dynamic(base, name, allow_init).await {
+                    Ok(v) => stack.push(v),
+                    Err(e) => vm_bail!(e),
                 }
             }
             Instr::StoreMember(field) | Instr::StoreMemberOrInit(field) => {
@@ -5138,147 +4853,13 @@ async fn run_interpreter_inner(
                 let base = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                // TODO(GC): write barrier hook for object/struct field write
-                match base {
-                    Value::Object(mut obj) => {
-                        if let Some((p, _owner)) =
-                            runmat_builtins::lookup_property(&obj.class_name, &field)
-                        {
-                            if p.is_static {
-                                vm_bail!(format!(
-                                    "Property '{}' is static; use classref('{}').{}",
-                                    field, obj.class_name, field
-                                ));
-                            }
-                            if p.set_access == runmat_builtins::Access::Private {
-                                vm_bail!(format!("Property '{}' is private", field))
-                            }
-                            if p.is_dependent {
-                                // Call set.<field>(obj, rhs)
-                                let setter = format!("set.{field}");
-                                match call_builtin_vm!(
-                                    &setter,
-                                    &[Value::Object(obj.clone()), rhs.clone()],
-                                ) {
-                                    Ok(v) => {
-                                        stack.push(v);
-                                        continue;
-                                    }
-                                    Err(_e) => {}
-                                }
-                            }
-                            if let Some(oldv) = obj.properties.get(&field) {
-                                runmat_gc::gc_record_write(oldv, &rhs);
-                            }
-                            obj.properties.insert(field, rhs);
-                            stack.push(Value::Object(obj));
-                        } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
-                            if cls.methods.contains_key("subsasgn") {
-                                match call_builtin_vm!(
-                                    "call_method",
-                                    &[
-                                        Value::Object(obj),
-                                        Value::String("subsasgn".to_string()),
-                                        Value::String(".".to_string()),
-                                        Value::String(field),
-                                        rhs,
-                                    ],
-                                ) {
-                                    Ok(v) => stack.push(v),
-                                    Err(e) => vm_bail!(e),
-                                }
-                            } else {
-                                vm_bail!(format!(
-                                    "Undefined property '{}' for class {}",
-                                    field, obj.class_name
-                                ));
-                            }
-                        } else {
-                            vm_bail!(format!("Unknown class {}", obj.class_name));
-                        }
-                    }
-                    Value::ClassRef(cls) => {
-                        if let Some((p, owner)) = runmat_builtins::lookup_property(&cls, &field) {
-                            if !p.is_static {
-                                vm_bail!(format!("Property '{}' is not static", field));
-                            }
-                            if p.set_access == runmat_builtins::Access::Private {
-                                vm_bail!(format!("Property '{}' is private", field))
-                            }
-                            runmat_builtins::set_static_property_value_in_owner(
-                                &owner, &field, rhs,
-                            )?;
-                            stack.push(Value::ClassRef(cls));
-                        } else {
-                            vm_bail!(format!("Unknown property '{}' on class {}", field, cls));
-                        }
-                    }
-                    Value::HandleObject(handle) => match call_builtin_vm!(
-                        "call_method",
-                        &[
-                            Value::HandleObject(handle),
-                            Value::String("subsasgn".to_string()),
-                            Value::String(".".to_string()),
-                            Value::String(field),
-                            rhs,
-                        ],
-                    ) {
-                        Ok(v) => stack.push(v),
-                        Err(e) => vm_bail!(e.to_string()),
-                    },
-                    Value::Struct(mut st) => {
-                        if let Some(oldv) = st.fields.get(&field) {
-                            runmat_gc::gc_record_write(oldv, &rhs);
-                        }
-                        st.fields.insert(field, rhs);
-                        stack.push(Value::Struct(st));
-                    }
-                    Value::Cell(mut ca) => {
-                        // Assign field across each element; support scalar rhs or cell rhs of same shape
-                        let is_cell_rhs = matches!(rhs, Value::Cell(_));
-                        let rhs_cell = if let Value::Cell(rc) = &rhs {
-                            Some(rc)
-                        } else {
-                            None
-                        };
-                        if is_cell_rhs {
-                            if let Some(rc) = rhs_cell {
-                                if rc.rows != ca.rows || rc.cols != ca.cols {
-                                    vm_bail!(
-                                        "Field assignment: cell rhs shape mismatch".to_string()
-                                    );
-                                }
-                            }
-                        }
-                        for i in 0..ca.data.len() {
-                            let rv = if let Some(rc) = rhs_cell {
-                                (*rc.data[i]).clone()
-                            } else {
-                                rhs.clone()
-                            };
-                            match &mut *ca.data[i] {
-                                Value::Struct(st) => {
-                                    if let Some(oldv) = st.fields.get(&field) {
-                                        runmat_gc::gc_record_write(oldv, &rv);
-                                    }
-                                    st.fields.insert(field.clone(), rv);
-                                }
-                                other => {
-                                    // If not struct, convert to struct with this single field
-                                    let mut st = runmat_builtins::StructValue::new();
-                                    st.fields.insert(field.clone(), rv);
-                                    *other = Value::Struct(st);
-                                }
-                            }
-                        }
-                        stack.push(Value::Cell(ca));
-                    }
-                    Value::Num(0.0) if allow_init => {
-                        let mut st = runmat_builtins::StructValue::new();
-                        st.fields.insert(field, rhs);
-                        stack.push(Value::Struct(st));
-                    }
-                    _ => vm_bail!("StoreMember on non-object".to_string()),
+                match obj_resolve::store_member(base, field, rhs, allow_init, |oldv, newv| {
+                    runmat_gc::gc_record_write(oldv, newv);
+                })
+                .await
+                {
+                    Ok(v) => stack.push(v),
+                    Err(e) => vm_bail!(e),
                 }
             }
             Instr::StoreMemberDynamic | Instr::StoreMemberDynamicOrInit => {
@@ -5294,92 +4875,13 @@ async fn run_interpreter_inner(
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 let name: String = (&name_val).try_into()?;
-                // TODO(GC): write barrier hook for dynamic field write
-                match base {
-                    Value::Object(mut obj) => {
-                        if let Some((p, _owner)) =
-                            runmat_builtins::lookup_property(&obj.class_name, &name)
-                        {
-                            if p.is_static {
-                                vm_bail!(format!(
-                                    "Property '{}' is static; use classref('{}').{}",
-                                    name, obj.class_name, name
-                                ));
-                            }
-                            if p.set_access == runmat_builtins::Access::Private {
-                                vm_bail!(format!("Property '{}' is private", name))
-                            }
-                        }
-                        if let Some(oldv) = obj.properties.get(&name) {
-                            runmat_gc::gc_record_write(oldv, &rhs);
-                        }
-                        obj.properties.insert(name, rhs);
-                        stack.push(Value::Object(obj));
-                    }
-                    Value::HandleObject(handle) => match call_builtin_vm!(
-                        "call_method",
-                        &[
-                            Value::HandleObject(handle),
-                            Value::String("subsasgn".to_string()),
-                            Value::String(".".to_string()),
-                            Value::String(name),
-                            rhs,
-                        ],
-                    ) {
-                        Ok(v) => stack.push(v),
-                        Err(e) => vm_bail!(e.to_string()),
-                    },
-                    Value::Struct(mut st) => {
-                        if let Some(oldv) = st.fields.get(&name) {
-                            runmat_gc::gc_record_write(oldv, &rhs);
-                        }
-                        st.fields.insert(name, rhs);
-                        stack.push(Value::Struct(st));
-                    }
-                    Value::Cell(mut ca) => {
-                        let is_cell_rhs = matches!(rhs, Value::Cell(_));
-                        let rhs_cell = if let Value::Cell(rc) = &rhs {
-                            Some(rc)
-                        } else {
-                            None
-                        };
-                        if is_cell_rhs {
-                            if let Some(rc) = rhs_cell {
-                                if rc.rows != ca.rows || rc.cols != ca.cols {
-                                    vm_bail!(
-                                        "Field assignment: cell rhs shape mismatch".to_string()
-                                    );
-                                }
-                            }
-                        }
-                        for i in 0..ca.data.len() {
-                            let rv = if let Some(rc) = rhs_cell {
-                                (*rc.data[i]).clone()
-                            } else {
-                                rhs.clone()
-                            };
-                            match &mut *ca.data[i] {
-                                Value::Struct(st) => {
-                                    if let Some(oldv) = st.fields.get(&name) {
-                                        runmat_gc::gc_record_write(oldv, &rv);
-                                    }
-                                    st.fields.insert(name.clone(), rv);
-                                }
-                                other => {
-                                    let mut st = runmat_builtins::StructValue::new();
-                                    st.fields.insert(name.clone(), rv);
-                                    *other = Value::Struct(st);
-                                }
-                            }
-                        }
-                        stack.push(Value::Cell(ca));
-                    }
-                    Value::Num(0.0) if allow_init => {
-                        let mut st = runmat_builtins::StructValue::new();
-                        st.fields.insert(name, rhs);
-                        stack.push(Value::Struct(st));
-                    }
-                    _ => vm_bail!("StoreMemberDynamic on non-struct/object".to_string()),
+                match obj_resolve::store_member_dynamic(base, name, rhs, allow_init, |oldv, newv| {
+                    runmat_gc::gc_record_write(oldv, newv);
+                })
+                .await
+                {
+                    Ok(v) => stack.push(v),
+                    Err(e) => vm_bail!(e),
                 }
             }
             Instr::CallMethod(name, arg_count) => {
@@ -5407,7 +4909,7 @@ async fn run_interpreter_inner(
                 call_closures::create_closure(&mut stack, func_name, capture_count)?;
             }
             Instr::LoadStaticProperty(class_name, prop) => {
-                match call_closures::load_static_property(&class_name, &prop) {
+                match obj_resolve::load_static_member(&class_name, &prop) {
                     Ok(v) => stack.push(v),
                     Err(e) => vm_bail!(e),
                 }
@@ -5458,60 +4960,7 @@ async fn run_interpreter_inner(
                 properties,
                 methods,
             } => {
-                // Build a minimal ClassDef and register it in runtime builtins registry
-                let mut prop_map = std::collections::HashMap::new();
-                for (p, is_static, get_access, set_access) in properties {
-                    let gacc = if get_access.eq_ignore_ascii_case("private") {
-                        runmat_builtins::Access::Private
-                    } else {
-                        runmat_builtins::Access::Public
-                    };
-                    let sacc = if set_access.eq_ignore_ascii_case("private") {
-                        runmat_builtins::Access::Private
-                    } else {
-                        runmat_builtins::Access::Public
-                    };
-                    let (is_dep, clean_name) = if let Some(stripped) = p.strip_prefix("@dep:") {
-                        (true, stripped.to_string())
-                    } else {
-                        (false, p.clone())
-                    };
-                    prop_map.insert(
-                        clean_name.clone(),
-                        runmat_builtins::PropertyDef {
-                            name: clean_name,
-                            is_static,
-                            is_dependent: is_dep,
-                            get_access: gacc,
-                            set_access: sacc,
-                            default_value: None,
-                        },
-                    );
-                }
-                let mut method_map = std::collections::HashMap::new();
-                for (mname, fname, is_static, access) in methods {
-                    let access = if access.eq_ignore_ascii_case("private") {
-                        runmat_builtins::Access::Private
-                    } else {
-                        runmat_builtins::Access::Public
-                    };
-                    method_map.insert(
-                        mname.clone(),
-                        runmat_builtins::MethodDef {
-                            name: mname,
-                            is_static,
-                            access,
-                            function_name: fname,
-                        },
-                    );
-                }
-                let def = runmat_builtins::ClassDef {
-                    name: name.clone(),
-                    parent: super_class.clone(),
-                    properties: prop_map,
-                    methods: method_map,
-                };
-                runmat_builtins::register_class(def);
+                obj_class_def::register_class(name, super_class, properties, methods)?;
             }
         }
         if debug_stack {
