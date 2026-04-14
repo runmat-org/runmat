@@ -170,8 +170,7 @@ fn format_diagnostic(
     version = env!("CARGO_PKG_VERSION"),
     about = "High-performance MATLAB/Octave code runtime",
     long_about = r#"
-RunMat is a modern, high-performance runtime for MATLAB/Octave code built 
-by Dystr (https://dystr.com).
+RunMat is a modern, high-performance runtime for MATLAB/Octave.
 
 It is built in Rust, and features a V8-inspired tiered execution model with a 
 baseline interpreter feeding an optimizing JIT compiler built on Cranelift.
@@ -1523,7 +1522,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
     }
 
     println!(
-        "RunMat v{} by Dystr (https://dystr.com)",
+        "RunMat v{}",
         env!("CARGO_PKG_VERSION")
     );
     println!("Fast, free, modern MATLAB runtime with JIT compilation and GC");

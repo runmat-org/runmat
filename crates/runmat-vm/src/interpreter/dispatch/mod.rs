@@ -80,12 +80,14 @@ pub async fn dispatch_instruction(
     var_names: &HashMap<usize, String>,
     context: &mut crate::bytecode::ExecutionContext,
     try_stack: &mut Vec<(usize, Option<usize>)>,
-    imports: &mut Vec<(Vec<String>, bool)>,
-    current_function_name: &str,
-    global_aliases: &mut HashMap<usize, String>,
-    persistent_aliases: &mut HashMap<usize, String>,
     pc: &mut usize,
     mut clear_value_residency: impl FnMut(&Value),
+    invoke_user_for_end_expr: impl for<'a> Fn(
+        &'a str,
+        Vec<Value>,
+        &'a HashMap<String, crate::bytecode::UserFunction>,
+        &'a Vec<Value>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + 'a>> + Copy,
     mut store_var_before_overwrite: impl FnMut(&Value, &Value),
     mut store_var_after_store: impl FnMut(usize, &Value),
     mut store_local_before_local_overwrite: impl FnMut(&Value, &Value),
@@ -93,7 +95,16 @@ pub async fn dispatch_instruction(
     mut store_local_after_fallback_store: impl FnMut(&str, usize, &Value),
 ) -> Result<Option<DispatchHandled>, RuntimeError> {
     match instr {
-        _ if indexing::dispatch_indexing(instr, stack, *pc, &mut clear_value_residency).await? => {
+        _ if indexing::dispatch_indexing(
+            instr,
+            stack,
+            vars,
+            &context.functions,
+            *pc,
+            &mut clear_value_residency,
+            &invoke_user_for_end_expr,
+        )
+        .await? => {
             Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         _ if object::dispatch_object(instr, stack).await? => {
@@ -212,41 +223,6 @@ pub async fn dispatch_instruction(
         ))),
         Instr::EnterScope(local_count) => {
             crate::ops::control_flow::enter_scope(&mut context.locals, *local_count);
-            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
-        }
-        Instr::ExitScope(local_count) => {
-            crate::ops::control_flow::exit_scope(&mut context.locals, *local_count, |_val| {});
-            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
-        }
-        Instr::RegisterImport { path, wildcard } => {
-            imports.push((path.clone(), *wildcard));
-            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
-        }
-        Instr::DeclareGlobal(indices) => {
-            crate::runtime::globals::declare_global(indices.clone(), vars);
-            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
-        }
-        Instr::DeclareGlobalNamed(indices, names) => {
-            crate::runtime::globals::declare_global_named(
-                indices.clone(),
-                names.clone(),
-                vars,
-                global_aliases,
-            );
-            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
-        }
-        Instr::DeclarePersistent(indices) => {
-            crate::runtime::globals::declare_persistent(current_function_name, indices.clone(), vars);
-            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
-        }
-        Instr::DeclarePersistentNamed(indices, names) => {
-            crate::runtime::globals::declare_persistent_named(
-                current_function_name,
-                indices.clone(),
-                names.clone(),
-                vars,
-                persistent_aliases,
-            );
             Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         Instr::PackToRow(count) => {
