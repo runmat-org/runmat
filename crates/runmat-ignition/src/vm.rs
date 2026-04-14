@@ -42,6 +42,7 @@ use runmat_vm::call::shared as call_shared;
 use runmat_vm::call::{builtins as call_builtins, feval as call_feval, user as call_user};
 use runmat_vm::call::builtins::ImportedBuiltinResolution;
 use runmat_vm::call::closures as call_closures;
+use runmat_vm::call::feval::FevalDispatch;
 use runmat_vm::ops::control_flow::{self, ControlFlowAction};
 use runmat_vm::ops::stack as stack_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
@@ -1902,132 +1903,89 @@ async fn run_interpreter_inner(
             Instr::CallFeval(argc) => {
                 let args = call_builtins::collect_call_args(&mut stack, argc)?;
                 let func_val = pop_value(&mut stack)?;
-                match func_val {
-                    Value::Closure(c) => {
-                        let (name, call_args) = call_feval::closure_call_args(&c, args);
-                        if let Some(result) = call_feval::try_closure_builtin_fallback(&name, &call_args).await? {
-                            stack.push(result);
-                            pc += 1;
-                            continue;
-                        }
-                        let mut functions = bytecode.functions.clone();
-                        for (k, v) in &context.functions {
-                            functions.insert(k.clone(), v.clone());
-                        }
-                        match invoke_user_function_value(&name, &call_args, &functions, &mut vars).await {
-                            Ok(value) => stack.push(value),
-                            Err(e) => vm_bail!(e),
-                        }
-                    }
-                    other => {
-                        match call_feval::forward_builtin_feval(other, args).await {
-                            Ok(result) => stack.push(result),
-                            Err(err) => vm_bail!(err),
-                        }
-                    }
+                match call_feval::execute_feval(
+                    func_val,
+                    args,
+                    &context.functions,
+                    &bytecode.functions,
+                )
+                .await
+                {
+                    Ok(FevalDispatch::Completed(result)) => stack.push(result),
+                    Ok(FevalDispatch::InvokeUser {
+                        name,
+                        args,
+                        functions,
+                    }) => match invoke_user_function_value(&name, &args, &functions, &mut vars).await {
+                        Ok(value) => stack.push(value),
+                        Err(e) => vm_bail!(e),
+                    },
+                    Err(err) => vm_bail!(err),
                 }
             }
             Instr::CallFevalExpandMulti(specs) => {
-                let mut temp: Vec<Value> = Vec::new();
-                for spec in specs.iter().rev() {
-                    if spec.is_expand {
-                        let mut indices = Vec::with_capacity(spec.num_indices);
-                        for _ in 0..spec.num_indices {
-                            indices.push(pop_value(&mut stack)?);
-                        }
-                        indices.reverse();
-                        let base = pop_value(&mut stack)?;
-                        let expanded = if spec.expand_all {
-                            match base {
+                let args = call_shared::build_expanded_args_from_specs(
+                    &mut stack,
+                    &specs,
+                    "CallFevalExpandMulti requires cell or object for expand_all",
+                    "CallFevalExpandMulti requires cell or object cell access",
+                    |base| async move { match base {
+                        Value::Object(obj) => {
+                            let empty = call_shared::subsref_empty_brace_cell()?;
+                            let args = vec![
+                                Value::Object(obj),
+                                Value::String("subsref".to_string()),
+                                Value::String("{}".to_string()),
+                                empty,
+                            ];
+                            let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
+                            Ok(match v {
                                 Value::Cell(ca) => call_shared::expand_all_cell(&ca),
-                                Value::Object(obj) => {
-                                    let empty = call_shared::subsref_empty_brace_cell()?;
-                                    let v = match call_builtin_vm!(
-                                        "call_method",
-                                        &[
-                                            Value::Object(obj),
-                                            Value::String("subsref".to_string()),
-                                            Value::String("{}".to_string()),
-                                            empty,
-                                        ],
-                                    ) {
-                                        Ok(v) => v,
-                                        Err(e) => vm_bail!(e),
-                                    };
-                                    match v {
-                                        Value::Cell(ca) => call_shared::expand_all_cell(&ca),
-                                        other => vec![other],
-                                    }
-                                }
-                                _ => {
-                                    return Err(mex(
-                                        "InvalidExpandAllTarget",
-                                        "CallFevalExpandMulti requires cell or object for expand_all",
-                                    ))
-                                }
-                            }
-                        } else {
-                            match (base, indices.len()) {
-                                (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => {
-                                    call_shared::expand_cell_indices(&ca, &indices)?
-                                }
-                                (Value::Object(obj), _) => {
-                                    let cell = call_shared::subsref_brace_index_cell_raw(&indices)?;
-                                    let v = match call_builtin_vm!(
-                                        "call_method",
-                                        &[
-                                            Value::Object(obj),
-                                            Value::String("subsref".to_string()),
-                                            Value::String("{}".to_string()),
-                                            cell,
-                                        ],
-                                    ) {
-                                        Ok(v) => v,
-                                        Err(e) => vm_bail!(e),
-                                    };
-                                    vec![v]
-                                }
-                                _ => {
-                                    return Err(mex(
-                                        "ExpandError",
-                                        "CallFevalExpandMulti requires cell or object cell access",
-                                    ))
-                                }
-                            }
-                        };
-                        temp.extend(expanded);
-                    } else {
-                        temp.push(pop_value(&mut stack)?);
-                    }
-                }
-                temp.reverse();
-                let args = temp;
+                                other => vec![other],
+                            })
+                        }
+                        _ => Err(mex(
+                            "InvalidExpandAllTarget",
+                            "CallFevalExpandMulti requires cell or object for expand_all",
+                        )),
+                    }},
+                    |base, indices| async move { match base {
+                        Value::Object(obj) => {
+                            let cell = call_shared::subsref_brace_index_cell_raw(&indices)?;
+                            let args = vec![
+                                Value::Object(obj),
+                                Value::String("subsref".to_string()),
+                                Value::String("{}".to_string()),
+                                cell,
+                            ];
+                            let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
+                            Ok(vec![v])
+                        }
+                        _ => Err(mex(
+                            "ExpandError",
+                            "CallFevalExpandMulti requires cell or object cell access",
+                        )),
+                    }},
+                ).await?;
                 let func_val = pop_value(&mut stack)?;
-                match func_val {
-                    Value::Closure(c) => {
-                        let (name, call_args) = call_feval::closure_call_args(&c, args);
-                        if let Some(result) =
-                            call_feval::try_closure_builtin_fallback(&name, &call_args).await?
-                        {
-                            stack.push(result);
-                            pc += 1;
-                            continue;
-                        }
-                        let mut functions = bytecode.functions.clone();
-                        for (k, v) in &context.functions {
-                            functions.insert(k.clone(), v.clone());
-                        }
-                        match invoke_user_function_value(&name, &call_args, &functions, &mut vars)
-                            .await
-                        {
-                            Ok(value) => stack.push(value),
-                            Err(e) => vm_bail!(e),
-                        }
-                    }
-                    other => match call_feval::forward_builtin_feval(other, args).await {
-                        Ok(result) => stack.push(result),
-                        Err(err) => vm_bail!(err),
+                match call_feval::execute_feval(
+                    func_val,
+                    args,
+                    &context.functions,
+                    &bytecode.functions,
+                )
+                .await
+                {
+                    Ok(FevalDispatch::Completed(result)) => stack.push(result),
+                    Ok(FevalDispatch::InvokeUser {
+                        name,
+                        args,
+                        functions,
+                    }) => match invoke_user_function_value(&name, &args, &functions, &mut vars).await {
+                        Ok(value) => stack.push(value),
+                        Err(e) => vm_bail!(e),
                     },
+                    Err(err) => vm_bail!(err),
                 }
             }
             Instr::LoadConst(c) => {
@@ -3499,98 +3457,50 @@ async fn run_interpreter_inner(
                 }
             }
             Instr::CallBuiltinExpandMulti(name, specs) => {
-                // Build final args by walking specs left-to-right and popping from stack accordingly.
-                let mut args: Vec<Value> = Vec::with_capacity(specs.len());
-                // We'll reconstruct by first collecting a temporary vector and then reversing (since stack is LIFO)
-                let mut temp: Vec<Value> = Vec::new();
-                for spec in specs.iter().rev() {
-                    if spec.is_expand {
-                        let mut indices = Vec::with_capacity(spec.num_indices);
-                        for _ in 0..spec.num_indices {
-                            indices.push(
-                                stack
-                                    .pop()
-                                    .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                            );
-                        }
-                        indices.reverse();
-                        let base = stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                        #[cfg(feature = "native-accel")]
-                        clear_residency(&base);
-                        let expanded = if spec.expand_all {
-                            match base {
+                let args = call_shared::build_expanded_args_from_specs(
+                    &mut stack,
+                    &specs,
+                    "CallBuiltinExpandMulti requires cell or object for expand_all",
+                    "CallBuiltinExpandMulti requires cell or object cell access",
+                    |base| async move { match base {
+                        Value::Object(obj) => {
+                            let empty = call_shared::subsref_empty_brace_cell()?;
+                            let args = vec![
+                                Value::Object(obj),
+                                Value::String("subsref".to_string()),
+                                Value::String("{}".to_string()),
+                                empty,
+                            ];
+                            let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
+                            Ok(match v {
                                 Value::Cell(ca) => call_shared::expand_all_cell(&ca),
-                                Value::Object(obj) => {
-                                    // subsref(obj,'{}', {}) with empty indices; expect a cell or value
-                                    let empty = call_shared::subsref_empty_brace_cell()?;
-                                    let v = match call_builtin_vm!(
-                                        "call_method",
-                                        &[
-                                            Value::Object(obj),
-                                            Value::String("subsref".to_string()),
-                                            Value::String("{}".to_string()),
-                                            empty,
-                                        ],
-                                    ) {
-                                        Ok(v) => v,
-                                        Err(e) => vm_bail!(e),
-                                    };
-                                    match v {
-                                        Value::Cell(ca) => call_shared::expand_all_cell(&ca),
-                                        other => vec![other],
-                                    }
-                                }
-                                _ => return Err(mex(
-                                    "ExpandError",
-                                    "CallBuiltinExpandMulti requires cell or object for expand_all",
-                                )),
-                            }
-                        } else {
-                            match (base, indices.len()) {
-                                (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => {
-                                    call_shared::expand_cell_indices(&ca, &indices)?
-                                }
-                                (Value::Object(obj), _) => {
-                                    let idx_vals: Vec<Value> = indices
-                                        .iter()
-                                        .map(|v| Value::Num((v).try_into().unwrap_or(0.0)))
-                                        .collect();
-                                    let cell = call_builtin_vm!("__make_cell", &idx_vals)?;
-                                    let v = match call_builtin_vm!(
-                                        "call_method",
-                                        &[
-                                            Value::Object(obj),
-                                            Value::String("subsref".to_string()),
-                                            Value::String("{}".to_string()),
-                                            cell,
-                                        ],
-                                    ) {
-                                        Ok(v) => v,
-                                        Err(e) => vm_bail!(e),
-                                    };
-                                    vec![v]
-                                }
-                                _ => return Err(mex(
-                                    "ExpandError",
-                                    "CallBuiltinExpandMulti requires cell or object cell access",
-                                )),
-                            }
-                        };
-                        for v in expanded {
-                            temp.push(v);
+                                other => vec![other],
+                            })
                         }
-                    } else {
-                        temp.push(
-                            stack
-                                .pop()
-                                .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                        );
-                    }
-                }
-                temp.reverse();
-                args.extend(temp.into_iter());
+                        _ => Err(mex(
+                            "ExpandError",
+                            "CallBuiltinExpandMulti requires cell or object for expand_all",
+                        )),
+                    }},
+                    |base, indices| async move { match base {
+                        Value::Object(obj) => {
+                            let idx_vals = call_shared::subsref_brace_numeric_index_values(&indices);
+                            let cell = runmat_runtime::call_builtin_async("__make_cell", &idx_vals).await?;
+                            let args = vec![
+                                Value::Object(obj),
+                                Value::String("subsref".to_string()),
+                                Value::String("{}".to_string()),
+                                cell,
+                            ];
+                            let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
+                            Ok(vec![v])
+                        }
+                        _ => Err(mex(
+                            "ExpandError",
+                            "CallBuiltinExpandMulti requires cell or object cell access",
+                        )),
+                    }},
+                ).await?;
                 let output_hint = output_hint_for_single_result(&bytecode, pc);
                 let _output_guard = push_output_count(output_hint);
                 match call_builtin_auto(&name, &args).await {

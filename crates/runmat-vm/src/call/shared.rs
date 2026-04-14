@@ -1,9 +1,10 @@
-use crate::bytecode::UserFunction;
+use crate::bytecode::{ArgSpec, UserFunction};
 use crate::compiler::CompileError;
 use runmat_builtins::{Type, Value};
 use runmat_hir::{remapping, HirProgram, VarId};
 use runmat_runtime::RuntimeError;
 use std::collections::HashMap;
+use std::future::Future;
 
 pub struct PreparedUserCall {
     pub func: UserFunction,
@@ -349,4 +350,68 @@ pub fn subsref_empty_brace_cell() -> Result<Value, RuntimeError> {
         runmat_builtins::CellArray::new(vec![], 1, 0)
             .map_err(|e| CompileError::new(format!("subsref build error: {e}")))?,
     ))
+}
+
+pub async fn build_expanded_args_from_specs<ExpandObjectAll, ExpandObjectIndices, FutAll, FutIdx>(
+    stack: &mut Vec<Value>,
+    specs: &[ArgSpec],
+    invalid_expand_all_msg: &str,
+    invalid_expand_msg: &str,
+    mut expand_object_all: ExpandObjectAll,
+    mut expand_object_indices: ExpandObjectIndices,
+) -> Result<Vec<Value>, RuntimeError>
+where
+    ExpandObjectAll: FnMut(Value) -> FutAll,
+    ExpandObjectIndices: FnMut(Value, Vec<Value>) -> FutIdx,
+    FutAll: Future<Output = Result<Vec<Value>, RuntimeError>>,
+    FutIdx: Future<Output = Result<Vec<Value>, RuntimeError>>,
+{
+    let mut temp: Vec<Value> = Vec::new();
+    for spec in specs.iter().rev() {
+        if spec.is_expand {
+            let mut indices = Vec::with_capacity(spec.num_indices);
+            for _ in 0..spec.num_indices {
+                indices.push(stack.pop().ok_or_else(|| {
+                    crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
+                })?);
+            }
+            indices.reverse();
+            let base = stack.pop().ok_or_else(|| {
+                crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
+            })?;
+
+            let expanded = if spec.expand_all {
+                match base {
+                    Value::Cell(ca) => expand_all_cell(&ca),
+                    other @ Value::Object(_) => expand_object_all(other).await?,
+                    _ => {
+                        return Err(crate::interpreter::errors::mex(
+                            "InvalidExpandAllTarget",
+                            invalid_expand_all_msg,
+                        ))
+                    }
+                }
+            } else {
+                match (base, indices.len()) {
+                    (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => {
+                        expand_cell_indices(&ca, &indices)?
+                    }
+                    (other @ Value::Object(_), _) => expand_object_indices(other, indices).await?,
+                    _ => {
+                        return Err(crate::interpreter::errors::mex(
+                            "ExpandError",
+                            invalid_expand_msg,
+                        ))
+                    }
+                }
+            };
+            temp.extend(expanded);
+        } else {
+            temp.push(stack.pop().ok_or_else(|| {
+                crate::interpreter::errors::mex("StackUnderflow", "stack underflow")
+            })?);
+        }
+    }
+    temp.reverse();
+    Ok(temp)
 }
