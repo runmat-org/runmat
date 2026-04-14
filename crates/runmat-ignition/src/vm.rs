@@ -38,6 +38,7 @@ use runmat_vm::interpreter::errors::{
     attach_span_at, attach_span_from_pc, ensure_runtime_error_identifier, mex, set_vm_pc,
 };
 use runmat_vm::interpreter::stack::{pop2, pop_args, pop_value};
+use runmat_vm::call::shared as call_shared;
 use runmat_vm::ops::control_flow::{self, ControlFlowAction};
 use runmat_vm::ops::stack as stack_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
@@ -4326,12 +4327,9 @@ async fn run_interpreter_inner(
                         stack.push(v);
                     }
                 }
-                let func: UserFunction = match bytecode.functions.get(&name) {
-                    Some(f) => f.clone(),
-                    None => vm_bail!(mex(
-                        "UndefinedFunction",
-                        &format!("Undefined function: {name}")
-                    )),
+                let func = match call_shared::lookup_user_function(&name, &bytecode.functions) {
+                    Ok(func) => func,
+                    Err(err) => vm_bail!(err),
                 };
                 let mut args = Vec::new();
                 for _ in 0..arg_count {
@@ -4343,112 +4341,19 @@ async fn run_interpreter_inner(
                 }
                 args.reverse();
                 let out_count = 1usize;
-                if !func.has_varargin {
-                    if arg_count < func.params.len() {
-                        vm_bail!(mex(
-                            "NotEnoughInputs",
-                            &format!(
-                                "Function '{name}' expects {} inputs, got {arg_count}",
-                                func.params.len()
-                            )
-                        ));
-                    }
-                    if arg_count > func.params.len() {
-                        vm_bail!(mex(
-                            "TooManyInputs",
-                            &format!(
-                                "Function '{name}' expects {} inputs, got {arg_count}",
-                                func.params.len()
-                            )
-                        ));
-                    }
-                } else {
-                    let min_args = func.params.len().saturating_sub(1);
-                    if arg_count < min_args {
-                        vm_bail!(mex(
-                            "NotEnoughInputs",
-                            &format!("Function '{name}' expects at least {min_args} inputs, got {arg_count}")
-                        ));
-                    }
+                if let Err(err) = call_shared::validate_user_function_arity(&name, &func, arg_count) {
+                    vm_bail!(err);
                 }
-                let var_map = runmat_hir::remapping::create_complete_function_var_map(
-                    &func.params,
-                    &func.outputs,
-                    &func.body,
-                );
-                let local_var_count = var_map.len();
-                let remapped_body =
-                    runmat_hir::remapping::remap_function_body(&func.body, &var_map);
-                let func_vars_count = local_var_count.max(func.params.len());
-                let mut func_vars = vec![Value::Num(0.0); func_vars_count];
-                if func.has_varargin {
-                    // All fixed parameters except the last (varargin placeholder) are positional; pack the rest into a cell
-                    let fixed = func.params.len().saturating_sub(1);
-                    for i in 0..fixed {
-                        if i < args.len() && i < func_vars.len() {
-                            func_vars[i] = args[i].clone();
-                        }
-                    }
-                    let mut rest: Vec<Value> = if args.len() > fixed {
-                        args[fixed..].to_vec()
-                    } else {
-                        Vec::new()
-                    };
-                    // Create row cell for varargin
-                    let cell = runmat_builtins::CellArray::new(
-                        std::mem::take(&mut rest),
-                        1,
-                        if args.len() > fixed {
-                            args.len() - fixed
-                        } else {
-                            0
-                        },
-                    )
-                    .map_err(|e| format!("varargin: {e}"))?;
-                    if fixed < func_vars.len() {
-                        func_vars[fixed] = Value::Cell(cell);
-                    }
-                } else {
-                    for (i, _param_id) in func.params.iter().enumerate() {
-                        if i < args.len() && i < func_vars.len() {
-                            func_vars[i] = args[i].clone();
-                        }
-                    }
-                }
-                // Copy referenced globals into local frame
-                for (original_var_id, local_var_id) in &var_map {
-                    let local_index = local_var_id.0;
-                    let global_index = original_var_id.0;
-                    if local_index < func_vars.len() && global_index < vars.len() {
-                        let is_parameter = func
-                            .params
-                            .iter()
-                            .any(|param_id| param_id == original_var_id);
-                        if !is_parameter {
-                            func_vars[local_index] = vars[global_index].clone();
-                        }
-                    }
-                }
-                // Initialize varargout cell if needed
-                if func.has_varargout {
-                    if let Some(varargout_oid) = func.outputs.last() {
-                        if let Some(local_id) = var_map.get(varargout_oid) {
-                            if local_id.0 < func_vars.len() {
-                                let empty = runmat_builtins::CellArray::new(vec![], 1, 0)
-                                    .map_err(|e| format!("varargout init: {e}"))?;
-                                func_vars[local_id.0] = Value::Cell(empty);
-                            }
-                        }
-                    }
-                }
-                let mut func_var_types = func.var_types.clone();
-                if func_var_types.len() < local_var_count {
-                    func_var_types.resize(local_var_count, Type::Unknown);
-                }
-                let func_program = runmat_hir::HirProgram {
-                    body: remapped_body,
-                    var_types: func_var_types,
+                let prepared = match call_shared::prepare_user_call(func, &args, &vars) {
+                    Ok(prepared) => prepared,
+                    Err(err) => vm_bail!(err),
                 };
+                let runmat_vm::call::shared::PreparedUserCall {
+                    func,
+                    var_map,
+                    func_program,
+                    func_vars,
+                } = prepared;
                 let mut func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
                 func_bytecode.source_id = func.source_id;
                 let _call_frame_guard = push_call_frame(&name, &bytecode, pc);
@@ -4481,62 +4386,18 @@ async fn run_interpreter_inner(
                         }
                     }
                 };
-                if func.has_varargout {
-                    // Push named outputs first (excluding varargout itself), then fill from varargout cell, then pad with 0.0
-                    let total_named = func.outputs.len().saturating_sub(1);
-                    let mut pushed = 0usize;
-                    // Push named outputs in order
-                    for i in 0..total_named.min(out_count) {
-                        if let Some(oid) = func.outputs.get(i) {
-                            if let Some(local_id) = var_map.get(oid) {
-                                let idx = local_id.0;
-                                let v = func_result_vars
-                                    .get(idx)
-                                    .cloned()
-                                    .unwrap_or(Value::Num(0.0));
-                                stack.push(v);
-                                pushed += 1;
-                            }
-                        }
-                    }
-                    if pushed < out_count {
-                        // Now consume from varargout cell (last output)
-                        if let Some(varargout_oid) = func.outputs.last() {
-                            if let Some(local_id) = var_map.get(varargout_oid) {
-                                if let Some(Value::Cell(ca)) = func_result_vars.get(local_id.0) {
-                                    let available = ca.data.len();
-                                    let need = out_count - pushed;
-                                    if need > available {
-                                        vm_bail!(mex("VarargoutMismatch", &format!("Function '{name}' returned {available} varargout values, {need} requested")));
-                                    }
-                                    for vi in 0..need {
-                                        stack.push((*ca.data[vi]).clone());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // No padding
-                } else {
-                    // Push out_count values; error if requesting more than defined
-                    let defined = func.outputs.len();
-                    if out_count > defined {
-                        vm_bail!(mex(
-                            "TooManyOutputs",
-                            &format!("Function '{name}' defines {defined} outputs, {out_count} requested")
-                        ));
-                    }
-                    for i in 0..out_count {
-                        let v = func
-                            .outputs
-                            .get(i)
-                            .and_then(|oid| var_map.get(oid))
-                            .map(|lid| lid.0)
-                            .and_then(|idx| func_result_vars.get(idx))
-                            .cloned()
-                            .unwrap_or(Value::Num(0.0));
-                        stack.push(v);
-                    }
+                let outputs = match call_shared::collect_multi_outputs(
+                    &name,
+                    &func,
+                    &var_map,
+                    &func_result_vars,
+                    out_count,
+                ) {
+                    Ok(outputs) => outputs,
+                    Err(err) => vm_bail!(err),
+                };
+                for value in outputs {
+                    stack.push(value);
                 }
             }
             Instr::CallFunctionMulti(name, arg_count, out_count) => {
@@ -4569,12 +4430,9 @@ async fn run_interpreter_inner(
                         stack.push(v);
                     }
                 }
-                let func: UserFunction = match bytecode.functions.get(&name) {
-                    Some(f) => f.clone(),
-                    None => vm_bail!(mex(
-                        "UndefinedFunction",
-                        &format!("Undefined function: {name}")
-                    )),
+                let func = match call_shared::lookup_user_function(&name, &bytecode.functions) {
+                    Ok(func) => func,
+                    Err(err) => vm_bail!(err),
                 };
                 let mut args = Vec::new();
                 for _ in 0..arg_count {
@@ -4585,111 +4443,19 @@ async fn run_interpreter_inner(
                     );
                 }
                 args.reverse();
-                if !func.has_varargin {
-                    if arg_count < func.params.len() {
-                        vm_bail!(mex(
-                            "NotEnoughInputs",
-                            &format!(
-                                "Function '{name}' expects {} inputs, got {arg_count}",
-                                func.params.len()
-                            )
-                        ));
-                    }
-                    if arg_count > func.params.len() {
-                        vm_bail!(mex(
-                            "TooManyInputs",
-                            &format!(
-                                "Function '{name}' expects {} inputs, got {arg_count}",
-                                func.params.len()
-                            )
-                        ));
-                    }
-                } else if arg_count + 1 < func.params.len() {
-                    vm_bail!(mex(
-                        "NotEnoughInputs",
-                        &format!(
-                            "Function '{name}' expects at least {} inputs, got {arg_count}",
-                            func.params.len() - 1
-                        )
-                    ));
+                if let Err(err) = call_shared::validate_user_function_arity(&name, &func, arg_count) {
+                    vm_bail!(err);
                 }
-                let var_map = runmat_hir::remapping::create_complete_function_var_map(
-                    &func.params,
-                    &func.outputs,
-                    &func.body,
-                );
-                let local_var_count = var_map.len();
-                let remapped_body =
-                    runmat_hir::remapping::remap_function_body(&func.body, &var_map);
-                let func_vars_count = local_var_count.max(func.params.len());
-                let mut func_vars = vec![Value::Num(0.0); func_vars_count];
-                if func.has_varargin {
-                    let fixed = func.params.len().saturating_sub(1);
-                    for i in 0..fixed {
-                        if i < args.len() && i < func_vars.len() {
-                            func_vars[i] = args[i].clone();
-                        }
-                    }
-                    let mut rest: Vec<Value> = if args.len() > fixed {
-                        args[fixed..].to_vec()
-                    } else {
-                        Vec::new()
-                    };
-                    // Create row cell for varargin
-                    let cell = runmat_builtins::CellArray::new(
-                        std::mem::take(&mut rest),
-                        1,
-                        if args.len() > fixed {
-                            args.len() - fixed
-                        } else {
-                            0
-                        },
-                    )
-                    .map_err(|e| format!("varargin: {e}"))?;
-                    if fixed < func_vars.len() {
-                        func_vars[fixed] = Value::Cell(cell);
-                    }
-                } else {
-                    for (i, _param_id) in func.params.iter().enumerate() {
-                        if i < args.len() && i < func_vars.len() {
-                            func_vars[i] = args[i].clone();
-                        }
-                    }
-                }
-                // Copy referenced globals into local frame
-                for (original_var_id, local_var_id) in &var_map {
-                    let local_index = local_var_id.0;
-                    let global_index = original_var_id.0;
-                    if local_index < func_vars.len() && global_index < vars.len() {
-                        let is_parameter = func
-                            .params
-                            .iter()
-                            .any(|param_id| param_id == original_var_id);
-                        if !is_parameter {
-                            func_vars[local_index] = vars[global_index].clone();
-                        }
-                    }
-                }
-                // Initialize varargout cell if needed
-                if func.has_varargout {
-                    if let Some(varargout_oid) = func.outputs.last() {
-                        if let Some(local_id) = var_map.get(varargout_oid) {
-                            if local_id.0 < func_vars.len() {
-                                let empty = runmat_builtins::CellArray::new(vec![], 1, 0)
-                                    .map_err(|e| format!("varargout init: {e}"))?;
-                                func_vars[local_id.0] = Value::Cell(empty);
-                            }
-                        }
-                    }
-                }
-                let mut func_var_types = func.var_types.clone();
-                if func_var_types.len() < local_var_count {
-                    func_var_types.resize(local_var_count, Type::Unknown);
-                }
-                let func_program = runmat_hir::HirProgram {
-                    body: remapped_body,
-                    var_types: func_var_types,
+                let prepared = match call_shared::prepare_user_call(func, &args, &vars) {
+                    Ok(prepared) => prepared,
+                    Err(err) => vm_bail!(err),
                 };
+                let runmat_vm::call::shared::PreparedUserCall {
+                    func,
+                    var_map,
+                    func_program,
+                    func_vars,
+                } = prepared;
                 let func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
                 let func_result_vars = match interpret_function_with_counts(
                     &func_bytecode,
@@ -4719,64 +4485,16 @@ async fn run_interpreter_inner(
                         }
                     }
                 };
-                let mut outputs: Vec<Value> = Vec::with_capacity(out_count);
-                if func.has_varargout {
-                    // Push named outputs first (excluding varargout itself), then fill from varargout cell, then pad with 0.0
-                    let total_named = func.outputs.len().saturating_sub(1);
-                    let mut pushed = 0usize;
-                    // Push named outputs in order
-                    for i in 0..total_named.min(out_count) {
-                        if let Some(oid) = func.outputs.get(i) {
-                            if let Some(local_id) = var_map.get(oid) {
-                                let idx = local_id.0;
-                                let v = func_result_vars
-                                    .get(idx)
-                                    .cloned()
-                                    .unwrap_or(Value::Num(0.0));
-                                outputs.push(v);
-                                pushed += 1;
-                            }
-                        }
-                    }
-                    if pushed < out_count {
-                        // Now consume from varargout cell (last output)
-                        if let Some(varargout_oid) = func.outputs.last() {
-                            if let Some(local_id) = var_map.get(varargout_oid) {
-                                if let Some(Value::Cell(ca)) = func_result_vars.get(local_id.0) {
-                                    let available = ca.data.len();
-                                    let need = out_count - pushed;
-                                    if need > available {
-                                        vm_bail!(mex("VarargoutMismatch", &format!("Function '{name}' returned {available} varargout values, {need} requested")));
-                                    }
-                                    for vi in 0..need {
-                                        outputs.push((*ca.data[vi]).clone());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    // No padding
-                } else {
-                    // Push out_count values; error if requesting more than defined
-                    let defined = func.outputs.len();
-                    if out_count > defined {
-                        vm_bail!(mex(
-                            "TooManyOutputs",
-                            &format!("Function '{name}' defines {defined} outputs, {out_count} requested")
-                        ));
-                    }
-                    for i in 0..out_count {
-                        let v = func
-                            .outputs
-                            .get(i)
-                            .and_then(|oid| var_map.get(oid))
-                            .map(|lid| lid.0)
-                            .and_then(|idx| func_result_vars.get(idx))
-                            .cloned()
-                            .unwrap_or(Value::Num(0.0));
-                        outputs.push(v);
-                    }
-                }
+                let outputs = match call_shared::collect_multi_outputs(
+                    &name,
+                    &func,
+                    &var_map,
+                    &func_result_vars,
+                    out_count,
+                ) {
+                    Ok(outputs) => outputs,
+                    Err(err) => vm_bail!(err),
+                };
                 stack.push(Value::OutputList(outputs));
             }
             Instr::EnterTry(catch_pc, catch_var) => {
@@ -11682,164 +11400,20 @@ async fn invoke_user_function_value(
     functions: &HashMap<String, UserFunction>,
     vars: &mut [Value],
 ) -> Result<Value, RuntimeError> {
-    let func: UserFunction = match functions.get(name) {
-        Some(f) => f.clone(),
-        None => {
-            return Err(mex(
-                "UndefinedFunction",
-                &format!("Undefined function: {name}"),
-            ))
-        }
-    };
-
+    let func = call_shared::lookup_user_function(name, functions)?;
     let arg_count = args.len();
-    if !func.has_varargin {
-        if arg_count < func.params.len() {
-            return Err(mex(
-                "NotEnoughInputs",
-                &format!(
-                    "Function '{name}' expects {} inputs, got {arg_count}",
-                    func.params.len()
-                ),
-            ));
-        }
-        if arg_count > func.params.len() {
-            return Err(mex(
-                "TooManyInputs",
-                &format!(
-                    "Function '{name}' expects {} inputs, got {arg_count}",
-                    func.params.len()
-                ),
-            ));
-        }
-    } else if arg_count + 1 < func.params.len() {
-        return Err(mex(
-            "NotEnoughInputs",
-            &format!(
-                "Function '{name}' expects at least {} inputs, got {arg_count}",
-                func.params.len() - 1
-            ),
-        ));
-    }
-
-    let var_map = runmat_hir::remapping::create_complete_function_var_map(
-        &func.params,
-        &func.outputs,
-        &func.body,
-    );
-    let local_var_count = var_map.len();
-    let remapped_body = runmat_hir::remapping::remap_function_body(&func.body, &var_map);
-    let func_vars_count = local_var_count.max(func.params.len());
-    let mut func_vars = vec![Value::Num(0.0); func_vars_count];
-
-    if func.has_varargin {
-        let fixed = func.params.len().saturating_sub(1);
-        for i in 0..fixed {
-            if i < args.len() && i < func_vars.len() {
-                func_vars[i] = args[i].clone();
-            }
-        }
-        let mut rest: Vec<Value> = if args.len() > fixed {
-            args[fixed..].to_vec()
-        } else {
-            Vec::new()
-        };
-        let cell = runmat_builtins::CellArray::new(
-            std::mem::take(&mut rest),
-            1,
-            if args.len() > fixed {
-                args.len() - fixed
-            } else {
-                0
-            },
-        )
-        .map_err(|e| mex("VararginBuildError", &format!("varargin: {e}")))?;
-        if fixed < func_vars.len() {
-            func_vars[fixed] = Value::Cell(cell);
-        }
-    } else {
-        for (i, _param_id) in func.params.iter().enumerate() {
-            if i < args.len() && i < func_vars.len() {
-                func_vars[i] = args[i].clone();
-            }
-        }
-    }
-
-    for (original_var_id, local_var_id) in &var_map {
-        let local_index = local_var_id.0;
-        let global_index = original_var_id.0;
-        if local_index < func_vars.len() && global_index < vars.len() {
-            let is_parameter = func
-                .params
-                .iter()
-                .any(|param_id| param_id == original_var_id);
-            if !is_parameter {
-                func_vars[local_index] = vars[global_index].clone();
-            }
-        }
-    }
-
-    if func.has_varargout {
-        if let Some(varargout_oid) = func.outputs.last() {
-            if let Some(local_id) = var_map.get(varargout_oid) {
-                if local_id.0 < func_vars.len() {
-                    let empty = runmat_builtins::CellArray::new(vec![], 1, 0)
-                        .map_err(|e| mex("VarargoutInitError", &format!("varargout init: {e}")))?;
-                    func_vars[local_id.0] = Value::Cell(empty);
-                }
-            }
-        }
-    }
-
-    let mut func_var_types = func.var_types.clone();
-    if func_var_types.len() < local_var_count {
-        func_var_types.resize(local_var_count, Type::Unknown);
-    }
-    let func_program = runmat_hir::HirProgram {
-        body: remapped_body,
-        var_types: func_var_types,
-    };
+    call_shared::validate_user_function_arity(name, &func, arg_count)?;
+    let prepared = call_shared::prepare_user_call(func, args, vars)?;
+    let runmat_vm::call::shared::PreparedUserCall {
+        func,
+        var_map,
+        func_program,
+        func_vars,
+    } = prepared;
     let func_bytecode = crate::compile(&func_program, functions)?;
     let func_result_vars =
         interpret_function_with_counts(&func_bytecode, func_vars, name, 1, arg_count).await?;
-
-    if func.outputs.is_empty() {
-        return Ok(Value::Num(0.0));
-    }
-
-    if func.has_varargout {
-        let total_named = func.outputs.len().saturating_sub(1);
-        if total_named > 0 {
-            if let Some(oid) = func.outputs.first() {
-                if let Some(local_id) = var_map.get(oid) {
-                    if let Some(value) = func_result_vars.get(local_id.0) {
-                        return Ok(value.clone());
-                    }
-                }
-            }
-        }
-        if let Some(varargout_oid) = func.outputs.last() {
-            if let Some(local_id) = var_map.get(varargout_oid) {
-                if let Some(Value::Cell(ca)) = func_result_vars.get(local_id.0) {
-                    if let Some(first) = ca.data.first() {
-                        return Ok((**first).clone());
-                    }
-                }
-            }
-        }
-        return Ok(Value::Num(0.0));
-    }
-
-    let Some(output_id) = func.outputs.first() else {
-        return Ok(Value::Num(0.0));
-    };
-    let Some(local_id) = var_map.get(output_id) else {
-        return Ok(Value::Num(0.0));
-    };
-    Ok(func_result_vars
-        .get(local_id.0)
-        .cloned()
-        .unwrap_or(Value::Num(0.0)))
+    Ok(call_shared::first_output_value(&func, &var_map, &func_result_vars))
 }
 
 pub async fn interpret_function(
