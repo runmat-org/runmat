@@ -4,7 +4,7 @@ import "./globals.css";
 import Navigation from "@/components/Navigation";
 import Footer from "@/components/Footer";
 import { ThemeProvider } from "@/components/ThemeProvider";
-
+import { GoogleAnalytics } from "@/components/GoogleAnalytics";
 import { GoogleTagManager } from "@/components/GoogleTagManager";
 import AnalyticsBootstrapClient from "@/components/AnalyticsBootstrapClient";
 
@@ -182,7 +182,7 @@ export default function RootLayout({
             }
           `}</style>
         ) : null}
-
+        <GoogleAnalytics />
       </head>
       <body className={`${inter.className} antialiased`} suppressHydrationWarning>
         <GoogleTagManager />
