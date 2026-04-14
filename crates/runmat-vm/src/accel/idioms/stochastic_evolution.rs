@@ -1,3 +1,4 @@
+use crate::accel::idioms::{AccelStmtIdiom, StmtIdiomContext};
 use crate::compiler::core::Compiler;
 use crate::compiler::end_expr::expr_is_one;
 use crate::compiler::CompileError;
@@ -11,6 +12,8 @@ pub(crate) struct Plan<'a> {
     pub scale: &'a HirExpr,
     pub steps: &'a HirExpr,
 }
+
+pub(crate) struct Idiom;
 
 fn stochastic_evolution_disabled() -> bool {
     static DISABLE: OnceCell<bool> = OnceCell::new();
@@ -94,54 +97,58 @@ fn is_exp_call(expr: &HirExpr) -> bool {
     matches!(&expr.kind, runmat_hir::HirExprKind::FuncCall(name, _) if name.eq_ignore_ascii_case("exp"))
 }
 
-pub(crate) fn detect<'a>(expr: &'a HirExpr, body: &'a [HirStmt]) -> Option<Plan<'a>> {
-    if stochastic_evolution_disabled() {
-        return None;
-    }
-    use runmat_hir::HirExprKind as EK;
+impl<'a> AccelStmtIdiom<'a> for Idiom {
+    type Plan = Plan<'a>;
 
-    match &expr.kind {
-        EK::Range(start, step, end) => {
-            if !expr_is_one(start) {
-                return None;
-            }
-            if let Some(step_expr) = step {
-                if !expr_is_one(step_expr) {
+    fn detect(ctx: &StmtIdiomContext<'a>) -> Option<Self::Plan> {
+        if stochastic_evolution_disabled() {
+            return None;
+        }
+        use runmat_hir::HirExprKind as EK;
+
+        match &ctx.expr.kind {
+            EK::Range(start, step, end) => {
+                if !expr_is_one(start) {
                     return None;
                 }
+                if let Some(step_expr) = step {
+                    if !expr_is_one(step_expr) {
+                        return None;
+                    }
+                }
+                if ctx.body.len() != 2 {
+                    return None;
+                }
+                let (z_var, randn_expr) = match &ctx.body[0] {
+                    HirStmt::Assign(var, expr, _, _) => (*var, expr),
+                    _ => return None,
+                };
+                if !is_randn_call(randn_expr) {
+                    return None;
+                }
+                let (state_var, update_expr) = match &ctx.body[1] {
+                    HirStmt::Assign(var, expr, _, _) => (*var, expr),
+                    _ => return None,
+                };
+                let (drift, scale) = extract_drift_and_scale(update_expr, state_var, z_var)?;
+                Some(Plan {
+                    state: state_var,
+                    drift,
+                    scale,
+                    steps: end,
+                })
             }
-            if body.len() != 2 {
-                return None;
-            }
-            let (z_var, randn_expr) = match &body[0] {
-                HirStmt::Assign(var, expr, _, _) => (*var, expr),
-                _ => return None,
-            };
-            if !is_randn_call(randn_expr) {
-                return None;
-            }
-            let (state_var, update_expr) = match &body[1] {
-                HirStmt::Assign(var, expr, _, _) => (*var, expr),
-                _ => return None,
-            };
-            let (drift, scale) = extract_drift_and_scale(update_expr, state_var, z_var)?;
-            Some(Plan {
-                state: state_var,
-                drift,
-                scale,
-                steps: end,
-            })
+            _ => None,
         }
-        _ => None,
     }
-}
 
-pub(crate) fn lower(compiler: &mut Compiler, plan: Plan<'_>) -> Result<(), CompileError> {
-    compiler.emit(Instr::LoadVar(plan.state.0));
-    compiler.compile_expr(plan.drift)?;
-    compiler.compile_expr(plan.scale)?;
-    compiler.compile_expr(plan.steps)?;
-    compiler.emit(Instr::StochasticEvolution);
-    compiler.emit(Instr::StoreVar(plan.state.0));
-    Ok(())
+    fn lower(compiler: &mut Compiler, plan: Self::Plan) -> Result<(), CompileError> {
+        compiler.emit(Instr::LoadVar(plan.state.0));
+        compiler.compile_expr(plan.drift)?;
+        compiler.compile_expr(plan.scale)?;
+        compiler.compile_expr(plan.steps)?;
+        compiler.emit(Instr::StochasticEvolution);
+        compiler.emit(Instr::StoreVar(plan.state.0));
+        Ok(())
+    }
 }
