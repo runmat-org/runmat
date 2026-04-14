@@ -1,4 +1,5 @@
 pub mod api;
+pub mod debug;
 pub mod dispatch;
 pub mod engine;
 pub mod errors;

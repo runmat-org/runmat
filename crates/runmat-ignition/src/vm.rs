@@ -804,21 +804,64 @@ async fn run_interpreter_inner(
         if let Some(decision) = interp_dispatch::dispatch_instruction(
             &bytecode.instructions[pc],
             &mut stack,
-            &vars,
+            &mut vars,
             &bytecode.var_names,
-            &context,
+            &mut context,
             &mut try_stack,
             &mut pc,
+            |current, incoming| {
+                #[cfg(feature = "native-accel")]
+                if !same_gpu_handle(current, incoming) {
+                    clear_residency(current);
+                }
+            },
+            |stored_index, stored_value| {
+                runtime_globals::update_global_store(stored_index, stored_value, &global_aliases);
+            },
+            |current, incoming| {
+                #[cfg(feature = "native-accel")]
+                if !same_gpu_handle(current, incoming) {
+                    clear_residency(current);
+                }
+            },
+            |current, incoming| {
+                #[cfg(feature = "native-accel")]
+                if !same_gpu_handle(current, incoming) {
+                    clear_residency(current);
+                }
+            },
+            |func_name, stored_offset, stored_value| {
+                runtime_globals::update_persistent_local_store(
+                    func_name,
+                    stored_offset,
+                    stored_value,
+                );
+            },
         )
         .await?
         {
             match decision {
-                DispatchDecision::ContinueLoop => continue,
-                DispatchDecision::Return => {
+                interp_dispatch::DispatchHandled::Generic(DispatchDecision::ContinueLoop) => continue,
+                interp_dispatch::DispatchHandled::Generic(DispatchDecision::FallThrough) => {
+                    pc += 1;
+                    continue;
+                }
+                interp_dispatch::DispatchHandled::Generic(DispatchDecision::Return) => {
                     interpreter_timing.flush_host_span("return", None);
                     break;
                 }
-                DispatchDecision::FallThrough => {
+                interp_dispatch::DispatchHandled::ReturnValue(DispatchDecision::ContinueLoop)
+                | interp_dispatch::DispatchHandled::Return(DispatchDecision::ContinueLoop) => continue,
+                interp_dispatch::DispatchHandled::ReturnValue(DispatchDecision::Return) => {
+                    interpreter_timing.flush_host_span("return_value", None);
+                    break;
+                }
+                interp_dispatch::DispatchHandled::Return(DispatchDecision::Return) => {
+                    interpreter_timing.flush_host_span("return", None);
+                    break;
+                }
+                interp_dispatch::DispatchHandled::ReturnValue(DispatchDecision::FallThrough)
+                | interp_dispatch::DispatchHandled::Return(DispatchDecision::FallThrough) => {
                     pc += 1;
                     continue;
                 }
@@ -837,10 +880,15 @@ async fn run_interpreter_inner(
             | Instr::LoadString(_)
             | Instr::LoadCharRow(_)
             | Instr::LoadLocal(_)
+            | Instr::LoadVar(_)
+            | Instr::StoreVar(_)
+            | Instr::StoreLocal(_)
             | Instr::Swap
             | Instr::Pop
             | Instr::EnterTry(_, _)
             | Instr::PopTry
+            | Instr::ReturnValue
+            | Instr::Return
             | Instr::Unpack(_)
             | Instr::CreateMatrix(_, _)
             | Instr::CreateMatrixDynamic(_)
@@ -932,118 +980,6 @@ async fn run_interpreter_inner(
                     }
                     Err(err) => vm_bail!(err),
                 }
-            }
-            Instr::LoadVar(i) => {
-                let v = vars[i].clone();
-                if std::env::var("RUNMAT_DEBUG_VARS").as_deref() == Ok("1") {
-                    match &v {
-                        Value::Tensor(t) => {
-                            eprintln!("[vm] LoadVar var={i} Tensor shape={:?}", t.shape);
-                        }
-                        Value::GpuTensor(h) => {
-                            eprintln!("[vm] LoadVar var={i} GpuTensor shape={:?}", h.shape);
-                        }
-                        _ => {}
-                    }
-                }
-                if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
-                    match &v {
-                        Value::GpuTensor(h) => {
-                            debug!(pc, var = i, shape = ?h.shape, "[vm] LoadVar GPU tensor");
-                        }
-                        Value::Tensor(t) => {
-                            debug!(pc, var = i, shape = ?t.shape, "[vm] LoadVar tensor");
-                        }
-                        _ => {}
-                    }
-                }
-                interp_dispatch::load_var(&mut stack, &vars, i)
-            }
-            Instr::StoreVar(i) => {
-                let preview = stack
-                    .last()
-                    .cloned()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                if std::env::var("RUNMAT_DEBUG_VARS").as_deref() == Ok("1") {
-                    match &preview {
-                        Value::Tensor(t) => {
-                            eprintln!("[vm] StoreVar var={i} Tensor shape={:?}", t.shape);
-                        }
-                        Value::GpuTensor(h) => {
-                            eprintln!("[vm] StoreVar var={i} GpuTensor shape={:?}", h.shape);
-                        }
-                        _ => {}
-                    }
-                }
-                if let Ok(filter) = std::env::var("RUNMAT_DEBUG_STORE_VAR") {
-                    let log_this = if filter.trim().eq_ignore_ascii_case("*") {
-                        true
-                    } else if let Ok(target) = filter.trim().parse::<usize>() {
-                        target == i
-                    } else {
-                        false
-                    };
-                    if log_this {
-                        debug!(pc, var = i, ?preview, "[vm] StoreVar value");
-                    }
-                }
-                if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
-                    match &preview {
-                        Value::GpuTensor(h) => {
-                            debug!(pc, var = i, shape = ?h.shape, "[vm] StoreVar GPU tensor");
-                        }
-                        Value::Tensor(t) => {
-                            debug!(pc, var = i, shape = ?t.shape, "[vm] StoreVar tensor");
-                        }
-                        _ => {}
-                    }
-                }
-                interp_dispatch::store_var(
-                    &mut stack,
-                    &mut vars,
-                    i,
-                    &bytecode.var_names,
-                    |current, incoming| {
-                        #[cfg(feature = "native-accel")]
-                        if !same_gpu_handle(current, incoming) {
-                            clear_residency(current);
-                        }
-                    },
-                    |stored_index, stored_value| {
-                        runtime_globals::update_global_store(
-                            stored_index,
-                            stored_value,
-                            &global_aliases,
-                        );
-                    },
-                )?;
-            }
-            Instr::StoreLocal(offset) => {
-                interp_dispatch::store_local(
-                    &mut stack,
-                    &mut context,
-                    &mut vars,
-                    offset,
-                    |current, incoming| {
-                        #[cfg(feature = "native-accel")]
-                        if !same_gpu_handle(current, incoming) {
-                            clear_residency(current);
-                        }
-                    },
-                    |current, incoming| {
-                        #[cfg(feature = "native-accel")]
-                        if !same_gpu_handle(current, incoming) {
-                            clear_residency(current);
-                        }
-                    },
-                    |func_name, stored_offset, stored_value| {
-                        runtime_globals::update_persistent_local_store(
-                            func_name,
-                            stored_offset,
-                            stored_value,
-                        );
-                    },
-                )?;
             }
             Instr::EnterScope(local_count) => {
                 control_flow::enter_scope(&mut context.locals, local_count);
@@ -3160,24 +3096,6 @@ async fn run_interpreter_inner(
                         }
                     }
                     _ => return Err(mex("CellExpansionOnNonCell", "Cell expansion on non-cell")),
-                }
-            }
-            Instr::ReturnValue => {
-                let action = control_flow::return_value(&mut stack)?;
-                interpreter_timing.flush_host_span("return_value", None);
-                match interp_dispatch::apply_control_flow_action(action, &mut pc) {
-                    DispatchDecision::Return => break,
-                    DispatchDecision::ContinueLoop => continue,
-                    DispatchDecision::FallThrough => {}
-                }
-            }
-            Instr::Return => {
-                let action = control_flow::return_void();
-                interpreter_timing.flush_host_span("return", None);
-                match interp_dispatch::apply_control_flow_action(action, &mut pc) {
-                    DispatchDecision::Return => break,
-                    DispatchDecision::ContinueLoop => continue,
-                    DispatchDecision::FallThrough => {}
                 }
             }
             Instr::StoreIndex(num_indices) => {

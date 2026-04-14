@@ -5,6 +5,7 @@ mod exceptions;
 mod stack;
 
 use crate::bytecode::Instr;
+use crate::interpreter::debug;
 use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
 use runmat_runtime::dispatcher::gather_if_needed_async;
@@ -25,6 +26,12 @@ pub use stack::{
     emit_stack_top, emit_var, load_bool, load_char_row, load_complex, load_const, load_local,
     load_string, load_var, store_local, store_var,
 };
+
+pub enum DispatchHandled {
+    Generic(DispatchDecision),
+    ReturnValue(DispatchDecision),
+    Return(DispatchDecision),
+}
 
 pub async fn logical_truth_from_value(value: &Value, label: &str) -> Result<bool, RuntimeError> {
     match value {
@@ -63,112 +70,157 @@ pub async fn logical_truth_from_value(value: &Value, label: &str) -> Result<bool
 pub async fn dispatch_instruction(
     instr: &Instr,
     stack: &mut Vec<Value>,
-    vars: &[Value],
+    vars: &mut Vec<Value>,
     var_names: &HashMap<usize, String>,
-    context: &crate::bytecode::ExecutionContext,
+    context: &mut crate::bytecode::ExecutionContext,
     try_stack: &mut Vec<(usize, Option<usize>)>,
     pc: &mut usize,
-) -> Result<Option<DispatchDecision>, RuntimeError> {
+    mut store_var_before_overwrite: impl FnMut(&Value, &Value),
+    mut store_var_after_store: impl FnMut(usize, &Value),
+    mut store_local_before_local_overwrite: impl FnMut(&Value, &Value),
+    mut store_local_before_var_overwrite: impl FnMut(&Value, &Value),
+    mut store_local_after_fallback_store: impl FnMut(&str, usize, &Value),
+) -> Result<Option<DispatchHandled>, RuntimeError> {
     match instr {
         Instr::EmitStackTop { label } => {
             emit_stack_top(stack, label, var_names).await?;
-            Ok(Some(DispatchDecision::FallThrough))
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         Instr::EmitVar { var_index, label } => {
             emit_var(vars, *var_index, label, var_names).await?;
-            Ok(Some(DispatchDecision::FallThrough))
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         Instr::LoadConst(value) => {
             load_const(stack, *value);
-            Ok(Some(DispatchDecision::FallThrough))
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         Instr::LoadComplex(re, im) => {
             load_complex(stack, *re, *im);
-            Ok(Some(DispatchDecision::FallThrough))
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         Instr::LoadBool(value) => {
             load_bool(stack, *value);
-            Ok(Some(DispatchDecision::FallThrough))
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         Instr::LoadString(value) => {
             load_string(stack, value.clone());
-            Ok(Some(DispatchDecision::FallThrough))
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         Instr::LoadCharRow(value) => {
             load_char_row(stack, value.clone())?;
-            Ok(Some(DispatchDecision::FallThrough))
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         Instr::LoadLocal(offset) => {
             load_local(stack, context, vars, *offset)?;
-            Ok(Some(DispatchDecision::FallThrough))
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::LoadVar(index) => {
+            let value = vars[*index].clone();
+            debug::trace_load_var(*pc, *index, &value);
+            load_var(stack, vars, *index);
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::StoreVar(index) => {
+            let preview = stack
+                .last()
+                .cloned()
+                .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?;
+            debug::trace_store_var(*pc, *index, &preview);
+            store_var(
+                stack,
+                vars,
+                *index,
+                var_names,
+                &mut store_var_before_overwrite,
+                &mut store_var_after_store,
+            )?;
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::StoreLocal(offset) => {
+            store_local(
+                stack,
+                context,
+                vars,
+                *offset,
+                &mut store_local_before_local_overwrite,
+                &mut store_local_before_var_overwrite,
+                &mut store_local_after_fallback_store,
+            )?;
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         Instr::Swap => {
             crate::ops::stack::swap(stack)?;
-            Ok(Some(DispatchDecision::FallThrough))
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         Instr::Pop => {
             crate::ops::stack::pop(stack);
-            Ok(Some(DispatchDecision::FallThrough))
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
-        Instr::AndAnd(target) => Ok(Some(apply_control_flow_action(
+        Instr::AndAnd(target) => Ok(Some(DispatchHandled::Generic(apply_control_flow_action(
             crate::ops::control_flow::and_and(stack, *target)?,
             pc,
-        ))),
-        Instr::OrOr(target) => Ok(Some(apply_control_flow_action(
+        )))),
+        Instr::OrOr(target) => Ok(Some(DispatchHandled::Generic(apply_control_flow_action(
             crate::ops::control_flow::or_or(stack, *target)?,
             pc,
-        ))),
+        )))),
         Instr::JumpIfFalse(target) => {
             let cond = crate::interpreter::stack::pop_value(stack)?;
             let truth = logical_truth_from_value(&cond, "if condition").await?;
-            Ok(Some(apply_control_flow_action(
+            Ok(Some(DispatchHandled::Generic(apply_control_flow_action(
                 crate::ops::control_flow::jump_if_false(truth, *target),
                 pc,
-            )))
+            ))))
         }
-        Instr::Jump(target) => Ok(Some(apply_control_flow_action(
+        Instr::Jump(target) => Ok(Some(DispatchHandled::Generic(apply_control_flow_action(
             crate::ops::control_flow::jump(*target),
             pc,
-        ))),
+        )))),
         Instr::EnterTry(catch_pc, catch_var) => {
             crate::ops::control_flow::enter_try(try_stack, *catch_pc, *catch_var);
-            Ok(Some(DispatchDecision::FallThrough))
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         Instr::PopTry => {
             crate::ops::control_flow::pop_try(try_stack);
-            Ok(Some(DispatchDecision::FallThrough))
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
+        Instr::ReturnValue => Ok(Some(DispatchHandled::ReturnValue(
+            apply_control_flow_action(crate::ops::control_flow::return_value(stack)?, pc),
+        ))),
+        Instr::Return => Ok(Some(DispatchHandled::Return(
+            apply_control_flow_action(crate::ops::control_flow::return_void(), pc),
+        ))),
         Instr::PackToRow(count) => {
             pack_to_row(stack, *count)?;
-            Ok(Some(DispatchDecision::FallThrough))
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         Instr::PackToCol(count) => {
             pack_to_col(stack, *count)?;
-            Ok(Some(DispatchDecision::FallThrough))
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         Instr::Unpack(out_count) => {
             if *out_count > 0 {
                 unpack(stack, *out_count)?;
             }
-            Ok(Some(DispatchDecision::FallThrough))
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         Instr::CreateMatrix(rows, cols) => {
             create_matrix(stack, *rows, *cols)?;
-            Ok(Some(DispatchDecision::FallThrough))
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         Instr::CreateMatrixDynamic(num_rows) => {
             create_matrix_dynamic(stack, *num_rows, |rows_data| async move {
                 runmat_runtime::create_matrix_from_values(&rows_data).await
             })
             .await?;
-            Ok(Some(DispatchDecision::FallThrough))
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         Instr::CreateRange(has_step) => {
             create_range(stack, *has_step, |args| async move {
                 runmat_runtime::call_builtin_async("colon", &args).await
             })
             .await?;
-            Ok(Some(DispatchDecision::FallThrough))
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         _ => Ok(None),
     }
