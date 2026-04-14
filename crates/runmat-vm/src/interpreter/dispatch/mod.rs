@@ -3,6 +3,7 @@ mod control_flow;
 mod arithmetic;
 mod arrays;
 mod exceptions;
+mod indexing;
 mod object;
 mod stack;
 
@@ -91,6 +92,9 @@ pub async fn dispatch_instruction(
     mut store_local_after_fallback_store: impl FnMut(&str, usize, &Value),
 ) -> Result<Option<DispatchHandled>, RuntimeError> {
     match instr {
+        _ if indexing::dispatch_indexing(instr, stack).await? => {
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
         _ if object::dispatch_object(instr, stack).await? => {
             Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }

@@ -44,7 +44,6 @@ use runmat_vm::interpreter::stack::pop_value;
 use runmat_vm::call::shared as call_shared;
 use runmat_vm::call::{builtins as call_builtins, feval as call_feval, user as call_user};
 use runmat_vm::indexing::end_expr as idx_end_expr;
-use runmat_vm::indexing::read_linear as idx_read_linear;
 use runmat_vm::indexing::read_slice as idx_read_slice;
 use runmat_vm::indexing::selectors as idx_selectors;
 use runmat_vm::indexing::write_linear as idx_write_linear;
@@ -752,6 +751,10 @@ async fn run_interpreter_inner(
             | Instr::StoreMemberOrInit(_)
             | Instr::StoreMemberDynamic
             | Instr::StoreMemberDynamicOrInit
+            | Instr::Index(_)
+            | Instr::IndexCell(_)
+            | Instr::IndexCellExpand(_, _)
+            | Instr::StoreIndexCell(_)
             | Instr::Add
             | Instr::Sub
             | Instr::Mul
@@ -1406,53 +1409,6 @@ async fn run_interpreter_inner(
                 interp_dispatch::push_single_result(&mut stack, output_list);
             }
             
-            Instr::Index(num_indices) => {
-                let indices = idx_read_linear::collect_linear_indices(&mut stack, num_indices).await?;
-                let base = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                #[cfg(feature = "native-accel")]
-                clear_residency(&base);
-                match base {
-                    Value::Object(obj) => {
-                        let cell = idx_read_linear::build_object_subsref_cell(&indices)?;
-                        match call_builtin_vm!(
-                            "call_method",
-                            &[
-                                Value::Object(obj),
-                                Value::String("subsref".to_string()),
-                                Value::String("()".to_string()),
-                                cell,
-                            ],
-                        ) {
-                            Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e.to_string()),
-                        }
-                    }
-                    Value::HandleObject(handle) => {
-                        let cell = idx_read_linear::build_object_subsref_cell(&indices)?;
-                        match call_builtin_vm!(
-                            "call_method",
-                            &[
-                                Value::HandleObject(handle),
-                                Value::String("subsref".to_string()),
-                                Value::String("()".to_string()),
-                                cell,
-                            ],
-                        ) {
-                            Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e.to_string()),
-                        }
-                    }
-                    other => {
-                        let result = match idx_read_linear::generic_index(&other, &indices).await {
-                            Ok(v) => v,
-                            Err(e) => vm_bail!(e),
-                        };
-                        stack.push(result);
-                    }
-                }
-            }
             Instr::IndexSlice(dims, numeric_count, colon_mask, end_mask) => {
                 let __b = bench_start();
                 // Pop numeric indices in reverse order (they were pushed in order), then base
@@ -2520,149 +2476,7 @@ async fn run_interpreter_inner(
                 let cell = cell_ops::create_cell_2d(elems, rows, cols)?;
                 stack.push(cell);
             }
-            Instr::IndexCell(num_indices) => {
-                // Pop indices first (in reverse), then base
-                let mut indices = Vec::with_capacity(num_indices);
-                for _ in 0..num_indices {
-                    let v: f64 = (&stack
-                        .pop()
-                        .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                        .try_into()?;
-                    indices.push(v as usize);
-                }
-                indices.reverse();
-                let base = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match base {
-                    Value::Object(obj) => {
-                        // Route to subsref(obj, '{}', {indices})
-                        let cell = call_builtin_vm!(
-                            "__make_cell",
-                            &indices
-                                .iter()
-                                .map(|n| Value::Num(*n as f64))
-                                .collect::<Vec<_>>(),
-                        )?;
-                        match call_builtin_vm!(
-                            "call_method",
-                            &[
-                                Value::Object(obj),
-                                Value::String("subsref".to_string()),
-                                Value::String("{}".to_string()),
-                                cell,
-                            ],
-                        ) {
-                            Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e),
-                        }
-                    }
-                    Value::HandleObject(handle) => {
-                        // Route to subsref(obj, '{}', {indices})
-                        let cell = call_builtin_vm!(
-                            "__make_cell",
-                            &indices
-                                .iter()
-                                .map(|n| Value::Num(*n as f64))
-                                .collect::<Vec<_>>(),
-                        )?;
-                        match call_builtin_vm!(
-                            "call_method",
-                            &[
-                                Value::HandleObject(handle),
-                                Value::String("subsref".to_string()),
-                                Value::String("{}".to_string()),
-                                cell,
-                            ],
-                        ) {
-                            Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e),
-                        }
-                    }
-                    Value::Cell(ca) => stack.push(cell_ops::index_cell_value(&ca, &indices)?),
-                    _ => return Err(mex("CellIndexingOnNonCell", "Cell indexing on non-cell")),
-                }
-            }
-            Instr::IndexCellExpand(num_indices, out_count) => {
-                // Same as IndexCell but flatten cell contents into multiple outputs
-                let mut indices = Vec::with_capacity(num_indices);
-                if num_indices > 0 {
-                    for _ in 0..num_indices {
-                        let v: f64 = (&stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                            .try_into()?;
-                        indices.push(v as usize);
-                    }
-                    indices.reverse();
-                }
-                let base = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match base {
-                    Value::Cell(ca) => {
-                        let values = cell_ops::expand_cell_values(&ca, &indices, out_count)?;
-                        for v in values {
-                            stack.push(v);
-                        }
-                    }
-                    Value::Object(obj) => {
-                        // Defer to subsref; expect a cell back; then expand one element
-                        let cell = call_builtin_vm!(
-                            "__make_cell",
-                            &indices
-                                .iter()
-                                .map(|n| Value::Num(*n as f64))
-                                .collect::<Vec<_>>(),
-                        )?;
-                        let v = match call_builtin_vm!(
-                            "call_method",
-                            &[
-                                Value::Object(obj),
-                                Value::String("subsref".to_string()),
-                                Value::String("{}".to_string()),
-                                cell,
-                            ],
-                        ) {
-                            Ok(v) => v,
-                            Err(e) => vm_bail!(e.to_string()),
-                        };
-                        // Push returned value and pad to out_count
-                        stack.push(v);
-                        for _ in 1..out_count {
-                            stack.push(Value::Num(0.0));
-                        }
-                    }
-                    Value::HandleObject(handle) => {
-                        // Defer to subsref; expect a cell back; then expand one element
-                        let cell = call_builtin_vm!(
-                            "__make_cell",
-                            &indices
-                                .iter()
-                                .map(|n| Value::Num(*n as f64))
-                                .collect::<Vec<_>>(),
-                        )?;
-                        let v = match call_builtin_vm!(
-                            "call_method",
-                            &[
-                                Value::HandleObject(handle),
-                                Value::String("subsref".to_string()),
-                                Value::String("{}".to_string()),
-                                cell,
-                            ],
-                        ) {
-                            Ok(v) => v,
-                            Err(e) => vm_bail!(e.to_string()),
-                        };
-                        // Push returned value and pad to out_count
-                        stack.push(v);
-                        for _ in 1..out_count {
-                            stack.push(Value::Num(0.0));
-                        }
-                    }
-                    _ => return Err(mex("CellExpansionOnNonCell", "Cell expansion on non-cell")),
-                }
-            }
+            
             Instr::StoreIndex(num_indices) => {
                 // RHS to assign, then indices, then base
                 // Debug snapshot of top-of-stack types before mutation
@@ -2885,85 +2699,6 @@ async fn run_interpreter_inner(
                             "IndexAssignmentUnsupportedBase",
                             "Index assignment only for tensors",
                         ));
-                    }
-                }
-            }
-            Instr::StoreIndexCell(num_indices) => {
-                // RHS, then indices, then base cell
-                let rhs = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let mut indices = Vec::new();
-                for _ in 0..num_indices {
-                    let v: f64 = (&stack
-                        .pop()
-                        .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                        .try_into()?;
-                    indices.push(v as usize);
-                }
-                indices.reverse();
-                let base = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                #[cfg(feature = "native-accel")]
-                clear_residency(&base);
-                // TODO(GC): write barrier hook for cell element updates
-                match base {
-                    Value::Object(obj) => {
-                        // subsasgn(obj, '{}', {indices}, rhs)
-                        let cell = runmat_builtins::CellArray::new(
-                            indices.iter().map(|n| Value::Num(*n as f64)).collect(),
-                            1,
-                            indices.len(),
-                        )
-                        .map_err(|e| format!("subsasgn build error: {e}"))?;
-                        match call_builtin_vm!(
-                            "call_method",
-                            &[
-                                Value::Object(obj),
-                                Value::String("subsasgn".to_string()),
-                                Value::String("{}".to_string()),
-                                Value::Cell(cell),
-                                rhs,
-                            ],
-                        ) {
-                            Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e.to_string()),
-                        }
-                    }
-                    Value::HandleObject(handle) => {
-                        // subsasgn(obj, '{}', {indices}, rhs)
-                        let cell = runmat_builtins::CellArray::new(
-                            indices.iter().map(|n| Value::Num(*n as f64)).collect(),
-                            1,
-                            indices.len(),
-                        )
-                        .map_err(|e| format!("subsasgn build error: {e}"))?;
-                        match call_builtin_vm!(
-                            "call_method",
-                            &[
-                                Value::HandleObject(handle),
-                                Value::String("subsasgn".to_string()),
-                                Value::String("{}".to_string()),
-                                Value::Cell(cell),
-                                rhs,
-                            ],
-                        ) {
-                            Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e.to_string()),
-                        }
-                    }
-                    Value::Cell(ca) => {
-                        let updated = cell_ops::assign_cell_value(ca, &indices, rhs, |oldv, newv| {
-                            runmat_gc::gc_record_write(oldv, newv);
-                        })?;
-                        stack.push(updated);
-                    }
-                    _ => {
-                        return Err(mex(
-                            "CellAssignmentOnNonCell",
-                            "Cell assignment on non-cell",
-                        ))
                     }
                 }
             }
