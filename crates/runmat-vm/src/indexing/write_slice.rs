@@ -739,3 +739,80 @@ pub async fn assign_gpu_store_slice(
     let Value::Tensor(updated) = updated else { unreachable!() };
     upload_tensor_to_gpu(&updated)
 }
+
+pub async fn build_expr_selectors<ResolveEnd, Fut>(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    range_dims: &[usize],
+    range_params: &[(f64, f64)],
+    range_start_exprs: &[Option<crate::bytecode::EndExpr>],
+    range_step_exprs: &[Option<crate::bytecode::EndExpr>],
+    range_end_exprs: &[crate::bytecode::EndExpr],
+    numeric: &[Value],
+    shape: &[usize],
+    mut resolve_end: ResolveEnd,
+) -> Result<Vec<SliceSelector>, RuntimeError>
+where
+    ResolveEnd: FnMut(usize, &crate::bytecode::EndExpr) -> Fut,
+    Fut: std::future::Future<Output = Result<i64, RuntimeError>>,
+{
+    let mut selectors: Vec<SliceSelector> = Vec::with_capacity(dims);
+    let mut num_iter = 0usize;
+    let mut rp_iter = 0usize;
+    for d in 0..dims {
+        if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
+            let (raw_st, raw_sp) = range_params[rp_iter];
+            let dim_len = *shape.get(d).unwrap_or(&1);
+            let st = if let Some(expr) = &range_start_exprs[rp_iter] {
+                resolve_end(dim_len, expr).await? as f64
+            } else {
+                raw_st
+            };
+            let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
+                resolve_end(dim_len, expr).await? as f64
+            } else {
+                raw_sp
+            };
+            rp_iter += 1;
+            let step_i = if sp >= 0.0 { sp as i64 } else { -(sp.abs() as i64) };
+            let end_i = resolve_end(dim_len, &range_end_exprs[pos]).await?;
+            if step_i == 0 {
+                return Err(mex("IndexStepZero", "Index step cannot be zero"));
+            }
+            let mut vals = Vec::new();
+            let mut cur = st as i64;
+            if step_i > 0 {
+                while cur <= end_i {
+                    if cur < 1 || cur > dim_len as i64 { break; }
+                    vals.push(cur as usize);
+                    cur += step_i;
+                }
+            } else {
+                while cur >= end_i {
+                    if cur < 1 || cur > dim_len as i64 { break; }
+                    vals.push(cur as usize);
+                    cur += step_i;
+                }
+            }
+            selectors.push(SliceSelector::Indices(vals));
+            continue;
+        }
+        let is_colon = (colon_mask & (1u32 << d)) != 0;
+        let is_end = (end_mask & (1u32 << d)) != 0;
+        if is_colon {
+            selectors.push(SliceSelector::Colon);
+        } else if is_end {
+            selectors.push(SliceSelector::Scalar(*shape.get(d).unwrap_or(&1)));
+        } else {
+            let v = numeric.get(num_iter).ok_or_else(|| mex("MissingNumericIndex", "missing numeric index"))?;
+            num_iter += 1;
+            let dim_len = *shape.get(d).unwrap_or(&1);
+            selectors.push(match crate::indexing::selectors::selector_from_value_dim(v, dim_len).await? {
+                SliceSelector::LinearIndices { values, .. } => SliceSelector::Indices(values),
+                other => other,
+            });
+        }
+    }
+    Ok(selectors)
+}
