@@ -41,6 +41,7 @@ use runmat_vm::interpreter::stack::{pop2, pop_value};
 use runmat_vm::call::shared as call_shared;
 use runmat_vm::call::{builtins as call_builtins, feval as call_feval, user as call_user};
 use runmat_vm::call::builtins::ImportedBuiltinResolution;
+use runmat_vm::call::closures as call_closures;
 use runmat_vm::ops::control_flow::{self, ControlFlowAction};
 use runmat_vm::ops::stack as stack_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
@@ -9196,334 +9197,40 @@ async fn run_interpreter_inner(
                 }
             }
             Instr::CallMethod(name, arg_count) => {
-                // base, then args are on stack in order: [..., base, a1, a2, ...]
-                let mut args = Vec::with_capacity(arg_count);
-                for _ in 0..arg_count {
-                    args.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                args.reverse();
-                let base = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match base {
-                    Value::Object(obj) => {
-                        // Compose qualified and try runtime builtin dispatch, passing receiver first
-                        if let Some((m, _owner)) =
-                            runmat_builtins::lookup_method(&obj.class_name, &name)
-                        {
-                            if m.is_static {
-                                vm_bail!(format!(
-                                    "Method '{}' is static; use classref({}).{}",
-                                    name, obj.class_name, name
-                                ));
-                            }
-                            if m.access == runmat_builtins::Access::Private {
-                                vm_bail!(format!("Method '{}' is private", name))
-                            }
-                            let mut full_args = Vec::with_capacity(1 + args.len());
-                            full_args.push(Value::Object(obj));
-                            full_args.extend(args.into_iter());
-                            let v = call_builtin_vm!(&m.function_name, &full_args)?;
-                            stack.push(v);
-                            pc += 1;
-                            continue;
-                        }
-                        let qualified = format!("{}.{}", obj.class_name, name);
-                        let mut full_args = Vec::with_capacity(1 + args.len());
-                        full_args.push(Value::Object(obj));
-                        full_args.extend(args.into_iter());
-                        if let Ok(v) = call_builtin_vm!(&qualified, &full_args) {
-                            stack.push(v);
-                        } else {
-                            match call_builtin_vm!(&name, &full_args) {
-                                Ok(v) => {
-                                    stack.push(v);
-                                }
-                                Err(e) => {
-                                    vm_bail!(e);
-                                }
-                            }
-                        }
-                    }
-                    _ => vm_bail!("CallMethod on non-object".to_string()),
+                let (base, args) = call_closures::collect_method_args(&mut stack, arg_count)?;
+                match call_closures::call_method(base, &name, args).await {
+                    Ok(v) => stack.push(v),
+                    Err(e) => vm_bail!(e),
                 }
             }
             Instr::CallMethodOrMemberIndex(name, arg_count) => {
-                let mut args = Vec::with_capacity(arg_count);
-                for _ in 0..arg_count {
-                    args.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                args.reverse();
-                let base = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-
-                match base {
-                    Value::Object(obj) => {
-                        if let Some((m, _owner)) =
-                            runmat_builtins::lookup_method(&obj.class_name, &name)
-                        {
-                            if m.is_static {
-                                vm_bail!(format!(
-                                    "Method '{}' is static; use classref({}).{}",
-                                    name, obj.class_name, name
-                                ));
-                            }
-                            if m.access == runmat_builtins::Access::Private {
-                                vm_bail!(format!("Method '{}' is private", name))
-                            }
-                            let mut full_args = Vec::with_capacity(1 + args.len());
-                            full_args.push(Value::Object(obj));
-                            full_args.extend(args.into_iter());
-                            let v = call_builtin_vm!(&m.function_name, &full_args)?;
-                            stack.push(v);
-                            pc += 1;
-                            continue;
-                        }
-
-                        let mut method_args = Vec::with_capacity(1 + args.len());
-                        method_args.push(Value::Object(obj.clone()));
-                        method_args.extend(args.iter().cloned());
-
-                        let qualified = format!("{}.{}", obj.class_name, name);
-                        if let Ok(v) = call_builtin_vm!(&qualified, &method_args) {
-                            stack.push(v);
-                            pc += 1;
-                            continue;
-                        }
-                        if let Ok(v) = call_builtin_vm!(&name, &method_args) {
-                            stack.push(v);
-                            pc += 1;
-                            continue;
-                        }
-
-                        let mut getfield_args = Vec::with_capacity(3);
-                        getfield_args.push(Value::Object(obj));
-                        getfield_args.push(Value::String(name));
-                        if !args.is_empty() {
-                            let idx_cell = runmat_builtins::CellArray::new(args, 1, arg_count)
-                                .map_err(|e| format!("getfield idx build: {e}"))?;
-                            getfield_args.push(Value::Cell(idx_cell));
-                        }
-                        match call_builtin_vm!("getfield", &getfield_args) {
-                            Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e.to_string()),
-                        }
-                    }
-                    Value::HandleObject(handle) => {
-                        let mut method_args = Vec::with_capacity(2 + args.len());
-                        method_args.push(Value::HandleObject(handle.clone()));
-                        method_args.push(Value::String(name.clone()));
-                        method_args.extend(args.iter().cloned());
-                        if let Ok(v) = call_builtin_vm!("call_method", &method_args) {
-                            stack.push(v);
-                            pc += 1;
-                            continue;
-                        }
-
-                        let mut getfield_args = Vec::with_capacity(3);
-                        getfield_args.push(Value::HandleObject(handle));
-                        getfield_args.push(Value::String(name));
-                        if !args.is_empty() {
-                            let idx_cell = runmat_builtins::CellArray::new(args, 1, arg_count)
-                                .map_err(|e| format!("getfield idx build: {e}"))?;
-                            getfield_args.push(Value::Cell(idx_cell));
-                        }
-                        match call_builtin_vm!("getfield", &getfield_args) {
-                            Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e.to_string()),
-                        }
-                    }
-                    Value::ClassRef(cls) => {
-                        if let Some((m, _owner)) = runmat_builtins::lookup_method(&cls, &name) {
-                            if !m.is_static {
-                                vm_bail!(format!("Method '{}' is not static", name));
-                            }
-                            let v = call_builtin_vm!(&m.function_name, &args)?;
-                            stack.push(v);
-                            pc += 1;
-                            continue;
-                        }
-
-                        let qualified = format!("{cls}.{name}");
-                        if let Ok(v) = call_builtin_vm!(&qualified, &args) {
-                            stack.push(v);
-                            pc += 1;
-                            continue;
-                        }
-
-                        if args.is_empty() {
-                            if let Some((p, owner)) = runmat_builtins::lookup_property(&cls, &name)
-                            {
-                                if !p.is_static {
-                                    vm_bail!(format!("Property '{}' is not static", name));
-                                }
-                                if p.get_access == runmat_builtins::Access::Private {
-                                    vm_bail!(format!("Property '{}' is private", name))
-                                }
-                                if let Some(v) =
-                                    runmat_builtins::get_static_property_value(&owner, &name)
-                                {
-                                    stack.push(v);
-                                } else if let Some(v) = &p.default_value {
-                                    stack.push(v.clone());
-                                } else {
-                                    stack.push(Value::Num(0.0));
-                                }
-                                pc += 1;
-                                continue;
-                            }
-                        }
-
-                        vm_bail!(format!("Unknown static member '{}' on class {}", name, cls));
-                    }
-                    other => {
-                        let mut getfield_args = Vec::with_capacity(3);
-                        getfield_args.push(other);
-                        getfield_args.push(Value::String(name));
-                        if !args.is_empty() {
-                            let idx_cell = runmat_builtins::CellArray::new(args, 1, arg_count)
-                                .map_err(|e| format!("getfield idx build: {e}"))?;
-                            getfield_args.push(Value::Cell(idx_cell));
-                        }
-                        match call_builtin_vm!("getfield", &getfield_args) {
-                            Ok(v) => stack.push(v),
-                            Err(e) => vm_bail!(e.to_string()),
-                        }
-                    }
+                let (base, args) = call_closures::collect_method_args(&mut stack, arg_count)?;
+                match call_closures::call_method_or_member_index(base, name, args).await {
+                    Ok(v) => stack.push(v),
+                    Err(e) => vm_bail!(e),
                 }
             }
             Instr::LoadMethod(name) => {
-                // Base object on stack; return a closure that calls the method with receiver as first captured arg
-                let base = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match base {
-                    Value::Object(obj) => {
-                        let func_qual = format!("{}.{}", obj.class_name, name);
-                        stack.push(Value::Closure(runmat_builtins::Closure {
-                            function_name: func_qual,
-                            captures: vec![Value::Object(obj)],
-                        }));
-                    }
-                    Value::ClassRef(cls) => {
-                        // Bound static method handle (no receiver capture), resolve via inheritance
-                        if let Some((m, _owner)) = runmat_builtins::lookup_method(&cls, &name) {
-                            if !m.is_static {
-                                vm_bail!(format!("Method '{}' is not static", name));
-                            }
-                            stack.push(Value::Closure(runmat_builtins::Closure {
-                                function_name: m.function_name,
-                                captures: vec![],
-                            }));
-                        } else {
-                            // Fallback to namespaced builtin (e.g., Point.origin) when class
-                            // metadata has not been registered yet.
-                            let qualified = format!("{cls}.{name}");
-                            if runmat_builtins::builtin_functions()
-                                .iter()
-                                .any(|b| b.name == qualified)
-                            {
-                                stack.push(Value::Closure(runmat_builtins::Closure {
-                                    function_name: qualified,
-                                    captures: vec![],
-                                }));
-                            } else {
-                                vm_bail!(format!(
-                                    "Unknown static method '{}' on class {}",
-                                    name, cls
-                                ));
-                            }
-                        }
-                    }
-                    _ => vm_bail!("LoadMethod requires object or classref".to_string()),
+                let base = pop_value(&mut stack)?;
+                match call_closures::load_method_closure(base, name) {
+                    Ok(v) => stack.push(v),
+                    Err(e) => vm_bail!(e),
                 }
             }
             Instr::CreateClosure(func_name, capture_count) => {
-                let mut captures = Vec::with_capacity(capture_count);
-                for _ in 0..capture_count {
-                    captures.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                captures.reverse();
-                stack.push(Value::Closure(runmat_builtins::Closure {
-                    function_name: func_name,
-                    captures,
-                }));
+                call_closures::create_closure(&mut stack, func_name, capture_count)?;
             }
             Instr::LoadStaticProperty(class_name, prop) => {
-                // Enforce access and static-ness via registry (with inheritance)
-                if let Some((p, owner)) = runmat_builtins::lookup_property(&class_name, &prop) {
-                    if !p.is_static {
-                        vm_bail!(format!("Property '{}' is not static", prop));
-                    }
-                    if p.get_access == runmat_builtins::Access::Private {
-                        vm_bail!(format!("Property '{}' is private", prop))
-                    }
-                    if let Some(v) = runmat_builtins::get_static_property_value(&owner, &prop) {
-                        stack.push(v);
-                    } else if let Some(v) = &p.default_value {
-                        stack.push(v.clone());
-                    } else {
-                        stack.push(Value::Num(0.0));
-                    }
-                } else {
-                    vm_bail!(format!(
-                        "Unknown property '{}' on class {}",
-                        prop, class_name
-                    ));
+                match call_closures::load_static_property(&class_name, &prop) {
+                    Ok(v) => stack.push(v),
+                    Err(e) => vm_bail!(e),
                 }
             }
             Instr::CallStaticMethod(class_name, method, arg_count) => {
-                let mut args = Vec::with_capacity(arg_count);
-                for _ in 0..arg_count {
-                    args.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                args.reverse();
-                if let Some((m, _owner)) = runmat_builtins::lookup_method(&class_name, &method) {
-                    if !m.is_static {
-                        vm_bail!(format!("Method '{}' is not static", method));
-                    }
-                    if m.access == runmat_builtins::Access::Private {
-                        vm_bail!(format!("Method '{}' is private", method))
-                    }
-                    let v = match call_builtin_vm!(&m.function_name, &args) {
-                        Ok(v) => v,
-                        Err(e) => vm_bail!(e),
-                    };
-                    stack.push(v);
-                } else {
-                    // Fallback to namespaced builtin (e.g., Point.origin) when class metadata
-                    // has not been registered yet.
-                    let qualified = format!("{class_name}.{method}");
-                    if runmat_builtins::builtin_functions()
-                        .iter()
-                        .any(|b| b.name == qualified)
-                    {
-                        let v = match call_builtin_vm!(&qualified, &args) {
-                            Ok(v) => v,
-                            Err(e) => vm_bail!(e),
-                        };
-                        stack.push(v);
-                    } else {
-                        // Fallback for type-class static methods like gpuArray.zeros(m, n)
-                        // These are equivalent to calling the builtin with the class name appended:
-                        // e.g., gpuArray.zeros(2, 3) → zeros(2, 3, 'gpuArray')
+                let mut args = call_builtins::collect_call_args(&mut stack, arg_count)?;
+                match call_closures::call_static_method(&class_name, &method, args.clone()).await {
+                    Ok(v) => stack.push(v),
+                    Err(_) => {
                         let is_type_class = matches!(
                             class_name.as_str(),
                             "gpuArray"
@@ -9544,7 +9251,6 @@ async fn run_interpreter_inner(
                                 | "struct"
                         );
                         if is_type_class {
-                            // Append the class name as a string argument
                             args.push(Value::from(class_name.as_str()));
                             let v = match call_builtin_vm!(&method, &args) {
                                 Ok(v) => v,
