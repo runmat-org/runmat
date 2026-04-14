@@ -43,6 +43,7 @@ use runmat_vm::call::{builtins as call_builtins, feval as call_feval, user as ca
 use runmat_vm::call::builtins::ImportedBuiltinResolution;
 use runmat_vm::call::closures as call_closures;
 use runmat_vm::call::feval::FevalDispatch;
+use runmat_vm::indexing::end_expr as idx_end_expr;
 use runmat_vm::indexing::selectors as idx_selectors;
 use runmat_vm::ops::control_flow::{self, ControlFlowAction};
 use runmat_vm::ops::stack as stack_ops;
@@ -861,119 +862,33 @@ fn apply_end_offsets_to_numeric<'a>(
     })
 }
 
-fn eval_end_expr_value<'a>(
-    expr: &'a EndExpr,
-    end_value: f64,
-    vars: &'a mut Vec<Value>,
-    functions: &'a HashMap<String, UserFunction>,
-) -> std::pin::Pin<Box<dyn std::future::Future<Output = VmResult<f64>> + 'a>> {
-    Box::pin(async move {
-        match expr {
-            EndExpr::End => Ok(end_value),
-            EndExpr::Const(v) => Ok(*v),
-            EndExpr::Var(i) => {
-                let v = vars.get(*i).ok_or_else(|| {
-                    mex("MissingNumericIndex", "missing variable for end expression")
-                })?;
-                value_to_f64(v)
-                    .map_err(|_| mex("UnsupportedIndexType", "end expression must be numeric"))
-            }
-            EndExpr::Call(name, args) => {
-                let mut argv: Vec<Value> = Vec::with_capacity(args.len());
-                for a in args {
-                    let val = eval_end_expr_value(a, end_value, vars, functions).await?;
-                    argv.push(Value::Num(val));
-                }
-                let v = if let Ok(v) = call_builtin_vm!(name, &argv) {
-                    v
-                } else if functions.contains_key(name) {
-                    invoke_user_function_value(name, &argv, functions, vars).await?
-                } else {
-                    return Err(mex(
-                        "UndefinedFunction",
-                        &format!("Undefined function in end expression: {name}"),
-                    ));
-                };
-                value_to_f64(&v)
-                    .map_err(|_| mex("UnsupportedIndexType", "end call must return scalar"))
-            }
-            EndExpr::Add(a, b) => {
-                let lhs = eval_end_expr_value(a, end_value, vars, functions).await?;
-                let rhs = eval_end_expr_value(b, end_value, vars, functions).await?;
-                Ok(lhs + rhs)
-            }
-            EndExpr::Sub(a, b) => {
-                let lhs = eval_end_expr_value(a, end_value, vars, functions).await?;
-                let rhs = eval_end_expr_value(b, end_value, vars, functions).await?;
-                Ok(lhs - rhs)
-            }
-            EndExpr::Mul(a, b) => {
-                let lhs = eval_end_expr_value(a, end_value, vars, functions).await?;
-                let rhs = eval_end_expr_value(b, end_value, vars, functions).await?;
-                Ok(lhs * rhs)
-            }
-            EndExpr::Div(a, b) => {
-                let denom = eval_end_expr_value(b, end_value, vars, functions).await?;
-                if denom == 0.0 {
-                    return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-                }
-                let lhs = eval_end_expr_value(a, end_value, vars, functions).await?;
-                Ok(lhs / denom)
-            }
-            EndExpr::LeftDiv(a, b) => {
-                let denom = eval_end_expr_value(a, end_value, vars, functions).await?;
-                if denom == 0.0 {
-                    return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-                }
-                let rhs = eval_end_expr_value(b, end_value, vars, functions).await?;
-                Ok(rhs / denom)
-            }
-            EndExpr::Pow(a, b) => {
-                let lhs = eval_end_expr_value(a, end_value, vars, functions).await?;
-                let rhs = eval_end_expr_value(b, end_value, vars, functions).await?;
-                Ok(lhs.powf(rhs))
-            }
-            EndExpr::Neg(a) => Ok(-eval_end_expr_value(a, end_value, vars, functions).await?),
-            EndExpr::Pos(a) => Ok(eval_end_expr_value(a, end_value, vars, functions).await?),
-            EndExpr::Floor(a) => Ok(eval_end_expr_value(a, end_value, vars, functions)
-                .await?
-                .floor()),
-            EndExpr::Ceil(a) => Ok(eval_end_expr_value(a, end_value, vars, functions)
-                .await?
-                .ceil()),
-            EndExpr::Round(a) => Ok(eval_end_expr_value(a, end_value, vars, functions)
-                .await?
-                .round()),
-            EndExpr::Fix(a) => {
-                let v = eval_end_expr_value(a, end_value, vars, functions).await?;
-                Ok(if v >= 0.0 { v.floor() } else { v.ceil() })
-            }
-        }
-    })
-}
-
-fn value_to_f64(v: &Value) -> Result<f64, ()> {
-    match v {
-        Value::Num(n) => Ok(*n),
-        Value::Int(i) => Ok(i.to_f64()),
-        Value::Bool(b) => Ok(if *b { 1.0 } else { 0.0 }),
-        Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
-        Value::Complex(re, im) if im.abs() < 1e-12 => Ok(*re),
-        Value::ComplexTensor(ct) if ct.data.len() == 1 && ct.data[0].1.abs() < 1e-12 => {
-            Ok(ct.data[0].0)
-        }
-        _ => Err(()),
-    }
-}
-
 async fn resolve_range_end_index(
     dim_len: usize,
     end_expr: &EndExpr,
     vars: &mut Vec<Value>,
     functions: &HashMap<String, UserFunction>,
 ) -> VmResult<i64> {
-    let value = eval_end_expr_value(end_expr, dim_len as f64, vars, functions).await?;
-    Ok(value.floor() as i64)
+    idx_end_expr::resolve_range_end_index(
+        dim_len,
+        end_expr,
+        vars,
+        functions,
+        &|name, argv| {
+            Box::pin(async move {
+                match runmat_runtime::call_builtin_async(name, &argv).await {
+                    Ok(v) => Ok(Some(v)),
+                    Err(_) => Ok(None),
+                }
+            })
+        },
+        &|name, argv, functions, vars| {
+            Box::pin(async move {
+                let mut local_vars = vars.clone();
+                invoke_user_function_value(name, &argv, functions, &mut local_vars).await
+            })
+        },
+    )
+    .await
 }
 
 fn encode_end_expr_value(expr: &EndExpr) -> VmResult<Value> {
