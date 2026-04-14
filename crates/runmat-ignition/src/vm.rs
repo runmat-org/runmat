@@ -52,7 +52,6 @@ use runmat_vm::indexing::write_linear as idx_write_linear;
 use runmat_vm::indexing::write_slice as idx_write_slice;
 use runmat_vm::object::{class_def as obj_class_def, resolve as obj_resolve};
 use runmat_vm::ops::cells as cell_ops;
-use runmat_vm::ops::arithmetic as arithmetic_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
 use runmat_vm::runtime::call_stack::{
     attach_call_frames, push_call_frame,
@@ -81,50 +80,6 @@ impl Drop for FusionPlanGuard {
     fn drop(&mut self) {
         deactivate_fusion_plan();
     }
-}
-
-#[derive(Clone, Copy)]
-enum AutoBinaryOp {
-    Elementwise,
-    MatMul,
-}
-
-#[derive(Clone, Copy)]
-enum AutoUnaryOp {
-    Transpose,
-}
-
-#[cfg(feature = "native-accel")]
-async fn accel_promote_binary(op: AutoBinaryOp, a: &Value, b: &Value) -> VmResult<(Value, Value)> {
-    use runmat_accelerate::{promote_binary, BinaryOp};
-    let mapped = match op {
-        AutoBinaryOp::Elementwise => BinaryOp::Elementwise,
-        AutoBinaryOp::MatMul => BinaryOp::MatMul,
-    };
-    Ok(promote_binary(mapped, a, b)
-        .await
-        .map_err(|e| e.to_string())?)
-}
-
-#[cfg(not(feature = "native-accel"))]
-async fn accel_promote_binary(_op: AutoBinaryOp, a: &Value, b: &Value) -> VmResult<(Value, Value)> {
-    Ok((a.clone(), b.clone()))
-}
-
-#[cfg(feature = "native-accel")]
-async fn accel_promote_unary(op: AutoUnaryOp, value: &Value) -> VmResult<Value> {
-    use runmat_accelerate::{promote_unary, UnaryOp};
-    let mapped = match op {
-        AutoUnaryOp::Transpose => UnaryOp::Transpose,
-    };
-    Ok(promote_unary(mapped, value)
-        .await
-        .map_err(|e| e.to_string())?)
-}
-
-#[cfg(not(feature = "native-accel"))]
-async fn accel_promote_unary(_op: AutoUnaryOp, value: &Value) -> VmResult<Value> {
-    Ok(value.clone())
 }
 
 #[cfg(feature = "native-accel")]
@@ -791,8 +746,20 @@ async fn run_interpreter_inner(
             | Instr::DeclareGlobalNamed(_, _)
             | Instr::DeclarePersistent(_)
             | Instr::DeclarePersistentNamed(_, _)
+            | Instr::Add
+            | Instr::Sub
+            | Instr::Mul
+            | Instr::ElemMul
+            | Instr::ElemDiv
+            | Instr::ElemPow
+            | Instr::ElemLeftDiv
             | Instr::Neg
             | Instr::UPlus
+            | Instr::Transpose
+            | Instr::ConjugateTranspose
+            | Instr::Pow
+            | Instr::RightDiv
+            | Instr::LeftDiv
             | Instr::LessEqual
             | Instr::Less
             | Instr::Greater
@@ -890,171 +857,6 @@ async fn run_interpreter_inner(
                     }
                     Err(err) => vm_bail!(err),
                 }
-            }
-            Instr::Add => {
-                arithmetic_ops::add(
-                    &mut stack,
-                    |obj, method, arg| async move {
-                        let args = vec![obj, Value::String(method.to_string()), arg];
-                        call_builtin_vm!("call_method", &args)
-                    },
-                    |a, b| async move {
-                        let (a_acc, b_acc) =
-                            accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                        call_builtin_vm!("plus", &[a_acc, b_acc])
-                    },
-                ).await?;
-            }
-            Instr::Sub => {
-                arithmetic_ops::sub(
-                    &mut stack,
-                    |obj, method, arg| async move {
-                        let args = vec![obj, Value::String(method.to_string()), arg];
-                        call_builtin_vm!("call_method", &args)
-                    },
-                    |obj, lhs| async move {
-                        let class_name = match &obj { Value::Object(o) => o.class_name.clone(), _ => String::new() };
-                        let qualified = format!("{}.minus", class_name);
-                        call_builtin_vm!(&qualified, &[lhs, obj])
-                    },
-                    |a, b| async move {
-                        let (a_acc, b_acc) =
-                            accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                        call_builtin_vm!("minus", &[a_acc, b_acc])
-                    },
-                ).await?;
-            }
-            Instr::Mul => {
-                arithmetic_ops::mul(
-                    &mut stack,
-                    |obj, method, arg| async move {
-                        let args = vec![obj, Value::String(method.to_string()), arg];
-                        call_builtin_vm!("call_method", &args)
-                    },
-                    |a, b| async move {
-                        let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::MatMul, &a, &b).await?;
-                        runmat_runtime::matrix::value_matmul(&a_acc, &b_acc).await
-                    },
-                ).await?;
-            }
-            Instr::RightDiv => {
-                arithmetic_ops::binary_fallback(&mut stack, |a, b| async move {
-                    arithmetic_ops::execute_right_division(
-                        &a,
-                        &b,
-                        |obj, method, arg| async move {
-                            let args = vec![obj, Value::String(method.to_string()), arg];
-                            call_builtin_vm!("call_method", &args)
-                        },
-                        |lhs, rhs| async move {
-                            let (lhs_acc, rhs_acc) =
-                                accel_promote_binary(AutoBinaryOp::Elementwise, &lhs, &rhs).await?;
-                            call_builtin_vm!("rdivide", &[lhs_acc, rhs_acc])
-                        },
-                        |lhs, rhs| async move {
-                            call_builtin_auto("mrdivide", &[lhs, rhs]).await
-                        },
-                    )
-                    .await
-                }).await?;
-            }
-            Instr::LeftDiv => {
-                arithmetic_ops::binary_fallback(&mut stack, |a, b| async move {
-                    arithmetic_ops::execute_left_division(
-                        &a,
-                        &b,
-                        |obj, method, arg| async move {
-                            let args = vec![obj, Value::String(method.to_string()), arg];
-                            call_builtin_vm!("call_method", &args)
-                        },
-                        |lhs, rhs| async move {
-                            let (rhs_acc, lhs_acc) =
-                                accel_promote_binary(AutoBinaryOp::Elementwise, &rhs, &lhs).await?;
-                            call_builtin_vm!("rdivide", &[rhs_acc, lhs_acc])
-                        },
-                        |lhs, rhs| async move {
-                            call_builtin_auto("mldivide", &[lhs, rhs]).await
-                        },
-                    )
-                    .await
-                }).await?;
-            }
-            Instr::Pow => {
-                arithmetic_ops::power(
-                    &mut stack,
-                    |obj, method, arg| async move {
-                        let args = vec![obj, Value::String(method.to_string()), arg];
-                        call_builtin_vm!("call_method", &args)
-                    },
-                    |a, b| async move {
-                        let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                        runmat_runtime::power(&a_acc, &b_acc).map_err(RuntimeError::from)
-                    },
-                ).await?;
-            }
-            Instr::ElemMul => {
-                arithmetic_ops::binary_method(
-                    &mut stack,
-                    "times",
-                    |obj, method, arg| async move {
-                        let args = vec![obj, Value::String(method.to_string()), arg];
-                        call_builtin_vm!("call_method", &args)
-                    },
-                    |a, b| async move {
-                        let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                        call_builtin_vm!("times", &[a_acc, b_acc])
-                    },
-                ).await?;
-            }
-            Instr::ElemDiv => {
-                arithmetic_ops::binary_method(
-                    &mut stack,
-                    "rdivide",
-                    |obj, method, arg| async move {
-                        let args = vec![obj, Value::String(method.to_string()), arg];
-                        call_builtin_vm!("call_method", &args)
-                    },
-                    |a, b| async move {
-                        let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                        call_builtin_vm!("rdivide", &[a_acc, b_acc])
-                    },
-                ).await?;
-            }
-            Instr::ElemPow => {
-                arithmetic_ops::power(
-                    &mut stack,
-                    |obj, _method, arg| async move { call_builtin_vm!("power", &[obj, arg]) },
-                    |a, b| async move {
-                        let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                        call_builtin_vm!("power", &[a_acc, b_acc])
-                    },
-                ).await?;
-            }
-            Instr::ElemLeftDiv => {
-                arithmetic_ops::binary_method(
-                    &mut stack,
-                    "ldivide",
-                    |obj, method, arg| async move {
-                        let args = vec![obj, Value::String(method.to_string()), arg];
-                        call_builtin_vm!("call_method", &args)
-                    },
-                    |a, b| async move {
-                        let (b_acc, a_acc) = accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a).await?;
-                        call_builtin_vm!("rdivide", &[b_acc, a_acc])
-                    },
-                ).await?;
-            }
-            Instr::Transpose => {
-                arithmetic_ops::unary(&mut stack, |value| async move {
-                    let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value).await?;
-                    call_builtin_vm!("transpose", &[promoted])
-                }).await?;
-            }
-            Instr::ConjugateTranspose => {
-                arithmetic_ops::unary(&mut stack, |value| async move {
-                    let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value).await?;
-                    call_builtin_vm!("ctranspose", &[promoted])
-                }).await?;
             }
             Instr::StochasticEvolution => {
                 let steps_value = stack
