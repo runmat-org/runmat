@@ -16,7 +16,8 @@ use std::collections::HashMap;
 
 pub use calls::{
     build_builtin_expand_at_args, build_builtin_expand_last_args, build_builtin_expand_multi_args,
-    build_feval_expand_multi_args, handle_builtin_outcome, handle_feval_dispatch,
+    build_feval_expand_multi_args, handle_builtin_expand_at_call, handle_builtin_expand_last_call,
+    handle_builtin_expand_multi_call, handle_builtin_outcome, handle_feval_dispatch,
     handle_create_closure, handle_load_method, handle_load_static_property, handle_method_call,
     handle_method_or_member_index_call, handle_register_class, handle_static_method_call,
     output_list_for_user_call, push_single_result, prepare_named_user_dispatch,
@@ -79,6 +80,7 @@ pub async fn dispatch_instruction(
     vars: &mut Vec<Value>,
     var_names: &HashMap<usize, String>,
     context: &mut crate::bytecode::ExecutionContext,
+    bytecode_functions: &HashMap<String, crate::bytecode::UserFunction>,
     try_stack: &mut Vec<(usize, Option<usize>)>,
     pc: &mut usize,
     mut clear_value_residency: impl FnMut(&Value),
@@ -93,6 +95,7 @@ pub async fn dispatch_instruction(
     mut store_local_before_local_overwrite: impl FnMut(&Value, &Value),
     mut store_local_before_var_overwrite: impl FnMut(&Value, &Value),
     mut store_local_after_fallback_store: impl FnMut(&str, usize, &Value),
+    next_instr: Option<&Instr>,
 ) -> Result<Option<DispatchHandled>, RuntimeError> {
     match instr {
         _ if indexing::dispatch_indexing(
@@ -255,6 +258,150 @@ pub async fn dispatch_instruction(
                 runmat_runtime::call_builtin_async("colon", &args).await
             })
             .await?;
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::CallFeval(argc) => {
+            let args = crate::call::builtins::collect_call_args(stack, *argc)?;
+            let func_val = crate::interpreter::stack::pop_value(stack)?;
+            match handle_feval_dispatch(
+                crate::call::feval::execute_feval(
+                    func_val,
+                    args,
+                    &context.functions,
+                    bytecode_functions,
+                )
+                .await,
+                stack,
+            )? {
+                FevalHandling::Completed => {}
+                FevalHandling::InvokeUser { name, args, functions } => {
+                    let value = invoke_user_for_end_expr(&name, args, &functions, vars).await?;
+                    stack.push(value);
+                }
+            }
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::CallFevalExpandMulti(specs) => {
+            let args = build_feval_expand_multi_args(stack, specs).await?;
+            let func_val = crate::interpreter::stack::pop_value(stack)?;
+            match handle_feval_dispatch(
+                crate::call::feval::execute_feval(
+                    func_val,
+                    args,
+                    &context.functions,
+                    bytecode_functions,
+                )
+                .await,
+                stack,
+            )? {
+                FevalHandling::Completed => {}
+                FevalHandling::InvokeUser { name, args, functions } => {
+                    let value = invoke_user_for_end_expr(&name, args, &functions, vars).await?;
+                    stack.push(value);
+                }
+            }
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::CallBuiltinExpandLast(name, fixed_argc, num_indices) => {
+            handle_builtin_expand_last_call(
+                stack,
+                name,
+                *fixed_argc,
+                *num_indices,
+                next_instr,
+                |base, indices| async move {
+                    let obj = match base {
+                        Value::Object(obj) => obj,
+                        _ => unreachable!(),
+                    };
+                    let cell = crate::call::shared::subsref_paren_index_cell(&indices)?;
+                    let v = runmat_runtime::call_builtin_async(
+                        "call_method",
+                        &[
+                            Value::Object(obj),
+                            Value::String("subsref".to_string()),
+                            Value::String("()".to_string()),
+                            cell,
+                        ],
+                    )
+                    .await?;
+                    Ok(vec![v])
+                },
+            )
+            .await?;
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::CallBuiltinExpandAt(name, before_count, num_indices, after_count) => {
+            handle_builtin_expand_at_call(
+                stack,
+                name,
+                *before_count,
+                *num_indices,
+                *after_count,
+                next_instr,
+                |base, indices| async move {
+                    let obj = match base {
+                        Value::Object(obj) => obj,
+                        _ => unreachable!(),
+                    };
+                    let idx_vals = crate::call::shared::subsref_brace_numeric_index_values(&indices);
+                    let cell = runmat_runtime::call_builtin_async("__make_cell", &idx_vals).await?;
+                    let v = runmat_runtime::call_builtin_async(
+                        "call_method",
+                        &[
+                            Value::Object(obj),
+                            Value::String("subsref".to_string()),
+                            Value::String("{}".to_string()),
+                            cell,
+                        ],
+                    )
+                    .await?;
+                    Ok(vec![v])
+                },
+            )
+            .await?;
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::CallBuiltinExpandMulti(name, specs) => {
+            handle_builtin_expand_multi_call(stack, name, specs, next_instr).await?;
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::CallMethod(name, arg_count) => {
+            handle_method_call(stack, name, *arg_count).await?;
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::CallMethodOrMemberIndex(name, arg_count) => {
+            handle_method_or_member_index_call(stack, name.clone(), *arg_count).await?;
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::LoadMethod(name) => {
+            handle_load_method(stack, name.clone())?;
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::CreateClosure(func_name, capture_count) => {
+            handle_create_closure(stack, func_name.clone(), *capture_count)?;
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::LoadStaticProperty(class_name, prop) => {
+            handle_load_static_property(stack, class_name, prop)?;
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::CallStaticMethod(class_name, method, arg_count) => {
+            handle_static_method_call(stack, class_name, method, *arg_count).await?;
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::RegisterClass {
+            name,
+            super_class,
+            properties,
+            methods,
+        } => {
+            handle_register_class(
+                name.clone(),
+                super_class.clone(),
+                properties.clone(),
+                methods.clone(),
+            )?;
             Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         _ => Ok(None),

@@ -43,9 +43,8 @@ use runmat_vm::interpreter::dispatch::{
 use runmat_vm::interpreter::errors::{
     attach_span_from_pc, mex, set_vm_pc,
 };
-use runmat_vm::interpreter::stack::pop_value;
 use runmat_vm::call::shared as call_shared;
-use runmat_vm::call::{builtins as call_builtins, feval as call_feval, user as call_user};
+use runmat_vm::call::{builtins as call_builtins, user as call_user};
 #[cfg(test)]
 use runmat_vm::indexing::end_expr as idx_end_expr;
 #[cfg(test)]
@@ -77,27 +76,10 @@ impl Drop for FusionPlanGuard {
     }
 }
 
-#[cfg(feature = "native-accel")]
-async fn accel_prepare_args(name: &str, args: &[Value]) -> VmResult<Vec<Value>> {
-    Ok(runmat_accelerate::prepare_builtin_args(name, args)
-        .await
-        .map_err(|e| e.to_string())?)
-}
-
-#[cfg(not(feature = "native-accel"))]
-async fn accel_prepare_args(_name: &str, args: &[Value]) -> VmResult<Vec<Value>> {
-    Ok(args.to_vec())
-}
-
 macro_rules! call_builtin_vm {
     ($name:expr, $args:expr $(,)?) => {
         runmat_runtime::call_builtin_async($name, $args).await
     };
-}
-
-async fn call_builtin_auto(name: &str, args: &[Value]) -> VmResult<Value> {
-    let prepared = accel_prepare_args(name, args).await?;
-    Ok(call_builtin_vm!(name, &prepared)?)
 }
 
 fn output_hint_for_single_result(bytecode: &Bytecode, pc: usize) -> usize {
@@ -647,12 +629,14 @@ async fn run_interpreter_inner(
             &bytecode.instructions[pc],
             stack.len(),
         );
+        let next_instr = bytecode.instructions.get(pc + 1);
         if let Some(decision) = interp_dispatch::dispatch_instruction(
             &bytecode.instructions[pc],
             &mut stack,
             &mut vars,
             &bytecode.var_names,
             &mut context,
+            &bytecode.functions,
             &mut try_stack,
             &mut pc,
             |value| {
@@ -697,6 +681,7 @@ async fn run_interpreter_inner(
                     stored_value,
                 );
             },
+            next_instr,
         )
         .await?
         {
@@ -767,6 +752,18 @@ async fn run_interpreter_inner(
             | Instr::StoreIndexCell(_)
             | Instr::StoreSlice(_, _, _, _)
             | Instr::StoreSliceExpr { .. }
+            | Instr::CallMethod(_, _)
+            | Instr::CallMethodOrMemberIndex(_, _)
+            | Instr::LoadMethod(_)
+            | Instr::CreateClosure(_, _)
+            | Instr::LoadStaticProperty(_, _)
+            | Instr::CallStaticMethod(_, _, _)
+            | Instr::RegisterClass { .. }
+            | Instr::CallFeval(_)
+            | Instr::CallFevalExpandMulti(_)
+            | Instr::CallBuiltinExpandLast(_, _, _)
+            | Instr::CallBuiltinExpandAt(_, _, _, _)
+            | Instr::CallBuiltinExpandMulti(_, _)
             | Instr::Add
             | Instr::Sub
             | Instr::Mul
@@ -793,50 +790,6 @@ async fn run_interpreter_inner(
             | Instr::CreateRange(_)
             | Instr::PackToRow(_)
             | Instr::PackToCol(_) => unreachable!("handled by dispatch_instruction"),
-            Instr::CallFeval(argc) => {
-                let args = call_builtins::collect_call_args(&mut stack, argc)?;
-                let func_val = pop_value(&mut stack)?;
-                match interp_dispatch::handle_feval_dispatch(
-                    call_feval::execute_feval(
-                        func_val,
-                        args,
-                        &context.functions,
-                        &bytecode.functions,
-                    ).await,
-                    &mut stack,
-                ) {
-                    Ok(interp_dispatch::FevalHandling::Completed) => {}
-                    Ok(interp_dispatch::FevalHandling::InvokeUser { name, args, functions }) => {
-                        match invoke_user_function_value(&name, &args, &functions, &mut vars).await {
-                            Ok(value) => stack.push(value),
-                            Err(e) => vm_bail!(e),
-                        }
-                    }
-                    Err(err) => vm_bail!(err),
-                }
-            }
-            Instr::CallFevalExpandMulti(specs) => {
-                let args = interp_dispatch::build_feval_expand_multi_args(&mut stack, &specs).await?;
-                let func_val = pop_value(&mut stack)?;
-                match interp_dispatch::handle_feval_dispatch(
-                    call_feval::execute_feval(
-                        func_val,
-                        args,
-                        &context.functions,
-                        &bytecode.functions,
-                    ).await,
-                    &mut stack,
-                ) {
-                    Ok(interp_dispatch::FevalHandling::Completed) => {}
-                    Ok(interp_dispatch::FevalHandling::InvokeUser { name, args, functions }) => {
-                        match invoke_user_function_value(&name, &args, &functions, &mut vars).await {
-                            Ok(value) => stack.push(value),
-                            Err(e) => vm_bail!(e),
-                        }
-                    }
-                    Err(err) => vm_bail!(err),
-                }
-            }
             Instr::StochasticEvolution => {
                 let steps_value = stack
                     .pop()
@@ -925,81 +878,6 @@ async fn run_interpreter_inner(
                     Ok(interp_dispatch::BuiltinHandling::Caught) => continue,
                     Ok(interp_dispatch::BuiltinHandling::Uncaught(err)) => return Err(err),
                     Err(err) => vm_bail!(err),
-                }
-            }
-            Instr::CallBuiltinExpandLast(name, fixed_argc, num_indices) => {
-                let args = interp_dispatch::build_builtin_expand_last_args(
-                    &mut stack,
-                    fixed_argc,
-                    num_indices,
-                    "CallBuiltinExpandLast requires cell or object cell access",
-                    |base, indices| async move {
-                        let obj = match base {
-                            Value::Object(obj) => obj,
-                            _ => unreachable!(),
-                        };
-                        let cell = call_shared::subsref_paren_index_cell(&indices)?;
-                        let v = runmat_runtime::call_builtin_async(
-                            "call_method",
-                            &[
-                                Value::Object(obj),
-                                Value::String("subsref".to_string()),
-                                Value::String("()".to_string()),
-                                cell,
-                            ],
-                        )
-                        .await?;
-                        Ok(vec![v])
-                    },
-                ).await?;
-                let output_hint = output_hint_for_single_result(&bytecode, pc);
-                let _output_guard = push_output_count(output_hint);
-                match call_builtin_auto(&name, &args).await {
-                    Ok(v) => interp_dispatch::push_single_result(&mut stack, v),
-                    Err(e) => vm_bail!(e),
-                }
-            }
-            Instr::CallBuiltinExpandAt(name, before_count, num_indices, after_count) => {
-                let args = interp_dispatch::build_builtin_expand_at_args(
-                    &mut stack,
-                    before_count,
-                    num_indices,
-                    after_count,
-                    "CallBuiltinExpandAt requires cell or object cell access",
-                    |base, indices| async move {
-                        let obj = match base {
-                            Value::Object(obj) => obj,
-                            _ => unreachable!(),
-                        };
-                        let idx_vals = call_shared::subsref_brace_numeric_index_values(&indices);
-                        let cell = runmat_runtime::call_builtin_async("__make_cell", &idx_vals).await?;
-                        let v = runmat_runtime::call_builtin_async(
-                            "call_method",
-                            &[
-                                Value::Object(obj),
-                                Value::String("subsref".to_string()),
-                                Value::String("{}".to_string()),
-                                cell,
-                            ],
-                        )
-                        .await?;
-                        Ok(vec![v])
-                    },
-                ).await?;
-                let output_hint = output_hint_for_single_result(&bytecode, pc);
-                let _output_guard = push_output_count(output_hint);
-                match call_builtin_auto(&name, &args).await {
-                    Ok(v) => interp_dispatch::push_single_result(&mut stack, v),
-                    Err(e) => vm_bail!(e),
-                }
-            }
-            Instr::CallBuiltinExpandMulti(name, specs) => {
-                let args = interp_dispatch::build_builtin_expand_multi_args(&mut stack, &specs).await?;
-                let output_hint = output_hint_for_single_result(&bytecode, pc);
-                let _output_guard = push_output_count(output_hint);
-                match call_builtin_auto(&name, &args).await {
-                    Ok(v) => interp_dispatch::push_single_result(&mut stack, v),
-                    Err(e) => vm_bail!(e),
                 }
             }
             Instr::CallFunctionExpandMulti(name, specs) => {
@@ -1474,60 +1352,6 @@ async fn run_interpreter_inner(
             }
             
             
-            Instr::CallMethod(name, arg_count) => {
-                match interp_dispatch::handle_method_call(&mut stack, &name, arg_count).await {
-                    Ok(interp_dispatch::MethodHandling::Completed) => {}
-                    Err(e) => vm_bail!(e),
-                }
-            }
-            Instr::CallMethodOrMemberIndex(name, arg_count) => {
-                match interp_dispatch::handle_method_or_member_index_call(&mut stack, name, arg_count).await {
-                    Ok(interp_dispatch::MethodHandling::Completed) => {}
-                    Err(e) => vm_bail!(e),
-                }
-            }
-            Instr::LoadMethod(name) => {
-                match interp_dispatch::handle_load_method(&mut stack, name) {
-                    Ok(interp_dispatch::MethodHandling::Completed) => {}
-                    Err(e) => vm_bail!(e),
-                }
-            }
-            Instr::CreateClosure(func_name, capture_count) => {
-                match interp_dispatch::handle_create_closure(&mut stack, func_name, capture_count) {
-                    Ok(interp_dispatch::MethodHandling::Completed) => {}
-                    Err(e) => vm_bail!(e),
-                }
-            }
-            Instr::LoadStaticProperty(class_name, prop) => {
-                match interp_dispatch::handle_load_static_property(&mut stack, &class_name, &prop) {
-                    Ok(interp_dispatch::MethodHandling::Completed) => {}
-                    Err(e) => vm_bail!(e),
-                }
-            }
-            Instr::CallStaticMethod(class_name, method, arg_count) => {
-                match interp_dispatch::handle_static_method_call(
-                    &mut stack,
-                    &class_name,
-                    &method,
-                    arg_count,
-                )
-                .await
-                {
-                    Ok(interp_dispatch::MethodHandling::Completed) => {}
-                    Err(e) => vm_bail!(e),
-                }
-            }
-            Instr::RegisterClass {
-                name,
-                super_class,
-                properties,
-                methods,
-            } => {
-                match interp_dispatch::handle_register_class(name, super_class, properties, methods) {
-                    Ok(interp_dispatch::MethodHandling::Completed) => {}
-                    Err(e) => vm_bail!(e),
-                }
-            }
         }
         if debug_stack {
             debug!(pc, stack_len = stack.len(), "[vm] after exec");

@@ -7,6 +7,7 @@ use crate::call::shared::{
     subsref_brace_numeric_index_values, validate_user_function_arity, PreparedUserCall,
 };
 use crate::bytecode::ArgSpec;
+use crate::bytecode::Instr;
 use crate::functions::UserFunction;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
 use crate::object::class_def as obj_class_def;
@@ -39,6 +40,30 @@ pub enum BuiltinHandling {
 
 pub enum MethodHandling {
     Completed,
+}
+
+#[cfg(feature = "native-accel")]
+async fn accel_prepare_args(name: &str, args: &[Value]) -> Result<Vec<Value>, RuntimeError> {
+    Ok(runmat_accelerate::prepare_builtin_args(name, args)
+        .await
+        .map_err(|e| e.to_string())?)
+}
+
+#[cfg(not(feature = "native-accel"))]
+async fn accel_prepare_args(_name: &str, args: &[Value]) -> Result<Vec<Value>, RuntimeError> {
+    Ok(args.to_vec())
+}
+
+async fn call_builtin_auto(name: &str, args: &[Value]) -> Result<Value, RuntimeError> {
+    let prepared = accel_prepare_args(name, args).await?;
+    runmat_runtime::call_builtin_async(name, &prepared).await
+}
+
+fn output_hint_for_next(next_instr: Option<&Instr>) -> usize {
+    match next_instr {
+        Some(Instr::Pop) | Some(Instr::EmitStackTop { .. }) => 0,
+        _ => 1,
+    }
 }
 
 pub fn handle_feval_dispatch(
@@ -379,6 +404,73 @@ pub async fn handle_method_call(
     let value = call_closures::call_method(base, name, args).await?;
     stack.push(value);
     Ok(MethodHandling::Completed)
+}
+
+pub async fn handle_builtin_expand_last_call<F, Fut>(
+    stack: &mut Vec<Value>,
+    name: &str,
+    fixed_argc: usize,
+    num_indices: usize,
+    next_instr: Option<&Instr>,
+    expand_object_indices: F,
+) -> Result<BuiltinHandling, RuntimeError>
+where
+    F: FnMut(Value, Vec<Value>) -> Fut,
+    Fut: Future<Output = Result<Vec<Value>, RuntimeError>>,
+{
+    let args = build_builtin_expand_last_args(
+        stack,
+        fixed_argc,
+        num_indices,
+        "CallBuiltinExpandLast requires cell or object cell access",
+        expand_object_indices,
+    )
+    .await?;
+    let output_hint = output_hint_for_next(next_instr);
+    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
+    push_single_result(stack, call_builtin_auto(name, &args).await?);
+    Ok(BuiltinHandling::Completed)
+}
+
+pub async fn handle_builtin_expand_at_call<F, Fut>(
+    stack: &mut Vec<Value>,
+    name: &str,
+    before_count: usize,
+    num_indices: usize,
+    after_count: usize,
+    next_instr: Option<&Instr>,
+    expand_object_indices: F,
+) -> Result<BuiltinHandling, RuntimeError>
+where
+    F: FnMut(Value, Vec<Value>) -> Fut,
+    Fut: Future<Output = Result<Vec<Value>, RuntimeError>>,
+{
+    let args = build_builtin_expand_at_args(
+        stack,
+        before_count,
+        num_indices,
+        after_count,
+        "CallBuiltinExpandAt requires cell or object cell access",
+        expand_object_indices,
+    )
+    .await?;
+    let output_hint = output_hint_for_next(next_instr);
+    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
+    push_single_result(stack, call_builtin_auto(name, &args).await?);
+    Ok(BuiltinHandling::Completed)
+}
+
+pub async fn handle_builtin_expand_multi_call(
+    stack: &mut Vec<Value>,
+    name: &str,
+    specs: &[ArgSpec],
+    next_instr: Option<&Instr>,
+) -> Result<BuiltinHandling, RuntimeError> {
+    let args = build_builtin_expand_multi_args(stack, specs).await?;
+    let output_hint = output_hint_for_next(next_instr);
+    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
+    push_single_result(stack, call_builtin_auto(name, &args).await?);
+    Ok(BuiltinHandling::Completed)
 }
 
 pub async fn handle_method_or_member_index_call(
