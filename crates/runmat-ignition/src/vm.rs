@@ -47,6 +47,8 @@ use runmat_vm::indexing::end_expr as idx_end_expr;
 use runmat_vm::indexing::read_linear as idx_read_linear;
 use runmat_vm::indexing::read_slice as idx_read_slice;
 use runmat_vm::indexing::selectors as idx_selectors;
+use runmat_vm::indexing::write_linear as idx_write_linear;
+use runmat_vm::indexing::write_slice as idx_write_slice;
 use runmat_vm::ops::cells as cell_ops;
 use runmat_vm::ops::control_flow::{self, ControlFlowAction};
 use runmat_vm::ops::stack as stack_ops;
@@ -484,10 +486,6 @@ impl<'a> IndexContext<'a> {
 
 async fn index_scalar_from_value(value: &Value) -> VmResult<Option<i64>> {
     idx_selectors::index_scalar_from_value(value).await
-}
-
-async fn indices_from_value_linear(value: &Value, total_len: usize) -> VmResult<Vec<usize>> {
-    idx_selectors::indices_from_value_linear(value, total_len).await
 }
 
 async fn selector_from_value_dim(value: &Value, dim_len: usize) -> VmResult<SliceSelector> {
@@ -956,47 +954,6 @@ async fn materialize_rhs_linear(rhs: &Value, count: usize) -> VmResult<Vec<f64>>
             "InvalidSliceAssignmentRhs",
             &format!("slice assign: unsupported RHS type {:?}", other),
         )),
-    }
-}
-
-async fn value_to_complex_scalar(rhs: &Value) -> VmResult<(f64, f64)> {
-    match rhs {
-        Value::Complex(re, im) => Ok((*re, *im)),
-        Value::Num(n) => Ok((*n, 0.0)),
-        Value::Int(i) => Ok((i.to_f64(), 0.0)),
-        Value::Bool(b) => Ok((if *b { 1.0 } else { 0.0 }, 0.0)),
-        Value::Tensor(t) => {
-            if t.data.len() == 1 {
-                Ok((t.data[0], 0.0))
-            } else {
-                Err(mex("ScalarRequired", "RHS must be scalar"))
-            }
-        }
-        Value::ComplexTensor(ct) => {
-            if ct.data.len() == 1 {
-                Ok(ct.data[0])
-            } else {
-                Err(mex("ScalarRequired", "RHS must be scalar"))
-            }
-        }
-        Value::GpuTensor(h) => {
-            let total = h.shape.iter().copied().product::<usize>();
-            if total != 1 {
-                return Err(mex("ScalarRequired", "RHS must be scalar"));
-            }
-            let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-                mex(
-                    "AccelerationProviderUnavailable",
-                    "No acceleration provider registered",
-                )
-            })?;
-            let host = provider
-                .download(h)
-                .await
-                .map_err(|e| format!("gather rhs: {e}"))?;
-            Ok((host.data.first().copied().unwrap_or(0.0), 0.0))
-        }
-        _ => Err(mex("NumericRequired", "RHS must be numeric")),
     }
 }
 
@@ -4405,30 +4362,25 @@ async fn run_interpreter_inner(
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 match base {
                     Value::Object(obj) => {
-                        let cell =
-                            runmat_builtins::CellArray::new(numeric.clone(), 1, numeric.len())
-                                .map_err(|e| format!("subsasgn build error: {e}"))?;
-                        match call_builtin_vm!(
-                            "call_method",
-                            &[
-                                Value::Object(obj.clone()),
-                                Value::String("subsasgn".to_string()),
-                                Value::String("()".to_string()),
-                                Value::Cell(cell.clone()),
-                                rhs.clone(),
-                            ],
-                        ) {
+                        match idx_write_slice::object_subsasgn_paren(
+                            Value::Object(obj.clone()),
+                            &numeric,
+                            rhs.clone(),
+                        )
+                        .await
+                        {
                             Ok(v) => stack.push(v),
                             Err(_e) => {
                                 // Fallback to direct builtin OverIdx.subsasgn if class method isn't registered
                                 // Determine class name and call fully qualified builtin if present
                                 let qualified = format!("{}.subsasgn", obj.class_name);
+                                let cell = idx_write_slice::build_subsasgn_paren_cell(&numeric)?;
                                 match call_builtin_vm!(
                                     &qualified,
                                     &[
                                         Value::Object(obj),
                                         Value::String("()".to_string()),
-                                        Value::Cell(cell),
+                                        cell,
                                         rhs,
                                     ],
                                 ) {
@@ -4439,19 +4391,13 @@ async fn run_interpreter_inner(
                         }
                     }
                     Value::HandleObject(handle) => {
-                        let cell =
-                            runmat_builtins::CellArray::new(numeric.clone(), 1, numeric.len())
-                                .map_err(|e| format!("subsasgn build error: {e}"))?;
-                        match call_builtin_vm!(
-                            "call_method",
-                            &[
-                                Value::HandleObject(handle),
-                                Value::String("subsasgn".to_string()),
-                                Value::String("()".to_string()),
-                                Value::Cell(cell),
-                                rhs,
-                            ],
-                        ) {
+                        match idx_write_slice::object_subsasgn_paren(
+                            Value::HandleObject(handle),
+                            &numeric,
+                            rhs,
+                        )
+                        .await
+                        {
                             Ok(v) => stack.push(v),
                             Err(e) => vm_bail!(e.to_string()),
                         }
@@ -4460,49 +4406,16 @@ async fn run_interpreter_inner(
                         // F4: write barrier hook (placeholder) – in a full GC integration, call into GC pre/post here
                         // Linear 1-D indexing assignment: A(I) = rhs
                         if dims == 1 {
-                            let total = t.data.len();
-                            // Build linear index list
-                            let is_colon = (colon_mask & 1u32) != 0;
-                            let is_end = (end_mask & 1u32) != 0;
-                            let lin_indices = if is_colon {
-                                (1..=total).collect()
-                            } else if is_end {
-                                vec![total]
-                            } else {
-                                let v = numeric
-                                    .first()
-                                    .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
-                                match indices_from_value_linear(v, total).await {
-                                    Ok(idxs) => idxs,
-                                    Err(err) => vm_bail!(err),
-                                }
-                            };
-                            // Scatter RHS
-                            match rhs {
-                                Value::Num(v) => {
-                                    for &li in &lin_indices {
-                                        t.data[li - 1] = v;
-                                    }
-                                }
-                                Value::Tensor(rt) => {
-                                    if rt.data.len() == 1 {
-                                        let v = rt.data[0];
-                                        for &li in &lin_indices {
-                                            t.data[li - 1] = v;
-                                        }
-                                    } else if rt.data.len() == lin_indices.len() {
-                                        for (k, &li) in lin_indices.iter().enumerate() {
-                                            t.data[li - 1] = rt.data[k];
-                                        }
-                                    } else {
-                                        vm_bail!(
-                                            "shape mismatch for linear slice assign".to_string()
-                                        );
-                                    }
-                                }
-                                _ => vm_bail!("rhs must be numeric or tensor".to_string()),
-                            }
-                            stack.push(Value::Tensor(t));
+                            stack.push(
+                                idx_write_slice::assign_tensor_slice_1d(
+                                    t,
+                                    colon_mask,
+                                    end_mask,
+                                    &numeric,
+                                    rhs,
+                                )
+                                .await?,
+                            );
                         } else {
                             let rank = t.shape.len();
                             let mut selectors: Vec<SliceSelector> = Vec::with_capacity(dims);
@@ -6784,223 +6697,9 @@ async fn run_interpreter_inner(
                             Err(e) => vm_bail!(e.to_string()),
                         }
                     }
-                    Value::Tensor(mut t) => {
-                        // Helper to coerce RHS to scalar f64, supporting 1x1 tensors and gpu tensors
-                        async fn rhs_to_scalar(rhs: &Value) -> Result<f64, RuntimeError> {
-                            match rhs {
-                                Value::Num(x) => Ok(*x),
-                                Value::Tensor(t2) => {
-                                    if t2.data.len() == 1 {
-                                        Ok(t2.data[0])
-                                    } else {
-                                        Err(mex("ScalarRequired", "RHS must be scalar"))
-                                    }
-                                }
-                                Value::GpuTensor(h2) => {
-                                    let total = h2.shape.iter().copied().product::<usize>();
-                                    if total != 1 {
-                                        return Err(mex("ScalarRequired", "RHS must be scalar"));
-                                    }
-                                    if let Some(p) = runmat_accelerate_api::provider() {
-                                        let host = p
-                                            .download(h2)
-                                            .await
-                                            .map_err(|e| format!("gather rhs: {e}"))?;
-                                        Ok(host.data[0])
-                                    } else {
-                                        Err(mex(
-                                            "AccelerationProviderUnavailable",
-                                            "No acceleration provider registered",
-                                        ))
-                                    }
-                                }
-                                _ => rhs
-                                    .try_into()
-                                    .map_err(|_| mex("NumericRequired", "RHS must be numeric")),
-                            }
-                        }
-                        // 1D linear or 2D scalar assignment only for now
-                        if indices.len() == 1 {
-                            let total = t.rows * t.cols;
-                            let idx = indices[0];
-                            if idx == 0 || idx > total {
-                                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-                            }
-                            let val: f64 = rhs_to_scalar(&rhs).await?;
-                            t.data[idx - 1] = val;
-                            stack.push(Value::Tensor(t));
-                        } else if indices.len() == 2 {
-                            let i = indices[0];
-                            let mut j = indices[1];
-                            let rows = t.rows;
-                            let cols = t.cols;
-                            // Clamp column index within [1..cols] to accommodate end-offset semantics
-                            if j == 0 {
-                                j = 1;
-                            }
-                            if j > cols {
-                                j = cols;
-                            }
-                            if i == 0 || i > rows {
-                                if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
-                                    debug!(
-                                        i,
-                                        j_clamped = j,
-                                        rows,
-                                        cols,
-                                        shape = ?t.shape,
-                                        "[vm] StoreIndex Tensor OOB"
-                                    );
-                                }
-                                return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
-                            }
-                            let val: f64 = rhs_to_scalar(&rhs).await?;
-                            let idx = (i - 1) + (j - 1) * rows;
-                            t.data[idx] = val;
-                            stack.push(Value::Tensor(t));
-                        } else {
-                            return Err(mex(
-                                "UnsupportedAssignmentRank",
-                                "Only 1D/2D scalar assignment supported",
-                            ));
-                        }
-                    }
-                    Value::ComplexTensor(mut t) => {
-                        if indices.len() == 1 {
-                            let total = t.rows * t.cols;
-                            let idx = indices[0];
-                            if idx == 0 || idx > total {
-                                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-                            }
-                            let val = value_to_complex_scalar(&rhs).await?;
-                            t.data[idx - 1] = val;
-                            stack.push(Value::ComplexTensor(t));
-                        } else if indices.len() == 2 {
-                            let i = indices[0];
-                            let mut j = indices[1];
-                            let rows = t.rows;
-                            let cols = t.cols;
-                            if j == 0 {
-                                j = 1;
-                            }
-                            if j > cols {
-                                j = cols;
-                            }
-                            if i == 0 || i > rows {
-                                return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
-                            }
-                            let val = value_to_complex_scalar(&rhs).await?;
-                            let idx = (i - 1) + (j - 1) * rows;
-                            t.data[idx] = val;
-                            stack.push(Value::ComplexTensor(t));
-                        } else {
-                            return Err(mex(
-                                "UnsupportedAssignmentRank",
-                                "Only 1D/2D scalar assignment supported",
-                            ));
-                        }
-                    }
-                    Value::GpuTensor(h) => {
-                        // Stage F1: gather–mutate–reupload for simple 1D/2D scalar assignments
-                        let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-                            mex(
-                                "AccelerationProviderUnavailable",
-                                "No acceleration provider registered",
-                            )
-                        })?;
-                        let host = provider
-                            .download(&h)
-                            .await
-                            .map_err(|e| format!("gather for assignment: {e}"))?;
-                        let mut t = runmat_builtins::Tensor::new(host.data, host.shape)
-                            .map_err(|e| format!("assignment: {e}"))?;
-                        // Reuse same scalar coercion
-                        async fn rhs_to_scalar(
-                            rhs: &Value,
-                            provider: &dyn runmat_accelerate_api::AccelProvider,
-                        ) -> Result<f64, RuntimeError> {
-                            match rhs {
-                                Value::Num(x) => Ok(*x),
-                                Value::Tensor(t2) => {
-                                    if t2.data.len() == 1 {
-                                        Ok(t2.data[0])
-                                    } else {
-                                        Err(mex("ScalarRequired", "RHS must be scalar"))
-                                    }
-                                }
-                                Value::GpuTensor(h2) => {
-                                    let total = h2.shape.iter().copied().product::<usize>();
-                                    if total != 1 {
-                                        return Err(mex("ScalarRequired", "RHS must be scalar"));
-                                    }
-                                    let host2 = provider
-                                        .download(h2)
-                                        .await
-                                        .map_err(|e| format!("gather rhs: {e}"))?;
-                                    Ok(host2.data[0])
-                                }
-                                _ => rhs
-                                    .try_into()
-                                    .map_err(|_| mex("NumericRequired", "RHS must be numeric")),
-                            }
-                        }
-                        if indices.len() == 1 {
-                            let total = t.rows() * t.cols();
-                            let idx = indices[0];
-                            if idx == 0 || idx > total {
-                                return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-                            }
-                            let val: f64 = rhs_to_scalar(&rhs, provider).await?;
-                            t.data[idx - 1] = val;
-                        } else if indices.len() == 2 {
-                            let i = indices[0];
-                            let mut j = indices[1];
-                            let rows = t.rows();
-                            let cols = t.cols();
-                            // Clamp column index within [1..cols] to accommodate end-offset semantics
-                            if j == 0 {
-                                j = 1;
-                            }
-                            if j > cols {
-                                j = cols;
-                            }
-                            if i == 0 || i > rows {
-                                if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
-                                    debug!(
-                                        i,
-                                        j_clamped = j,
-                                        rows,
-                                        cols,
-                                        shape = ?t.shape,
-                                        "[vm] StoreIndex GpuTensor OOB"
-                                    );
-                                }
-                                return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
-                            }
-                            let val: f64 = rhs_to_scalar(&rhs, provider).await?;
-                            let idx = (i - 1) + (j - 1) * rows;
-                            t.data[idx] = val;
-                        } else if indices.is_empty() {
-                            // Trivial colon slice cases from parser may encode as zero indices; handle full-row/col scalar broadcast
-                            let val: f64 = rhs_to_scalar(&rhs, provider).await?;
-                            for k in 0..t.data.len() {
-                                t.data[k] = val;
-                            }
-                        } else {
-                            return Err(mex(
-                                "UnsupportedAssignmentRank",
-                                "Only 1D/2D scalar assignment supported",
-                            ));
-                        }
-                        let view = runmat_accelerate_api::HostTensorView {
-                            data: &t.data,
-                            shape: &t.shape,
-                        };
-                        let new_h = provider
-                            .upload(&view)
-                            .map_err(|e| format!("reupload after assignment: {e}"))?;
-                        stack.push(Value::GpuTensor(new_h));
-                    }
+                    Value::Tensor(t) => stack.push(idx_write_linear::assign_tensor_scalar(t, &indices, &rhs).await?),
+                    Value::ComplexTensor(t) => stack.push(idx_write_linear::assign_complex_scalar(t, &indices, &rhs).await?),
+                    Value::GpuTensor(h) => stack.push(idx_write_linear::assign_gpu_scalar(&h, &indices, &rhs).await?),
                     _ => {
                         if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
                             let kind = |v: &Value| match v {
@@ -7091,44 +6790,12 @@ async fn run_interpreter_inner(
                             Err(e) => vm_bail!(e.to_string()),
                         }
                     }
-                    Value::Cell(mut ca) => match indices.len() {
-                        1 => {
-                            let i = indices[0];
-                            if i == 0 || i > ca.data.len() {
-                                return Err(mex(
-                                    "CellIndexOutOfBounds",
-                                    "Cell index out of bounds",
-                                ));
-                            }
-                            if let Some(oldv) = ca.data.get(i - 1) {
-                                runmat_gc::gc_record_write(oldv, &rhs);
-                            }
-                            *ca.data[i - 1] = rhs;
-                            stack.push(Value::Cell(ca));
-                        }
-                        2 => {
-                            let i = indices[0];
-                            let j = indices[1];
-                            if i == 0 || i > ca.rows || j == 0 || j > ca.cols {
-                                return Err(mex(
-                                    "CellSubscriptOutOfBounds",
-                                    "Cell subscript out of bounds",
-                                ));
-                            }
-                            let lin = (i - 1) * ca.cols + (j - 1);
-                            if let Some(oldv) = ca.data.get(lin) {
-                                runmat_gc::gc_record_write(oldv, &rhs);
-                            }
-                            *ca.data[lin] = rhs;
-                            stack.push(Value::Cell(ca));
-                        }
-                        _ => {
-                            return Err(mex(
-                                "UnsupportedCellIndexCount",
-                                "Unsupported number of cell indices",
-                            ))
-                        }
-                    },
+                    Value::Cell(ca) => {
+                        let updated = cell_ops::assign_cell_value(ca, &indices, rhs, |oldv, newv| {
+                            runmat_gc::gc_record_write(oldv, newv);
+                        })?;
+                        stack.push(updated);
+                    }
                     _ => {
                         return Err(mex(
                             "CellAssignmentOnNonCell",

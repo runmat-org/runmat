@@ -53,3 +53,47 @@ pub fn expand_cell_values(
         Ok(out)
     }
 }
+
+pub fn assign_cell_value<OnWrite>(
+    mut ca: CellArray,
+    indices: &[usize],
+    rhs: Value,
+    mut on_write: OnWrite,
+) -> Result<Value, RuntimeError>
+where
+    OnWrite: FnMut(&Value, &Value),
+{
+    match indices.len() {
+        1 => {
+            let i = indices[0];
+            if i == 0 || i > ca.data.len() {
+                return Err(mex("CellIndexOutOfBounds", "Cell index out of bounds"));
+            }
+            if let Some(oldv) = ca.data.get(i - 1) {
+                on_write(oldv, &rhs);
+            }
+            *ca.data[i - 1] = rhs;
+            Ok(Value::Cell(ca))
+        }
+        2 => {
+            let i = indices[0];
+            let j = indices[1];
+            if i == 0 || i > ca.rows || j == 0 || j > ca.cols {
+                return Err(mex(
+                    "CellSubscriptOutOfBounds",
+                    "Cell subscript out of bounds",
+                ));
+            }
+            let lin = (i - 1) * ca.cols + (j - 1);
+            if let Some(oldv) = ca.data.get(lin) {
+                on_write(oldv, &rhs);
+            }
+            *ca.data[lin] = rhs;
+            Ok(Value::Cell(ca))
+        }
+        _ => Err(mex(
+            "UnsupportedCellIndexCount",
+            "Unsupported number of cell indices",
+        )),
+    }
+}
