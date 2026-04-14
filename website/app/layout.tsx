@@ -73,11 +73,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <link
-          rel="preload"
-          as="image"
-          href="https://web.runmatstatic.com/video/posters/runmat-wave-simulation.webp"
-        />
+        {/* We moved the poster preload out of root layout because it hurts LCP on non-homepage routes (like blogs) */}
         <link rel="icon" href="/favicon.ico" sizes="32x32" />
         <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
         <link rel="apple-touch-icon" href="/apple-touch-icon.png" />

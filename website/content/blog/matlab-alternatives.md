@@ -128,9 +128,6 @@ jsonLd:
             text: "RunMat ships as a single static binary with no external dependencies or license server, making it straightforward to deploy on air-gapped networks. MATLAB requires a FlexLM license server, and Python requires pre-staging all package dependencies."
 ---
 
-
-![Matlab Alternatives in 2026](https://web.runmatstatic.com/free-matlab-alternatives-2026.png)
-
 *This article was originally published in September 2025 and has been updated for 2026 with new sections on Browser-Based Computing, GPU Acceleration, Version Control, Large File Handling, and Airgap Deployment.*
 
 ## Why are engineers searching for MATLAB alternatives?

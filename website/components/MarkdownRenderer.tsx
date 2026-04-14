@@ -318,15 +318,24 @@ export async function MarkdownRenderer({ source, components = {} }: MarkdownRend
       const inlineClassName = mergeClassNames("markdown-inline-code", className);
       return <code className={inlineClassName} {...props}>{children}</code>;
     },
-    img: ({ src, alt, ...props }: { src?: string; alt?: string } & Record<string, unknown>) => (
-      <img 
-        src={src} 
-        alt={alt} 
-        className="my-6 max-w-full h-auto rounded-lg" 
-        loading="lazy"
-        {...props} 
-      />
-    ),
+    img: ({ src, alt, ...props }: { src?: string; alt?: string } & Record<string, unknown>) => {
+      // Next.js Image component handles lazy loading better by default, 
+      // but for markdown we'll use a standard img tag with better attributes
+      // The hero image or first image should usually be eager loaded
+      const isFirstImage = src?.includes('free-matlab-alternatives-2026') || false; // Hacky way to detect hero
+      
+      return (
+        <img 
+          src={src} 
+          alt={alt} 
+          className="my-6 max-w-full h-auto rounded-lg shadow-sm" 
+          loading={isFirstImage ? "eager" : "lazy"}
+          fetchPriority={isFirstImage ? "high" : "auto"}
+          decoding="async"
+          {...props} 
+        />
+      );
+    },
     MermaidDiagram: (props: { chart?: string } & Record<string, unknown>) => (
       <div className="my-12 flex justify-center">
         <div className="max-w-full overflow-x-auto">

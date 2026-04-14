@@ -433,6 +433,21 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
           dangerouslySetInnerHTML={{ __html: jsonLdString }}
         />
       )}
+      
+      {/* If there's a frontmatter image and we're on a specific blog post, render it early as a hero to improve LCP */}
+      {post.frontmatter.image && (
+        <div className="mb-10 w-full rounded-xl overflow-hidden shadow-md">
+          <Image 
+            src={post.frontmatter.image} 
+            alt={post.frontmatter.imageAlt || post.frontmatter.title}
+            width={1200}
+            height={630}
+            className="w-full h-auto object-cover"
+            priority={true}
+          />
+        </div>
+      )}
+
       <MarkdownRenderer source={post.content} />
 
       {relatedPosts.length > 0 && (
