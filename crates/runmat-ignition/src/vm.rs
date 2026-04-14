@@ -1,6 +1,6 @@
 use crate::functions::{Bytecode, ExecutionContext, UserFunction};
 use crate::gc_roots::InterpretContext;
-use crate::instr::{EmitLabel, EndExpr, Instr};
+use crate::instr::{EndExpr, Instr};
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::fusion_exec::{
     execute_centered_gram, execute_elementwise, execute_explained_variance,
@@ -38,14 +38,14 @@ use runmat_vm::interpreter::errors::{
     attach_span_at, attach_span_from_pc, ensure_runtime_error_identifier, mex, set_vm_pc,
 };
 use runmat_vm::interpreter::stack::{pop2, pop_args, pop_value};
+use runmat_vm::ops::stack as stack_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
 use runmat_vm::runtime::call_stack::{
     attach_call_frames, error_namespace, push_call_frame,
 };
 use runmat_vm::runtime::workspace::{
-    ensure_workspace_slot_name, mark_workspace_assigned, refresh_workspace_state,
-    set_workspace_state, take_pending_workspace_state, workspace_assign, workspace_clear,
-    workspace_lookup, workspace_remove, workspace_snapshot,
+    refresh_workspace_state, set_workspace_state, take_pending_workspace_state,
+    workspace_assign, workspace_clear, workspace_lookup, workspace_remove, workspace_snapshot,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_time::Instant;
@@ -1601,19 +1601,6 @@ fn sync_initial_vars(initial: &mut [Value], vars: &[Value]) {
     }
 }
 
-fn resolve_emit_label_text(
-    label: &EmitLabel,
-    var_names: &HashMap<usize, String>,
-) -> Option<String> {
-    match label {
-        EmitLabel::Ans => Some("ans".to_string()),
-        EmitLabel::Var(idx) => var_names
-            .get(idx)
-            .cloned()
-            .or_else(|| Some(format!("var{idx}"))),
-    }
-}
-
 fn rel_binary_use_builtin(a: &Value, b: &Value) -> bool {
     !matches!(a, Value::Num(_) | Value::Int(_)) || !matches!(b, Value::Num(_) | Value::Int(_))
 }
@@ -1881,28 +1868,10 @@ async fn run_interpreter_inner(
         }
         match bytecode.instructions[pc].clone() {
             Instr::EmitStackTop { label } => {
-                if let Some(value) = stack.last() {
-                    let label_text = resolve_emit_label_text(&label, &bytecode.var_names);
-                    // Gather GPU tensors so we display actual values, not internal handles
-                    let host_value =
-                        runmat_runtime::dispatcher::gather_if_needed_async(value).await?;
-                    runmat_runtime::console::record_value_output(
-                        label_text.as_deref(),
-                        &host_value,
-                    );
-                }
+                stack_ops::emit_stack_top(&stack, &label, &bytecode.var_names).await?;
             }
             Instr::EmitVar { var_index, label } => {
-                if let Some(value) = vars.get(var_index) {
-                    let label_text = resolve_emit_label_text(&label, &bytecode.var_names);
-                    // Gather GPU tensors so we display actual values, not internal handles
-                    let host_value =
-                        runmat_runtime::dispatcher::gather_if_needed_async(value).await?;
-                    runmat_runtime::console::record_value_output(
-                        label_text.as_deref(),
-                        &host_value,
-                    );
-                }
+                stack_ops::emit_var(&vars, var_index, &label, &bytecode.var_names).await?;
             }
             Instr::AndAnd(target) => {
                 let lhs: f64 = (&pop_value(&mut stack)?).try_into()?;
@@ -1919,9 +1888,7 @@ async fn run_interpreter_inner(
                 }
             }
             Instr::Swap => {
-                let (b, a) = pop2(&mut stack)?;
-                stack.push(a);
-                stack.push(b);
+                stack_ops::swap(&mut stack)?;
             }
             Instr::CallFeval(argc) => {
                 let args = pop_args(&mut stack, argc)?;
@@ -2084,13 +2051,13 @@ async fn run_interpreter_inner(
                 vm_bail!("feval expand not supported in this execution mode".to_string());
             }
             Instr::LoadConst(c) => {
-                stack.push(Value::Num(c));
+                stack_ops::load_const(&mut stack, c);
                 if debug_stack {
                     debug!(const_value = c, stack_len = stack.len(), "[vm] load const");
                 }
             }
             Instr::LoadComplex(re, im) => {
-                stack.push(Value::Complex(re, im));
+                stack_ops::load_complex(&mut stack, re, im);
                 if debug_stack {
                     eprintln!(
                         "  -> LoadComplex pushed ({}, {}), new_len={}",
@@ -2100,12 +2067,10 @@ async fn run_interpreter_inner(
                     );
                 }
             }
-            Instr::LoadBool(b) => stack.push(Value::Bool(b)),
-            Instr::LoadString(s) => stack.push(Value::String(s)),
+            Instr::LoadBool(b) => stack_ops::load_bool(&mut stack, b),
+            Instr::LoadString(s) => stack_ops::load_string(&mut stack, s),
             Instr::LoadCharRow(s) => {
-                let ca = runmat_builtins::CharArray::new(s.chars().collect(), 1, s.chars().count())
-                    .map_err(|e| mex("CharError", &e))?;
-                stack.push(Value::CharArray(ca));
+                stack_ops::load_char_row(&mut stack, s)?;
             }
             Instr::LoadVar(i) => {
                 let v = vars[i].clone();
@@ -2131,14 +2096,15 @@ async fn run_interpreter_inner(
                         _ => {}
                     }
                 }
-                stack.push(v)
+                stack_ops::load_var(&mut stack, &vars, i)
             }
             Instr::StoreVar(i) => {
-                let val = stack
-                    .pop()
+                let preview = stack
+                    .last()
+                    .cloned()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 if std::env::var("RUNMAT_DEBUG_VARS").as_deref() == Ok("1") {
-                    match &val {
+                    match &preview {
                         Value::Tensor(t) => {
                             eprintln!("[vm] StoreVar var={i} Tensor shape={:?}", t.shape);
                         }
@@ -2157,11 +2123,11 @@ async fn run_interpreter_inner(
                         false
                     };
                     if log_this {
-                        debug!(pc, var = i, ?val, "[vm] StoreVar value");
+                        debug!(pc, var = i, ?preview, "[vm] StoreVar value");
                     }
                 }
                 if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
-                    match &val {
+                    match &preview {
                         Value::GpuTensor(h) => {
                             debug!(pc, var = i, shape = ?h.shape, "[vm] StoreVar GPU tensor");
                         }
@@ -2171,93 +2137,66 @@ async fn run_interpreter_inner(
                         _ => {}
                     }
                 }
-                if i < vars.len() {
-                    #[cfg(feature = "native-accel")]
-                    if !same_gpu_handle(&vars[i], &val) {
-                        clear_residency(&vars[i]);
-                    }
-                }
-                if i >= vars.len() {
-                    vars.resize(i + 1, Value::Num(0.0));
-                    refresh_workspace_state(&vars);
-                }
-                vars[i] = val;
-                // After clear() the idx_to_name map is wiped, but the compiled bytecode still
-                // uses the same slot indices. Re-register the static var name so post-clear
-                // assignments remain visible in the workspace view.
-                if let Some(name) = bytecode.var_names.get(&i) {
-                    ensure_workspace_slot_name(i, name);
-                }
-                mark_workspace_assigned(i);
-
-                // If this var is declared global, update the global table entry
-                // We optimistically write-through whenever StoreVar happens and a global exists for this name
-                let key = format!("var_{i}");
-                GLOBALS.with(|g| {
-                    let mut m = g.borrow_mut();
-                    if m.contains_key(&key) {
-                        m.insert(key, vars[i].clone());
-                    }
-                });
-                if let Some(name) = global_aliases.get(&i) {
-                    GLOBALS.with(|g| {
-                        g.borrow_mut().insert(name.clone(), vars[i].clone());
-                    });
-                }
+                stack_ops::store_var(
+                    &mut stack,
+                    &mut vars,
+                    i,
+                    &bytecode.var_names,
+                    |current, incoming| {
+                        #[cfg(feature = "native-accel")]
+                        if !same_gpu_handle(current, incoming) {
+                            clear_residency(current);
+                        }
+                    },
+                    |stored_index, stored_value| {
+                        let key = format!("var_{stored_index}");
+                        GLOBALS.with(|g| {
+                            let mut m = g.borrow_mut();
+                            if m.contains_key(&key) {
+                                m.insert(key, stored_value.clone());
+                            }
+                        });
+                        if let Some(name) = global_aliases.get(&stored_index) {
+                            GLOBALS.with(|g| {
+                                g.borrow_mut().insert(name.clone(), stored_value.clone());
+                            });
+                        }
+                    },
+                )?;
             }
             Instr::LoadLocal(offset) => {
-                if let Some(current_frame) = context.call_stack.last() {
-                    let local_index = current_frame.locals_start + offset;
-                    if local_index >= context.locals.len() {
-                        vm_bail!("Local variable index out of bounds".to_string());
-                    }
-                    stack.push(context.locals[local_index].clone());
-                } else if offset < vars.len() {
-                    stack.push(vars[offset].clone());
-                } else {
-                    stack.push(Value::Num(0.0));
+                if let Err(err) = stack_ops::load_local(&mut stack, &context, &vars, offset) {
+                    vm_bail!(err);
                 }
             }
             Instr::StoreLocal(offset) => {
-                let val = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                if let Some(current_frame) = context.call_stack.last() {
-                    let local_index = current_frame.locals_start + offset;
-                    while context.locals.len() <= local_index {
-                        context.locals.push(Value::Num(0.0));
-                    }
-                    #[cfg(feature = "native-accel")]
-                    if local_index < context.locals.len()
-                        && !same_gpu_handle(&context.locals[local_index], &val)
-                    {
-                        clear_residency(&context.locals[local_index]);
-                    }
-                    context.locals[local_index] = val;
-                } else {
-                    if offset >= vars.len() {
-                        vars.resize(offset + 1, Value::Num(0.0));
-                        refresh_workspace_state(&vars);
-                    }
-                    #[cfg(feature = "native-accel")]
-                    if offset < vars.len() && !same_gpu_handle(&vars[offset], &val) {
-                        clear_residency(&vars[offset]);
-                    }
-                    vars[offset] = val;
-                    // write-through to persistents if this local is a declared persistent for current function
-                    let func_name = context
-                        .call_stack
-                        .last()
-                        .map(|f| f.function_name.clone())
-                        .unwrap_or_else(|| "<main>".to_string());
-                    let key = (func_name, offset);
-                    PERSISTENTS.with(|p| {
-                        let mut m = p.borrow_mut();
-                        if m.contains_key(&key) {
-                            m.insert(key, vars[offset].clone());
+                stack_ops::store_local(
+                    &mut stack,
+                    &mut context,
+                    &mut vars,
+                    offset,
+                    |current, incoming| {
+                        #[cfg(feature = "native-accel")]
+                        if !same_gpu_handle(current, incoming) {
+                            clear_residency(current);
                         }
-                    });
-                }
+                    },
+                    |current, incoming| {
+                        #[cfg(feature = "native-accel")]
+                        if !same_gpu_handle(current, incoming) {
+                            clear_residency(current);
+                        }
+                    },
+                    |func_name, stored_offset, stored_value| {
+                        let key = (func_name.to_string(), stored_offset);
+                        PERSISTENTS.with(|p| {
+                            let mut m = p.borrow_mut();
+                            if m.contains_key(&key) {
+                                m.insert(key, stored_value.clone());
+                            }
+                        });
+                    },
+                )?;
             }
             Instr::EnterScope(local_count) => {
                 for _ in 0..local_count {
@@ -8848,7 +8787,7 @@ async fn run_interpreter_inner(
                 }
             }
             Instr::Pop => {
-                stack.pop();
+                stack_ops::pop(&mut stack);
             }
             Instr::Unpack(out_count) => {
                 let value = stack
