@@ -132,6 +132,18 @@ Port source:
 - Owns lowering from HIR to bytecode.
 - Split by lowering concern rather than by AST type count.
 
+Current internal ownership:
+
+- `core.rs`: compiler state, setup, emit/patch/error helpers, and thin span-guarded entrypoints.
+- `end_expr.rs`: lowering-time `end` expression construction and numeric `end` helper parsing.
+- `lvalues.rs`: assignment-target lowering including indexed/member lvalues and store-back chains.
+- `functions.rs`: function statement registration, closure capture analysis, and anonymous-function lowering.
+- `classes.rs`: class-definition lowering and class/member attribute parsing.
+- `statements.rs`: general statement lowering including control flow, imports, globals/persistents, and multi-assign.
+- `expressions.rs`: general expression lowering including calls, indexing, member access, literals, and operators.
+- `imports.rs`: compile-time import/static resolution helpers for unqualified names and `Class.*` lookup.
+- `patterns.rs`: lowering-time pattern detection and special-case lowering such as stochastic evolution.
+
 Port source:
 
 - `runmat-ignition/src/compiler.rs`
