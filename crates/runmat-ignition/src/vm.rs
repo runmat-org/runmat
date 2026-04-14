@@ -37,7 +37,7 @@ pub use runmat_vm::interpreter::api::{
 use runmat_vm::interpreter::errors::{
     attach_span_at, attach_span_from_pc, ensure_runtime_error_identifier, mex, set_vm_pc,
 };
-use runmat_vm::interpreter::stack::{pop2, pop_value};
+use runmat_vm::interpreter::stack::pop_value;
 use runmat_vm::call::shared as call_shared;
 use runmat_vm::call::{builtins as call_builtins, feval as call_feval, user as call_user};
 use runmat_vm::call::builtins::ImportedBuiltinResolution;
@@ -51,6 +51,7 @@ use runmat_vm::indexing::write_linear as idx_write_linear;
 use runmat_vm::indexing::write_slice as idx_write_slice;
 use runmat_vm::object::{class_def as obj_class_def, resolve as obj_resolve};
 use runmat_vm::ops::cells as cell_ops;
+use runmat_vm::ops::{arithmetic as arithmetic_ops, arrays as array_ops, comparison as comparison_ops};
 use runmat_vm::ops::control_flow::{self, ControlFlowAction};
 use runmat_vm::ops::stack as stack_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
@@ -700,28 +701,6 @@ fn sync_initial_vars(initial: &mut [Value], vars: &[Value]) {
     }
 }
 
-fn rel_binary_use_builtin(a: &Value, b: &Value) -> bool {
-    !matches!(a, Value::Num(_) | Value::Int(_)) || !matches!(b, Value::Num(_) | Value::Int(_))
-}
-
-macro_rules! handle_rel_binary { ($op:tt, $name:literal, $stack:ident) => {{
-    let (a, b) = pop2(&mut $stack)?;
-    match (&a, &b) {
-        (Value::Object(obj), _) => { let args = vec![Value::Object(obj.clone()), Value::String($name.to_string()), b.clone()]; match call_builtin_vm!("call_method", &args) { Ok(v) => $stack.push(v), Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; $stack.push(Value::Num(if aa $op bb {1.0}else{0.0})) } } }
-        (_, Value::Object(obj)) => { let rev = match $name { "lt" => "gt", "le" => "ge", "gt" => "lt", "ge" => "le", other => other };
-            let args = vec![Value::Object(obj.clone()), Value::String(rev.to_string()), a.clone()]; match call_builtin_vm!("call_method", &args) { Ok(v) => $stack.push(v), Err(_) => { let aa: f64 = (&a).try_into()?; let bb: f64 = (&b).try_into()?; $stack.push(Value::Num(if aa $op bb {1.0}else{0.0})) } } }
-        _ => {
-            if rel_binary_use_builtin(&a, &b) {
-                let v = call_builtin_vm!($name, &[a.clone(), b.clone()])?;
-                $stack.push(v);
-            } else {
-                let bb: f64 = (&b).try_into()?;
-                let aa: f64 = (&a).try_into()?;
-                $stack.push(Value::Num(if aa $op bb {1.0}else{0.0}))
-            }
-        }
-    }
-}}; }
 pub async fn interpret_with_vars(
     bytecode: &Bytecode,
     initial_vars: &mut [Value],
@@ -1315,982 +1294,245 @@ async fn run_interpreter_inner(
                 }
             }
             Instr::Add => {
-                // If either operand is an object, try operator overloading
-                let b = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let a = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match (&a, &b) {
-                    (Value::Object(obj), _) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("plus".to_string()),
-                            b.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                let v = call_builtin_vm!("plus", &[a.clone(), b.clone()])?;
-                                stack.push(v)
-                            }
-                        }
-                    }
-                    (_, Value::Object(obj)) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("plus".to_string()),
-                            a.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                let v = call_builtin_vm!("plus", &[a.clone(), b.clone()])?;
-                                stack.push(v)
-                            }
-                        }
-                    }
-                    _ => {
+                arithmetic_ops::add(
+                    &mut stack,
+                    |obj, method, arg| async move {
+                        let args = vec![obj, Value::String(method.to_string()), arg];
+                        call_builtin_vm!("call_method", &args)
+                    },
+                    |a, b| async move {
                         let (a_acc, b_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                        let v = call_builtin_vm!("plus", &[a_acc, b_acc])?;
-                        stack.push(v)
-                    }
-                }
+                        call_builtin_vm!("plus", &[a_acc, b_acc])
+                    },
+                ).await?;
             }
             Instr::Sub => {
-                let b = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let a = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match (&a, &b) {
-                    (Value::Object(obj), _) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("minus".to_string()),
-                            b.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                let v = call_builtin_vm!("minus", &[a.clone(), b.clone()])?;
-                                stack.push(v)
-                            }
-                        }
-                    }
-                    (_, Value::Object(obj)) => {
-                        // Subtraction is non-commutative: dispatch to b's class method with (a, b)
-                        // in the original order so the method receives lhs=a, rhs=b and computes
-                        // a - b. Using call_method here would be wrong because call_method always
-                        // prepends the object as the first argument, computing b - a instead.
-                        let qualified = format!("{}.minus", obj.class_name);
-                        match call_builtin_vm!(&qualified, &[a.clone(), b.clone()]) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                let v = call_builtin_vm!("minus", &[a.clone(), b.clone()])?;
-                                stack.push(v)
-                            }
-                        }
-                    }
-                    _ => {
+                arithmetic_ops::sub(
+                    &mut stack,
+                    |obj, method, arg| async move {
+                        let args = vec![obj, Value::String(method.to_string()), arg];
+                        call_builtin_vm!("call_method", &args)
+                    },
+                    |obj, lhs| async move {
+                        let class_name = match &obj { Value::Object(o) => o.class_name.clone(), _ => String::new() };
+                        let qualified = format!("{}.minus", class_name);
+                        call_builtin_vm!(&qualified, &[lhs, obj])
+                    },
+                    |a, b| async move {
                         let (a_acc, b_acc) =
                             accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                        let v = call_builtin_vm!("minus", &[a_acc, b_acc])?;
-                        stack.push(v)
-                    }
-                }
+                        call_builtin_vm!("minus", &[a_acc, b_acc])
+                    },
+                ).await?;
             }
             Instr::Mul => {
-                let b = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let a = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match (&a, &b) {
-                    (Value::Object(obj), _) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("mtimes".to_string()),
-                            b.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                let v = runmat_runtime::matrix::value_matmul(&a, &b).await?;
-                                stack.push(v)
-                            }
-                        }
-                    }
-                    (_, Value::Object(obj)) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("mtimes".to_string()),
-                            a.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                let v = runmat_runtime::matrix::value_matmul(&a, &b).await?;
-                                stack.push(v)
-                            }
-                        }
-                    }
-                    _ => {
-                        let (a_acc, b_acc) =
-                            accel_promote_binary(AutoBinaryOp::MatMul, &a, &b).await?;
-                        let v = runmat_runtime::matrix::value_matmul(&a_acc, &b_acc).await?;
-                        stack.push(v)
-                    }
-                }
+                arithmetic_ops::mul(
+                    &mut stack,
+                    |obj, method, arg| async move {
+                        let args = vec![obj, Value::String(method.to_string()), arg];
+                        call_builtin_vm!("call_method", &args)
+                    },
+                    |a, b| async move {
+                        let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::MatMul, &a, &b).await?;
+                        runmat_runtime::matrix::value_matmul(&a_acc, &b_acc).await
+                    },
+                ).await?;
             }
             Instr::RightDiv => {
-                let b = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let a = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                stack.push(execute_right_division(&a, &b).await?)
+                arithmetic_ops::binary_fallback(&mut stack, |a, b| async move {
+                    execute_right_division(&a, &b).await
+                }).await?;
             }
             Instr::LeftDiv => {
-                let b = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let a = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                stack.push(execute_left_division(&a, &b).await?)
+                arithmetic_ops::binary_fallback(&mut stack, |a, b| async move {
+                    execute_left_division(&a, &b).await
+                }).await?;
             }
             Instr::Pow => {
-                let b = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let a = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match (&a, &b) {
-                    (Value::Object(obj), _) | (_, Value::Object(obj)) => {
-                        let arg_val = if matches!(&a, Value::Object(_)) {
-                            b.clone()
-                        } else {
-                            a.clone()
-                        };
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("power".to_string()),
-                            arg_val,
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                let v = runmat_runtime::power(&a, &b)?;
-                                stack.push(v)
-                            }
-                        }
-                    }
-                    _ => {
-                        let (a_acc, b_acc) =
-                            accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                        let v = runmat_runtime::power(&a_acc, &b_acc)?;
-                        stack.push(v)
-                    }
-                }
+                arithmetic_ops::power(
+                    &mut stack,
+                    |obj, method, arg| async move {
+                        let args = vec![obj, Value::String(method.to_string()), arg];
+                        call_builtin_vm!("call_method", &args)
+                    },
+                    |a, b| async move {
+                        let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
+                        runmat_runtime::power(&a_acc, &b_acc).map_err(RuntimeError::from)
+                    },
+                ).await?;
             }
             Instr::Neg => {
-                let value = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match &value {
-                    Value::Object(obj) => {
-                        let args = vec![Value::Object(obj.clone())];
-                        match call_builtin_vm!("uminus", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                let result = call_builtin_vm!(
-                                    "times",
-                                    &[value.clone(), runmat_builtins::Value::Num(-1.0)],
-                                )?;
-                                stack.push(result)
+                arithmetic_ops::unary(&mut stack, |value| async move {
+                    match &value {
+                        Value::Object(obj) => {
+                            let args = vec![Value::Object(obj.clone())];
+                            match call_builtin_vm!("uminus", &args) {
+                                Ok(v) => Ok(v),
+                                Err(_) => call_builtin_vm!("times", &[value.clone(), Value::Num(-1.0)]),
                             }
                         }
+                        _ => call_builtin_vm!("times", &[value.clone(), Value::Num(-1.0)]),
                     }
-                    _ => {
-                        let result = call_builtin_vm!(
-                            "times",
-                            &[value.clone(), runmat_builtins::Value::Num(-1.0)],
-                        )?;
-                        stack.push(result);
-                    }
-                }
+                }).await?;
             }
             Instr::UPlus => {
-                let value = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match &value {
-                    Value::Object(obj) => {
-                        let args = vec![Value::Object(obj.clone())];
-                        match call_builtin_vm!("uplus", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => stack.push(value),
+                arithmetic_ops::unary(&mut stack, |value| async move {
+                    match &value {
+                        Value::Object(obj) => {
+                            let args = vec![Value::Object(obj.clone())];
+                            match call_builtin_vm!("uplus", &args) {
+                                Ok(v) => Ok(v),
+                                Err(_) => Ok(value),
+                            }
                         }
+                        _ => Ok(value),
                     }
-                    _ => stack.push(value),
-                }
+                }).await?;
             }
             Instr::Transpose => {
-                let value = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value).await?;
-                let args = [promoted];
-                let result = call_builtin_vm!("transpose", &args)?;
-                stack.push(result);
+                arithmetic_ops::unary(&mut stack, |value| async move {
+                    let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value).await?;
+                    call_builtin_vm!("transpose", &[promoted])
+                }).await?;
             }
             Instr::ConjugateTranspose => {
-                let value = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value).await?;
-                let args = [promoted];
-                let result = call_builtin_vm!("ctranspose", &args)?;
-                stack.push(result);
+                arithmetic_ops::unary(&mut stack, |value| async move {
+                    let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value).await?;
+                    call_builtin_vm!("ctranspose", &[promoted])
+                }).await?;
             }
             Instr::ElemMul => {
-                let b = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let a = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match (&a, &b) {
-                    (Value::Object(obj), _) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("times".to_string()),
-                            b.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                let (a_acc, b_acc) =
-                                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                                stack.push(call_builtin_vm!("times", &[a_acc, b_acc])?)
-                            }
-                        }
-                    }
-                    (_, Value::Object(obj)) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("times".to_string()),
-                            a.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                let (a_acc, b_acc) =
-                                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                                stack.push(call_builtin_vm!("times", &[a_acc, b_acc])?)
-                            }
-                        }
-                    }
-                    _ => {
-                        let (a_acc, b_acc) =
-                            accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                        stack.push(call_builtin_vm!("times", &[a_acc, b_acc])?)
-                    }
-                }
+                arithmetic_ops::binary_method(
+                    &mut stack,
+                    "times",
+                    |obj, method, arg| async move {
+                        let args = vec![obj, Value::String(method.to_string()), arg];
+                        call_builtin_vm!("call_method", &args)
+                    },
+                    |a, b| async move {
+                        let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
+                        call_builtin_vm!("times", &[a_acc, b_acc])
+                    },
+                ).await?;
             }
             Instr::ElemDiv => {
-                let b = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let a = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match (&a, &b) {
-                    (Value::Object(obj), _) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("rdivide".to_string()),
-                            b.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                let (a_acc, b_acc) =
-                                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                                stack.push(call_builtin_vm!("rdivide", &[a_acc, b_acc])?)
-                            }
-                        }
-                    }
-                    (_, Value::Object(obj)) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("rdivide".to_string()),
-                            a.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                let (a_acc, b_acc) =
-                                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                                stack.push(call_builtin_vm!("rdivide", &[a_acc, b_acc])?)
-                            }
-                        }
-                    }
-                    _ => {
-                        let (a_acc, b_acc) =
-                            accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                        stack.push(call_builtin_vm!("rdivide", &[a_acc, b_acc])?)
-                    }
-                }
+                arithmetic_ops::binary_method(
+                    &mut stack,
+                    "rdivide",
+                    |obj, method, arg| async move {
+                        let args = vec![obj, Value::String(method.to_string()), arg];
+                        call_builtin_vm!("call_method", &args)
+                    },
+                    |a, b| async move {
+                        let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
+                        call_builtin_vm!("rdivide", &[a_acc, b_acc])
+                    },
+                ).await?;
             }
             Instr::ElemPow => {
-                let b = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let a = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match (&a, &b) {
-                    (Value::Object(obj), _) | (_, Value::Object(obj)) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            if matches!(&a, Value::Object(_)) {
-                                b.clone()
-                            } else {
-                                a.clone()
-                            },
-                        ];
-                        match call_builtin_vm!("power", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                let (a_acc, b_acc) =
-                                    accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                                stack.push(call_builtin_vm!("power", &[a_acc, b_acc])?)
-                            }
-                        }
-                    }
-                    _ => {
-                        let (a_acc, b_acc) =
-                            accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
-                        stack.push(call_builtin_vm!("power", &[a_acc, b_acc])?)
-                    }
-                }
+                arithmetic_ops::power(
+                    &mut stack,
+                    |obj, _method, arg| async move { call_builtin_vm!("power", &[obj, arg]) },
+                    |a, b| async move {
+                        let (a_acc, b_acc) = accel_promote_binary(AutoBinaryOp::Elementwise, &a, &b).await?;
+                        call_builtin_vm!("power", &[a_acc, b_acc])
+                    },
+                ).await?;
             }
             Instr::ElemLeftDiv => {
-                let b = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let a = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match (&a, &b) {
-                    (Value::Object(obj), _) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("ldivide".to_string()),
-                            b.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                let (b_acc, a_acc) =
-                                    accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a).await?;
-                                stack.push(call_builtin_vm!("rdivide", &[b_acc, a_acc])?)
-                            }
-                        }
-                    }
-                    (_, Value::Object(obj)) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("ldivide".to_string()),
-                            a.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                let (b_acc, a_acc) =
-                                    accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a).await?;
-                                stack.push(call_builtin_vm!("rdivide", &[b_acc, a_acc])?)
-                            }
-                        }
-                    }
-                    _ => {
-                        let (b_acc, a_acc) =
-                            accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a).await?;
-                        stack.push(call_builtin_vm!("rdivide", &[b_acc, a_acc])?)
-                    }
-                }
+                arithmetic_ops::binary_method(
+                    &mut stack,
+                    "ldivide",
+                    |obj, method, arg| async move {
+                        let args = vec![obj, Value::String(method.to_string()), arg];
+                        call_builtin_vm!("call_method", &args)
+                    },
+                    |a, b| async move {
+                        let (b_acc, a_acc) = accel_promote_binary(AutoBinaryOp::Elementwise, &b, &a).await?;
+                        call_builtin_vm!("rdivide", &[b_acc, a_acc])
+                    },
+                ).await?;
             }
             Instr::LessEqual => {
-                let b = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let a = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match (&a, &b) {
-                    (Value::Object(obj), _) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("le".to_string()),
-                            b.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                // Fallback: le(a,b) = ~gt(a,b)
-                                let args2 = vec![
-                                    Value::Object(obj.clone()),
-                                    Value::String("gt".to_string()),
-                                    b.clone(),
-                                ];
-                                match call_builtin_vm!("call_method", &args2) {
-                                    Ok(v) => {
-                                        let truth =
-                                            logical_truth_from_value(&v, "comparison result")
-                                                .await?;
-                                        stack.push(Value::Num(if !truth { 1.0 } else { 0.0 }));
-                                    }
-                                    Err(_) => {
-                                        let aa: f64 = (&a).try_into()?;
-                                        let bb: f64 = (&b).try_into()?;
-                                        stack.push(Value::Num(if aa <= bb { 1.0 } else { 0.0 }));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    (_, Value::Object(obj)) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("ge".to_string()),
-                            a.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                // Fallback: ge(b,a) = ~lt(b,a) hence le(a,b) = ge(b,a)
-                                let args2 = vec![
-                                    Value::Object(obj.clone()),
-                                    Value::String("lt".to_string()),
-                                    a.clone(),
-                                ];
-                                match call_builtin_vm!("call_method", &args2) {
-                                    Ok(v) => {
-                                        let truth =
-                                            logical_truth_from_value(&v, "comparison result")
-                                                .await?;
-                                        stack.push(Value::Num(if !truth { 1.0 } else { 0.0 }));
-                                    }
-                                    Err(_) => {
-                                        let aa: f64 = (&a).try_into()?;
-                                        let bb: f64 = (&b).try_into()?;
-                                        stack.push(Value::Num(if aa <= bb { 1.0 } else { 0.0 }));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    _ => {
-                        if rel_binary_use_builtin(&a, &b) {
-                            let v = call_builtin_vm!("le", &[a.clone(), b.clone()])?;
-                            stack.push(v);
-                        } else {
-                            let bb: f64 = (&b).try_into()?;
-                            let aa: f64 = (&a).try_into()?;
-                            stack.push(Value::Num(if aa <= bb { 1.0 } else { 0.0 }));
-                        }
-                    }
-                }
+                comparison_ops::relation_inverted(
+                    &mut stack,
+                    "le",
+                    "gt",
+                    "ge",
+                    "lt",
+                    |aa, bb| aa <= bb,
+                    |obj, method, arg| async move {
+                        let args = vec![obj, Value::String(method.to_string()), arg];
+                        call_builtin_vm!("call_method", &args)
+                    },
+                    |name, a, b| async move { call_builtin_vm!(name, &[a, b]) },
+                    |v, label| async move { logical_truth_from_value(&v, &label).await },
+                ).await?;
             }
             Instr::Less => {
-                handle_rel_binary!(<, "lt", stack);
+                comparison_ops::relation(
+                    &mut stack,
+                    "lt",
+                    "gt",
+                    |aa, bb| aa < bb,
+                    |obj, method, arg| async move {
+                        let args = vec![obj, Value::String(method.to_string()), arg];
+                        call_builtin_vm!("call_method", &args)
+                    },
+                    |name, a, b| async move { call_builtin_vm!(name, &[a, b]) },
+                ).await?;
             }
             Instr::Greater => {
-                handle_rel_binary!(>, "gt", stack);
+                comparison_ops::relation(
+                    &mut stack,
+                    "gt",
+                    "lt",
+                    |aa, bb| aa > bb,
+                    |obj, method, arg| async move {
+                        let args = vec![obj, Value::String(method.to_string()), arg];
+                        call_builtin_vm!("call_method", &args)
+                    },
+                    |name, a, b| async move { call_builtin_vm!(name, &[a, b]) },
+                ).await?;
             }
             Instr::GreaterEqual => {
-                let b = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let a = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match (&a, &b) {
-                    (Value::Object(obj), _) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("ge".to_string()),
-                            b.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                // Fallback: ge(a,b) = ~lt(a,b)
-                                let args2 = vec![
-                                    Value::Object(obj.clone()),
-                                    Value::String("lt".to_string()),
-                                    b.clone(),
-                                ];
-                                match call_builtin_vm!("call_method", &args2) {
-                                    Ok(v) => {
-                                        let truth =
-                                            logical_truth_from_value(&v, "comparison result")
-                                                .await?;
-                                        stack.push(Value::Num(if !truth { 1.0 } else { 0.0 }));
-                                    }
-                                    Err(_) => {
-                                        let aa: f64 = (&a).try_into()?;
-                                        let bb: f64 = (&b).try_into()?;
-                                        stack.push(Value::Num(if aa >= bb { 1.0 } else { 0.0 }));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    (_, Value::Object(obj)) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("le".to_string()),
-                            a.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                // Fallback: le(b,a) = ~gt(b,a); hence ge(a,b) = le(b,a)
-                                let args2 = vec![
-                                    Value::Object(obj.clone()),
-                                    Value::String("gt".to_string()),
-                                    a.clone(),
-                                ];
-                                match call_builtin_vm!("call_method", &args2) {
-                                    Ok(v) => {
-                                        let truth =
-                                            logical_truth_from_value(&v, "comparison result")
-                                                .await?;
-                                        stack.push(Value::Num(if !truth { 1.0 } else { 0.0 }));
-                                    }
-                                    Err(_) => {
-                                        let aa: f64 = (&a).try_into()?;
-                                        let bb: f64 = (&b).try_into()?;
-                                        stack.push(Value::Num(if aa >= bb { 1.0 } else { 0.0 }));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    _ => {
-                        if rel_binary_use_builtin(&a, &b) {
-                            let v = call_builtin_vm!("ge", &[a.clone(), b.clone()])?;
-                            stack.push(v);
-                        } else {
-                            let bb: f64 = (&b).try_into()?;
-                            let aa: f64 = (&a).try_into()?;
-                            stack.push(Value::Num(if aa >= bb { 1.0 } else { 0.0 }));
-                        }
-                    }
-                }
+                comparison_ops::relation_inverted(
+                    &mut stack,
+                    "ge",
+                    "lt",
+                    "le",
+                    "gt",
+                    |aa, bb| aa >= bb,
+                    |obj, method, arg| async move {
+                        let args = vec![obj, Value::String(method.to_string()), arg];
+                        call_builtin_vm!("call_method", &args)
+                    },
+                    |name, a, b| async move { call_builtin_vm!(name, &[a, b]) },
+                    |v, label| async move { logical_truth_from_value(&v, &label).await },
+                ).await?;
             }
             Instr::Equal => {
-                let b = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let a = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let push_logical =
-                    |data: Vec<u8>, shape: Vec<usize>, stack: &mut Vec<Value>| -> VmResult<()> {
-                        if data.len() == 1 && is_scalar_shape(&shape) {
-                            stack.push(Value::Bool(data[0] != 0));
-                            return Ok(());
-                        }
-                        let logical = runmat_builtins::LogicalArray::new(data, shape)
-                            .map_err(|e| format!("eq: {e}"))?;
-                        stack.push(Value::LogicalArray(logical));
-                        Ok(())
-                    };
-                let logical_eq_scalar = |array: &runmat_builtins::LogicalArray,
-                                         scalar: f64,
-                                         stack: &mut Vec<Value>|
-                 -> VmResult<()> {
-                    let mut out = Vec::with_capacity(array.data.len());
-                    for &bit in &array.data {
-                        let val = if bit != 0 { 1.0 } else { 0.0 };
-                        out.push(if (val - scalar).abs() < 1e-12 { 1 } else { 0 });
-                    }
-                    push_logical(out, array.shape.clone(), stack)
-                };
-                let logical_eq_tensor = |array: &runmat_builtins::LogicalArray,
-                                         tensor: &runmat_builtins::Tensor,
-                                         stack: &mut Vec<Value>|
-                 -> VmResult<()> {
-                    if array.shape != tensor.shape {
-                        return Err(mex(
-                            "ShapeMismatch",
-                            "shape mismatch for element-wise comparison",
-                        ));
-                    }
-                    let mut out = Vec::with_capacity(array.data.len());
-                    for i in 0..array.data.len() {
-                        let val = if array.data[i] != 0 { 1.0 } else { 0.0 };
-                        out.push(if (val - tensor.data[i]).abs() < 1e-12 {
-                            1
-                        } else {
-                            0
-                        });
-                    }
-                    push_logical(out, array.shape.clone(), stack)
-                };
-                match (&a, &b) {
-                    (Value::Object(obj), _) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("eq".to_string()),
-                            b.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                let aa: f64 = (&a).try_into()?;
-                                let bb: f64 = (&b).try_into()?;
-                                stack.push(Value::Num(if aa == bb { 1.0 } else { 0.0 }))
-                            }
-                        }
-                    }
-                    (_, Value::Object(obj)) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("eq".to_string()),
-                            a.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                let aa: f64 = (&a).try_into()?;
-                                let bb: f64 = (&b).try_into()?;
-                                stack.push(Value::Num(if aa == bb { 1.0 } else { 0.0 }))
-                            }
-                        }
-                    }
-                    (Value::HandleObject(_), _) | (_, Value::HandleObject(_)) => {
-                        // Delegate to runtime eq builtin which implements identity semantics
-                        let v = call_builtin_vm!("eq", &[a.clone(), b.clone()])?;
-                        stack.push(v);
-                    }
-                    (Value::LogicalArray(la), Value::LogicalArray(lb)) => {
-                        if la.shape != lb.shape {
-                            return Err(mex(
-                                "ShapeMismatch",
-                                "shape mismatch for element-wise comparison",
-                            ));
-                        }
-                        let mut out = Vec::with_capacity(la.data.len());
-                        for i in 0..la.data.len() {
-                            out.push(if la.data[i] == lb.data[i] { 1 } else { 0 });
-                        }
-                        push_logical(out, la.shape.clone(), &mut stack)?;
-                    }
-                    (Value::LogicalArray(la), Value::Num(n)) => {
-                        logical_eq_scalar(la, *n, &mut stack)?;
-                    }
-                    (Value::LogicalArray(la), Value::Int(i)) => {
-                        logical_eq_scalar(la, i.to_f64(), &mut stack)?;
-                    }
-                    (Value::LogicalArray(la), Value::Bool(flag)) => {
-                        logical_eq_scalar(la, if *flag { 1.0 } else { 0.0 }, &mut stack)?;
-                    }
-                    (Value::Num(n), Value::LogicalArray(lb)) => {
-                        logical_eq_scalar(lb, *n, &mut stack)?;
-                    }
-                    (Value::Int(i), Value::LogicalArray(lb)) => {
-                        logical_eq_scalar(lb, i.to_f64(), &mut stack)?;
-                    }
-                    (Value::Bool(flag), Value::LogicalArray(lb)) => {
-                        logical_eq_scalar(lb, if *flag { 1.0 } else { 0.0 }, &mut stack)?;
-                    }
-                    (Value::LogicalArray(la), Value::Tensor(tb)) => {
-                        logical_eq_tensor(la, tb, &mut stack)?;
-                    }
-                    (Value::Tensor(ta), Value::LogicalArray(lb)) => {
-                        logical_eq_tensor(lb, ta, &mut stack)?;
-                    }
-                    (Value::Tensor(ta), Value::Tensor(tb)) => {
-                        // Element-wise eq; shapes must match
-                        if ta.shape != tb.shape {
-                            return Err(mex(
-                                "ShapeMismatch",
-                                "shape mismatch for element-wise comparison",
-                            ));
-                        }
-                        let mut out = Vec::with_capacity(ta.data.len());
-                        for i in 0..ta.data.len() {
-                            out.push(if (ta.data[i] - tb.data[i]).abs() < 1e-12 {
-                                1.0
-                            } else {
-                                0.0
-                            });
-                        }
-                        stack.push(Value::Tensor(
-                            runmat_builtins::Tensor::new(out, ta.shape.clone())
-                                .map_err(|e| format!("eq: {e}"))?,
-                        ));
-                    }
-                    (Value::Tensor(t), Value::Num(_)) | (Value::Tensor(t), Value::Int(_)) => {
-                        let s = match &b {
-                            Value::Num(n) => *n,
-                            Value::Int(i) => i.to_f64(),
-                            _ => 0.0,
-                        };
-                        let out: Vec<f64> = t
-                            .data
-                            .iter()
-                            .map(|x| if (*x - s).abs() < 1e-12 { 1.0 } else { 0.0 })
-                            .collect();
-                        stack.push(Value::Tensor(
-                            runmat_builtins::Tensor::new(out, t.shape.clone())
-                                .map_err(|e| format!("eq: {e}"))?,
-                        ));
-                    }
-                    (Value::Num(_), Value::Tensor(t)) | (Value::Int(_), Value::Tensor(t)) => {
-                        let s = match &a {
-                            Value::Num(n) => *n,
-                            Value::Int(i) => i.to_f64(),
-                            _ => 0.0,
-                        };
-                        let out: Vec<f64> = t
-                            .data
-                            .iter()
-                            .map(|x| if (s - *x).abs() < 1e-12 { 1.0 } else { 0.0 })
-                            .collect();
-                        stack.push(Value::Tensor(
-                            runmat_builtins::Tensor::new(out, t.shape.clone())
-                                .map_err(|e| format!("eq: {e}"))?,
-                        ));
-                    }
-                    (Value::StringArray(sa), Value::StringArray(sb)) => {
-                        if sa.shape != sb.shape {
-                            return Err(mex(
-                                "ShapeMismatch",
-                                "shape mismatch for string array comparison",
-                            ));
-                        }
-                        let mut out = Vec::with_capacity(sa.data.len());
-                        for i in 0..sa.data.len() {
-                            out.push(if sa.data[i] == sb.data[i] { 1.0 } else { 0.0 });
-                        }
-                        stack.push(Value::Tensor(
-                            runmat_builtins::Tensor::new(out, sa.shape.clone())
-                                .map_err(|e| format!("eq: {e}"))?,
-                        ));
-                    }
-                    (Value::StringArray(sa), Value::String(s)) => {
-                        let mut out = Vec::with_capacity(sa.data.len());
-                        for i in 0..sa.data.len() {
-                            out.push(if sa.data[i] == *s { 1.0 } else { 0.0 });
-                        }
-                        stack.push(Value::Tensor(
-                            runmat_builtins::Tensor::new(out, sa.shape.clone())
-                                .map_err(|e| format!("eq: {e}"))?,
-                        ));
-                    }
-                    (Value::String(s), Value::StringArray(sa)) => {
-                        let mut out = Vec::with_capacity(sa.data.len());
-                        for i in 0..sa.data.len() {
-                            out.push(if *s == sa.data[i] { 1.0 } else { 0.0 });
-                        }
-                        stack.push(Value::Tensor(
-                            runmat_builtins::Tensor::new(out, sa.shape.clone())
-                                .map_err(|e| format!("eq: {e}"))?,
-                        ));
-                    }
-                    (Value::String(a_s), Value::String(b_s)) => {
-                        stack.push(Value::Num(if a_s == b_s { 1.0 } else { 0.0 }));
-                    }
-                    _ => {
-                        let bb: f64 = (&b).try_into()?;
-                        let aa: f64 = (&a).try_into()?;
-                        stack.push(Value::Num(if aa == bb { 1.0 } else { 0.0 }));
-                    }
-                }
+                comparison_ops::equal(
+                    &mut stack,
+                    |obj, method, arg| async move {
+                        let args = vec![obj, Value::String(method.to_string()), arg];
+                        call_builtin_vm!("call_method", &args)
+                    },
+                    |name, a, b| async move { call_builtin_vm!(name, &[a, b]) },
+                    |_v, _label| async move { Ok(false) },
+                ).await?;
             }
             Instr::NotEqual => {
-                let b = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let a = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match (&a, &b) {
-                    (Value::Object(obj), _) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("ne".to_string()),
-                            b.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                // Fallback: ne(a,b) = ~eq(a,b)
-                                let args2 = vec![
-                                    Value::Object(obj.clone()),
-                                    Value::String("eq".to_string()),
-                                    b.clone(),
-                                ];
-                                match call_builtin_vm!("call_method", &args2) {
-                                    Ok(v) => {
-                                        let truth =
-                                            logical_truth_from_value(&v, "comparison result")
-                                                .await?;
-                                        stack.push(Value::Num(if !truth { 1.0 } else { 0.0 }));
-                                    }
-                                    Err(_) => {
-                                        let aa: f64 = (&a).try_into()?;
-                                        let bb: f64 = (&b).try_into()?;
-                                        stack.push(Value::Num(if aa != bb { 1.0 } else { 0.0 }));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    (_, Value::Object(obj)) => {
-                        let args = vec![
-                            Value::Object(obj.clone()),
-                            Value::String("ne".to_string()),
-                            a.clone(),
-                        ];
-                        match call_builtin_vm!("call_method", &args) {
-                            Ok(v) => stack.push(v),
-                            Err(_) => {
-                                // Fallback: ne(b,a) = ~eq(b,a)
-                                let args2 = vec![
-                                    Value::Object(obj.clone()),
-                                    Value::String("eq".to_string()),
-                                    a.clone(),
-                                ];
-                                match call_builtin_vm!("call_method", &args2) {
-                                    Ok(v) => {
-                                        let truth =
-                                            logical_truth_from_value(&v, "comparison result")
-                                                .await?;
-                                        stack.push(Value::Num(if !truth { 1.0 } else { 0.0 }));
-                                    }
-                                    Err(_) => {
-                                        let aa: f64 = (&a).try_into()?;
-                                        let bb: f64 = (&b).try_into()?;
-                                        stack.push(Value::Num(if aa != bb { 1.0 } else { 0.0 }));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    (Value::HandleObject(_), _) | (_, Value::HandleObject(_)) => {
-                        let v = call_builtin_vm!("ne", &[a.clone(), b.clone()])?;
-                        stack.push(v);
-                    }
-                    (Value::Tensor(ta), Value::Tensor(tb)) => {
-                        if ta.shape != tb.shape {
-                            return Err(mex(
-                                "ShapeMismatch",
-                                "shape mismatch for element-wise comparison",
-                            ));
-                        }
-                        let mut out = Vec::with_capacity(ta.data.len());
-                        for i in 0..ta.data.len() {
-                            out.push(if (ta.data[i] - tb.data[i]).abs() >= 1e-12 {
-                                1.0
-                            } else {
-                                0.0
-                            });
-                        }
-                        stack.push(Value::Tensor(
-                            runmat_builtins::Tensor::new(out, ta.shape.clone())
-                                .map_err(|e| format!("ne: {e}"))?,
-                        ));
-                    }
-                    (Value::Tensor(t), Value::Num(_)) | (Value::Tensor(t), Value::Int(_)) => {
-                        let s = match &b {
-                            Value::Num(n) => *n,
-                            Value::Int(i) => i.to_f64(),
-                            _ => 0.0,
-                        };
-                        let out: Vec<f64> = t
-                            .data
-                            .iter()
-                            .map(|x| if (*x - s).abs() >= 1e-12 { 1.0 } else { 0.0 })
-                            .collect();
-                        stack.push(Value::Tensor(
-                            runmat_builtins::Tensor::new(out, t.shape.clone())
-                                .map_err(|e| format!("ne: {e}"))?,
-                        ));
-                    }
-                    (Value::Num(_), Value::Tensor(t)) | (Value::Int(_), Value::Tensor(t)) => {
-                        let s = match &a {
-                            Value::Num(n) => *n,
-                            Value::Int(i) => i.to_f64(),
-                            _ => 0.0,
-                        };
-                        let out: Vec<f64> = t
-                            .data
-                            .iter()
-                            .map(|x| if (s - *x).abs() >= 1e-12 { 1.0 } else { 0.0 })
-                            .collect();
-                        stack.push(Value::Tensor(
-                            runmat_builtins::Tensor::new(out, t.shape.clone())
-                                .map_err(|e| format!("ne: {e}"))?,
-                        ));
-                    }
-                    (Value::StringArray(sa), Value::StringArray(sb)) => {
-                        if sa.shape != sb.shape {
-                            return Err(mex(
-                                "ShapeMismatch",
-                                "shape mismatch for string array comparison",
-                            ));
-                        }
-                        let mut out = Vec::with_capacity(sa.data.len());
-                        for i in 0..sa.data.len() {
-                            out.push(if sa.data[i] != sb.data[i] { 1.0 } else { 0.0 });
-                        }
-                        stack.push(Value::Tensor(
-                            runmat_builtins::Tensor::new(out, sa.shape.clone())
-                                .map_err(|e| format!("ne: {e}"))?,
-                        ));
-                    }
-                    (Value::StringArray(sa), Value::String(s)) => {
-                        let mut out = Vec::with_capacity(sa.data.len());
-                        for i in 0..sa.data.len() {
-                            out.push(if sa.data[i] != *s { 1.0 } else { 0.0 });
-                        }
-                        stack.push(Value::Tensor(
-                            runmat_builtins::Tensor::new(out, sa.shape.clone())
-                                .map_err(|e| format!("ne: {e}"))?,
-                        ));
-                    }
-                    (Value::String(s), Value::StringArray(sa)) => {
-                        let mut out = Vec::with_capacity(sa.data.len());
-                        for i in 0..sa.data.len() {
-                            out.push(if *s != sa.data[i] { 1.0 } else { 0.0 });
-                        }
-                        stack.push(Value::Tensor(
-                            runmat_builtins::Tensor::new(out, sa.shape.clone())
-                                .map_err(|e| format!("ne: {e}"))?,
-                        ));
-                    }
-                    (Value::String(a_s), Value::String(b_s)) => {
-                        stack.push(Value::Num(if a_s != b_s { 1.0 } else { 0.0 }));
-                    }
-                    _ => {
-                        let bb: f64 = (&b).try_into()?;
-                        let aa: f64 = (&a).try_into()?;
-                        stack.push(Value::Num(if aa != bb { 1.0 } else { 0.0 }));
-                    }
-                }
+                comparison_ops::not_equal(
+                    &mut stack,
+                    |obj, method, arg| async move {
+                        let args = vec![obj, Value::String(method.to_string()), arg];
+                        call_builtin_vm!("call_method", &args)
+                    },
+                    |name, a, b| async move { call_builtin_vm!(name, &[a, b]) },
+                    |v, label| async move { logical_truth_from_value(&v, &label).await },
+                ).await?;
             }
             Instr::JumpIfFalse(target) => {
                 let cond = pop_value(&mut stack)?;
@@ -2602,43 +1844,10 @@ async fn run_interpreter_inner(
                 }
             }
             Instr::PackToRow(count) => {
-                // Pop count values and build a 1xN numeric tensor (Num only; others error)
-                let mut vals: Vec<f64> = Vec::with_capacity(count);
-                let mut tmp: Vec<Value> = Vec::with_capacity(count);
-                for _ in 0..count {
-                    tmp.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                tmp.reverse();
-                for v in tmp {
-                    let n: f64 = (&v).try_into()?;
-                    vals.push(n);
-                }
-                let tens = runmat_builtins::Tensor::new(vals, vec![1, count])
-                    .map_err(|e| format!("PackToRow: {e}"))?;
-                stack.push(Value::Tensor(tens));
+                array_ops::pack_to_row(&mut stack, count)?;
             }
             Instr::PackToCol(count) => {
-                let mut vals: Vec<f64> = Vec::with_capacity(count);
-                let mut tmp: Vec<Value> = Vec::with_capacity(count);
-                for _ in 0..count {
-                    tmp.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                tmp.reverse();
-                for v in tmp {
-                    let n: f64 = (&v).try_into()?;
-                    vals.push(n);
-                }
-                let tens = runmat_builtins::Tensor::new(vals, vec![count, 1])
-                    .map_err(|e| format!("PackToCol: {e}"))?;
-                stack.push(Value::Tensor(tens));
+                array_ops::pack_to_col(&mut stack, count)?;
             }
             Instr::CallFunctionExpandMulti(name, specs) => {
                 // Build args via specs, then invoke user function similar to CallFunction
@@ -3135,86 +2344,17 @@ async fn run_interpreter_inner(
                 control_flow::pop_try(&mut try_stack);
             }
             Instr::CreateMatrix(rows, cols) => {
-                let total_elements = rows * cols;
-                let mut row_major = Vec::with_capacity(total_elements);
-                for _ in 0..total_elements {
-                    let val: f64 = (&stack
-                        .pop()
-                        .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                        .try_into()?;
-                    row_major.push(val);
-                }
-                row_major.reverse();
-                // Reorder to column-major storage: cm[r + c*rows] = rm[r*cols + c]
-                let mut data = vec![0.0; total_elements];
-                for r in 0..rows {
-                    for c in 0..cols {
-                        data[r + c * rows] = row_major[r * cols + c];
-                    }
-                }
-                let matrix = runmat_builtins::Tensor::new_2d(data, rows, cols)
-                    .map_err(|e| format!("Matrix creation error: {e}"))?;
-                stack.push(Value::Tensor(matrix));
+                array_ops::create_matrix(&mut stack, rows, cols)?;
             }
             Instr::CreateMatrixDynamic(num_rows) => {
-                let mut row_lengths = Vec::new();
-                for _ in 0..num_rows {
-                    let row_len: f64 = (&stack
-                        .pop()
-                        .ok_or(mex("StackUnderflow", "stack underflow"))?)
-                        .try_into()?;
-                    row_lengths.push(row_len as usize);
-                }
-                row_lengths.reverse();
-                let mut rows_data = Vec::new();
-                for &row_len in row_lengths.iter().rev() {
-                    let mut row_values = Vec::new();
-                    for _ in 0..row_len {
-                        row_values.push(
-                            stack
-                                .pop()
-                                .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                        );
-                    }
-                    row_values.reverse();
-                    rows_data.push(row_values);
-                }
-                rows_data.reverse();
-                let result = runmat_runtime::create_matrix_from_values(&rows_data).await?;
-                stack.push(result);
+                array_ops::create_matrix_dynamic(&mut stack, num_rows, |rows_data| async move {
+                    runmat_runtime::create_matrix_from_values(&rows_data).await
+                }).await?;
             }
             Instr::CreateRange(has_step) => {
-                if has_step {
-                    // NOTE: Do not coerce to f64 here; start/step/end may be GPU-backed scalar
-                    // tensors (e.g. loop variable `t` living on GPU). Delegate to `colon` builtin
-                    // which contains the correct scalar extraction and GPU preference semantics.
-                    let end = stack
-                        .pop()
-                        .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                    let step = stack
-                        .pop()
-                        .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                    let start = stack
-                        .pop()
-                        .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                    let args = vec![start, step, end];
-                    match call_builtin_vm!("colon", &args) {
-                        Ok(v) => stack.push(v),
-                        Err(e) => vm_bail!(e.to_string()),
-                    }
-                } else {
-                    let end = stack
-                        .pop()
-                        .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                    let start = stack
-                        .pop()
-                        .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                    let args = vec![start, end];
-                    match call_builtin_vm!("colon", &args) {
-                        Ok(v) => stack.push(v),
-                        Err(e) => vm_bail!(e.to_string()),
-                    }
-                }
+                array_ops::create_range(&mut stack, has_step, |args| async move {
+                    call_builtin_vm!("colon", &args)
+                }).await?;
             }
             Instr::Index(num_indices) => {
                 let indices = idx_read_linear::collect_linear_indices(&mut stack, num_indices).await?;
@@ -4477,30 +3617,11 @@ async fn run_interpreter_inner(
                 stack_ops::pop(&mut stack);
             }
             Instr::Unpack(out_count) => {
-                let value = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
                 if out_count == 0 {
                     pc += 1;
                     continue;
                 }
-                match value {
-                    Value::OutputList(values) => {
-                        for i in 0..out_count {
-                            if let Some(v) = values.get(i) {
-                                stack.push(v.clone());
-                            } else {
-                                stack.push(Value::Num(0.0));
-                            }
-                        }
-                    }
-                    other => {
-                        stack.push(other);
-                        for _ in 1..out_count {
-                            stack.push(Value::Num(0.0));
-                        }
-                    }
-                }
+                array_ops::unpack(&mut stack, out_count)?;
             }
             Instr::ReturnValue => {
                 let action = control_flow::return_value(&mut stack)?;
