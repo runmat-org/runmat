@@ -49,7 +49,6 @@ use runmat_vm::indexing::read_slice as idx_read_slice;
 use runmat_vm::indexing::selectors as idx_selectors;
 use runmat_vm::indexing::write_linear as idx_write_linear;
 use runmat_vm::indexing::write_slice as idx_write_slice;
-use runmat_vm::object::resolve as obj_resolve;
 use runmat_vm::ops::cells as cell_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
 use runmat_vm::runtime::call_stack::{
@@ -745,6 +744,14 @@ async fn run_interpreter_inner(
             | Instr::DeclareGlobalNamed(_, _)
             | Instr::DeclarePersistent(_)
             | Instr::DeclarePersistentNamed(_, _)
+            | Instr::LoadMember(_)
+            | Instr::LoadMemberOrInit(_)
+            | Instr::LoadMemberDynamic
+            | Instr::LoadMemberDynamicOrInit
+            | Instr::StoreMember(_)
+            | Instr::StoreMemberOrInit(_)
+            | Instr::StoreMemberDynamic
+            | Instr::StoreMemberDynamicOrInit
             | Instr::Add
             | Instr::Sub
             | Instr::Mul
@@ -2958,70 +2965,6 @@ async fn run_interpreter_inner(
                             "Cell assignment on non-cell",
                         ))
                     }
-                }
-            }
-            Instr::LoadMember(field) | Instr::LoadMemberOrInit(field) => {
-                let allow_init = matches!(bytecode.instructions[pc], Instr::LoadMemberOrInit(_));
-                let base = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match obj_resolve::load_member(base, field, allow_init).await {
-                    Ok(v) => stack.push(v),
-                    Err(e) => vm_bail!(e),
-                }
-            }
-            Instr::LoadMemberDynamic | Instr::LoadMemberDynamicOrInit => {
-                let allow_init =
-                    matches!(bytecode.instructions[pc], Instr::LoadMemberDynamicOrInit);
-                let name_val = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let base = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let name: String = (&name_val).try_into()?;
-                match obj_resolve::load_member_dynamic(base, name, allow_init).await {
-                    Ok(v) => stack.push(v),
-                    Err(e) => vm_bail!(e),
-                }
-            }
-            Instr::StoreMember(field) | Instr::StoreMemberOrInit(field) => {
-                let allow_init = matches!(bytecode.instructions[pc], Instr::StoreMemberOrInit(_));
-                let rhs = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let base = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                match obj_resolve::store_member(base, field, rhs, allow_init, |oldv, newv| {
-                    runmat_gc::gc_record_write(oldv, newv);
-                })
-                .await
-                {
-                    Ok(v) => stack.push(v),
-                    Err(e) => vm_bail!(e),
-                }
-            }
-            Instr::StoreMemberDynamic | Instr::StoreMemberDynamicOrInit => {
-                let allow_init =
-                    matches!(bytecode.instructions[pc], Instr::StoreMemberDynamicOrInit);
-                let rhs = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let name_val = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let base = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let name: String = (&name_val).try_into()?;
-                match obj_resolve::store_member_dynamic(base, name, rhs, allow_init, |oldv, newv| {
-                    runmat_gc::gc_record_write(oldv, newv);
-                })
-                .await
-                {
-                    Ok(v) => stack.push(v),
-                    Err(e) => vm_bail!(e),
                 }
             }
             Instr::CallMethod(name, arg_count) => {

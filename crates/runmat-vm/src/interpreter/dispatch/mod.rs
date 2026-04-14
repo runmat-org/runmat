@@ -3,6 +3,7 @@ mod control_flow;
 mod arithmetic;
 mod arrays;
 mod exceptions;
+mod object;
 mod stack;
 
 use crate::bytecode::Instr;
@@ -90,6 +91,9 @@ pub async fn dispatch_instruction(
     mut store_local_after_fallback_store: impl FnMut(&str, usize, &Value),
 ) -> Result<Option<DispatchHandled>, RuntimeError> {
     match instr {
+        _ if object::dispatch_object(instr, stack).await? => {
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
         _ if arithmetic::dispatch_arithmetic(instr, stack).await? => {
             Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
