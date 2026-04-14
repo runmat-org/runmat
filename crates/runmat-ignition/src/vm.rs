@@ -667,114 +667,6 @@ fn scatter_complex_with_plan(
     Ok(())
 }
 
-enum StringAssignView {
-    Scalar(String),
-    Array {
-        data: Vec<String>,
-        shape: Vec<usize>,
-        strides: Vec<usize>,
-    },
-}
-
-fn build_string_rhs_view(rhs: &Value, selection_lengths: &[usize]) -> VmResult<StringAssignView> {
-    let dims = selection_lengths.len().max(1);
-    match rhs {
-        Value::String(s) => Ok(StringAssignView::Scalar(s.clone())),
-        Value::Num(n) => Ok(StringAssignView::Scalar(n.to_string())),
-        Value::Int(i) => Ok(StringAssignView::Scalar(i.to_i64().to_string())),
-        Value::Tensor(t) => {
-            let mut shape = t.shape.clone();
-            if shape.len() < dims {
-                shape.resize(dims, 1);
-            } else if shape.len() > dims {
-                if shape.iter().skip(dims).any(|&s| s != 1) {
-                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-                }
-                shape.truncate(dims);
-            }
-            for (rhs_len, sel_len) in shape.iter().zip(selection_lengths.iter()) {
-                if !(*rhs_len == 1 || *rhs_len == *sel_len) {
-                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-                }
-            }
-            let mut strides = vec![1usize; dims];
-            for d in 1..dims {
-                strides[d] = strides[d - 1] * shape[d - 1].max(1);
-            }
-            let data = t.data.iter().map(|v| v.to_string()).collect();
-            Ok(StringAssignView::Array {
-                data,
-                shape,
-                strides,
-            })
-        }
-        Value::StringArray(sa) => {
-            let mut shape = sa.shape.clone();
-            if shape.len() < dims {
-                shape.resize(dims, 1);
-            } else if shape.len() > dims {
-                if shape.iter().skip(dims).any(|&s| s != 1) {
-                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-                }
-                shape.truncate(dims);
-            }
-            for (rhs_len, sel_len) in shape.iter().zip(selection_lengths.iter()) {
-                if !(*rhs_len == 1 || *rhs_len == *sel_len) {
-                    return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
-                }
-            }
-            let mut strides = vec![1usize; dims];
-            for d in 1..dims {
-                strides[d] = strides[d - 1] * shape[d - 1].max(1);
-            }
-            Ok(StringAssignView::Array {
-                data: sa.data.clone(),
-                shape,
-                strides,
-            })
-        }
-        _ => Err(mex(
-            "InvalidSliceAssignmentRhs",
-            "rhs must be string or string array",
-        )),
-    }
-}
-
-fn scatter_string_with_plan(
-    sa: &mut runmat_builtins::StringArray,
-    plan: &SlicePlan,
-    view: &StringAssignView,
-) -> VmResult<()> {
-    if plan.indices.is_empty() {
-        return Ok(());
-    }
-    let mut idx_iter = plan.indices.iter();
-    cartesian_positions(&plan.selection_lengths, |position| {
-        if let Some(&lin) = idx_iter.next() {
-            let replacement = match view {
-                StringAssignView::Scalar(s) => s.clone(),
-                StringAssignView::Array {
-                    data,
-                    shape,
-                    strides,
-                } => {
-                    let mut rlin = 0usize;
-                    for (d, &pos_val) in position.iter().enumerate() {
-                        let rhs_len = shape.get(d).copied().unwrap_or(1);
-                        let pos = if rhs_len == 1 { 0 } else { pos_val };
-                        rlin += pos * strides.get(d).copied().unwrap_or(1);
-                    }
-                    data.get(rlin).cloned().unwrap_or_default()
-                }
-            };
-            if let Some(slot) = sa.data.get_mut(lin as usize) {
-                *slot = replacement;
-            }
-        }
-    });
-    Ok(())
-}
-
 fn apply_end_offsets_to_numeric<'a>(
     numeric: &'a [Value],
     ctx: IndexContext<'a>,
@@ -4402,7 +4294,7 @@ async fn run_interpreter_inner(
                             Err(e) => vm_bail!(e.to_string()),
                         }
                     }
-                    Value::Tensor(mut t) => {
+                    Value::Tensor(t) => {
                         // F4: write barrier hook (placeholder) – in a full GC integration, call into GC pre/post here
                         // Linear 1-D indexing assignment: A(I) = rhs
                         if dims == 1 {
@@ -4417,7 +4309,6 @@ async fn run_interpreter_inner(
                                 .await?,
                             );
                         } else {
-                            let rank = t.shape.len();
                             let mut selectors: Vec<SliceSelector> = Vec::with_capacity(dims);
                             let mut num_iter = 0usize;
                             for d in 0..dims {
@@ -4426,8 +4317,7 @@ async fn run_interpreter_inner(
                                 if is_colon {
                                     selectors.push(SliceSelector::Colon);
                                 } else if is_end {
-                                    selectors
-                                        .push(SliceSelector::Scalar(*t.shape.get(d).unwrap_or(&1)));
+                                    selectors.push(SliceSelector::Scalar(*t.shape.get(d).unwrap_or(&1)));
                                 } else {
                                     let v = numeric.get(num_iter).ok_or(mex(
                                         "MissingNumericIndex",
@@ -4442,240 +4332,21 @@ async fn run_interpreter_inner(
                                     selectors.push(selector);
                                 }
                             }
-                            // 2-D write fast paths (full column/row) with strict broadcast checks
-                            if dims == 2 {
-                                let rows = if rank >= 1 { t.shape[0] } else { 1 };
-                                let cols = if rank >= 2 { t.shape[1] } else { 1 };
-                                match (&selectors[0], &selectors[1]) {
-                                    // A(:, j) = rhs
-                                    (SliceSelector::Colon, SliceSelector::Scalar(j)) => {
-                                        let j0 = *j - 1;
-                                        // Size growth semantics: extend columns if needed
-                                        if j0 >= cols {
-                                            let new_cols = j0 + 1;
-                                            let new_rows = rows;
-                                            let mut new_data = vec![0.0f64; new_rows * new_cols];
-                                            for c in 0..cols {
-                                                let src_off = c * rows;
-                                                let dst_off = c * new_rows;
-                                                new_data[dst_off..dst_off + rows].copy_from_slice(
-                                                    &t.data[src_off..src_off + rows],
-                                                );
-                                            }
-                                            t.data = new_data;
-                                            t.shape = vec![new_rows, new_cols];
-                                            t.rows = new_rows;
-                                            t.cols = new_cols;
-                                        }
-                                        let start = j0 * rows;
-                                        match rhs {
-                                            Value::Num(v) => {
-                                                for r in 0..rows {
-                                                    t.data[start + r] = v;
-                                                }
-                                            }
-                                            Value::Tensor(rt) => {
-                                                let len = rt.data.len();
-                                                if len == rows {
-                                                    for r in 0..rows {
-                                                        t.data[start + r] = rt.data[r];
-                                                    }
-                                                } else if len == 1 {
-                                                    for r in 0..rows {
-                                                        t.data[start + r] = rt.data[0];
-                                                    }
-                                                } else {
-                                                    vm_bail!("shape mismatch for slice assign"
-                                                        .to_string());
-                                                }
-                                            }
-                                            _ => {
-                                                vm_bail!("rhs must be numeric or tensor".to_string())
-                                            }
-                                        }
-                                        stack.push(Value::Tensor(t));
-                                        bench_end("StoreSlice2D.fast_col", __b);
-                                        pc += 1;
-                                        continue;
-                                    }
-                                    // A(i, :) = rhs
-                                    (SliceSelector::Scalar(i), SliceSelector::Colon) => {
-                                        let i0 = *i - 1;
-                                        // Size growth semantics: extend rows if needed
-                                        if i0 >= rows {
-                                            let new_rows = i0 + 1;
-                                            let new_cols = cols;
-                                            let mut new_data = vec![0.0f64; new_rows * new_cols];
-                                            for c in 0..cols {
-                                                for r in 0..rows {
-                                                    new_data[r + c * new_rows] =
-                                                        t.data[r + c * rows];
-                                                }
-                                            }
-                                            t.data = new_data;
-                                            t.shape = vec![new_rows, new_cols];
-                                            t.rows = new_rows;
-                                            t.cols = new_cols;
-                                        }
-                                        match rhs {
-                                            Value::Num(v) => {
-                                                for c in 0..cols {
-                                                    t.data[i0 + c * rows] = v;
-                                                }
-                                            }
-                                            Value::Tensor(rt) => {
-                                                let len = rt.data.len();
-                                                if len == cols {
-                                                    for c in 0..cols {
-                                                        t.data[i0 + c * rows] = rt.data[c];
-                                                    }
-                                                } else if len == 1 {
-                                                    for c in 0..cols {
-                                                        t.data[i0 + c * rows] = rt.data[0];
-                                                    }
-                                                } else {
-                                                    vm_bail!("shape mismatch for slice assign"
-                                                        .to_string());
-                                                }
-                                            }
-                                            _ => {
-                                                vm_bail!("rhs must be numeric or tensor".to_string())
-                                            }
-                                        }
-                                        stack.push(Value::Tensor(t));
-                                        bench_end("StoreSlice2D.fast_row", __b);
-                                        pc += 1;
-                                        continue;
-                                    }
-                                    _ => {}
-                                }
-                            }
-                            // Generic N-D writer path
-                            // Build per-dim index lists and strides
-                            let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
-                            let full_shape: Vec<usize> = if rank < dims {
-                                let mut s = t.shape.clone();
-                                s.resize(dims, 1);
-                                s
-                            } else {
-                                t.shape.clone()
-                            };
-                            for d in 0..dims {
-                                let dim_len = full_shape[d];
-                                let idxs = match &selectors[d] {
-                                    SliceSelector::Colon => (1..=dim_len).collect(),
-                                    SliceSelector::Scalar(i) => vec![*i],
-                                    SliceSelector::Indices(v) => v.clone(),
-                                    SliceSelector::LinearIndices { values: v, .. } => v.clone(),
-                                };
-                                if idxs.iter().any(|&i| i == 0 || i > dim_len) {
-                                    vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
-                                }
-                                per_dim_indices.push(idxs);
-                            }
-                            // Column-major strides (first dimension fastest)
-                            let mut strides: Vec<usize> = vec![0; dims];
-                            let mut acc = 1usize;
-                            for d in 0..dims {
-                                strides[d] = acc;
-                                acc *= full_shape[d];
-                            }
-                            let total_out: usize =
-                                per_dim_indices.iter().map(|v| v.len()).product();
-                            // Prepare RHS values
-                            enum RhsView {
-                                Scalar(f64),
-                                Tensor {
-                                    data: Vec<f64>,
-                                    shape: Vec<usize>,
-                                    strides: Vec<usize>,
-                                },
-                            }
-                            let rhs_view = match rhs {
-                                Value::Num(n) => RhsView::Scalar(n),
-                                Value::Tensor(rt) => {
-                                    // Allow exact match or N-D broadcasting where rhs_dim is 1 or equals out_dim
-                                    let mut shape = rt.shape.clone();
-                                    if shape.len() < dims {
-                                        shape.resize(dims, 1);
-                                    }
-                                    if shape.len() > dims {
-                                        if shape.iter().skip(dims).any(|&s| s != 1) {
-                                            vm_bail!("shape mismatch for slice assign".to_string());
-                                        }
-                                        shape.truncate(dims);
-                                    }
-                                    let mut ok = true;
-                                    for d in 0..dims {
-                                        let out_len = per_dim_indices[d].len();
-                                        let rhs_len = shape[d];
-                                        if !(rhs_len == 1 || rhs_len == out_len) {
-                                            ok = false;
-                                            break;
+                            let vm_selectors: Vec<_> = selectors
+                                .iter()
+                                .map(|s| match s {
+                                    SliceSelector::Colon => idx_selectors::SliceSelector::Colon,
+                                    SliceSelector::Scalar(i) => idx_selectors::SliceSelector::Scalar(*i),
+                                    SliceSelector::Indices(v) => idx_selectors::SliceSelector::Indices(v.clone()),
+                                    SliceSelector::LinearIndices { values, output_shape } => {
+                                        idx_selectors::SliceSelector::LinearIndices {
+                                            values: values.clone(),
+                                            output_shape: output_shape.clone(),
                                         }
                                     }
-                                    if !ok {
-                                        vm_bail!("shape mismatch for slice assign".to_string());
-                                    }
-                                    let mut rstrides = vec![0usize; dims];
-                                    let mut racc = 1usize;
-                                    for d in 0..dims {
-                                        rstrides[d] = racc;
-                                        racc *= shape[d];
-                                    }
-                                    RhsView::Tensor {
-                                        data: rt.data,
-                                        shape,
-                                        strides: rstrides,
-                                    }
-                                }
-                                _ => vm_bail!("rhs must be numeric or tensor".to_string()),
-                            };
-                            // Iterate and scatter
-                            let mut _k = 0usize;
-                            let mut idx = vec![0usize; dims];
-                            if total_out == 0 {
-                                stack.push(Value::Tensor(t));
-                            } else {
-                                loop {
-                                    let mut lin = 0usize;
-                                    for d in 0..dims {
-                                        let i0 = per_dim_indices[d][idx[d]] - 1;
-                                        lin += i0 * strides[d];
-                                    }
-                                    match &rhs_view {
-                                        RhsView::Scalar(val) => t.data[lin] = *val,
-                                        RhsView::Tensor {
-                                            data,
-                                            shape,
-                                            strides,
-                                        } => {
-                                            let mut rlin = 0usize;
-                                            for d in 0..dims {
-                                                let rhs_len = shape[d];
-                                                let pos = if rhs_len == 1 { 0 } else { idx[d] };
-                                                rlin += pos * strides[d];
-                                            }
-                                            t.data[lin] = data[rlin];
-                                        }
-                                    }
-                                    _k += 1;
-                                    // Increment first dim fastest
-                                    let mut d = 0usize;
-                                    while d < dims {
-                                        idx[d] += 1;
-                                        if idx[d] < per_dim_indices[d].len() {
-                                            break;
-                                        }
-                                        idx[d] = 0;
-                                        d += 1;
-                                    }
-                                    if d == dims {
-                                        break;
-                                    }
-                                }
-                                stack.push(Value::Tensor(t));
-                            }
+                                })
+                                .collect();
+                            stack.push(idx_write_slice::assign_tensor_slice_nd(t, dims, &vm_selectors, rhs)?);
                         }
                     }
                     Value::GpuTensor(handle) => {
@@ -5235,9 +4906,15 @@ async fn run_interpreter_inner(
                             pc += 1;
                             continue;
                         }
-                        let rhs_view = build_complex_rhs_view(&rhs, &plan.selection_lengths)
+                        let vm_plan = idx_selectors::SlicePlan {
+                            indices: plan.indices.clone(),
+                            output_shape: plan.output_shape.clone(),
+                            selection_lengths: plan.selection_lengths.clone(),
+                            dims: plan.dims,
+                        };
+                        let rhs_view = idx_write_slice::build_complex_rhs_view(&rhs, &plan.selection_lengths)
                             .map_err(|e| format!("slice assign: {e}"))?;
-                        scatter_complex_with_plan(&mut ct, &plan, &rhs_view)
+                        idx_write_slice::scatter_complex_with_plan(&mut ct, &vm_plan, &rhs_view)
                             .map_err(|e| format!("slice assign: {e}"))?;
                         stack.push(Value::ComplexTensor(ct));
                         bench_end("StoreSlice", __b);
@@ -5257,9 +4934,15 @@ async fn run_interpreter_inner(
                             pc += 1;
                             continue;
                         }
-                        let rhs_view = build_string_rhs_view(&rhs, &plan.selection_lengths)
+                        let vm_plan = idx_selectors::SlicePlan {
+                            indices: plan.indices.clone(),
+                            output_shape: plan.output_shape.clone(),
+                            selection_lengths: plan.selection_lengths.clone(),
+                            dims: plan.dims,
+                        };
+                        let rhs_view = idx_write_slice::build_string_rhs_view(&rhs, &plan.selection_lengths)
                             .map_err(|e| format!("slice assign: {e}"))?;
-                        scatter_string_with_plan(&mut sa, &plan, &rhs_view)
+                        idx_write_slice::scatter_string_with_plan(&mut sa, &vm_plan, &rhs_view)
                             .map_err(|e| format!("slice assign: {e}"))?;
                         stack.push(Value::StringArray(sa));
                         bench_end("StoreSlice", __b);
