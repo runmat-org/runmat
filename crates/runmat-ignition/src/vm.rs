@@ -52,7 +52,7 @@ use runmat_vm::indexing::selectors as idx_selectors;
 use runmat_vm::ops::cells as cell_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
 use runmat_vm::runtime::call_stack::{
-    attach_call_frames, push_call_frame,
+    attach_call_frames,
 };
 use runmat_vm::runtime::globals as runtime_globals;
 use runmat_vm::runtime::workspace::{
@@ -61,7 +61,6 @@ use runmat_vm::runtime::workspace::{
 };
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::convert::TryInto;
 use std::sync::Arc;
 use std::sync::Once;
 use tracing::{debug, info_span};
@@ -74,12 +73,6 @@ impl Drop for FusionPlanGuard {
     fn drop(&mut self) {
         deactivate_fusion_plan();
     }
-}
-
-macro_rules! call_builtin_vm {
-    ($name:expr, $args:expr $(,)?) => {
-        runmat_runtime::call_builtin_async($name, $args).await
-    };
 }
 
 fn output_hint_for_single_result(bytecode: &Bytecode, pc: usize) -> usize {
@@ -778,6 +771,7 @@ async fn run_interpreter_inner(
             | Instr::CallFevalExpandMulti(_)
             | Instr::CallFunction(_, _)
             | Instr::CallFunctionMulti(_, _, _)
+            | Instr::CallFunctionExpandMulti(_, _)
             | Instr::CallBuiltinExpandLast(_, _, _)
             | Instr::CallBuiltinExpandAt(_, _, _, _)
             | Instr::CallBuiltinExpandMulti(_, _)
@@ -896,177 +890,6 @@ async fn run_interpreter_inner(
                     Ok(interp_dispatch::BuiltinHandling::Caught) => continue,
                     Ok(interp_dispatch::BuiltinHandling::Uncaught(err)) => return Err(err),
                     Err(err) => vm_bail!(err),
-                }
-            }
-            Instr::CallFunctionExpandMulti(name, specs) => {
-                // Build args via specs, then invoke user function similar to CallFunction
-                let mut temp: Vec<Value> = Vec::new();
-                for spec in specs.iter().rev() {
-                    if spec.is_expand {
-                        let mut indices = Vec::with_capacity(spec.num_indices);
-                        for _ in 0..spec.num_indices {
-                            indices.push(
-                                stack
-                                    .pop()
-                                    .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                            );
-                        }
-                        indices.reverse();
-                        let base = stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                        let expanded = if spec.expand_all {
-                            match base {
-                                Value::Cell(ca) => ca.data.iter().map(|p| (*(*p)).clone()).collect::<Vec<Value>>(),
-                                Value::Object(obj) => {
-                                    let empty = runmat_builtins::CellArray::new(vec![], 1, 0).map_err(|e| format!("subsref build error: {e}"))?;
-                                    let v = match call_builtin_vm!("call_method", &[
-                                        Value::Object(obj),
-                                        Value::String("subsref".to_string()),
-                                        Value::String("{}".to_string()),
-                                        Value::Cell(empty),
-                                    ]) { Ok(v) => v, Err(e) => vm_bail!(e) };
-                                    match v { Value::Cell(ca) => ca.data.iter().map(|p| (*(*p)).clone()).collect::<Vec<Value>>(), other => vec![other] }
-                                }
-                                _ => {
-                                    return Err(mex(
-                                        "InvalidExpandAllTarget",
-                                        "CallFunctionExpandMulti requires cell or object for expand_all",
-                                    ))
-                                }
-                            }
-                        } else {
-                            match (base, indices.len()) {
-                                (Value::Cell(ca), 1) => match &indices[0] {
-                                    Value::Num(n) => {
-                                        let idx = *n as usize;
-                                        if idx == 0 || idx > ca.data.len() {
-                                            return Err(mex(
-                                                "CellIndexOutOfBounds",
-                                                "Cell index out of bounds",
-                                            ));
-                                        }
-                                        vec![(*ca.data[idx - 1]).clone()]
-                                    }
-                                    Value::Int(i) => {
-                                        let idx = i.to_i64() as usize;
-                                        if idx == 0 || idx > ca.data.len() {
-                                            return Err(mex(
-                                                "CellIndexOutOfBounds",
-                                                "Cell index out of bounds",
-                                            ));
-                                        }
-                                        vec![(*ca.data[idx - 1]).clone()]
-                                    }
-                                    Value::Tensor(t) => {
-                                        let mut out: Vec<Value> = Vec::with_capacity(t.data.len());
-                                        for &val in &t.data {
-                                            let iu = val as usize;
-                                            if iu == 0 || iu > ca.data.len() {
-                                                return Err(mex(
-                                                    "CellIndexOutOfBounds",
-                                                    "Cell index out of bounds",
-                                                ));
-                                            }
-                                            out.push((*ca.data[iu - 1]).clone());
-                                        }
-                                        out
-                                    }
-                                    _ => {
-                                        return Err(mex(
-                                            "CellIndexType",
-                                            "Unsupported cell index type",
-                                        ))
-                                    }
-                                },
-                                (Value::Cell(ca), 2) => {
-                                    let r: f64 = (&indices[0]).try_into()?;
-                                    let c: f64 = (&indices[1]).try_into()?;
-                                    let (ir, ic) = (r as usize, c as usize);
-                                    if ir == 0 || ir > ca.rows || ic == 0 || ic > ca.cols {
-                                        return Err(mex(
-                                            "CellSubscriptOutOfBounds",
-                                            "Cell subscript out of bounds",
-                                        ));
-                                    }
-                                    vec![(*ca.data[(ir - 1) * ca.cols + (ic - 1)]).clone()]
-                                }
-                                (Value::Object(obj), _) => {
-                                    let cell = runmat_builtins::CellArray::new(
-                                        indices.clone(),
-                                        1,
-                                        indices.len(),
-                                    )
-                                    .map_err(|e| format!("subsref build error: {e}"))?;
-                                    let v = match call_builtin_vm!(
-                                        "call_method",
-                                        &[
-                                            Value::Object(obj),
-                                            Value::String("subsref".to_string()),
-                                            Value::String("{}".to_string()),
-                                            Value::Cell(cell),
-                                        ],
-                                    ) {
-                                        Ok(v) => v,
-                                        Err(e) => vm_bail!(e),
-                                    };
-                                    vec![v]
-                                }
-                                _ => return Err(
-                                    "CallFunctionExpandMulti requires cell or object cell access"
-                                        .to_string()
-                                        .into(),
-                                ),
-                            }
-                        };
-                        for v in expanded {
-                            temp.push(v);
-                        }
-                    } else {
-                        temp.push(
-                            stack
-                                .pop()
-                                .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                        );
-                    }
-                }
-                temp.reverse();
-                let args = temp;
-                let interp_dispatch::PreparedUserDispatch {
-                    func,
-                    var_map,
-                    func_program,
-                    func_vars,
-                } = match interp_dispatch::prepare_named_user_dispatch(
-                    &name,
-                    &bytecode.functions,
-                    &args,
-                    &vars,
-                ) {
-                    Ok(prepared) => prepared,
-                    Err(err) => vm_bail!(err),
-                };
-                let mut func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
-                func_bytecode.source_id = func.source_id;
-                let _call_frame_guard = push_call_frame(&name, &bytecode, pc);
-                // Make nested closures visible to outer frames
-                for (k, v) in func_bytecode.functions.iter() {
-                    context.functions.insert(k.clone(), v.clone());
-                }
-                let func_result_vars =
-                    match Box::pin(interpret_function(&func_bytecode, func_vars)).await {
-                        Ok(v) => v,
-                        Err(e) => vm_bail!(e),
-                    };
-                if let Err(err) = interp_dispatch::push_user_call_outputs(
-                    &mut stack,
-                    &name,
-                    &func,
-                    &var_map,
-                    &func_result_vars,
-                    1,
-                ) {
-                    vm_bail!(err);
                 }
             }
             Instr::ExitScope(local_count) => {

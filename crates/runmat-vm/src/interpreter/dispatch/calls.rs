@@ -363,6 +363,62 @@ pub async fn build_feval_expand_multi_args(
     .await
 }
 
+pub async fn build_user_function_expand_multi_args(
+    stack: &mut Vec<Value>,
+    specs: &[ArgSpec],
+) -> Result<Vec<Value>, RuntimeError> {
+    build_expanded_args_from_specs(
+        stack,
+        specs,
+        "CallFunctionExpandMulti requires cell or object for expand_all",
+        "CallFunctionExpandMulti requires cell or object cell access",
+        |base| async move {
+            match base {
+                Value::Cell(ca) => Ok(crate::call::shared::expand_all_cell(&ca)),
+                Value::Object(obj) => {
+                    let empty = subsref_empty_brace_cell()?;
+                    let args = vec![
+                        Value::Object(obj),
+                        Value::String("subsref".to_string()),
+                        Value::String("{}".to_string()),
+                        empty,
+                    ];
+                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
+                    Ok(match v {
+                        Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
+                        other => vec![other],
+                    })
+                }
+                _ => Err(crate::interpreter::errors::mex(
+                    "InvalidExpandAllTarget",
+                    "CallFunctionExpandMulti requires cell or object for expand_all",
+                )),
+            }
+        },
+        |base, indices| async move {
+            match (base, indices.len()) {
+                (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => expand_cell_indices(&ca, &indices),
+                (Value::Object(obj), _) => {
+                    let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
+                    let args = vec![
+                        Value::Object(obj),
+                        Value::String("subsref".to_string()),
+                        Value::String("{}".to_string()),
+                        cell,
+                    ];
+                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
+                    Ok(vec![v])
+                }
+                _ => Err(crate::interpreter::errors::mex(
+                    "ExpandError",
+                    "CallFunctionExpandMulti requires cell or object cell access",
+                )),
+            }
+        },
+    )
+    .await
+}
+
 pub fn handle_builtin_outcome(
     result: Result<Value, RuntimeError>,
     imported: ImportedBuiltinResolution,
@@ -412,10 +468,10 @@ pub async fn handle_method_call(
     Ok(MethodHandling::Completed)
 }
 
-pub async fn handle_user_function_call<BF, BFFut, IF, IFFut>(
+pub async fn handle_prepared_user_function_call<BF, BFFut, IF, IFFut>(
     stack: &mut Vec<Value>,
     name: &str,
-    arg_count: usize,
+    args: Vec<Value>,
     out_count: usize,
     bytecode_functions: &std::collections::HashMap<String, UserFunction>,
     vars: &mut Vec<Value>,
@@ -432,7 +488,7 @@ where
     IF: FnOnce(crate::bytecode::Bytecode, Vec<Value>, String, usize, usize) -> IFFut,
     IFFut: Future<Output = Result<Vec<Value>, RuntimeError>>,
 {
-    let args = crate::call::builtins::collect_call_args(stack, arg_count)?;
+    let arg_count = args.len();
     if let Some(result) = builtin_fallback(name.to_string(), args.clone(), out_count).await? {
         stack.push(result);
         return Ok(UserCallHandling::Completed);
@@ -480,6 +536,44 @@ where
         push_single_result(stack, output_list);
     }
     Ok(UserCallHandling::Completed)
+}
+
+pub async fn handle_user_function_call<BF, BFFut, IF, IFFut>(
+    stack: &mut Vec<Value>,
+    name: &str,
+    arg_count: usize,
+    out_count: usize,
+    bytecode_functions: &std::collections::HashMap<String, UserFunction>,
+    vars: &mut Vec<Value>,
+    try_stack: &mut Vec<(usize, Option<usize>)>,
+    last_exception: &mut Option<MException>,
+    pc: &mut usize,
+    refresh_vars: impl Fn(&[Value]),
+    builtin_fallback: BF,
+    interpret_counts: IF,
+) -> Result<UserCallHandling, RuntimeError>
+where
+    BF: FnOnce(String, Vec<Value>, usize) -> BFFut,
+    BFFut: Future<Output = Result<Option<Value>, RuntimeError>>,
+    IF: FnOnce(crate::bytecode::Bytecode, Vec<Value>, String, usize, usize) -> IFFut,
+    IFFut: Future<Output = Result<Vec<Value>, RuntimeError>>,
+{
+    let args = crate::call::builtins::collect_call_args(stack, arg_count)?;
+    handle_prepared_user_function_call(
+        stack,
+        name,
+        args,
+        out_count,
+        bytecode_functions,
+        vars,
+        try_stack,
+        last_exception,
+        pc,
+        refresh_vars,
+        builtin_fallback,
+        interpret_counts,
+    )
+    .await
 }
 
 pub async fn handle_builtin_expand_last_call<F, Fut>(

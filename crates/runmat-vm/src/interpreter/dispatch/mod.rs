@@ -17,11 +17,12 @@ use std::collections::HashMap;
 
 pub use calls::{
     build_builtin_expand_at_args, build_builtin_expand_last_args, build_builtin_expand_multi_args,
-    build_feval_expand_multi_args, handle_builtin_expand_at_call, handle_builtin_expand_last_call,
+    build_feval_expand_multi_args, build_user_function_expand_multi_args,
+    handle_builtin_expand_at_call, handle_builtin_expand_last_call,
     handle_builtin_expand_multi_call, handle_builtin_outcome, handle_feval_dispatch,
     handle_create_closure, handle_load_method, handle_load_static_property, handle_method_call,
     handle_method_or_member_index_call, handle_register_class, handle_static_method_call,
-    handle_user_function_call,
+    handle_prepared_user_function_call, handle_user_function_call,
     output_list_for_user_call, push_single_result, prepare_named_user_dispatch,
     push_user_call_outputs, unpack_prepared_user_call, BuiltinHandling, FevalHandling,
     MethodHandling, PreparedUserDispatch, UserCallHandling,
@@ -460,6 +461,34 @@ pub async fn dispatch_instruction(
             .await?;
             let value = invoke_user_for_end_expr(name, args, bytecode_functions, vars).await?;
             stack.push(value);
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::CallFunctionExpandMulti(name, specs) => {
+            let args = build_user_function_expand_multi_args(stack, specs).await?;
+            match handle_prepared_user_function_call(
+                stack,
+                name,
+                args,
+                1,
+                bytecode_functions,
+                vars,
+                try_stack,
+                last_exception,
+                pc,
+                refresh_workspace_state,
+                |name, args, out_count| builtin_fallback_user_call(name, args, out_count),
+                |bc, vars, name, out_count, in_count| {
+                    interpret_function_counts(bc, vars, name, out_count, in_count)
+                },
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(DispatchDecision::ContinueLoop)))
+                }
+                UserCallHandling::Uncaught(err) => return Err(err),
+            }
             Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         Instr::CallMethod(name, arg_count) => {
