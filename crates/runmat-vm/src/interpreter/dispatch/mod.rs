@@ -4,6 +4,12 @@ mod arrays;
 mod exceptions;
 mod stack;
 
+use crate::bytecode::Instr;
+use runmat_builtins::Value;
+use runmat_runtime::RuntimeError;
+use runmat_runtime::dispatcher::gather_if_needed_async;
+use std::collections::HashMap;
+
 pub use calls::{
     build_builtin_expand_at_args, build_builtin_expand_last_args, build_builtin_expand_multi_args,
     handle_builtin_outcome, handle_feval_dispatch, output_list_for_user_call, push_single_result,
@@ -19,3 +25,151 @@ pub use stack::{
     emit_stack_top, emit_var, load_bool, load_char_row, load_complex, load_const, load_local,
     load_string, load_var, store_local, store_var,
 };
+
+pub async fn logical_truth_from_value(value: &Value, label: &str) -> Result<bool, RuntimeError> {
+    match value {
+        Value::Bool(flag) => Ok(*flag),
+        Value::Int(i) => Ok(!i.is_zero()),
+        Value::Num(n) => Ok(*n != 0.0),
+        Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
+        Value::LogicalArray(array) => Err(crate::interpreter::errors::mex(
+            "InvalidConditionType",
+            &format!(
+                "{label}: expected scalar logical or numeric value, got logical array with {} elements",
+                array.data.len()
+            ),
+        )),
+        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0] != 0.0),
+        Value::Tensor(tensor) => Err(crate::interpreter::errors::mex(
+            "InvalidConditionType",
+            &format!(
+                "{label}: expected scalar logical or numeric value, got numeric array with {} elements",
+                tensor.data.len()
+            ),
+        )),
+        Value::GpuTensor(_) => {
+            let gathered = gather_if_needed_async(value)
+                .await
+                .map_err(|e| format!("{label}: {e}"))?;
+            Box::pin(logical_truth_from_value(&gathered, label)).await
+        }
+        other => Err(crate::interpreter::errors::mex(
+            "InvalidConditionType",
+            &format!("{label}: expected scalar logical or numeric value, got {other:?}"),
+        )),
+    }
+}
+
+pub async fn dispatch_instruction(
+    instr: &Instr,
+    stack: &mut Vec<Value>,
+    vars: &[Value],
+    var_names: &HashMap<usize, String>,
+    context: &crate::bytecode::ExecutionContext,
+    try_stack: &mut Vec<(usize, Option<usize>)>,
+    pc: &mut usize,
+) -> Result<Option<DispatchDecision>, RuntimeError> {
+    match instr {
+        Instr::EmitStackTop { label } => {
+            emit_stack_top(stack, label, var_names).await?;
+            Ok(Some(DispatchDecision::FallThrough))
+        }
+        Instr::EmitVar { var_index, label } => {
+            emit_var(vars, *var_index, label, var_names).await?;
+            Ok(Some(DispatchDecision::FallThrough))
+        }
+        Instr::LoadConst(value) => {
+            load_const(stack, *value);
+            Ok(Some(DispatchDecision::FallThrough))
+        }
+        Instr::LoadComplex(re, im) => {
+            load_complex(stack, *re, *im);
+            Ok(Some(DispatchDecision::FallThrough))
+        }
+        Instr::LoadBool(value) => {
+            load_bool(stack, *value);
+            Ok(Some(DispatchDecision::FallThrough))
+        }
+        Instr::LoadString(value) => {
+            load_string(stack, value.clone());
+            Ok(Some(DispatchDecision::FallThrough))
+        }
+        Instr::LoadCharRow(value) => {
+            load_char_row(stack, value.clone())?;
+            Ok(Some(DispatchDecision::FallThrough))
+        }
+        Instr::LoadLocal(offset) => {
+            load_local(stack, context, vars, *offset)?;
+            Ok(Some(DispatchDecision::FallThrough))
+        }
+        Instr::Swap => {
+            crate::ops::stack::swap(stack)?;
+            Ok(Some(DispatchDecision::FallThrough))
+        }
+        Instr::Pop => {
+            crate::ops::stack::pop(stack);
+            Ok(Some(DispatchDecision::FallThrough))
+        }
+        Instr::AndAnd(target) => Ok(Some(apply_control_flow_action(
+            crate::ops::control_flow::and_and(stack, *target)?,
+            pc,
+        ))),
+        Instr::OrOr(target) => Ok(Some(apply_control_flow_action(
+            crate::ops::control_flow::or_or(stack, *target)?,
+            pc,
+        ))),
+        Instr::JumpIfFalse(target) => {
+            let cond = crate::interpreter::stack::pop_value(stack)?;
+            let truth = logical_truth_from_value(&cond, "if condition").await?;
+            Ok(Some(apply_control_flow_action(
+                crate::ops::control_flow::jump_if_false(truth, *target),
+                pc,
+            )))
+        }
+        Instr::Jump(target) => Ok(Some(apply_control_flow_action(
+            crate::ops::control_flow::jump(*target),
+            pc,
+        ))),
+        Instr::EnterTry(catch_pc, catch_var) => {
+            crate::ops::control_flow::enter_try(try_stack, *catch_pc, *catch_var);
+            Ok(Some(DispatchDecision::FallThrough))
+        }
+        Instr::PopTry => {
+            crate::ops::control_flow::pop_try(try_stack);
+            Ok(Some(DispatchDecision::FallThrough))
+        }
+        Instr::PackToRow(count) => {
+            pack_to_row(stack, *count)?;
+            Ok(Some(DispatchDecision::FallThrough))
+        }
+        Instr::PackToCol(count) => {
+            pack_to_col(stack, *count)?;
+            Ok(Some(DispatchDecision::FallThrough))
+        }
+        Instr::Unpack(out_count) => {
+            if *out_count > 0 {
+                unpack(stack, *out_count)?;
+            }
+            Ok(Some(DispatchDecision::FallThrough))
+        }
+        Instr::CreateMatrix(rows, cols) => {
+            create_matrix(stack, *rows, *cols)?;
+            Ok(Some(DispatchDecision::FallThrough))
+        }
+        Instr::CreateMatrixDynamic(num_rows) => {
+            create_matrix_dynamic(stack, *num_rows, |rows_data| async move {
+                runmat_runtime::create_matrix_from_values(&rows_data).await
+            })
+            .await?;
+            Ok(Some(DispatchDecision::FallThrough))
+        }
+        Instr::CreateRange(has_step) => {
+            create_range(stack, *has_step, |args| async move {
+                runmat_runtime::call_builtin_async("colon", &args).await
+            })
+            .await?;
+            Ok(Some(DispatchDecision::FallThrough))
+        }
+        _ => Ok(None),
+    }
+}

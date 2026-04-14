@@ -54,7 +54,6 @@ use runmat_vm::object::{class_def as obj_class_def, resolve as obj_resolve};
 use runmat_vm::ops::cells as cell_ops;
 use runmat_vm::ops::{arithmetic as arithmetic_ops, comparison as comparison_ops};
 use runmat_vm::ops::control_flow;
-use runmat_vm::ops::stack as stack_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
 use runmat_vm::runtime::call_stack::{
     attach_call_frames, push_call_frame,
@@ -802,34 +801,52 @@ async fn run_interpreter_inner(
             &bytecode.instructions[pc],
             stack.len(),
         );
+        if let Some(decision) = interp_dispatch::dispatch_instruction(
+            &bytecode.instructions[pc],
+            &mut stack,
+            &vars,
+            &bytecode.var_names,
+            &context,
+            &mut try_stack,
+            &mut pc,
+        )
+        .await?
+        {
+            match decision {
+                DispatchDecision::ContinueLoop => continue,
+                DispatchDecision::Return => {
+                    interpreter_timing.flush_host_span("return", None);
+                    break;
+                }
+                DispatchDecision::FallThrough => {
+                    pc += 1;
+                    continue;
+                }
+            }
+        }
         match bytecode.instructions[pc].clone() {
-            Instr::EmitStackTop { label } => {
-                interp_dispatch::emit_stack_top(&stack, &label, &bytecode.var_names).await?;
-            }
-            Instr::EmitVar { var_index, label } => {
-                interp_dispatch::emit_var(&vars, var_index, &label, &bytecode.var_names).await?;
-            }
-            Instr::AndAnd(target) => {
-                match interp_dispatch::apply_control_flow_action(
-                    control_flow::and_and(&mut stack, target)?,
-                    &mut pc,
-                ) {
-                    DispatchDecision::ContinueLoop => continue,
-                    DispatchDecision::FallThrough | DispatchDecision::Return => {}
-                }
-            }
-            Instr::OrOr(target) => {
-                match interp_dispatch::apply_control_flow_action(
-                    control_flow::or_or(&mut stack, target)?,
-                    &mut pc,
-                ) {
-                    DispatchDecision::ContinueLoop => continue,
-                    DispatchDecision::FallThrough | DispatchDecision::Return => {}
-                }
-            }
-            Instr::Swap => {
-                stack_ops::swap(&mut stack)?;
-            }
+            Instr::EmitStackTop { .. }
+            | Instr::EmitVar { .. }
+            | Instr::AndAnd(_)
+            | Instr::OrOr(_)
+            | Instr::JumpIfFalse(_)
+            | Instr::Jump(_)
+            | Instr::LoadConst(_)
+            | Instr::LoadComplex(_, _)
+            | Instr::LoadBool(_)
+            | Instr::LoadString(_)
+            | Instr::LoadCharRow(_)
+            | Instr::LoadLocal(_)
+            | Instr::Swap
+            | Instr::Pop
+            | Instr::EnterTry(_, _)
+            | Instr::PopTry
+            | Instr::Unpack(_)
+            | Instr::CreateMatrix(_, _)
+            | Instr::CreateMatrixDynamic(_)
+            | Instr::CreateRange(_)
+            | Instr::PackToRow(_)
+            | Instr::PackToCol(_) => unreachable!("handled by dispatch_instruction"),
             Instr::CallFeval(argc) => {
                 let args = call_builtins::collect_call_args(&mut stack, argc)?;
                 let func_val = pop_value(&mut stack)?;
@@ -916,28 +933,6 @@ async fn run_interpreter_inner(
                     Err(err) => vm_bail!(err),
                 }
             }
-            Instr::LoadConst(c) => {
-                interp_dispatch::load_const(&mut stack, c);
-                if debug_stack {
-                    debug!(const_value = c, stack_len = stack.len(), "[vm] load const");
-                }
-            }
-            Instr::LoadComplex(re, im) => {
-                interp_dispatch::load_complex(&mut stack, re, im);
-                if debug_stack {
-                    eprintln!(
-                        "  -> LoadComplex pushed ({}, {}), new_len={}",
-                        re,
-                        im,
-                        stack.len()
-                    );
-                }
-            }
-            Instr::LoadBool(b) => interp_dispatch::load_bool(&mut stack, b),
-            Instr::LoadString(s) => interp_dispatch::load_string(&mut stack, s),
-            Instr::LoadCharRow(s) => {
-                interp_dispatch::load_char_row(&mut stack, s)?;
-            }
             Instr::LoadVar(i) => {
                 let v = vars[i].clone();
                 if std::env::var("RUNMAT_DEBUG_VARS").as_deref() == Ok("1") {
@@ -1022,11 +1017,6 @@ async fn run_interpreter_inner(
                         );
                     },
                 )?;
-            }
-            Instr::LoadLocal(offset) => {
-                if let Err(err) = interp_dispatch::load_local(&mut stack, &context, &vars, offset) {
-                    vm_bail!(err);
-                }
             }
             Instr::StoreLocal(offset) => {
                 interp_dispatch::store_local(
@@ -1331,23 +1321,6 @@ async fn run_interpreter_inner(
                     |v, label| async move { logical_truth_from_value(&v, &label).await },
                 ).await?;
             }
-            Instr::JumpIfFalse(target) => {
-                let cond = pop_value(&mut stack)?;
-                let truth = logical_truth_from_value(&cond, "if condition").await?;
-                match interp_dispatch::apply_control_flow_action(
-                    control_flow::jump_if_false(truth, target),
-                    &mut pc,
-                ) {
-                    DispatchDecision::ContinueLoop => continue,
-                    DispatchDecision::FallThrough | DispatchDecision::Return => {}
-                }
-            }
-            Instr::Jump(target) => {
-                match interp_dispatch::apply_control_flow_action(control_flow::jump(target), &mut pc) {
-                    DispatchDecision::ContinueLoop => continue,
-                    DispatchDecision::FallThrough | DispatchDecision::Return => unreachable!(),
-                }
-            }
             Instr::StochasticEvolution => {
                 let steps_value = stack
                     .pop()
@@ -1512,12 +1485,6 @@ async fn run_interpreter_inner(
                     Ok(v) => interp_dispatch::push_single_result(&mut stack, v),
                     Err(e) => vm_bail!(e),
                 }
-            }
-            Instr::PackToRow(count) => {
-                interp_dispatch::pack_to_row(&mut stack, count)?;
-            }
-            Instr::PackToCol(count) => {
-                interp_dispatch::pack_to_col(&mut stack, count)?;
             }
             Instr::CallFunctionExpandMulti(name, specs) => {
                 // Build args via specs, then invoke user function similar to CallFunction
@@ -1937,25 +1904,7 @@ async fn run_interpreter_inner(
                 };
                 interp_dispatch::push_single_result(&mut stack, output_list);
             }
-            Instr::EnterTry(catch_pc, catch_var) => {
-                control_flow::enter_try(&mut try_stack, catch_pc, catch_var);
-            }
-            Instr::PopTry => {
-                control_flow::pop_try(&mut try_stack);
-            }
-            Instr::CreateMatrix(rows, cols) => {
-                interp_dispatch::create_matrix(&mut stack, rows, cols)?;
-            }
-            Instr::CreateMatrixDynamic(num_rows) => {
-                interp_dispatch::create_matrix_dynamic(&mut stack, num_rows, |rows_data| async move {
-                    runmat_runtime::create_matrix_from_values(&rows_data).await
-                }).await?;
-            }
-            Instr::CreateRange(has_step) => {
-                interp_dispatch::create_range(&mut stack, has_step, |args| async move {
-                    call_builtin_vm!("colon", &args)
-                }).await?;
-            }
+            
             Instr::Index(num_indices) => {
                 let indices = idx_read_linear::collect_linear_indices(&mut stack, num_indices).await?;
                 let base = stack
@@ -3212,16 +3161,6 @@ async fn run_interpreter_inner(
                     }
                     _ => return Err(mex("CellExpansionOnNonCell", "Cell expansion on non-cell")),
                 }
-            }
-            Instr::Pop => {
-                stack_ops::pop(&mut stack);
-            }
-            Instr::Unpack(out_count) => {
-                if out_count == 0 {
-                    pc += 1;
-                    continue;
-                }
-                interp_dispatch::unpack(&mut stack, out_count)?;
             }
             Instr::ReturnValue => {
                 let action = control_flow::return_value(&mut stack)?;
