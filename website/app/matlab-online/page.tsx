@@ -4,6 +4,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import dynamic from "next/dynamic";
+import LazyVideo from "@/components/LazyVideo";
 
 const MatlabInlineCodeBlock = dynamic(() => import("@/components/MatlabInlineCodeBlock"), {
   loading: () => <div className="w-full h-[60px] rounded-md bg-muted/40 animate-pulse" />,
@@ -336,18 +337,16 @@ export default function MatlabOnlinePage() {
               </div>
             </div>
             <div className="rounded-xl border border-border bg-muted/40 p-2 bg-[radial-gradient(ellipse_at_top,_rgba(124,58,237,0.25),_transparent_60%)]">
-              <video
-                className="w-full h-auto rounded-lg"
-                autoPlay
+              <LazyVideo
+                className="w-full h-auto rounded-lg shadow-sm"
                 muted
                 loop
                 playsInline
-                preload="none"
                 poster={heroPosterSrc}
                 aria-label="RunMat MATLAB-style code example demo"
               >
                 <source src={heroVideoSrc} type="video/mp4" />
-              </video>
+              </LazyVideo>
             </div>
           </div>
         </section>
