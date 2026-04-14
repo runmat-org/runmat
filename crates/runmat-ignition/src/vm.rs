@@ -3294,19 +3294,14 @@ async fn run_interpreter_inner(
                         // Route to subsref(obj,'{}',{indices...}) if object
                         match other {
                             Value::Object(obj) => {
-                                let cell = runmat_builtins::CellArray::new(
-                                    indices.clone(),
-                                    1,
-                                    indices.len(),
-                                )
-                                .map_err(|e| format!("subsref build error: {e}"))?;
+                                let cell = call_shared::subsref_paren_index_cell(&indices)?;
                                 let v = match call_builtin_vm!(
                                     "call_method",
                                     &[
                                         Value::Object(obj),
                                         Value::String("subsref".to_string()),
                                         Value::String("()".to_string()),
-                                        Value::Cell(cell),
+                                        cell,
                                     ],
                                 ) {
                                     Ok(v) => v,
@@ -3369,10 +3364,7 @@ async fn run_interpreter_inner(
                         call_shared::expand_cell_indices(&ca, &indices)?
                     }
                     (Value::Object(obj), _) => {
-                        let idx_vals: Vec<Value> = indices
-                            .iter()
-                            .map(|v| Value::Num((v).try_into().unwrap_or(0.0)))
-                            .collect();
+                        let idx_vals = call_shared::subsref_brace_numeric_index_values(&indices);
                         let cell = call_builtin_vm!("__make_cell", &idx_vals)?;
                         let v = match call_builtin_vm!(
                             "call_method",
@@ -3431,15 +3423,14 @@ async fn run_interpreter_inner(
                                 Value::Cell(ca) => call_shared::expand_all_cell(&ca),
                                 Value::Object(obj) => {
                                     // subsref(obj,'{}', {}) with empty indices; expect a cell or value
-                                    let empty = runmat_builtins::CellArray::new(vec![], 1, 0)
-                                        .map_err(|e| format!("subsref build error: {e}"))?;
+                                    let empty = call_shared::subsref_empty_brace_cell()?;
                                     let v = match call_builtin_vm!(
                                         "call_method",
                                         &[
                                             Value::Object(obj),
                                             Value::String("subsref".to_string()),
                                             Value::String("{}".to_string()),
-                                            Value::Cell(empty),
+                                            empty,
                                         ],
                                     ) {
                                         Ok(v) => v,
@@ -3782,16 +3773,14 @@ async fn run_interpreter_inner(
                         call_shared::expand_cell_indices(&ca, &indices)?
                     }
                     (Value::Object(obj), _) => {
-                        let cell =
-                            runmat_builtins::CellArray::new(indices.clone(), 1, indices.len())
-                                .map_err(|e| format!("subsref build error: {e}"))?;
+                        let cell = call_shared::subsref_brace_index_cell_raw(&indices)?;
                         let v = match call_builtin_vm!(
                             "call_method",
                             &[
                                 Value::Object(obj),
                                 Value::String("subsref".to_string()),
                                 Value::String("{}".to_string()),
-                                Value::Cell(cell),
+                                cell,
                             ],
                         ) {
                             Ok(v) => v,

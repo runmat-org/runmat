@@ -322,3 +322,31 @@ pub fn expand_cell_indices(
 pub fn expand_all_cell(cell: &runmat_builtins::CellArray) -> Vec<Value> {
     cell.data.iter().map(|p| (*(*p)).clone()).collect()
 }
+
+pub fn subsref_paren_index_cell(indices: &[Value]) -> Result<Value, RuntimeError> {
+    Ok(Value::Cell(
+        runmat_builtins::CellArray::new(indices.to_vec(), 1, indices.len())
+            .map_err(|e| CompileError::new(format!("subsref build error: {e}")))?,
+    ))
+}
+
+pub fn subsref_brace_index_cell_raw(indices: &[Value]) -> Result<Value, RuntimeError> {
+    Ok(Value::Cell(
+        runmat_builtins::CellArray::new(indices.to_vec(), 1, indices.len())
+            .map_err(|e| CompileError::new(format!("subsref build error: {e}")))?,
+    ))
+}
+
+pub fn subsref_brace_numeric_index_values(indices: &[Value]) -> Vec<Value> {
+    indices
+        .iter()
+        .map(|v| Value::Num((v).try_into().unwrap_or(0.0)))
+        .collect()
+}
+
+pub fn subsref_empty_brace_cell() -> Result<Value, RuntimeError> {
+    Ok(Value::Cell(
+        runmat_builtins::CellArray::new(vec![], 1, 0)
+            .map_err(|e| CompileError::new(format!("subsref build error: {e}")))?,
+    ))
+}
