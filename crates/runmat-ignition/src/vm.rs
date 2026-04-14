@@ -15,7 +15,7 @@ use runmat_accelerate::{
     active_group_plan_clone, value_is_all_keyword, FusionKind, InstrSpan, ReductionAxes, ShapeInfo,
     ValueOrigin, VarKind,
 };
-use runmat_builtins::{Type, Value};
+use runmat_builtins::Value;
 use runmat_runtime::{
     build_runtime_error,
     builtins::common::shape::is_scalar_shape,
@@ -52,7 +52,7 @@ use runmat_vm::indexing::write_linear as idx_write_linear;
 use runmat_vm::indexing::write_slice as idx_write_slice;
 use runmat_vm::object::{class_def as obj_class_def, resolve as obj_resolve};
 use runmat_vm::ops::cells as cell_ops;
-use runmat_vm::ops::{arithmetic as arithmetic_ops, arrays as array_ops, comparison as comparison_ops};
+use runmat_vm::ops::{arithmetic as arithmetic_ops, comparison as comparison_ops};
 use runmat_vm::ops::control_flow;
 use runmat_vm::ops::stack as stack_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
@@ -804,10 +804,10 @@ async fn run_interpreter_inner(
         );
         match bytecode.instructions[pc].clone() {
             Instr::EmitStackTop { label } => {
-                stack_ops::emit_stack_top(&stack, &label, &bytecode.var_names).await?;
+                interp_dispatch::emit_stack_top(&stack, &label, &bytecode.var_names).await?;
             }
             Instr::EmitVar { var_index, label } => {
-                stack_ops::emit_var(&vars, var_index, &label, &bytecode.var_names).await?;
+                interp_dispatch::emit_var(&vars, var_index, &label, &bytecode.var_names).await?;
             }
             Instr::AndAnd(target) => {
                 match interp_dispatch::apply_control_flow_action(
@@ -917,13 +917,13 @@ async fn run_interpreter_inner(
                 }
             }
             Instr::LoadConst(c) => {
-                stack_ops::load_const(&mut stack, c);
+                interp_dispatch::load_const(&mut stack, c);
                 if debug_stack {
                     debug!(const_value = c, stack_len = stack.len(), "[vm] load const");
                 }
             }
             Instr::LoadComplex(re, im) => {
-                stack_ops::load_complex(&mut stack, re, im);
+                interp_dispatch::load_complex(&mut stack, re, im);
                 if debug_stack {
                     eprintln!(
                         "  -> LoadComplex pushed ({}, {}), new_len={}",
@@ -933,10 +933,10 @@ async fn run_interpreter_inner(
                     );
                 }
             }
-            Instr::LoadBool(b) => stack_ops::load_bool(&mut stack, b),
-            Instr::LoadString(s) => stack_ops::load_string(&mut stack, s),
+            Instr::LoadBool(b) => interp_dispatch::load_bool(&mut stack, b),
+            Instr::LoadString(s) => interp_dispatch::load_string(&mut stack, s),
             Instr::LoadCharRow(s) => {
-                stack_ops::load_char_row(&mut stack, s)?;
+                interp_dispatch::load_char_row(&mut stack, s)?;
             }
             Instr::LoadVar(i) => {
                 let v = vars[i].clone();
@@ -962,7 +962,7 @@ async fn run_interpreter_inner(
                         _ => {}
                     }
                 }
-                stack_ops::load_var(&mut stack, &vars, i)
+                interp_dispatch::load_var(&mut stack, &vars, i)
             }
             Instr::StoreVar(i) => {
                 let preview = stack
@@ -1003,7 +1003,7 @@ async fn run_interpreter_inner(
                         _ => {}
                     }
                 }
-                stack_ops::store_var(
+                interp_dispatch::store_var(
                     &mut stack,
                     &mut vars,
                     i,
@@ -1024,12 +1024,12 @@ async fn run_interpreter_inner(
                 )?;
             }
             Instr::LoadLocal(offset) => {
-                if let Err(err) = stack_ops::load_local(&mut stack, &context, &vars, offset) {
+                if let Err(err) = interp_dispatch::load_local(&mut stack, &context, &vars, offset) {
                     vm_bail!(err);
                 }
             }
             Instr::StoreLocal(offset) => {
-                stack_ops::store_local(
+                interp_dispatch::store_local(
                     &mut stack,
                     &mut context,
                     &mut vars,
@@ -1439,186 +1439,29 @@ async fn run_interpreter_inner(
                 }
             }
             Instr::CallBuiltinExpandLast(name, fixed_argc, num_indices) => {
-                // Stack layout: [..., a1, a2, ..., a_fixed, base_for_cell, idx1, idx2, ...]
-                // Build args vector by first collecting fixed args, then expanding cell indexing into comma-list
-                // Evaluate indices and base
-                let mut indices = Vec::with_capacity(num_indices);
-                for _ in 0..num_indices {
-                    let v = stack
-                        .pop()
-                        .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                    indices.push(v);
-                }
-                indices.reverse();
-                let base = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                // Collect fixed args
-                let mut fixed = Vec::with_capacity(fixed_argc);
-                for _ in 0..fixed_argc {
-                    fixed.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                fixed.reverse();
-                // Evaluate cell indexing, then flatten cell contents to extend args
-                let expanded = match (base, indices.len()) {
-                    (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => {
-                        call_shared::expand_cell_indices(&ca, &indices)?
-                    }
-                    (other, _) => {
-                        // Route to subsref(obj,'{}',{indices...}) if object
-                        match other {
-                            Value::Object(obj) => {
-                                let cell = call_shared::subsref_paren_index_cell(&indices)?;
-                                let v = match call_builtin_vm!(
-                                    "call_method",
-                                    &[
-                                        Value::Object(obj),
-                                        Value::String("subsref".to_string()),
-                                        Value::String("()".to_string()),
-                                        cell,
-                                    ],
-                                ) {
-                                    Ok(v) => v,
-                                    Err(e) => vm_bail!(e),
-                                };
-                                vec![v]
-                            }
-                            _ => {
-                                return Err(mex(
-                                    "ExpandError",
-                                    "CallBuiltinExpandLast requires cell or object cell access",
-                                ))
-                            }
-                        }
-                    }
-                };
-                let mut args = fixed;
-                args.extend(expanded.into_iter());
-                let output_hint = output_hint_for_single_result(&bytecode, pc);
-                let _output_guard = push_output_count(output_hint);
-                match call_builtin_auto(&name, &args).await {
-                    Ok(v) => interp_dispatch::push_single_result(&mut stack, v),
-                    Err(e) => vm_bail!(e),
-                }
-            }
-            Instr::CallBuiltinExpandAt(name, before_count, num_indices, after_count) => {
-                // Stack layout: [..., a1..abefore, base, idx..., a_after...]
-                let mut after: Vec<Value> = Vec::with_capacity(after_count);
-                for _ in 0..after_count {
-                    after.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                after.reverse();
-                let mut indices = Vec::with_capacity(num_indices);
-                for _ in 0..num_indices {
-                    indices.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                indices.reverse();
-                let base = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let mut before: Vec<Value> = Vec::with_capacity(before_count);
-                for _ in 0..before_count {
-                    before.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                before.reverse();
-                let expanded = match (base, indices.len()) {
-                    (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => {
-                        call_shared::expand_cell_indices(&ca, &indices)?
-                    }
-                    (Value::Object(obj), _) => {
-                        let idx_vals = call_shared::subsref_brace_numeric_index_values(&indices);
-                        let cell = call_builtin_vm!("__make_cell", &idx_vals)?;
-                        let v = match call_builtin_vm!(
+                let args = interp_dispatch::build_builtin_expand_last_args(
+                    &mut stack,
+                    fixed_argc,
+                    num_indices,
+                    "CallBuiltinExpandLast requires cell or object cell access",
+                    |base, indices| async move {
+                        let obj = match base {
+                            Value::Object(obj) => obj,
+                            _ => unreachable!(),
+                        };
+                        let cell = call_shared::subsref_paren_index_cell(&indices)?;
+                        let v = runmat_runtime::call_builtin_async(
                             "call_method",
                             &[
                                 Value::Object(obj),
                                 Value::String("subsref".to_string()),
-                                Value::String("{}".to_string()),
+                                Value::String("()".to_string()),
                                 cell,
                             ],
-                        ) {
-                            Ok(v) => v,
-                            Err(e) => vm_bail!(e),
-                        };
-                        vec![v]
-                    }
-                    _ => {
-                        return Err(mex(
-                            "ExpandError",
-                            "CallBuiltinExpandAt requires cell or object cell access",
-                        ))
-                    }
-                };
-                let mut args = before;
-                args.extend(expanded.into_iter());
-                args.extend(after.into_iter());
-                let output_hint = output_hint_for_single_result(&bytecode, pc);
-                let _output_guard = push_output_count(output_hint);
-                match call_builtin_auto(&name, &args).await {
-                    Ok(v) => interp_dispatch::push_single_result(&mut stack, v),
-                    Err(e) => vm_bail!(e),
-                }
-            }
-            Instr::CallBuiltinExpandMulti(name, specs) => {
-                let args = call_shared::build_expanded_args_from_specs(
-                    &mut stack,
-                    &specs,
-                    "CallBuiltinExpandMulti requires cell or object for expand_all",
-                    "CallBuiltinExpandMulti requires cell or object cell access",
-                    |base| async move { match base {
-                        Value::Object(obj) => {
-                            let empty = call_shared::subsref_empty_brace_cell()?;
-                            let args = vec![
-                                Value::Object(obj),
-                                Value::String("subsref".to_string()),
-                                Value::String("{}".to_string()),
-                                empty,
-                            ];
-                            let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
-                            Ok(match v {
-                                Value::Cell(ca) => call_shared::expand_all_cell(&ca),
-                                other => vec![other],
-                            })
-                        }
-                        _ => Err(mex(
-                            "ExpandError",
-                            "CallBuiltinExpandMulti requires cell or object for expand_all",
-                        )),
-                    }},
-                    |base, indices| async move { match base {
-                        Value::Object(obj) => {
-                            let idx_vals = call_shared::subsref_brace_numeric_index_values(&indices);
-                            let cell = runmat_runtime::call_builtin_async("__make_cell", &idx_vals).await?;
-                            let args = vec![
-                                Value::Object(obj),
-                                Value::String("subsref".to_string()),
-                                Value::String("{}".to_string()),
-                                cell,
-                            ];
-                            let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
-                            Ok(vec![v])
-                        }
-                        _ => Err(mex(
-                            "ExpandError",
-                            "CallBuiltinExpandMulti requires cell or object cell access",
-                        )),
-                    }},
+                        )
+                        .await?;
+                        Ok(vec![v])
+                    },
                 ).await?;
                 let output_hint = output_hint_for_single_result(&bytecode, pc);
                 let _output_guard = push_output_count(output_hint);
@@ -1627,11 +1470,54 @@ async fn run_interpreter_inner(
                     Err(e) => vm_bail!(e),
                 }
             }
+            Instr::CallBuiltinExpandAt(name, before_count, num_indices, after_count) => {
+                let args = interp_dispatch::build_builtin_expand_at_args(
+                    &mut stack,
+                    before_count,
+                    num_indices,
+                    after_count,
+                    "CallBuiltinExpandAt requires cell or object cell access",
+                    |base, indices| async move {
+                        let obj = match base {
+                            Value::Object(obj) => obj,
+                            _ => unreachable!(),
+                        };
+                        let idx_vals = call_shared::subsref_brace_numeric_index_values(&indices);
+                        let cell = runmat_runtime::call_builtin_async("__make_cell", &idx_vals).await?;
+                        let v = runmat_runtime::call_builtin_async(
+                            "call_method",
+                            &[
+                                Value::Object(obj),
+                                Value::String("subsref".to_string()),
+                                Value::String("{}".to_string()),
+                                cell,
+                            ],
+                        )
+                        .await?;
+                        Ok(vec![v])
+                    },
+                ).await?;
+                let output_hint = output_hint_for_single_result(&bytecode, pc);
+                let _output_guard = push_output_count(output_hint);
+                match call_builtin_auto(&name, &args).await {
+                    Ok(v) => interp_dispatch::push_single_result(&mut stack, v),
+                    Err(e) => vm_bail!(e),
+                }
+            }
+            Instr::CallBuiltinExpandMulti(name, specs) => {
+                let args = interp_dispatch::build_builtin_expand_multi_args(&mut stack, &specs).await?;
+                let output_hint = output_hint_for_single_result(&bytecode, pc);
+                let _output_guard = push_output_count(output_hint);
+                match call_builtin_auto(&name, &args).await {
+                    Ok(v) => interp_dispatch::push_single_result(&mut stack, v),
+                    Err(e) => vm_bail!(e),
+                }
+            }
             Instr::PackToRow(count) => {
-                array_ops::pack_to_row(&mut stack, count)?;
+                interp_dispatch::pack_to_row(&mut stack, count)?;
             }
             Instr::PackToCol(count) => {
-                array_ops::pack_to_col(&mut stack, count)?;
+                interp_dispatch::pack_to_col(&mut stack, count)?;
             }
             Instr::CallFunctionExpandMulti(name, specs) => {
                 // Build args via specs, then invoke user function similar to CallFunction
@@ -1767,48 +1653,19 @@ async fn run_interpreter_inner(
                 }
                 temp.reverse();
                 let args = temp;
-                let func: UserFunction = match bytecode.functions.get(&name) {
-                    Some(f) => f.clone(),
-                    None => vm_bail!(mex(
-                        "UndefinedFunction",
-                        &format!("Undefined function: {name}")
-                    )),
-                };
-                let var_map = runmat_hir::remapping::create_complete_function_var_map(
-                    &func.params,
-                    &func.outputs,
-                    &func.body,
-                );
-                let local_var_count = var_map.len();
-                let remapped_body =
-                    runmat_hir::remapping::remap_function_body(&func.body, &var_map);
-                let func_vars_count = local_var_count.max(func.params.len());
-                let mut func_vars = vec![Value::Num(0.0); func_vars_count];
-                for (i, _param_id) in func.params.iter().enumerate() {
-                    if i < args.len() && i < func_vars.len() {
-                        func_vars[i] = args[i].clone();
-                    }
-                }
-                for (original_var_id, local_var_id) in &var_map {
-                    let local_index = local_var_id.0;
-                    let global_index = original_var_id.0;
-                    if local_index < func_vars.len() && global_index < vars.len() {
-                        let is_parameter = func
-                            .params
-                            .iter()
-                            .any(|param_id| param_id == original_var_id);
-                        if !is_parameter {
-                            func_vars[local_index] = vars[global_index].clone();
-                        }
-                    }
-                }
-                let mut func_var_types = func.var_types.clone();
-                if func_var_types.len() < local_var_count {
-                    func_var_types.resize(local_var_count, Type::Unknown);
-                }
-                let func_program = runmat_hir::HirProgram {
-                    body: remapped_body,
-                    var_types: func_var_types,
+                let interp_dispatch::PreparedUserDispatch {
+                    func,
+                    var_map,
+                    func_program,
+                    func_vars,
+                } = match interp_dispatch::prepare_named_user_dispatch(
+                    &name,
+                    &bytecode.functions,
+                    &args,
+                    &vars,
+                ) {
+                    Ok(prepared) => prepared,
+                    Err(err) => vm_bail!(err),
                 };
                 let mut func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
                 func_bytecode.source_id = func.source_id;
@@ -1822,15 +1679,15 @@ async fn run_interpreter_inner(
                         Ok(v) => v,
                         Err(e) => vm_bail!(e),
                     };
-                if let Some(output_var_id) = func.outputs.first() {
-                    let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
-                    if local_output_index < func_result_vars.len() {
-                        stack.push(func_result_vars[local_output_index].clone());
-                    } else {
-                        stack.push(Value::Num(0.0));
-                    }
-                } else {
-                    stack.push(Value::Num(0.0));
+                if let Err(err) = interp_dispatch::push_user_call_outputs(
+                    &mut stack,
+                    &name,
+                    &func,
+                    &var_map,
+                    &func_result_vars,
+                    1,
+                ) {
+                    vm_bail!(err);
                 }
             }
             Instr::CallFunctionExpandAt(name, before_count, num_indices, after_count) => {
@@ -1895,48 +1752,19 @@ async fn run_interpreter_inner(
                 let mut args = before;
                 args.extend(expanded.into_iter());
                 args.extend(after.into_iter());
-                let func: UserFunction = match bytecode.functions.get(&name) {
-                    Some(f) => f.clone(),
-                    None => vm_bail!(mex(
-                        "UndefinedFunction",
-                        &format!("Undefined function: {name}")
-                    )),
-                };
-                let var_map = runmat_hir::remapping::create_complete_function_var_map(
-                    &func.params,
-                    &func.outputs,
-                    &func.body,
-                );
-                let local_var_count = var_map.len();
-                let remapped_body =
-                    runmat_hir::remapping::remap_function_body(&func.body, &var_map);
-                let func_vars_count = local_var_count.max(func.params.len());
-                let mut func_vars = vec![Value::Num(0.0); func_vars_count];
-                for (i, _param_id) in func.params.iter().enumerate() {
-                    if i < args.len() && i < func_vars.len() {
-                        func_vars[i] = args[i].clone();
-                    }
-                }
-                for (original_var_id, local_var_id) in &var_map {
-                    let local_index = local_var_id.0;
-                    let global_index = original_var_id.0;
-                    if local_index < func_vars.len() && global_index < vars.len() {
-                        let is_parameter = func
-                            .params
-                            .iter()
-                            .any(|param_id| param_id == original_var_id);
-                        if !is_parameter {
-                            func_vars[local_index] = vars[global_index].clone();
-                        }
-                    }
-                }
-                let mut func_var_types = func.var_types.clone();
-                if func_var_types.len() < local_var_count {
-                    func_var_types.resize(local_var_count, Type::Unknown);
-                }
-                let func_program = runmat_hir::HirProgram {
-                    body: remapped_body,
-                    var_types: func_var_types,
+                let interp_dispatch::PreparedUserDispatch {
+                    func,
+                    var_map,
+                    func_program,
+                    func_vars,
+                } = match interp_dispatch::prepare_named_user_dispatch(
+                    &name,
+                    &bytecode.functions,
+                    &args,
+                    &vars,
+                ) {
+                    Ok(prepared) => prepared,
+                    Err(err) => vm_bail!(err),
                 };
                 let func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
                 // Make nested closures visible to outer frames
@@ -1948,15 +1776,15 @@ async fn run_interpreter_inner(
                         Ok(v) => v,
                         Err(e) => vm_bail!(e),
                     };
-                if let Some(output_var_id) = func.outputs.first() {
-                    let local_output_index = var_map.get(output_var_id).map(|id| id.0).unwrap_or(0);
-                    if local_output_index < func_result_vars.len() {
-                        stack.push(func_result_vars[local_output_index].clone());
-                    } else {
-                        stack.push(Value::Num(0.0));
-                    }
-                } else {
-                    stack.push(Value::Num(0.0));
+                if let Err(err) = interp_dispatch::push_user_call_outputs(
+                    &mut stack,
+                    &name,
+                    &func,
+                    &var_map,
+                    &func_result_vars,
+                    1,
+                ) {
+                    vm_bail!(err);
                 }
             }
             Instr::CallFunction(name, arg_count) => {
@@ -2116,15 +1944,15 @@ async fn run_interpreter_inner(
                 control_flow::pop_try(&mut try_stack);
             }
             Instr::CreateMatrix(rows, cols) => {
-                array_ops::create_matrix(&mut stack, rows, cols)?;
+                interp_dispatch::create_matrix(&mut stack, rows, cols)?;
             }
             Instr::CreateMatrixDynamic(num_rows) => {
-                array_ops::create_matrix_dynamic(&mut stack, num_rows, |rows_data| async move {
+                interp_dispatch::create_matrix_dynamic(&mut stack, num_rows, |rows_data| async move {
                     runmat_runtime::create_matrix_from_values(&rows_data).await
                 }).await?;
             }
             Instr::CreateRange(has_step) => {
-                array_ops::create_range(&mut stack, has_step, |args| async move {
+                interp_dispatch::create_range(&mut stack, has_step, |args| async move {
                     call_builtin_vm!("colon", &args)
                 }).await?;
             }
@@ -3393,7 +3221,7 @@ async fn run_interpreter_inner(
                     pc += 1;
                     continue;
                 }
-                array_ops::unpack(&mut stack, out_count)?;
+                interp_dispatch::unpack(&mut stack, out_count)?;
             }
             Instr::ReturnValue => {
                 let action = control_flow::return_value(&mut stack)?;
