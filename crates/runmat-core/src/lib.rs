@@ -1264,14 +1264,12 @@ impl RunMatSession {
                 move |expr: String| -> runmat_runtime::interaction::EvalHookFuture {
                     Box::pin(async move {
                         let wrapped = format!("__runmat_input_result__ = ({expr});");
-                        let ast =
-                            parse_with_options(&wrapped, ParserOptions::new(compat)).map_err(
-                                |e| {
-                                    build_runtime_error(format!("input: parse error: {e}"))
-                                        .with_identifier("RunMat:input:ParseError")
-                                        .build()
-                                },
-                            )?;
+                        let ast = parse_with_options(&wrapped, ParserOptions::new(compat))
+                            .map_err(|e| {
+                                build_runtime_error(format!("input: parse error: {e}"))
+                                    .with_identifier("RunMat:input:ParseError")
+                                    .build()
+                            })?;
                         let lowering = runmat_hir::lower(
                             &ast,
                             &LoweringContext::new(&HashMap::new(), &HashMap::new()),
@@ -1282,10 +1280,7 @@ impl RunMatSession {
                                 .build()
                         })?;
                         // lowering.variables maps variable name → slot index.
-                        let result_idx = lowering
-                            .variables
-                            .get("__runmat_input_result__")
-                            .copied();
+                        let result_idx = lowering.variables.get("__runmat_input_result__").copied();
                         let bc = runmat_ignition::compile(&lowering.hir, &HashMap::new())
                             .map_err(RuntimeError::from)?;
                         // interpret() returns the final variable slot array.
