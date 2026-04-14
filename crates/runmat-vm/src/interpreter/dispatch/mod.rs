@@ -18,7 +18,7 @@ use std::collections::HashMap;
 pub use calls::{
     build_builtin_expand_at_args, build_builtin_expand_last_args, build_builtin_expand_multi_args,
     build_feval_expand_multi_args, build_user_function_expand_multi_args,
-    handle_builtin_expand_at_call, handle_builtin_expand_last_call,
+    handle_builtin_call, handle_builtin_expand_at_call, handle_builtin_expand_last_call,
     handle_builtin_expand_multi_call, handle_builtin_outcome, handle_feval_dispatch,
     handle_create_closure, handle_load_method, handle_load_static_property, handle_method_call,
     handle_method_or_member_index_call, handle_register_class, handle_static_method_call,
@@ -86,6 +86,13 @@ pub async fn dispatch_instruction(
     bytecode_functions: &HashMap<String, crate::bytecode::UserFunction>,
     try_stack: &mut Vec<(usize, Option<usize>)>,
     last_exception: &mut Option<runmat_builtins::MException>,
+    imports: &mut Vec<(Vec<String>, bool)>,
+    source_id: Option<runmat_hir::SourceId>,
+    call_arg_spans: Option<Vec<runmat_hir::Span>>,
+    call_counts: &[(usize, usize)],
+    current_function_name: &str,
+    global_aliases: &mut HashMap<usize, String>,
+    persistent_aliases: &mut HashMap<usize, String>,
     pc: &mut usize,
     mut clear_value_residency: impl FnMut(&Value),
     invoke_user_for_end_expr: impl for<'a> Fn(
@@ -244,6 +251,43 @@ pub async fn dispatch_instruction(
             crate::ops::control_flow::enter_scope(&mut context.locals, *local_count);
             Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
+        Instr::ExitScope(local_count) => {
+            crate::ops::control_flow::exit_scope(&mut context.locals, *local_count, |val| {
+                clear_value_residency(val);
+            });
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::RegisterImport { path, wildcard } => {
+            imports.push((path.clone(), *wildcard));
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::DeclareGlobal(indices) => {
+            crate::runtime::globals::declare_global(indices.clone(), vars);
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::DeclareGlobalNamed(indices, names) => {
+            crate::runtime::globals::declare_global_named(
+                indices.clone(),
+                names.clone(),
+                vars,
+                global_aliases,
+            );
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::DeclarePersistent(indices) => {
+            crate::runtime::globals::declare_persistent(current_function_name, indices.clone(), vars);
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::DeclarePersistentNamed(indices, names) => {
+            crate::runtime::globals::declare_persistent_named(
+                current_function_name,
+                indices.clone(),
+                names.clone(),
+                vars,
+                persistent_aliases,
+            );
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
         Instr::PackToRow(count) => {
             pack_to_row(stack, *count)?;
             Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
@@ -274,6 +318,43 @@ pub async fn dispatch_instruction(
                 runmat_runtime::call_builtin_async("colon", &args).await
             })
             .await?;
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::CreateCell2D(rows, cols) => {
+            let mut elems = Vec::with_capacity(*rows * *cols);
+            for _ in 0..(*rows * *cols) {
+                elems.push(
+                    stack
+                        .pop()
+                        .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?,
+                );
+            }
+            elems.reverse();
+            stack.push(crate::ops::cells::create_cell_2d(elems, *rows, *cols)?);
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::CallBuiltin(name, arg_count) => {
+            match handle_builtin_call(
+                stack,
+                name,
+                *arg_count,
+                next_instr,
+                source_id,
+                call_arg_spans,
+                imports,
+                call_counts,
+                try_stack,
+                vars,
+                last_exception,
+                pc,
+                refresh_workspace_state,
+            ).await? {
+                BuiltinHandling::Completed => {}
+                BuiltinHandling::Caught => {
+                    return Ok(Some(DispatchHandled::Generic(DispatchDecision::ContinueLoop)))
+                }
+                BuiltinHandling::Uncaught(err) => return Err(err),
+            }
             Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         Instr::CallFeval(argc) => {

@@ -22,7 +22,6 @@ use runmat_runtime::{
     builtins::common::tensor,
     builtins::stats::random::stochastic_evolution::stochastic_evolution_host,
     gather_if_needed_async,
-    output_context::push_output_count,
     user_functions,
     workspace::{self as runtime_workspace, WorkspaceResolver},
     RuntimeError,
@@ -35,21 +34,17 @@ pub use runmat_vm::interpreter::api::{
     take_updated_workspace_state, InterpreterOutcome, InterpreterState, PendingWorkspaceGuard,
     DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
 };
-use runmat_vm::ops::control_flow;
 use runmat_vm::interpreter::engine as interp_engine;
-use runmat_vm::interpreter::dispatch::{
-    self as interp_dispatch, DispatchDecision, ExceptionHandling,
-};
+use runmat_vm::interpreter::dispatch::{self as interp_dispatch, DispatchDecision};
 use runmat_vm::interpreter::errors::{
     attach_span_from_pc, mex, set_vm_pc,
 };
 use runmat_vm::call::shared as call_shared;
-use runmat_vm::call::{builtins as call_builtins, user as call_user};
+use runmat_vm::call::user as call_user;
 #[cfg(test)]
 use runmat_vm::indexing::end_expr as idx_end_expr;
 #[cfg(test)]
 use runmat_vm::indexing::selectors as idx_selectors;
-use runmat_vm::ops::cells as cell_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
 use runmat_vm::runtime::call_stack::{
     attach_call_frames,
@@ -72,13 +67,6 @@ struct FusionPlanGuard;
 impl Drop for FusionPlanGuard {
     fn drop(&mut self) {
         deactivate_fusion_plan();
-    }
-}
-
-fn output_hint_for_single_result(bytecode: &Bytecode, pc: usize) -> usize {
-    match bytecode.instructions.get(pc + 1) {
-        Some(Instr::Pop) | Some(Instr::EmitStackTop { .. }) => 0,
-        _ => 1,
     }
 }
 
@@ -545,22 +533,6 @@ async fn run_interpreter_inner(
         };
     let debug_stack = interp_engine::debug_stack_enabled();
     let mut interpreter_timing = InterpreterTiming::new();
-    macro_rules! vm_bail {
-        ($err:expr) => {{
-            let err = interp_dispatch::prepare_vm_error(&bytecode, pc, $err);
-            match interp_dispatch::redirect_exception_to_catch(
-                err,
-                &mut try_stack,
-                &mut vars,
-                &mut last_exception,
-                &mut pc,
-                refresh_workspace_state,
-            ) {
-                ExceptionHandling::Caught => continue,
-                ExceptionHandling::Uncaught(err) => return Err(err),
-            }
-        }};
-    }
     while pc < bytecode.instructions.len() {
         set_vm_pc(pc);
         #[cfg(feature = "native-accel")]
@@ -623,6 +595,11 @@ async fn run_interpreter_inner(
             stack.len(),
         );
         let next_instr = bytecode.instructions.get(pc + 1);
+        let call_counts_snapshot = CALL_COUNTS.with(|cc| cc.borrow().clone());
+        let store_var_global_aliases = match &bytecode.instructions[pc] {
+            Instr::StoreVar(_) => Some(global_aliases.clone()),
+            _ => None,
+        };
         if let Some(decision) = interp_dispatch::dispatch_instruction(
             &bytecode.instructions[pc],
             &mut stack,
@@ -632,6 +609,13 @@ async fn run_interpreter_inner(
             &bytecode.functions,
             &mut try_stack,
             &mut last_exception,
+            &mut imports,
+            bytecode.source_id,
+            bytecode.call_arg_spans.get(pc).cloned().flatten(),
+            &call_counts_snapshot,
+            &current_function_name,
+            &mut global_aliases,
+            &mut persistent_aliases,
             &mut pc,
             |value| {
                 #[cfg(feature = "native-accel")]
@@ -664,11 +648,9 @@ async fn run_interpreter_inner(
                 }
             },
             |stored_index, stored_value| {
-                runtime_globals::update_global_store(
-                    stored_index,
-                    stored_value,
-                    &global_aliases,
-                );
+                if let Some(ref aliases) = store_var_global_aliases {
+                    runtime_globals::update_global_store(stored_index, stored_value, aliases);
+                }
             },
             |current, incoming| {
                 #[cfg(feature = "native-accel")]
@@ -769,6 +751,7 @@ async fn run_interpreter_inner(
             | Instr::RegisterClass { .. }
             | Instr::CallFeval(_)
             | Instr::CallFevalExpandMulti(_)
+            | Instr::CallBuiltin(_, _)
             | Instr::CallFunction(_, _)
             | Instr::CallFunctionMulti(_, _, _)
             | Instr::CallFunctionExpandMulti(_, _)
@@ -776,6 +759,13 @@ async fn run_interpreter_inner(
             | Instr::CallBuiltinExpandAt(_, _, _, _)
             | Instr::CallBuiltinExpandMulti(_, _)
             | Instr::CallFunctionExpandAt(_, _, _, _)
+            | Instr::ExitScope(_)
+            | Instr::RegisterImport { .. }
+            | Instr::DeclareGlobal(_)
+            | Instr::DeclareGlobalNamed(_, _)
+            | Instr::DeclarePersistent(_)
+            | Instr::DeclarePersistentNamed(_, _)
+            | Instr::CreateCell2D(_, _)
             | Instr::Add
             | Instr::Sub
             | Instr::Mul
@@ -824,128 +814,6 @@ async fn run_interpreter_inner(
                 .await?;
                 stack.push(evolved);
             }
-            Instr::CallBuiltin(name, arg_count) => {
-                if debug_stack {
-                    debug!(
-                        pc,
-                        name,
-                        arg_count,
-                        stack_len = stack.len(),
-                        top = ?stack.last(),
-                        "[vm] CallBuiltin"
-                    );
-                }
-                let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
-                if let Some(value) = call_builtins::special_counter_builtin(&name, arg_count, &call_counts)? {
-                    stack.push(value);
-                    pc += 1;
-                    continue;
-                }
-                let requested_outputs = call_builtins::requested_output_count(&bytecode.instructions, pc);
-                let args = call_builtins::collect_call_args(&mut stack, arg_count)?;
-
-                let _callsite_guard = runmat_runtime::callsite::push_callsite(
-                    bytecode.source_id,
-                    bytecode.call_arg_spans.get(pc).cloned().flatten(),
-                );
-                let output_hint = output_hint_for_single_result(&bytecode, pc);
-                let _output_guard = push_output_count(output_hint);
-
-                let prepared_primary = call_builtins::prepare_builtin_args(&name, &args).await?;
-                let result = match requested_outputs {
-                    Some(count) => {
-                        runmat_runtime::call_builtin_async_with_outputs(&name, &prepared_primary, count)
-                            .await
-                    }
-                    None => runmat_runtime::call_builtin_async(&name, &prepared_primary).await,
-                };
-                let imported = call_builtins::resolve_imported_builtin(
-                    &name,
-                    &imports,
-                    &prepared_primary,
-                    requested_outputs,
-                )
-                .await?;
-                if result.is_err() {
-                    if let Some(err) = call_builtins::rethrow_without_explicit_exception(
-                        &name,
-                        &args,
-                        last_exception.as_ref().map(|e| e.identifier.as_str()),
-                        last_exception.as_ref().map(|e| e.message.as_str()),
-                    ) {
-                        vm_bail!(err);
-                    }
-                }
-                match interp_dispatch::handle_builtin_outcome(
-                    result,
-                    imported,
-                    &mut stack,
-                    &mut try_stack,
-                    &mut vars,
-                    &mut last_exception,
-                    &mut pc,
-                    refresh_workspace_state,
-                ) {
-                    Ok(interp_dispatch::BuiltinHandling::Completed) => {}
-                    Ok(interp_dispatch::BuiltinHandling::Caught) => continue,
-                    Ok(interp_dispatch::BuiltinHandling::Uncaught(err)) => return Err(err),
-                    Err(err) => vm_bail!(err),
-                }
-            }
-            Instr::ExitScope(local_count) => {
-                control_flow::exit_scope(&mut context.locals, local_count, |val| {
-                    #[cfg(feature = "native-accel")]
-                    clear_residency(val);
-                });
-            }
-            Instr::RegisterImport { path, wildcard } => {
-                imports.push((path, wildcard));
-            }
-            Instr::DeclareGlobal(indices) => {
-                runtime_globals::declare_global(indices, &mut vars);
-            }
-            Instr::DeclareGlobalNamed(indices, names) => {
-                runtime_globals::declare_global_named(
-                    indices,
-                    names,
-                    &mut vars,
-                    &mut global_aliases,
-                );
-            }
-            Instr::DeclarePersistent(indices) => {
-                runtime_globals::declare_persistent(&current_function_name, indices, &mut vars);
-            }
-            Instr::DeclarePersistentNamed(indices, names) => {
-                runtime_globals::declare_persistent_named(
-                    &current_function_name,
-                    indices,
-                    names,
-                    &mut vars,
-                    &mut persistent_aliases,
-                );
-            }
-            
-            
-            
-
-            
-
-            
-            Instr::CreateCell2D(rows, cols) => {
-                let mut elems = Vec::with_capacity(rows * cols);
-                for _ in 0..rows * cols {
-                    elems.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                elems.reverse();
-                let cell = cell_ops::create_cell_2d(elems, rows, cols)?;
-                stack.push(cell);
-            }
-            
-            
         }
         if debug_stack {
             debug!(pc, stack_len = stack.len(), "[vm] after exec");

@@ -1,4 +1,5 @@
 use crate::call::builtins::ImportedBuiltinResolution;
+use crate::call::builtins as call_builtins;
 use crate::call::closures as call_closures;
 use crate::call::feval::FevalDispatch;
 use crate::call::shared::{
@@ -9,6 +10,7 @@ use crate::call::shared::{
 use crate::bytecode::ArgSpec;
 use crate::bytecode::Instr;
 use crate::functions::UserFunction;
+use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
 use crate::object::class_def as obj_class_def;
 use crate::object::resolve as obj_resolve;
@@ -69,6 +71,13 @@ fn output_hint_for_next(next_instr: Option<&Instr>) -> usize {
     match next_instr {
         Some(Instr::Pop) | Some(Instr::EmitStackTop { .. }) => 0,
         _ => 1,
+    }
+}
+
+fn requested_output_count_from_next(next_instr: Option<&Instr>) -> Option<usize> {
+    match next_instr {
+        Some(Instr::Unpack(count)) => Some(*count),
+        _ => None,
     }
 }
 
@@ -455,6 +464,52 @@ pub fn handle_builtin_outcome(
             ),
         },
     }
+}
+
+pub async fn handle_builtin_call(
+    stack: &mut Vec<Value>,
+    name: &str,
+    arg_count: usize,
+    next_instr: Option<&Instr>,
+    source_id: Option<runmat_hir::SourceId>,
+    call_arg_spans: Option<Vec<runmat_hir::Span>>,
+    imports: &[(Vec<String>, bool)],
+    call_counts: &[(usize, usize)],
+    try_stack: &mut Vec<(usize, Option<usize>)>,
+    vars: &mut Vec<Value>,
+    last_exception: &mut Option<MException>,
+    pc: &mut usize,
+    refresh_vars: impl Fn(&[Value]),
+) -> Result<BuiltinHandling, RuntimeError> {
+    debug::trace_call_builtin(*pc, name, arg_count, stack);
+    if let Some(value) = call_builtins::special_counter_builtin(name, arg_count, call_counts)? {
+        stack.push(value);
+        return Ok(BuiltinHandling::Completed);
+    }
+    let requested_outputs = requested_output_count_from_next(next_instr);
+    let args = call_builtins::collect_call_args(stack, arg_count)?;
+
+    let _callsite_guard = runmat_runtime::callsite::push_callsite(source_id, call_arg_spans);
+    let output_hint = output_hint_for_next(next_instr);
+    let _output_guard = runmat_runtime::output_context::push_output_count(output_hint);
+
+    let prepared_primary = call_builtins::prepare_builtin_args(name, &args).await?;
+    let result = match requested_outputs {
+        Some(count) => runmat_runtime::call_builtin_async_with_outputs(name, &prepared_primary, count).await,
+        None => runmat_runtime::call_builtin_async(name, &prepared_primary).await,
+    };
+    let imported = call_builtins::resolve_imported_builtin(name, imports, &prepared_primary, requested_outputs).await?;
+    if result.is_err() {
+        if let Some(err) = call_builtins::rethrow_without_explicit_exception(
+            name,
+            &args,
+            last_exception.as_ref().map(|e| e.identifier.as_str()),
+            last_exception.as_ref().map(|e| e.message.as_str()),
+        ) {
+            return Err(err);
+        }
+    }
+    handle_builtin_outcome(result, imported, stack, try_stack, vars, last_exception, pc, refresh_vars)
 }
 
 pub async fn handle_method_call(
