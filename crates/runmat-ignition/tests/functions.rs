@@ -1106,6 +1106,24 @@ fn varargin_pack_and_forward() {
 }
 
 #[test]
+fn feval_expand_multi_forwards_expanded_cell_args() {
+    let program = r#"
+        function y = f(a,b,c,d)
+            y = a + b + c + d;
+        end
+        function out = g(varargin)
+            out = feval(@f, varargin{:});
+        end
+        r = g(4,5,6,7);
+    "#;
+    let hir = lower(&parse(program).unwrap()).unwrap();
+    let vars = execute(&hir).unwrap();
+    assert!(vars
+        .iter()
+        .any(|v| matches!(v, runmat_builtins::Value::Num(n) if (*n-22.0).abs()<1e-9)));
+}
+
+#[test]
 #[ignore]
 fn varargout_expand_into_outer_call() {
     // h returns varargout with three numbers; max(h()) should consume two (max takes two args)

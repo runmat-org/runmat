@@ -1927,8 +1927,108 @@ async fn run_interpreter_inner(
                     }
                 }
             }
-            Instr::CallFevalExpandMulti(_specs) => {
-                vm_bail!("feval expand not supported in this execution mode".to_string());
+            Instr::CallFevalExpandMulti(specs) => {
+                let mut temp: Vec<Value> = Vec::new();
+                for spec in specs.iter().rev() {
+                    if spec.is_expand {
+                        let mut indices = Vec::with_capacity(spec.num_indices);
+                        for _ in 0..spec.num_indices {
+                            indices.push(pop_value(&mut stack)?);
+                        }
+                        indices.reverse();
+                        let base = pop_value(&mut stack)?;
+                        let expanded = if spec.expand_all {
+                            match base {
+                                Value::Cell(ca) => call_shared::expand_all_cell(&ca),
+                                Value::Object(obj) => {
+                                    let empty = call_shared::subsref_empty_brace_cell()?;
+                                    let v = match call_builtin_vm!(
+                                        "call_method",
+                                        &[
+                                            Value::Object(obj),
+                                            Value::String("subsref".to_string()),
+                                            Value::String("{}".to_string()),
+                                            empty,
+                                        ],
+                                    ) {
+                                        Ok(v) => v,
+                                        Err(e) => vm_bail!(e),
+                                    };
+                                    match v {
+                                        Value::Cell(ca) => call_shared::expand_all_cell(&ca),
+                                        other => vec![other],
+                                    }
+                                }
+                                _ => {
+                                    return Err(mex(
+                                        "InvalidExpandAllTarget",
+                                        "CallFevalExpandMulti requires cell or object for expand_all",
+                                    ))
+                                }
+                            }
+                        } else {
+                            match (base, indices.len()) {
+                                (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => {
+                                    call_shared::expand_cell_indices(&ca, &indices)?
+                                }
+                                (Value::Object(obj), _) => {
+                                    let cell = call_shared::subsref_brace_index_cell_raw(&indices)?;
+                                    let v = match call_builtin_vm!(
+                                        "call_method",
+                                        &[
+                                            Value::Object(obj),
+                                            Value::String("subsref".to_string()),
+                                            Value::String("{}".to_string()),
+                                            cell,
+                                        ],
+                                    ) {
+                                        Ok(v) => v,
+                                        Err(e) => vm_bail!(e),
+                                    };
+                                    vec![v]
+                                }
+                                _ => {
+                                    return Err(mex(
+                                        "ExpandError",
+                                        "CallFevalExpandMulti requires cell or object cell access",
+                                    ))
+                                }
+                            }
+                        };
+                        temp.extend(expanded);
+                    } else {
+                        temp.push(pop_value(&mut stack)?);
+                    }
+                }
+                temp.reverse();
+                let args = temp;
+                let func_val = pop_value(&mut stack)?;
+                match func_val {
+                    Value::Closure(c) => {
+                        let (name, call_args) = call_feval::closure_call_args(&c, args);
+                        if let Some(result) =
+                            call_feval::try_closure_builtin_fallback(&name, &call_args).await?
+                        {
+                            stack.push(result);
+                            pc += 1;
+                            continue;
+                        }
+                        let mut functions = bytecode.functions.clone();
+                        for (k, v) in &context.functions {
+                            functions.insert(k.clone(), v.clone());
+                        }
+                        match invoke_user_function_value(&name, &call_args, &functions, &mut vars)
+                            .await
+                        {
+                            Ok(value) => stack.push(value),
+                            Err(e) => vm_bail!(e),
+                        }
+                    }
+                    other => match call_feval::forward_builtin_feval(other, args).await {
+                        Ok(result) => stack.push(result),
+                        Err(err) => vm_bail!(err),
+                    },
+                }
             }
             Instr::LoadConst(c) => {
                 stack_ops::load_const(&mut stack, c);
