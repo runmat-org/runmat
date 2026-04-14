@@ -9,20 +9,6 @@ pub async fn dispatch_arithmetic(
     stack: &mut Vec<Value>,
 ) -> Result<bool, RuntimeError> {
     match instr {
-        crate::bytecode::Instr::RightDiv => {
-            arithmetic_ops::binary_fallback(stack, |a, b| async move {
-                runmat_runtime::matrix::execute_right_division(&a, &b).await
-            })
-            .await?;
-            Ok(true)
-        }
-        crate::bytecode::Instr::LeftDiv => {
-            arithmetic_ops::binary_fallback(stack, |a, b| async move {
-                runmat_runtime::matrix::execute_left_division(&a, &b).await
-            })
-            .await?;
-            Ok(true)
-        }
         crate::bytecode::Instr::Neg => {
             arithmetic_ops::unary(stack, |value| async move {
                 match &value {

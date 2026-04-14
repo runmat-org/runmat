@@ -2,6 +2,7 @@ use crate::interpreter::errors::mex;
 use crate::interpreter::stack::pop2;
 use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
+use runmat_runtime::builtins::common::shape::is_scalar_shape;
 use std::future::Future;
 
 pub async fn add<CM, CMFut, F, FFut>(
@@ -161,4 +162,115 @@ where
     let value = stack.pop().ok_or(mex("StackUnderflow", "stack underflow"))?;
     stack.push(op(value).await?);
     Ok(())
+}
+
+pub fn is_scalarish_for_division(value: &Value) -> bool {
+    match value {
+        Value::Int(_) | Value::Num(_) | Value::Complex(_, _) | Value::Bool(_) => true,
+        Value::LogicalArray(arr) => is_scalar_shape(&arr.shape),
+        Value::Tensor(tensor) => is_scalar_shape(&tensor.shape),
+        Value::ComplexTensor(tensor) => is_scalar_shape(&tensor.shape),
+        Value::GpuTensor(handle) => is_scalar_shape(&handle.shape),
+        _ => false,
+    }
+}
+
+pub async fn execute_right_division<CM, CMFut, SF, SFFut, MF, MFFut>(
+    lhs: &Value,
+    rhs: &Value,
+    mut call_method: CM,
+    mut scalarish_fallback: SF,
+    mut matrix_fallback: MF,
+) -> Result<Value, RuntimeError>
+where
+    CM: FnMut(Value, &'static str, Value) -> CMFut,
+    CMFut: Future<Output = Result<Value, RuntimeError>>,
+    SF: FnMut(Value, Value) -> SFFut,
+    SFFut: Future<Output = Result<Value, RuntimeError>>,
+    MF: FnMut(Value, Value) -> MFFut,
+    MFFut: Future<Output = Result<Value, RuntimeError>>,
+{
+    match (lhs, rhs) {
+        (Value::Object(obj), _) => {
+            match call_method(Value::Object(obj.clone()), "mrdivide", rhs.clone()).await {
+                Ok(v) => Ok(v),
+                Err(_) => {
+                    if is_scalarish_for_division(rhs) {
+                        scalarish_fallback(lhs.clone(), rhs.clone()).await
+                    } else {
+                        matrix_fallback(lhs.clone(), rhs.clone()).await
+                    }
+                }
+            }
+        }
+        (_, Value::Object(obj)) => {
+            match call_method(Value::Object(obj.clone()), "mrdivide", lhs.clone()).await {
+                Ok(v) => Ok(v),
+                Err(_) => {
+                    if is_scalarish_for_division(rhs) {
+                        scalarish_fallback(lhs.clone(), rhs.clone()).await
+                    } else {
+                        matrix_fallback(lhs.clone(), rhs.clone()).await
+                    }
+                }
+            }
+        }
+        _ => {
+            if is_scalarish_for_division(rhs) {
+                scalarish_fallback(lhs.clone(), rhs.clone()).await
+            } else {
+                matrix_fallback(lhs.clone(), rhs.clone()).await
+            }
+        }
+    }
+}
+
+pub async fn execute_left_division<CM, CMFut, SF, SFFut, MF, MFFut>(
+    lhs: &Value,
+    rhs: &Value,
+    mut call_method: CM,
+    mut scalarish_fallback: SF,
+    mut matrix_fallback: MF,
+) -> Result<Value, RuntimeError>
+where
+    CM: FnMut(Value, &'static str, Value) -> CMFut,
+    CMFut: Future<Output = Result<Value, RuntimeError>>,
+    SF: FnMut(Value, Value) -> SFFut,
+    SFFut: Future<Output = Result<Value, RuntimeError>>,
+    MF: FnMut(Value, Value) -> MFFut,
+    MFFut: Future<Output = Result<Value, RuntimeError>>,
+{
+    match (lhs, rhs) {
+        (Value::Object(obj), _) => {
+            match call_method(Value::Object(obj.clone()), "mldivide", rhs.clone()).await {
+                Ok(v) => Ok(v),
+                Err(_) => {
+                    if is_scalarish_for_division(lhs) {
+                        scalarish_fallback(lhs.clone(), rhs.clone()).await
+                    } else {
+                        matrix_fallback(lhs.clone(), rhs.clone()).await
+                    }
+                }
+            }
+        }
+        (_, Value::Object(obj)) => {
+            match call_method(Value::Object(obj.clone()), "mldivide", lhs.clone()).await {
+                Ok(v) => Ok(v),
+                Err(_) => {
+                    if is_scalarish_for_division(lhs) {
+                        scalarish_fallback(lhs.clone(), rhs.clone()).await
+                    } else {
+                        matrix_fallback(lhs.clone(), rhs.clone()).await
+                    }
+                }
+            }
+        }
+        _ => {
+            if is_scalarish_for_division(lhs) {
+                scalarish_fallback(lhs.clone(), rhs.clone()).await
+            } else {
+                matrix_fallback(lhs.clone(), rhs.clone()).await
+            }
+        }
+    }
 }
