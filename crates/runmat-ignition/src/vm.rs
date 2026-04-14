@@ -58,6 +58,7 @@ use runmat_vm::interpreter::timing::InterpreterTiming;
 use runmat_vm::runtime::call_stack::{
     attach_call_frames, error_namespace, push_call_frame,
 };
+use runmat_vm::runtime::globals as runtime_globals;
 use runmat_vm::runtime::workspace::{
     refresh_workspace_state, set_workspace_state, take_pending_workspace_state,
     workspace_assign, workspace_clear, workspace_lookup, workspace_remove, workspace_snapshot,
@@ -615,39 +616,13 @@ fn build_end_range_descriptor(start: Value, step: Value, end_expr: &EndExpr) -> 
     Ok(Value::Cell(cell))
 }
 
-runmat_thread_local! {
-    static GLOBALS: RefCell<HashMap<String, Value>> = RefCell::new(HashMap::new());
-}
-
-runmat_thread_local! {
-    static PERSISTENTS: RefCell<HashMap<(String, usize), Value>> = RefCell::new(HashMap::new());
-}
-
-runmat_thread_local! {
-    static PERSISTENTS_BY_NAME: RefCell<HashMap<(String, String), Value>> = RefCell::new(HashMap::new());
-}
-
-fn workspace_global_names() -> Vec<String> {
-    let mut names = Vec::new();
-    GLOBALS.with(|globals| {
-        let map = globals.borrow();
-        for key in map.keys() {
-            if !key.starts_with("var_") {
-                names.push(key.clone());
-            }
-        }
-    });
-    names.sort();
-    names
-}
-
 fn ensure_workspace_resolver_registered() {
     static REGISTER: Once = Once::new();
     REGISTER.call_once(|| {
         runtime_workspace::register_workspace_resolver(WorkspaceResolver {
             lookup: workspace_lookup,
             snapshot: workspace_snapshot,
-            globals: workspace_global_names,
+            globals: runtime_globals::workspace_global_names,
             assign: Some(workspace_assign),
             clear: Some(workspace_clear),
             remove: Some(workspace_remove),
@@ -796,23 +771,7 @@ async fn run_interpreter_inner(
     refresh_workspace_state(&vars);
     let mut _gc_context = InterpretContext::new(&stack, &vars)?;
     // Register thread-local globals/persistents as GC roots for the duration of this execution
-    let mut thread_roots: Vec<Value> = Vec::new();
-    GLOBALS.with(|g| {
-        for v in g.borrow().values() {
-            thread_roots.push(v.clone());
-        }
-    });
-    PERSISTENTS.with(|p| {
-        for v in p.borrow().values() {
-            thread_roots.push(v.clone());
-        }
-    });
-    // Name-based table may duplicate persistents; harmless if included
-    PERSISTENTS_BY_NAME.with(|p| {
-        for v in p.borrow().values() {
-            thread_roots.push(v.clone());
-        }
-    });
+    let thread_roots: Vec<Value> = runtime_globals::collect_thread_roots();
     let _ = _gc_context.register_global_values(thread_roots, "thread_globals_persistents");
     // Helper to resolve unqualified static accesses if Class.* is imported
     let _resolve_static =
@@ -1159,18 +1118,11 @@ async fn run_interpreter_inner(
                         }
                     },
                     |stored_index, stored_value| {
-                        let key = format!("var_{stored_index}");
-                        GLOBALS.with(|g| {
-                            let mut m = g.borrow_mut();
-                            if m.contains_key(&key) {
-                                m.insert(key, stored_value.clone());
-                            }
-                        });
-                        if let Some(name) = global_aliases.get(&stored_index) {
-                            GLOBALS.with(|g| {
-                                g.borrow_mut().insert(name.clone(), stored_value.clone());
-                            });
-                        }
+                        runtime_globals::update_global_store(
+                            stored_index,
+                            stored_value,
+                            &global_aliases,
+                        );
                     },
                 )?;
             }
@@ -1198,13 +1150,11 @@ async fn run_interpreter_inner(
                         }
                     },
                     |func_name, stored_offset, stored_value| {
-                        let key = (func_name.to_string(), stored_offset);
-                        PERSISTENTS.with(|p| {
-                            let mut m = p.borrow_mut();
-                            if m.contains_key(&key) {
-                                m.insert(key, stored_value.clone());
-                            }
-                        });
+                        runtime_globals::update_persistent_local_store(
+                            func_name,
+                            stored_offset,
+                            stored_value,
+                        );
                     },
                 )?;
             }
@@ -1221,77 +1171,27 @@ async fn run_interpreter_inner(
                 imports.push((path, wildcard));
             }
             Instr::DeclareGlobal(indices) => {
-                // Bind local var slots to global table entries by name (var_N)
-                for i in indices.into_iter() {
-                    let key = format!("var_{i}");
-                    let val_opt = GLOBALS.with(|g| g.borrow().get(&key).cloned());
-                    if let Some(v) = val_opt {
-                        if i >= vars.len() {
-                            vars.resize(i + 1, Value::Num(0.0));
-                            refresh_workspace_state(&vars);
-                        }
-                        vars[i] = v;
-                    }
-                }
+                runtime_globals::declare_global(indices, &mut vars);
             }
             Instr::DeclareGlobalNamed(indices, names) => {
-                for (pos, i) in indices.into_iter().enumerate() {
-                    let name = names
-                        .get(pos)
-                        .cloned()
-                        .unwrap_or_else(|| format!("var_{i}"));
-                    let val_opt = GLOBALS.with(|g| g.borrow().get(&name).cloned());
-                    if let Some(v) = val_opt {
-                        if i >= vars.len() {
-                            vars.resize(i + 1, Value::Num(0.0));
-                            refresh_workspace_state(&vars);
-                        }
-                        vars[i] = v;
-                    }
-                    GLOBALS.with(|g| {
-                        let mut m = g.borrow_mut();
-                        if let Some(v) = m.get(&name).cloned() {
-                            m.insert(format!("var_{i}"), v);
-                        }
-                    });
-                    global_aliases.insert(i, name);
-                }
+                runtime_globals::declare_global_named(
+                    indices,
+                    names,
+                    &mut vars,
+                    &mut global_aliases,
+                );
             }
             Instr::DeclarePersistent(indices) => {
-                // Initialize locals from persistent table if present
-                let func_name = current_function_name.clone();
-                for i in indices.into_iter() {
-                    let key = (func_name.clone(), i);
-                    let val_opt = PERSISTENTS.with(|p| p.borrow().get(&key).cloned());
-                    if let Some(v) = val_opt {
-                        if i >= vars.len() {
-                            vars.resize(i + 1, Value::Num(0.0));
-                            refresh_workspace_state(&vars);
-                        }
-                        vars[i] = v;
-                    }
-                }
+                runtime_globals::declare_persistent(&current_function_name, indices, &mut vars);
             }
             Instr::DeclarePersistentNamed(indices, names) => {
-                let func_name = current_function_name.clone();
-                for (pos, i) in indices.into_iter().enumerate() {
-                    let name = names
-                        .get(pos)
-                        .cloned()
-                        .unwrap_or_else(|| format!("var_{i}"));
-                    let key = (func_name.clone(), i);
-                    let val_opt = PERSISTENTS_BY_NAME
-                        .with(|p| p.borrow().get(&(func_name.clone(), name.clone())).cloned())
-                        .or_else(|| PERSISTENTS.with(|p| p.borrow().get(&key).cloned()));
-                    if let Some(v) = val_opt {
-                        if i >= vars.len() {
-                            vars.resize(i + 1, Value::Num(0.0));
-                            refresh_workspace_state(&vars);
-                        }
-                        vars[i] = v;
-                    }
-                    persistent_aliases.insert(i, name);
-                }
+                runtime_globals::declare_persistent_named(
+                    &current_function_name,
+                    indices,
+                    names,
+                    &mut vars,
+                    &mut persistent_aliases,
+                );
             }
             Instr::Add => {
                 arithmetic_ops::add(
@@ -5432,44 +5332,7 @@ async fn interpret_function_with_counts(
         Ok(InterpreterOutcome::Completed(values)) => Ok(values),
         Err(e) => Err(e),
     }?;
-    // Persist any variables declared persistent in this bytecode under the given function name
-    let func_name = name.to_string();
-    for instr in &bytecode.instructions {
-        match instr {
-            crate::instr::Instr::DeclarePersistent(indices) => {
-                for &i in indices {
-                    if i < vars.len() {
-                        let key = (func_name.clone(), i);
-                        PERSISTENTS.with(|p| {
-                            p.borrow_mut().insert(key, vars[i].clone());
-                        });
-                    }
-                }
-            }
-            crate::instr::Instr::DeclarePersistentNamed(indices, names) => {
-                for (pos, &i) in indices.iter().enumerate() {
-                    if i < vars.len() {
-                        let key = (func_name.clone(), i);
-                        let name_key = (
-                            func_name.clone(),
-                            names
-                                .get(pos)
-                                .cloned()
-                                .unwrap_or_else(|| format!("var_{i}")),
-                        );
-                        let val = vars[i].clone();
-                        PERSISTENTS.with(|p| {
-                            p.borrow_mut().insert(key, val.clone());
-                        });
-                        PERSISTENTS_BY_NAME.with(|p| {
-                            p.borrow_mut().insert(name_key, val);
-                        });
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
+    runtime_globals::persist_declared_for_bytecode(bytecode, name, &vars);
     Ok(res)
 }
 

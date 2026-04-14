@@ -6027,6 +6027,7 @@ dependencies = [
  "runmat-accelerate",
  "runmat-accelerate-api",
  "runmat-builtins",
+ "runmat-gc",
  "runmat-hir",
  "runmat-parser",
  "runmat-runtime",
