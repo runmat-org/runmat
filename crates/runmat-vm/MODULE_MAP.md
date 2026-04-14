@@ -49,6 +49,9 @@ runmat-vm/
     lib.rs
     accel/
       mod.rs
+      idioms/
+        mod.rs
+        stochastic_evolution.rs
       fusion.rs
       graph.rs
       residency.rs
@@ -72,7 +75,6 @@ runmat-vm/
       functions.rs
       imports.rs
       lvalues.rs
-      patterns.rs
       statements.rs
     indexing/
       mod.rs
@@ -142,7 +144,6 @@ Current internal ownership:
 - `statements.rs`: general statement lowering including control flow, imports, globals/persistents, and multi-assign.
 - `expressions.rs`: general expression lowering including calls, indexing, member access, literals, and operators.
 - `imports.rs`: compile-time import/static resolution helpers for unqualified names and `Class.*` lookup.
-- `patterns.rs`: lowering-time pattern detection and special-case lowering such as stochastic evolution.
 
 Port source:
 
@@ -237,6 +238,12 @@ Port source:
 - Owns optional fusion graph and native acceleration integration.
 - Keeps feature-gated acceleration logic separated from the core host interpreter.
 - `residency.rs` is the shared home for residency policy and fusion/barrier decisions used by both analysis and execution.
+- `idioms/` is the home for deterministic detection/lowering of accel-specific math idioms into specialized VM opcodes.
+
+Current migrated ownership:
+
+- stochastic-evolution idiom detection/lowering in `idioms/stochastic_evolution.rs`
+- statement-idiom dispatch in `idioms/mod.rs`
 
 Port source:
 

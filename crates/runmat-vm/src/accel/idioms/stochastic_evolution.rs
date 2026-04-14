@@ -1,14 +1,12 @@
-//! Lowering-time pattern detection.
-
 use crate::compiler::core::Compiler;
 use crate::compiler::end_expr::expr_is_one;
 use crate::compiler::CompileError;
 use crate::instr::Instr;
 use once_cell::sync::OnceCell;
-use runmat_hir::{HirExpr, HirStmt};
+use runmat_hir::{HirExpr, HirStmt, VarId};
 
-pub(crate) struct StochasticEvolutionPlan<'a> {
-    pub state: runmat_hir::VarId,
+pub(crate) struct Plan<'a> {
+    pub state: VarId,
     pub drift: &'a HirExpr,
     pub scale: &'a HirExpr,
     pub steps: &'a HirExpr,
@@ -30,14 +28,14 @@ fn is_randn_call(expr: &HirExpr) -> bool {
     }
 }
 
-fn matches_var(expr: &HirExpr, var: runmat_hir::VarId) -> bool {
+fn matches_var(expr: &HirExpr, var: VarId) -> bool {
     matches!(expr.kind, runmat_hir::HirExprKind::Var(id) if id == var)
 }
 
 fn extract_drift_and_scale(
     expr: &HirExpr,
-    state_var: runmat_hir::VarId,
-    z_var: runmat_hir::VarId,
+    state_var: VarId,
+    z_var: VarId,
 ) -> Option<(&HirExpr, &HirExpr)> {
     use runmat_hir::HirExprKind as EK;
     use runmat_parser::BinOp;
@@ -74,7 +72,7 @@ fn extract_drift_and_scale(
     }
 }
 
-fn extract_scale_term(expr: &HirExpr, z_var: runmat_hir::VarId) -> Option<&HirExpr> {
+fn extract_scale_term(expr: &HirExpr, z_var: VarId) -> Option<&HirExpr> {
     use runmat_hir::HirExprKind as EK;
     use runmat_parser::BinOp;
 
@@ -96,63 +94,54 @@ fn is_exp_call(expr: &HirExpr) -> bool {
     matches!(&expr.kind, runmat_hir::HirExprKind::FuncCall(name, _) if name.eq_ignore_ascii_case("exp"))
 }
 
-impl Compiler {
-    pub(crate) fn compile_stochastic_evolution(
-        &mut self,
-        plan: StochasticEvolutionPlan<'_>,
-    ) -> Result<(), CompileError> {
-        self.emit(Instr::LoadVar(plan.state.0));
-        self.compile_expr(plan.drift)?;
-        self.compile_expr(plan.scale)?;
-        self.compile_expr(plan.steps)?;
-        self.emit(Instr::StochasticEvolution);
-        self.emit(Instr::StoreVar(plan.state.0));
-        Ok(())
+pub(crate) fn detect<'a>(expr: &'a HirExpr, body: &'a [HirStmt]) -> Option<Plan<'a>> {
+    if stochastic_evolution_disabled() {
+        return None;
     }
+    use runmat_hir::HirExprKind as EK;
 
-    pub(crate) fn detect_stochastic_evolution<'a>(
-        &self,
-        expr: &'a HirExpr,
-        body: &'a [HirStmt],
-    ) -> Option<StochasticEvolutionPlan<'a>> {
-        if stochastic_evolution_disabled() {
-            return None;
-        }
-        use runmat_hir::HirExprKind as EK;
-
-        match &expr.kind {
-            EK::Range(start, step, end) => {
-                if !expr_is_one(start) {
-                    return None;
-                }
-                if let Some(step_expr) = step {
-                    if !expr_is_one(step_expr) {
-                        return None;
-                    }
-                }
-                if body.len() != 2 {
-                    return None;
-                }
-                let (z_var, randn_expr) = match &body[0] {
-                    HirStmt::Assign(var, expr, _, _) => (*var, expr),
-                    _ => return None,
-                };
-                if !is_randn_call(randn_expr) {
-                    return None;
-                }
-                let (state_var, update_expr) = match &body[1] {
-                    HirStmt::Assign(var, expr, _, _) => (*var, expr),
-                    _ => return None,
-                };
-                let (drift, scale) = extract_drift_and_scale(update_expr, state_var, z_var)?;
-                Some(StochasticEvolutionPlan {
-                    state: state_var,
-                    drift,
-                    scale,
-                    steps: end,
-                })
+    match &expr.kind {
+        EK::Range(start, step, end) => {
+            if !expr_is_one(start) {
+                return None;
             }
-            _ => None,
+            if let Some(step_expr) = step {
+                if !expr_is_one(step_expr) {
+                    return None;
+                }
+            }
+            if body.len() != 2 {
+                return None;
+            }
+            let (z_var, randn_expr) = match &body[0] {
+                HirStmt::Assign(var, expr, _, _) => (*var, expr),
+                _ => return None,
+            };
+            if !is_randn_call(randn_expr) {
+                return None;
+            }
+            let (state_var, update_expr) = match &body[1] {
+                HirStmt::Assign(var, expr, _, _) => (*var, expr),
+                _ => return None,
+            };
+            let (drift, scale) = extract_drift_and_scale(update_expr, state_var, z_var)?;
+            Some(Plan {
+                state: state_var,
+                drift,
+                scale,
+                steps: end,
+            })
         }
+        _ => None,
     }
+}
+
+pub(crate) fn lower(compiler: &mut Compiler, plan: Plan<'_>) -> Result<(), CompileError> {
+    compiler.emit(Instr::LoadVar(plan.state.0));
+    compiler.compile_expr(plan.drift)?;
+    compiler.compile_expr(plan.scale)?;
+    compiler.compile_expr(plan.steps)?;
+    compiler.emit(Instr::StochasticEvolution);
+    compiler.emit(Instr::StoreVar(plan.state.0));
+    Ok(())
 }

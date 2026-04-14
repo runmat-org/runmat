@@ -1,5 +1,6 @@
 //! Statement lowering.
 
+use crate::accel::idioms;
 use crate::compiler::core::{Compiler, LoopLabels};
 use crate::compiler::CompileError;
 use crate::instr::{EmitLabel, Instr};
@@ -101,8 +102,8 @@ impl Compiler {
             HirStmt::For {
                 var, expr, body, ..
             } => {
-                if let Some(plan) = self.detect_stochastic_evolution(expr, body) {
-                    self.compile_stochastic_evolution(plan)?;
+                if let Some(plan) = idioms::detect_stmt_idiom(expr, body) {
+                    idioms::lower_stmt_idiom(self, plan)?;
                     return Ok(());
                 }
                 if let HirExprKind::Range(start, step, end) = &expr.kind {
