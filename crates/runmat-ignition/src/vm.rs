@@ -52,8 +52,7 @@ use runmat_vm::indexing::write_linear as idx_write_linear;
 use runmat_vm::indexing::write_slice as idx_write_slice;
 use runmat_vm::object::{class_def as obj_class_def, resolve as obj_resolve};
 use runmat_vm::ops::cells as cell_ops;
-use runmat_vm::ops::{arithmetic as arithmetic_ops, comparison as comparison_ops};
-use runmat_vm::ops::control_flow;
+use runmat_vm::ops::arithmetic as arithmetic_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
 use runmat_vm::runtime::call_stack::{
     attach_call_frames, push_call_frame,
@@ -801,6 +800,7 @@ async fn run_interpreter_inner(
             &bytecode.instructions[pc],
             stack.len(),
         );
+        let global_aliases_snapshot = global_aliases.clone();
         if let Some(decision) = interp_dispatch::dispatch_instruction(
             &bytecode.instructions[pc],
             &mut stack,
@@ -808,6 +808,10 @@ async fn run_interpreter_inner(
             &bytecode.var_names,
             &mut context,
             &mut try_stack,
+            &mut imports,
+            &current_function_name,
+            &mut global_aliases,
+            &mut persistent_aliases,
             &mut pc,
             |current, incoming| {
                 #[cfg(feature = "native-accel")]
@@ -816,7 +820,11 @@ async fn run_interpreter_inner(
                 }
             },
             |stored_index, stored_value| {
-                runtime_globals::update_global_store(stored_index, stored_value, &global_aliases);
+                runtime_globals::update_global_store(
+                    stored_index,
+                    stored_value,
+                    &global_aliases_snapshot,
+                );
             },
             |current, incoming| {
                 #[cfg(feature = "native-accel")]
@@ -889,6 +897,21 @@ async fn run_interpreter_inner(
             | Instr::PopTry
             | Instr::ReturnValue
             | Instr::Return
+            | Instr::EnterScope(_)
+            | Instr::ExitScope(_)
+            | Instr::RegisterImport { .. }
+            | Instr::DeclareGlobal(_)
+            | Instr::DeclareGlobalNamed(_, _)
+            | Instr::DeclarePersistent(_)
+            | Instr::DeclarePersistentNamed(_, _)
+            | Instr::Neg
+            | Instr::UPlus
+            | Instr::LessEqual
+            | Instr::Less
+            | Instr::Greater
+            | Instr::GreaterEqual
+            | Instr::Equal
+            | Instr::NotEqual
             | Instr::Unpack(_)
             | Instr::CreateMatrix(_, _)
             | Instr::CreateMatrixDynamic(_)
@@ -981,41 +1004,6 @@ async fn run_interpreter_inner(
                     Err(err) => vm_bail!(err),
                 }
             }
-            Instr::EnterScope(local_count) => {
-                control_flow::enter_scope(&mut context.locals, local_count);
-            }
-            Instr::ExitScope(local_count) => {
-                control_flow::exit_scope(&mut context.locals, local_count, |val| {
-                    #[cfg(feature = "native-accel")]
-                    clear_residency(val);
-                });
-            }
-            Instr::RegisterImport { path, wildcard } => {
-                imports.push((path, wildcard));
-            }
-            Instr::DeclareGlobal(indices) => {
-                runtime_globals::declare_global(indices, &mut vars);
-            }
-            Instr::DeclareGlobalNamed(indices, names) => {
-                runtime_globals::declare_global_named(
-                    indices,
-                    names,
-                    &mut vars,
-                    &mut global_aliases,
-                );
-            }
-            Instr::DeclarePersistent(indices) => {
-                runtime_globals::declare_persistent(&current_function_name, indices, &mut vars);
-            }
-            Instr::DeclarePersistentNamed(indices, names) => {
-                runtime_globals::declare_persistent_named(
-                    &current_function_name,
-                    indices,
-                    names,
-                    &mut vars,
-                    &mut persistent_aliases,
-                );
-            }
             Instr::Add => {
                 arithmetic_ops::add(
                     &mut stack,
@@ -1085,46 +1073,6 @@ async fn run_interpreter_inner(
                     },
                 ).await?;
             }
-            Instr::Neg => {
-                arithmetic_ops::unary(&mut stack, |value| async move {
-                    match &value {
-                        Value::Object(obj) => {
-                            let args = vec![Value::Object(obj.clone())];
-                            match call_builtin_vm!("uminus", &args) {
-                                Ok(v) => Ok(v),
-                                Err(_) => call_builtin_vm!("times", &[value.clone(), Value::Num(-1.0)]),
-                            }
-                        }
-                        _ => call_builtin_vm!("times", &[value.clone(), Value::Num(-1.0)]),
-                    }
-                }).await?;
-            }
-            Instr::UPlus => {
-                arithmetic_ops::unary(&mut stack, |value| async move {
-                    match &value {
-                        Value::Object(obj) => {
-                            let args = vec![Value::Object(obj.clone())];
-                            match call_builtin_vm!("uplus", &args) {
-                                Ok(v) => Ok(v),
-                                Err(_) => Ok(value),
-                            }
-                        }
-                        _ => Ok(value),
-                    }
-                }).await?;
-            }
-            Instr::Transpose => {
-                arithmetic_ops::unary(&mut stack, |value| async move {
-                    let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value).await?;
-                    call_builtin_vm!("transpose", &[promoted])
-                }).await?;
-            }
-            Instr::ConjugateTranspose => {
-                arithmetic_ops::unary(&mut stack, |value| async move {
-                    let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value).await?;
-                    call_builtin_vm!("ctranspose", &[promoted])
-                }).await?;
-            }
             Instr::ElemMul => {
                 arithmetic_ops::binary_method(
                     &mut stack,
@@ -1177,85 +1125,17 @@ async fn run_interpreter_inner(
                     },
                 ).await?;
             }
-            Instr::LessEqual => {
-                comparison_ops::relation_inverted(
-                    &mut stack,
-                    "le",
-                    "gt",
-                    "ge",
-                    "lt",
-                    |aa, bb| aa <= bb,
-                    |obj, method, arg| async move {
-                        let args = vec![obj, Value::String(method.to_string()), arg];
-                        call_builtin_vm!("call_method", &args)
-                    },
-                    |name, a, b| async move { call_builtin_vm!(name, &[a, b]) },
-                    |v, label| async move { logical_truth_from_value(&v, &label).await },
-                ).await?;
+            Instr::Transpose => {
+                arithmetic_ops::unary(&mut stack, |value| async move {
+                    let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value).await?;
+                    call_builtin_vm!("transpose", &[promoted])
+                }).await?;
             }
-            Instr::Less => {
-                comparison_ops::relation(
-                    &mut stack,
-                    "lt",
-                    "gt",
-                    |aa, bb| aa < bb,
-                    |obj, method, arg| async move {
-                        let args = vec![obj, Value::String(method.to_string()), arg];
-                        call_builtin_vm!("call_method", &args)
-                    },
-                    |name, a, b| async move { call_builtin_vm!(name, &[a, b]) },
-                ).await?;
-            }
-            Instr::Greater => {
-                comparison_ops::relation(
-                    &mut stack,
-                    "gt",
-                    "lt",
-                    |aa, bb| aa > bb,
-                    |obj, method, arg| async move {
-                        let args = vec![obj, Value::String(method.to_string()), arg];
-                        call_builtin_vm!("call_method", &args)
-                    },
-                    |name, a, b| async move { call_builtin_vm!(name, &[a, b]) },
-                ).await?;
-            }
-            Instr::GreaterEqual => {
-                comparison_ops::relation_inverted(
-                    &mut stack,
-                    "ge",
-                    "lt",
-                    "le",
-                    "gt",
-                    |aa, bb| aa >= bb,
-                    |obj, method, arg| async move {
-                        let args = vec![obj, Value::String(method.to_string()), arg];
-                        call_builtin_vm!("call_method", &args)
-                    },
-                    |name, a, b| async move { call_builtin_vm!(name, &[a, b]) },
-                    |v, label| async move { logical_truth_from_value(&v, &label).await },
-                ).await?;
-            }
-            Instr::Equal => {
-                comparison_ops::equal(
-                    &mut stack,
-                    |obj, method, arg| async move {
-                        let args = vec![obj, Value::String(method.to_string()), arg];
-                        call_builtin_vm!("call_method", &args)
-                    },
-                    |name, a, b| async move { call_builtin_vm!(name, &[a, b]) },
-                    |_v, _label| async move { Ok(false) },
-                ).await?;
-            }
-            Instr::NotEqual => {
-                comparison_ops::not_equal(
-                    &mut stack,
-                    |obj, method, arg| async move {
-                        let args = vec![obj, Value::String(method.to_string()), arg];
-                        call_builtin_vm!("call_method", &args)
-                    },
-                    |name, a, b| async move { call_builtin_vm!(name, &[a, b]) },
-                    |v, label| async move { logical_truth_from_value(&v, &label).await },
-                ).await?;
+            Instr::ConjugateTranspose => {
+                arithmetic_ops::unary(&mut stack, |value| async move {
+                    let promoted = accel_promote_unary(AutoUnaryOp::Transpose, &value).await?;
+                    call_builtin_vm!("ctranspose", &[promoted])
+                }).await?;
             }
             Instr::StochasticEvolution => {
                 let steps_value = stack
@@ -3638,42 +3518,6 @@ async fn scalar_from_value_scalar(value: &Value, label: &str) -> VmResult<f64> {
             }
         }
         other => Err(format!("{label}: expected numeric scalar, got {:?}", other).into()),
-    }
-}
-
-async fn logical_truth_from_value(value: &Value, label: &str) -> VmResult<bool> {
-    match value {
-        Value::Bool(flag) => Ok(*flag),
-        Value::Int(i) => Ok(!i.is_zero()),
-        Value::Num(n) => Ok(*n != 0.0),
-        Value::LogicalArray(array) if array.data.len() == 1 => Ok(array.data[0] != 0),
-        Value::LogicalArray(array) => Err(mex(
-            "InvalidConditionType",
-            &format!(
-                "{label}: expected scalar logical or numeric value, got logical array with {} elements",
-                array.data.len()
-            ),
-        )),
-        Value::Tensor(tensor) if tensor.data.len() == 1 => Ok(tensor.data[0] != 0.0),
-        Value::Tensor(tensor) => Err(mex(
-            "InvalidConditionType",
-            &format!(
-                "{label}: expected scalar logical or numeric value, got numeric array with {} elements",
-                tensor.data.len()
-            ),
-        )),
-        Value::GpuTensor(_) => {
-            let gathered = gather_if_needed_async(value)
-                .await
-                .map_err(|e| format!("{label}: {e}"))?;
-            Box::pin(logical_truth_from_value(&gathered, label)).await
-        }
-        other => Err(mex(
-            "InvalidConditionType",
-            &format!(
-                "{label}: expected scalar logical or numeric value, got {other:?}"
-            ),
-        )),
     }
 }
 

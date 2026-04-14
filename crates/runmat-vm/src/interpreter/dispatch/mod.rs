@@ -1,5 +1,6 @@
 mod calls;
 mod control_flow;
+mod arithmetic;
 mod arrays;
 mod exceptions;
 mod stack;
@@ -74,6 +75,10 @@ pub async fn dispatch_instruction(
     var_names: &HashMap<usize, String>,
     context: &mut crate::bytecode::ExecutionContext,
     try_stack: &mut Vec<(usize, Option<usize>)>,
+    imports: &mut Vec<(Vec<String>, bool)>,
+    current_function_name: &str,
+    global_aliases: &mut HashMap<usize, String>,
+    persistent_aliases: &mut HashMap<usize, String>,
     pc: &mut usize,
     mut store_var_before_overwrite: impl FnMut(&Value, &Value),
     mut store_var_after_store: impl FnMut(usize, &Value),
@@ -82,6 +87,9 @@ pub async fn dispatch_instruction(
     mut store_local_after_fallback_store: impl FnMut(&str, usize, &Value),
 ) -> Result<Option<DispatchHandled>, RuntimeError> {
     match instr {
+        _ if arithmetic::dispatch_arithmetic(instr, stack).await? => {
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
         Instr::EmitStackTop { label } => {
             emit_stack_top(stack, label, var_names).await?;
             Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
@@ -190,6 +198,45 @@ pub async fn dispatch_instruction(
         Instr::Return => Ok(Some(DispatchHandled::Return(
             apply_control_flow_action(crate::ops::control_flow::return_void(), pc),
         ))),
+        Instr::EnterScope(local_count) => {
+            crate::ops::control_flow::enter_scope(&mut context.locals, *local_count);
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::ExitScope(local_count) => {
+            crate::ops::control_flow::exit_scope(&mut context.locals, *local_count, |_val| {});
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::RegisterImport { path, wildcard } => {
+            imports.push((path.clone(), *wildcard));
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::DeclareGlobal(indices) => {
+            crate::runtime::globals::declare_global(indices.clone(), vars);
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::DeclareGlobalNamed(indices, names) => {
+            crate::runtime::globals::declare_global_named(
+                indices.clone(),
+                names.clone(),
+                vars,
+                global_aliases,
+            );
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::DeclarePersistent(indices) => {
+            crate::runtime::globals::declare_persistent(current_function_name, indices.clone(), vars);
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::DeclarePersistentNamed(indices, names) => {
+            crate::runtime::globals::declare_persistent_named(
+                current_function_name,
+                indices.clone(),
+                names.clone(),
+                vars,
+                persistent_aliases,
+            );
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
         Instr::PackToRow(count) => {
             pack_to_row(stack, *count)?;
             Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
