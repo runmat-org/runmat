@@ -795,49 +795,7 @@ async fn run_interpreter_inner(
                 }
             }
             Instr::CallFevalExpandMulti(specs) => {
-                let args = call_shared::build_expanded_args_from_specs(
-                    &mut stack,
-                    &specs,
-                    "CallFevalExpandMulti requires cell or object for expand_all",
-                    "CallFevalExpandMulti requires cell or object cell access",
-                    |base| async move { match base {
-                        Value::Object(obj) => {
-                            let empty = call_shared::subsref_empty_brace_cell()?;
-                            let args = vec![
-                                Value::Object(obj),
-                                Value::String("subsref".to_string()),
-                                Value::String("{}".to_string()),
-                                empty,
-                            ];
-                            let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
-                            Ok(match v {
-                                Value::Cell(ca) => call_shared::expand_all_cell(&ca),
-                                other => vec![other],
-                            })
-                        }
-                        _ => Err(mex(
-                            "InvalidExpandAllTarget",
-                            "CallFevalExpandMulti requires cell or object for expand_all",
-                        )),
-                    }},
-                    |base, indices| async move { match base {
-                        Value::Object(obj) => {
-                            let cell = call_shared::subsref_brace_index_cell_raw(&indices)?;
-                            let args = vec![
-                                Value::Object(obj),
-                                Value::String("subsref".to_string()),
-                                Value::String("{}".to_string()),
-                                cell,
-                            ];
-                            let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
-                            Ok(vec![v])
-                        }
-                        _ => Err(mex(
-                            "ExpandError",
-                            "CallFevalExpandMulti requires cell or object cell access",
-                        )),
-                    }},
-                ).await?;
+                let args = interp_dispatch::build_feval_expand_multi_args(&mut stack, &specs).await?;
                 let func_val = pop_value(&mut stack)?;
                 match interp_dispatch::handle_feval_dispatch(
                     call_feval::execute_feval(

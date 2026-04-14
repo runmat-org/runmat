@@ -14,8 +14,9 @@ use std::collections::HashMap;
 
 pub use calls::{
     build_builtin_expand_at_args, build_builtin_expand_last_args, build_builtin_expand_multi_args,
-    handle_builtin_outcome, handle_feval_dispatch, output_list_for_user_call, push_single_result,
-    prepare_named_user_dispatch, push_user_call_outputs, unpack_prepared_user_call,
+    build_feval_expand_multi_args, handle_builtin_outcome, handle_feval_dispatch,
+    output_list_for_user_call, push_single_result, prepare_named_user_dispatch,
+    push_user_call_outputs, unpack_prepared_user_call,
     BuiltinHandling, FevalHandling, PreparedUserDispatch,
 };
 pub use arrays::{create_matrix, create_matrix_dynamic, create_range, pack_to_col, pack_to_row, unpack};

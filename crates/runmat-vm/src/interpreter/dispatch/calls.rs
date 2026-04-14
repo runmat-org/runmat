@@ -271,6 +271,60 @@ pub async fn build_builtin_expand_multi_args(
     .await
 }
 
+pub async fn build_feval_expand_multi_args(
+    stack: &mut Vec<Value>,
+    specs: &[ArgSpec],
+) -> Result<Vec<Value>, RuntimeError> {
+    build_expanded_args_from_specs(
+        stack,
+        specs,
+        "CallFevalExpandMulti requires cell or object for expand_all",
+        "CallFevalExpandMulti requires cell or object cell access",
+        |base| async move {
+            match base {
+                Value::Object(obj) => {
+                    let empty = subsref_empty_brace_cell()?;
+                    let args = vec![
+                        Value::Object(obj),
+                        Value::String("subsref".to_string()),
+                        Value::String("{}".to_string()),
+                        empty,
+                    ];
+                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
+                    Ok(match v {
+                        Value::Cell(ca) => crate::call::shared::expand_all_cell(&ca),
+                        other => vec![other],
+                    })
+                }
+                _ => Err(crate::interpreter::errors::mex(
+                    "InvalidExpandAllTarget",
+                    "CallFevalExpandMulti requires cell or object for expand_all",
+                )),
+            }
+        },
+        |base, indices| async move {
+            match base {
+                Value::Object(obj) => {
+                    let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
+                    let args = vec![
+                        Value::Object(obj),
+                        Value::String("subsref".to_string()),
+                        Value::String("{}".to_string()),
+                        cell,
+                    ];
+                    let v = runmat_runtime::call_builtin_async("call_method", &args).await?;
+                    Ok(vec![v])
+                }
+                _ => Err(crate::interpreter::errors::mex(
+                    "ExpandError",
+                    "CallFevalExpandMulti requires cell or object cell access",
+                )),
+            }
+        },
+    )
+    .await
+}
+
 pub fn handle_builtin_outcome(
     result: Result<Value, RuntimeError>,
     imported: ImportedBuiltinResolution,
