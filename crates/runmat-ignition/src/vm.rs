@@ -34,16 +34,17 @@ pub use runmat_vm::interpreter::api::{
     DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
 };
 use runmat_vm::interpreter::engine as interp_engine;
-use runmat_vm::interpreter::dispatch::{self as interp_dispatch, DispatchDecision};
+use runmat_vm::interpreter::dispatch::{
+    self as interp_dispatch, DispatchDecision, ExceptionHandling,
+};
 use runmat_vm::interpreter::errors::{
-    attach_span_at, attach_span_from_pc, ensure_runtime_error_identifier, mex, set_vm_pc,
+    attach_span_from_pc, mex, set_vm_pc,
 };
 use runmat_vm::interpreter::stack::pop_value;
 use runmat_vm::call::shared as call_shared;
 use runmat_vm::call::{builtins as call_builtins, feval as call_feval, user as call_user};
 use runmat_vm::call::builtins::ImportedBuiltinResolution;
 use runmat_vm::call::closures as call_closures;
-use runmat_vm::call::feval::FevalDispatch;
 use runmat_vm::indexing::end_expr as idx_end_expr;
 use runmat_vm::indexing::read_linear as idx_read_linear;
 use runmat_vm::indexing::read_slice as idx_read_slice;
@@ -57,7 +58,7 @@ use runmat_vm::ops::control_flow;
 use runmat_vm::ops::stack as stack_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
 use runmat_vm::runtime::call_stack::{
-    attach_call_frames, error_namespace, push_call_frame,
+    attach_call_frames, push_call_frame,
 };
 use runmat_vm::runtime::globals as runtime_globals;
 use runmat_vm::runtime::workspace::{
@@ -727,22 +728,17 @@ async fn run_interpreter_inner(
     let mut interpreter_timing = InterpreterTiming::new();
     macro_rules! vm_bail {
         ($err:expr) => {{
-            let err: RuntimeError = ensure_runtime_error_identifier(($err).into());
-            let err = attach_span_at(&bytecode, pc, err);
-            if let Some((catch_pc, catch_var)) = try_stack.pop() {
-                if let Some(var_idx) = catch_var {
-                    if var_idx >= vars.len() {
-                        vars.resize(var_idx + 1, Value::Num(0.0));
-                        refresh_workspace_state(&vars);
-                    }
-                    let mex = parse_exception(&err);
-                    last_exception = Some(mex.clone());
-                    vars[var_idx] = Value::MException(mex);
-                }
-                pc = catch_pc;
-                continue;
-            } else {
-                return Err(err);
+            let err = interp_dispatch::prepare_vm_error(&bytecode, pc, $err);
+            match interp_dispatch::redirect_exception_to_catch(
+                err,
+                &mut try_stack,
+                &mut vars,
+                &mut last_exception,
+                &mut pc,
+                refresh_workspace_state,
+            ) {
+                ExceptionHandling::Caught => continue,
+                ExceptionHandling::Uncaught(err) => return Err(err),
             }
         }};
     }
@@ -838,23 +834,22 @@ async fn run_interpreter_inner(
             Instr::CallFeval(argc) => {
                 let args = call_builtins::collect_call_args(&mut stack, argc)?;
                 let func_val = pop_value(&mut stack)?;
-                match call_feval::execute_feval(
-                    func_val,
-                    args,
-                    &context.functions,
-                    &bytecode.functions,
-                )
-                .await
-                {
-                    Ok(FevalDispatch::Completed(result)) => stack.push(result),
-                    Ok(FevalDispatch::InvokeUser {
-                        name,
+                match interp_dispatch::handle_feval_dispatch(
+                    call_feval::execute_feval(
+                        func_val,
                         args,
-                        functions,
-                    }) => match invoke_user_function_value(&name, &args, &functions, &mut vars).await {
-                        Ok(value) => stack.push(value),
-                        Err(e) => vm_bail!(e),
-                    },
+                        &context.functions,
+                        &bytecode.functions,
+                    ).await,
+                    &mut stack,
+                ) {
+                    Ok(interp_dispatch::FevalHandling::Completed) => {}
+                    Ok(interp_dispatch::FevalHandling::InvokeUser { name, args, functions }) => {
+                        match invoke_user_function_value(&name, &args, &functions, &mut vars).await {
+                            Ok(value) => stack.push(value),
+                            Err(e) => vm_bail!(e),
+                        }
+                    }
                     Err(err) => vm_bail!(err),
                 }
             }
@@ -903,23 +898,22 @@ async fn run_interpreter_inner(
                     }},
                 ).await?;
                 let func_val = pop_value(&mut stack)?;
-                match call_feval::execute_feval(
-                    func_val,
-                    args,
-                    &context.functions,
-                    &bytecode.functions,
-                )
-                .await
-                {
-                    Ok(FevalDispatch::Completed(result)) => stack.push(result),
-                    Ok(FevalDispatch::InvokeUser {
-                        name,
+                match interp_dispatch::handle_feval_dispatch(
+                    call_feval::execute_feval(
+                        func_val,
                         args,
-                        functions,
-                    }) => match invoke_user_function_value(&name, &args, &functions, &mut vars).await {
-                        Ok(value) => stack.push(value),
-                        Err(e) => vm_bail!(e),
-                    },
+                        &context.functions,
+                        &bytecode.functions,
+                    ).await,
+                    &mut stack,
+                ) {
+                    Ok(interp_dispatch::FevalHandling::Completed) => {}
+                    Ok(interp_dispatch::FevalHandling::InvokeUser { name, args, functions }) => {
+                        match invoke_user_function_value(&name, &args, &functions, &mut vars).await {
+                            Ok(value) => stack.push(value),
+                            Err(e) => vm_bail!(e),
+                        }
+                    }
                     Err(err) => vm_bail!(err),
                 }
             }
@@ -1435,20 +1429,16 @@ async fn run_interpreter_inner(
                                 ) {
                                     vm_bail!(err);
                                 }
-                                if let Some((catch_pc, catch_var)) = try_stack.pop() {
-                                    if let Some(var_idx) = catch_var {
-                                        if var_idx >= vars.len() {
-                                            vars.resize(var_idx + 1, Value::Num(0.0));
-                                            refresh_workspace_state(&vars);
-                                        }
-                                        let mex = parse_exception(&e);
-                                        last_exception = Some(mex.clone());
-                                        vars[var_idx] = Value::MException(mex);
-                                    }
-                                    pc = catch_pc;
-                                    continue;
-                                } else {
-                                    return Err(e);
+                                match interp_dispatch::redirect_exception_to_catch(
+                                    e,
+                                    &mut try_stack,
+                                    &mut vars,
+                                    &mut last_exception,
+                                    &mut pc,
+                                    refresh_workspace_state,
+                                ) {
+                                    ExceptionHandling::Caught => continue,
+                                    ExceptionHandling::Uncaught(err) => return Err(err),
                                 }
                             }
                         }
@@ -2028,21 +2018,16 @@ async fn run_interpreter_inner(
                 {
                     Ok(v) => v,
                     Err(e) => {
-                        if let Some((catch_pc, catch_var)) = try_stack.pop() {
-                            if let Some(var_idx) = catch_var {
-                                if var_idx >= vars.len() {
-                                    vars.resize(var_idx + 1, Value::Num(0.0));
-                                    refresh_workspace_state(&vars);
-                                }
-                                let mex = parse_exception(&e);
-
-                                last_exception = Some(mex.clone());
-                                vars[var_idx] = Value::MException(mex);
-                            }
-                            pc = catch_pc;
-                            continue;
-                        } else {
-                            vm_bail!(e);
+                        match interp_dispatch::redirect_exception_to_catch(
+                            e,
+                            &mut try_stack,
+                            &mut vars,
+                            &mut last_exception,
+                            &mut pc,
+                            refresh_workspace_state,
+                        ) {
+                            ExceptionHandling::Caught => continue,
+                            ExceptionHandling::Uncaught(err) => vm_bail!(err),
                         }
                     }
                 };
@@ -2109,20 +2094,16 @@ async fn run_interpreter_inner(
                 {
                     Ok(v) => v,
                     Err(e) => {
-                        if let Some((catch_pc, catch_var)) = try_stack.pop() {
-                            if let Some(var_idx) = catch_var {
-                                if var_idx >= vars.len() {
-                                    vars.resize(var_idx + 1, Value::Num(0.0));
-                                    refresh_workspace_state(&vars);
-                                }
-                                let mex = parse_exception(&e);
-                                last_exception = Some(mex.clone());
-                                vars[var_idx] = Value::MException(mex);
-                            }
-                            pc = catch_pc;
-                            continue;
-                        } else {
-                            vm_bail!(e);
+                        match interp_dispatch::redirect_exception_to_catch(
+                            e,
+                            &mut try_stack,
+                            &mut vars,
+                            &mut last_exception,
+                            &mut pc,
+                            refresh_workspace_state,
+                        ) {
+                            ExceptionHandling::Caught => continue,
+                            ExceptionHandling::Uncaught(err) => vm_bail!(err),
                         }
                     }
                 };
@@ -5127,40 +5108,6 @@ fn same_gpu_handle(lhs: &Value, rhs: &Value) -> bool {
         (lhs, rhs),
         (Value::GpuTensor(left), Value::GpuTensor(right)) if left.buffer_id == right.buffer_id
     )
-}
-
-fn parse_exception(err: &runmat_runtime::RuntimeError) -> runmat_builtins::MException {
-    if let Some(identifier) = err.identifier() {
-        return runmat_builtins::MException::new(identifier.to_string(), err.message().to_string());
-    }
-    let message = err.message();
-    // Prefer the last occurrence of ": " to split IDENT: message, preserving nested identifiers
-    if let Some(idx) = message.rfind(": ") {
-        let (id, msg) = message.split_at(idx);
-        let message = msg.trim_start_matches(':').trim().to_string();
-        let ident = if id.trim().is_empty() {
-            format!("{}:error", error_namespace())
-        } else {
-            id.trim().to_string()
-        };
-        return runmat_builtins::MException::new(ident, message);
-    }
-    // Fallback: if any ':' present, use the last as separator
-    if let Some(idx) = message.rfind(':') {
-        let (id, msg) = message.split_at(idx);
-        let message = msg.trim_start_matches(':').trim().to_string();
-        let ident = if id.trim().is_empty() {
-            format!("{}:error", error_namespace())
-        } else {
-            id.trim().to_string()
-        };
-        runmat_builtins::MException::new(ident, message)
-    } else {
-        runmat_builtins::MException::new(
-            format!("{}:error", error_namespace()),
-            message.to_string(),
-        )
-    }
 }
 
 fn map_slice_plan_error(context: &str, err: RuntimeError) -> RuntimeError {
