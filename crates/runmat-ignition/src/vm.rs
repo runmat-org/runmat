@@ -38,6 +38,7 @@ use runmat_vm::interpreter::errors::{
     attach_span_at, attach_span_from_pc, ensure_runtime_error_identifier, mex, set_vm_pc,
 };
 use runmat_vm::interpreter::stack::{pop2, pop_args, pop_value};
+use runmat_vm::ops::control_flow::{self, ControlFlowAction};
 use runmat_vm::ops::stack as stack_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
 use runmat_vm::runtime::call_stack::{
@@ -1874,17 +1875,21 @@ async fn run_interpreter_inner(
                 stack_ops::emit_var(&vars, var_index, &label, &bytecode.var_names).await?;
             }
             Instr::AndAnd(target) => {
-                let lhs: f64 = (&pop_value(&mut stack)?).try_into()?;
-                if lhs == 0.0 {
-                    pc = target;
-                    continue;
+                match control_flow::and_and(&mut stack, target)? {
+                    ControlFlowAction::Jump(target) => {
+                        pc = target;
+                        continue;
+                    }
+                    ControlFlowAction::Next | ControlFlowAction::Return => {}
                 }
             }
             Instr::OrOr(target) => {
-                let lhs: f64 = (&pop_value(&mut stack)?).try_into()?;
-                if lhs != 0.0 {
-                    pc = target;
-                    continue;
+                match control_flow::or_or(&mut stack, target)? {
+                    ControlFlowAction::Jump(target) => {
+                        pc = target;
+                        continue;
+                    }
+                    ControlFlowAction::Next | ControlFlowAction::Return => {}
                 }
             }
             Instr::Swap => {
@@ -2199,17 +2204,13 @@ async fn run_interpreter_inner(
                 )?;
             }
             Instr::EnterScope(local_count) => {
-                for _ in 0..local_count {
-                    context.locals.push(Value::Num(0.0));
-                }
+                control_flow::enter_scope(&mut context.locals, local_count);
             }
             Instr::ExitScope(local_count) => {
-                for _ in 0..local_count {
-                    if let Some(val) = context.locals.pop() {
-                        #[cfg(feature = "native-accel")]
-                        clear_residency(&val);
-                    }
-                }
+                control_flow::exit_scope(&mut context.locals, local_count, |val| {
+                    #[cfg(feature = "native-accel")]
+                    clear_residency(val);
+                });
             }
             Instr::RegisterImport { path, wildcard } => {
                 imports.push((path, wildcard));
@@ -3266,17 +3267,24 @@ async fn run_interpreter_inner(
                 }
             }
             Instr::JumpIfFalse(target) => {
-                let cond = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                if !logical_truth_from_value(&cond, "if condition").await? {
-                    pc = target;
-                    continue;
+                let cond = pop_value(&mut stack)?;
+                let truth = logical_truth_from_value(&cond, "if condition").await?;
+                match control_flow::jump_if_false(truth, target) {
+                    ControlFlowAction::Jump(target) => {
+                        pc = target;
+                        continue;
+                    }
+                    ControlFlowAction::Next | ControlFlowAction::Return => {}
                 }
             }
             Instr::Jump(target) => {
-                pc = target;
-                continue;
+                match control_flow::jump(target) {
+                    ControlFlowAction::Jump(target) => {
+                        pc = target;
+                        continue;
+                    }
+                    ControlFlowAction::Next | ControlFlowAction::Return => unreachable!(),
+                }
             }
             Instr::StochasticEvolution => {
                 let steps_value = stack
@@ -4772,10 +4780,10 @@ async fn run_interpreter_inner(
                 stack.push(Value::OutputList(outputs));
             }
             Instr::EnterTry(catch_pc, catch_var) => {
-                try_stack.push((catch_pc, catch_var));
+                control_flow::enter_try(&mut try_stack, catch_pc, catch_var);
             }
             Instr::PopTry => {
-                try_stack.pop();
+                control_flow::pop_try(&mut try_stack);
             }
             Instr::CreateMatrix(rows, cols) => {
                 let total_elements = rows * cols;
@@ -8816,16 +8824,18 @@ async fn run_interpreter_inner(
                 }
             }
             Instr::ReturnValue => {
-                let return_value = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                stack.push(return_value);
+                let action = control_flow::return_value(&mut stack)?;
                 interpreter_timing.flush_host_span("return_value", None);
-                break;
+                if matches!(action, ControlFlowAction::Return) {
+                    break;
+                }
             }
             Instr::Return => {
+                let action = control_flow::return_void();
                 interpreter_timing.flush_host_span("return", None);
-                break;
+                if matches!(action, ControlFlowAction::Return) {
+                    break;
+                }
             }
             Instr::StoreIndex(num_indices) => {
                 // RHS to assign, then indices, then base
