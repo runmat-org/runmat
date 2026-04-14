@@ -10,6 +10,7 @@ repository = "https://github.com/runmat-org/runmat"
 
 [dependencies]
 runmat-accelerate = { workspace = true, optional = true }
+runmat-accelerate-api = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-hir = { workspace = true }
 runmat-parser = { workspace = true }

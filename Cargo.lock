@@ -6025,6 +6025,7 @@ dependencies = [
  "miette",
  "once_cell",
  "runmat-accelerate",
+ "runmat-accelerate-api",
  "runmat-builtins",
  "runmat-hir",
  "runmat-parser",
