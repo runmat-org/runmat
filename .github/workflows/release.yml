@@ -530,6 +530,14 @@ jobs:
             fi
           done
 
+      - name: Verify published crate assets
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cmp openapi/runmat-public.yaml crates/runmat-server-client/openapi/runmat-public.yaml
+          cargo package -p runmat-server-client --allow-dirty --list | tee /tmp/runmat-server-client-package.txt
+          grep -Fx 'openapi/runmat-public.yaml' /tmp/runmat-server-client-package.txt
+
       - name: Publish crates with cargo-workspaces
         shell: bash
         env:
@@ -544,7 +552,6 @@ jobs:
             --skip-published \
             --publish-as-is \
             --publish-interval 30 \
-            --no-verify \
             --token "$CARGO_REGISTRY_TOKEN"
 
   publish-bindings:
