@@ -42,6 +42,12 @@ pub enum MethodHandling {
     Completed,
 }
 
+pub enum UserCallHandling {
+    Completed,
+    Caught,
+    Uncaught(RuntimeError),
+}
+
 #[cfg(feature = "native-accel")]
 async fn accel_prepare_args(name: &str, args: &[Value]) -> Result<Vec<Value>, RuntimeError> {
     Ok(runmat_accelerate::prepare_builtin_args(name, args)
@@ -404,6 +410,76 @@ pub async fn handle_method_call(
     let value = call_closures::call_method(base, name, args).await?;
     stack.push(value);
     Ok(MethodHandling::Completed)
+}
+
+pub async fn handle_user_function_call<BF, BFFut, IF, IFFut>(
+    stack: &mut Vec<Value>,
+    name: &str,
+    arg_count: usize,
+    out_count: usize,
+    bytecode_functions: &std::collections::HashMap<String, UserFunction>,
+    vars: &mut Vec<Value>,
+    try_stack: &mut Vec<(usize, Option<usize>)>,
+    last_exception: &mut Option<MException>,
+    pc: &mut usize,
+    refresh_vars: impl Fn(&[Value]),
+    builtin_fallback: BF,
+    interpret_counts: IF,
+) -> Result<UserCallHandling, RuntimeError>
+where
+    BF: FnOnce(String, Vec<Value>, usize) -> BFFut,
+    BFFut: Future<Output = Result<Option<Value>, RuntimeError>>,
+    IF: FnOnce(crate::bytecode::Bytecode, Vec<Value>, String, usize, usize) -> IFFut,
+    IFFut: Future<Output = Result<Vec<Value>, RuntimeError>>,
+{
+    let args = crate::call::builtins::collect_call_args(stack, arg_count)?;
+    if let Some(result) = builtin_fallback(name.to_string(), args.clone(), out_count).await? {
+        stack.push(result);
+        return Ok(UserCallHandling::Completed);
+    }
+
+    let prepared = prepare_named_user_dispatch(name, bytecode_functions, &args, vars)?;
+    let PreparedUserDispatch {
+        func,
+        var_map,
+        func_program,
+        func_vars,
+    } = prepared;
+    let mut func_bytecode = crate::compile(&func_program, bytecode_functions)?;
+    func_bytecode.source_id = func.source_id;
+
+    let func_result_vars = match interpret_counts(
+        func_bytecode,
+        func_vars,
+        name.to_string(),
+        out_count,
+        arg_count,
+    )
+    .await
+    {
+        Ok(v) => v,
+        Err(e) => {
+            return Ok(match redirect_exception_to_catch(
+                e,
+                try_stack,
+                vars,
+                last_exception,
+                pc,
+                refresh_vars,
+            ) {
+                ExceptionHandling::Caught => UserCallHandling::Caught,
+                ExceptionHandling::Uncaught(err) => UserCallHandling::Uncaught(err),
+            })
+        }
+    };
+
+    if out_count == 1 {
+        push_user_call_outputs(stack, name, &func, &var_map, &func_result_vars, 1)?;
+    } else {
+        let output_list = output_list_for_user_call(name, &func, &var_map, &func_result_vars, out_count)?;
+        push_single_result(stack, output_list);
+    }
+    Ok(UserCallHandling::Completed)
 }
 
 pub async fn handle_builtin_expand_last_call<F, Fut>(

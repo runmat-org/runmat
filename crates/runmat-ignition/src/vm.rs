@@ -638,6 +638,7 @@ async fn run_interpreter_inner(
             &mut context,
             &bytecode.functions,
             &mut try_stack,
+            &mut last_exception,
             &mut pc,
             |value| {
                 #[cfg(feature = "native-accel")]
@@ -647,6 +648,20 @@ async fn run_interpreter_inner(
                 Box::pin(async move {
                     let mut local_vars = vars_ref.clone();
                     invoke_user_function_value(name, &argv, functions, &mut local_vars).await
+                })
+            },
+            |name, args, out_count| {
+                Box::pin(async move {
+                    if out_count == 1 {
+                        call_user::try_builtin_fallback_single(&name, &args).await
+                    } else {
+                        call_user::try_builtin_fallback_multi(&name, &args, out_count).await
+                    }
+                })
+            },
+            |bc, vars, name, out_count, in_count| {
+                Box::pin(async move {
+                    interpret_function_with_counts(&bc, vars, &name, out_count, in_count).await
                 })
             },
             |current, incoming| {
@@ -761,9 +776,12 @@ async fn run_interpreter_inner(
             | Instr::RegisterClass { .. }
             | Instr::CallFeval(_)
             | Instr::CallFevalExpandMulti(_)
+            | Instr::CallFunction(_, _)
+            | Instr::CallFunctionMulti(_, _, _)
             | Instr::CallBuiltinExpandLast(_, _, _)
             | Instr::CallBuiltinExpandAt(_, _, _, _)
             | Instr::CallBuiltinExpandMulti(_, _)
+            | Instr::CallFunctionExpandAt(_, _, _, _)
             | Instr::Add
             | Instr::Sub
             | Instr::Mul
@@ -1082,253 +1100,6 @@ async fn run_interpreter_inner(
                     &mut vars,
                     &mut persistent_aliases,
                 );
-            }
-            Instr::CallFunctionExpandAt(name, before_count, num_indices, after_count) => {
-                // Stack layout: [..., a1..abefore, base, idx..., a_after...]
-                let mut after: Vec<Value> = Vec::with_capacity(after_count);
-                for _ in 0..after_count {
-                    after.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                after.reverse();
-                let mut indices = Vec::with_capacity(num_indices);
-                for _ in 0..num_indices {
-                    indices.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                indices.reverse();
-                let base = stack
-                    .pop()
-                    .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let mut before: Vec<Value> = Vec::with_capacity(before_count);
-                for _ in 0..before_count {
-                    before.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                before.reverse();
-                let expanded = match (base, indices.len()) {
-                    (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => {
-                        call_shared::expand_cell_indices(&ca, &indices)?
-                    }
-                    (Value::Object(obj), _) => {
-                        let cell = call_shared::subsref_brace_index_cell_raw(&indices)?;
-                        let v = match call_builtin_vm!(
-                            "call_method",
-                            &[
-                                Value::Object(obj),
-                                Value::String("subsref".to_string()),
-                                Value::String("{}".to_string()),
-                                cell,
-                            ],
-                        ) {
-                            Ok(v) => v,
-                            Err(e) => vm_bail!(e),
-                        };
-                        vec![v]
-                    }
-                    _ => {
-                        return Err(mex(
-                            "ExpandError",
-                            "CallFunctionExpandAt requires cell or object cell access",
-                        ))
-                    }
-                };
-                let mut args = before;
-                args.extend(expanded.into_iter());
-                args.extend(after.into_iter());
-                let interp_dispatch::PreparedUserDispatch {
-                    func,
-                    var_map,
-                    func_program,
-                    func_vars,
-                } = match interp_dispatch::prepare_named_user_dispatch(
-                    &name,
-                    &bytecode.functions,
-                    &args,
-                    &vars,
-                ) {
-                    Ok(prepared) => prepared,
-                    Err(err) => vm_bail!(err),
-                };
-                let func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
-                // Make nested closures visible to outer frames
-                for (k, v) in func_bytecode.functions.iter() {
-                    context.functions.insert(k.clone(), v.clone());
-                }
-                let func_result_vars =
-                    match Box::pin(interpret_function(&func_bytecode, func_vars)).await {
-                        Ok(v) => v,
-                        Err(e) => vm_bail!(e),
-                    };
-                if let Err(err) = interp_dispatch::push_user_call_outputs(
-                    &mut stack,
-                    &name,
-                    &func,
-                    &var_map,
-                    &func_result_vars,
-                    1,
-                ) {
-                    vm_bail!(err);
-                }
-            }
-            Instr::CallFunction(name, arg_count) => {
-                // First, try runtime builtin fallback (some helpers like call_method)
-                {
-                    let args = call_builtins::collect_call_args(&mut stack, arg_count)?;
-                    if let Some(result) = call_user::try_builtin_fallback_single(&name, &args).await? {
-                        stack.push(result);
-                        pc += 1;
-                        continue;
-                    }
-                    for v in args.into_iter().rev() { stack.push(v); }
-                }
-                let func = match call_shared::lookup_user_function(&name, &bytecode.functions) {
-                    Ok(func) => func,
-                    Err(err) => vm_bail!(err),
-                };
-                let mut args = Vec::new();
-                for _ in 0..arg_count {
-                    args.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                args.reverse();
-                let out_count = 1usize;
-                if let Err(err) = call_shared::validate_user_function_arity(&name, &func, arg_count) {
-                    vm_bail!(err);
-                }
-                let prepared = match call_shared::prepare_user_call(func, &args, &vars) {
-                    Ok(prepared) => prepared,
-                    Err(err) => vm_bail!(err),
-                };
-                let interp_dispatch::PreparedUserDispatch {
-                    func,
-                    var_map,
-                    func_program,
-                    func_vars,
-                } = interp_dispatch::unpack_prepared_user_call(prepared);
-                let mut func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
-                func_bytecode.source_id = func.source_id;
-                let _call_frame_guard = push_call_frame(&name, &bytecode, pc);
-                let func_result_vars = match interpret_function_with_counts(
-                    &func_bytecode,
-                    func_vars,
-                    &name,
-                    1,
-                    arg_count,
-                )
-                .await
-                {
-                    Ok(v) => v,
-                    Err(e) => {
-                        match interp_dispatch::redirect_exception_to_catch(
-                            e,
-                            &mut try_stack,
-                            &mut vars,
-                            &mut last_exception,
-                            &mut pc,
-                            refresh_workspace_state,
-                        ) {
-                            ExceptionHandling::Caught => continue,
-                            ExceptionHandling::Uncaught(err) => vm_bail!(err),
-                        }
-                    }
-                };
-                if let Err(err) = interp_dispatch::push_user_call_outputs(
-                    &mut stack,
-                    &name,
-                    &func,
-                    &var_map,
-                    &func_result_vars,
-                    out_count,
-                ) {
-                    vm_bail!(err);
-                }
-            }
-            Instr::CallFunctionMulti(name, arg_count, out_count) => {
-                // First, try runtime builtin fallback (some helpers like call_method)
-                {
-                    let args = call_builtins::collect_call_args(&mut stack, arg_count)?;
-                    if let Some(result) = call_user::try_builtin_fallback_multi(&name, &args, out_count).await? {
-                        stack.push(result);
-                        pc += 1;
-                        continue;
-                    }
-                    for v in args.into_iter().rev() { stack.push(v); }
-                }
-                let func = match call_shared::lookup_user_function(&name, &bytecode.functions) {
-                    Ok(func) => func,
-                    Err(err) => vm_bail!(err),
-                };
-                let mut args = Vec::new();
-                for _ in 0..arg_count {
-                    args.push(
-                        stack
-                            .pop()
-                            .ok_or(mex("StackUnderflow", "stack underflow"))?,
-                    );
-                }
-                args.reverse();
-                if let Err(err) = call_shared::validate_user_function_arity(&name, &func, arg_count) {
-                    vm_bail!(err);
-                }
-                let prepared = match call_shared::prepare_user_call(func, &args, &vars) {
-                    Ok(prepared) => prepared,
-                    Err(err) => vm_bail!(err),
-                };
-                let interp_dispatch::PreparedUserDispatch {
-                    func,
-                    var_map,
-                    func_program,
-                    func_vars,
-                } = interp_dispatch::unpack_prepared_user_call(prepared);
-                let func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
-                let func_result_vars = match interpret_function_with_counts(
-                    &func_bytecode,
-                    func_vars,
-                    &name,
-                    out_count,
-                    arg_count,
-                )
-                .await
-                {
-                    Ok(v) => v,
-                    Err(e) => {
-                        match interp_dispatch::redirect_exception_to_catch(
-                            e,
-                            &mut try_stack,
-                            &mut vars,
-                            &mut last_exception,
-                            &mut pc,
-                            refresh_workspace_state,
-                        ) {
-                            ExceptionHandling::Caught => continue,
-                            ExceptionHandling::Uncaught(err) => vm_bail!(err),
-                        }
-                    }
-                };
-                let output_list = match interp_dispatch::output_list_for_user_call(
-                    &name,
-                    &func,
-                    &var_map,
-                    &func_result_vars,
-                    out_count,
-                ) {
-                    Ok(value) => value,
-                    Err(err) => vm_bail!(err),
-                };
-                interp_dispatch::push_single_result(&mut stack, output_list);
             }
             
             

@@ -9,6 +9,7 @@ mod stack;
 
 use crate::bytecode::Instr;
 use crate::interpreter::debug;
+use crate::runtime::workspace::refresh_workspace_state;
 use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
 use runmat_runtime::dispatcher::gather_if_needed_async;
@@ -20,9 +21,10 @@ pub use calls::{
     handle_builtin_expand_multi_call, handle_builtin_outcome, handle_feval_dispatch,
     handle_create_closure, handle_load_method, handle_load_static_property, handle_method_call,
     handle_method_or_member_index_call, handle_register_class, handle_static_method_call,
+    handle_user_function_call,
     output_list_for_user_call, push_single_result, prepare_named_user_dispatch,
     push_user_call_outputs, unpack_prepared_user_call, BuiltinHandling, FevalHandling,
-    MethodHandling, PreparedUserDispatch,
+    MethodHandling, PreparedUserDispatch, UserCallHandling,
 };
 pub use arrays::{create_matrix, create_matrix_dynamic, create_range, pack_to_col, pack_to_row, unpack};
 pub use control_flow::{apply_control_flow_action, DispatchDecision};
@@ -82,6 +84,7 @@ pub async fn dispatch_instruction(
     context: &mut crate::bytecode::ExecutionContext,
     bytecode_functions: &HashMap<String, crate::bytecode::UserFunction>,
     try_stack: &mut Vec<(usize, Option<usize>)>,
+    last_exception: &mut Option<runmat_builtins::MException>,
     pc: &mut usize,
     mut clear_value_residency: impl FnMut(&Value),
     invoke_user_for_end_expr: impl for<'a> Fn(
@@ -90,6 +93,18 @@ pub async fn dispatch_instruction(
         &'a HashMap<String, crate::bytecode::UserFunction>,
         &'a Vec<Value>,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + 'a>> + Copy,
+    builtin_fallback_user_call: impl Fn(
+        String,
+        Vec<Value>,
+        usize,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Option<Value>, RuntimeError>>>> + Copy,
+    interpret_function_counts: impl Fn(
+        crate::bytecode::Bytecode,
+        Vec<Value>,
+        String,
+        usize,
+        usize,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Value>, RuntimeError>>>> + Copy,
     mut store_var_before_overwrite: impl FnMut(&Value, &Value),
     mut store_var_after_store: impl FnMut(usize, &Value),
     mut store_local_before_local_overwrite: impl FnMut(&Value, &Value),
@@ -302,6 +317,56 @@ pub async fn dispatch_instruction(
             }
             Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
+        Instr::CallFunction(name, arg_count) => {
+            match handle_user_function_call(
+                stack,
+                name,
+                *arg_count,
+                1,
+                bytecode_functions,
+                vars,
+                try_stack,
+                last_exception,
+                pc,
+                refresh_workspace_state,
+                |name, args, out_count| builtin_fallback_user_call(name, args, out_count),
+                |bc, vars, name, out_count, in_count| {
+                    interpret_function_counts(bc, vars, name, out_count, in_count)
+                },
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => return Ok(Some(DispatchHandled::Generic(DispatchDecision::ContinueLoop))),
+                UserCallHandling::Uncaught(err) => return Err(err),
+            }
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::CallFunctionMulti(name, arg_count, out_count) => {
+            match handle_user_function_call(
+                stack,
+                name,
+                *arg_count,
+                *out_count,
+                bytecode_functions,
+                vars,
+                try_stack,
+                last_exception,
+                pc,
+                refresh_workspace_state,
+                |name, args, out_count| builtin_fallback_user_call(name, args, out_count),
+                |bc, vars, name, out_count, in_count| {
+                    interpret_function_counts(bc, vars, name, out_count, in_count)
+                },
+            )
+            .await?
+            {
+                UserCallHandling::Completed => {}
+                UserCallHandling::Caught => return Ok(Some(DispatchHandled::Generic(DispatchDecision::ContinueLoop))),
+                UserCallHandling::Uncaught(err) => return Err(err),
+            }
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
         Instr::CallBuiltinExpandLast(name, fixed_argc, num_indices) => {
             handle_builtin_expand_last_call(
                 stack,
@@ -364,6 +429,37 @@ pub async fn dispatch_instruction(
         }
         Instr::CallBuiltinExpandMulti(name, specs) => {
             handle_builtin_expand_multi_call(stack, name, specs, next_instr).await?;
+            Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
+        }
+        Instr::CallFunctionExpandAt(name, before_count, num_indices, after_count) => {
+            let args = build_builtin_expand_at_args(
+                stack,
+                *before_count,
+                *num_indices,
+                *after_count,
+                "CallFunctionExpandAt requires cell or object cell access",
+                |base, indices| async move {
+                    let obj = match base {
+                        Value::Object(obj) => obj,
+                        _ => unreachable!(),
+                    };
+                    let cell = crate::call::shared::subsref_brace_index_cell_raw(&indices)?;
+                    let v = runmat_runtime::call_builtin_async(
+                        "call_method",
+                        &[
+                            Value::Object(obj),
+                            Value::String("subsref".to_string()),
+                            Value::String("{}".to_string()),
+                            cell,
+                        ],
+                    )
+                    .await?;
+                    Ok(vec![v])
+                },
+            )
+            .await?;
+            let value = invoke_user_for_end_expr(name, args, bytecode_functions, vars).await?;
+            stack.push(value);
             Ok(Some(DispatchHandled::Generic(DispatchDecision::FallThrough)))
         }
         Instr::CallMethod(name, arg_count) => {
