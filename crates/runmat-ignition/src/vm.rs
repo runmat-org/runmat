@@ -43,7 +43,6 @@ use runmat_vm::interpreter::errors::{
 use runmat_vm::interpreter::stack::pop_value;
 use runmat_vm::call::shared as call_shared;
 use runmat_vm::call::{builtins as call_builtins, feval as call_feval, user as call_user};
-use runmat_vm::call::builtins::ImportedBuiltinResolution;
 use runmat_vm::call::closures as call_closures;
 use runmat_vm::indexing::end_expr as idx_end_expr;
 use runmat_vm::indexing::read_linear as idx_read_linear;
@@ -1406,43 +1405,37 @@ async fn run_interpreter_inner(
                     }
                     None => runmat_runtime::call_builtin_async(&name, &prepared_primary).await,
                 };
-                match result {
-                    Ok(result) => stack.push(result),
-                    Err(e) => {
-                        let e = e;
-                        let imported = call_builtins::resolve_imported_builtin(
-                            &name,
-                            &imports,
-                            &prepared_primary,
-                            requested_outputs,
-                        )
-                        .await?;
-                        match imported {
-                            ImportedBuiltinResolution::Resolved(value) => stack.push(value),
-                            ImportedBuiltinResolution::Ambiguous(message) => vm_bail!(message),
-                            ImportedBuiltinResolution::NotFound => {
-                                if let Some(err) = call_builtins::rethrow_without_explicit_exception(
-                                    &name,
-                                    &args,
-                                    last_exception.as_ref().map(|e| e.identifier.as_str()),
-                                    last_exception.as_ref().map(|e| e.message.as_str()),
-                                ) {
-                                    vm_bail!(err);
-                                }
-                                match interp_dispatch::redirect_exception_to_catch(
-                                    e,
-                                    &mut try_stack,
-                                    &mut vars,
-                                    &mut last_exception,
-                                    &mut pc,
-                                    refresh_workspace_state,
-                                ) {
-                                    ExceptionHandling::Caught => continue,
-                                    ExceptionHandling::Uncaught(err) => return Err(err),
-                                }
-                            }
-                        }
+                let imported = call_builtins::resolve_imported_builtin(
+                    &name,
+                    &imports,
+                    &prepared_primary,
+                    requested_outputs,
+                )
+                .await?;
+                if result.is_err() {
+                    if let Some(err) = call_builtins::rethrow_without_explicit_exception(
+                        &name,
+                        &args,
+                        last_exception.as_ref().map(|e| e.identifier.as_str()),
+                        last_exception.as_ref().map(|e| e.message.as_str()),
+                    ) {
+                        vm_bail!(err);
                     }
+                }
+                match interp_dispatch::handle_builtin_outcome(
+                    result,
+                    imported,
+                    &mut stack,
+                    &mut try_stack,
+                    &mut vars,
+                    &mut last_exception,
+                    &mut pc,
+                    refresh_workspace_state,
+                ) {
+                    Ok(interp_dispatch::BuiltinHandling::Completed) => {}
+                    Ok(interp_dispatch::BuiltinHandling::Caught) => continue,
+                    Ok(interp_dispatch::BuiltinHandling::Uncaught(err)) => return Err(err),
+                    Err(err) => vm_bail!(err),
                 }
             }
             Instr::CallBuiltinExpandLast(name, fixed_argc, num_indices) => {
@@ -1508,7 +1501,7 @@ async fn run_interpreter_inner(
                 let output_hint = output_hint_for_single_result(&bytecode, pc);
                 let _output_guard = push_output_count(output_hint);
                 match call_builtin_auto(&name, &args).await {
-                    Ok(v) => stack.push(v),
+                    Ok(v) => interp_dispatch::push_single_result(&mut stack, v),
                     Err(e) => vm_bail!(e),
                 }
             }
@@ -1578,7 +1571,7 @@ async fn run_interpreter_inner(
                 let output_hint = output_hint_for_single_result(&bytecode, pc);
                 let _output_guard = push_output_count(output_hint);
                 match call_builtin_auto(&name, &args).await {
-                    Ok(v) => stack.push(v),
+                    Ok(v) => interp_dispatch::push_single_result(&mut stack, v),
                     Err(e) => vm_bail!(e),
                 }
             }
@@ -1630,7 +1623,7 @@ async fn run_interpreter_inner(
                 let output_hint = output_hint_for_single_result(&bytecode, pc);
                 let _output_guard = push_output_count(output_hint);
                 match call_builtin_auto(&name, &args).await {
-                    Ok(v) => stack.push(v),
+                    Ok(v) => interp_dispatch::push_single_result(&mut stack, v),
                     Err(e) => vm_bail!(e),
                 }
             }
@@ -1998,12 +1991,12 @@ async fn run_interpreter_inner(
                     Ok(prepared) => prepared,
                     Err(err) => vm_bail!(err),
                 };
-                let runmat_vm::call::shared::PreparedUserCall {
+                let interp_dispatch::PreparedUserDispatch {
                     func,
                     var_map,
                     func_program,
                     func_vars,
-                } = prepared;
+                } = interp_dispatch::unpack_prepared_user_call(prepared);
                 let mut func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
                 func_bytecode.source_id = func.source_id;
                 let _call_frame_guard = push_call_frame(&name, &bytecode, pc);
@@ -2031,18 +2024,15 @@ async fn run_interpreter_inner(
                         }
                     }
                 };
-                let outputs = match call_shared::collect_multi_outputs(
+                if let Err(err) = interp_dispatch::push_user_call_outputs(
+                    &mut stack,
                     &name,
                     &func,
                     &var_map,
                     &func_result_vars,
                     out_count,
                 ) {
-                    Ok(outputs) => outputs,
-                    Err(err) => vm_bail!(err),
-                };
-                for value in outputs {
-                    stack.push(value);
+                    vm_bail!(err);
                 }
             }
             Instr::CallFunctionMulti(name, arg_count, out_count) => {
@@ -2076,12 +2066,12 @@ async fn run_interpreter_inner(
                     Ok(prepared) => prepared,
                     Err(err) => vm_bail!(err),
                 };
-                let runmat_vm::call::shared::PreparedUserCall {
+                let interp_dispatch::PreparedUserDispatch {
                     func,
                     var_map,
                     func_program,
                     func_vars,
-                } = prepared;
+                } = interp_dispatch::unpack_prepared_user_call(prepared);
                 let func_bytecode = crate::compile(&func_program, &bytecode.functions)?;
                 let func_result_vars = match interpret_function_with_counts(
                     &func_bytecode,
@@ -2107,17 +2097,17 @@ async fn run_interpreter_inner(
                         }
                     }
                 };
-                let outputs = match call_shared::collect_multi_outputs(
+                let output_list = match interp_dispatch::output_list_for_user_call(
                     &name,
                     &func,
                     &var_map,
                     &func_result_vars,
                     out_count,
                 ) {
-                    Ok(outputs) => outputs,
+                    Ok(value) => value,
                     Err(err) => vm_bail!(err),
                 };
-                stack.push(Value::OutputList(outputs));
+                interp_dispatch::push_single_result(&mut stack, output_list);
             }
             Instr::EnterTry(catch_pc, catch_var) => {
                 control_flow::enter_try(&mut try_stack, catch_pc, catch_var);
