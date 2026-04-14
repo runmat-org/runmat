@@ -1,4 +1,5 @@
 use crate::call::builtins::ImportedBuiltinResolution;
+use crate::call::closures as call_closures;
 use crate::call::feval::FevalDispatch;
 use crate::call::shared::{
     build_expanded_args_from_specs, collect_multi_outputs, expand_cell_indices,
@@ -8,6 +9,8 @@ use crate::call::shared::{
 use crate::bytecode::ArgSpec;
 use crate::functions::UserFunction;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
+use crate::object::class_def as obj_class_def;
+use crate::object::resolve as obj_resolve;
 use runmat_builtins::{MException, Value};
 use runmat_runtime::RuntimeError;
 use std::future::Future;
@@ -32,6 +35,10 @@ pub enum BuiltinHandling {
     Completed,
     Caught,
     Uncaught(RuntimeError),
+}
+
+pub enum MethodHandling {
+    Completed,
 }
 
 pub fn handle_feval_dispatch(
@@ -361,4 +368,109 @@ pub fn handle_builtin_outcome(
             ),
         },
     }
+}
+
+pub async fn handle_method_call(
+    stack: &mut Vec<Value>,
+    name: &str,
+    arg_count: usize,
+) -> Result<MethodHandling, RuntimeError> {
+    let (base, args) = call_closures::collect_method_args(stack, arg_count)?;
+    let value = call_closures::call_method(base, name, args).await?;
+    stack.push(value);
+    Ok(MethodHandling::Completed)
+}
+
+pub async fn handle_method_or_member_index_call(
+    stack: &mut Vec<Value>,
+    name: String,
+    arg_count: usize,
+) -> Result<MethodHandling, RuntimeError> {
+    let (base, args) = call_closures::collect_method_args(stack, arg_count)?;
+    let value = call_closures::call_method_or_member_index(base, name, args).await?;
+    stack.push(value);
+    Ok(MethodHandling::Completed)
+}
+
+pub async fn handle_static_method_call(
+    stack: &mut Vec<Value>,
+    class_name: &str,
+    method: &str,
+    arg_count: usize,
+) -> Result<MethodHandling, RuntimeError> {
+    let mut args = crate::call::builtins::collect_call_args(stack, arg_count)?;
+    match call_closures::call_static_method(class_name, method, args.clone()).await {
+        Ok(v) => {
+            stack.push(v);
+            Ok(MethodHandling::Completed)
+        }
+        Err(_) => {
+            let is_type_class = matches!(
+                class_name,
+                "gpuArray"
+                    | "logical"
+                    | "double"
+                    | "single"
+                    | "int8"
+                    | "int16"
+                    | "int32"
+                    | "int64"
+                    | "uint8"
+                    | "uint16"
+                    | "uint32"
+                    | "uint64"
+                    | "char"
+                    | "string"
+                    | "cell"
+                    | "struct"
+            );
+            if is_type_class {
+                args.push(Value::from(class_name));
+                let v = runmat_runtime::call_builtin_async(method, &args).await?;
+                stack.push(v);
+                Ok(MethodHandling::Completed)
+            } else {
+                Err(format!("Unknown static method '{}' on class {}", method, class_name).into())
+            }
+        }
+    }
+}
+
+pub fn handle_load_method(
+    stack: &mut Vec<Value>,
+    name: String,
+) -> Result<MethodHandling, RuntimeError> {
+    let base = crate::interpreter::stack::pop_value(stack)?;
+    let value = call_closures::load_method_closure(base, name)?;
+    stack.push(value);
+    Ok(MethodHandling::Completed)
+}
+
+pub fn handle_create_closure(
+    stack: &mut Vec<Value>,
+    func_name: String,
+    capture_count: usize,
+) -> Result<MethodHandling, RuntimeError> {
+    call_closures::create_closure(stack, func_name, capture_count)?;
+    Ok(MethodHandling::Completed)
+}
+
+pub fn handle_load_static_property(
+    stack: &mut Vec<Value>,
+    class_name: &str,
+    prop: &str,
+) -> Result<MethodHandling, RuntimeError> {
+    let value = obj_resolve::load_static_member(class_name, prop)?;
+    stack.push(value);
+    Ok(MethodHandling::Completed)
+}
+
+pub fn handle_register_class(
+    name: String,
+    super_class: Option<String>,
+    properties: Vec<(String, bool, String, String)>,
+    methods: Vec<(String, String, bool, String)>,
+) -> Result<MethodHandling, RuntimeError> {
+    obj_class_def::register_class(name, super_class, properties, methods)?;
+    Ok(MethodHandling::Completed)
 }

@@ -43,14 +43,13 @@ use runmat_vm::interpreter::errors::{
 use runmat_vm::interpreter::stack::pop_value;
 use runmat_vm::call::shared as call_shared;
 use runmat_vm::call::{builtins as call_builtins, feval as call_feval, user as call_user};
-use runmat_vm::call::closures as call_closures;
 use runmat_vm::indexing::end_expr as idx_end_expr;
 use runmat_vm::indexing::read_linear as idx_read_linear;
 use runmat_vm::indexing::read_slice as idx_read_slice;
 use runmat_vm::indexing::selectors as idx_selectors;
 use runmat_vm::indexing::write_linear as idx_write_linear;
 use runmat_vm::indexing::write_slice as idx_write_slice;
-use runmat_vm::object::{class_def as obj_class_def, resolve as obj_resolve};
+use runmat_vm::object::resolve as obj_resolve;
 use runmat_vm::ops::cells as cell_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
 use runmat_vm::runtime::call_stack::{
@@ -3026,73 +3025,46 @@ async fn run_interpreter_inner(
                 }
             }
             Instr::CallMethod(name, arg_count) => {
-                let (base, args) = call_closures::collect_method_args(&mut stack, arg_count)?;
-                match call_closures::call_method(base, &name, args).await {
-                    Ok(v) => stack.push(v),
+                match interp_dispatch::handle_method_call(&mut stack, &name, arg_count).await {
+                    Ok(interp_dispatch::MethodHandling::Completed) => {}
                     Err(e) => vm_bail!(e),
                 }
             }
             Instr::CallMethodOrMemberIndex(name, arg_count) => {
-                let (base, args) = call_closures::collect_method_args(&mut stack, arg_count)?;
-                match call_closures::call_method_or_member_index(base, name, args).await {
-                    Ok(v) => stack.push(v),
+                match interp_dispatch::handle_method_or_member_index_call(&mut stack, name, arg_count).await {
+                    Ok(interp_dispatch::MethodHandling::Completed) => {}
                     Err(e) => vm_bail!(e),
                 }
             }
             Instr::LoadMethod(name) => {
-                let base = pop_value(&mut stack)?;
-                match call_closures::load_method_closure(base, name) {
-                    Ok(v) => stack.push(v),
+                match interp_dispatch::handle_load_method(&mut stack, name) {
+                    Ok(interp_dispatch::MethodHandling::Completed) => {}
                     Err(e) => vm_bail!(e),
                 }
             }
             Instr::CreateClosure(func_name, capture_count) => {
-                call_closures::create_closure(&mut stack, func_name, capture_count)?;
+                match interp_dispatch::handle_create_closure(&mut stack, func_name, capture_count) {
+                    Ok(interp_dispatch::MethodHandling::Completed) => {}
+                    Err(e) => vm_bail!(e),
+                }
             }
             Instr::LoadStaticProperty(class_name, prop) => {
-                match obj_resolve::load_static_member(&class_name, &prop) {
-                    Ok(v) => stack.push(v),
+                match interp_dispatch::handle_load_static_property(&mut stack, &class_name, &prop) {
+                    Ok(interp_dispatch::MethodHandling::Completed) => {}
                     Err(e) => vm_bail!(e),
                 }
             }
             Instr::CallStaticMethod(class_name, method, arg_count) => {
-                let mut args = call_builtins::collect_call_args(&mut stack, arg_count)?;
-                match call_closures::call_static_method(&class_name, &method, args.clone()).await {
-                    Ok(v) => stack.push(v),
-                    Err(_) => {
-                        let is_type_class = matches!(
-                            class_name.as_str(),
-                            "gpuArray"
-                                | "logical"
-                                | "double"
-                                | "single"
-                                | "int8"
-                                | "int16"
-                                | "int32"
-                                | "int64"
-                                | "uint8"
-                                | "uint16"
-                                | "uint32"
-                                | "uint64"
-                                | "char"
-                                | "string"
-                                | "cell"
-                                | "struct"
-                        );
-                        if is_type_class {
-                            args.push(Value::from(class_name.as_str()));
-                            let v = match call_builtin_vm!(&method, &args) {
-                                Ok(v) => v,
-                                Err(e) => vm_bail!(e),
-                            };
-                            stack.push(v);
-                        } else {
-                            vm_bail!(format!(
-                                "Unknown static method '{}' on class {}",
-                                method, class_name
-                            ));
-                        }
-                    }
+                match interp_dispatch::handle_static_method_call(
+                    &mut stack,
+                    &class_name,
+                    &method,
+                    arg_count,
+                )
+                .await
+                {
+                    Ok(interp_dispatch::MethodHandling::Completed) => {}
+                    Err(e) => vm_bail!(e),
                 }
             }
             Instr::RegisterClass {
@@ -3101,7 +3073,10 @@ async fn run_interpreter_inner(
                 properties,
                 methods,
             } => {
-                obj_class_def::register_class(name, super_class, properties, methods)?;
+                match interp_dispatch::handle_register_class(name, super_class, properties, methods) {
+                    Ok(interp_dispatch::MethodHandling::Completed) => {}
+                    Err(e) => vm_bail!(e),
+                }
             }
         }
         if debug_stack {

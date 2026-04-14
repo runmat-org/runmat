@@ -15,9 +15,11 @@ use std::collections::HashMap;
 pub use calls::{
     build_builtin_expand_at_args, build_builtin_expand_last_args, build_builtin_expand_multi_args,
     build_feval_expand_multi_args, handle_builtin_outcome, handle_feval_dispatch,
+    handle_create_closure, handle_load_method, handle_load_static_property, handle_method_call,
+    handle_method_or_member_index_call, handle_register_class, handle_static_method_call,
     output_list_for_user_call, push_single_result, prepare_named_user_dispatch,
-    push_user_call_outputs, unpack_prepared_user_call,
-    BuiltinHandling, FevalHandling, PreparedUserDispatch,
+    push_user_call_outputs, unpack_prepared_user_call, BuiltinHandling, FevalHandling,
+    MethodHandling, PreparedUserDispatch,
 };
 pub use arrays::{create_matrix, create_matrix_dynamic, create_range, pack_to_col, pack_to_row, unpack};
 pub use control_flow::{apply_control_flow_action, DispatchDecision};
