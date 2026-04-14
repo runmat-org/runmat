@@ -1,5 +1,4 @@
 use crate::functions::{Bytecode, ExecutionContext, UserFunction};
-use crate::gc_roots::InterpretContext;
 use crate::instr::{EndExpr, Instr};
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::fusion_exec::{
@@ -34,6 +33,8 @@ pub use runmat_vm::interpreter::api::{
     take_updated_workspace_state, InterpreterOutcome, InterpreterState, PendingWorkspaceGuard,
     DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
 };
+use runmat_vm::interpreter::engine as interp_engine;
+use runmat_vm::interpreter::dispatch::{self as interp_dispatch, DispatchDecision};
 use runmat_vm::interpreter::errors::{
     attach_span_at, attach_span_from_pc, ensure_runtime_error_identifier, mex, set_vm_pc,
 };
@@ -52,7 +53,7 @@ use runmat_vm::indexing::write_slice as idx_write_slice;
 use runmat_vm::object::{class_def as obj_class_def, resolve as obj_resolve};
 use runmat_vm::ops::cells as cell_ops;
 use runmat_vm::ops::{arithmetic as arithmetic_ops, arrays as array_ops, comparison as comparison_ops};
-use runmat_vm::ops::control_flow::{self, ControlFlowAction};
+use runmat_vm::ops::control_flow;
 use runmat_vm::ops::stack as stack_ops;
 use runmat_vm::interpreter::timing::InterpreterTiming;
 use runmat_vm::runtime::call_stack::{
@@ -60,20 +61,18 @@ use runmat_vm::runtime::call_stack::{
 };
 use runmat_vm::runtime::globals as runtime_globals;
 use runmat_vm::runtime::workspace::{
-    refresh_workspace_state, set_workspace_state, take_pending_workspace_state,
-    workspace_assign, workspace_clear, workspace_lookup, workspace_remove, workspace_snapshot,
+    refresh_workspace_state, workspace_assign, workspace_clear, workspace_lookup,
+    workspace_remove, workspace_snapshot,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_time::Instant;
 #[cfg(target_arch = "wasm32")]
 type Instant = ();
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::sync::Arc;
 use std::sync::Once;
-#[cfg(feature = "native-accel")]
-use std::sync::OnceLock;
 use tracing::{debug, info_span, warn};
 
 #[cfg(feature = "native-accel")]
@@ -271,68 +270,6 @@ fn output_hint_for_single_result(bytecode: &Bytecode, pc: usize) -> usize {
         Some(Instr::Pop) | Some(Instr::EmitStackTop { .. }) => 0,
         _ => 1,
     }
-}
-
-#[cfg(feature = "native-accel")]
-#[inline]
-fn fusion_debug_enabled() -> bool {
-    static FLAG: OnceLock<bool> = OnceLock::new();
-    *FLAG.get_or_init(|| match std::env::var("RUNMAT_DEBUG_FUSION") {
-        Ok(v) => v == "1" || v.eq_ignore_ascii_case("true") || v.eq_ignore_ascii_case("yes"),
-        Err(_) => false,
-    })
-}
-
-#[cfg(feature = "native-accel")]
-fn log_fusion_span_window(
-    plan: &runmat_accelerate::FusionGroupPlan,
-    bytecode: &Bytecode,
-    pc: usize,
-) {
-    if !fusion_debug_enabled() || !log::log_enabled!(log::Level::Debug) {
-        return;
-    }
-    if bytecode.instructions.is_empty() {
-        return;
-    }
-    let window = 3usize;
-    let span = plan.group.span.clone();
-    let total = bytecode.instructions.len();
-    let start = span.start.saturating_sub(window);
-    let mut end = span.end + window;
-    if end >= total {
-        end = total.saturating_sub(1);
-    }
-    if end < span.end {
-        end = span.end;
-    }
-    let mut ops: Vec<String> = Vec::new();
-    for idx in start..=end {
-        let instr = &bytecode.instructions[idx];
-        let mut tags: Vec<&'static str> = Vec::new();
-        if idx == pc {
-            tags.push("pc");
-        }
-        if idx == span.start {
-            tags.push("start");
-        }
-        if idx == span.end {
-            tags.push("end");
-        }
-        let tag_str = if tags.is_empty() {
-            String::new()
-        } else {
-            format!("<{}>", tags.join(","))
-        };
-        ops.push(format!("{}{} {:?}", idx, tag_str, instr));
-    }
-    log::debug!(
-        "fusion plan {} span window [{}..{}]: {}",
-        plan.index,
-        start,
-        end,
-        ops.join(" | ")
-    );
 }
 
 type VmResult<T> = Result<T, RuntimeError>;
@@ -760,19 +697,9 @@ async fn run_interpreter_inner(
     CALL_COUNTS.with(|cc| {
         *cc.borrow_mut() = call_counts.clone();
     });
-    let pending_state = take_pending_workspace_state();
-    let _workspace_guard = pending_state.map(|(names, assigned)| {
-        let filtered_assigned: HashSet<String> = assigned
-            .into_iter()
-            .filter(|name| names.contains_key(name))
-            .collect();
-        set_workspace_state(names, filtered_assigned, &mut vars)
-    });
-    refresh_workspace_state(&vars);
-    let mut _gc_context = InterpretContext::new(&stack, &vars)?;
-    // Register thread-local globals/persistents as GC roots for the duration of this execution
+    let _workspace_guard = interp_engine::prepare_workspace_guard(&mut vars);
     let thread_roots: Vec<Value> = runtime_globals::collect_thread_roots();
-    let _ = _gc_context.register_global_values(thread_roots, "thread_globals_persistents");
+    let mut _gc_context = interp_engine::create_gc_context(&stack, &vars, thread_roots)?;
     // Helper to resolve unqualified static accesses if Class.* is imported
     let _resolve_static =
         |imports: &Vec<(Vec<String>, bool)>, name: &str| -> Option<(String, String)> {
@@ -796,9 +723,7 @@ async fn run_interpreter_inner(
     }
     #[inline]
     fn bench_end(_label: &str, _start: Option<Instant>) {}
-    let debug_stack = std::env::var("RUNMAT_DEBUG_STACK")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-        .unwrap_or(false);
+    let debug_stack = interp_engine::debug_stack_enabled();
     let mut interpreter_timing = InterpreterTiming::new();
     macro_rules! vm_bail {
         ($err:expr) => {{
@@ -825,9 +750,7 @@ async fn run_interpreter_inner(
         set_vm_pc(pc);
         #[cfg(feature = "native-accel")]
         set_current_pc(pc);
-        if runmat_runtime::interrupt::is_cancelled() {
-            return Err(mex("ExecutionCancelled", "Execution cancelled by user"));
-        }
+        interp_engine::check_cancelled()?;
         #[cfg(feature = "native-accel")]
         if let (Some(plan), Some(graph)) =
             (active_group_plan_clone(), bytecode.accel_graph.as_ref())
@@ -835,29 +758,17 @@ async fn run_interpreter_inner(
             if plan.group.span.start == pc {
                 #[cfg(feature = "native-accel")]
                 {
-                    let detail = format!(
-                        "plan={} kind={:?} span=[{}..{}]",
-                        plan.index, plan.group.kind, plan.group.span.start, plan.group.span.end
+                    interp_engine::note_fusion_gate(
+                        &mut interpreter_timing,
+                        &plan,
+                        &bytecode,
+                        pc,
+                        fusion_span_has_vm_barrier(&bytecode.instructions, &plan.group.span),
+                        fusion_span_live_result_count(&bytecode.instructions, &plan.group.span),
                     );
-                    interpreter_timing.flush_host_span("before_fusion", Some(detail.as_str()));
                 }
-                #[cfg(feature = "native-accel")]
-                log_fusion_span_window(&plan, &bytecode, pc);
                 let span = plan.group.span.clone();
                 let has_barrier = fusion_span_has_vm_barrier(&bytecode.instructions, &span);
-                let live_result_count =
-                    fusion_span_live_result_count(&bytecode.instructions, &span);
-                if fusion_debug_enabled() {
-                    log::trace!(
-                        "fusion gate pc={} kind={:?} span={}..{} has_barrier={} live_results={:?}",
-                        pc,
-                        plan.group.kind,
-                        span.start,
-                        span.end,
-                        has_barrier,
-                        live_result_count
-                    );
-                }
                 let _fusion_span = info_span!(
                     "fusion.execute",
                     span_start = plan.group.span.start,
@@ -884,25 +795,18 @@ async fn run_interpreter_inner(
                             log::debug!("fusion fallback at pc {}: {}", pc, err);
                         }
                     }
-                } else if fusion_debug_enabled() {
-                    log::debug!(
-                        "fusion skip at pc {}: side-effecting instrs in span {}..{}",
-                        pc,
-                        span.start,
-                        span.end
-                    );
+                } else {
+                    interp_engine::note_fusion_skip(pc, &span);
                 }
             }
         }
-        interpreter_timing.note_host_instr(pc);
-        if debug_stack {
-            debug!(
-                pc,
-                instr = ?bytecode.instructions[pc],
-                stack_len = stack.len(),
-                "[vm] instr"
-            );
-        }
+        interp_engine::note_pre_dispatch(
+            &mut interpreter_timing,
+            debug_stack,
+            pc,
+            &bytecode.instructions[pc],
+            stack.len(),
+        );
         match bytecode.instructions[pc].clone() {
             Instr::EmitStackTop { label } => {
                 stack_ops::emit_stack_top(&stack, &label, &bytecode.var_names).await?;
@@ -911,21 +815,21 @@ async fn run_interpreter_inner(
                 stack_ops::emit_var(&vars, var_index, &label, &bytecode.var_names).await?;
             }
             Instr::AndAnd(target) => {
-                match control_flow::and_and(&mut stack, target)? {
-                    ControlFlowAction::Jump(target) => {
-                        pc = target;
-                        continue;
-                    }
-                    ControlFlowAction::Next | ControlFlowAction::Return => {}
+                match interp_dispatch::apply_control_flow_action(
+                    control_flow::and_and(&mut stack, target)?,
+                    &mut pc,
+                ) {
+                    DispatchDecision::ContinueLoop => continue,
+                    DispatchDecision::FallThrough | DispatchDecision::Return => {}
                 }
             }
             Instr::OrOr(target) => {
-                match control_flow::or_or(&mut stack, target)? {
-                    ControlFlowAction::Jump(target) => {
-                        pc = target;
-                        continue;
-                    }
-                    ControlFlowAction::Next | ControlFlowAction::Return => {}
+                match interp_dispatch::apply_control_flow_action(
+                    control_flow::or_or(&mut stack, target)?,
+                    &mut pc,
+                ) {
+                    DispatchDecision::ContinueLoop => continue,
+                    DispatchDecision::FallThrough | DispatchDecision::Return => {}
                 }
             }
             Instr::Swap => {
@@ -1437,21 +1341,18 @@ async fn run_interpreter_inner(
             Instr::JumpIfFalse(target) => {
                 let cond = pop_value(&mut stack)?;
                 let truth = logical_truth_from_value(&cond, "if condition").await?;
-                match control_flow::jump_if_false(truth, target) {
-                    ControlFlowAction::Jump(target) => {
-                        pc = target;
-                        continue;
-                    }
-                    ControlFlowAction::Next | ControlFlowAction::Return => {}
+                match interp_dispatch::apply_control_flow_action(
+                    control_flow::jump_if_false(truth, target),
+                    &mut pc,
+                ) {
+                    DispatchDecision::ContinueLoop => continue,
+                    DispatchDecision::FallThrough | DispatchDecision::Return => {}
                 }
             }
             Instr::Jump(target) => {
-                match control_flow::jump(target) {
-                    ControlFlowAction::Jump(target) => {
-                        pc = target;
-                        continue;
-                    }
-                    ControlFlowAction::Next | ControlFlowAction::Return => unreachable!(),
+                match interp_dispatch::apply_control_flow_action(control_flow::jump(target), &mut pc) {
+                    DispatchDecision::ContinueLoop => continue,
+                    DispatchDecision::FallThrough | DispatchDecision::Return => unreachable!(),
                 }
             }
             Instr::StochasticEvolution => {
@@ -3526,15 +3427,19 @@ async fn run_interpreter_inner(
             Instr::ReturnValue => {
                 let action = control_flow::return_value(&mut stack)?;
                 interpreter_timing.flush_host_span("return_value", None);
-                if matches!(action, ControlFlowAction::Return) {
-                    break;
+                match interp_dispatch::apply_control_flow_action(action, &mut pc) {
+                    DispatchDecision::Return => break,
+                    DispatchDecision::ContinueLoop => continue,
+                    DispatchDecision::FallThrough => {}
                 }
             }
             Instr::Return => {
                 let action = control_flow::return_void();
                 interpreter_timing.flush_host_span("return", None);
-                if matches!(action, ControlFlowAction::Return) {
-                    break;
+                match interp_dispatch::apply_control_flow_action(action, &mut pc) {
+                    DispatchDecision::Return => break,
+                    DispatchDecision::ContinueLoop => continue,
+                    DispatchDecision::FallThrough => {}
                 }
             }
             Instr::StoreIndex(num_indices) => {
@@ -4366,7 +4271,7 @@ async fn try_execute_fusion_group(
         }
     }
 
-    if log::log_enabled!(log::Level::Debug) && fusion_debug_enabled() {
+    if log::log_enabled!(log::Level::Debug) && interp_engine::fusion_debug_enabled() {
         let stack_needed_preview = required_stack_operands;
         let stack_snapshot: Vec<&Value> = stack.iter().rev().take(stack_needed_preview).collect();
         let stack_kinds: Vec<&'static str> =
@@ -4395,7 +4300,7 @@ async fn try_execute_fusion_group(
     }
 
     if stack.len() < required_stack_operands {
-        if fusion_debug_enabled() {
+        if interp_engine::fusion_debug_enabled() {
             log::debug!(
                 "fusion stack underflow: plan={} needed={} available={} pattern={:?}",
                 plan.index,
@@ -4643,7 +4548,7 @@ async fn try_execute_fusion_group(
         if has_all {
             reduce_all = true;
         }
-        if reduce_all && fusion_debug_enabled() {
+        if reduce_all && interp_engine::fusion_debug_enabled() {
             log::debug!(
                 "fusion reduction (all) meta: data_vid={:?} inputs={:?} stack_pattern={:?}",
                 plan.reduction_data,
@@ -4986,7 +4891,7 @@ async fn try_execute_fusion_group(
                     }
                 }
                 if total_elems.is_none() || !total_from_operand {
-                    if fusion_debug_enabled() {
+                    if interp_engine::fusion_debug_enabled() {
                         log::debug!(
                             "fusion reduction (all): operand extent unknown (source: {:?}); falling back to provider path",
                             if total_from_operand { "runtime" } else { "output_shape" }
@@ -4998,7 +4903,7 @@ async fn try_execute_fusion_group(
                     ));
                 }
                 let total = total_elems.unwrap();
-                if fusion_debug_enabled() {
+                if interp_engine::fusion_debug_enabled() {
                     log::debug!(
                         "fusion reduction (all): total_elems={} fallback_rows={} fallback_cols={}",
                         total,
@@ -5017,7 +4922,7 @@ async fn try_execute_fusion_group(
                         axis
                     };
                 }
-                if fusion_debug_enabled() {
+                if interp_engine::fusion_debug_enabled() {
                     if r == 1 && c == 1 {
                         log::debug!(
                     "fusion reduction: unresolved shape (defaulted to 1x1); axis={}, constants={:?}",
@@ -5040,7 +4945,7 @@ async fn try_execute_fusion_group(
                 }
             }
         };
-        if fusion_debug_enabled() {
+        if interp_engine::fusion_debug_enabled() {
             log::debug!(
                 "fusion reduction: axis={} reduce_len={} num_slices={} constants={:?}",
                 axis,
@@ -5049,7 +4954,7 @@ async fn try_execute_fusion_group(
                 plan.constants
             );
         }
-        if log::log_enabled!(log::Level::Debug) && fusion_debug_enabled() {
+        if log::log_enabled!(log::Level::Debug) && interp_engine::fusion_debug_enabled() {
             let _rt_inputs: Vec<String> = request
                 .inputs
                 .iter()
@@ -5121,7 +5026,7 @@ async fn try_execute_fusion_group(
             ));
         }
         let workgroup_size = 256u32;
-        if log::log_enabled!(log::Level::Debug) && fusion_debug_enabled() {
+        if log::log_enabled!(log::Level::Debug) && interp_engine::fusion_debug_enabled() {
             let _rt_inputs: Vec<String> = request
                 .inputs
                 .iter()
