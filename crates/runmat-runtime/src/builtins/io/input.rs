@@ -167,8 +167,25 @@ async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
     if trimmed.is_empty() || trimmed == "[]" {
         return Ok(Value::Tensor(Tensor::zeros(vec![0, 0])));
     }
-    // Use the eval hook installed by runmat-core if available. This lets users
-    // type full MATLAB expressions: `[1 2 3]`, `pi`, `3+4`, `ones(3)`, etc.
+
+    // Fast path 1: scalar literals and named constants.
+    // Handles the vast majority of input() use cases without touching the VM.
+    if let Some(f) = parse_scalar_token(trimmed) {
+        return Ok(Value::Num(f));
+    }
+
+    // Fast path 2: matrix/vector literals like `[1 2 3]`, `[1;2;3]`, `[1 2;3 4]`.
+    // Avoids recursive interpret() calls for this common case.
+    if trimmed.starts_with('[') && trimmed.ends_with(']') {
+        if let Some(v) = parse_matrix_literal(trimmed) {
+            return Ok(v);
+        }
+    }
+
+    // Full eval path for complex expressions (`sqrt(2)`, `pi/2`, `ones(3)`, etc.).
+    // The eval hook is only safe to call when the executor can handle re-entrant
+    // polls (e.g. the WASM async runtime). On native the fast paths above cover
+    // the common cases; truly complex expressions fall back to str2double here.
     if let Some(hook) = interaction::current_eval_hook() {
         return hook(trimmed.to_string()).await.map_err(|err| {
             let message = err.message().to_string();
@@ -179,7 +196,8 @@ async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
                 .build()
         });
     }
-    // Fallback when no eval hook is installed (e.g. in unit tests or native REPL).
+
+    // Fallback when no eval hook is installed (unit tests, native REPL).
     call_builtin_async("str2double", &[Value::String(trimmed.to_string())])
         .await
         .map_err(|err| {
@@ -190,6 +208,80 @@ async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
                 .with_builtin("input")
                 .build()
         })
+}
+
+/// Parse a single token that represents a MATLAB numeric scalar or named constant.
+/// Returns `None` if the token is not a recognisable scalar (e.g. it contains
+/// brackets, commas, or looks like a function call).
+fn parse_scalar_token(s: &str) -> Option<f64> {
+    // Named constants (case-insensitive to match MATLAB behaviour).
+    match s.to_ascii_lowercase().as_str() {
+        "pi" => return Some(std::f64::consts::PI),
+        "inf" | "+inf" | "infinity" | "+infinity" => return Some(f64::INFINITY),
+        "-inf" | "-infinity" => return Some(f64::NEG_INFINITY),
+        "nan" => return Some(f64::NAN),
+        "e" => return Some(std::f64::consts::E),
+        "true" => return Some(1.0),
+        "false" => return Some(0.0),
+        _ => {}
+    }
+    // Plain numeric literals: integers, decimals, scientific notation, optional sign.
+    // We reject anything containing brackets, commas, spaces (which would indicate a
+    // matrix or an expression), or letters other than 'e'/'E' for exponent notation.
+    let has_non_numeric = s.chars().any(|c| {
+        matches!(c, '[' | ']' | ',' | ';' | '(' | ')' | ' ' | '\t')
+            || (c.is_ascii_alphabetic() && c != 'e' && c != 'E' && c != 'i' && c != 'j')
+    });
+    if has_non_numeric {
+        return None;
+    }
+    s.parse::<f64>().ok()
+}
+
+/// Parse a MATLAB matrix literal of the form `[elements]`.
+///
+/// Rows are separated by `;` and elements within a row by whitespace and/or `,`.
+/// Every element must be a token accepted by [`parse_scalar_token`].
+/// Returns `None` if the literal is malformed or contains non-scalar elements.
+fn parse_matrix_literal(s: &str) -> Option<Value> {
+    let inner = s.strip_prefix('[')?.strip_suffix(']')?;
+    let inner = inner.trim();
+    if inner.is_empty() {
+        return Some(Value::Tensor(Tensor::zeros(vec![0, 0])));
+    }
+
+    let row_strs: Vec<&str> = inner.split(';').collect();
+    let mut data: Vec<f64> = Vec::new();
+    let mut nrows = 0usize;
+    let mut ncols: Option<usize> = None;
+
+    for row_str in &row_strs {
+        let tokens: Vec<&str> = row_str
+            .split(|c: char| c == ',' || c.is_ascii_whitespace())
+            .filter(|t| !t.is_empty())
+            .collect();
+        if tokens.is_empty() {
+            continue;
+        }
+        match ncols {
+            None => ncols = Some(tokens.len()),
+            Some(expected) if tokens.len() != expected => return None,
+            _ => {}
+        }
+        for token in &tokens {
+            data.push(parse_scalar_token(token)?);
+        }
+        nrows += 1;
+    }
+
+    let ncols = ncols.unwrap_or(0);
+    if nrows == 0 || ncols == 0 {
+        return Some(Value::Tensor(Tensor::zeros(vec![0, 0])));
+    }
+    if nrows == 1 && ncols == 1 {
+        return Some(Value::Num(data[0]));
+    }
+    Tensor::new_2d(data, nrows, ncols).ok().map(Value::Tensor)
 }
 
 #[cfg(test)]
@@ -228,17 +320,41 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
-    fn matrix_input_falls_through_to_str2double_without_hook() {
-        // Without the eval hook (unit-test context), `[1 2 3]` is not a scalar
-        // so str2double returns NaN. This test documents that the hook path is
-        // needed for matrix literals and that the fallback returns NaN (not an error).
+    fn matrix_literal_parses_without_eval_hook() {
+        // The fast-path parser handles `[1 2 3]` directly, so no eval hook (and
+        // therefore no recursive interpret() call) is needed.
         push_queued_response(Ok(InteractionResponse::Line("[1 2 3]".into())));
         let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
-        // str2double("[1 2 3]") returns NaN — the eval hook is required for the
-        // real result; this test just confirms no panic or hard error occurs.
         match value {
-            Value::Num(f) => assert!(f.is_nan()),
-            other => panic!("expected NaN scalar, got {other:?}"),
+            Value::Tensor(t) => {
+                assert_eq!(t.rows, 1);
+                assert_eq!(t.cols, 3);
+                assert_eq!(t.data, vec![1.0, 2.0, 3.0]);
+            }
+            other => panic!("expected 1×3 tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn named_constants_parse_without_eval_hook() {
+        push_queued_response(Ok(InteractionResponse::Line("pi".into())));
+        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        assert_eq!(value, Value::Num(std::f64::consts::PI));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn column_vector_parses_without_eval_hook() {
+        push_queued_response(Ok(InteractionResponse::Line("[1;2;3]".into())));
+        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        match value {
+            Value::Tensor(t) => {
+                assert_eq!(t.rows, 3);
+                assert_eq!(t.cols, 1);
+                assert_eq!(t.data, vec![1.0, 2.0, 3.0]);
+            }
+            other => panic!("expected 3×1 tensor, got {other:?}"),
         }
     }
 
