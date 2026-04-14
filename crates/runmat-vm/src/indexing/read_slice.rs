@@ -1,9 +1,11 @@
 use crate::indexing::selectors::{
     build_slice_plan, build_slice_selectors, index_scalar_from_value, materialize_index_value,
-    SliceSelector,
+    SlicePlan, SliceSelector,
 };
+use crate::bytecode::EndExpr;
 use runmat_builtins::{CellArray, ComplexTensor, StringArray, Tensor, Value};
 use runmat_runtime::RuntimeError;
+use std::future::Future;
 
 pub fn build_numeric_subsref_cell(numeric: &[Value]) -> Result<Value, RuntimeError> {
     let cell = CellArray::new(numeric.to_vec(), 1, numeric.len())
@@ -255,6 +257,28 @@ pub async fn read_tensor_slice_nd(
     }
 }
 
+pub fn read_tensor_slice_from_plan(
+    tensor: &Tensor,
+    plan: &SlicePlan,
+) -> Result<Value, RuntimeError> {
+    if plan.indices.is_empty() {
+        let out_tensor = Tensor::new(Vec::new(), plan.output_shape.clone())
+            .map_err(|e| format!("Slice error: {e}"))?;
+        return Ok(Value::Tensor(out_tensor));
+    }
+    let mut out_data: Vec<f64> = Vec::with_capacity(plan.indices.len());
+    for &lin in &plan.indices {
+        out_data.push(tensor.data[lin as usize]);
+    }
+    if out_data.len() == 1 {
+        Ok(Value::Num(out_data[0]))
+    } else {
+        let out_tensor = Tensor::new(out_data, plan.output_shape.clone())
+            .map_err(|e| format!("Slice error: {e}"))?;
+        Ok(Value::Tensor(out_tensor))
+    }
+}
+
 pub async fn read_complex_slice(
     tensor: &ComplexTensor,
     dims: usize,
@@ -264,8 +288,15 @@ pub async fn read_complex_slice(
 ) -> Result<Value, RuntimeError> {
     let selectors = build_slice_selectors(dims, colon_mask, end_mask, numeric, &tensor.shape).await?;
     let plan = build_slice_plan(&selectors, dims, &tensor.shape)?;
+    read_complex_slice_from_plan(tensor, &plan)
+}
+
+pub fn read_complex_slice_from_plan(
+    tensor: &ComplexTensor,
+    plan: &SlicePlan,
+) -> Result<Value, RuntimeError> {
     if plan.indices.is_empty() {
-        let empty = ComplexTensor::new(Vec::new(), plan.output_shape)
+        let empty = ComplexTensor::new(Vec::new(), plan.output_shape.clone())
             .map_err(|e| format!("Slice error: {e}"))?;
         return Ok(Value::ComplexTensor(empty));
     }
@@ -290,7 +321,7 @@ pub async fn read_complex_slice(
         })?;
         out.push(value);
     }
-    let out_ct = ComplexTensor::new(out, plan.output_shape)
+    let out_ct = ComplexTensor::new(out, plan.output_shape.clone())
         .map_err(|e| format!("Slice error: {e}"))?;
     Ok(Value::ComplexTensor(out_ct))
 }
@@ -555,4 +586,305 @@ pub async fn read_string_slice(
             Ok(Value::StringArray(out_sa))
         }
     }
+}
+
+pub fn gather_string_slice(sa: &StringArray, plan: &SlicePlan) -> Result<Value, RuntimeError> {
+    if plan.indices.is_empty() {
+        let empty = StringArray::new(Vec::new(), plan.output_shape.clone())
+            .map_err(|e| format!("Slice error: {e}"))?;
+        return Ok(Value::StringArray(empty));
+    }
+    if plan.indices.len() == 1 {
+        let lin = plan.indices[0] as usize;
+        let value = sa.data.get(lin).cloned().ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "IndexOutOfBounds",
+                "Slice error: string index out of bounds",
+            )
+        })?;
+        return Ok(Value::String(value));
+    }
+    let mut out = Vec::with_capacity(plan.indices.len());
+    for &lin in &plan.indices {
+        let idx = lin as usize;
+        let value = sa.data.get(idx).cloned().ok_or_else(|| {
+            crate::interpreter::errors::mex(
+                "IndexOutOfBounds",
+                "Slice error: string index out of bounds",
+            )
+        })?;
+        out.push(value);
+    }
+    let out_sa = StringArray::new(out, plan.output_shape.clone())
+        .map_err(|e| format!("Slice error: {e}"))?;
+    Ok(Value::StringArray(out_sa))
+}
+
+fn total_len_from_shape(shape: &[usize]) -> usize {
+    if shape.is_empty() {
+        1
+    } else {
+        shape.iter().product()
+    }
+}
+
+#[derive(Clone)]
+enum ExprSel {
+    Colon,
+    Scalar(usize),
+    Indices(Vec<usize>),
+    Range { start: i64, step: i64, end_off: EndExpr },
+}
+
+pub async fn build_expr_gather_plan<ResolveEnd, Fut>(
+    dims: usize,
+    colon_mask: u32,
+    end_mask: u32,
+    range_dims: &[usize],
+    range_params: &[(f64, f64)],
+    range_start_exprs: &[Option<EndExpr>],
+    range_step_exprs: &[Option<EndExpr>],
+    range_end_exprs: &[EndExpr],
+    numeric: &[Value],
+    shape: &[usize],
+    mut resolve_end: ResolveEnd,
+) -> Result<SlicePlan, RuntimeError>
+where
+    ResolveEnd: FnMut(usize, &EndExpr) -> Fut,
+    Fut: Future<Output = Result<i64, RuntimeError>>,
+{
+    let rank = shape.len();
+    let full_shape: Vec<usize> = if dims == 1 {
+        vec![total_len_from_shape(shape)]
+    } else if rank < dims {
+        let mut s = shape.to_vec();
+        s.resize(dims, 1);
+        s
+    } else {
+        shape.to_vec()
+    };
+
+    let mut selectors: Vec<ExprSel> = Vec::with_capacity(dims);
+    let mut num_iter = 0usize;
+    let mut rp_iter = 0usize;
+    for d in 0..dims {
+        let is_colon = (colon_mask & (1u32 << d)) != 0;
+        let is_end = (end_mask & (1u32 << d)) != 0;
+        if is_colon {
+            selectors.push(ExprSel::Colon);
+        } else if is_end {
+            selectors.push(ExprSel::Scalar(*full_shape.get(d).unwrap_or(&1)));
+        } else if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
+            let (raw_st, raw_sp) = range_params[rp_iter];
+            let dim_len = *full_shape.get(d).unwrap_or(&1);
+            let st = if let Some(expr) = &range_start_exprs[rp_iter] {
+                resolve_end(dim_len, expr).await? as f64
+            } else {
+                raw_st
+            };
+            let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
+                resolve_end(dim_len, expr).await? as f64
+            } else {
+                raw_sp
+            };
+            rp_iter += 1;
+            let off = range_end_exprs[pos].clone();
+            selectors.push(ExprSel::Range {
+                start: st as i64,
+                step: if sp >= 0.0 { sp as i64 } else { -(sp.abs() as i64) },
+                end_off: off,
+            });
+        } else {
+            let v = numeric.get(num_iter).ok_or_else(|| {
+                crate::interpreter::errors::mex("MissingNumericIndex", "missing numeric index")
+            })?;
+            num_iter += 1;
+            if let Some(idx) = index_scalar_from_value(v).await? {
+                if idx < 1 {
+                    return Err(crate::interpreter::errors::mex(
+                        "IndexOutOfBounds",
+                        "Index out of bounds",
+                    ));
+                }
+                selectors.push(ExprSel::Scalar(idx as usize));
+            } else {
+                match v {
+                    Value::Tensor(idx_t) => {
+                        let dim_len = *full_shape.get(d).unwrap_or(&1);
+                        let len = idx_t.shape.iter().product::<usize>();
+                        if len == dim_len {
+                            let mut vv = Vec::new();
+                            for (i, &val) in idx_t.data.iter().enumerate() {
+                                if val != 0.0 {
+                                    vv.push(i + 1);
+                                }
+                            }
+                            selectors.push(ExprSel::Indices(vv));
+                        } else {
+                            let mut vv = Vec::with_capacity(len);
+                            for &val in &idx_t.data {
+                                let idx = val as isize;
+                                if idx < 1 {
+                                    return Err(crate::interpreter::errors::mex(
+                                        "IndexOutOfBounds",
+                                        "Index out of bounds",
+                                    ));
+                                }
+                                vv.push(idx as usize);
+                            }
+                            selectors.push(ExprSel::Indices(vv));
+                        }
+                    }
+                    _ => {
+                        return Err(crate::interpreter::errors::mex(
+                            "UnsupportedIndexType",
+                            "Unsupported index type",
+                        ))
+                    }
+                }
+            }
+        }
+    }
+
+    let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
+    let mut selection_lengths: Vec<usize> = Vec::with_capacity(dims);
+    let mut scalar_mask: Vec<bool> = Vec::with_capacity(dims);
+    for (d, sel) in selectors.iter().enumerate().take(dims) {
+        let dim_len = full_shape[d] as i64;
+        let idxs: Vec<usize> = match sel {
+            ExprSel::Colon => (1..=full_shape[d]).collect(),
+            ExprSel::Scalar(i) => vec![*i],
+            ExprSel::Indices(v) => v.clone(),
+            ExprSel::Range { start, step, end_off } => {
+                let mut v = Vec::new();
+                let mut cur = *start;
+                let stp = *step;
+                let end_i = resolve_end(dim_len as usize, end_off).await?;
+                if stp == 0 {
+                    return Err(crate::interpreter::errors::mex(
+                        "IndexStepZero",
+                        "Index step cannot be zero",
+                    ));
+                }
+                if stp > 0 {
+                    while cur <= end_i {
+                        if cur < 1 || cur > dim_len {
+                            break;
+                        }
+                        v.push(cur as usize);
+                        cur += stp;
+                    }
+                } else {
+                    while cur >= end_i {
+                        if cur < 1 || cur > dim_len {
+                            break;
+                        }
+                        v.push(cur as usize);
+                        cur += stp;
+                    }
+                }
+                v
+            }
+        };
+        if idxs.iter().any(|&i| i == 0 || i > full_shape[d]) {
+            return Err(crate::interpreter::errors::mex(
+                "IndexOutOfBounds",
+                "Index out of bounds",
+            ));
+        }
+        selection_lengths.push(idxs.len());
+        per_dim_indices.push(idxs);
+        scalar_mask.push(matches!(sel, ExprSel::Scalar(_)));
+    }
+
+    let mut strides: Vec<usize> = vec![0; dims];
+    let mut acc = 1usize;
+    for (d, stride) in strides.iter_mut().enumerate().take(dims) {
+        *stride = acc;
+        acc *= full_shape[d];
+    }
+    let total_out: usize = per_dim_indices.iter().map(|v| v.len()).product();
+    if total_out == 0 {
+        let output_shape = if dims == 1 {
+            vec![0, 1]
+        } else {
+            let mut dims_out: Vec<(usize, usize, bool)> = selection_lengths
+                .iter()
+                .enumerate()
+                .map(|(d, &len)| (d, len, scalar_mask.get(d).copied().unwrap_or(false)))
+                .collect();
+            while dims_out.len() > 2
+                && dims_out
+                    .last()
+                    .map(|&(_, len, is_scalar)| len == 1 && is_scalar)
+                    .unwrap_or(false)
+            {
+                dims_out.pop();
+            }
+            if dims_out.is_empty() {
+                vec![1, 1]
+            } else if dims_out.len() == 1 {
+                let (dim, len, _) = dims_out[0];
+                if dim == 1 { vec![1, len] } else { vec![len, 1] }
+            } else {
+                dims_out.into_iter().map(|(_, len, _)| len).collect()
+            }
+        };
+        return Ok(SlicePlan {
+            indices: Vec::new(),
+            output_shape,
+            selection_lengths,
+            dims,
+        });
+    }
+
+    let mut indices: Vec<u32> = Vec::with_capacity(total_out);
+    let mut idx = vec![0usize; dims];
+    loop {
+        let mut lin = 0usize;
+        for d in 0..dims {
+            let i0 = per_dim_indices[d][idx[d]] - 1;
+            lin += i0 * strides[d];
+        }
+        indices.push(lin as u32);
+        let mut d = 0usize;
+        while d < dims {
+            idx[d] += 1;
+            if idx[d] < per_dim_indices[d].len() {
+                break;
+            }
+            idx[d] = 0;
+            d += 1;
+        }
+        if d == dims {
+            break;
+        }
+    }
+
+    let output_shape = if dims == 1 {
+        if total_out <= 1 { vec![1, 1] } else { vec![total_out, 1] }
+    } else {
+        let mut dims_out: Vec<(usize, usize, bool)> = selection_lengths
+            .iter()
+            .enumerate()
+            .map(|(d, &len)| (d, len, scalar_mask.get(d).copied().unwrap_or(false)))
+            .collect();
+        while dims_out.len() > 2
+            && dims_out
+                .last()
+                .map(|&(_, len, is_scalar)| len == 1 && is_scalar)
+                .unwrap_or(false)
+        {
+            dims_out.pop();
+        }
+        if dims_out.is_empty() {
+            vec![1, 1]
+        } else if dims_out.len() == 1 {
+            let (dim, len, _) = dims_out[0];
+            if dim == 1 { vec![1, len] } else { vec![len, 1] }
+        } else {
+            dims_out.into_iter().map(|(_, len, _)| len).collect()
+        }
+    };
+    Ok(SlicePlan { indices, output_shape, selection_lengths, dims })
 }

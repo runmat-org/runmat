@@ -548,38 +548,6 @@ fn matlab_squeezed_shape(selection_lengths: &[usize], scalar_mask: &[bool]) -> V
     dims.into_iter().map(|(_, len, _)| len).collect()
 }
 
-fn gather_string_slice(sa: &runmat_builtins::StringArray, plan: &SlicePlan) -> VmResult<Value> {
-    if plan.indices.is_empty() {
-        let empty = runmat_builtins::StringArray::new(Vec::new(), plan.output_shape.clone())
-            .map_err(|e| format!("Slice error: {e}"))?;
-        return Ok(Value::StringArray(empty));
-    }
-    if plan.indices.len() == 1 {
-        let lin = plan.indices[0] as usize;
-        let value = sa.data.get(lin).cloned().ok_or_else(|| {
-            mex(
-                "IndexOutOfBounds",
-                "Slice error: string index out of bounds",
-            )
-        })?;
-        return Ok(Value::String(value));
-    }
-    let mut out = Vec::with_capacity(plan.indices.len());
-    for &lin in &plan.indices {
-        let idx = lin as usize;
-        let value = sa.data.get(idx).cloned().ok_or_else(|| {
-            mex(
-                "IndexOutOfBounds",
-                "Slice error: string index out of bounds",
-            )
-        })?;
-        out.push(value);
-    }
-    let out_sa = runmat_builtins::StringArray::new(out, plan.output_shape.clone())
-        .map_err(|e| format!("Slice error: {e}"))?;
-    Ok(Value::StringArray(out_sa))
-}
-
 #[derive(Clone)]
 enum ComplexAssignView {
     Scalar((f64, f64)),
@@ -831,7 +799,7 @@ fn apply_end_offsets_to_numeric<'a>(
 async fn resolve_range_end_index(
     dim_len: usize,
     end_expr: &EndExpr,
-    vars: &mut Vec<Value>,
+    vars: &Vec<Value>,
     functions: &HashMap<String, UserFunction>,
 ) -> VmResult<i64> {
     idx_end_expr::resolve_range_end_index(
@@ -4343,442 +4311,58 @@ async fn run_interpreter_inner(
                 }
                 match base {
                     Value::ComplexTensor(t) => {
-                        let rank = t.shape.len();
-                        #[derive(Clone)]
-                        enum Sel {
-                            Colon,
-                            Scalar(usize),
-                            Indices(Vec<usize>),
-                            Range {
-                                start: i64,
-                                step: i64,
-                                end_off: EndExpr,
+                        let vm_plan = idx_read_slice::build_expr_gather_plan(
+                            dims,
+                            colon_mask,
+                            end_mask,
+                            &range_dims,
+                            &range_params,
+                            &range_start_exprs,
+                            &range_step_exprs,
+                            &range_end_exprs,
+                            &numeric,
+                            &t.shape,
+                            |dim_len, expr| {
+                                let expr = expr.clone();
+                                let vars_ref = &vars;
+                                let functions_ref = &context.functions;
+                                async move {
+                                    resolve_range_end_index(dim_len, &expr, vars_ref, functions_ref)
+                                        .await
+                                }
                             },
-                        }
-                        let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
-                        let mut num_iter = 0usize;
-                        let mut rp_iter = 0usize;
-                        for d in 0..dims {
-                            let is_colon = (colon_mask & (1u32 << d)) != 0;
-                            let is_end = (end_mask & (1u32 << d)) != 0;
-                            if is_colon {
-                                selectors.push(Sel::Colon);
-                            } else if is_end {
-                                selectors.push(Sel::Scalar(*t.shape.get(d).unwrap_or(&1)));
-                            } else if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
-                                let (raw_st, raw_sp) = range_params[rp_iter];
-                                let dim_len = if dims == 1 {
-                                    total_len_from_shape(&t.shape)
-                                } else {
-                                    *t.shape.get(d).unwrap_or(&1)
-                                };
-                                let st = if let Some(expr) = &range_start_exprs[rp_iter] {
-                                    resolve_range_end_index(
-                                        dim_len,
-                                        expr,
-                                        &mut vars,
-                                        &context.functions,
-                                    )
-                                    .await? as f64
-                                } else {
-                                    raw_st
-                                };
-                                let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
-                                    resolve_range_end_index(
-                                        dim_len,
-                                        expr,
-                                        &mut vars,
-                                        &context.functions,
-                                    )
-                                    .await? as f64
-                                } else {
-                                    raw_sp
-                                };
-                                rp_iter += 1;
-                                let off = range_end_exprs[pos].clone();
-                                selectors.push(Sel::Range {
-                                    start: st as i64,
-                                    step: if sp >= 0.0 {
-                                        sp as i64
-                                    } else {
-                                        -(sp.abs() as i64)
-                                    },
-                                    end_off: off.clone(),
-                                });
-                            } else {
-                                let v = numeric
-                                    .get(num_iter)
-                                    .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
-                                num_iter += 1;
-                                if let Some(idx) = index_scalar_from_value(v).await? {
-                                    if idx < 1 {
-                                        vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
-                                    }
-                                    selectors.push(Sel::Scalar(idx as usize));
-                                } else {
-                                    match v {
-                                        Value::Tensor(idx_t) => {
-                                            let dim_len = *t.shape.get(d).unwrap_or(&1);
-                                            let len = idx_t.shape.iter().product::<usize>();
-                                            if len == dim_len {
-                                                let mut v = Vec::new();
-                                                for (i, &val) in idx_t.data.iter().enumerate() {
-                                                    if val != 0.0 {
-                                                        v.push(i + 1);
-                                                    }
-                                                }
-                                                selectors.push(Sel::Indices(v));
-                                            } else {
-                                                let mut v = Vec::with_capacity(len);
-                                                for &val in &idx_t.data {
-                                                    let idx = val as isize;
-                                                    if idx < 1 {
-                                                        vm_bail!(mex(
-                                                            "IndexOutOfBounds",
-                                                            "Index out of bounds"
-                                                        ));
-                                                    }
-                                                    v.push(idx as usize);
-                                                }
-                                                selectors.push(Sel::Indices(v));
-                                            }
-                                        }
-                                        _ => {
-                                            vm_bail!(mex(
-                                                "UnsupportedIndexType",
-                                                "Unsupported index type"
-                                            ))
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
-                        let mut selection_lengths: Vec<usize> = Vec::with_capacity(dims);
-                        let mut scalar_mask: Vec<bool> = Vec::with_capacity(dims);
-                        let full_shape: Vec<usize> = if dims == 1 {
-                            vec![total_len_from_shape(&t.shape)]
-                        } else if rank < dims {
-                            let mut s = t.shape.clone();
-                            s.resize(dims, 1);
-                            s
-                        } else {
-                            t.shape.clone()
-                        };
-                        for (d, sel) in selectors.iter().enumerate().take(dims) {
-                            let dim_len = full_shape[d] as i64;
-                            let idxs: Vec<usize> = match sel {
-                                Sel::Colon => (1..=full_shape[d]).collect(),
-                                Sel::Scalar(i) => vec![*i],
-                                Sel::Indices(v) => v.clone(),
-                                Sel::Range {
-                                    start,
-                                    step,
-                                    end_off,
-                                } => {
-                                    let mut v = Vec::new();
-                                    let mut cur = *start;
-                                    let stp = *step;
-                                    let end_i = resolve_range_end_index(
-                                        dim_len as usize,
-                                        end_off,
-                                        &mut vars,
-                                        &context.functions,
-                                    )
-                                    .await?;
-                                    if stp == 0 {
-                                        vm_bail!(mex("IndexStepZero", "Index step cannot be zero"));
-                                    }
-                                    if stp > 0 {
-                                        while cur <= end_i {
-                                            if cur < 1 || cur > dim_len {
-                                                break;
-                                            }
-                                            v.push(cur as usize);
-                                            cur += stp;
-                                        }
-                                    } else {
-                                        while cur >= end_i {
-                                            if cur < 1 || cur > dim_len {
-                                                break;
-                                            }
-                                            v.push(cur as usize);
-                                            cur += stp;
-                                        }
-                                    }
-                                    v
-                                }
-                            };
-                            if idxs.iter().any(|&i| i == 0 || i > full_shape[d]) {
-                                vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
-                            }
-                            selection_lengths.push(idxs.len());
-                            per_dim_indices.push(idxs);
-                            scalar_mask.push(matches!(sel, Sel::Scalar(_)));
-                        }
-
-                        let mut strides: Vec<usize> = vec![0; dims];
-                        let mut acc = 1usize;
-                        for (d, stride) in strides.iter_mut().enumerate().take(dims) {
-                            *stride = acc;
-                            acc *= full_shape[d];
-                        }
-                        let total_out: usize = per_dim_indices.iter().map(|v| v.len()).product();
-                        if total_out == 0 {
-                            let shape = matlab_squeezed_shape(&selection_lengths, &scalar_mask);
-                            let ct = runmat_builtins::ComplexTensor::new(Vec::new(), shape)
-                                .map_err(|e| format!("Slice error: {e}"))?;
-                            stack.push(Value::ComplexTensor(ct));
-                            pc += 1;
-                            continue;
-                        }
-                        let mut out_data: Vec<(f64, f64)> = Vec::with_capacity(total_out);
-                        cartesian_product(&per_dim_indices, |multi| {
-                            let mut lin = 0usize;
-                            for d in 0..dims {
-                                let i0 = multi[d] - 1;
-                                lin += i0 * strides[d];
-                            }
-                            out_data.push(t.data[lin]);
-                        });
-                        if out_data.len() == 1 {
-                            let (re, im) = out_data[0];
-                            stack.push(Value::Complex(re, im));
-                        } else {
-                            let shape = matlab_squeezed_shape(&selection_lengths, &scalar_mask);
-                            let ct = runmat_builtins::ComplexTensor::new(out_data, shape)
-                                .map_err(|e| format!("Slice error: {e}"))?;
-                            stack.push(Value::ComplexTensor(ct));
-                        }
+                        )
+                        .await?;
+                        let result = idx_read_slice::read_complex_slice_from_plan(&t, &vm_plan)
+                            .map_err(|e| format!("Slice error: {e}"))?;
+                        stack.push(result);
                     }
                     Value::Tensor(t) => {
-                        let rank = t.shape.len();
-                        #[derive(Clone)]
-                        enum Sel {
-                            Colon,
-                            Scalar(usize),
-                            Indices(Vec<usize>),
-                            Range {
-                                start: i64,
-                                step: i64,
-                                end_off: EndExpr,
+                        let vm_plan = idx_read_slice::build_expr_gather_plan(
+                            dims,
+                            colon_mask,
+                            end_mask,
+                            &range_dims,
+                            &range_params,
+                            &range_start_exprs,
+                            &range_step_exprs,
+                            &range_end_exprs,
+                            &numeric,
+                            &t.shape,
+                            |dim_len, expr| {
+                                let expr = expr.clone();
+                                let vars_ref = &vars;
+                                let functions_ref = &context.functions;
+                                async move {
+                                    resolve_range_end_index(dim_len, &expr, vars_ref, functions_ref)
+                                        .await
+                                }
                             },
-                        }
-                        let mut selectors: Vec<Sel> = Vec::with_capacity(dims);
-                        let mut num_iter = 0usize;
-                        let mut rp_iter = 0usize;
-                        for d in 0..dims {
-                            let is_colon = (colon_mask & (1u32 << d)) != 0;
-                            let is_end = (end_mask & (1u32 << d)) != 0;
-                            if is_colon {
-                                selectors.push(Sel::Colon);
-                            } else if is_end {
-                                selectors.push(Sel::Scalar(*t.shape.get(d).unwrap_or(&1)));
-                            } else if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
-                                let (raw_st, raw_sp) = range_params[rp_iter];
-                                let dim_len = if dims == 1 {
-                                    total_len_from_shape(&t.shape)
-                                } else {
-                                    *t.shape.get(d).unwrap_or(&1)
-                                };
-                                let st = if let Some(expr) = &range_start_exprs[rp_iter] {
-                                    resolve_range_end_index(
-                                        dim_len,
-                                        expr,
-                                        &mut vars,
-                                        &context.functions,
-                                    )
-                                    .await? as f64
-                                } else {
-                                    raw_st
-                                };
-                                let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
-                                    resolve_range_end_index(
-                                        dim_len,
-                                        expr,
-                                        &mut vars,
-                                        &context.functions,
-                                    )
-                                    .await? as f64
-                                } else {
-                                    raw_sp
-                                };
-                                rp_iter += 1;
-                                let off = range_end_exprs[pos].clone();
-                                selectors.push(Sel::Range {
-                                    start: st as i64,
-                                    step: if sp >= 0.0 {
-                                        sp as i64
-                                    } else {
-                                        -(sp.abs() as i64)
-                                    },
-                                    end_off: off.clone(),
-                                });
-                            } else {
-                                let v = numeric
-                                    .get(num_iter)
-                                    .ok_or(mex("MissingNumericIndex", "missing numeric index"))?;
-                                num_iter += 1;
-                                if let Some(idx) = index_scalar_from_value(v).await? {
-                                    if idx < 1 {
-                                        vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
-                                    }
-                                    selectors.push(Sel::Scalar(idx as usize));
-                                } else {
-                                    match v {
-                                        Value::Tensor(idx_t) => {
-                                            let dim_len = *t.shape.get(d).unwrap_or(&1);
-                                            let len = idx_t.shape.iter().product::<usize>();
-                                            if len == dim_len {
-                                                let mut v = Vec::new();
-                                                for (i, &val) in idx_t.data.iter().enumerate() {
-                                                    if val != 0.0 {
-                                                        v.push(i + 1);
-                                                    }
-                                                }
-                                                selectors.push(Sel::Indices(v));
-                                            } else {
-                                                let mut v = Vec::with_capacity(len);
-                                                for &val in &idx_t.data {
-                                                    let idx = val as isize;
-                                                    if idx < 1 {
-                                                        vm_bail!(mex(
-                                                            "IndexOutOfBounds",
-                                                            "Index out of bounds"
-                                                        ));
-                                                    }
-                                                    v.push(idx as usize);
-                                                }
-                                                selectors.push(Sel::Indices(v));
-                                            }
-                                        }
-                                        _ => vm_bail!(mex(
-                                            "UnsupportedIndexType",
-                                            "Unsupported index type"
-                                        )),
-                                    }
-                                }
-                            }
-                        }
-                        // Materialize per-dim indices, resolving ranges with end_off
-                        let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
-                        let mut selection_lengths: Vec<usize> = Vec::with_capacity(dims);
-                        let mut scalar_mask: Vec<bool> = Vec::with_capacity(dims);
-                        let full_shape: Vec<usize> = if dims == 1 {
-                            vec![total_len_from_shape(&t.shape)]
-                        } else if rank < dims {
-                            let mut s = t.shape.clone();
-                            s.resize(dims, 1);
-                            s
-                        } else {
-                            t.shape.clone()
-                        };
-                        for (d, sel) in selectors.iter().enumerate().take(dims) {
-                            let dim_len = full_shape[d] as i64;
-                            let idxs: Vec<usize> = match sel {
-                                Sel::Colon => (1..=full_shape[d]).collect(),
-                                Sel::Scalar(i) => vec![*i],
-                                Sel::Indices(v) => v.clone(),
-                                Sel::Range {
-                                    start,
-                                    step,
-                                    end_off,
-                                } => {
-                                    let mut v = Vec::new();
-                                    let mut cur = *start;
-                                    let stp = *step;
-                                    let end_i = resolve_range_end_index(
-                                        dim_len as usize,
-                                        end_off,
-                                        &mut vars,
-                                        &context.functions,
-                                    )
-                                    .await?;
-                                    if stp == 0 {
-                                        vm_bail!(mex("IndexStepZero", "Index step cannot be zero"));
-                                    }
-                                    if stp > 0 {
-                                        while cur <= end_i {
-                                            if cur < 1 || cur > dim_len {
-                                                break;
-                                            }
-                                            v.push(cur as usize);
-                                            cur += stp;
-                                        }
-                                    } else {
-                                        while cur >= end_i {
-                                            if cur < 1 || cur > dim_len {
-                                                break;
-                                            }
-                                            v.push(cur as usize);
-                                            cur += stp;
-                                        }
-                                    }
-                                    v
-                                }
-                            };
-                            if idxs.iter().any(|&i| i == 0 || i > full_shape[d]) {
-                                vm_bail!(mex("IndexOutOfBounds", "Index out of bounds"));
-                            }
-                            selection_lengths.push(idxs.len());
-                            per_dim_indices.push(idxs);
-                            scalar_mask.push(matches!(sel, Sel::Scalar(_)));
-                        }
-                        // Strides and gather
-                        let mut strides: Vec<usize> = vec![0; dims];
-                        let mut acc = 1usize;
-                        for (d, stride) in strides.iter_mut().enumerate().take(dims) {
-                            *stride = acc;
-                            acc *= full_shape[d];
-                        }
-                        let total_out: usize = per_dim_indices.iter().map(|v| v.len()).product();
-                        if total_out == 0 {
-                            let shape = matlab_squeezed_shape(&selection_lengths, &scalar_mask);
-                            stack.push(Value::Tensor(
-                                runmat_builtins::Tensor::new(Vec::new(), shape)
-                                    .map_err(|e| format!("Slice error: {e}"))?,
-                            ));
-                            pc += 1;
-                            continue;
-                        }
-                        let mut out_data: Vec<f64> = Vec::with_capacity(total_out);
-                        fn cartesian<F: FnMut(&[usize])>(lists: &[Vec<usize>], mut f: F) {
-                            let dims = lists.len();
-                            let mut idx = vec![0usize; dims];
-                            loop {
-                                let current: Vec<usize> =
-                                    (0..dims).map(|d| lists[d][idx[d]]).collect();
-                                f(&current);
-                                let mut d = 0usize;
-                                while d < dims {
-                                    idx[d] += 1;
-                                    if idx[d] < lists[d].len() {
-                                        break;
-                                    }
-                                    idx[d] = 0;
-                                    d += 1;
-                                }
-                                if d == dims {
-                                    break;
-                                }
-                            }
-                        }
-                        cartesian(&per_dim_indices, |multi| {
-                            let mut lin = 0usize;
-                            for d in 0..dims {
-                                let i0 = multi[d] - 1;
-                                lin += i0 * strides[d];
-                            }
-                            out_data.push(t.data[lin]);
-                        });
-                        if out_data.len() == 1 {
-                            stack.push(Value::Num(out_data[0]));
-                        } else {
-                            let shape = matlab_squeezed_shape(&selection_lengths, &scalar_mask);
-                            let tens = runmat_builtins::Tensor::new(out_data, shape)
-                                .map_err(|e| format!("Slice error: {e}"))?;
-                            stack.push(Value::Tensor(tens));
-                        }
+                        )
+                        .await?;
+                        let result = idx_read_slice::read_tensor_slice_from_plan(&t, &vm_plan)
+                            .map_err(|e| format!("Slice error: {e}"))?;
+                        stack.push(result);
                     }
                     Value::StringArray(sa) => {
                         let selectors =
@@ -4787,8 +4371,14 @@ async fn run_interpreter_inner(
                                 .map_err(|e| format!("slice: {e}"))?;
                         let plan = build_slice_plan(&selectors, dims, &sa.shape)
                             .map_err(|e| map_slice_plan_error("slice", e))?;
-                        let result =
-                            gather_string_slice(&sa, &plan).map_err(|e| format!("slice: {e}"))?;
+                        let vm_plan = idx_selectors::SlicePlan {
+                            indices: plan.indices.clone(),
+                            output_shape: plan.output_shape.clone(),
+                            selection_lengths: plan.selection_lengths.clone(),
+                            dims: plan.dims,
+                        };
+                        let result = idx_read_slice::gather_string_slice(&sa, &vm_plan)
+                            .map_err(|e| format!("slice: {e}"))?;
                         stack.push(result);
                     }
                     _ => vm_bail!(mex("SliceNonTensor", "Slicing only supported on tensors")),
