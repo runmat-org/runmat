@@ -828,3 +828,26 @@ pub fn execute_fusion_reduction(
         Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
     }
 }
+
+pub async fn try_execute_fusion_group(
+    plan: &runmat_accelerate::FusionGroupPlan,
+    graph: &runmat_accelerate::AccelGraph,
+    stack: &mut Vec<Value>,
+    vars: &mut Vec<Value>,
+    context: &mut ExecutionContext,
+) -> Result<Value, RuntimeError> {
+    let (stack_guard, request, consumed_inputs) =
+        gather_fusion_inputs(plan, graph, stack, vars, context)?;
+    log::debug!(
+        "dispatch fusion kind {:?}, supported {}",
+        plan.group.kind,
+        plan.kernel.supported
+    );
+    if plan.group.kind.is_elementwise() {
+        execute_fusion_elementwise(request, stack_guard, vars, context)
+    } else if plan.group.kind.is_reduction() {
+        execute_fusion_reduction(plan, graph, request, &consumed_inputs, stack_guard, vars, context)
+    } else {
+        execute_fusion_special_kind(plan.group.kind.clone(), &plan.inputs, request, stack_guard).await
+    }
+}

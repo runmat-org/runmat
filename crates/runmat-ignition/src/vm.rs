@@ -1,4 +1,4 @@
-use crate::functions::{Bytecode, ExecutionContext, UserFunction};
+use crate::functions::{Bytecode, UserFunction};
 use crate::instr::Instr;
 #[cfg(test)]
 use crate::instr::EndExpr;
@@ -556,7 +556,7 @@ async fn run_interpreter_inner(
                 )
                 .entered();
                 if !has_barrier {
-                    match try_execute_fusion_group(
+                    match accel_fusion::try_execute_fusion_group(
                         &plan,
                         graph,
                         &mut stack,
@@ -827,38 +827,6 @@ async fn stochastic_evolution_dispatch(
         state, drift, scale, steps,
     )
     .await
-}
-
-#[cfg(feature = "native-accel")]
-async fn try_execute_fusion_group(
-    plan: &runmat_accelerate::FusionGroupPlan,
-    graph: &runmat_accelerate::AccelGraph,
-    stack: &mut Vec<Value>,
-    vars: &mut Vec<Value>,
-    context: &mut ExecutionContext,
-) -> VmResult<Value> {
-    let (stack_guard, request, consumed_inputs) =
-        accel_fusion::gather_fusion_inputs(plan, graph, stack, vars, context)?;
-    log::debug!(
-        "dispatch fusion kind {:?}, supported {}",
-        plan.group.kind,
-        plan.kernel.supported
-    );
-    if plan.group.kind.is_elementwise() {
-        accel_fusion::execute_fusion_elementwise(request, stack_guard, vars, context)
-    } else if plan.group.kind.is_reduction() {
-        accel_fusion::execute_fusion_reduction(
-            plan,
-            graph,
-            request,
-            &consumed_inputs,
-            stack_guard,
-            vars,
-            context,
-        )
-    } else {
-        accel_fusion::execute_fusion_special_kind(plan.group.kind.clone(), &plan.inputs, request, stack_guard).await
-    }
 }
 
 #[cfg(feature = "native-accel")]
