@@ -254,20 +254,6 @@ pub fn map_public_error<T: std::fmt::Debug>(err: public_api::Error<T>) -> anyhow
     anyhow::anyhow!(err.to_string())
 }
 
-pub async fn fetch_auth_me(
-    config: &mut RemoteConfig,
-    server_override: Option<String>,
-) -> Result<public_api::types::AuthMeResponse> {
-    let server_url = resolve_server_url(config, server_override)?;
-    let token = resolve_auth_token(config, &server_url).await?;
-    let client = build_public_client(&server_url, &token)?;
-    client
-        .auth_me()
-        .await
-        .map_err(map_public_error)
-        .map(|response| response.into_inner())
-}
-
 fn load_token(server_url: &str, mode: CredentialStoreMode) -> Result<Option<String>> {
     match mode {
         CredentialStoreMode::Auto => load_token_auto(server_url),
