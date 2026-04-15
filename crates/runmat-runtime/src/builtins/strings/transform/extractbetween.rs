@@ -807,9 +807,9 @@ pub(crate) mod tests {
     #[test]
     fn extractBetween_char_array_rows() {
         let chars = CharArray::new(
-            "GPUAccelerateIgnition".chars().collect(),
+            "GPUAccelerateVM".chars().collect(),
             1,
-            "GPUAccelerateIgnition".len(),
+            "GPUAccelerateVM".len(),
         )
         .unwrap();
         let result = extract_between_builtin(

@@ -29,7 +29,7 @@
   },
   "requires_feature": null,
   "tested": {
-    "integration": "runmat-ignition/tests/datetime.rs"
+    "integration": "runmat-vm/tests/datetime.rs"
   },
   "description": "`datetime` constructs MATLAB-style datetime objects. RunMat currently supports creation from year-month-day component inputs, from text scalars or text arrays, from serial date numbers, and from numeric inputs marked with `ConvertFrom='datenum'`. The resulting object stores serial dates internally and exposes a writable `Format` property used by display, `string`, and `char` conversion.",
   "behaviors": [

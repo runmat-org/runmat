@@ -1,4 +1,4 @@
 //! Object and struct member writes.
 //!
 //! Port target:
-//! - `StoreMember*` behavior from `runmat-ignition/src/vm.rs`
+//! - `StoreMember*` behavior from the previous interpreter wrapper

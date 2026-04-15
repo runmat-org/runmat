@@ -73,8 +73,8 @@
     },
     {
       "description": "Replace text stored inside a cell array of strings",
-      "input": "cells = { \"Snapshot\", \"Ignition Interpreter\" };\nrenamed = replace(cells, \" \", \"_\")",
-      "output": "renamed = 1×2 cell array\n    {\"Snapshot\"}    {\"Ignition_Interpreter\"}"
+      "input": "cells = { \"Snapshot\", \"VM Interpreter\" };\nrenamed = replace(cells, \" \", \"_\")",
+      "output": "renamed = 1×2 cell array\n    {\"Snapshot\"}    {\"VM_Interpreter\"}"
     },
     {
       "description": "Preserve missing strings during replacement",

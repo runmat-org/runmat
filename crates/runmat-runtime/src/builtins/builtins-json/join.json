@@ -62,8 +62,8 @@
     },
     {
       "description": "Join A Cell Array Of Character Vectors",
-      "input": "C = {'GPU', 'Accelerate'; 'Ignition', 'Interpreter'};\nresult = join(C, \", \")",
-      "output": "result = 2×1 cell\n    {'GPU, Accelerate'}\n    {'Ignition, Interpreter'}"
+      "input": "C = {'GPU', 'Accelerate'; 'VM', 'Interpreter'};\nresult = join(C, \", \")",
+      "output": "result = 2×1 cell\n    {'GPU, Accelerate'}\n    {'VM, Interpreter'}"
     },
     {
       "description": "Join Using A Dimension Argument As The Second Input",

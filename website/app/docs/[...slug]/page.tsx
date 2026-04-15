@@ -239,17 +239,6 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
 
 // Map well-known slug prefixes to repo files when not present in the manifest
 function fallbackForSlug(slug: string[]) {
-  if (slug.length === 2 && slug[0] === "ignition") {
-    const map: Record<string, string> = {
-      "compiler-pipeline": "crates/runmat-ignition/COMPILER_PIPELINE.md",
-      "instr-set": "crates/runmat-ignition/INSTR_SET.md",
-      "indexing-and-slicing": "crates/runmat-ignition/INDEXING_AND_SLICING.md",
-      "error-model": "docs/ERROR_MODEL.md",
-      "oop-semantics": "crates/runmat-ignition/OOP_SEMANTICS.md",
-    };
-    const file = map[slug[1]];
-    if (file) return { title: toTitleCase(slug[1].replace(/-/g, " ")), slug, file };
-  }
   return undefined;
 }
 
@@ -273,4 +262,3 @@ function findRepoRoot(start: string): string | undefined {
   }
   return undefined;
 }
-

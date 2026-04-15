@@ -488,7 +488,7 @@ fn diagnostic_for_compile_error(error: &CompileError, text: &str) -> Diagnostic 
         severity: Some(DiagnosticSeverity::ERROR),
         code: None,
         code_description: None,
-        source: Some("runmat-ignition".into()),
+        source: Some("runmat-vm".into()),
         message,
         related_information: None,
         tags: None,

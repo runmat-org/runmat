@@ -430,7 +430,7 @@ export default function AboutPage() {
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-blue-300">•</span>
-                  <p>Ignition interpreter for ~5 ms startup; Turbine JIT (Cranelift) for hot paths</p>
+                  <p>VM interpreter for ~5 ms startup; Turbine JIT (Cranelift) for hot paths</p>
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-blue-300">•</span>

@@ -1,7 +1,7 @@
 //! RunMat Turbine - Cranelift-based JIT Compiler
 //!
 //! The optimizing tier of RunMat's V8-inspired tiered execution model.
-//! Turbine compiles hot bytecode sequences from Ignition into native machine code
+//! Turbine compiles hot bytecode sequences from the VM into native machine code
 //! using Cranelift for maximum performance.
 
 // Allow raw pointer dereference in FFI functions - they're inherently unsafe
@@ -116,7 +116,7 @@ fn declare_host_call_in_module(module: &mut JITModule) -> FuncId {
         .expect("Failed to declare runmat_call_user_function")
 }
 
-/// Execute a user-defined function with access to global variables using Ignition interpreter
+/// Execute a user-defined function with access to global variables using the VM interpreter
 fn execute_user_function_isolated(
     function_def: &runmat_vm::UserFunction,
     args: &[Value],
@@ -144,7 +144,7 @@ fn execute_user_function_isolated(
         }
     }
 
-    // Execute the function using Ignition interpreter
+    // Execute the function using the VM interpreter
     let mut func_var_types = function_def.var_types.clone();
     if func_var_types.len() < local_var_count {
         func_var_types.resize(local_var_count, Type::Unknown);
@@ -539,10 +539,10 @@ impl TurbineEngine {
         // Record execution for profiling
         self.profiler.record_execution(hash);
 
-        // Fallback to the main Ignition interpreter which supports all features
-        debug!("Executing bytecode in Ignition interpreter mode (supports user functions)");
+        // Fallback to the main VM interpreter which supports all features
+        debug!("Executing bytecode in VM interpreter mode (supports user functions)");
 
-        // Use the main Ignition interpreter which has full feature support
+        // Use the main VM interpreter which has full feature support
         match run_immediate(Box::pin(runmat_vm::interpret_with_vars(
             bytecode,
             vars,

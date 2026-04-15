@@ -1,4 +1,4 @@
 //! Object and struct member reads.
 //!
 //! Port target:
-//! - `LoadMember*` behavior from `runmat-ignition/src/vm.rs`
+//! - `LoadMember*` behavior from the previous interpreter wrapper

@@ -26,7 +26,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::structs::core::getfield::tests",
-    "integration": "runmat_ignition::tests::functions::member_get_set_and_method_call_skeleton"
+    "integration": "runmat-vm/tests/functions.rs::member_get_set_and_method_call_skeleton"
   },
   "description": "`value = getfield(S, field)` returns the contents of `S.field`. RunMat matches MATLAB by supporting nested field access, struct arrays (via index cells), and MATLAB-style objects created with `new_object`.",
   "behaviors": [

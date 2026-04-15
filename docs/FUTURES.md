@@ -291,7 +291,7 @@ This allows returning “native future” from builtins without spawning a separ
 For first iteration:
 
 * compile normal functions as today
-* for async functions/blocks: interpret them (Ignition) until stable semantics exist
+* for async functions/blocks: interpret them in the VM until stable semantics exist
 
 This de-risks the first release.
 
