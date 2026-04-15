@@ -30,7 +30,7 @@ function ConditionalLayout({ children }: { children: React.ReactNode }) {
       <Suspense fallback={<div className="hidden lg:block" />}> 
         <Sidebar />
       </Suspense>
-      <main className="min-w-0 lg:pl-8 lg:border-l lg:border-border/60 overflow-visible">{children}</main>
+      <main className="min-w-0 lg:pl-12 lg:border-l lg:border-border/60 overflow-visible">{children}</main>
     </div>
   );
 }
