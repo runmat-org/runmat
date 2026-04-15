@@ -1319,13 +1319,20 @@ impl RunMatSession {
                         // blocking on recv() is safe here because the native executor
                         // (futures::executor::block_on) is itself synchronous.
                         let (tx, rx) = std::sync::mpsc::sync_channel(1);
-                        let _ = std::thread::Builder::new()
+                        let spawn_result = std::thread::Builder::new()
                             .stack_size(16 * 1024 * 1024)
                             .spawn(move || {
                                 let result = futures::executor::block_on(eval_expr(expr, compat));
                                 let _ = tx.send(result);
                             });
                         Box::pin(async move {
+                            spawn_result.map_err(|err| {
+                                build_runtime_error(format!(
+                                    "input: failed to spawn eval thread: {err}"
+                                ))
+                                .with_identifier("RunMat:input:EvalThreadSpawnFailed")
+                                .build()
+                            })?;
                             rx.recv().unwrap_or_else(|_| {
                                 Err(build_runtime_error("input: eval thread panicked")
                                     .with_identifier("RunMat:input:EvalThreadPanic")
