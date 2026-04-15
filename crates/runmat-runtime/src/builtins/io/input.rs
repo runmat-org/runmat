@@ -213,9 +213,14 @@ async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
 /// Parse a single MATLAB scalar token into a [`Value`].
 ///
 /// Returns [`Value::Bool`] for `true`/`false` (case-insensitive), [`Value::Num`]
-/// for numeric literals and named constants (`pi`, `inf`, `nan`, `e`), and
+/// for numeric literals and named constants (`pi`, `inf`, `nan`), and
 /// `None` for anything that looks like a matrix, function call, or unknown
 /// identifier.
+///
+/// Note: `e` is intentionally **not** handled here. It is not a MATLAB built-in
+/// constant; typing `e` at an `input()` prompt would perform a variable lookup in
+/// MATLAB and error if `e` is undefined. Unknown identifiers fall through to the
+/// eval hook or `str2double`, which produce the correct error.
 fn parse_scalar_value(s: &str) -> Option<Value> {
     match s.to_ascii_lowercase().as_str() {
         "true" => return Some(Value::Bool(true)),
@@ -224,7 +229,6 @@ fn parse_scalar_value(s: &str) -> Option<Value> {
         "inf" | "+inf" | "infinity" | "+infinity" => return Some(Value::Num(f64::INFINITY)),
         "-inf" | "-infinity" => return Some(Value::Num(f64::NEG_INFINITY)),
         "nan" => return Some(Value::Num(f64::NAN)),
-        "e" => return Some(Value::Num(std::f64::consts::E)),
         _ => {}
     }
     // Plain numeric literals: integers, decimals, scientific notation, optional sign.
@@ -290,27 +294,38 @@ fn parse_matrix_literal(s: &str) -> Option<Value> {
     }
 
     // All-logical → LogicalArray; any numeric element → Tensor (bools coerced to f64).
+    // `values` is in row-major order (row 0 left-to-right, then row 1, …), but both
+    // Tensor and LogicalArray store data in column-major order (data[r + c*rows]).
+    // Reorder so that column-major index maps to the correct element.
     let all_logical = values.iter().all(|v| matches!(v, Value::Bool(_)));
     if all_logical {
-        let data: Vec<u8> = values
-            .iter()
-            .map(|v| match v {
-                Value::Bool(b) => u8::from(*b),
-                _ => unreachable!(),
-            })
-            .collect();
+        let mut data: Vec<u8> = vec![0u8; nrows * ncols];
+        for r in 0..nrows {
+            for c in 0..ncols {
+                let row_major_idx = r * ncols + c;
+                let col_major_idx = r + c * nrows;
+                data[col_major_idx] = match &values[row_major_idx] {
+                    Value::Bool(b) => u8::from(*b),
+                    _ => unreachable!(),
+                };
+            }
+        }
         LogicalArray::new(data, vec![nrows, ncols])
             .ok()
             .map(Value::LogicalArray)
     } else {
-        let data: Vec<f64> = values
-            .iter()
-            .map(|v| match v {
-                Value::Num(f) => *f,
-                Value::Bool(b) => f64::from(u8::from(*b)),
-                _ => unreachable!(),
-            })
-            .collect();
+        let mut data: Vec<f64> = vec![0f64; nrows * ncols];
+        for r in 0..nrows {
+            for c in 0..ncols {
+                let row_major_idx = r * ncols + c;
+                let col_major_idx = r + c * nrows;
+                data[col_major_idx] = match &values[row_major_idx] {
+                    Value::Num(f) => *f,
+                    Value::Bool(b) => f64::from(u8::from(*b)),
+                    _ => unreachable!(),
+                };
+            }
+        }
         Tensor::new_2d(data, nrows, ncols).ok().map(Value::Tensor)
     }
 }
@@ -372,6 +387,23 @@ pub(crate) mod tests {
         push_queued_response(Ok(InteractionResponse::Line("pi".into())));
         let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
         assert_eq!(value, Value::Num(std::f64::consts::PI));
+    }
+
+    /// `e` is not a MATLAB built-in constant. The fast-path parser must not map
+    /// it to Euler's number; it should fall through so the eval hook or
+    /// `str2double` can handle it (which will NaN or error on an unknown identifier).
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn bare_e_is_not_eulers_number() {
+        assert_eq!(parse_scalar_value("e"), None);
+        assert_eq!(parse_scalar_value("E"), None);
+    }
+
+    /// `[1 e 3]` must not silently produce `[1.0, 2.718…, 3.0]`.
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn matrix_with_bare_e_does_not_parse() {
+        assert_eq!(parse_matrix_literal("[1 e 3]"), None);
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
@@ -453,6 +485,44 @@ pub(crate) mod tests {
                 assert_eq!(t.data, vec![1.0, 2.0]);
             }
             other => panic!("expected Tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn matrix_2x2_column_major_layout() {
+        // [1 2; 3 4] → get2(r,c) must return element at row r, col c, not the transpose.
+        // Column-major storage: data = [1, 3, 2, 4] (not the row-major [1, 2, 3, 4]).
+        push_queued_response(Ok(InteractionResponse::Line("[1 2; 3 4]".into())));
+        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        match value {
+            Value::Tensor(t) => {
+                assert_eq!(t.rows, 2);
+                assert_eq!(t.cols, 2);
+                assert_eq!(t.get2(0, 0).unwrap(), 1.0, "(0,0) should be 1");
+                assert_eq!(t.get2(0, 1).unwrap(), 2.0, "(0,1) should be 2");
+                assert_eq!(t.get2(1, 0).unwrap(), 3.0, "(1,0) should be 3");
+                assert_eq!(t.get2(1, 1).unwrap(), 4.0, "(1,1) should be 4");
+            }
+            other => panic!("expected 2×2 tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn logical_matrix_2x2_column_major_layout() {
+        // [true false; false true] → column-major data = [1, 0, 0, 1].
+        push_queued_response(Ok(InteractionResponse::Line(
+            "[true false; false true]".into(),
+        )));
+        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        match value {
+            Value::LogicalArray(la) => {
+                assert_eq!(la.shape, vec![2, 2]);
+                // column-major: col 0 first ([true, false]), then col 1 ([false, true])
+                assert_eq!(la.data, vec![1, 0, 0, 1]);
+            }
+            other => panic!("expected 2×2 LogicalArray, got {other:?}"),
         }
     }
 
