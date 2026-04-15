@@ -10,11 +10,11 @@ use runmat_accelerate::fusion_exec::{
 };
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
-    activate_fusion_plan, deactivate_fusion_plan, fusion_residency, set_current_pc,
+    activate_fusion_plan, deactivate_fusion_plan, set_current_pc,
 };
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
-    active_group_plan_clone, value_is_all_keyword, FusionKind, InstrSpan, ReductionAxes, ShapeInfo,
+    active_group_plan_clone, value_is_all_keyword, FusionKind, ReductionAxes, ShapeInfo,
     ValueOrigin, VarKind,
 };
 use runmat_builtins::Value;
@@ -38,6 +38,8 @@ use runmat_vm::interpreter::errors::{
 };
 use runmat_vm::call::shared as call_shared;
 use runmat_vm::call::user as call_user;
+use runmat_vm::accel::fusion as accel_fusion;
+use runmat_vm::accel::residency as accel_residency;
 #[cfg(test)]
 use runmat_vm::indexing::end_expr as idx_end_expr;
 #[cfg(test)]
@@ -547,12 +549,12 @@ async fn run_interpreter_inner(
                         &plan,
                         &bytecode,
                         pc,
-                        fusion_span_has_vm_barrier(&bytecode.instructions, &plan.group.span),
-                        fusion_span_live_result_count(&bytecode.instructions, &plan.group.span),
+                        accel_fusion::fusion_span_has_vm_barrier(&bytecode.instructions, &plan.group.span),
+                        accel_fusion::fusion_span_live_result_count(&bytecode.instructions, &plan.group.span),
                     );
                 }
                 let span = plan.group.span.clone();
-                let has_barrier = fusion_span_has_vm_barrier(&bytecode.instructions, &span);
+                let has_barrier = accel_fusion::fusion_span_has_vm_barrier(&bytecode.instructions, &span);
                 let _fusion_span = info_span!(
                     "fusion.execute",
                     span_start = plan.group.span.start,
@@ -835,131 +837,6 @@ async fn stochastic_evolution_dispatch(
 }
 
 #[cfg(feature = "native-accel")]
-#[inline]
-fn value_kind(value: &Value) -> &'static str {
-    match value {
-        Value::Int(_) => "Int",
-        Value::Num(_) => "Num",
-        Value::Complex(_, _) => "Complex",
-        Value::Bool(_) => "Bool",
-        Value::LogicalArray(_) => "LogicalArray",
-        Value::String(_) => "String",
-        Value::StringArray(_) => "StringArray",
-        Value::CharArray(_) => "CharArray",
-        Value::Tensor(_) => "Tensor",
-        Value::ComplexTensor(_) => "ComplexTensor",
-        Value::Cell(_) => "Cell",
-        Value::Struct(_) => "Struct",
-        Value::GpuTensor(_) => "GpuTensor",
-        Value::Object(_) => "Object",
-        Value::HandleObject(_) => "HandleObject",
-        Value::Listener(_) => "Listener",
-        Value::FunctionHandle(_) => "FunctionHandle",
-        Value::Closure(_) => "Closure",
-        Value::ClassRef(_) => "ClassRef",
-        Value::MException(_) => "MException",
-        Value::OutputList(_) => "OutputList",
-    }
-}
-#[cfg(feature = "native-accel")]
-#[inline]
-fn summarize_value(i: usize, v: &Value) -> String {
-    match v {
-        Value::GpuTensor(h) => format!("in#{i}:GpuTensor shape={:?}", h.shape),
-        Value::Tensor(t) => format!("in#{i}:Tensor shape={:?}", t.shape),
-        Value::Num(n) => format!("in#{i}:Num({n:.6})"),
-        Value::Int(n) => format!("in#{i}:Int({})", n.to_i64()),
-        Value::Bool(b) => format!("in#{i}:Bool({})", if *b { 1 } else { 0 }),
-        Value::String(s) => format!("in#{i}:String({})", s),
-        _ => format!("in#{i}:{}", value_kind(v)),
-    }
-}
-
-#[cfg(feature = "native-accel")]
-fn fusion_span_live_result_count(instructions: &[Instr], span: &InstrSpan) -> Option<usize> {
-    if span.start > span.end || span.end >= instructions.len() {
-        return None;
-    }
-
-    let mut current_depth = 0usize;
-    for instr in &instructions[span.start..=span.end] {
-        let effect = instr.stack_effect()?;
-        if current_depth < effect.pops {
-            current_depth = effect.pops;
-        }
-        current_depth = current_depth - effect.pops + effect.pushes;
-    }
-    Some(current_depth)
-}
-
-#[cfg(feature = "native-accel")]
-fn fusion_span_has_vm_barrier(instructions: &[Instr], span: &InstrSpan) -> bool {
-    if span.start > span.end || span.end >= instructions.len() {
-        return true;
-    }
-
-    for instr in &instructions[span.start..=span.end] {
-        if matches!(
-            instr,
-            Instr::StoreIndex(_)
-                | Instr::StoreSlice(_, _, _, _)
-                | Instr::StoreSliceExpr { .. }
-                | Instr::StoreIndexCell(_)
-                | Instr::StoreMember(_)
-                | Instr::StoreMemberOrInit(_)
-                | Instr::StoreMemberDynamic
-                | Instr::StoreMemberDynamicOrInit
-        ) {
-            return true;
-        }
-    }
-
-    if fusion_span_live_result_count(instructions, span) != Some(1) {
-        return true;
-    }
-
-    false
-}
-
-#[cfg(feature = "native-accel")]
-struct StackSliceGuard<'a> {
-    stack: *mut Vec<Value>,
-    slice: Option<Vec<Value>>,
-    _marker: std::marker::PhantomData<&'a mut Vec<Value>>,
-}
-
-#[cfg(feature = "native-accel")]
-impl<'a> StackSliceGuard<'a> {
-    fn new(stack: &'a mut Vec<Value>, slice_start: usize) -> Self {
-        let slice = stack.split_off(slice_start);
-        Self {
-            stack,
-            slice: Some(slice),
-            _marker: std::marker::PhantomData,
-        }
-    }
-
-    fn slice(&self) -> &[Value] {
-        self.slice.as_ref().expect("stack slice missing").as_slice()
-    }
-
-    fn commit(mut self) {
-        self.slice = None;
-    }
-}
-
-#[cfg(feature = "native-accel")]
-impl Drop for StackSliceGuard<'_> {
-    fn drop(&mut self) {
-        if let Some(slice) = self.slice.take() {
-            unsafe {
-                (&mut *self.stack).extend(slice);
-            }
-        }
-    }
-}
-
-#[cfg(feature = "native-accel")]
 async fn try_execute_fusion_group(
     plan: &runmat_accelerate::FusionGroupPlan,
     graph: &runmat_accelerate::AccelGraph,
@@ -1030,7 +907,7 @@ async fn try_execute_fusion_group(
         let stack_needed_preview = required_stack_operands;
         let stack_snapshot: Vec<&Value> = stack.iter().rev().take(stack_needed_preview).collect();
         let stack_kinds: Vec<&'static str> =
-            stack_snapshot.iter().rev().map(|v| value_kind(v)).collect();
+            stack_snapshot.iter().rev().map(|v| accel_fusion::value_kind(v)).collect();
         let input_meta: Vec<String> = plan
             .inputs
             .iter()
@@ -1071,7 +948,7 @@ async fn try_execute_fusion_group(
     }
     let available = required_stack_operands;
     let slice_start = stack.len() - available;
-    let stack_guard = StackSliceGuard::new(stack, slice_start);
+    let stack_guard = accel_fusion::StackSliceGuard::new(stack, slice_start);
     let slice = stack_guard.slice().to_vec();
     let mut consumed_inputs: Vec<Option<Value>> = vec![None; plan.inputs.len()];
     let input_positions: HashMap<runmat_accelerate::graph::ValueId, usize> = plan
@@ -1207,7 +1084,7 @@ async fn try_execute_fusion_group(
         let summaries: Vec<String> = inputs
             .iter()
             .enumerate()
-            .map(|(i, v)| summarize_value(i, v))
+            .map(|(i, v)| accel_fusion::summarize_value(i, v))
             .collect();
         log::debug!("fusion inputs runtime: [{}]", summaries.join(", "));
     }
@@ -1714,7 +1591,7 @@ async fn try_execute_fusion_group(
                 .inputs
                 .iter()
                 .enumerate()
-                .map(|(i, v)| summarize_value(i, v))
+                .map(|(i, v)| accel_fusion::summarize_value(i, v))
                 .collect();
             let _plan_inputs: Vec<String> = plan
                 .inputs
@@ -1786,7 +1663,7 @@ async fn try_execute_fusion_group(
                 .inputs
                 .iter()
                 .enumerate()
-                .map(|(i, v)| summarize_value(i, v))
+                .map(|(i, v)| accel_fusion::summarize_value(i, v))
                 .collect();
             let _plan_inputs: Vec<String> = plan
                 .inputs
@@ -1871,17 +1748,12 @@ async fn try_execute_fusion_group(
 
 #[cfg(feature = "native-accel")]
 fn clear_residency(value: &Value) {
-    if let Value::GpuTensor(handle) = value {
-        fusion_residency::clear(handle);
-    }
+    accel_residency::clear_value(value);
 }
 
 #[cfg(feature = "native-accel")]
 fn same_gpu_handle(lhs: &Value, rhs: &Value) -> bool {
-    matches!(
-        (lhs, rhs),
-        (Value::GpuTensor(left), Value::GpuTensor(right)) if left.buffer_id == right.buffer_id
-    )
+    accel_residency::same_gpu_handle(lhs, rhs)
 }
 
 #[cfg(test)]
@@ -2013,8 +1885,8 @@ mod fusion_span_barrier_tests {
         ];
         let span = InstrSpan { start: 0, end: 4 };
 
-        assert_eq!(fusion_span_live_result_count(&instructions, &span), Some(1));
-        assert!(!fusion_span_has_vm_barrier(&instructions, &span));
+        assert_eq!(accel_fusion::fusion_span_live_result_count(&instructions, &span), Some(1));
+        assert!(!accel_fusion::fusion_span_has_vm_barrier(&instructions, &span));
     }
 
     #[test]
@@ -2027,8 +1899,8 @@ mod fusion_span_barrier_tests {
         ];
         let span = InstrSpan { start: 0, end: 3 };
 
-        assert_eq!(fusion_span_live_result_count(&instructions, &span), Some(2));
-        assert!(fusion_span_has_vm_barrier(&instructions, &span));
+        assert_eq!(accel_fusion::fusion_span_live_result_count(&instructions, &span), Some(2));
+        assert!(accel_fusion::fusion_span_has_vm_barrier(&instructions, &span));
     }
 
     #[test]
@@ -2043,7 +1915,7 @@ mod fusion_span_barrier_tests {
         ];
         let span = InstrSpan { start: 0, end: 4 };
 
-        assert!(!fusion_span_has_vm_barrier(&instructions, &span));
+        assert!(!accel_fusion::fusion_span_has_vm_barrier(&instructions, &span));
     }
 
     #[test]
@@ -2060,6 +1932,6 @@ mod fusion_span_barrier_tests {
         ];
         let span = InstrSpan { start: 0, end: 4 };
 
-        assert!(!fusion_span_has_vm_barrier(&instructions, &span));
+        assert!(!accel_fusion::fusion_span_has_vm_barrier(&instructions, &span));
     }
 }
