@@ -3,19 +3,15 @@ use crate::instr::Instr;
 #[cfg(test)]
 use crate::instr::EndExpr;
 #[cfg(feature = "native-accel")]
-use runmat_accelerate::fusion_exec::{
-    execute_centered_gram, execute_elementwise, execute_explained_variance,
-    execute_image_normalize, execute_matmul_epilogue, execute_power_step_normalize,
-    execute_reduction,
-};
+use runmat_accelerate::fusion_exec::execute_reduction;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
     activate_fusion_plan, deactivate_fusion_plan, set_current_pc,
 };
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::{
-    active_group_plan_clone, value_is_all_keyword, FusionKind, ReductionAxes, ShapeInfo,
-    ValueOrigin, VarKind,
+    active_group_plan_clone, value_is_all_keyword, ReductionAxes, ShapeInfo, ValueOrigin,
+    VarKind,
 };
 use runmat_builtins::Value;
 use runmat_runtime::{
@@ -851,14 +847,7 @@ async fn try_execute_fusion_group(
         plan.kernel.supported
     );
     if plan.group.kind.is_elementwise() {
-        match execute_elementwise(request) {
-            Ok(result) => {
-                accel_fusion::write_elementwise_materialized_stores(result.materialized_stores, vars, context);
-                stack_guard.commit();
-                Ok(result.final_value)
-            }
-            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
-        }
+        accel_fusion::execute_fusion_elementwise(request, stack_guard, vars, context)
     } else if plan.group.kind.is_reduction() {
         // Determine reduction axis or 'all'. Prefer the builtin reduction op's dim argument (inputs[1]).
         // MATLAB dim is 1-based: dim=1 reduces rows (axis 0), dim=2 reduces cols (axis 1), 'all' reduces all elements.
@@ -1409,56 +1398,8 @@ async fn try_execute_fusion_group(
             }
             Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
         }
-    } else if plan.group.kind == FusionKind::CenteredGram {
-        match execute_centered_gram(request).await {
-            Ok(result) => {
-                stack_guard.commit();
-                Ok(result)
-            }
-            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
-        }
-    } else if plan.group.kind == FusionKind::PowerStepNormalize {
-        match execute_power_step_normalize(request).await {
-            Ok(result) => {
-                stack_guard.commit();
-                Ok(result)
-            }
-            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
-        }
-    } else if plan.group.kind == FusionKind::ExplainedVariance {
-        log::debug!("explained variance plan inputs {:?}", plan.inputs);
-        match execute_explained_variance(request).await {
-            Ok(result) => {
-                stack_guard.commit();
-                Ok(result)
-            }
-            Err(err) => {
-                log::debug!("explained variance fusion fallback: {}", err);
-                Err(mex("FusionExecutionFailed", &err.to_string()))
-            }
-        }
-    } else if plan.group.kind == FusionKind::MatmulEpilogue {
-        match execute_matmul_epilogue(request).await {
-            Ok(result) => {
-                stack_guard.commit();
-                Ok(result)
-            }
-            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
-        }
-    } else if plan.group.kind == FusionKind::ImageNormalize {
-        match execute_image_normalize(request).await {
-            Ok(result) => {
-                stack_guard.commit();
-                Ok(result)
-            }
-            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
-        }
     } else {
-        // Unknown fusion kind; restore stack and report
-        Err(mex(
-            "FusionUnsupportedKind",
-            "fusion: unsupported fusion kind",
-        ))
+        accel_fusion::execute_fusion_special_kind(plan.group.kind.clone(), &plan.inputs, request, stack_guard).await
     }
 }
 

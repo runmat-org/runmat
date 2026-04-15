@@ -5,9 +5,13 @@ use crate::interpreter::engine as interp_engine;
 use crate::interpreter::errors::mex;
 use crate::runtime::workspace::refresh_workspace_state;
 use runmat_accelerate::fusion::FusionStoreMaterialization;
-use runmat_accelerate::fusion_exec::FusionExecutionRequest;
+use runmat_accelerate::fusion_exec::{
+    execute_centered_gram, execute_elementwise, execute_explained_variance,
+    execute_image_normalize, execute_matmul_epilogue, execute_power_step_normalize,
+    FusionExecutionRequest,
+};
 use runmat_accelerate::InstrSpan;
-use runmat_accelerate::{ValueOrigin, VarKind};
+use runmat_accelerate::{FusionKind, ValueOrigin, VarKind};
 use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
 use std::collections::HashMap;
@@ -423,5 +427,73 @@ pub fn write_elementwise_materialized_stores(
                 }
             }
         }
+    }
+}
+
+pub fn execute_fusion_elementwise(
+    request: FusionExecutionRequest<'_>,
+    stack_guard: StackSliceGuard<'_>,
+    vars: &mut Vec<Value>,
+    context: &mut ExecutionContext,
+) -> Result<Value, RuntimeError> {
+    match execute_elementwise(request) {
+        Ok(result) => {
+            write_elementwise_materialized_stores(result.materialized_stores, vars, context);
+            stack_guard.commit();
+            Ok(result.final_value)
+        }
+        Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
+    }
+}
+
+pub async fn execute_fusion_special_kind(
+    kind: FusionKind,
+    plan_inputs: &[runmat_accelerate::graph::ValueId],
+    request: FusionExecutionRequest<'_>,
+    stack_guard: StackSliceGuard<'_>,
+) -> Result<Value, RuntimeError> {
+    match kind {
+        FusionKind::CenteredGram => match execute_centered_gram(request).await {
+            Ok(result) => {
+                stack_guard.commit();
+                Ok(result)
+            }
+            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
+        },
+        FusionKind::PowerStepNormalize => match execute_power_step_normalize(request).await {
+            Ok(result) => {
+                stack_guard.commit();
+                Ok(result)
+            }
+            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
+        },
+        FusionKind::ExplainedVariance => {
+            log::debug!("explained variance plan inputs {:?}", plan_inputs);
+            match execute_explained_variance(request).await {
+                Ok(result) => {
+                    stack_guard.commit();
+                    Ok(result)
+                }
+                Err(err) => {
+                    log::debug!("explained variance fusion fallback: {}", err);
+                    Err(mex("FusionExecutionFailed", &err.to_string()))
+                }
+            }
+        }
+        FusionKind::MatmulEpilogue => match execute_matmul_epilogue(request).await {
+            Ok(result) => {
+                stack_guard.commit();
+                Ok(result)
+            }
+            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
+        },
+        FusionKind::ImageNormalize => match execute_image_normalize(request).await {
+            Ok(result) => {
+                stack_guard.commit();
+                Ok(result)
+            }
+            Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
+        },
+        _ => Err(mex("FusionUnsupportedKind", "fusion: unsupported fusion kind")),
     }
 }
