@@ -6,7 +6,24 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 
-pub fn value_to_f64(v: &Value) -> Result<f64, ()> {
+#[derive(Debug, Clone, Copy)]
+pub struct ValueToF64Error;
+
+pub type BuiltinEndCallback<'a> = dyn Fn(
+        &'a str,
+        Vec<Value>,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Value>, RuntimeError>> + 'a>>
+    + 'a;
+
+pub type UserEndCallback<'a> = dyn Fn(
+        &'a str,
+        Vec<Value>,
+        &'a HashMap<String, UserFunction>,
+        &'a [Value],
+    ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>>
+    + 'a;
+
+pub fn value_to_f64(v: &Value) -> Result<f64, ValueToF64Error> {
     match v {
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
@@ -16,27 +33,17 @@ pub fn value_to_f64(v: &Value) -> Result<f64, ()> {
         Value::ComplexTensor(ct) if ct.data.len() == 1 && ct.data[0].1.abs() < 1e-12 => {
             Ok(ct.data[0].0)
         }
-        _ => Err(()),
+        _ => Err(ValueToF64Error),
     }
 }
 
 pub fn eval_end_expr_value<'a>(
     expr: &'a EndExpr,
     end_value: f64,
-    vars: &'a Vec<Value>,
+    vars: &'a [Value],
     functions: &'a HashMap<String, UserFunction>,
-    call_builtin: &'a dyn Fn(
-        &'a str,
-        Vec<Value>,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<Option<Value>, RuntimeError>> + 'a>,
-    >,
-    call_user: &'a dyn Fn(
-        &'a str,
-        Vec<Value>,
-        &'a HashMap<String, UserFunction>,
-        &'a Vec<Value>,
-    ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>>,
+    call_builtin: &'a BuiltinEndCallback<'a>,
+    call_user: &'a UserEndCallback<'a>,
 ) -> Pin<Box<dyn Future<Output = Result<f64, RuntimeError>> + 'a>> {
     Box::pin(async move {
         match expr {
@@ -175,20 +182,10 @@ pub fn eval_end_expr_value<'a>(
 pub async fn resolve_range_end_index<'a>(
     dim_len: usize,
     end_expr: &'a EndExpr,
-    vars: &'a Vec<Value>,
+    vars: &'a [Value],
     functions: &'a HashMap<String, UserFunction>,
-    call_builtin: &'a dyn Fn(
-        &'a str,
-        Vec<Value>,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<Option<Value>, RuntimeError>> + 'a>,
-    >,
-    call_user: &'a dyn Fn(
-        &'a str,
-        Vec<Value>,
-        &'a HashMap<String, UserFunction>,
-        &'a Vec<Value>,
-    ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>>,
+    call_builtin: &'a BuiltinEndCallback<'a>,
+    call_user: &'a UserEndCallback<'a>,
 ) -> Result<i64, RuntimeError> {
     let value = eval_end_expr_value(
         end_expr,

@@ -6,7 +6,7 @@ use runmat_runtime::RuntimeError;
 
 pub enum ExceptionHandling {
     Caught,
-    Uncaught(RuntimeError),
+    Uncaught(Box<RuntimeError>),
 }
 
 pub fn parse_exception(err: &RuntimeError) -> MException {
@@ -58,7 +58,7 @@ pub fn redirect_exception_to_catch(
         *pc = catch_pc;
         ExceptionHandling::Caught
     } else {
-        ExceptionHandling::Uncaught(err)
+        ExceptionHandling::Uncaught(Box::new(err))
     }
 }
 

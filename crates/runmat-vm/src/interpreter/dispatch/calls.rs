@@ -37,7 +37,7 @@ pub struct PreparedUserDispatch {
 pub enum BuiltinHandling {
     Completed,
     Caught,
-    Uncaught(RuntimeError),
+    Uncaught(Box<RuntimeError>),
 }
 
 pub enum MethodHandling {
@@ -47,7 +47,34 @@ pub enum MethodHandling {
 pub enum UserCallHandling {
     Completed,
     Caught,
-    Uncaught(RuntimeError),
+    Uncaught(Box<RuntimeError>),
+}
+
+pub struct ExceptionRouteContext<'a> {
+    pub try_stack: &'a mut Vec<(usize, Option<usize>)>,
+    pub vars: &'a mut Vec<Value>,
+    pub last_exception: &'a mut Option<MException>,
+    pub pc: &'a mut usize,
+}
+
+pub struct BuiltinCallContext<'a> {
+    pub stack: &'a mut Vec<Value>,
+    pub name: &'a str,
+    pub arg_count: usize,
+    pub next_instr: Option<&'a Instr>,
+    pub source_id: Option<runmat_hir::SourceId>,
+    pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
+    pub imports: &'a [(Vec<String>, bool)],
+    pub call_counts: &'a [(usize, usize)],
+    pub exception: ExceptionRouteContext<'a>,
+}
+
+pub struct UserCallContext<'a> {
+    pub stack: &'a mut Vec<Value>,
+    pub name: &'a str,
+    pub out_count: usize,
+    pub bytecode_functions: &'a std::collections::HashMap<String, UserFunction>,
+    pub exception: ExceptionRouteContext<'a>,
 }
 
 #[cfg(feature = "native-accel")]
@@ -124,8 +151,8 @@ pub fn prepare_named_user_dispatch(
     vars: &[Value],
 ) -> Result<PreparedUserDispatch, RuntimeError> {
     let func = lookup_user_function(name, functions)?;
-    validate_user_function_arity(name, &func, args.len()).map_err(RuntimeError::from)?;
-    let prepared = prepare_user_call(func, args, vars).map_err(RuntimeError::from)?;
+    validate_user_function_arity(name, &func, args.len())?;
+    let prepared = prepare_user_call(func, args, vars)?;
     Ok(unpack_prepared_user_call(prepared))
 }
 
@@ -439,12 +466,15 @@ pub fn handle_builtin_outcome(
     result: Result<Value, RuntimeError>,
     imported: ImportedBuiltinResolution,
     stack: &mut Vec<Value>,
-    try_stack: &mut Vec<(usize, Option<usize>)>,
-    vars: &mut Vec<Value>,
-    last_exception: &mut Option<MException>,
-    pc: &mut usize,
+    ctx: ExceptionRouteContext<'_>,
     refresh_vars: impl Fn(&[Value]),
 ) -> Result<BuiltinHandling, RuntimeError> {
+    let ExceptionRouteContext {
+        try_stack,
+        vars,
+        last_exception,
+        pc,
+    } = ctx;
     match result {
         Ok(result) => {
             stack.push(result);
@@ -474,21 +504,27 @@ pub fn handle_builtin_outcome(
 }
 
 pub async fn handle_builtin_call(
-    stack: &mut Vec<Value>,
-    name: &str,
-    arg_count: usize,
-    next_instr: Option<&Instr>,
-    source_id: Option<runmat_hir::SourceId>,
-    call_arg_spans: Option<Vec<runmat_hir::Span>>,
-    imports: &[(Vec<String>, bool)],
-    call_counts: &[(usize, usize)],
-    try_stack: &mut Vec<(usize, Option<usize>)>,
-    vars: &mut Vec<Value>,
-    last_exception: &mut Option<MException>,
-    pc: &mut usize,
+    ctx: BuiltinCallContext<'_>,
     refresh_vars: impl Fn(&[Value]),
 ) -> Result<BuiltinHandling, RuntimeError> {
-    debug::trace_call_builtin(*pc, name, arg_count, stack);
+    let BuiltinCallContext {
+        stack,
+        name,
+        arg_count,
+        next_instr,
+        source_id,
+        call_arg_spans,
+        imports,
+        call_counts,
+        exception,
+    } = ctx;
+    let ExceptionRouteContext {
+        try_stack: _,
+        vars: _,
+        last_exception,
+        pc,
+    } = &exception;
+    debug::trace_call_builtin(**pc, name, arg_count, stack);
     if let Some(value) = call_builtins::special_counter_builtin(name, arg_count, call_counts)? {
         stack.push(value);
         return Ok(BuiltinHandling::Completed);
@@ -524,16 +560,7 @@ pub async fn handle_builtin_call(
             return Err(err);
         }
     }
-    handle_builtin_outcome(
-        result,
-        imported,
-        stack,
-        try_stack,
-        vars,
-        last_exception,
-        pc,
-        refresh_vars,
-    )
+    handle_builtin_outcome(result, imported, stack, exception, refresh_vars)
 }
 
 pub async fn handle_method_call(
@@ -548,15 +575,8 @@ pub async fn handle_method_call(
 }
 
 pub async fn handle_prepared_user_function_call<BF, BFFut, IF, IFFut>(
-    stack: &mut Vec<Value>,
-    name: &str,
+    ctx: UserCallContext<'_>,
     args: Vec<Value>,
-    out_count: usize,
-    bytecode_functions: &std::collections::HashMap<String, UserFunction>,
-    vars: &mut Vec<Value>,
-    try_stack: &mut Vec<(usize, Option<usize>)>,
-    last_exception: &mut Option<MException>,
-    pc: &mut usize,
     refresh_vars: impl Fn(&[Value]),
     builtin_fallback: BF,
     interpret_counts: IF,
@@ -567,6 +587,19 @@ where
     IF: FnOnce(crate::bytecode::Bytecode, Vec<Value>, String, usize, usize) -> IFFut,
     IFFut: Future<Output = Result<Vec<Value>, RuntimeError>>,
 {
+    let UserCallContext {
+        stack,
+        name,
+        out_count,
+        bytecode_functions,
+        exception,
+    } = ctx;
+    let ExceptionRouteContext {
+        try_stack,
+        vars,
+        last_exception,
+        pc,
+    } = exception;
     let arg_count = args.len();
     if let Some(result) = builtin_fallback(name.to_string(), args.clone(), out_count).await? {
         stack.push(result);
@@ -621,15 +654,8 @@ where
 }
 
 pub async fn handle_user_function_call<BF, BFFut, IF, IFFut>(
-    stack: &mut Vec<Value>,
-    name: &str,
+    ctx: UserCallContext<'_>,
     arg_count: usize,
-    out_count: usize,
-    bytecode_functions: &std::collections::HashMap<String, UserFunction>,
-    vars: &mut Vec<Value>,
-    try_stack: &mut Vec<(usize, Option<usize>)>,
-    last_exception: &mut Option<MException>,
-    pc: &mut usize,
     refresh_vars: impl Fn(&[Value]),
     builtin_fallback: BF,
     interpret_counts: IF,
@@ -640,22 +666,9 @@ where
     IF: FnOnce(crate::bytecode::Bytecode, Vec<Value>, String, usize, usize) -> IFFut,
     IFFut: Future<Output = Result<Vec<Value>, RuntimeError>>,
 {
-    let args = crate::call::builtins::collect_call_args(stack, arg_count)?;
-    handle_prepared_user_function_call(
-        stack,
-        name,
-        args,
-        out_count,
-        bytecode_functions,
-        vars,
-        try_stack,
-        last_exception,
-        pc,
-        refresh_vars,
-        builtin_fallback,
-        interpret_counts,
-    )
-    .await
+    let args = crate::call::builtins::collect_call_args(ctx.stack, arg_count)?;
+    handle_prepared_user_function_call(ctx, args, refresh_vars, builtin_fallback, interpret_counts)
+        .await
 }
 
 pub async fn handle_builtin_expand_last_call<F, Fut>(

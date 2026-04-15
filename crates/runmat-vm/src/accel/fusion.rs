@@ -130,7 +130,7 @@ pub fn gather_fusion_inputs<'a>(
     plan: &'a runmat_accelerate::FusionGroupPlan,
     graph: &runmat_accelerate::AccelGraph,
     stack: &'a mut Vec<Value>,
-    vars: &mut Vec<Value>,
+    vars: &mut [Value],
     context: &mut ExecutionContext,
 ) -> Result<
     (
@@ -512,7 +512,7 @@ pub fn resolve_reduction_geometry(
     graph: &runmat_accelerate::AccelGraph,
     request: &FusionExecutionRequest<'_>,
     consumed_inputs: &[Option<Value>],
-    vars: &Vec<Value>,
+    vars: &[Value],
     context: &ExecutionContext,
 ) -> Result<ReductionGeometry, RuntimeError> {
     fn detect_reduce_all(
@@ -596,7 +596,7 @@ pub fn resolve_reduction_geometry(
         graph: &runmat_accelerate::AccelGraph,
         request: &FusionExecutionRequest<'_>,
         consumed_inputs: &[Option<Value>],
-        vars: &Vec<Value>,
+        vars: &[Value],
         context: &ExecutionContext,
     ) -> Option<(usize, usize)> {
         let shape_of = |value: &Value| -> Option<(usize, usize)> {
@@ -891,7 +891,7 @@ pub fn execute_fusion_reduction(
     request: FusionExecutionRequest<'_>,
     consumed_inputs: &[Option<Value>],
     stack_guard: StackSliceGuard<'_>,
-    vars: &Vec<Value>,
+    vars: &[Value],
     context: &ExecutionContext,
 ) -> Result<Value, RuntimeError> {
     let geom = resolve_reduction_geometry(plan, graph, &request, consumed_inputs, vars, context)?;

@@ -73,7 +73,7 @@ fn apply_end_offsets_to_numeric<'a, F>(
     numeric: &'a [Value],
     ctx: IndexContext<'a>,
     end_offsets: &'a [(usize, EndExpr)],
-    vars: &'a mut Vec<Value>,
+    vars: &'a mut [Value],
     functions: &'a HashMap<String, UserFunction>,
     call_user: F,
 ) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, RuntimeError>> + 'a>>
@@ -82,7 +82,7 @@ where
             &'a str,
             Vec<Value>,
             &'a HashMap<String, UserFunction>,
-            &'a Vec<Value>,
+            &'a [Value],
         ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>>
         + Copy
         + 'a,
@@ -104,7 +104,7 @@ where
 async fn resolve_range_end_index<'a, F>(
     dim_len: usize,
     end_expr: &'a EndExpr,
-    vars: &'a Vec<Value>,
+    vars: &'a [Value],
     functions: &'a HashMap<String, UserFunction>,
     call_user: F,
 ) -> Result<i64, RuntimeError>
@@ -113,7 +113,7 @@ where
             &'a str,
             Vec<Value>,
             &'a HashMap<String, UserFunction>,
-            &'a Vec<Value>,
+            &'a [Value],
         ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>>
         + Copy
         + 'a,
@@ -121,7 +121,7 @@ where
     fn eval_end_expr_value<'a, F>(
         expr: &'a EndExpr,
         end_value: f64,
-        vars: &'a Vec<Value>,
+        vars: &'a [Value],
         functions: &'a HashMap<String, UserFunction>,
         call_user: F,
     ) -> Pin<Box<dyn Future<Output = Result<f64, RuntimeError>> + 'a>>
@@ -130,7 +130,7 @@ where
                 &'a str,
                 Vec<Value>,
                 &'a HashMap<String, UserFunction>,
-                &'a Vec<Value>,
+                &'a [Value],
             ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>>
             + Copy
             + 'a,
@@ -374,7 +374,7 @@ where
             &'b str,
             Vec<Value>,
             &'b HashMap<String, UserFunction>,
-            &'b Vec<Value>,
+            &'b [Value],
         ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'b>>
         + Copy,
 {
@@ -1504,16 +1504,18 @@ where
             match base {
                 Value::ComplexTensor(t) => {
                     let vm_plan = idx_read_slice::build_expr_gather_plan(
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        range_dims,
-                        &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        &numeric,
-                        &t.shape,
+                        idx_read_slice::ExprGatherSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &t.shape,
+                        },
                         |dim_len, expr| {
                             let expr = expr.clone();
                             let vars_ref = &*vars;
@@ -1539,16 +1541,18 @@ where
                 }
                 Value::Tensor(t) => {
                     let vm_plan = idx_read_slice::build_expr_gather_plan(
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        range_dims,
-                        &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        &numeric,
-                        &t.shape,
+                        idx_read_slice::ExprGatherSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &t.shape,
+                        },
                         |dim_len, expr| {
                             let expr = expr.clone();
                             let vars_ref = &*vars;
@@ -1705,16 +1709,18 @@ where
             match base {
                 Value::ComplexTensor(mut t) => {
                     let vm_plan = idx_read_slice::build_expr_gather_plan(
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        range_dims,
-                        &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        &numeric,
-                        &t.shape,
+                        idx_read_slice::ExprGatherSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &t.shape,
+                        },
                         |dim_len, expr| {
                             let expr = expr.clone();
                             let vars_ref = &*vars;
@@ -1745,16 +1751,18 @@ where
                 }
                 Value::Tensor(t) => {
                     let selectors = idx_write_slice::build_expr_selectors(
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        range_dims,
-                        &range_params,
-                        range_start_exprs,
-                        range_step_exprs,
-                        range_end_exprs,
-                        &numeric,
-                        &t.shape,
+                        idx_write_slice::ExprSelectorSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &t.shape,
+                        },
                         |dim_len, expr| {
                             let expr = expr.clone();
                             let vars_ref = &*vars;

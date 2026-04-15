@@ -658,59 +658,63 @@ enum ExprSel {
     },
 }
 
+pub struct ExprGatherSpec<'a> {
+    pub dims: usize,
+    pub colon_mask: u32,
+    pub end_mask: u32,
+    pub range_dims: &'a [usize],
+    pub range_params: &'a [(f64, f64)],
+    pub range_start_exprs: &'a [Option<EndExpr>],
+    pub range_step_exprs: &'a [Option<EndExpr>],
+    pub range_end_exprs: &'a [EndExpr],
+    pub numeric: &'a [Value],
+    pub shape: &'a [usize],
+}
+
 pub async fn build_expr_gather_plan<ResolveEnd, Fut>(
-    dims: usize,
-    colon_mask: u32,
-    end_mask: u32,
-    range_dims: &[usize],
-    range_params: &[(f64, f64)],
-    range_start_exprs: &[Option<EndExpr>],
-    range_step_exprs: &[Option<EndExpr>],
-    range_end_exprs: &[EndExpr],
-    numeric: &[Value],
-    shape: &[usize],
+    spec: ExprGatherSpec<'_>,
     mut resolve_end: ResolveEnd,
 ) -> Result<SlicePlan, RuntimeError>
 where
     ResolveEnd: FnMut(usize, &EndExpr) -> Fut,
     Fut: Future<Output = Result<i64, RuntimeError>>,
 {
-    let rank = shape.len();
-    let full_shape: Vec<usize> = if dims == 1 {
-        vec![total_len_from_shape(shape)]
-    } else if rank < dims {
-        let mut s = shape.to_vec();
-        s.resize(dims, 1);
+    let rank = spec.shape.len();
+    let full_shape: Vec<usize> = if spec.dims == 1 {
+        vec![total_len_from_shape(spec.shape)]
+    } else if rank < spec.dims {
+        let mut s = spec.shape.to_vec();
+        s.resize(spec.dims, 1);
         s
     } else {
-        shape.to_vec()
+        spec.shape.to_vec()
     };
 
-    let mut selectors: Vec<ExprSel> = Vec::with_capacity(dims);
+    let mut selectors: Vec<ExprSel> = Vec::with_capacity(spec.dims);
     let mut num_iter = 0usize;
     let mut rp_iter = 0usize;
-    for d in 0..dims {
-        let is_colon = (colon_mask & (1u32 << d)) != 0;
-        let is_end = (end_mask & (1u32 << d)) != 0;
+    for d in 0..spec.dims {
+        let is_colon = (spec.colon_mask & (1u32 << d)) != 0;
+        let is_end = (spec.end_mask & (1u32 << d)) != 0;
         if is_colon {
             selectors.push(ExprSel::Colon);
         } else if is_end {
             selectors.push(ExprSel::Scalar(*full_shape.get(d).unwrap_or(&1)));
-        } else if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
-            let (raw_st, raw_sp) = range_params[rp_iter];
+        } else if let Some(pos) = spec.range_dims.iter().position(|&rd| rd == d) {
+            let (raw_st, raw_sp) = spec.range_params[rp_iter];
             let dim_len = *full_shape.get(d).unwrap_or(&1);
-            let st = if let Some(expr) = &range_start_exprs[rp_iter] {
+            let st = if let Some(expr) = &spec.range_start_exprs[rp_iter] {
                 resolve_end(dim_len, expr).await? as f64
             } else {
                 raw_st
             };
-            let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
+            let sp = if let Some(expr) = &spec.range_step_exprs[rp_iter] {
                 resolve_end(dim_len, expr).await? as f64
             } else {
                 raw_sp
             };
             rp_iter += 1;
-            let off = range_end_exprs[pos].clone();
+            let off = spec.range_end_exprs[pos].clone();
             selectors.push(ExprSel::Range {
                 start: st as i64,
                 step: if sp >= 0.0 {
@@ -721,7 +725,7 @@ where
                 end_off: off,
             });
         } else {
-            let v = numeric.get(num_iter).ok_or_else(|| {
+            let v = spec.numeric.get(num_iter).ok_or_else(|| {
                 crate::interpreter::errors::mex("MissingNumericIndex", "missing numeric index")
             })?;
             num_iter += 1;
@@ -772,10 +776,10 @@ where
         }
     }
 
-    let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
-    let mut selection_lengths: Vec<usize> = Vec::with_capacity(dims);
-    let mut scalar_mask: Vec<bool> = Vec::with_capacity(dims);
-    for (d, sel) in selectors.iter().enumerate().take(dims) {
+    let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(spec.dims);
+    let mut selection_lengths: Vec<usize> = Vec::with_capacity(spec.dims);
+    let mut scalar_mask: Vec<bool> = Vec::with_capacity(spec.dims);
+    for (d, sel) in selectors.iter().enumerate().take(spec.dims) {
         let dim_len = full_shape[d] as i64;
         let idxs: Vec<usize> = match sel {
             ExprSel::Colon => (1..=full_shape[d]).collect(),
@@ -827,15 +831,15 @@ where
         scalar_mask.push(matches!(sel, ExprSel::Scalar(_)));
     }
 
-    let mut strides: Vec<usize> = vec![0; dims];
+    let mut strides: Vec<usize> = vec![0; spec.dims];
     let mut acc = 1usize;
-    for (d, stride) in strides.iter_mut().enumerate().take(dims) {
+    for (d, stride) in strides.iter_mut().enumerate().take(spec.dims) {
         *stride = acc;
         acc *= full_shape[d];
     }
     let total_out: usize = per_dim_indices.iter().map(|v| v.len()).product();
     if total_out == 0 {
-        let output_shape = if dims == 1 {
+        let output_shape = if spec.dims == 1 {
             vec![0, 1]
         } else {
             let mut dims_out: Vec<(usize, usize, bool)> = selection_lengths
@@ -868,21 +872,21 @@ where
             indices: Vec::new(),
             output_shape,
             selection_lengths,
-            dims,
+            dims: spec.dims,
         });
     }
 
     let mut indices: Vec<u32> = Vec::with_capacity(total_out);
-    let mut idx = vec![0usize; dims];
+    let mut idx = vec![0usize; spec.dims];
     loop {
         let mut lin = 0usize;
-        for d in 0..dims {
+        for d in 0..spec.dims {
             let i0 = per_dim_indices[d][idx[d]] - 1;
             lin += i0 * strides[d];
         }
         indices.push(lin as u32);
         let mut d = 0usize;
-        while d < dims {
+        while d < spec.dims {
             idx[d] += 1;
             if idx[d] < per_dim_indices[d].len() {
                 break;
@@ -890,12 +894,12 @@ where
             idx[d] = 0;
             d += 1;
         }
-        if d == dims {
+        if d == spec.dims {
             break;
         }
     }
 
-    let output_shape = if dims == 1 {
+    let output_shape = if spec.dims == 1 {
         if total_out <= 1 {
             vec![1, 1]
         } else {
@@ -932,6 +936,6 @@ where
         indices,
         output_shape,
         selection_lengths,
-        dims,
+        dims: spec.dims,
     })
 }

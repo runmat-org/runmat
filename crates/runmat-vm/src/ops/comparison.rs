@@ -8,6 +8,14 @@ fn rel_binary_use_builtin(a: &Value, b: &Value) -> bool {
     !matches!(a, Value::Num(_) | Value::Int(_)) || !matches!(b, Value::Num(_) | Value::Int(_))
 }
 
+pub struct RelationInvertedSpec {
+    pub name: &'static str,
+    pub inverse_name: &'static str,
+    pub right_name: &'static str,
+    pub right_inverse_name: &'static str,
+    pub predicate: fn(f64, f64) -> bool,
+}
+
 pub async fn relation<CM, CMFut, B, BFut>(
     stack: &mut Vec<Value>,
     name: &'static str,
@@ -62,11 +70,7 @@ where
 
 pub async fn relation_inverted<CM, CMFut, B, BFut, LT, LTFut>(
     stack: &mut Vec<Value>,
-    name: &'static str,
-    inverse_name: &'static str,
-    right_name: &'static str,
-    right_inverse_name: &'static str,
-    predicate: fn(f64, f64) -> bool,
+    spec: RelationInvertedSpec,
     mut call_method: CM,
     mut call_builtin: B,
     mut logical_truth: LT,
@@ -82,31 +86,10 @@ where
     let (a, b) = pop2(stack)?;
     let result = match (&a, &b) {
         (Value::Object(obj), _) => {
-            match call_method(Value::Object(obj.clone()), name, b.clone()).await {
+            match call_method(Value::Object(obj.clone()), spec.name, b.clone()).await {
                 Ok(v) => v,
                 Err(_) => {
-                    match call_method(Value::Object(obj.clone()), inverse_name, b.clone()).await {
-                        Ok(v) => Value::Num(
-                            if !logical_truth(v, "comparison result".to_string()).await? {
-                                1.0
-                            } else {
-                                0.0
-                            },
-                        ),
-                        Err(_) => Value::Num(if predicate((&a).try_into()?, (&b).try_into()?) {
-                            1.0
-                        } else {
-                            0.0
-                        }),
-                    }
-                }
-            }
-        }
-        (_, Value::Object(obj)) => {
-            match call_method(Value::Object(obj.clone()), right_name, a.clone()).await {
-                Ok(v) => v,
-                Err(_) => {
-                    match call_method(Value::Object(obj.clone()), right_inverse_name, a.clone())
+                    match call_method(Value::Object(obj.clone()), spec.inverse_name, b.clone())
                         .await
                     {
                         Ok(v) => Value::Num(
@@ -116,20 +99,51 @@ where
                                 0.0
                             },
                         ),
-                        Err(_) => Value::Num(if predicate((&a).try_into()?, (&b).try_into()?) {
-                            1.0
-                        } else {
-                            0.0
-                        }),
+                        Err(_) => {
+                            Value::Num(if (spec.predicate)((&a).try_into()?, (&b).try_into()?) {
+                                1.0
+                            } else {
+                                0.0
+                            })
+                        }
+                    }
+                }
+            }
+        }
+        (_, Value::Object(obj)) => {
+            match call_method(Value::Object(obj.clone()), spec.right_name, a.clone()).await {
+                Ok(v) => v,
+                Err(_) => {
+                    match call_method(
+                        Value::Object(obj.clone()),
+                        spec.right_inverse_name,
+                        a.clone(),
+                    )
+                    .await
+                    {
+                        Ok(v) => Value::Num(
+                            if !logical_truth(v, "comparison result".to_string()).await? {
+                                1.0
+                            } else {
+                                0.0
+                            },
+                        ),
+                        Err(_) => {
+                            Value::Num(if (spec.predicate)((&a).try_into()?, (&b).try_into()?) {
+                                1.0
+                            } else {
+                                0.0
+                            })
+                        }
                     }
                 }
             }
         }
         _ => {
             if rel_binary_use_builtin(&a, &b) {
-                call_builtin(name, a.clone(), b.clone()).await?
+                call_builtin(spec.name, a.clone(), b.clone()).await?
             } else {
-                Value::Num(if predicate((&a).try_into()?, (&b).try_into()?) {
+                Value::Num(if (spec.predicate)((&a).try_into()?, (&b).try_into()?) {
                     1.0
                 } else {
                     0.0

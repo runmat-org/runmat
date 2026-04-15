@@ -78,6 +78,13 @@ impl InterpreterTiming {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+impl Default for InterpreterTiming {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 impl Drop for InterpreterTiming {
     fn drop(&mut self) {
         self.flush_host_span("drop", None);
@@ -96,6 +103,13 @@ impl InterpreterTiming {
     pub fn note_host_instr(&mut self, _pc: usize) {}
 
     pub fn flush_host_span(&mut self, _reason: &str, _detail: Option<&str>) {}
+}
+
+#[cfg(target_arch = "wasm32")]
+impl Default for InterpreterTiming {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[cfg(target_arch = "wasm32")]

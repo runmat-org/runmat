@@ -22,6 +22,8 @@ use runmat_runtime::{
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Once;
 use tracing::{debug, info_span};
@@ -42,6 +44,44 @@ impl Drop for FusionPlanGuard {
 }
 
 type VmResult<T> = Result<T, RuntimeError>;
+
+fn invoke_user_for_end_expr_adapter<'a>(
+    name: &'a str,
+    argv: Vec<Value>,
+    functions: &'a HashMap<String, UserFunction>,
+    vars_ref: &'a [Value],
+) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>> {
+    Box::pin(async move {
+        let mut local_vars = vars_ref.to_owned();
+        invoke_user_function_value(name, &argv, functions, &mut local_vars).await
+    })
+}
+
+fn builtin_fallback_user_call_adapter(
+    name: String,
+    args: Vec<Value>,
+    out_count: usize,
+) -> Pin<Box<dyn Future<Output = Result<Option<Value>, RuntimeError>>>> {
+    Box::pin(async move {
+        if out_count == 1 {
+            call_user::try_builtin_fallback_single(&name, &args).await
+        } else {
+            call_user::try_builtin_fallback_multi(&name, &args, out_count).await
+        }
+    })
+}
+
+fn interpret_counts_adapter(
+    bc: Bytecode,
+    vars: Vec<Value>,
+    name: String,
+    out_count: usize,
+    in_count: usize,
+) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, RuntimeError>>>> {
+    Box::pin(
+        async move { interpret_function_with_counts(&bc, vars, &name, out_count, in_count).await },
+    )
+}
 
 runmat_thread_local! {
     static CALL_COUNTS: RefCell<Vec<(usize, usize)>> = const { RefCell::new(Vec::new()) };
@@ -301,78 +341,74 @@ async fn run_interpreter_inner(
             Instr::StoreVar(_) => Some(global_aliases.clone()),
             _ => None,
         };
-        if let Some(decision) = interp_dispatch::dispatch_instruction(
-            &bytecode.instructions[pc],
-            &mut stack,
-            &mut vars,
-            &bytecode.var_names,
-            &mut context,
-            &bytecode.functions,
-            &mut try_stack,
-            &mut last_exception,
-            &mut imports,
-            bytecode.source_id,
-            bytecode.call_arg_spans.get(pc).cloned().flatten(),
-            &call_counts_snapshot,
-            &current_function_name,
-            &mut global_aliases,
-            &mut persistent_aliases,
-            &mut pc,
-            |value| {
-                #[cfg(feature = "native-accel")]
-                clear_residency(value);
-            },
-            |name, argv, functions, vars_ref| {
-                Box::pin(async move {
-                    let mut local_vars = vars_ref.clone();
-                    invoke_user_function_value(name, &argv, functions, &mut local_vars).await
-                })
-            },
-            |name, args, out_count| {
-                Box::pin(async move {
-                    if out_count == 1 {
-                        call_user::try_builtin_fallback_single(&name, &args).await
-                    } else {
-                        call_user::try_builtin_fallback_multi(&name, &args, out_count).await
-                    }
-                })
-            },
-            |bc, vars, name, out_count, in_count| {
-                Box::pin(async move {
-                    interpret_function_with_counts(&bc, vars, &name, out_count, in_count).await
-                })
-            },
-            |current, incoming| {
-                #[cfg(feature = "native-accel")]
-                if !same_gpu_handle(current, incoming) {
-                    clear_residency(current);
-                }
-            },
-            |stored_index, stored_value| {
-                if let Some(ref aliases) = store_var_global_aliases {
-                    runtime_globals::update_global_store(stored_index, stored_value, aliases);
-                }
-            },
-            |current, incoming| {
-                #[cfg(feature = "native-accel")]
-                if !same_gpu_handle(current, incoming) {
-                    clear_residency(current);
-                }
-            },
-            |current, incoming| {
-                #[cfg(feature = "native-accel")]
-                if !same_gpu_handle(current, incoming) {
-                    clear_residency(current);
-                }
-            },
-            |func_name, stored_offset, stored_value| {
+        let mut clear_value_residency = |value: &Value| {
+            #[cfg(feature = "native-accel")]
+            clear_residency(value);
+        };
+        let mut store_var_before_overwrite = |current: &Value, incoming: &Value| {
+            #[cfg(feature = "native-accel")]
+            if !same_gpu_handle(current, incoming) {
+                clear_residency(current);
+            }
+        };
+        let mut store_var_after_store = |stored_index: usize, stored_value: &Value| {
+            if let Some(ref aliases) = store_var_global_aliases {
+                runtime_globals::update_global_store(stored_index, stored_value, aliases);
+            }
+        };
+        let mut store_local_before_local_overwrite = |current: &Value, incoming: &Value| {
+            #[cfg(feature = "native-accel")]
+            if !same_gpu_handle(current, incoming) {
+                clear_residency(current);
+            }
+        };
+        let mut store_local_before_var_overwrite = |current: &Value, incoming: &Value| {
+            #[cfg(feature = "native-accel")]
+            if !same_gpu_handle(current, incoming) {
+                clear_residency(current);
+            }
+        };
+        let mut store_local_after_fallback_store =
+            |func_name: &str, stored_offset: usize, stored_value: &Value| {
                 runtime_globals::update_persistent_local_store(
                     func_name,
                     stored_offset,
                     stored_value,
                 );
+            };
+        if let Some(decision) = interp_dispatch::dispatch_instruction(
+            interp_dispatch::DispatchMeta {
+                instr: &bytecode.instructions[pc],
+                var_names: &bytecode.var_names,
+                bytecode_functions: &bytecode.functions,
+                source_id: bytecode.source_id,
+                call_arg_spans: bytecode.call_arg_spans.get(pc).cloned().flatten(),
+                call_counts: &call_counts_snapshot,
+                current_function_name: &current_function_name,
+                next_instr,
             },
-            next_instr,
+            interp_dispatch::DispatchState {
+                stack: &mut stack,
+                vars: &mut vars,
+                context: &mut context,
+                try_stack: &mut try_stack,
+                last_exception: &mut last_exception,
+                imports: &mut imports,
+                global_aliases: &mut global_aliases,
+                persistent_aliases: &mut persistent_aliases,
+                pc: &mut pc,
+            },
+            interp_dispatch::DispatchHooks {
+                clear_value_residency: &mut clear_value_residency,
+                invoke_user_for_end_expr: &invoke_user_for_end_expr_adapter,
+                builtin_fallback_user_call: &builtin_fallback_user_call_adapter,
+                interpret_function_counts: &interpret_counts_adapter,
+                store_var_before_overwrite: &mut store_var_before_overwrite,
+                store_var_after_store: &mut store_var_after_store,
+                store_local_before_local_overwrite: &mut store_local_before_local_overwrite,
+                store_local_before_var_overwrite: &mut store_local_before_var_overwrite,
+                store_local_after_fallback_store: &mut store_local_after_fallback_store,
+            },
         )
         .await?
         {

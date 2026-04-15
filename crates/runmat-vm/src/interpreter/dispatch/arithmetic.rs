@@ -258,11 +258,13 @@ pub async fn dispatch_arithmetic(
         crate::bytecode::Instr::LessEqual => {
             comparison_ops::relation_inverted(
                 stack,
-                "le",
-                "gt",
-                "ge",
-                "lt",
-                |aa, bb| aa <= bb,
+                comparison_ops::RelationInvertedSpec {
+                    name: "le",
+                    inverse_name: "gt",
+                    right_name: "ge",
+                    right_inverse_name: "lt",
+                    predicate: |aa, bb| aa <= bb,
+                },
                 |obj, method, arg| async move {
                     let args = vec![obj, Value::String(method.to_string()), arg];
                     runmat_runtime::call_builtin_async("call_method", &args).await
@@ -306,11 +308,13 @@ pub async fn dispatch_arithmetic(
         crate::bytecode::Instr::GreaterEqual => {
             comparison_ops::relation_inverted(
                 stack,
-                "ge",
-                "lt",
-                "le",
-                "gt",
-                |aa, bb| aa >= bb,
+                comparison_ops::RelationInvertedSpec {
+                    name: "ge",
+                    inverse_name: "lt",
+                    right_name: "le",
+                    right_inverse_name: "gt",
+                    predicate: |aa, bb| aa >= bb,
+                },
                 |obj, method, arg| async move {
                     let args = vec![obj, Value::String(method.to_string()), arg];
                     runmat_runtime::call_builtin_async("call_method", &args).await

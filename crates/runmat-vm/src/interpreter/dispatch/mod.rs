@@ -14,6 +14,8 @@ use runmat_builtins::Value;
 use runmat_runtime::dispatcher::gather_if_needed_async;
 use runmat_runtime::RuntimeError;
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 
 pub use arrays::{
     create_matrix, create_matrix_dynamic, create_range, pack_to_col, pack_to_row, unpack,
@@ -43,6 +45,65 @@ pub enum DispatchHandled {
     Generic(DispatchDecision),
     ReturnValue(DispatchDecision),
     Return(DispatchDecision),
+}
+
+pub type InvokeUserForEndExpr<'a> = dyn for<'b> Fn(
+        &'b str,
+        Vec<Value>,
+        &'b HashMap<String, crate::bytecode::UserFunction>,
+        &'b [Value],
+    ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'b>>
+    + 'a;
+
+pub type BuiltinFallbackUserCall<'a> = dyn Fn(
+        String,
+        Vec<Value>,
+        usize,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Value>, RuntimeError>>>>
+    + 'a;
+
+pub type InterpretFunctionCounts<'a> = dyn Fn(
+        crate::bytecode::Bytecode,
+        Vec<Value>,
+        String,
+        usize,
+        usize,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Value>, RuntimeError>>>>
+    + 'a;
+
+pub struct DispatchMeta<'a> {
+    pub instr: &'a Instr,
+    pub var_names: &'a HashMap<usize, String>,
+    pub bytecode_functions: &'a HashMap<String, crate::bytecode::UserFunction>,
+    pub source_id: Option<runmat_hir::SourceId>,
+    pub call_arg_spans: Option<Vec<runmat_hir::Span>>,
+    pub call_counts: &'a [(usize, usize)],
+    pub current_function_name: &'a str,
+    pub next_instr: Option<&'a Instr>,
+}
+
+pub struct DispatchState<'a> {
+    pub stack: &'a mut Vec<Value>,
+    pub vars: &'a mut Vec<Value>,
+    pub context: &'a mut crate::bytecode::ExecutionContext,
+    pub try_stack: &'a mut Vec<(usize, Option<usize>)>,
+    pub last_exception: &'a mut Option<runmat_builtins::MException>,
+    pub imports: &'a mut Vec<(Vec<String>, bool)>,
+    pub global_aliases: &'a mut HashMap<usize, String>,
+    pub persistent_aliases: &'a mut HashMap<usize, String>,
+    pub pc: &'a mut usize,
+}
+
+pub struct DispatchHooks<'a> {
+    pub clear_value_residency: &'a mut dyn FnMut(&Value),
+    pub invoke_user_for_end_expr: &'a InvokeUserForEndExpr<'a>,
+    pub builtin_fallback_user_call: &'a BuiltinFallbackUserCall<'a>,
+    pub interpret_function_counts: &'a InterpretFunctionCounts<'a>,
+    pub store_var_before_overwrite: &'a mut dyn FnMut(&Value, &Value),
+    pub store_var_after_store: &'a mut dyn FnMut(usize, &Value),
+    pub store_local_before_local_overwrite: &'a mut dyn FnMut(&Value, &Value),
+    pub store_local_before_var_overwrite: &'a mut dyn FnMut(&Value, &Value),
+    pub store_local_after_fallback_store: &'a mut dyn FnMut(&str, usize, &Value),
 }
 
 pub async fn logical_truth_from_value(value: &Value, label: &str) -> Result<bool, RuntimeError> {
@@ -80,54 +141,42 @@ pub async fn logical_truth_from_value(value: &Value, label: &str) -> Result<bool
 }
 
 pub async fn dispatch_instruction(
-    instr: &Instr,
-    stack: &mut Vec<Value>,
-    vars: &mut Vec<Value>,
-    var_names: &HashMap<usize, String>,
-    context: &mut crate::bytecode::ExecutionContext,
-    bytecode_functions: &HashMap<String, crate::bytecode::UserFunction>,
-    try_stack: &mut Vec<(usize, Option<usize>)>,
-    last_exception: &mut Option<runmat_builtins::MException>,
-    imports: &mut Vec<(Vec<String>, bool)>,
-    source_id: Option<runmat_hir::SourceId>,
-    call_arg_spans: Option<Vec<runmat_hir::Span>>,
-    call_counts: &[(usize, usize)],
-    current_function_name: &str,
-    global_aliases: &mut HashMap<usize, String>,
-    persistent_aliases: &mut HashMap<usize, String>,
-    pc: &mut usize,
-    mut clear_value_residency: impl FnMut(&Value),
-    invoke_user_for_end_expr: impl for<'a> Fn(
-            &'a str,
-            Vec<Value>,
-            &'a HashMap<String, crate::bytecode::UserFunction>,
-            &'a Vec<Value>,
-        ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<Value, RuntimeError>> + 'a>,
-        > + Copy,
-    builtin_fallback_user_call: impl Fn(
-            String,
-            Vec<Value>,
-            usize,
-        ) -> std::pin::Pin<
-            Box<dyn std::future::Future<Output = Result<Option<Value>, RuntimeError>>>,
-        > + Copy,
-    interpret_function_counts: impl Fn(
-            crate::bytecode::Bytecode,
-            Vec<Value>,
-            String,
-            usize,
-            usize,
-        )
-            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Vec<Value>, RuntimeError>>>>
-        + Copy,
-    mut store_var_before_overwrite: impl FnMut(&Value, &Value),
-    mut store_var_after_store: impl FnMut(usize, &Value),
-    mut store_local_before_local_overwrite: impl FnMut(&Value, &Value),
-    mut store_local_before_var_overwrite: impl FnMut(&Value, &Value),
-    mut store_local_after_fallback_store: impl FnMut(&str, usize, &Value),
-    next_instr: Option<&Instr>,
+    meta: DispatchMeta<'_>,
+    state: DispatchState<'_>,
+    hooks: DispatchHooks<'_>,
 ) -> Result<Option<DispatchHandled>, RuntimeError> {
+    let DispatchMeta {
+        instr,
+        var_names,
+        bytecode_functions,
+        source_id,
+        call_arg_spans,
+        call_counts,
+        current_function_name,
+        next_instr,
+    } = meta;
+    let DispatchState {
+        stack,
+        vars,
+        context,
+        try_stack,
+        last_exception,
+        imports,
+        global_aliases,
+        persistent_aliases,
+        pc,
+    } = state;
+    let DispatchHooks {
+        clear_value_residency,
+        invoke_user_for_end_expr,
+        builtin_fallback_user_call,
+        interpret_function_counts,
+        store_var_before_overwrite,
+        store_var_after_store,
+        store_local_before_local_overwrite,
+        store_local_before_var_overwrite,
+        store_local_after_fallback_store,
+    } = hooks;
     match instr {
         _ if indexing::dispatch_indexing(
             instr,
@@ -135,7 +184,7 @@ pub async fn dispatch_instruction(
             vars,
             &context.functions,
             *pc,
-            &mut clear_value_residency,
+            &mut *clear_value_residency,
             &invoke_user_for_end_expr,
         )
         .await? =>
@@ -220,8 +269,8 @@ pub async fn dispatch_instruction(
                 vars,
                 *index,
                 var_names,
-                &mut store_var_before_overwrite,
-                &mut store_var_after_store,
+                store_var_before_overwrite,
+                store_var_after_store,
             )?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
@@ -233,9 +282,9 @@ pub async fn dispatch_instruction(
                 context,
                 vars,
                 *offset,
-                &mut store_local_before_local_overwrite,
-                &mut store_local_before_var_overwrite,
-                &mut store_local_after_fallback_store,
+                store_local_before_local_overwrite,
+                store_local_before_var_overwrite,
+                store_local_after_fallback_store,
             )?;
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
@@ -411,18 +460,22 @@ pub async fn dispatch_instruction(
         }
         Instr::CallBuiltin(name, arg_count) => {
             match handle_builtin_call(
-                stack,
-                name,
-                *arg_count,
-                next_instr,
-                source_id,
-                call_arg_spans,
-                imports,
-                call_counts,
-                try_stack,
-                vars,
-                last_exception,
-                pc,
+                calls::BuiltinCallContext {
+                    stack,
+                    name,
+                    arg_count: *arg_count,
+                    next_instr,
+                    source_id,
+                    call_arg_spans,
+                    imports,
+                    call_counts,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
                 refresh_workspace_state,
             )
             .await?
@@ -433,7 +486,7 @@ pub async fn dispatch_instruction(
                         DispatchDecision::ContinueLoop,
                     )))
                 }
-                BuiltinHandling::Uncaught(err) => return Err(err),
+                BuiltinHandling::Uncaught(err) => return Err(*err),
             }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
@@ -495,17 +548,21 @@ pub async fn dispatch_instruction(
         }
         Instr::CallFunction(name, arg_count) => {
             match handle_user_function_call(
-                stack,
-                name,
+                calls::UserCallContext {
+                    stack,
+                    name,
+                    out_count: 1,
+                    bytecode_functions,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
                 *arg_count,
-                1,
-                bytecode_functions,
-                vars,
-                try_stack,
-                last_exception,
-                pc,
                 refresh_workspace_state,
-                |name, args, out_count| builtin_fallback_user_call(name, args, out_count),
+                builtin_fallback_user_call,
                 |bc, vars, name, out_count, in_count| {
                     interpret_function_counts(bc, vars, name, out_count, in_count)
                 },
@@ -518,7 +575,7 @@ pub async fn dispatch_instruction(
                         DispatchDecision::ContinueLoop,
                     )))
                 }
-                UserCallHandling::Uncaught(err) => return Err(err),
+                UserCallHandling::Uncaught(err) => return Err(*err),
             }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
@@ -526,17 +583,21 @@ pub async fn dispatch_instruction(
         }
         Instr::CallFunctionMulti(name, arg_count, out_count) => {
             match handle_user_function_call(
-                stack,
-                name,
+                calls::UserCallContext {
+                    stack,
+                    name,
+                    out_count: *out_count,
+                    bytecode_functions,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
                 *arg_count,
-                *out_count,
-                bytecode_functions,
-                vars,
-                try_stack,
-                last_exception,
-                pc,
                 refresh_workspace_state,
-                |name, args, out_count| builtin_fallback_user_call(name, args, out_count),
+                builtin_fallback_user_call,
                 |bc, vars, name, out_count, in_count| {
                     interpret_function_counts(bc, vars, name, out_count, in_count)
                 },
@@ -549,7 +610,7 @@ pub async fn dispatch_instruction(
                         DispatchDecision::ContinueLoop,
                     )))
                 }
-                UserCallHandling::Uncaught(err) => return Err(err),
+                UserCallHandling::Uncaught(err) => return Err(*err),
             }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
@@ -662,17 +723,21 @@ pub async fn dispatch_instruction(
         Instr::CallFunctionExpandMulti(name, specs) => {
             let args = build_user_function_expand_multi_args(stack, specs).await?;
             match handle_prepared_user_function_call(
-                stack,
-                name,
+                calls::UserCallContext {
+                    stack,
+                    name,
+                    out_count: 1,
+                    bytecode_functions,
+                    exception: calls::ExceptionRouteContext {
+                        try_stack,
+                        vars,
+                        last_exception,
+                        pc,
+                    },
+                },
                 args,
-                1,
-                bytecode_functions,
-                vars,
-                try_stack,
-                last_exception,
-                pc,
                 refresh_workspace_state,
-                |name, args, out_count| builtin_fallback_user_call(name, args, out_count),
+                builtin_fallback_user_call,
                 |bc, vars, name, out_count, in_count| {
                     interpret_function_counts(bc, vars, name, out_count, in_count)
                 },
@@ -685,7 +750,7 @@ pub async fn dispatch_instruction(
                         DispatchDecision::ContinueLoop,
                     )))
                 }
-                UserCallHandling::Uncaught(err) => return Err(err),
+                UserCallHandling::Uncaught(err) => return Err(*err),
             }
             Ok(Some(DispatchHandled::Generic(
                 DispatchDecision::FallThrough,
