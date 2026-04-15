@@ -7,17 +7,18 @@ pub mod compiler;
 pub mod functions;
 pub mod gc_roots;
 pub mod instr;
-pub mod vm;
 
 pub use bytecode::compile;
 pub use runmat_vm::CompileError;
 pub use functions::{Bytecode, ExecutionContext, UserFunction};
 pub use instr::Instr;
-pub use vm::{
-    interpret, interpret_with_vars, push_pending_workspace, set_call_stack_limit,
-    set_error_namespace, take_updated_workspace_state, InterpreterOutcome, InterpreterState,
-    PendingWorkspaceGuard, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
+pub use runmat_vm::{interpret, interpret_function, interpret_function_with_counts, interpret_with_vars};
+pub use runmat_vm::interpreter::api::{
+    push_pending_workspace, set_call_stack_limit, set_error_namespace,
+    take_updated_workspace_state, DEFAULT_CALLSTACK_LIMIT, DEFAULT_ERROR_NAMESPACE,
 };
+pub use runmat_vm::interpreter::state::{InterpreterOutcome, InterpreterState};
+pub use runmat_vm::runtime::workspace::PendingWorkspaceGuard;
 
 use runmat_builtins::Value;
 use runmat_hir::HirProgram;
