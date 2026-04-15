@@ -18,11 +18,13 @@ use runmat_accelerate_api::{
 use runmat_builtins::{Tensor, Value};
 use runmat_gc::gc_test_context;
 use runmat_hir::{lower as lower_hir, HirProgram, LoweringContext, SemanticError};
-use runmat_vm::{compile, interpret as interpret_async, interpret_function as interpret_function_async, Instr};
 use runmat_parser::parse;
 use runmat_runtime::builtins::image::filters::fspecial::spec_from_request as test_fspecial_spec_from_request;
 use runmat_runtime::builtins::math::linalg::ops::mrdivide_host_real_for_provider;
 use runmat_runtime::{gather_if_needed, gather_if_needed_async, RuntimeError};
+use runmat_vm::{
+    compile, interpret as interpret_async, interpret_function as interpret_function_async, Instr,
+};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 

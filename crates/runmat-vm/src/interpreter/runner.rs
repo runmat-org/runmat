@@ -27,7 +27,9 @@ use std::sync::Once;
 use tracing::{debug, info_span};
 
 #[cfg(feature = "native-accel")]
-use runmat_accelerate::{activate_fusion_plan, active_group_plan_clone, deactivate_fusion_plan, set_current_pc};
+use runmat_accelerate::{
+    activate_fusion_plan, active_group_plan_clone, deactivate_fusion_plan, set_current_pc,
+};
 
 #[cfg(feature = "native-accel")]
 struct FusionPlanGuard;
@@ -129,7 +131,11 @@ async fn invoke_user_function_value(
     let func_bytecode = crate::compile(&func_program, functions)?;
     let func_result_vars =
         interpret_function_with_counts(&func_bytecode, func_vars, name, 1, arg_count).await?;
-    Ok(call_shared::first_output_value(&func, &var_map, &func_result_vars))
+    Ok(call_shared::first_output_value(
+        &func,
+        &var_map,
+        &func_result_vars,
+    ))
 }
 
 pub async fn interpret_with_vars(
@@ -190,7 +196,7 @@ async fn run_interpreter_inner(
         current_function_name,
         call_counts,
         #[cfg(feature = "native-accel")]
-        fusion_plan: _,
+            fusion_plan: _,
         bytecode,
     } = state;
     let functions = Arc::new(context.functions.clone());
@@ -238,12 +244,19 @@ async fn run_interpreter_inner(
                         &plan,
                         &bytecode,
                         pc,
-                        accel_fusion::fusion_span_has_vm_barrier(&bytecode.instructions, &plan.group.span),
-                        accel_fusion::fusion_span_live_result_count(&bytecode.instructions, &plan.group.span),
+                        accel_fusion::fusion_span_has_vm_barrier(
+                            &bytecode.instructions,
+                            &plan.group.span,
+                        ),
+                        accel_fusion::fusion_span_live_result_count(
+                            &bytecode.instructions,
+                            &plan.group.span,
+                        ),
                     );
                 }
                 let span = plan.group.span.clone();
-                let has_barrier = accel_fusion::fusion_span_has_vm_barrier(&bytecode.instructions, &span);
+                let has_barrier =
+                    accel_fusion::fusion_span_has_vm_barrier(&bytecode.instructions, &span);
                 let _fusion_span = info_span!(
                     "fusion.execute",
                     span_start = plan.group.span.start,
@@ -364,7 +377,9 @@ async fn run_interpreter_inner(
         .await?
         {
             match decision {
-                interp_dispatch::DispatchHandled::Generic(DispatchDecision::ContinueLoop) => continue,
+                interp_dispatch::DispatchHandled::Generic(DispatchDecision::ContinueLoop) => {
+                    continue
+                }
                 interp_dispatch::DispatchHandled::Generic(DispatchDecision::FallThrough) => {
                     pc += 1;
                     continue;
@@ -374,7 +389,9 @@ async fn run_interpreter_inner(
                     break;
                 }
                 interp_dispatch::DispatchHandled::ReturnValue(DispatchDecision::ContinueLoop)
-                | interp_dispatch::DispatchHandled::Return(DispatchDecision::ContinueLoop) => continue,
+                | interp_dispatch::DispatchHandled::Return(DispatchDecision::ContinueLoop) => {
+                    continue
+                }
                 interp_dispatch::DispatchHandled::ReturnValue(DispatchDecision::Return) => {
                     interpreter_timing.flush_host_span("return_value", None);
                     break;
@@ -493,13 +510,14 @@ async fn run_interpreter_inner(
                 let state_value = stack
                     .pop()
                     .ok_or(mex("StackUnderflow", "stack underflow"))?;
-                let evolved = crate::accel::idioms::stochastic_evolution::execute_stochastic_evolution(
-                    state_value,
-                    drift_value,
-                    scale_value,
-                    steps_value,
-                )
-                .await?;
+                let evolved =
+                    crate::accel::idioms::stochastic_evolution::execute_stochastic_evolution(
+                        state_value,
+                        drift_value,
+                        scale_value,
+                        steps_value,
+                    )
+                    .await?;
                 stack.push(evolved);
             }
         }

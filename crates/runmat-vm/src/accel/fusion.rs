@@ -8,11 +8,10 @@ use runmat_accelerate::fusion::FusionStoreMaterialization;
 use runmat_accelerate::fusion_exec::{
     execute_centered_gram, execute_elementwise, execute_explained_variance,
     execute_image_normalize, execute_matmul_epilogue, execute_power_step_normalize,
-    execute_reduction,
-    FusionExecutionRequest,
+    execute_reduction, FusionExecutionRequest,
 };
 use runmat_accelerate::InstrSpan;
-use runmat_accelerate::{FusionKind, ShapeInfo, ValueOrigin, VarKind, value_is_all_keyword};
+use runmat_accelerate::{value_is_all_keyword, FusionKind, ShapeInfo, ValueOrigin, VarKind};
 use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
 use std::collections::HashMap;
@@ -495,7 +494,10 @@ pub async fn execute_fusion_special_kind(
             }
             Err(err) => Err(mex("FusionExecutionFailed", &err.to_string())),
         },
-        _ => Err(mex("FusionUnsupportedKind", "fusion: unsupported fusion kind")),
+        _ => Err(mex(
+            "FusionUnsupportedKind",
+            "fusion: unsupported fusion kind",
+        )),
     }
 }
 
@@ -517,7 +519,10 @@ pub fn resolve_reduction_geometry(
         plan: &runmat_accelerate::FusionGroupPlan,
         graph: &runmat_accelerate::AccelGraph,
     ) -> bool {
-        let mut reduce_all = matches!(plan.reduction_axes, Some(runmat_accelerate::ReductionAxes::All));
+        let mut reduce_all = matches!(
+            plan.reduction_axes,
+            Some(runmat_accelerate::ReductionAxes::All)
+        );
         let has_all = reduce_all
             || plan.constants.values().any(value_is_all_keyword)
             || plan.const_values.values().any(value_is_all_keyword);
@@ -541,7 +546,9 @@ pub fn resolve_reduction_geometry(
                     }
                 }
             }
-            if reduce_all { break; }
+            if reduce_all {
+                break;
+            }
         }
         reduce_all
     }
@@ -701,18 +708,29 @@ pub fn resolve_reduction_geometry(
     }
 
     if log::log_enabled!(log::Level::Debug) {
-        let meta: Vec<String> = plan.inputs.iter().map(|vid| {
-            if let Some(info) = graph.value(*vid) {
-                format!("vid={} origin={:?} shape={:?}", vid, info.origin, info.shape)
-            } else {
-                format!("vid={} origin=<missing>", vid)
-            }
-        }).collect();
+        let meta: Vec<String> = plan
+            .inputs
+            .iter()
+            .map(|vid| {
+                if let Some(info) = graph.value(*vid) {
+                    format!(
+                        "vid={} origin={:?} shape={:?}",
+                        vid, info.origin, info.shape
+                    )
+                } else {
+                    format!("vid={} origin=<missing>", vid)
+                }
+            })
+            .collect();
         log::debug!("reduction gather meta: [{}]", meta.join(", "));
     }
 
     let reduce_all = detect_reduce_all(plan, graph);
-    let (mut axis, axis_explicit) = if reduce_all { (0usize, false) } else { resolve_reduction_axis(plan) };
+    let (mut axis, axis_explicit) = if reduce_all {
+        (0usize, false)
+    } else {
+        resolve_reduction_axis(plan)
+    };
     if reduce_all && interp_engine::fusion_debug_enabled() {
         log::debug!(
             "fusion reduction (all) meta: data_vid={:?} inputs={:?} stack_pattern={:?}",
@@ -722,23 +740,48 @@ pub fn resolve_reduction_geometry(
         );
     }
 
-    let (r, c) = derive_rows_cols(plan, graph, request, consumed_inputs, vars, context).unwrap_or((1, 1));
+    let (r, c) =
+        derive_rows_cols(plan, graph, request, consumed_inputs, vars, context).unwrap_or((1, 1));
     let (reduce_len, num_slices) = if reduce_all {
         let total_from_runtime = consumed_inputs
             .iter()
             .filter_map(|v| v.as_ref())
             .chain(request.inputs.iter())
             .find_map(|value| match value {
-                Value::GpuTensor(handle) => Some(if handle.shape.is_empty() { 1 } else { handle.shape.iter().copied().map(|d| d.max(1)).product::<usize>() }),
-                Value::Tensor(tensor) => Some(if tensor.shape.is_empty() { 1 } else { tensor.shape.iter().copied().map(|d| d.max(1)).product::<usize>() }),
+                Value::GpuTensor(handle) => Some(if handle.shape.is_empty() {
+                    1
+                } else {
+                    handle
+                        .shape
+                        .iter()
+                        .copied()
+                        .map(|d| d.max(1))
+                        .product::<usize>()
+                }),
+                Value::Tensor(tensor) => Some(if tensor.shape.is_empty() {
+                    1
+                } else {
+                    tensor
+                        .shape
+                        .iter()
+                        .copied()
+                        .map(|d| d.max(1))
+                        .product::<usize>()
+                }),
                 _ => None,
             });
-        let total = plan.reduction_data_shape(graph)
+        let total = plan
+            .reduction_data_shape(graph)
             .map(|shape| shape.into_iter().map(|d| d.max(1)).product::<usize>())
             .or(total_from_runtime)
             .or_else(|| plan.element_count())
             .filter(|v| *v > 0)
-            .ok_or_else(|| mex("FusionReductionExtentUnknown", "fusion: reduction all extent unknown"))?;
+            .ok_or_else(|| {
+                mex(
+                    "FusionReductionExtentUnknown",
+                    "fusion: reduction all extent unknown",
+                )
+            })?;
         if interp_engine::fusion_debug_enabled() {
             log::debug!(
                 "fusion reduction (all): total_elems={} fallback_rows={} fallback_cols={}",
@@ -750,7 +793,13 @@ pub fn resolve_reduction_geometry(
         (total, 1usize)
     } else {
         if !axis_explicit {
-            axis = if r == 1 && c > 1 { 1 } else if r > 1 { 0 } else { axis };
+            axis = if r == 1 && c > 1 {
+                1
+            } else if r > 1 {
+                0
+            } else {
+                axis
+            };
         }
         if interp_engine::fusion_debug_enabled() {
             if r == 1 && c == 1 {
@@ -769,7 +818,11 @@ pub fn resolve_reduction_geometry(
                 );
             }
         }
-        if axis == 0 { (r, c) } else { (c, r) }
+        if axis == 0 {
+            (r, c)
+        } else {
+            (c, r)
+        }
     };
 
     if interp_engine::fusion_debug_enabled() {
@@ -787,27 +840,49 @@ pub fn resolve_reduction_geometry(
         let mut check_val = |v: &Value| match v {
             Value::GpuTensor(h) => {
                 let prod = h.shape.iter().copied().product::<usize>();
-                if prod > 1 { big = true; }
+                if prod > 1 {
+                    big = true;
+                }
             }
             Value::Tensor(t) => {
                 let prod = t.shape.iter().copied().product::<usize>();
-                if prod > 1 { big = true; }
+                if prod > 1 {
+                    big = true;
+                }
             }
             _ => {}
         };
-        for v in consumed_inputs.iter().filter_map(|v| v.as_ref()) { check_val(v); }
-        for v in &request.inputs { check_val(v); }
+        for v in consumed_inputs.iter().filter_map(|v| v.as_ref()) {
+            check_val(v);
+        }
+        for v in &request.inputs {
+            check_val(v);
+        }
         big
     };
     if looks_wrong {
         log::debug!("fusion reduction: skipping fusion due to unresolved shape; falling back to provider path");
-        return Err(mex("FusionReductionShapeUnresolved", "fusion: reduction shape unresolved"));
+        return Err(mex(
+            "FusionReductionShapeUnresolved",
+            "fusion: reduction shape unresolved",
+        ));
     }
-    if std::env::var("RUNMAT_DISABLE_FUSED_REDUCTION").ok().as_deref() == Some("1") {
-        return Err(mex("FusionReductionDisabled", "fusion: fused reductions disabled"));
+    if std::env::var("RUNMAT_DISABLE_FUSED_REDUCTION")
+        .ok()
+        .as_deref()
+        == Some("1")
+    {
+        return Err(mex(
+            "FusionReductionDisabled",
+            "fusion: fused reductions disabled",
+        ));
     }
 
-    Ok(ReductionGeometry { axis, reduce_len, num_slices })
+    Ok(ReductionGeometry {
+        axis,
+        reduce_len,
+        num_slices,
+    })
 }
 
 pub fn execute_fusion_reduction(
@@ -846,8 +921,17 @@ pub async fn try_execute_fusion_group(
     if plan.group.kind.is_elementwise() {
         execute_fusion_elementwise(request, stack_guard, vars, context)
     } else if plan.group.kind.is_reduction() {
-        execute_fusion_reduction(plan, graph, request, &consumed_inputs, stack_guard, vars, context)
+        execute_fusion_reduction(
+            plan,
+            graph,
+            request,
+            &consumed_inputs,
+            stack_guard,
+            vars,
+            context,
+        )
     } else {
-        execute_fusion_special_kind(plan.group.kind.clone(), &plan.inputs, request, stack_guard).await
+        execute_fusion_special_kind(plan.group.kind.clone(), &plan.inputs, request, stack_guard)
+            .await
     }
 }

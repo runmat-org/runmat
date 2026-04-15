@@ -7,7 +7,11 @@ pub fn pack_to_row(stack: &mut Vec<Value>, count: usize) -> Result<(), RuntimeEr
     let mut vals: Vec<f64> = Vec::with_capacity(count);
     let mut tmp: Vec<Value> = Vec::with_capacity(count);
     for _ in 0..count {
-        tmp.push(stack.pop().ok_or(mex("StackUnderflow", "stack underflow"))?);
+        tmp.push(
+            stack
+                .pop()
+                .ok_or(mex("StackUnderflow", "stack underflow"))?,
+        );
     }
     tmp.reverse();
     for v in tmp {
@@ -23,7 +27,11 @@ pub fn pack_to_col(stack: &mut Vec<Value>, count: usize) -> Result<(), RuntimeEr
     let mut vals: Vec<f64> = Vec::with_capacity(count);
     let mut tmp: Vec<Value> = Vec::with_capacity(count);
     for _ in 0..count {
-        tmp.push(stack.pop().ok_or(mex("StackUnderflow", "stack underflow"))?);
+        tmp.push(
+            stack
+                .pop()
+                .ok_or(mex("StackUnderflow", "stack underflow"))?,
+        );
     }
     tmp.reverse();
     for v in tmp {
@@ -39,7 +47,10 @@ pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result
     let total_elements = rows * cols;
     let mut row_major = Vec::with_capacity(total_elements);
     for _ in 0..total_elements {
-        let val: f64 = (&stack.pop().ok_or(mex("StackUnderflow", "stack underflow"))?).try_into()?;
+        let val: f64 = (&stack
+            .pop()
+            .ok_or(mex("StackUnderflow", "stack underflow"))?)
+            .try_into()?;
         row_major.push(val);
     }
     row_major.reverse();
@@ -49,7 +60,8 @@ pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result
             data[r + c * rows] = row_major[r * cols + c];
         }
     }
-    let matrix = Tensor::new_2d(data, rows, cols).map_err(|e| format!("Matrix creation error: {e}"))?;
+    let matrix =
+        Tensor::new_2d(data, rows, cols).map_err(|e| format!("Matrix creation error: {e}"))?;
     stack.push(Value::Tensor(matrix));
     Ok(())
 }
@@ -65,7 +77,10 @@ where
 {
     let mut row_lengths = Vec::new();
     for _ in 0..num_rows {
-        let row_len: f64 = (&stack.pop().ok_or(mex("StackUnderflow", "stack underflow"))?).try_into()?;
+        let row_len: f64 = (&stack
+            .pop()
+            .ok_or(mex("StackUnderflow", "stack underflow"))?)
+            .try_into()?;
         row_lengths.push(row_len as usize);
     }
     row_lengths.reverse();
@@ -73,7 +88,11 @@ where
     for &row_len in row_lengths.iter().rev() {
         let mut row_values = Vec::new();
         for _ in 0..row_len {
-            row_values.push(stack.pop().ok_or(mex("StackUnderflow", "stack underflow"))?);
+            row_values.push(
+                stack
+                    .pop()
+                    .ok_or(mex("StackUnderflow", "stack underflow"))?,
+            );
         }
         row_values.reverse();
         rows_data.push(row_values);
@@ -94,20 +113,32 @@ where
     Fut: Future<Output = Result<Value, RuntimeError>>,
 {
     if has_step {
-        let end = stack.pop().ok_or(mex("StackUnderflow", "stack underflow"))?;
-        let step = stack.pop().ok_or(mex("StackUnderflow", "stack underflow"))?;
-        let start = stack.pop().ok_or(mex("StackUnderflow", "stack underflow"))?;
+        let end = stack
+            .pop()
+            .ok_or(mex("StackUnderflow", "stack underflow"))?;
+        let step = stack
+            .pop()
+            .ok_or(mex("StackUnderflow", "stack underflow"))?;
+        let start = stack
+            .pop()
+            .ok_or(mex("StackUnderflow", "stack underflow"))?;
         stack.push(call_colon(vec![start, step, end]).await?);
     } else {
-        let end = stack.pop().ok_or(mex("StackUnderflow", "stack underflow"))?;
-        let start = stack.pop().ok_or(mex("StackUnderflow", "stack underflow"))?;
+        let end = stack
+            .pop()
+            .ok_or(mex("StackUnderflow", "stack underflow"))?;
+        let start = stack
+            .pop()
+            .ok_or(mex("StackUnderflow", "stack underflow"))?;
         stack.push(call_colon(vec![start, end]).await?);
     }
     Ok(())
 }
 
 pub fn unpack(stack: &mut Vec<Value>, out_count: usize) -> Result<(), RuntimeError> {
-    let value = stack.pop().ok_or(mex("StackUnderflow", "stack underflow"))?;
+    let value = stack
+        .pop()
+        .ok_or(mex("StackUnderflow", "stack underflow"))?;
     match value {
         Value::OutputList(values) => {
             for i in 0..out_count {

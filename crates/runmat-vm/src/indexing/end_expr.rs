@@ -28,7 +28,9 @@ pub fn eval_end_expr_value<'a>(
     call_builtin: &'a dyn Fn(
         &'a str,
         Vec<Value>,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Value>, RuntimeError>> + 'a>>,
+    ) -> Pin<
+        Box<dyn Future<Output = Result<Option<Value>, RuntimeError>> + 'a>,
+    >,
     call_user: &'a dyn Fn(
         &'a str,
         Vec<Value>,
@@ -41,17 +43,18 @@ pub fn eval_end_expr_value<'a>(
             EndExpr::End => Ok(end_value),
             EndExpr::Const(v) => Ok(*v),
             EndExpr::Var(i) => {
-                let v = vars
-                    .get(*i)
-                    .ok_or_else(|| mex("MissingNumericIndex", "missing variable for end expression"))?;
+                let v = vars.get(*i).ok_or_else(|| {
+                    mex("MissingNumericIndex", "missing variable for end expression")
+                })?;
                 value_to_f64(v)
                     .map_err(|_| mex("UnsupportedIndexType", "end expression must be numeric"))
             }
             EndExpr::Call(name, args) => {
                 let mut argv: Vec<Value> = Vec::with_capacity(args.len());
                 for a in args {
-                    let val = eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user)
-                        .await?;
+                    let val =
+                        eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user)
+                            .await?;
                     argv.push(Value::Num(val));
                 }
                 let v = if let Some(v) = call_builtin(name, argv.clone()).await? {
@@ -68,48 +71,101 @@ pub fn eval_end_expr_value<'a>(
                     .map_err(|_| mex("UnsupportedIndexType", "end call must return scalar"))
             }
             EndExpr::Add(a, b) => {
-                let lhs = eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user).await?;
-                let rhs = eval_end_expr_value(b, end_value, vars, functions, call_builtin, call_user).await?;
+                let lhs =
+                    eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user)
+                        .await?;
+                let rhs =
+                    eval_end_expr_value(b, end_value, vars, functions, call_builtin, call_user)
+                        .await?;
                 Ok(lhs + rhs)
             }
             EndExpr::Sub(a, b) => {
-                let lhs = eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user).await?;
-                let rhs = eval_end_expr_value(b, end_value, vars, functions, call_builtin, call_user).await?;
+                let lhs =
+                    eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user)
+                        .await?;
+                let rhs =
+                    eval_end_expr_value(b, end_value, vars, functions, call_builtin, call_user)
+                        .await?;
                 Ok(lhs - rhs)
             }
             EndExpr::Mul(a, b) => {
-                let lhs = eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user).await?;
-                let rhs = eval_end_expr_value(b, end_value, vars, functions, call_builtin, call_user).await?;
+                let lhs =
+                    eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user)
+                        .await?;
+                let rhs =
+                    eval_end_expr_value(b, end_value, vars, functions, call_builtin, call_user)
+                        .await?;
                 Ok(lhs * rhs)
             }
             EndExpr::Div(a, b) => {
-                let denom = eval_end_expr_value(b, end_value, vars, functions, call_builtin, call_user).await?;
+                let denom =
+                    eval_end_expr_value(b, end_value, vars, functions, call_builtin, call_user)
+                        .await?;
                 if denom == 0.0 {
                     return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                 }
-                let lhs = eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user).await?;
+                let lhs =
+                    eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user)
+                        .await?;
                 Ok(lhs / denom)
             }
             EndExpr::LeftDiv(a, b) => {
-                let denom = eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user).await?;
+                let denom =
+                    eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user)
+                        .await?;
                 if denom == 0.0 {
                     return Err(mex("IndexOutOfBounds", "Index out of bounds"));
                 }
-                let rhs = eval_end_expr_value(b, end_value, vars, functions, call_builtin, call_user).await?;
+                let rhs =
+                    eval_end_expr_value(b, end_value, vars, functions, call_builtin, call_user)
+                        .await?;
                 Ok(rhs / denom)
             }
             EndExpr::Pow(a, b) => {
-                let lhs = eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user).await?;
-                let rhs = eval_end_expr_value(b, end_value, vars, functions, call_builtin, call_user).await?;
+                let lhs =
+                    eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user)
+                        .await?;
+                let rhs =
+                    eval_end_expr_value(b, end_value, vars, functions, call_builtin, call_user)
+                        .await?;
                 Ok(lhs.powf(rhs))
             }
-            EndExpr::Neg(a) => Ok(-eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user).await?),
-            EndExpr::Pos(a) => Ok(eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user).await?),
-            EndExpr::Floor(a) => Ok(eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user).await?.floor()),
-            EndExpr::Ceil(a) => Ok(eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user).await?.ceil()),
-            EndExpr::Round(a) => Ok(eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user).await?.round()),
+            EndExpr::Neg(a) => {
+                Ok(
+                    -eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user)
+                        .await?,
+                )
+            }
+            EndExpr::Pos(a) => {
+                Ok(
+                    eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user)
+                        .await?,
+                )
+            }
+            EndExpr::Floor(a) => {
+                Ok(
+                    eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user)
+                        .await?
+                        .floor(),
+                )
+            }
+            EndExpr::Ceil(a) => {
+                Ok(
+                    eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user)
+                        .await?
+                        .ceil(),
+                )
+            }
+            EndExpr::Round(a) => {
+                Ok(
+                    eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user)
+                        .await?
+                        .round(),
+                )
+            }
             EndExpr::Fix(a) => {
-                let v = eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user).await?;
+                let v = eval_end_expr_value(a, end_value, vars, functions, call_builtin, call_user)
+                    .await?;
                 Ok(if v >= 0.0 { v.floor() } else { v.ceil() })
             }
         }
@@ -124,7 +180,9 @@ pub async fn resolve_range_end_index<'a>(
     call_builtin: &'a dyn Fn(
         &'a str,
         Vec<Value>,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<Value>, RuntimeError>> + 'a>>,
+    ) -> Pin<
+        Box<dyn Future<Output = Result<Option<Value>, RuntimeError>> + 'a>,
+    >,
     call_user: &'a dyn Fn(
         &'a str,
         Vec<Value>,
@@ -132,6 +190,14 @@ pub async fn resolve_range_end_index<'a>(
         &'a Vec<Value>,
     ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'a>>,
 ) -> Result<i64, RuntimeError> {
-    let value = eval_end_expr_value(end_expr, dim_len as f64, vars, functions, call_builtin, call_user).await?;
+    let value = eval_end_expr_value(
+        end_expr,
+        dim_len as f64,
+        vars,
+        functions,
+        call_builtin,
+        call_user,
+    )
+    .await?;
     Ok(value.floor() as i64)
 }

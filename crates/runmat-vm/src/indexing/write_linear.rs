@@ -6,7 +6,11 @@ pub async fn rhs_to_real_scalar(rhs: &Value) -> Result<f64, RuntimeError> {
     match rhs {
         Value::Num(x) => Ok(*x),
         Value::Tensor(t2) => {
-            if t2.data.len() == 1 { Ok(t2.data[0]) } else { Err(mex("ScalarRequired", "RHS must be scalar")) }
+            if t2.data.len() == 1 {
+                Ok(t2.data[0])
+            } else {
+                Err(mex("ScalarRequired", "RHS must be scalar"))
+            }
         }
         Value::GpuTensor(h2) => {
             let total = h2.shape.iter().copied().product::<usize>();
@@ -14,12 +18,20 @@ pub async fn rhs_to_real_scalar(rhs: &Value) -> Result<f64, RuntimeError> {
                 return Err(mex("ScalarRequired", "RHS must be scalar"));
             }
             let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-                mex("AccelerationProviderUnavailable", "No acceleration provider registered")
+                mex(
+                    "AccelerationProviderUnavailable",
+                    "No acceleration provider registered",
+                )
             })?;
-            let host = provider.download(h2).await.map_err(|e| format!("gather rhs: {e}"))?;
+            let host = provider
+                .download(h2)
+                .await
+                .map_err(|e| format!("gather rhs: {e}"))?;
             Ok(host.data[0])
         }
-        _ => rhs.try_into().map_err(|_| mex("NumericRequired", "RHS must be numeric")),
+        _ => rhs
+            .try_into()
+            .map_err(|_| mex("NumericRequired", "RHS must be numeric")),
     }
 }
 
@@ -37,9 +49,15 @@ pub async fn rhs_to_complex_scalar(rhs: &Value) -> Result<(f64, f64), RuntimeErr
                 return Err(mex("ScalarRequired", "RHS must be scalar"));
             }
             let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-                mex("AccelerationProviderUnavailable", "No acceleration provider registered")
+                mex(
+                    "AccelerationProviderUnavailable",
+                    "No acceleration provider registered",
+                )
             })?;
-            let host = provider.download(h).await.map_err(|e| format!("gather rhs: {e}"))?;
+            let host = provider
+                .download(h)
+                .await
+                .map_err(|e| format!("gather rhs: {e}"))?;
             Ok((host.data[0], 0.0))
         }
         _ => Err(mex("NumericRequired", "RHS must be numeric")),
@@ -65,8 +83,12 @@ pub async fn assign_tensor_scalar(
         let mut j = indices[1];
         let rows = t.rows;
         let cols = t.cols;
-        if j == 0 { j = 1; }
-        if j > cols { j = cols; }
+        if j == 0 {
+            j = 1;
+        }
+        if j > cols {
+            j = cols;
+        }
         if i == 0 || i > rows {
             return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
         }
@@ -75,7 +97,10 @@ pub async fn assign_tensor_scalar(
         t.data[idx] = val;
         Ok(Value::Tensor(t))
     } else {
-        Err(mex("UnsupportedAssignmentRank", "Only 1D/2D scalar assignment supported"))
+        Err(mex(
+            "UnsupportedAssignmentRank",
+            "Only 1D/2D scalar assignment supported",
+        ))
     }
 }
 
@@ -98,8 +123,12 @@ pub async fn assign_complex_scalar(
         let mut j = indices[1];
         let rows = t.rows;
         let cols = t.cols;
-        if j == 0 { j = 1; }
-        if j > cols { j = cols; }
+        if j == 0 {
+            j = 1;
+        }
+        if j > cols {
+            j = cols;
+        }
         if i == 0 || i > rows {
             return Err(mex("SubscriptOutOfBounds", "Subscript out of bounds"));
         }
@@ -108,7 +137,10 @@ pub async fn assign_complex_scalar(
         t.data[idx] = val;
         Ok(Value::ComplexTensor(t))
     } else {
-        Err(mex("UnsupportedAssignmentRank", "Only 1D/2D scalar assignment supported"))
+        Err(mex(
+            "UnsupportedAssignmentRank",
+            "Only 1D/2D scalar assignment supported",
+        ))
     }
 }
 
@@ -118,12 +150,25 @@ pub async fn assign_gpu_scalar(
     rhs: &Value,
 ) -> Result<Value, RuntimeError> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        mex("AccelerationProviderUnavailable", "No acceleration provider registered")
+        mex(
+            "AccelerationProviderUnavailable",
+            "No acceleration provider registered",
+        )
     })?;
-    let host = provider.download(h).await.map_err(|e| format!("gather for assignment: {e}"))?;
+    let host = provider
+        .download(h)
+        .await
+        .map_err(|e| format!("gather for assignment: {e}"))?;
     let t = Tensor::new(host.data, host.shape).map_err(|e| format!("assignment: {e}"))?;
-    let Value::Tensor(updated) = assign_tensor_scalar(t, indices, rhs).await? else { unreachable!() };
-    let view = runmat_accelerate_api::HostTensorView { data: &updated.data, shape: &updated.shape };
-    let new_h = provider.upload(&view).map_err(|e| format!("reupload after assignment: {e}"))?;
+    let Value::Tensor(updated) = assign_tensor_scalar(t, indices, rhs).await? else {
+        unreachable!()
+    };
+    let view = runmat_accelerate_api::HostTensorView {
+        data: &updated.data,
+        shape: &updated.shape,
+    };
+    let new_h = provider
+        .upload(&view)
+        .map_err(|e| format!("reupload after assignment: {e}"))?;
     Ok(Value::GpuTensor(new_h))
 }

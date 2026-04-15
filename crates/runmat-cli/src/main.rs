@@ -25,13 +25,13 @@ use runmat_gc::{
     gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats, GcConfig,
 };
 use runmat_hir::LoweringContext;
-use runmat_vm::instr::Instr;
 use runmat_kernel::{ConnectionInfo, KernelConfig, KernelServer};
 use runmat_parser::ParserOptions;
 use runmat_runtime::build_runtime_error;
 use runmat_snapshot::presets::SnapshotPreset;
 use runmat_snapshot::{SnapshotBuilder, SnapshotConfig, SnapshotLoader};
 use runmat_time::Instant;
+use runmat_vm::instr::Instr;
 use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
 use std::fs;
@@ -1521,10 +1521,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
         return Ok(());
     }
 
-    println!(
-        "RunMat v{}",
-        env!("CARGO_PKG_VERSION")
-    );
+    println!("RunMat v{}", env!("CARGO_PKG_VERSION"));
     println!("Fast, free, modern MATLAB runtime with JIT compilation and GC");
     println!();
 

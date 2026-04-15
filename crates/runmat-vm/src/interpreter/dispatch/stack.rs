@@ -67,14 +67,7 @@ where
     BeforeOverwrite: FnMut(&Value, &Value),
     AfterStore: FnMut(usize, &Value),
 {
-    stack_ops::store_var(
-        stack,
-        vars,
-        index,
-        var_names,
-        before_overwrite,
-        after_store,
-    )
+    stack_ops::store_var(stack, vars, index, var_names, before_overwrite, after_store)
 }
 
 pub fn store_local<BeforeLocalOverwrite, BeforeVarOverwrite, AfterFallbackStore>(

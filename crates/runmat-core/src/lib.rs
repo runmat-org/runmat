@@ -9,7 +9,6 @@ use tracing::{debug, info, info_span, warn};
 use runmat_accelerate_api::provider as accel_provider;
 use runmat_accelerate_api::{provider_for_handle, ProviderPrecision};
 use runmat_hir::{LoweringContext, LoweringResult, SemanticError, SourceId};
-use runmat_vm::CompileError;
 use runmat_lexer::{tokenize_detailed, Token as LexToken};
 pub use runmat_parser::CompatMode;
 use runmat_parser::{parse_with_options, ParserOptions, SyntaxError};
@@ -24,6 +23,7 @@ use runmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
 use runmat_time::Instant;
 #[cfg(feature = "jit")]
 use runmat_turbine::TurbineEngine;
+use runmat_vm::CompileError;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 #[cfg(not(target_arch = "wasm32"))]
@@ -1291,10 +1291,8 @@ impl RunMatSession {
         if debug_trace {
             debug!(?assigned_snapshot, "[repl] assigned snapshot");
         }
-        let _pending_workspace_guard = runmat_vm::push_pending_workspace(
-            updated_vars.clone(),
-            assigned_snapshot.clone(),
-        );
+        let _pending_workspace_guard =
+            runmat_vm::push_pending_workspace(updated_vars.clone(), assigned_snapshot.clone());
         if self.verbose {
             debug!("HIR generated successfully");
         }
@@ -1621,8 +1619,7 @@ impl RunMatSession {
 
         // Update variable names mapping and function definitions if execution was successful
         if error.is_none() {
-            if let Some((mutated_names, assigned)) = runmat_vm::take_updated_workspace_state()
-            {
+            if let Some((mutated_names, assigned)) = runmat_vm::take_updated_workspace_state() {
                 if debug_trace {
                     debug!(
                         ?mutated_names,
@@ -2108,9 +2105,7 @@ impl RunMatSession {
     }
 
     /// Convert stored HIR function definitions to UserFunction format for compilation
-    fn convert_hir_functions_to_user_functions(
-        &self,
-    ) -> HashMap<String, runmat_vm::UserFunction> {
+    fn convert_hir_functions_to_user_functions(&self) -> HashMap<String, runmat_vm::UserFunction> {
         let mut user_functions = HashMap::new();
 
         for (name, hir_stmt) in &self.function_definitions {

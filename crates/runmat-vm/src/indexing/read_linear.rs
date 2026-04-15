@@ -1,5 +1,5 @@
-use crate::interpreter::errors::mex;
 use crate::indexing::selectors::index_scalar_from_value;
+use crate::interpreter::errors::mex;
 use runmat_builtins::{CellArray, Value};
 use runmat_runtime::RuntimeError;
 
@@ -34,8 +34,12 @@ pub async fn collect_linear_indices(
 }
 
 pub fn build_object_subsref_cell(indices: &[f64]) -> Result<Value, RuntimeError> {
-    let cell = CellArray::new(indices.iter().map(|n| Value::Num(*n)).collect(), 1, indices.len())
-        .map_err(|e| format!("subsref build error: {e}"))?;
+    let cell = CellArray::new(
+        indices.iter().map(|n| Value::Num(*n)).collect(),
+        1,
+        indices.len(),
+    )
+    .map_err(|e| format!("subsref build error: {e}"))?;
     Ok(Value::Cell(cell))
 }
 

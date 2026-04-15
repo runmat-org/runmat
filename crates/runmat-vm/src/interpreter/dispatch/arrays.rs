@@ -3,11 +3,7 @@ use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
 use std::future::Future;
 
-pub fn create_matrix(
-    stack: &mut Vec<Value>,
-    rows: usize,
-    cols: usize,
-) -> Result<(), RuntimeError> {
+pub fn create_matrix(stack: &mut Vec<Value>, rows: usize, cols: usize) -> Result<(), RuntimeError> {
     array_ops::create_matrix(stack, rows, cols)
 }
 

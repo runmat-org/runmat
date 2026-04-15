@@ -61,7 +61,9 @@ fn index_scalar_from_host_value(value: &Value) -> Option<i64> {
     match value {
         Value::Num(n) => Some(*n as i64),
         Value::Int(int_val) => Some(int_val.to_i64()),
-        Value::Tensor(t) if t.data.len() == 1 && is_scalar_shape(&t.shape) => Some(t.data[0] as i64),
+        Value::Tensor(t) if t.data.len() == 1 && is_scalar_shape(&t.shape) => {
+            Some(t.data[0] as i64)
+        }
         _ => None,
     }
 }
@@ -124,7 +126,10 @@ pub async fn indices_from_value_linear(value: &Value, total_len: usize) -> VmRes
         }
         Value::LogicalArray(la) => {
             if la.data.len() != total_len {
-                return Err(mex("IndexShape", "Logical mask length mismatch for linear indexing"));
+                return Err(mex(
+                    "IndexShape",
+                    "Logical mask length mismatch for linear indexing",
+                ));
             }
             let mut indices = Vec::new();
             for (i, &b) in la.data.iter().enumerate() {
@@ -134,7 +139,10 @@ pub async fn indices_from_value_linear(value: &Value, total_len: usize) -> VmRes
             }
             Ok(indices)
         }
-        _ => Err(mex("UnsupportedIndexType", "Unsupported index type for linear indexing")),
+        _ => Err(mex(
+            "UnsupportedIndexType",
+            "Unsupported index type for linear indexing",
+        )),
     }
 }
 
@@ -181,7 +189,10 @@ pub async fn selector_from_value_dim(value: &Value, dim_len: usize) -> VmResult<
         }
         Value::LogicalArray(la) => {
             if la.data.len() != dim_len {
-                return Err(mex("IndexShape", "Logical mask length mismatch for dimension"));
+                return Err(mex(
+                    "IndexShape",
+                    "Logical mask length mismatch for dimension",
+                ));
             }
             let mut indices = Vec::new();
             for (i, &b) in la.data.iter().enumerate() {
@@ -191,7 +202,10 @@ pub async fn selector_from_value_dim(value: &Value, dim_len: usize) -> VmResult<
             }
             Ok(SliceSelector::Indices(indices))
         }
-        _ => Err(mex("UnsupportedIndexType", "Unsupported index type for slicing")),
+        _ => Err(mex(
+            "UnsupportedIndexType",
+            "Unsupported index type for slicing",
+        )),
     }
 }
 
@@ -213,7 +227,12 @@ pub async fn build_slice_selectors(
             selectors.push(SliceSelector::Scalar(total_len.max(1)));
             return Ok(selectors);
         }
-        let value = numeric.first().ok_or_else(|| mex("MissingNumericIndex", "missing numeric index for linear slice"))?;
+        let value = numeric.first().ok_or_else(|| {
+            mex(
+                "MissingNumericIndex",
+                "missing numeric index for linear slice",
+            )
+        })?;
         let materialized = materialize_index_value(value).await?;
         if let Value::Tensor(idx_t) = &materialized {
             let len = idx_t.shape.iter().product::<usize>();
@@ -225,7 +244,10 @@ pub async fn build_slice_selectors(
                 }
                 indices.push(idx as usize);
             }
-            selectors.push(SliceSelector::LinearIndices { values: indices, output_shape: idx_t.shape.clone() });
+            selectors.push(SliceSelector::LinearIndices {
+                values: indices,
+                output_shape: idx_t.shape.clone(),
+            });
         } else {
             let idxs = indices_from_value_linear(&materialized, total_len).await?;
             selectors.push(SliceSelector::Indices(idxs));
@@ -246,7 +268,9 @@ pub async fn build_slice_selectors(
             selectors.push(SliceSelector::Scalar(dim_len));
             continue;
         }
-        let value = numeric.get(numeric_iter).ok_or_else(|| mex("MissingNumericIndex", "missing numeric index for slice"))?;
+        let value = numeric
+            .get(numeric_iter)
+            .ok_or_else(|| mex("MissingNumericIndex", "missing numeric index for slice"))?;
         numeric_iter += 1;
         selectors.push(selector_from_value_dim(value, dim_len).await?);
     }
@@ -260,12 +284,19 @@ fn matlab_squeezed_shape(selection_lengths: &[usize], scalar_mask: &[bool]) -> V
         .map(|(d, &len)| (d, len, scalar_mask.get(d).copied().unwrap_or(false)))
         .collect();
     while dims.len() > 2
-        && dims.last().map(|&(_, len, is_scalar)| len == 1 && is_scalar).unwrap_or(false)
+        && dims
+            .last()
+            .map(|&(_, len, is_scalar)| len == 1 && is_scalar)
+            .unwrap_or(false)
     {
         dims.pop();
     }
     let out: Vec<usize> = dims.into_iter().map(|(_, len, _)| len).collect();
-    if out.is_empty() { vec![1, 1] } else { out }
+    if out.is_empty() {
+        vec![1, 1]
+    } else {
+        out
+    }
 }
 
 pub fn build_slice_plan(
@@ -275,7 +306,10 @@ pub fn build_slice_plan(
 ) -> VmResult<SlicePlan> {
     let total_len = total_len_from_shape(base_shape);
     if dims == 1 {
-        let list = selectors.first().cloned().unwrap_or(SliceSelector::Indices(Vec::new()));
+        let list = selectors
+            .first()
+            .cloned()
+            .unwrap_or(SliceSelector::Indices(Vec::new()));
         let indices = match &list {
             SliceSelector::Colon => (1..=total_len).collect::<Vec<usize>>(),
             SliceSelector::Scalar(i) => vec![*i],
@@ -292,7 +326,12 @@ pub fn build_slice_plan(
             _ if count <= 1 => vec![1, 1],
             _ => vec![count, 1],
         };
-        return Ok(SlicePlan { indices: zero_based, output_shape: shape, selection_lengths: vec![count], dims });
+        return Ok(SlicePlan {
+            indices: zero_based,
+            output_shape: shape,
+            selection_lengths: vec![count],
+            dims,
+        });
     }
 
     let mut selection_lengths = Vec::with_capacity(dims);
@@ -317,7 +356,12 @@ pub fn build_slice_plan(
     let mut out_shape = matlab_squeezed_shape(&selection_lengths, &scalar_mask);
     if selection_lengths.contains(&0) {
         let selection_lengths = out_shape.clone();
-        return Ok(SlicePlan { indices: Vec::new(), output_shape: out_shape, selection_lengths, dims });
+        return Ok(SlicePlan {
+            indices: Vec::new(),
+            output_shape: out_shape,
+            selection_lengths,
+            dims,
+        });
     }
 
     let mut base_norm = base_shape.to_vec();
@@ -344,5 +388,10 @@ pub fn build_slice_plan(
         out_shape = vec![1, 1];
     }
     let selection_lengths = out_shape.clone();
-    Ok(SlicePlan { indices, output_shape: out_shape, selection_lengths, dims })
+    Ok(SlicePlan {
+        indices,
+        output_shape: out_shape,
+        selection_lengths,
+        dims,
+    })
 }

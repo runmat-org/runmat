@@ -9,7 +9,10 @@ use runmat_builtins::{CharArray, Value};
 use runmat_runtime::{dispatcher::gather_if_needed_async, RuntimeError};
 use std::collections::HashMap;
 
-fn resolve_emit_label_text(label: &EmitLabel, var_names: &HashMap<usize, String>) -> Option<String> {
+fn resolve_emit_label_text(
+    label: &EmitLabel,
+    var_names: &HashMap<usize, String>,
+) -> Option<String> {
     match label {
         EmitLabel::Ans => Some("ans".to_string()),
         EmitLabel::Var(idx) => var_names

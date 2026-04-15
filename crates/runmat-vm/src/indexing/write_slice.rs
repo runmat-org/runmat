@@ -1,7 +1,7 @@
-use crate::interpreter::errors::mex;
 use crate::indexing::selectors::{
-    build_slice_plan, build_slice_selectors, SlicePlan, SliceSelector, indices_from_value_linear,
+    build_slice_plan, build_slice_selectors, indices_from_value_linear, SlicePlan, SliceSelector,
 };
+use crate::interpreter::errors::mex;
 use runmat_builtins::{CellArray, ComplexTensor, StringArray, Tensor, Value};
 use runmat_runtime::RuntimeError;
 
@@ -11,7 +11,11 @@ pub fn build_subsasgn_paren_cell(numeric: &[Value]) -> Result<Value, RuntimeErro
     Ok(Value::Cell(cell))
 }
 
-pub async fn object_subsasgn_paren(base: Value, numeric: &[Value], rhs: Value) -> Result<Value, RuntimeError> {
+pub async fn object_subsasgn_paren(
+    base: Value,
+    numeric: &[Value],
+    rhs: Value,
+) -> Result<Value, RuntimeError> {
     let cell = build_subsasgn_paren_cell(numeric)?;
     match base {
         Value::Object(obj) => {
@@ -210,13 +214,19 @@ pub fn assign_tensor_slice_nd(
     let total_out: usize = per_dim_indices.iter().map(|v| v.len()).product();
     enum RhsView {
         Scalar(f64),
-        Tensor { data: Vec<f64>, shape: Vec<usize>, strides: Vec<usize> },
+        Tensor {
+            data: Vec<f64>,
+            shape: Vec<usize>,
+            strides: Vec<usize>,
+        },
     }
     let rhs_view = match rhs {
         Value::Num(n) => RhsView::Scalar(n),
         Value::Tensor(rt) => {
             let mut shape = rt.shape.clone();
-            if shape.len() < dims { shape.resize(dims, 1); }
+            if shape.len() < dims {
+                shape.resize(dims, 1);
+            }
             if shape.len() > dims {
                 if shape.iter().skip(dims).any(|&s| s != 1) {
                     return Err("shape mismatch for slice assign".to_string().into());
@@ -236,7 +246,11 @@ pub fn assign_tensor_slice_nd(
                 rstrides[d] = racc;
                 racc *= shape[d];
             }
-            RhsView::Tensor { data: rt.data, shape, strides: rstrides }
+            RhsView::Tensor {
+                data: rt.data,
+                shape,
+                strides: rstrides,
+            }
         }
         _ => return Err("rhs must be numeric or tensor".to_string().into()),
     };
@@ -252,7 +266,11 @@ pub fn assign_tensor_slice_nd(
         }
         match &rhs_view {
             RhsView::Scalar(val) => t.data[lin] = *val,
-            RhsView::Tensor { data, shape, strides } => {
+            RhsView::Tensor {
+                data,
+                shape,
+                strides,
+            } => {
                 let mut rlin = 0usize;
                 for d in 0..dims {
                     let rhs_len = shape[d];
@@ -287,14 +305,19 @@ pub enum ComplexRhsView {
     },
 }
 
-pub fn build_complex_rhs_view(rhs: &Value, selection_lengths: &[usize]) -> Result<ComplexRhsView, RuntimeError> {
+pub fn build_complex_rhs_view(
+    rhs: &Value,
+    selection_lengths: &[usize],
+) -> Result<ComplexRhsView, RuntimeError> {
     match rhs {
         Value::Complex(re, im) => Ok(ComplexRhsView::Scalar((*re, *im))),
         Value::Num(n) => Ok(ComplexRhsView::Scalar((*n, 0.0))),
         Value::ComplexTensor(rt) => {
             let dims = selection_lengths.len();
             let mut shape = rt.shape.clone();
-            if shape.len() < dims { shape.resize(dims, 1); }
+            if shape.len() < dims {
+                shape.resize(dims, 1);
+            }
             if shape.len() > dims {
                 if shape.iter().skip(dims).any(|&s| s != 1) {
                     return Err("shape mismatch for slice assign".to_string().into());
@@ -314,7 +337,11 @@ pub fn build_complex_rhs_view(rhs: &Value, selection_lengths: &[usize]) -> Resul
                 rstrides[d] = racc;
                 racc *= shape[d];
             }
-            Ok(ComplexRhsView::Tensor { data: rt.data.clone(), shape, strides: rstrides })
+            Ok(ComplexRhsView::Tensor {
+                data: rt.data.clone(),
+                shape,
+                strides: rstrides,
+            })
         }
         _ => Err("rhs must be numeric or tensor".to_string().into()),
     }
@@ -342,7 +369,11 @@ pub fn scatter_complex_with_plan(
                 let pos = plan.indices[rlin] as usize;
                 t.data[pos] = *val;
             }
-            ComplexRhsView::Tensor { data, shape, strides } => {
+            ComplexRhsView::Tensor {
+                data,
+                shape,
+                strides,
+            } => {
                 for d in 0..dims {
                     let rhs_len = shape[d];
                     let pos = if rhs_len == 1 { 0 } else { idx[d] };
@@ -386,7 +417,10 @@ pub enum StringRhsView {
     },
 }
 
-pub fn build_string_rhs_view(rhs: &Value, selection_lengths: &[usize]) -> Result<StringRhsView, RuntimeError> {
+pub fn build_string_rhs_view(
+    rhs: &Value,
+    selection_lengths: &[usize],
+) -> Result<StringRhsView, RuntimeError> {
     let scalar = match rhs {
         Value::String(s) => Some(s.clone()),
         Value::CharArray(ca) => Some(ca.to_string()),
@@ -398,7 +432,9 @@ pub fn build_string_rhs_view(rhs: &Value, selection_lengths: &[usize]) -> Result
     if let Value::StringArray(rt) = rhs {
         let dims = selection_lengths.len();
         let mut shape = rt.shape.clone();
-        if shape.len() < dims { shape.resize(dims, 1); }
+        if shape.len() < dims {
+            shape.resize(dims, 1);
+        }
         if shape.len() > dims {
             if shape.iter().skip(dims).any(|&s| s != 1) {
                 return Err("shape mismatch for slice assign".to_string().into());
@@ -418,7 +454,11 @@ pub fn build_string_rhs_view(rhs: &Value, selection_lengths: &[usize]) -> Result
             rstrides[d] = racc;
             racc *= shape[d];
         }
-        return Ok(StringRhsView::Tensor { data: rt.data.clone(), shape, strides: rstrides });
+        return Ok(StringRhsView::Tensor {
+            data: rt.data.clone(),
+            shape,
+            strides: rstrides,
+        });
     }
     Err("rhs must be string or string array".to_string().into())
 }
@@ -453,7 +493,11 @@ pub fn scatter_string_with_plan(
                 let dst = plan.indices[lin_pos] as usize;
                 sa.data[dst] = val.clone();
             }
-            StringRhsView::Tensor { data, shape, strides } => {
+            StringRhsView::Tensor {
+                data,
+                shape,
+                strides,
+            } => {
                 let mut rlin = 0usize;
                 for d in 0..dims {
                     let rhs_len = shape[d];
@@ -489,7 +533,10 @@ pub fn scatter_string_with_plan(
     Ok(())
 }
 
-pub async fn materialize_rhs_linear_real(rhs: &Value, count: usize) -> Result<Vec<f64>, RuntimeError> {
+pub async fn materialize_rhs_linear_real(
+    rhs: &Value,
+    count: usize,
+) -> Result<Vec<f64>, RuntimeError> {
     let host_rhs = runmat_runtime::dispatcher::gather_if_needed_async(rhs).await?;
     match host_rhs {
         Value::Num(n) => Ok(vec![n; count]),
@@ -506,7 +553,11 @@ pub async fn materialize_rhs_linear_real(rhs: &Value, count: usize) -> Result<Ve
         }
         Value::LogicalArray(la) => {
             if la.data.len() == count {
-                Ok(la.data.into_iter().map(|b| if b != 0 { 1.0 } else { 0.0 }).collect())
+                Ok(la
+                    .data
+                    .into_iter()
+                    .map(|b| if b != 0 { 1.0 } else { 0.0 })
+                    .collect())
             } else if la.data.len() == 1 {
                 let val = if la.data[0] != 0 { 1.0 } else { 0.0 };
                 Ok(vec![val; count])
@@ -528,7 +579,11 @@ pub async fn materialize_rhs_nd_real(
     let rhs_host = runmat_runtime::dispatcher::gather_if_needed_async(rhs).await?;
     enum RhsView {
         Scalar(f64),
-        Tensor { data: Vec<f64>, shape: Vec<usize>, strides: Vec<usize> },
+        Tensor {
+            data: Vec<f64>,
+            shape: Vec<usize>,
+            strides: Vec<usize>,
+        },
     }
     let view = match rhs_host {
         Value::Num(n) => RhsView::Scalar(n),
@@ -555,15 +610,26 @@ pub async fn materialize_rhs_nd_real(
                 strides[d] = strides[d - 1] * shape[d - 1].max(1);
             }
             if t.data.len()
-                != shape.iter().copied().fold(1usize, |acc, len| acc.saturating_mul(len.max(1)))
+                != shape
+                    .iter()
+                    .copied()
+                    .fold(1usize, |acc, len| acc.saturating_mul(len.max(1)))
             {
                 return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
             }
-            RhsView::Tensor { data: t.data, shape, strides }
+            RhsView::Tensor {
+                data: t.data,
+                shape,
+                strides,
+            }
         }
         Value::LogicalArray(la) => {
             if la.shape.len() > selection_lengths.len()
-                && la.shape.iter().skip(selection_lengths.len()).any(|&s| s != 1)
+                && la
+                    .shape
+                    .iter()
+                    .skip(selection_lengths.len())
+                    .any(|&s| s != 1)
             {
                 return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
             }
@@ -583,12 +649,23 @@ pub async fn materialize_rhs_nd_real(
                 strides[d] = strides[d - 1] * shape[d - 1].max(1);
             }
             if la.data.len()
-                != shape.iter().copied().fold(1usize, |acc, len| acc.saturating_mul(len.max(1)))
+                != shape
+                    .iter()
+                    .copied()
+                    .fold(1usize, |acc, len| acc.saturating_mul(len.max(1)))
             {
                 return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
             }
-            let data: Vec<f64> = la.data.into_iter().map(|b| if b != 0 { 1.0 } else { 0.0 }).collect();
-            RhsView::Tensor { data, shape, strides }
+            let data: Vec<f64> = la
+                .data
+                .into_iter()
+                .map(|b| if b != 0 { 1.0 } else { 0.0 })
+                .collect();
+            RhsView::Tensor {
+                data,
+                shape,
+                strides,
+            }
         }
         other => {
             return Err(mex(
@@ -610,7 +687,11 @@ pub async fn materialize_rhs_nd_real(
     loop {
         match &view {
             RhsView::Scalar(val) => out.push(*val),
-            RhsView::Tensor { data, shape, strides } => {
+            RhsView::Tensor {
+                data,
+                shape,
+                strides,
+            } => {
                 let mut rlin = 0usize;
                 for d in 0..idx.len() {
                     let rhs_len = shape[d];
@@ -623,21 +704,33 @@ pub async fn materialize_rhs_nd_real(
         let mut d = 0usize;
         while d < idx.len() {
             idx[d] += 1;
-            if idx[d] < selection_lengths[d].max(1) { break; }
+            if idx[d] < selection_lengths[d].max(1) {
+                break;
+            }
             idx[d] = 0;
             d += 1;
         }
-        if d == idx.len() { break; }
+        if d == idx.len() {
+            break;
+        }
     }
     Ok(out)
 }
 
 pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        mex("AccelerationProviderUnavailable", "No acceleration provider registered")
+        mex(
+            "AccelerationProviderUnavailable",
+            "No acceleration provider registered",
+        )
     })?;
-    let view = runmat_accelerate_api::HostTensorView { data: &t.data, shape: &t.shape };
-    let new_h = provider.upload(&view).map_err(|e| format!("reupload after slice assign: {e}"))?;
+    let view = runmat_accelerate_api::HostTensorView {
+        data: &t.data,
+        shape: &t.shape,
+    };
+    let new_h = provider
+        .upload(&view)
+        .map_err(|e| format!("reupload after slice assign: {e}"))?;
     Ok(Value::GpuTensor(new_h))
 }
 
@@ -650,7 +743,10 @@ pub async fn assign_gpu_store_slice(
     rhs: Value,
 ) -> Result<Value, RuntimeError> {
     let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        mex("AccelerationProviderUnavailable", "No acceleration provider registered")
+        mex(
+            "AccelerationProviderUnavailable",
+            "No acceleration provider registered",
+        )
     })?;
     let base_shape = handle.shape.clone();
     let selectors = build_slice_selectors(dims, colon_mask, end_mask, numeric, &base_shape).await?;
@@ -736,7 +832,9 @@ pub async fn assign_gpu_store_slice(
     } else {
         assign_tensor_slice_nd(t, dims, &selectors, rhs)?
     };
-    let Value::Tensor(updated) = updated else { unreachable!() };
+    let Value::Tensor(updated) = updated else {
+        unreachable!()
+    };
     upload_tensor_to_gpu(&updated)
 }
 
@@ -775,7 +873,11 @@ where
                 raw_sp
             };
             rp_iter += 1;
-            let step_i = if sp >= 0.0 { sp as i64 } else { -(sp.abs() as i64) };
+            let step_i = if sp >= 0.0 {
+                sp as i64
+            } else {
+                -(sp.abs() as i64)
+            };
             let end_i = resolve_end(dim_len, &range_end_exprs[pos]).await?;
             if step_i == 0 {
                 return Err(mex("IndexStepZero", "Index step cannot be zero"));
@@ -784,13 +886,17 @@ where
             let mut cur = st as i64;
             if step_i > 0 {
                 while cur <= end_i {
-                    if cur < 1 || cur > dim_len as i64 { break; }
+                    if cur < 1 || cur > dim_len as i64 {
+                        break;
+                    }
                     vals.push(cur as usize);
                     cur += step_i;
                 }
             } else {
                 while cur >= end_i {
-                    if cur < 1 || cur > dim_len as i64 { break; }
+                    if cur < 1 || cur > dim_len as i64 {
+                        break;
+                    }
                     vals.push(cur as usize);
                     cur += step_i;
                 }
@@ -805,13 +911,17 @@ where
         } else if is_end {
             selectors.push(SliceSelector::Scalar(*shape.get(d).unwrap_or(&1)));
         } else {
-            let v = numeric.get(num_iter).ok_or_else(|| mex("MissingNumericIndex", "missing numeric index"))?;
+            let v = numeric
+                .get(num_iter)
+                .ok_or_else(|| mex("MissingNumericIndex", "missing numeric index"))?;
             num_iter += 1;
             let dim_len = *shape.get(d).unwrap_or(&1);
-            selectors.push(match crate::indexing::selectors::selector_from_value_dim(v, dim_len).await? {
-                SliceSelector::LinearIndices { values, .. } => SliceSelector::Indices(values),
-                other => other,
-            });
+            selectors.push(
+                match crate::indexing::selectors::selector_from_value_dim(v, dim_len).await? {
+                    SliceSelector::LinearIndices { values, .. } => SliceSelector::Indices(values),
+                    other => other,
+                },
+            );
         }
     }
     Ok(selectors)

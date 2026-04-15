@@ -1,5 +1,5 @@
-use crate::call::user::try_builtin_fallback_single;
 use crate::bytecode::UserFunction;
+use crate::call::user::try_builtin_fallback_single;
 use runmat_builtins::{Closure, Value};
 use runmat_runtime::RuntimeError;
 use std::collections::HashMap;

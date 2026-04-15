@@ -1,12 +1,14 @@
+use crate::bytecode::{EndExpr, UserFunction};
+use crate::indexing::end_expr as idx_end_expr;
 use crate::indexing::read_linear as idx_read_linear;
 use crate::indexing::read_slice as idx_read_slice;
-use crate::indexing::end_expr as idx_end_expr;
 use crate::indexing::selectors as idx_selectors;
-use crate::indexing::selectors::{build_slice_plan, build_slice_selectors, selector_from_value_dim, SliceSelector};
 use crate::indexing::selectors::index_scalar_from_value;
+use crate::indexing::selectors::{
+    build_slice_plan, build_slice_selectors, selector_from_value_dim, SliceSelector,
+};
 use crate::indexing::write_linear as idx_write_linear;
 use crate::indexing::write_slice as idx_write_slice;
-use crate::bytecode::{EndExpr, UserFunction};
 use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
 use std::collections::HashMap;
@@ -35,7 +37,12 @@ struct IndexContext<'a> {
 
 impl<'a> IndexContext<'a> {
     fn new(dims: usize, colon_mask: u32, end_mask: u32, base_shape: &'a [usize]) -> Self {
-        Self { dims, colon_mask, end_mask, base_shape }
+        Self {
+            dims,
+            colon_mask,
+            end_mask,
+            base_shape,
+        }
     }
 
     fn dim_len_for_numeric_position(&self, numeric_position: usize) -> usize {
@@ -85,7 +92,8 @@ where
         for (position, end_expr) in end_offsets {
             if let Some(value) = adjusted.get_mut(*position) {
                 let dim_len = ctx.dim_len_for_numeric_position(*position);
-                let idx_val = resolve_range_end_index(dim_len, end_expr, vars, functions, call_user).await?;
+                let idx_val =
+                    resolve_range_end_index(dim_len, end_expr, vars, functions, call_user).await?;
                 *value = Value::Num(idx_val as f64);
             }
         }
@@ -131,24 +139,30 @@ where
             match expr {
                 EndExpr::End => Ok(end_value),
                 EndExpr::Const(v) => Ok(*v),
-                EndExpr::Var(i) => idx_end_expr::value_to_f64(
-                    vars.get(*i).ok_or_else(|| {
-                        crate::interpreter::errors::mex(
-                            "MissingNumericIndex",
-                            "missing variable for end expression",
-                        )
-                    })?,
-                )
-                .map_err(|_| crate::interpreter::errors::mex("UnsupportedIndexType", "end expression must be numeric")),
+                EndExpr::Var(i) => idx_end_expr::value_to_f64(vars.get(*i).ok_or_else(|| {
+                    crate::interpreter::errors::mex(
+                        "MissingNumericIndex",
+                        "missing variable for end expression",
+                    )
+                })?)
+                .map_err(|_| {
+                    crate::interpreter::errors::mex(
+                        "UnsupportedIndexType",
+                        "end expression must be numeric",
+                    )
+                }),
                 EndExpr::Call(name, args) => {
                     let mut argv: Vec<Value> = Vec::with_capacity(args.len());
                     for a in args {
-                        let val = eval_end_expr_value(a, end_value, vars, functions, call_user).await?;
+                        let val =
+                            eval_end_expr_value(a, end_value, vars, functions, call_user).await?;
                         argv.push(Value::Num(val));
                     }
                     let v = match runmat_runtime::call_builtin_async(name, &argv).await {
                         Ok(v) => v,
-                        Err(_) if functions.contains_key(name) => call_user(name, argv, functions, vars).await?,
+                        Err(_) if functions.contains_key(name) => {
+                            call_user(name, argv, functions, vars).await?
+                        }
                         Err(_) => {
                             return Err(crate::interpreter::errors::mex(
                                 "UndefinedFunction",
@@ -156,28 +170,82 @@ where
                             ))
                         }
                     };
-                    idx_end_expr::value_to_f64(&v)
-                        .map_err(|_| crate::interpreter::errors::mex("UnsupportedIndexType", "end call must return scalar"))
+                    idx_end_expr::value_to_f64(&v).map_err(|_| {
+                        crate::interpreter::errors::mex(
+                            "UnsupportedIndexType",
+                            "end call must return scalar",
+                        )
+                    })
                 }
-                EndExpr::Add(a, b) => Ok(eval_end_expr_value(a, end_value, vars, functions, call_user).await? + eval_end_expr_value(b, end_value, vars, functions, call_user).await?),
-                EndExpr::Sub(a, b) => Ok(eval_end_expr_value(a, end_value, vars, functions, call_user).await? - eval_end_expr_value(b, end_value, vars, functions, call_user).await?),
-                EndExpr::Mul(a, b) => Ok(eval_end_expr_value(a, end_value, vars, functions, call_user).await? * eval_end_expr_value(b, end_value, vars, functions, call_user).await?),
+                EndExpr::Add(a, b) => Ok(eval_end_expr_value(
+                    a, end_value, vars, functions, call_user,
+                )
+                .await?
+                    + eval_end_expr_value(b, end_value, vars, functions, call_user).await?),
+                EndExpr::Sub(a, b) => Ok(eval_end_expr_value(
+                    a, end_value, vars, functions, call_user,
+                )
+                .await?
+                    - eval_end_expr_value(b, end_value, vars, functions, call_user).await?),
+                EndExpr::Mul(a, b) => Ok(eval_end_expr_value(
+                    a, end_value, vars, functions, call_user,
+                )
+                .await?
+                    * eval_end_expr_value(b, end_value, vars, functions, call_user).await?),
                 EndExpr::Div(a, b) => {
-                    let denom = eval_end_expr_value(b, end_value, vars, functions, call_user).await?;
-                    if denom == 0.0 { return Err(crate::interpreter::errors::mex("IndexOutOfBounds", "Index out of bounds")); }
-                    Ok(eval_end_expr_value(a, end_value, vars, functions, call_user).await? / denom)
+                    let denom =
+                        eval_end_expr_value(b, end_value, vars, functions, call_user).await?;
+                    if denom == 0.0 {
+                        return Err(crate::interpreter::errors::mex(
+                            "IndexOutOfBounds",
+                            "Index out of bounds",
+                        ));
+                    }
+                    Ok(
+                        eval_end_expr_value(a, end_value, vars, functions, call_user).await?
+                            / denom,
+                    )
                 }
                 EndExpr::LeftDiv(a, b) => {
-                    let denom = eval_end_expr_value(a, end_value, vars, functions, call_user).await?;
-                    if denom == 0.0 { return Err(crate::interpreter::errors::mex("IndexOutOfBounds", "Index out of bounds")); }
-                    Ok(eval_end_expr_value(b, end_value, vars, functions, call_user).await? / denom)
+                    let denom =
+                        eval_end_expr_value(a, end_value, vars, functions, call_user).await?;
+                    if denom == 0.0 {
+                        return Err(crate::interpreter::errors::mex(
+                            "IndexOutOfBounds",
+                            "Index out of bounds",
+                        ));
+                    }
+                    Ok(
+                        eval_end_expr_value(b, end_value, vars, functions, call_user).await?
+                            / denom,
+                    )
                 }
-                EndExpr::Pow(a, b) => Ok(eval_end_expr_value(a, end_value, vars, functions, call_user).await?.powf(eval_end_expr_value(b, end_value, vars, functions, call_user).await?)),
-                EndExpr::Neg(a) => Ok(-eval_end_expr_value(a, end_value, vars, functions, call_user).await?),
-                EndExpr::Pos(a) => Ok(eval_end_expr_value(a, end_value, vars, functions, call_user).await?),
-                EndExpr::Floor(a) => Ok(eval_end_expr_value(a, end_value, vars, functions, call_user).await?.floor()),
-                EndExpr::Ceil(a) => Ok(eval_end_expr_value(a, end_value, vars, functions, call_user).await?.ceil()),
-                EndExpr::Round(a) => Ok(eval_end_expr_value(a, end_value, vars, functions, call_user).await?.round()),
+                EndExpr::Pow(a, b) => Ok(eval_end_expr_value(
+                    a, end_value, vars, functions, call_user,
+                )
+                .await?
+                .powf(eval_end_expr_value(b, end_value, vars, functions, call_user).await?)),
+                EndExpr::Neg(a) => {
+                    Ok(-eval_end_expr_value(a, end_value, vars, functions, call_user).await?)
+                }
+                EndExpr::Pos(a) => {
+                    Ok(eval_end_expr_value(a, end_value, vars, functions, call_user).await?)
+                }
+                EndExpr::Floor(a) => Ok(eval_end_expr_value(
+                    a, end_value, vars, functions, call_user,
+                )
+                .await?
+                .floor()),
+                EndExpr::Ceil(a) => Ok(eval_end_expr_value(
+                    a, end_value, vars, functions, call_user,
+                )
+                .await?
+                .ceil()),
+                EndExpr::Round(a) => Ok(eval_end_expr_value(
+                    a, end_value, vars, functions, call_user,
+                )
+                .await?
+                .round()),
                 EndExpr::Fix(a) => {
                     let v = eval_end_expr_value(a, end_value, vars, functions, call_user).await?;
                     Ok(if v >= 0.0 { v.floor() } else { v.ceil() })
@@ -186,7 +254,11 @@ where
         })
     }
 
-    Ok(eval_end_expr_value(end_expr, dim_len as f64, vars, functions, call_user).await?.floor() as i64)
+    Ok(
+        eval_end_expr_value(end_expr, dim_len as f64, vars, functions, call_user)
+            .await?
+            .floor() as i64,
+    )
 }
 
 fn encode_end_expr_value(expr: &EndExpr) -> Result<Value, RuntimeError> {
@@ -202,29 +274,85 @@ fn encode_end_expr_value(expr: &EndExpr) -> Result<Value, RuntimeError> {
         EndExpr::Const(v) => Ok(Value::Num(*v)),
         EndExpr::Var(i) => Ok(Value::String(format!("var:{i}"))),
         EndExpr::Call(name, args) => {
-            let mut items = vec![Value::String("call".to_string()), Value::String(name.clone())];
-            for a in args { items.push(encode_end_expr_value(a)?); }
+            let mut items = vec![
+                Value::String("call".to_string()),
+                Value::String(name.clone()),
+            ];
+            for a in args {
+                items.push(encode_end_expr_value(a)?);
+            }
             mk_cell(items)
         }
-        EndExpr::Add(a, b) => mk_cell(vec![Value::String("+".to_string()), encode_end_expr_value(a)?, encode_end_expr_value(b)?]),
-        EndExpr::Sub(a, b) => mk_cell(vec![Value::String("-".to_string()), encode_end_expr_value(a)?, encode_end_expr_value(b)?]),
-        EndExpr::Mul(a, b) => mk_cell(vec![Value::String("*".to_string()), encode_end_expr_value(a)?, encode_end_expr_value(b)?]),
-        EndExpr::Div(a, b) => mk_cell(vec![Value::String("/".to_string()), encode_end_expr_value(a)?, encode_end_expr_value(b)?]),
-        EndExpr::LeftDiv(a, b) => mk_cell(vec![Value::String("\\".to_string()), encode_end_expr_value(a)?, encode_end_expr_value(b)?]),
-        EndExpr::Pow(a, b) => mk_cell(vec![Value::String("^".to_string()), encode_end_expr_value(a)?, encode_end_expr_value(b)?]),
-        EndExpr::Neg(a) => mk_cell(vec![Value::String("neg".to_string()), encode_end_expr_value(a)?]),
-        EndExpr::Pos(a) => mk_cell(vec![Value::String("pos".to_string()), encode_end_expr_value(a)?]),
-        EndExpr::Floor(a) => mk_cell(vec![Value::String("floor".to_string()), encode_end_expr_value(a)?]),
-        EndExpr::Ceil(a) => mk_cell(vec![Value::String("ceil".to_string()), encode_end_expr_value(a)?]),
-        EndExpr::Round(a) => mk_cell(vec![Value::String("round".to_string()), encode_end_expr_value(a)?]),
-        EndExpr::Fix(a) => mk_cell(vec![Value::String("fix".to_string()), encode_end_expr_value(a)?]),
+        EndExpr::Add(a, b) => mk_cell(vec![
+            Value::String("+".to_string()),
+            encode_end_expr_value(a)?,
+            encode_end_expr_value(b)?,
+        ]),
+        EndExpr::Sub(a, b) => mk_cell(vec![
+            Value::String("-".to_string()),
+            encode_end_expr_value(a)?,
+            encode_end_expr_value(b)?,
+        ]),
+        EndExpr::Mul(a, b) => mk_cell(vec![
+            Value::String("*".to_string()),
+            encode_end_expr_value(a)?,
+            encode_end_expr_value(b)?,
+        ]),
+        EndExpr::Div(a, b) => mk_cell(vec![
+            Value::String("/".to_string()),
+            encode_end_expr_value(a)?,
+            encode_end_expr_value(b)?,
+        ]),
+        EndExpr::LeftDiv(a, b) => mk_cell(vec![
+            Value::String("\\".to_string()),
+            encode_end_expr_value(a)?,
+            encode_end_expr_value(b)?,
+        ]),
+        EndExpr::Pow(a, b) => mk_cell(vec![
+            Value::String("^".to_string()),
+            encode_end_expr_value(a)?,
+            encode_end_expr_value(b)?,
+        ]),
+        EndExpr::Neg(a) => mk_cell(vec![
+            Value::String("neg".to_string()),
+            encode_end_expr_value(a)?,
+        ]),
+        EndExpr::Pos(a) => mk_cell(vec![
+            Value::String("pos".to_string()),
+            encode_end_expr_value(a)?,
+        ]),
+        EndExpr::Floor(a) => mk_cell(vec![
+            Value::String("floor".to_string()),
+            encode_end_expr_value(a)?,
+        ]),
+        EndExpr::Ceil(a) => mk_cell(vec![
+            Value::String("ceil".to_string()),
+            encode_end_expr_value(a)?,
+        ]),
+        EndExpr::Round(a) => mk_cell(vec![
+            Value::String("round".to_string()),
+            encode_end_expr_value(a)?,
+        ]),
+        EndExpr::Fix(a) => mk_cell(vec![
+            Value::String("fix".to_string()),
+            encode_end_expr_value(a)?,
+        ]),
     }
 }
 
-fn build_end_range_descriptor(start: Value, step: Value, end_expr: &EndExpr) -> Result<Value, RuntimeError> {
+fn build_end_range_descriptor(
+    start: Value,
+    step: Value,
+    end_expr: &EndExpr,
+) -> Result<Value, RuntimeError> {
     let encoded_end = encode_end_expr_value(end_expr)?;
     let cell = runmat_builtins::CellArray::new(
-        vec![start, step, Value::String("end_expr".to_string()), encoded_end],
+        vec![
+            start,
+            step,
+            Value::String("end_expr".to_string()),
+            encoded_end,
+        ],
         1,
         4,
     )
@@ -243,18 +371,20 @@ pub async fn dispatch_indexing<F>(
 ) -> Result<bool, RuntimeError>
 where
     F: for<'b> Fn(
-        &'b str,
-        Vec<Value>,
-        &'b HashMap<String, UserFunction>,
-        &'b Vec<Value>,
-    ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'b>> + Copy,
+            &'b str,
+            Vec<Value>,
+            &'b HashMap<String, UserFunction>,
+            &'b Vec<Value>,
+        ) -> Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'b>>
+        + Copy,
 {
     match instr {
         crate::bytecode::Instr::Index(num_indices) => {
             let numeric = idx_read_linear::collect_linear_indices(stack, *num_indices).await?;
-            let base = stack
-                .pop()
-                .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?;
+            let base = stack.pop().ok_or(crate::interpreter::errors::mex(
+                "StackUnderflow",
+                "stack underflow",
+            ))?;
             match &base {
                 Value::Object(_) | Value::HandleObject(_) => {
                     let cell = idx_read_linear::build_object_subsref_cell(&numeric)?;
@@ -275,21 +405,26 @@ where
         crate::bytecode::Instr::IndexCell(num_indices) => {
             let mut indices = Vec::with_capacity(*num_indices);
             for _ in 0..*num_indices {
-                let v: f64 = (&stack
-                    .pop()
-                    .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?)
+                let v: f64 = (&stack.pop().ok_or(crate::interpreter::errors::mex(
+                    "StackUnderflow",
+                    "stack underflow",
+                ))?)
                     .try_into()?;
                 indices.push(v as usize);
             }
             indices.reverse();
-            let base = stack
-                .pop()
-                .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?;
+            let base = stack.pop().ok_or(crate::interpreter::errors::mex(
+                "StackUnderflow",
+                "stack underflow",
+            ))?;
             match base {
                 Value::Object(obj) => {
                     let cell = runmat_runtime::call_builtin_async(
                         "__make_cell",
-                        &indices.iter().map(|n| Value::Num(*n as f64)).collect::<Vec<_>>(),
+                        &indices
+                            .iter()
+                            .map(|n| Value::Num(*n as f64))
+                            .collect::<Vec<_>>(),
                     )
                     .await?;
                     let args = vec![
@@ -303,7 +438,10 @@ where
                 Value::HandleObject(handle) => {
                     let cell = runmat_runtime::call_builtin_async(
                         "__make_cell",
-                        &indices.iter().map(|n| Value::Num(*n as f64)).collect::<Vec<_>>(),
+                        &indices
+                            .iter()
+                            .map(|n| Value::Num(*n as f64))
+                            .collect::<Vec<_>>(),
                     )
                     .await?;
                     let args = vec![
@@ -328,17 +466,19 @@ where
             let mut indices = Vec::with_capacity(*num_indices);
             if *num_indices > 0 {
                 for _ in 0..*num_indices {
-                    let v: f64 = (&stack
-                        .pop()
-                        .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?)
+                    let v: f64 = (&stack.pop().ok_or(crate::interpreter::errors::mex(
+                        "StackUnderflow",
+                        "stack underflow",
+                    ))?)
                         .try_into()?;
                     indices.push(v as usize);
                 }
                 indices.reverse();
             }
-            let base = stack
-                .pop()
-                .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?;
+            let base = stack.pop().ok_or(crate::interpreter::errors::mex(
+                "StackUnderflow",
+                "stack underflow",
+            ))?;
             match base {
                 Value::Cell(ca) => {
                     let values = crate::ops::cells::expand_cell_values(&ca, &indices, *out_count)?;
@@ -349,7 +489,10 @@ where
                 Value::Object(obj) => {
                     let cell = runmat_runtime::call_builtin_async(
                         "__make_cell",
-                        &indices.iter().map(|n| Value::Num(*n as f64)).collect::<Vec<_>>(),
+                        &indices
+                            .iter()
+                            .map(|n| Value::Num(*n as f64))
+                            .collect::<Vec<_>>(),
                     )
                     .await?;
                     let args = vec![
@@ -367,7 +510,10 @@ where
                 Value::HandleObject(handle) => {
                     let cell = runmat_runtime::call_builtin_async(
                         "__make_cell",
-                        &indices.iter().map(|n| Value::Num(*n as f64)).collect::<Vec<_>>(),
+                        &indices
+                            .iter()
+                            .map(|n| Value::Num(*n as f64))
+                            .collect::<Vec<_>>(),
                     )
                     .await?;
                     let args = vec![
@@ -392,21 +538,24 @@ where
             Ok(true)
         }
         crate::bytecode::Instr::StoreIndexCell(num_indices) => {
-            let rhs = stack
-                .pop()
-                .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?;
+            let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
+                "StackUnderflow",
+                "stack underflow",
+            ))?;
             let mut indices = Vec::new();
             for _ in 0..*num_indices {
-                let v: f64 = (&stack
-                    .pop()
-                    .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?)
+                let v: f64 = (&stack.pop().ok_or(crate::interpreter::errors::mex(
+                    "StackUnderflow",
+                    "stack underflow",
+                ))?)
                     .try_into()?;
                 indices.push(v as usize);
             }
             indices.reverse();
-            let base = stack
-                .pop()
-                .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?;
+            let base = stack.pop().ok_or(crate::interpreter::errors::mex(
+                "StackUnderflow",
+                "stack underflow",
+            ))?;
             match base {
                 Value::Object(obj) => {
                     let cell = runmat_builtins::CellArray::new(
@@ -441,9 +590,10 @@ where
                     stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
                 }
                 Value::Cell(ca) => {
-                    let updated = crate::ops::cells::assign_cell_value(ca, &indices, rhs, |oldv, newv| {
-                        runmat_gc::gc_record_write(oldv, newv);
-                    })?;
+                    let updated =
+                        crate::ops::cells::assign_cell_value(ca, &indices, rhs, |oldv, newv| {
+                            runmat_gc::gc_record_write(oldv, newv);
+                        })?;
                     stack.push(updated);
                 }
                 _ => {
@@ -479,11 +629,16 @@ where
                         _ => "Other",
                     })
                     .collect::<Vec<_>>();
-                log::debug!("[vm] StoreIndex pre-snap pc={} stack_top_types={:?}", pc, snap);
+                log::debug!(
+                    "[vm] StoreIndex pre-snap pc={} stack_top_types={:?}",
+                    pc,
+                    snap
+                );
             }
-            let rhs = stack
-                .pop()
-                .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?;
+            let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
+                "StackUnderflow",
+                "stack underflow",
+            ))?;
             let assignable = |v: &Value| {
                 matches!(
                     v,
@@ -564,7 +719,9 @@ where
                         let (j_idx, j_val) = numeric_above[w];
                         let (i_idx, i_val) = numeric_above[w - 1];
                         let fits = match (rows_opt, cols_opt) {
-                            (Some(r), Some(c)) => i_val >= 1 && i_val <= r && j_val >= 1 && j_val <= c,
+                            (Some(r), Some(c)) => {
+                                i_val >= 1 && i_val <= r && j_val >= 1 && j_val <= c
+                            }
                             _ => true,
                         };
                         if fits {
@@ -595,7 +752,10 @@ where
                 Value::Object(obj) => {
                     let cell = runmat_runtime::call_builtin_async(
                         "__make_cell",
-                        &indices.iter().map(|n| Value::Num(*n as f64)).collect::<Vec<_>>(),
+                        &indices
+                            .iter()
+                            .map(|n| Value::Num(*n as f64))
+                            .collect::<Vec<_>>(),
                     )
                     .await?;
                     let args = vec![
@@ -610,7 +770,10 @@ where
                 Value::HandleObject(handle) => {
                     let cell = runmat_runtime::call_builtin_async(
                         "__make_cell",
-                        &indices.iter().map(|n| Value::Num(*n as f64)).collect::<Vec<_>>(),
+                        &indices
+                            .iter()
+                            .map(|n| Value::Num(*n as f64))
+                            .collect::<Vec<_>>(),
                     )
                     .await?;
                     let args = vec![
@@ -622,9 +785,15 @@ where
                     ];
                     stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
                 }
-                Value::Tensor(t) => stack.push(idx_write_linear::assign_tensor_scalar(t, &indices, &rhs).await?),
-                Value::ComplexTensor(t) => stack.push(idx_write_linear::assign_complex_scalar(t, &indices, &rhs).await?),
-                Value::GpuTensor(h) => stack.push(idx_write_linear::assign_gpu_scalar(&h, &indices, &rhs).await?),
+                Value::Tensor(t) => {
+                    stack.push(idx_write_linear::assign_tensor_scalar(t, &indices, &rhs).await?)
+                }
+                Value::ComplexTensor(t) => {
+                    stack.push(idx_write_linear::assign_complex_scalar(t, &indices, &rhs).await?)
+                }
+                Value::GpuTensor(h) => {
+                    stack.push(idx_write_linear::assign_gpu_scalar(&h, &indices, &rhs).await?)
+                }
                 _ => {
                     if std::env::var("RUNMAT_DEBUG_INDEX").as_deref() == Ok("1") {
                         let kind = |v: &Value| match v {
@@ -654,21 +823,25 @@ where
         crate::bytecode::Instr::IndexSlice(dims, numeric_count, colon_mask, end_mask) => {
             let mut numeric: Vec<Value> = Vec::with_capacity(*numeric_count);
             for _ in 0..*numeric_count {
-                numeric.push(
-                    stack
-                        .pop()
-                        .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?,
-                );
+                numeric.push(stack.pop().ok_or(crate::interpreter::errors::mex(
+                    "StackUnderflow",
+                    "stack underflow",
+                ))?);
             }
             numeric.reverse();
-            let mut base = stack
-                .pop()
-                .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?;
+            let mut base = stack.pop().ok_or(crate::interpreter::errors::mex(
+                "StackUnderflow",
+                "stack underflow",
+            ))?;
             let mut logical_base = false;
             base = match base {
                 Value::LogicalArray(la) => {
                     logical_base = true;
-                    let data: Vec<f64> = la.data.iter().map(|&b| if b != 0 { 1.0 } else { 0.0 }).collect();
+                    let data: Vec<f64> = la
+                        .data
+                        .iter()
+                        .map(|&b| if b != 0 { 1.0 } else { 0.0 })
+                        .collect();
                     let tensor = runmat_builtins::Tensor::new(data, la.shape.clone())
                         .map_err(|e| format!("slice: {e}"))?;
                     Value::Tensor(tensor)
@@ -676,34 +849,63 @@ where
                 other => other,
             };
             match base {
-                Value::Object(obj) => stack.push(idx_read_slice::object_subsref_paren(Value::Object(obj), &numeric).await?),
-                Value::HandleObject(handle) => {
-                    stack.push(idx_read_slice::object_subsref_paren(Value::HandleObject(handle), &numeric).await?)
-                }
+                Value::Object(obj) => stack.push(
+                    idx_read_slice::object_subsref_paren(Value::Object(obj), &numeric).await?,
+                ),
+                Value::HandleObject(handle) => stack.push(
+                    idx_read_slice::object_subsref_paren(Value::HandleObject(handle), &numeric)
+                        .await?,
+                ),
                 Value::Tensor(t) => {
                     if *dims == 1 {
-                        stack.push(idx_read_slice::read_tensor_slice_1d(&t, *colon_mask, *end_mask, &numeric).await?)
+                        stack.push(
+                            idx_read_slice::read_tensor_slice_1d(
+                                &t,
+                                *colon_mask,
+                                *end_mask,
+                                &numeric,
+                            )
+                            .await?,
+                        )
                     } else {
-                        stack.push(idx_read_slice::read_tensor_slice_nd(&t, *dims, *colon_mask, *end_mask, &numeric).await?)
+                        stack.push(
+                            idx_read_slice::read_tensor_slice_nd(
+                                &t,
+                                *dims,
+                                *colon_mask,
+                                *end_mask,
+                                &numeric,
+                            )
+                            .await?,
+                        )
                     }
                 }
-                Value::ComplexTensor(ct) => {
-                    stack.push(
-                        idx_read_slice::read_complex_slice(&ct, *dims, *colon_mask, *end_mask, &numeric)
-                            .await
-                            .map_err(|e| format!("slice: {e}"))?,
+                Value::ComplexTensor(ct) => stack.push(
+                    idx_read_slice::read_complex_slice(
+                        &ct,
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        &numeric,
                     )
-                }
-                Value::GpuTensor(handle) => {
-                    stack.push(
-                        idx_read_slice::read_gpu_slice(&handle, *dims, *colon_mask, *end_mask, &numeric)
-                            .await
-                            .map_err(|e| format!("slice: {e}"))?,
+                    .await
+                    .map_err(|e| format!("slice: {e}"))?,
+                ),
+                Value::GpuTensor(handle) => stack.push(
+                    idx_read_slice::read_gpu_slice(
+                        &handle,
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        &numeric,
                     )
-                }
-                Value::StringArray(sa) => {
-                    stack.push(idx_read_slice::read_string_slice(&sa, *dims, *colon_mask, *end_mask, &numeric).await?)
-                }
+                    .await
+                    .map_err(|e| format!("slice: {e}"))?,
+                ),
+                Value::StringArray(sa) => stack.push(
+                    idx_read_slice::read_string_slice(&sa, *dims, *colon_mask, *end_mask, &numeric)
+                        .await?,
+                ),
                 other => {
                     if *dims == 1 {
                         let is_colon = (*colon_mask & 1u32) != 0;
@@ -725,7 +927,12 @@ where
                         };
                         let v = runmat_runtime::perform_indexing(&other, &[idx_val])
                             .await
-                            .map_err(|_| crate::interpreter::errors::mex("SliceNonTensor", "Slicing only supported on tensors"))?;
+                            .map_err(|_| {
+                                crate::interpreter::errors::mex(
+                                    "SliceNonTensor",
+                                    "Slicing only supported on tensors",
+                                )
+                            })?;
                         stack.push(v);
                     } else {
                         return Err(crate::interpreter::errors::mex(
@@ -736,17 +943,28 @@ where
                 }
             }
             if logical_base {
-                let result = stack
-                    .pop()
-                    .ok_or(crate::interpreter::errors::mex("SliceNonTensor", "logical slice missing result"))?;
+                let result = stack.pop().ok_or(crate::interpreter::errors::mex(
+                    "SliceNonTensor",
+                    "logical slice missing result",
+                ))?;
                 let converted = match result {
                     Value::Tensor(t) => {
-                        let logical_data: Vec<u8> = t.data.iter().map(|&v| if v != 0.0 { 1 } else { 0 }).collect();
+                        let logical_data: Vec<u8> = t
+                            .data
+                            .iter()
+                            .map(|&v| if v != 0.0 { 1 } else { 0 })
+                            .collect();
                         if logical_data.len() <= 1 {
                             Value::Bool(logical_data.first().copied().unwrap_or(0) != 0)
                         } else {
-                            let logical = runmat_builtins::LogicalArray::new(logical_data, t.shape.clone())
-                                .map_err(|e| crate::interpreter::errors::mex("SliceNonTensor", &format!("slice: {e}")))?;
+                            let logical =
+                                runmat_builtins::LogicalArray::new(logical_data, t.shape.clone())
+                                    .map_err(|e| {
+                                    crate::interpreter::errors::mex(
+                                        "SliceNonTensor",
+                                        &format!("slice: {e}"),
+                                    )
+                                })?;
                             Value::LogicalArray(logical)
                         }
                     }
@@ -759,39 +977,66 @@ where
             Ok(true)
         }
         crate::bytecode::Instr::StoreSlice(dims, numeric_count, colon_mask, end_mask) => {
-            let rhs = stack
-                .pop()
-                .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?;
+            let rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
+                "StackUnderflow",
+                "stack underflow",
+            ))?;
             let mut numeric: Vec<Value> = Vec::with_capacity(*numeric_count);
             for _ in 0..*numeric_count {
-                numeric.push(
-                    stack
-                        .pop()
-                        .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?,
-                );
+                numeric.push(stack.pop().ok_or(crate::interpreter::errors::mex(
+                    "StackUnderflow",
+                    "stack underflow",
+                ))?);
             }
             numeric.reverse();
-            let base = stack
-                .pop()
-                .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?;
+            let base = stack.pop().ok_or(crate::interpreter::errors::mex(
+                "StackUnderflow",
+                "stack underflow",
+            ))?;
             match base {
                 Value::Object(obj) => {
-                    match idx_write_slice::object_subsasgn_paren(Value::Object(obj.clone()), &numeric, rhs.clone()).await {
+                    match idx_write_slice::object_subsasgn_paren(
+                        Value::Object(obj.clone()),
+                        &numeric,
+                        rhs.clone(),
+                    )
+                    .await
+                    {
                         Ok(v) => stack.push(v),
                         Err(_e) => {
                             let qualified = format!("{}.subsasgn", obj.class_name);
                             let cell = idx_write_slice::build_subsasgn_paren_cell(&numeric)?;
-                            let args = vec![Value::Object(obj), Value::String("()".to_string()), cell, rhs];
-                            stack.push(runmat_runtime::call_builtin_async(&qualified, &args).await?);
+                            let args = vec![
+                                Value::Object(obj),
+                                Value::String("()".to_string()),
+                                cell,
+                                rhs,
+                            ];
+                            stack
+                                .push(runmat_runtime::call_builtin_async(&qualified, &args).await?);
                         }
                     }
                 }
-                Value::HandleObject(handle) => {
-                    stack.push(idx_write_slice::object_subsasgn_paren(Value::HandleObject(handle), &numeric, rhs).await?)
-                }
+                Value::HandleObject(handle) => stack.push(
+                    idx_write_slice::object_subsasgn_paren(
+                        Value::HandleObject(handle),
+                        &numeric,
+                        rhs,
+                    )
+                    .await?,
+                ),
                 Value::Tensor(t) => {
                     if *dims == 1 {
-                        stack.push(idx_write_slice::assign_tensor_slice_1d(t, *colon_mask, *end_mask, &numeric, rhs).await?)
+                        stack.push(
+                            idx_write_slice::assign_tensor_slice_1d(
+                                t,
+                                *colon_mask,
+                                *end_mask,
+                                &numeric,
+                                rhs,
+                            )
+                            .await?,
+                        )
                     } else {
                         let mut selectors: Vec<SliceSelector> = Vec::with_capacity(*dims);
                         let mut num_iter = 0usize;
@@ -801,36 +1046,65 @@ where
                             if is_colon {
                                 selectors.push(SliceSelector::Colon);
                             } else if is_end {
-                                selectors.push(SliceSelector::Scalar(*t.shape.get(d).unwrap_or(&1)));
+                                selectors
+                                    .push(SliceSelector::Scalar(*t.shape.get(d).unwrap_or(&1)));
                             } else {
-                                let v = numeric.get(num_iter).ok_or(crate::interpreter::errors::mex(
-                                    "MissingNumericIndex",
-                                    "missing numeric index",
-                                ))?;
+                                let v = numeric.get(num_iter).ok_or(
+                                    crate::interpreter::errors::mex(
+                                        "MissingNumericIndex",
+                                        "missing numeric index",
+                                    ),
+                                )?;
                                 num_iter += 1;
                                 let dim_len = *t.shape.get(d).unwrap_or(&1);
                                 selectors.push(selector_from_value_dim(v, dim_len).await?);
                             }
                         }
-                        let vm_selectors: Vec<_> = selectors.iter().map(|s| match s {
-                            SliceSelector::Colon => crate::indexing::selectors::SliceSelector::Colon,
-                            SliceSelector::Scalar(i) => crate::indexing::selectors::SliceSelector::Scalar(*i),
-                            SliceSelector::Indices(v) => crate::indexing::selectors::SliceSelector::Indices(v.clone()),
-                            SliceSelector::LinearIndices { values, output_shape } => crate::indexing::selectors::SliceSelector::LinearIndices {
-                                values: values.clone(),
-                                output_shape: output_shape.clone(),
-                            },
-                        }).collect();
-                        stack.push(idx_write_slice::assign_tensor_slice_nd(t, *dims, &vm_selectors, rhs)?);
+                        let vm_selectors: Vec<_> = selectors
+                            .iter()
+                            .map(|s| match s {
+                                SliceSelector::Colon => {
+                                    crate::indexing::selectors::SliceSelector::Colon
+                                }
+                                SliceSelector::Scalar(i) => {
+                                    crate::indexing::selectors::SliceSelector::Scalar(*i)
+                                }
+                                SliceSelector::Indices(v) => {
+                                    crate::indexing::selectors::SliceSelector::Indices(v.clone())
+                                }
+                                SliceSelector::LinearIndices {
+                                    values,
+                                    output_shape,
+                                } => crate::indexing::selectors::SliceSelector::LinearIndices {
+                                    values: values.clone(),
+                                    output_shape: output_shape.clone(),
+                                },
+                            })
+                            .collect();
+                        stack.push(idx_write_slice::assign_tensor_slice_nd(
+                            t,
+                            *dims,
+                            &vm_selectors,
+                            rhs,
+                        )?);
                     }
                 }
-                Value::GpuTensor(handle) => {
-                    stack.push(idx_write_slice::assign_gpu_store_slice(&handle, *dims, *colon_mask, *end_mask, &numeric, rhs).await?)
-                }
+                Value::GpuTensor(handle) => stack.push(
+                    idx_write_slice::assign_gpu_store_slice(
+                        &handle,
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        &numeric,
+                        rhs,
+                    )
+                    .await?,
+                ),
                 Value::ComplexTensor(mut ct) => {
-                    let selectors = build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &ct.shape)
-                        .await
-                        .map_err(|e| format!("slice assign: {e}"))?;
+                    let selectors =
+                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &ct.shape)
+                            .await
+                            .map_err(|e| format!("slice assign: {e}"))?;
                     let plan = build_slice_plan(&selectors, *dims, &ct.shape)
                         .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     if plan.indices.is_empty() {
@@ -843,16 +1117,18 @@ where
                         selection_lengths: plan.selection_lengths.clone(),
                         dims: plan.dims,
                     };
-                    let rhs_view = idx_write_slice::build_complex_rhs_view(&rhs, &plan.selection_lengths)
-                        .map_err(|e| format!("slice assign: {e}"))?;
+                    let rhs_view =
+                        idx_write_slice::build_complex_rhs_view(&rhs, &plan.selection_lengths)
+                            .map_err(|e| format!("slice assign: {e}"))?;
                     idx_write_slice::scatter_complex_with_plan(&mut ct, &vm_plan, &rhs_view)
                         .map_err(|e| format!("slice assign: {e}"))?;
                     stack.push(Value::ComplexTensor(ct));
                 }
                 Value::StringArray(mut sa) => {
-                    let selectors = build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &sa.shape)
-                        .await
-                        .map_err(|e| format!("slice assign: {e}"))?;
+                    let selectors =
+                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &sa.shape)
+                            .await
+                            .map_err(|e| format!("slice assign: {e}"))?;
                     let plan = build_slice_plan(&selectors, *dims, &sa.shape)
                         .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     if plan.indices.is_empty() {
@@ -865,8 +1141,9 @@ where
                         selection_lengths: plan.selection_lengths.clone(),
                         dims: plan.dims,
                     };
-                    let rhs_view = idx_write_slice::build_string_rhs_view(&rhs, &plan.selection_lengths)
-                        .map_err(|e| format!("slice assign: {e}"))?;
+                    let rhs_view =
+                        idx_write_slice::build_string_rhs_view(&rhs, &plan.selection_lengths)
+                            .map_err(|e| format!("slice assign: {e}"))?;
                     idx_write_slice::scatter_string_with_plan(&mut sa, &vm_plan, &rhs_view)
                         .map_err(|e| format!("slice assign: {e}"))?;
                     stack.push(Value::StringArray(sa));
@@ -879,7 +1156,11 @@ where
                         numeric,
                         rhs
                     );
-                    return Err("Slicing assignment only supported on tensors or string arrays".to_string().into());
+                    return Err(
+                        "Slicing assignment only supported on tensors or string arrays"
+                            .to_string()
+                            .into(),
+                    );
                 }
             }
             Ok(true)
@@ -898,59 +1179,82 @@ where
         } => {
             let mut numeric: Vec<Value> = Vec::with_capacity(*numeric_count);
             for _ in 0..*numeric_count {
-                numeric.push(
-                    stack
-                        .pop()
-                        .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?,
-                );
+                numeric.push(stack.pop().ok_or(crate::interpreter::errors::mex(
+                    "StackUnderflow",
+                    "stack underflow",
+                ))?);
             }
             numeric.reverse();
             let mut range_params: Vec<(f64, f64)> = Vec::with_capacity(range_dims.len());
             for i in (0..range_dims.len()).rev() {
                 let has_step = range_has_step[i];
                 let step = if has_step {
-                    let v = stack
-                        .pop()
-                        .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?;
-                    match v { Value::Num(n) => n, Value::Int(i) => i.to_f64(), Value::Tensor(t) if !t.data.is_empty() => t.data[0], _ => 1.0 }
-                } else { 1.0 };
-                let v = stack
-                    .pop()
-                    .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?;
-                let start = match v { Value::Num(n) => n, Value::Int(i) => i.to_f64(), Value::Tensor(t) if !t.data.is_empty() => t.data[0], _ => 1.0 };
+                    let v = stack.pop().ok_or(crate::interpreter::errors::mex(
+                        "StackUnderflow",
+                        "stack underflow",
+                    ))?;
+                    match v {
+                        Value::Num(n) => n,
+                        Value::Int(i) => i.to_f64(),
+                        Value::Tensor(t) if !t.data.is_empty() => t.data[0],
+                        _ => 1.0,
+                    }
+                } else {
+                    1.0
+                };
+                let v = stack.pop().ok_or(crate::interpreter::errors::mex(
+                    "StackUnderflow",
+                    "stack underflow",
+                ))?;
+                let start = match v {
+                    Value::Num(n) => n,
+                    Value::Int(i) => i.to_f64(),
+                    Value::Tensor(t) if !t.data.is_empty() => t.data[0],
+                    _ => 1.0,
+                };
                 range_params.push((start, step));
             }
             range_params.reverse();
-            let mut base = stack
-                .pop()
-                .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?;
+            let mut base = stack.pop().ok_or(crate::interpreter::errors::mex(
+                "StackUnderflow",
+                "stack underflow",
+            ))?;
             clear_value_residency(&base);
             if !end_numeric_exprs.is_empty() {
                 numeric = match &base {
-                    Value::GpuTensor(handle) => apply_end_offsets_to_numeric(
-                        &numeric,
-                        IndexContext::new(*dims, *colon_mask, *end_mask, &handle.shape),
-                        end_numeric_exprs,
-                        vars,
-                        functions,
-                        call_user,
-                    ).await?,
-                    Value::Tensor(t) => apply_end_offsets_to_numeric(
-                        &numeric,
-                        IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape),
-                        end_numeric_exprs,
-                        vars,
-                        functions,
-                        call_user,
-                    ).await?,
-                    Value::ComplexTensor(t) => apply_end_offsets_to_numeric(
-                        &numeric,
-                        IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape),
-                        end_numeric_exprs,
-                        vars,
-                        functions,
-                        call_user,
-                    ).await?,
+                    Value::GpuTensor(handle) => {
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(*dims, *colon_mask, *end_mask, &handle.shape),
+                            end_numeric_exprs,
+                            vars,
+                            functions,
+                            call_user,
+                        )
+                        .await?
+                    }
+                    Value::Tensor(t) => {
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape),
+                            end_numeric_exprs,
+                            vars,
+                            functions,
+                            call_user,
+                        )
+                        .await?
+                    }
+                    Value::ComplexTensor(t) => {
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape),
+                            end_numeric_exprs,
+                            vars,
+                            functions,
+                            call_user,
+                        )
+                        .await?
+                    }
                     _ => numeric,
                 };
             }
@@ -962,7 +1266,11 @@ where
                         Colon,
                         Scalar(usize),
                         Indices(Vec<usize>),
-                        Range { start: i64, step: i64, end_off: EndExpr },
+                        Range {
+                            start: i64,
+                            step: i64,
+                            end_off: EndExpr,
+                        },
                     }
                     let full_shape: Vec<usize> = if *dims == 1 {
                         vec![total_len_from_shape(&handle.shape)]
@@ -987,12 +1295,14 @@ where
                             let (raw_st, raw_sp) = range_params[rp_iter];
                             let dim_len = *full_shape.get(d).unwrap_or(&1);
                             let st = if let Some(expr) = &range_start_exprs[rp_iter] {
-                                resolve_range_end_index(dim_len, expr, &*vars, functions, call_user).await? as f64
+                                resolve_range_end_index(dim_len, expr, &*vars, functions, call_user)
+                                    .await? as f64
                             } else {
                                 raw_st
                             };
                             let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
-                                resolve_range_end_index(dim_len, expr, &*vars, functions, call_user).await? as f64
+                                resolve_range_end_index(dim_len, expr, &*vars, functions, call_user)
+                                    .await? as f64
                             } else {
                                 raw_sp
                             };
@@ -1000,19 +1310,29 @@ where
                             let off = range_end_exprs[pos].clone();
                             selectors.push(Sel::Range {
                                 start: st as i64,
-                                step: if sp >= 0.0 { sp as i64 } else { -(sp.abs() as i64) },
+                                step: if sp >= 0.0 {
+                                    sp as i64
+                                } else {
+                                    -(sp.abs() as i64)
+                                },
                                 end_off: off,
                             });
                         } else {
-                            let v = numeric.get(num_iter).ok_or(crate::interpreter::errors::mex(
-                                "MissingNumericIndex",
-                                "missing numeric index",
-                            ))?;
+                            let v =
+                                numeric
+                                    .get(num_iter)
+                                    .ok_or(crate::interpreter::errors::mex(
+                                        "MissingNumericIndex",
+                                        "missing numeric index",
+                                    ))?;
                             num_iter += 1;
                             if let Value::Int(idx_val) = v {
                                 let idx = idx_val.to_i64();
                                 if idx < 1 {
-                                    return Err(crate::interpreter::errors::mex("IndexOutOfBounds", "Index out of bounds"));
+                                    return Err(crate::interpreter::errors::mex(
+                                        "IndexOutOfBounds",
+                                        "Index out of bounds",
+                                    ));
                                 }
                                 selectors.push(Sel::Scalar(idx as usize));
                             } else {
@@ -1023,7 +1343,9 @@ where
                                         if len == dim_len {
                                             let mut vv = Vec::new();
                                             for (i, &val) in idx_t.data.iter().enumerate() {
-                                                if val != 0.0 { vv.push(i + 1); }
+                                                if val != 0.0 {
+                                                    vv.push(i + 1);
+                                                }
                                             }
                                             selectors.push(Sel::Indices(vv));
                                         } else {
@@ -1031,7 +1353,10 @@ where
                                             for &val in &idx_t.data {
                                                 let idx = val as isize;
                                                 if idx < 1 {
-                                                    return Err(crate::interpreter::errors::mex("IndexOutOfBounds", "Index out of bounds"));
+                                                    return Err(crate::interpreter::errors::mex(
+                                                        "IndexOutOfBounds",
+                                                        "Index out of bounds",
+                                                    ));
                                                 }
                                                 vv.push(idx as usize);
                                             }
@@ -1055,22 +1380,40 @@ where
                             Sel::Colon => (1..=dim_len as usize).collect(),
                             Sel::Scalar(i) => vec![*i],
                             Sel::Indices(v) => v.clone(),
-                            Sel::Range { start, step, end_off } => {
+                            Sel::Range {
+                                start,
+                                step,
+                                end_off,
+                            } => {
                                 let mut vv = Vec::new();
                                 let mut cur = *start;
-                                let end_i = resolve_range_end_index(dim_len as usize, end_off, &*vars, functions, call_user).await?;
+                                let end_i = resolve_range_end_index(
+                                    dim_len as usize,
+                                    end_off,
+                                    &*vars,
+                                    functions,
+                                    call_user,
+                                )
+                                .await?;
                                 if *step == 0 {
-                                    return Err(crate::interpreter::errors::mex("IndexStepZero", "Index step cannot be zero"));
+                                    return Err(crate::interpreter::errors::mex(
+                                        "IndexStepZero",
+                                        "Index step cannot be zero",
+                                    ));
                                 }
                                 if *step > 0 {
                                     while cur <= end_i {
-                                        if cur < 1 || cur > dim_len { break; }
+                                        if cur < 1 || cur > dim_len {
+                                            break;
+                                        }
                                         vv.push(cur as usize);
                                         cur += *step;
                                     }
                                 } else {
                                     while cur >= end_i {
-                                        if cur < 1 || cur > dim_len { break; }
+                                        if cur < 1 || cur > dim_len {
+                                            break;
+                                        }
                                         vv.push(cur as usize);
                                         cur += *step;
                                     }
@@ -1079,7 +1422,10 @@ where
                             }
                         };
                         if idxs.iter().any(|&i| i == 0 || i > dim_len as usize) {
-                            return Err(crate::interpreter::errors::mex("IndexOutOfBounds", "Index out of bounds"));
+                            return Err(crate::interpreter::errors::mex(
+                                "IndexOutOfBounds",
+                                "Index out of bounds",
+                            ));
                         }
                         per_dim_indices.push(idxs);
                     }
@@ -1105,14 +1451,22 @@ where
                         let mut d = 0usize;
                         while d < *dims {
                             idx[d] += 1;
-                            if idx[d] < per_dim_indices[d].len() { break; }
+                            if idx[d] < per_dim_indices[d].len() {
+                                break;
+                            }
                             idx[d] = 0;
                             d += 1;
                         }
-                        if d == *dims { break; }
+                        if d == *dims {
+                            break;
+                        }
                     }
                     let output_shape = if *dims == 1 {
-                        if total_out <= 1 { vec![1, 1] } else { vec![total_out, 1] }
+                        if total_out <= 1 {
+                            vec![1, 1]
+                        } else {
+                            vec![total_out, 1]
+                        }
                     } else {
                         per_dim_indices.iter().map(|v| v.len().max(1)).collect()
                     };
@@ -1134,9 +1488,15 @@ where
                 }
 
                 let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-                    crate::interpreter::errors::mex("AccelerationProviderUnavailable", "No acceleration provider registered")
+                    crate::interpreter::errors::mex(
+                        "AccelerationProviderUnavailable",
+                        "No acceleration provider registered",
+                    )
                 })?;
-                let host = provider.download(handle).await.map_err(|e| format!("slice: {e}"))?;
+                let host = provider
+                    .download(handle)
+                    .await
+                    .map_err(|e| format!("slice: {e}"))?;
                 let tensor = runmat_builtins::Tensor::new(host.data, host.shape)
                     .map_err(|e| format!("slice: {e}"))?;
                 base = Value::Tensor(tensor);
@@ -1144,36 +1504,79 @@ where
             match base {
                 Value::ComplexTensor(t) => {
                     let vm_plan = idx_read_slice::build_expr_gather_plan(
-                        *dims, *colon_mask, *end_mask, range_dims, &range_params,
-                        range_start_exprs, range_step_exprs, range_end_exprs, &numeric, &t.shape,
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        range_dims,
+                        &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        &numeric,
+                        &t.shape,
                         |dim_len, expr| {
                             let expr = expr.clone();
                             let vars_ref = &*vars;
                             let functions_ref = functions;
                             let call_user_ref = call_user;
-                            async move { resolve_range_end_index(dim_len, &expr, vars_ref, functions_ref, call_user_ref).await }
+                            async move {
+                                resolve_range_end_index(
+                                    dim_len,
+                                    &expr,
+                                    vars_ref,
+                                    functions_ref,
+                                    call_user_ref,
+                                )
+                                .await
+                            }
                         },
-                    ).await?;
-                    stack.push(idx_read_slice::read_complex_slice_from_plan(&t, &vm_plan).map_err(|e| format!("Slice error: {e}"))?);
+                    )
+                    .await?;
+                    stack.push(
+                        idx_read_slice::read_complex_slice_from_plan(&t, &vm_plan)
+                            .map_err(|e| format!("Slice error: {e}"))?,
+                    );
                 }
                 Value::Tensor(t) => {
                     let vm_plan = idx_read_slice::build_expr_gather_plan(
-                        *dims, *colon_mask, *end_mask, range_dims, &range_params,
-                        range_start_exprs, range_step_exprs, range_end_exprs, &numeric, &t.shape,
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        range_dims,
+                        &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        &numeric,
+                        &t.shape,
                         |dim_len, expr| {
                             let expr = expr.clone();
                             let vars_ref = &*vars;
                             let functions_ref = functions;
                             let call_user_ref = call_user;
-                            async move { resolve_range_end_index(dim_len, &expr, vars_ref, functions_ref, call_user_ref).await }
+                            async move {
+                                resolve_range_end_index(
+                                    dim_len,
+                                    &expr,
+                                    vars_ref,
+                                    functions_ref,
+                                    call_user_ref,
+                                )
+                                .await
+                            }
                         },
-                    ).await?;
-                    stack.push(idx_read_slice::read_tensor_slice_from_plan(&t, &vm_plan).map_err(|e| format!("Slice error: {e}"))?);
+                    )
+                    .await?;
+                    stack.push(
+                        idx_read_slice::read_tensor_slice_from_plan(&t, &vm_plan)
+                            .map_err(|e| format!("Slice error: {e}"))?,
+                    );
                 }
                 Value::StringArray(sa) => {
-                    let selectors = build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &sa.shape)
-                        .await
-                        .map_err(|e| format!("slice: {e}"))?;
+                    let selectors =
+                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &sa.shape)
+                            .await
+                            .map_err(|e| format!("slice: {e}"))?;
                     let plan = build_slice_plan(&selectors, *dims, &sa.shape)
                         .map_err(|e| map_slice_plan_error("slice", e))?;
                     let vm_plan = idx_selectors::SlicePlan {
@@ -1182,9 +1585,17 @@ where
                         selection_lengths: plan.selection_lengths.clone(),
                         dims: plan.dims,
                     };
-                    stack.push(idx_read_slice::gather_string_slice(&sa, &vm_plan).map_err(|e| format!("slice: {e}"))?);
+                    stack.push(
+                        idx_read_slice::gather_string_slice(&sa, &vm_plan)
+                            .map_err(|e| format!("slice: {e}"))?,
+                    );
                 }
-                _ => return Err(crate::interpreter::errors::mex("SliceNonTensor", "Slicing only supported on tensors")),
+                _ => {
+                    return Err(crate::interpreter::errors::mex(
+                        "SliceNonTensor",
+                        "Slicing only supported on tensors",
+                    ))
+                }
             }
             Ok(true)
         }
@@ -1200,60 +1611,133 @@ where
             range_end_exprs,
             end_numeric_exprs,
         } => {
-            let mut rhs = stack
-                .pop()
-                .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?;
+            let mut rhs = stack.pop().ok_or(crate::interpreter::errors::mex(
+                "StackUnderflow",
+                "stack underflow",
+            ))?;
             let mut range_params: Vec<(f64, f64)> = Vec::with_capacity(range_dims.len());
             for i in (0..range_dims.len()).rev() {
                 let has = range_has_step[i];
                 let step = if has {
-                    let v: f64 = (&stack
-                        .pop()
-                        .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?)
+                    let v: f64 = (&stack.pop().ok_or(crate::interpreter::errors::mex(
+                        "StackUnderflow",
+                        "stack underflow",
+                    ))?)
                         .try_into()?;
                     v
-                } else { 1.0 };
-                let st: f64 = (&stack
-                    .pop()
-                    .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?)
+                } else {
+                    1.0
+                };
+                let st: f64 = (&stack.pop().ok_or(crate::interpreter::errors::mex(
+                    "StackUnderflow",
+                    "stack underflow",
+                ))?)
                     .try_into()?;
                 range_params.push((st, step));
             }
             range_params.reverse();
             let mut numeric: Vec<Value> = Vec::with_capacity(*numeric_count);
             for _ in 0..*numeric_count {
-                numeric.push(stack.pop().ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?);
+                numeric.push(stack.pop().ok_or(crate::interpreter::errors::mex(
+                    "StackUnderflow",
+                    "stack underflow",
+                ))?);
             }
             numeric.reverse();
-            let mut base = stack.pop().ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?;
+            let mut base = stack.pop().ok_or(crate::interpreter::errors::mex(
+                "StackUnderflow",
+                "stack underflow",
+            ))?;
             clear_value_residency(&base);
-            let base_assignable = matches!(base, Value::Object(_) | Value::Tensor(_) | Value::ComplexTensor(_) | Value::GpuTensor(_));
-            if !base_assignable && matches!(rhs, Value::Object(_) | Value::Tensor(_) | Value::ComplexTensor(_) | Value::GpuTensor(_)) {
+            let base_assignable = matches!(
+                base,
+                Value::Object(_) | Value::Tensor(_) | Value::ComplexTensor(_) | Value::GpuTensor(_)
+            );
+            if !base_assignable
+                && matches!(
+                    rhs,
+                    Value::Object(_)
+                        | Value::Tensor(_)
+                        | Value::ComplexTensor(_)
+                        | Value::GpuTensor(_)
+                )
+            {
                 std::mem::swap(&mut base, &mut rhs);
             }
             if !end_numeric_exprs.is_empty() {
                 numeric = match &base {
-                    Value::GpuTensor(handle) => apply_end_offsets_to_numeric(&numeric, IndexContext::new(*dims, *colon_mask, *end_mask, &handle.shape), end_numeric_exprs, vars, functions, call_user).await?,
-                    Value::Tensor(t) => apply_end_offsets_to_numeric(&numeric, IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape), end_numeric_exprs, vars, functions, call_user).await?,
-                    Value::ComplexTensor(t) => apply_end_offsets_to_numeric(&numeric, IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape), end_numeric_exprs, vars, functions, call_user).await?,
+                    Value::GpuTensor(handle) => {
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(*dims, *colon_mask, *end_mask, &handle.shape),
+                            end_numeric_exprs,
+                            vars,
+                            functions,
+                            call_user,
+                        )
+                        .await?
+                    }
+                    Value::Tensor(t) => {
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape),
+                            end_numeric_exprs,
+                            vars,
+                            functions,
+                            call_user,
+                        )
+                        .await?
+                    }
+                    Value::ComplexTensor(t) => {
+                        apply_end_offsets_to_numeric(
+                            &numeric,
+                            IndexContext::new(*dims, *colon_mask, *end_mask, &t.shape),
+                            end_numeric_exprs,
+                            vars,
+                            functions,
+                            call_user,
+                        )
+                        .await?
+                    }
                     _ => numeric,
                 };
             }
             match base {
                 Value::ComplexTensor(mut t) => {
                     let vm_plan = idx_read_slice::build_expr_gather_plan(
-                        *dims, *colon_mask, *end_mask, range_dims, &range_params,
-                        range_start_exprs, range_step_exprs, range_end_exprs, &numeric, &t.shape,
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        range_dims,
+                        &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        &numeric,
+                        &t.shape,
                         |dim_len, expr| {
                             let expr = expr.clone();
                             let vars_ref = &*vars;
                             let functions_ref = functions;
-                            async move { resolve_range_end_index(dim_len, &expr, vars_ref, functions_ref, call_user).await }
+                            async move {
+                                resolve_range_end_index(
+                                    dim_len,
+                                    &expr,
+                                    vars_ref,
+                                    functions_ref,
+                                    call_user,
+                                )
+                                .await
+                            }
                         },
-                    ).await?;
+                    )
+                    .await?;
                     if !vm_plan.indices.is_empty() {
-                        let rhs_view = idx_write_slice::build_complex_rhs_view(&rhs, &vm_plan.selection_lengths)
-                            .map_err(|e| format!("slice assign: {e}"))?;
+                        let rhs_view = idx_write_slice::build_complex_rhs_view(
+                            &rhs,
+                            &vm_plan.selection_lengths,
+                        )
+                        .map_err(|e| format!("slice assign: {e}"))?;
                         idx_write_slice::scatter_complex_with_plan(&mut t, &vm_plan, &rhs_view)
                             .map_err(|e| format!("slice assign: {e}"))?;
                     }
@@ -1261,19 +1745,47 @@ where
                 }
                 Value::Tensor(t) => {
                     let selectors = idx_write_slice::build_expr_selectors(
-                        *dims, *colon_mask, *end_mask, range_dims, &range_params,
-                        range_start_exprs, range_step_exprs, range_end_exprs, &numeric, &t.shape,
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        range_dims,
+                        &range_params,
+                        range_start_exprs,
+                        range_step_exprs,
+                        range_end_exprs,
+                        &numeric,
+                        &t.shape,
                         |dim_len, expr| {
                             let expr = expr.clone();
                             let vars_ref = &*vars;
                             let functions_ref = functions;
-                            async move { resolve_range_end_index(dim_len, &expr, vars_ref, functions_ref, call_user).await }
+                            async move {
+                                resolve_range_end_index(
+                                    dim_len,
+                                    &expr,
+                                    vars_ref,
+                                    functions_ref,
+                                    call_user,
+                                )
+                                .await
+                            }
                         },
-                    ).await?;
-                    stack.push(idx_write_slice::assign_tensor_slice_nd(t, *dims, &selectors, rhs)?);
+                    )
+                    .await?;
+                    stack.push(idx_write_slice::assign_tensor_slice_nd(
+                        t, *dims, &selectors, rhs,
+                    )?);
                 }
                 Value::GpuTensor(h) => {
-                    let updated = idx_write_slice::assign_gpu_store_slice(&h, *dims, *colon_mask, *end_mask, &numeric, rhs).await?;
+                    let updated = idx_write_slice::assign_gpu_store_slice(
+                        &h,
+                        *dims,
+                        *colon_mask,
+                        *end_mask,
+                        &numeric,
+                        rhs,
+                    )
+                    .await?;
                     stack.push(updated);
                 }
                 Value::Object(obj) => {
@@ -1293,19 +1805,38 @@ where
                         }
                         if let Some(pos) = range_dims.iter().position(|&rd| rd == d) {
                             let (raw_st, raw_sp) = range_params[rp_iter];
-                            let st = if let Some(expr) = &range_start_exprs[rp_iter] { encode_end_expr_value(expr)? } else { Value::Num(raw_st) };
-                            let sp = if let Some(expr) = &range_step_exprs[rp_iter] { encode_end_expr_value(expr)? } else { Value::Num(raw_sp) };
+                            let st = if let Some(expr) = &range_start_exprs[rp_iter] {
+                                encode_end_expr_value(expr)?
+                            } else {
+                                Value::Num(raw_st)
+                            };
+                            let sp = if let Some(expr) = &range_step_exprs[rp_iter] {
+                                encode_end_expr_value(expr)?
+                            } else {
+                                Value::Num(raw_sp)
+                            };
                             rp_iter += 1;
                             let off = range_end_exprs[pos].clone();
                             idx_values.push(build_end_range_descriptor(st, sp, &off)?);
                         } else {
-                            let v = numeric.get(num_iter).ok_or(crate::interpreter::errors::mex("MissingNumericIndex", "missing numeric index"))?;
+                            let v =
+                                numeric
+                                    .get(num_iter)
+                                    .ok_or(crate::interpreter::errors::mex(
+                                        "MissingNumericIndex",
+                                        "missing numeric index",
+                                    ))?;
                             num_iter += 1;
                             match v {
                                 Value::Num(n) => idx_values.push(Value::Num(*n)),
                                 Value::Int(i) => idx_values.push(Value::Num(i.to_f64())),
                                 Value::Tensor(t) => idx_values.push(Value::Tensor(t.clone())),
-                                other => return Err(format!("Unsupported index type for object: {other:?}").into()),
+                                other => {
+                                    return Err(format!(
+                                        "Unsupported index type for object: {other:?}"
+                                    )
+                                    .into())
+                                }
                             }
                         }
                     }
@@ -1320,7 +1851,11 @@ where
                     ];
                     stack.push(runmat_runtime::call_builtin_async("call_method", &args).await?);
                 }
-                _ => return Err("StoreSliceExpr only supports tensors currently".to_string().into()),
+                _ => {
+                    return Err("StoreSliceExpr only supports tensors currently"
+                        .to_string()
+                        .into())
+                }
             }
             Ok(true)
         }

@@ -49,9 +49,6 @@ pub async fn accel_promote_unary(op: AutoUnaryOp, value: &Value) -> Result<Value
 }
 
 #[cfg(not(feature = "native-accel"))]
-pub async fn accel_promote_unary(
-    _op: AutoUnaryOp,
-    value: &Value,
-) -> Result<Value, RuntimeError> {
+pub async fn accel_promote_unary(_op: AutoUnaryOp, value: &Value) -> Result<Value, RuntimeError> {
     Ok(value.clone())
 }

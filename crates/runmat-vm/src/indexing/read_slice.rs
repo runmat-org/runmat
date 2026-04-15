@@ -1,8 +1,8 @@
+use crate::bytecode::EndExpr;
 use crate::indexing::selectors::{
     build_slice_plan, build_slice_selectors, index_scalar_from_value, materialize_index_value,
     SlicePlan, SliceSelector,
 };
-use crate::bytecode::EndExpr;
 use runmat_builtins::{CellArray, ComplexTensor, StringArray, Tensor, Value};
 use runmat_runtime::RuntimeError;
 use std::future::Future;
@@ -157,7 +157,8 @@ pub fn try_tensor_slice_2d_fast_path(
             if out.len() == 1 {
                 Ok(Some(Value::Num(out[0])))
             } else {
-                let tens = Tensor::new(out, vec![rows, 1]).map_err(|e| format!("Slice error: {e}"))?;
+                let tens =
+                    Tensor::new(out, vec![rows, 1]).map_err(|e| format!("Slice error: {e}"))?;
                 Ok(Some(Value::Tensor(tens)))
             }
         }
@@ -176,13 +177,15 @@ pub fn try_tensor_slice_2d_fast_path(
             if out.len() == 1 {
                 Ok(Some(Value::Num(out[0])))
             } else {
-                let tens = Tensor::new(out, vec![1, cols]).map_err(|e| format!("Slice error: {e}"))?;
+                let tens =
+                    Tensor::new(out, vec![1, cols]).map_err(|e| format!("Slice error: {e}"))?;
                 Ok(Some(Value::Tensor(tens)))
             }
         }
         (SliceSelector::Colon, SliceSelector::Indices(js)) => {
             if js.is_empty() {
-                let tens = Tensor::new(Vec::new(), vec![rows, 0]).map_err(|e| format!("Slice error: {e}"))?;
+                let tens = Tensor::new(Vec::new(), vec![rows, 0])
+                    .map_err(|e| format!("Slice error: {e}"))?;
                 Ok(Some(Value::Tensor(tens)))
             } else {
                 let mut out: Vec<f64> = Vec::with_capacity(rows * js.len());
@@ -204,7 +207,8 @@ pub fn try_tensor_slice_2d_fast_path(
         }
         (SliceSelector::Indices(is), SliceSelector::Colon) => {
             if is.is_empty() {
-                let tens = Tensor::new(Vec::new(), vec![0, cols]).map_err(|e| format!("Slice error: {e}"))?;
+                let tens = Tensor::new(Vec::new(), vec![0, cols])
+                    .map_err(|e| format!("Slice error: {e}"))?;
                 Ok(Some(Value::Tensor(tens)))
             } else {
                 let mut out: Vec<f64> = Vec::with_capacity(is.len() * cols);
@@ -236,13 +240,15 @@ pub async fn read_tensor_slice_nd(
     end_mask: u32,
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
-    let selectors = build_slice_selectors(dims, colon_mask, end_mask, numeric, &tensor.shape).await?;
+    let selectors =
+        build_slice_selectors(dims, colon_mask, end_mask, numeric, &tensor.shape).await?;
     if let Some(value) = try_tensor_slice_2d_fast_path(tensor, dims, &selectors)? {
         return Ok(value);
     }
     let plan = build_slice_plan(&selectors, dims, &tensor.shape)?;
     if plan.indices.is_empty() {
-        let out_tensor = Tensor::new(Vec::new(), plan.output_shape).map_err(|e| format!("Slice error: {e}"))?;
+        let out_tensor =
+            Tensor::new(Vec::new(), plan.output_shape).map_err(|e| format!("Slice error: {e}"))?;
         return Ok(Value::Tensor(out_tensor));
     }
     let mut out_data: Vec<f64> = Vec::with_capacity(plan.indices.len());
@@ -252,7 +258,8 @@ pub async fn read_tensor_slice_nd(
     if out_data.len() == 1 {
         Ok(Value::Num(out_data[0]))
     } else {
-        let out_tensor = Tensor::new(out_data, plan.output_shape).map_err(|e| format!("Slice error: {e}"))?;
+        let out_tensor =
+            Tensor::new(out_data, plan.output_shape).map_err(|e| format!("Slice error: {e}"))?;
         Ok(Value::Tensor(out_tensor))
     }
 }
@@ -286,7 +293,8 @@ pub async fn read_complex_slice(
     end_mask: u32,
     numeric: &[Value],
 ) -> Result<Value, RuntimeError> {
-    let selectors = build_slice_selectors(dims, colon_mask, end_mask, numeric, &tensor.shape).await?;
+    let selectors =
+        build_slice_selectors(dims, colon_mask, end_mask, numeric, &tensor.shape).await?;
     let plan = build_slice_plan(&selectors, dims, &tensor.shape)?;
     read_complex_slice_from_plan(tensor, &plan)
 }
@@ -533,7 +541,10 @@ pub async fn read_string_slice(
             per_dim_indices.push(idxs);
         }
         if dims == 2 {
-            match (&per_dim_indices[0].as_slice(), &per_dim_indices[1].as_slice()) {
+            match (
+                &per_dim_indices[0].as_slice(),
+                &per_dim_indices[1].as_slice(),
+            ) {
                 (i_list, j_list) if i_list.len() > 1 && j_list.len() == 1 => {
                     out_dims = vec![i_list.len(), 1];
                 }
@@ -588,8 +599,8 @@ pub async fn read_string_slice(
         if out_data.len() == 1 {
             Ok(Value::String(out_data[0].clone()))
         } else {
-            let out_sa = StringArray::new(out_data, out_dims)
-                .map_err(|e| format!("Slice error: {e}"))?;
+            let out_sa =
+                StringArray::new(out_data, out_dims).map_err(|e| format!("Slice error: {e}"))?;
             Ok(Value::StringArray(out_sa))
         }
     }
@@ -640,7 +651,11 @@ enum ExprSel {
     Colon,
     Scalar(usize),
     Indices(Vec<usize>),
-    Range { start: i64, step: i64, end_off: EndExpr },
+    Range {
+        start: i64,
+        step: i64,
+        end_off: EndExpr,
+    },
 }
 
 pub async fn build_expr_gather_plan<ResolveEnd, Fut>(
@@ -698,7 +713,11 @@ where
             let off = range_end_exprs[pos].clone();
             selectors.push(ExprSel::Range {
                 start: st as i64,
-                step: if sp >= 0.0 { sp as i64 } else { -(sp.abs() as i64) },
+                step: if sp >= 0.0 {
+                    sp as i64
+                } else {
+                    -(sp.abs() as i64)
+                },
                 end_off: off,
             });
         } else {
@@ -762,7 +781,11 @@ where
             ExprSel::Colon => (1..=full_shape[d]).collect(),
             ExprSel::Scalar(i) => vec![*i],
             ExprSel::Indices(v) => v.clone(),
-            ExprSel::Range { start, step, end_off } => {
+            ExprSel::Range {
+                start,
+                step,
+                end_off,
+            } => {
                 let mut v = Vec::new();
                 let mut cur = *start;
                 let stp = *step;
@@ -832,7 +855,11 @@ where
                 vec![1, 1]
             } else if dims_out.len() == 1 {
                 let (dim, len, _) = dims_out[0];
-                if dim == 1 { vec![1, len] } else { vec![len, 1] }
+                if dim == 1 {
+                    vec![1, len]
+                } else {
+                    vec![len, 1]
+                }
             } else {
                 dims_out.into_iter().map(|(_, len, _)| len).collect()
             }
@@ -869,7 +896,11 @@ where
     }
 
     let output_shape = if dims == 1 {
-        if total_out <= 1 { vec![1, 1] } else { vec![total_out, 1] }
+        if total_out <= 1 {
+            vec![1, 1]
+        } else {
+            vec![total_out, 1]
+        }
     } else {
         let mut dims_out: Vec<(usize, usize, bool)> = selection_lengths
             .iter()
@@ -888,10 +919,19 @@ where
             vec![1, 1]
         } else if dims_out.len() == 1 {
             let (dim, len, _) = dims_out[0];
-            if dim == 1 { vec![1, len] } else { vec![len, 1] }
+            if dim == 1 {
+                vec![1, len]
+            } else {
+                vec![len, 1]
+            }
         } else {
             dims_out.into_iter().map(|(_, len, _)| len).collect()
         }
     };
-    Ok(SlicePlan { indices, output_shape, selection_lengths, dims })
+    Ok(SlicePlan {
+        indices,
+        output_shape,
+        selection_lengths,
+        dims,
+    })
 }

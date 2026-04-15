@@ -2,7 +2,11 @@ use crate::interpreter::errors::mex;
 use runmat_builtins::{self, Access, Closure, StructValue, Value};
 use runmat_runtime::RuntimeError;
 
-pub async fn load_member(base: Value, field: String, allow_init: bool) -> Result<Value, RuntimeError> {
+pub async fn load_member(
+    base: Value,
+    field: String,
+    allow_init: bool,
+) -> Result<Value, RuntimeError> {
     match base {
         Value::Object(obj) => {
             if let Some((p, _owner)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
@@ -18,21 +22,29 @@ pub async fn load_member(base: Value, field: String, allow_init: bool) -> Result
                 }
                 if p.is_dependent {
                     let getter = format!("get.{field}");
-                    if let Ok(v) = runmat_runtime::call_builtin_async(&getter, &[Value::Object(obj.clone())]).await {
+                    if let Ok(v) =
+                        runmat_runtime::call_builtin_async(&getter, &[Value::Object(obj.clone())])
+                            .await
+                    {
                         return Ok(v);
                     }
                 }
             }
             if let Some(v) = obj.properties.get(&field) {
                 Ok(v.clone())
-            } else if let Some((p2, _)) = runmat_builtins::lookup_property(&obj.class_name, &field) {
+            } else if let Some((p2, _)) = runmat_builtins::lookup_property(&obj.class_name, &field)
+            {
                 if p2.is_dependent {
                     let backing = format!("{field}_backing");
                     if let Some(vb) = obj.properties.get(&backing) {
                         return Ok(vb.clone());
                     }
                 }
-                Err(format!("Undefined property '{}' for class {}", field, obj.class_name).into())
+                Err(format!(
+                    "Undefined property '{}' for class {}",
+                    field, obj.class_name
+                )
+                .into())
             } else if let Some(cls) = runmat_builtins::get_class(&obj.class_name) {
                 if cls.methods.contains_key("subsref") {
                     let args = vec![
@@ -43,7 +55,11 @@ pub async fn load_member(base: Value, field: String, allow_init: bool) -> Result
                     ];
                     runmat_runtime::call_builtin_async("call_method", &args).await
                 } else {
-                    Err(format!("Undefined property '{}' for class {}", field, obj.class_name).into())
+                    Err(format!(
+                        "Undefined property '{}' for class {}",
+                        field, obj.class_name
+                    )
+                    .into())
                 }
             } else {
                 Err(format!("Unknown class {}", obj.class_name).into())
@@ -91,7 +107,11 @@ pub async fn load_member(base: Value, field: String, allow_init: bool) -> Result
                 "identifier" => Value::String(mexn.identifier.clone()),
                 "message" => Value::String(mexn.message.clone()),
                 "stack" => {
-                    let values: Vec<Value> = mexn.stack.iter().map(|s| Value::String(s.clone())).collect();
+                    let values: Vec<Value> = mexn
+                        .stack
+                        .iter()
+                        .map(|s| Value::String(s.clone()))
+                        .collect();
                     let rows = values.len();
                     let cell = runmat_builtins::CellArray::new(values, rows, 1)
                         .map_err(|e| format!("MException.stack: {e}"))?;
@@ -105,7 +125,11 @@ pub async fn load_member(base: Value, field: String, allow_init: bool) -> Result
     }
 }
 
-pub async fn load_member_dynamic(base: Value, name: String, allow_init: bool) -> Result<Value, RuntimeError> {
+pub async fn load_member_dynamic(
+    base: Value,
+    name: String,
+    allow_init: bool,
+) -> Result<Value, RuntimeError> {
     load_member(base, name, allow_init).await
 }
 
@@ -128,11 +152,20 @@ pub fn load_static_member(cls: &str, field: &str) -> Result<Value, RuntimeError>
         if !m.is_static {
             return Err(format!("Method '{}' is not static", field).into());
         }
-        Ok(Value::Closure(Closure { function_name: m.function_name, captures: vec![] }))
+        Ok(Value::Closure(Closure {
+            function_name: m.function_name,
+            captures: vec![],
+        }))
     } else {
         let qualified = format!("{cls}.{field}");
-        if runmat_builtins::builtin_functions().iter().any(|b| b.name == qualified) {
-            Ok(Value::Closure(Closure { function_name: qualified, captures: vec![] }))
+        if runmat_builtins::builtin_functions()
+            .iter()
+            .any(|b| b.name == qualified)
+        {
+            Ok(Value::Closure(Closure {
+                function_name: qualified,
+                captures: vec![],
+            }))
         } else {
             Err(format!("Unknown property '{}' on class {}", field, cls).into())
         }
@@ -164,7 +197,12 @@ where
                 }
                 if p.is_dependent {
                     let setter = format!("set.{field}");
-                    if let Ok(v) = runmat_runtime::call_builtin_async(&setter, &[Value::Object(obj.clone()), rhs.clone()]).await {
+                    if let Ok(v) = runmat_runtime::call_builtin_async(
+                        &setter,
+                        &[Value::Object(obj.clone()), rhs.clone()],
+                    )
+                    .await
+                    {
                         return Ok(v);
                     }
                 }
@@ -222,14 +260,24 @@ where
             Ok(Value::Struct(st))
         }
         Value::Cell(mut ca) => {
-            let rhs_cell = if let Value::Cell(rc) = &rhs { Some(rc) } else { None };
+            let rhs_cell = if let Value::Cell(rc) = &rhs {
+                Some(rc)
+            } else {
+                None
+            };
             if let Some(rc) = rhs_cell {
                 if rc.rows != ca.rows || rc.cols != ca.cols {
-                    return Err("Field assignment: cell rhs shape mismatch".to_string().into());
+                    return Err("Field assignment: cell rhs shape mismatch"
+                        .to_string()
+                        .into());
                 }
             }
             for i in 0..ca.data.len() {
-                let rv = if let Some(rc) = rhs_cell { (*rc.data[i]).clone() } else { rhs.clone() };
+                let rv = if let Some(rc) = rhs_cell {
+                    (*rc.data[i]).clone()
+                } else {
+                    rhs.clone()
+                };
                 match &mut *ca.data[i] {
                     Value::Struct(st) => {
                         if let Some(oldv) = st.fields.get(&field) {

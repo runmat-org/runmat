@@ -1,14 +1,14 @@
-use crate::call::builtins::ImportedBuiltinResolution;
+use crate::bytecode::ArgSpec;
+use crate::bytecode::Instr;
 use crate::call::builtins as call_builtins;
+use crate::call::builtins::ImportedBuiltinResolution;
 use crate::call::closures as call_closures;
 use crate::call::feval::FevalDispatch;
 use crate::call::shared::{
     build_expanded_args_from_specs, collect_multi_outputs, expand_cell_indices,
-    lookup_user_function, prepare_user_call, subsref_empty_brace_cell,
-    subsref_brace_numeric_index_values, validate_user_function_arity, PreparedUserCall,
+    lookup_user_function, prepare_user_call, subsref_brace_numeric_index_values,
+    subsref_empty_brace_cell, validate_user_function_arity, PreparedUserCall,
 };
-use crate::bytecode::ArgSpec;
-use crate::bytecode::Instr;
 use crate::functions::UserFunction;
 use crate::interpreter::debug;
 use crate::interpreter::dispatch::exceptions::{redirect_exception_to_catch, ExceptionHandling};
@@ -172,23 +172,22 @@ where
 {
     let mut indices = Vec::with_capacity(num_indices);
     for _ in 0..num_indices {
-        indices.push(
-            stack
-                .pop()
-                .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?,
-        );
+        indices.push(stack.pop().ok_or(crate::interpreter::errors::mex(
+            "StackUnderflow",
+            "stack underflow",
+        ))?);
     }
     indices.reverse();
-    let base = stack
-        .pop()
-        .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?;
+    let base = stack.pop().ok_or(crate::interpreter::errors::mex(
+        "StackUnderflow",
+        "stack underflow",
+    ))?;
     let mut fixed = Vec::with_capacity(fixed_argc);
     for _ in 0..fixed_argc {
-        fixed.push(
-            stack
-                .pop()
-                .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?,
-        );
+        fixed.push(stack.pop().ok_or(crate::interpreter::errors::mex(
+            "StackUnderflow",
+            "stack underflow",
+        ))?);
     }
     fixed.reverse();
 
@@ -196,7 +195,12 @@ where
         (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => expand_cell_indices(&ca, &indices)?,
         (other, _) => match other {
             Value::Object(obj) => expand_object_indices(Value::Object(obj), indices).await?,
-            _ => return Err(crate::interpreter::errors::mex("ExpandError", invalid_expand_msg)),
+            _ => {
+                return Err(crate::interpreter::errors::mex(
+                    "ExpandError",
+                    invalid_expand_msg,
+                ))
+            }
         },
     };
 
@@ -219,42 +223,45 @@ where
 {
     let mut after = Vec::with_capacity(after_count);
     for _ in 0..after_count {
-        after.push(
-            stack
-                .pop()
-                .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?,
-        );
+        after.push(stack.pop().ok_or(crate::interpreter::errors::mex(
+            "StackUnderflow",
+            "stack underflow",
+        ))?);
     }
     after.reverse();
 
     let mut indices = Vec::with_capacity(num_indices);
     for _ in 0..num_indices {
-        indices.push(
-            stack
-                .pop()
-                .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?,
-        );
+        indices.push(stack.pop().ok_or(crate::interpreter::errors::mex(
+            "StackUnderflow",
+            "stack underflow",
+        ))?);
     }
     indices.reverse();
 
-    let base = stack
-        .pop()
-        .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?;
+    let base = stack.pop().ok_or(crate::interpreter::errors::mex(
+        "StackUnderflow",
+        "stack underflow",
+    ))?;
 
     let mut before = Vec::with_capacity(before_count);
     for _ in 0..before_count {
-        before.push(
-            stack
-                .pop()
-                .ok_or(crate::interpreter::errors::mex("StackUnderflow", "stack underflow"))?,
-        );
+        before.push(stack.pop().ok_or(crate::interpreter::errors::mex(
+            "StackUnderflow",
+            "stack underflow",
+        ))?);
     }
     before.reverse();
 
     let expanded = match (base, indices.len()) {
         (Value::Cell(ca), 1) | (Value::Cell(ca), 2) => expand_cell_indices(&ca, &indices)?,
         (Value::Object(obj), _) => expand_object_indices(Value::Object(obj), indices).await?,
-        _ => return Err(crate::interpreter::errors::mex("ExpandError", invalid_expand_msg)),
+        _ => {
+            return Err(crate::interpreter::errors::mex(
+                "ExpandError",
+                invalid_expand_msg,
+            ))
+        }
     };
 
     let mut args = before;
@@ -495,10 +502,18 @@ pub async fn handle_builtin_call(
 
     let prepared_primary = call_builtins::prepare_builtin_args(name, &args).await?;
     let result = match requested_outputs {
-        Some(count) => runmat_runtime::call_builtin_async_with_outputs(name, &prepared_primary, count).await,
+        Some(count) => {
+            runmat_runtime::call_builtin_async_with_outputs(name, &prepared_primary, count).await
+        }
         None => runmat_runtime::call_builtin_async(name, &prepared_primary).await,
     };
-    let imported = call_builtins::resolve_imported_builtin(name, imports, &prepared_primary, requested_outputs).await?;
+    let imported = call_builtins::resolve_imported_builtin(
+        name,
+        imports,
+        &prepared_primary,
+        requested_outputs,
+    )
+    .await?;
     if result.is_err() {
         if let Some(err) = call_builtins::rethrow_without_explicit_exception(
             name,
@@ -509,7 +524,16 @@ pub async fn handle_builtin_call(
             return Err(err);
         }
     }
-    handle_builtin_outcome(result, imported, stack, try_stack, vars, last_exception, pc, refresh_vars)
+    handle_builtin_outcome(
+        result,
+        imported,
+        stack,
+        try_stack,
+        vars,
+        last_exception,
+        pc,
+        refresh_vars,
+    )
 }
 
 pub async fn handle_method_call(
@@ -570,24 +594,27 @@ where
     {
         Ok(v) => v,
         Err(e) => {
-            return Ok(match redirect_exception_to_catch(
-                e,
-                try_stack,
-                vars,
-                last_exception,
-                pc,
-                refresh_vars,
-            ) {
-                ExceptionHandling::Caught => UserCallHandling::Caught,
-                ExceptionHandling::Uncaught(err) => UserCallHandling::Uncaught(err),
-            })
+            return Ok(
+                match redirect_exception_to_catch(
+                    e,
+                    try_stack,
+                    vars,
+                    last_exception,
+                    pc,
+                    refresh_vars,
+                ) {
+                    ExceptionHandling::Caught => UserCallHandling::Caught,
+                    ExceptionHandling::Uncaught(err) => UserCallHandling::Uncaught(err),
+                },
+            )
         }
     };
 
     if out_count == 1 {
         push_user_call_outputs(stack, name, &func, &var_map, &func_result_vars, 1)?;
     } else {
-        let output_list = output_list_for_user_call(name, &func, &var_map, &func_result_vars, out_count)?;
+        let output_list =
+            output_list_for_user_call(name, &func, &var_map, &func_result_vars, out_count)?;
         push_single_result(stack, output_list);
     }
     Ok(UserCallHandling::Completed)

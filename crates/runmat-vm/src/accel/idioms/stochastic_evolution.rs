@@ -4,11 +4,11 @@ use crate::compiler::end_expr::expr_is_one;
 use crate::compiler::CompileError;
 use crate::instr::Instr;
 use once_cell::sync::OnceCell;
-use runmat_hir::{HirExpr, HirStmt, VarId};
-use runmat_builtins::Value;
-use runmat_runtime::RuntimeError;
 #[cfg(feature = "native-accel")]
 use runmat_accelerate::fusion_residency;
+use runmat_builtins::Value;
+use runmat_hir::{HirExpr, HirStmt, VarId};
+use runmat_runtime::RuntimeError;
 
 pub(crate) struct Plan<'a> {
     pub state: VarId,
@@ -171,10 +171,18 @@ pub async fn execute_stochastic_evolution(
     #[cfg(feature = "native-accel")]
     {
         if let Some(provider) = runmat_accelerate_api::provider() {
-            let (state_handle, state_owned) = ensure_gpu_tensor_for_stochastic(provider, &state).await?;
-            let drift_scalar = scalar_from_value_scalar(&drift, "stochastic_evolution drift").await?;
-            let scale_scalar = scalar_from_value_scalar(&scale, "stochastic_evolution scale").await?;
-            match provider.stochastic_evolution(&state_handle, drift_scalar, scale_scalar, steps_u32) {
+            let (state_handle, state_owned) =
+                ensure_gpu_tensor_for_stochastic(provider, &state).await?;
+            let drift_scalar =
+                scalar_from_value_scalar(&drift, "stochastic_evolution drift").await?;
+            let scale_scalar =
+                scalar_from_value_scalar(&scale, "stochastic_evolution scale").await?;
+            match provider.stochastic_evolution(
+                &state_handle,
+                drift_scalar,
+                scale_scalar,
+                steps_u32,
+            ) {
                 Ok(output) => {
                     if let Some(temp) = state_owned {
                         let _ = provider.free(&temp);
@@ -197,7 +205,10 @@ pub async fn execute_stochastic_evolution(
         .map_err(|e| format!("stochastic_evolution: {e}"))?;
     let mut tensor_value = match gathered_state {
         Value::Tensor(t) => t,
-        other => runmat_runtime::builtins::common::tensor::value_into_tensor_for("stochastic_evolution", other)?,
+        other => runmat_runtime::builtins::common::tensor::value_into_tensor_for(
+            "stochastic_evolution",
+            other,
+        )?,
     };
     let drift_scalar = scalar_from_value_scalar(&drift, "stochastic_evolution drift").await?;
     let scale_scalar = scalar_from_value_scalar(&scale, "stochastic_evolution scale").await?;
@@ -215,7 +226,11 @@ async fn scalar_from_value_scalar(value: &Value, label: &str) -> Result<f64, Run
         Value::Num(n) => Ok(*n),
         Value::Int(i) => Ok(i.to_f64()),
         Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
-        Value::Tensor(t) => Err(format!("{label}: expected scalar tensor, got {} elements", t.data.len()).into()),
+        Value::Tensor(t) => Err(format!(
+            "{label}: expected scalar tensor, got {} elements",
+            t.data.len()
+        )
+        .into()),
         Value::GpuTensor(_) => {
             let gathered = runmat_runtime::dispatcher::gather_if_needed_async(value)
                 .await
@@ -224,7 +239,11 @@ async fn scalar_from_value_scalar(value: &Value, label: &str) -> Result<f64, Run
                 Value::Num(n) => Ok(n),
                 Value::Int(i) => Ok(i.to_f64()),
                 Value::Tensor(t) if t.data.len() == 1 => Ok(t.data[0]),
-                Value::Tensor(t) => Err(format!("{label}: expected scalar tensor, got {} elements", t.data.len()).into()),
+                Value::Tensor(t) => Err(format!(
+                    "{label}: expected scalar tensor, got {} elements",
+                    t.data.len()
+                )
+                .into()),
                 other => Err(format!("{label}: expected numeric scalar, got {:?}", other).into()),
             }
         }
@@ -247,10 +266,13 @@ async fn parse_steps_value(value: &Value) -> Result<u32, RuntimeError> {
 async fn ensure_gpu_tensor_for_stochastic(
     provider: &dyn runmat_accelerate_api::AccelProvider,
     value: &Value,
-) -> Result<(
-    runmat_accelerate_api::GpuTensorHandle,
-    Option<runmat_accelerate_api::GpuTensorHandle>,
-), RuntimeError> {
+) -> Result<
+    (
+        runmat_accelerate_api::GpuTensorHandle,
+        Option<runmat_accelerate_api::GpuTensorHandle>,
+    ),
+    RuntimeError,
+> {
     match value {
         Value::GpuTensor(handle) => Ok((handle.clone(), None)),
         Value::Tensor(tensor) => {
@@ -267,7 +289,10 @@ async fn ensure_gpu_tensor_for_stochastic(
                     Ok((handle.clone(), Some(handle)))
                 }
                 other => {
-                    let tensor = runmat_runtime::builtins::common::tensor::value_into_tensor_for("stochastic_evolution", other)?;
+                    let tensor = runmat_runtime::builtins::common::tensor::value_into_tensor_for(
+                        "stochastic_evolution",
+                        other,
+                    )?;
                     let handle = upload_tensor_view(provider, &tensor)?;
                     Ok((handle.clone(), Some(handle)))
                 }

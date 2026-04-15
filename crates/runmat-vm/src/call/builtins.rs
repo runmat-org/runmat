@@ -12,14 +12,14 @@ pub async fn prepare_builtin_args(name: &str, args: &[Value]) -> Result<Vec<Valu
 }
 
 #[cfg(not(feature = "native-accel"))]
-pub async fn prepare_builtin_args(
-    _name: &str,
-    args: &[Value],
-) -> Result<Vec<Value>, RuntimeError> {
+pub async fn prepare_builtin_args(_name: &str, args: &[Value]) -> Result<Vec<Value>, RuntimeError> {
     Ok(args.to_vec())
 }
 
-pub fn collect_call_args(stack: &mut Vec<Value>, arg_count: usize) -> Result<Vec<Value>, RuntimeError> {
+pub fn collect_call_args(
+    stack: &mut Vec<Value>,
+    arg_count: usize,
+) -> Result<Vec<Value>, RuntimeError> {
     pop_args(stack, arg_count)
 }
 
@@ -84,7 +84,9 @@ pub async fn resolve_imported_builtin(
             let qual = path.join(".");
             let qual_args = prepare_builtin_args(&qual, prepared_primary).await?;
             let result = match requested_outputs {
-                Some(count) => runmat_runtime::call_builtin_async_with_outputs(&qual, &qual_args, count).await,
+                Some(count) => {
+                    runmat_runtime::call_builtin_async_with_outputs(&qual, &qual_args, count).await
+                }
                 None => runmat_runtime::call_builtin_async(&qual, &qual_args).await,
             };
             if let Ok(value) = result {
@@ -115,7 +117,9 @@ pub async fn resolve_imported_builtin(
         let qual = format!("{}.{}", path.join("."), name);
         let qual_args = prepare_builtin_args(&qual, prepared_primary).await?;
         let result = match requested_outputs {
-            Some(count) => runmat_runtime::call_builtin_async_with_outputs(&qual, &qual_args, count).await,
+            Some(count) => {
+                runmat_runtime::call_builtin_async_with_outputs(&qual, &qual_args, count).await
+            }
             None => runmat_runtime::call_builtin_async(&qual, &qual_args).await,
         };
         if let Ok(value) = result {

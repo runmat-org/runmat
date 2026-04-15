@@ -20,7 +20,9 @@ pub async fn try_builtin_fallback_multi(
 ) -> Result<Option<Value>, RuntimeError> {
     let prepared = prepare_builtin_args(name, args).await?;
     match runmat_runtime::call_builtin_async(name, &prepared).await {
-        Ok(result) => Ok(Some(crate::call::builtins::single_result_output_list(result, out_count))),
+        Ok(result) => Ok(Some(crate::call::builtins::single_result_output_list(
+            result, out_count,
+        ))),
         Err(_) => Ok(None),
     }
 }

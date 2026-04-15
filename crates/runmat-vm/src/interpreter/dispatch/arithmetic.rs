@@ -1,6 +1,8 @@
-use crate::ops::arithmetic as arithmetic_ops;
-use crate::accel::auto_promote::{accel_promote_binary, accel_promote_unary, AutoBinaryOp, AutoUnaryOp};
+use crate::accel::auto_promote::{
+    accel_promote_binary, accel_promote_unary, AutoBinaryOp, AutoUnaryOp,
+};
 use crate::interpreter::dispatch::logical_truth_from_value;
+use crate::ops::arithmetic as arithmetic_ops;
 use crate::ops::comparison as comparison_ops;
 use runmat_builtins::Value;
 use runmat_runtime::RuntimeError;
