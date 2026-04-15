@@ -8,10 +8,10 @@ use runmat_builtins::{self, BuiltinFunction, Constant, Type};
 use runmat_hir::{
     HirDiagnostic, HirDiagnosticSeverity, HirStmt, LoweringContext, LoweringResult, SemanticError,
 };
-use runmat_ignition::{compile, CompileError};
 use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
 pub use runmat_parser::CompatMode;
 use runmat_parser::{parse_with_options, ParserOptions};
+use runmat_vm::{compile, CompileError};
 use std::collections::HashMap;
 use std::fmt::Write;
 

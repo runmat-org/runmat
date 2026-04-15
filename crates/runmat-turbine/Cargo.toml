@@ -21,7 +21,7 @@ tracing = "0.1"
 thiserror = { workspace = true }
 libm = "0.2"
 stacker = "0.1"
-runmat-ignition = { workspace = true }
+runmat-vm = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-runtime = { workspace = true, features = ["plot-core"] }
 runmat-gc = { workspace = true }
@@ -35,4 +35,4 @@ runmat-parser = { workspace = true }
 
 [features]
 default = ["native-accel"]
-native-accel = ["runmat-ignition/native-accel", "runmat-accelerate"]
+native-accel = ["runmat-vm/native-accel", "runmat-accelerate"]

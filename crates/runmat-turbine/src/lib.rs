@@ -19,8 +19,9 @@ use cranelift_module::{default_libcall_names, FuncId, Linkage, Module};
 use futures::task::noop_waker;
 use log::{debug, error, info, warn};
 use runmat_builtins::{Type, Value};
-use runmat_ignition::{Bytecode, Instr};
 use runmat_runtime::{build_runtime_error, RuntimeError};
+use runmat_vm::interpreter::state::InterpreterOutcome;
+use runmat_vm::{Bytecode, Instr};
 use std::cell::Cell;
 use std::env;
 use std::ffi::CStr;
@@ -69,11 +70,11 @@ fn run_immediate<F: Future>(mut future: Pin<Box<F>>) -> Result<F::Output> {
 }
 
 struct RuntimeContext {
-    functions: std::collections::HashMap<String, runmat_ignition::UserFunction>,
+    functions: std::collections::HashMap<String, runmat_vm::UserFunction>,
 }
 
 impl RuntimeContext {
-    fn new(functions: std::collections::HashMap<String, runmat_ignition::UserFunction>) -> Self {
+    fn new(functions: std::collections::HashMap<String, runmat_vm::UserFunction>) -> Self {
         Self { functions }
     }
 }
@@ -117,9 +118,9 @@ fn declare_host_call_in_module(module: &mut JITModule) -> FuncId {
 
 /// Execute a user-defined function with access to global variables using Ignition interpreter
 fn execute_user_function_isolated(
-    function_def: &runmat_ignition::UserFunction,
+    function_def: &runmat_vm::UserFunction,
     args: &[Value],
-    all_functions: &std::collections::HashMap<String, runmat_ignition::UserFunction>,
+    all_functions: &std::collections::HashMap<String, runmat_vm::UserFunction>,
 ) -> Result<Value> {
     // Create complete variable remapping that includes all variables referenced in the function body
     let var_map = runmat_hir::remapping::create_complete_function_var_map(
@@ -152,15 +153,15 @@ fn execute_user_function_isolated(
         body: remapped_body,
         var_types: func_var_types,
     };
-    let func_bytecode = runmat_ignition::compile(&func_program, all_functions)
+    let func_bytecode = runmat_vm::compile(&func_program, all_functions)
         .map_err(|e| execution_error(format!("Failed to compile function: {e}")))?;
 
-    let func_result_vars = match run_immediate(Box::pin(runmat_ignition::interpret_with_vars(
+    let func_result_vars = match run_immediate(Box::pin(runmat_vm::interpret_with_vars(
         &func_bytecode,
         &mut func_vars,
         Some(function_def.name.as_str()),
     )))? {
-        Ok(runmat_ignition::InterpreterOutcome::Completed(values)) => Ok(values),
+        Ok(InterpreterOutcome::Completed(values)) => Ok(values),
 
         Err(e) => Err(TurbineError::ExecutionError(e)),
     }?;
@@ -436,7 +437,7 @@ impl TurbineEngine {
         &mut self,
         hash: u64,
         vars: &mut [Value],
-        functions: &std::collections::HashMap<String, runmat_ignition::UserFunction>,
+        functions: &std::collections::HashMap<String, runmat_vm::UserFunction>,
     ) -> Result<i32> {
         let func = self
             .cache
@@ -542,12 +543,12 @@ impl TurbineEngine {
         debug!("Executing bytecode in Ignition interpreter mode (supports user functions)");
 
         // Use the main Ignition interpreter which has full feature support
-        match run_immediate(Box::pin(runmat_ignition::interpret_with_vars(
+        match run_immediate(Box::pin(runmat_vm::interpret_with_vars(
             bytecode,
             vars,
             Some("<main>"),
         )))? {
-            Ok(runmat_ignition::InterpreterOutcome::Completed(_)) => Ok((0, false)),
+            Ok(InterpreterOutcome::Completed(_)) => Ok((0, false)),
 
             Err(e) => Err(TurbineError::ExecutionError(e)),
         }

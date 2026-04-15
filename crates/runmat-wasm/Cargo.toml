@@ -21,7 +21,7 @@ runmat-core = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-accelerate = { workspace = true }
 runmat-accelerate-api = { workspace = true }
-runmat-ignition = { workspace = true }
+runmat-vm = { workspace = true }
 runmat-filesystem = { workspace = true }
 runmat-thread-local = { workspace = true }
 glam = "0.24"
