@@ -1250,6 +1250,99 @@ impl RunMatSession {
         let _async_input_guard =
             runmat_runtime::interaction::replace_async_handler(Some(runtime_async_handler));
 
+        // Install a stateless expression evaluator for `input()` numeric parsing.
+        //
+        // The hook runs the full parse → lower → compile → interpret pipeline so
+        // that users can type arbitrary MATLAB expressions at an input() prompt:
+        // `sqrt(2)`, `pi/2`, `ones(3)`, `[1 2; 3 4]`, etc.
+        //
+        // Stack-overflow hazard: the hook calls runmat_ignition::interpret() while
+        // the outer interpret() is already on the call stack. On WASM the JS event
+        // loop drives both as async state-machines and the WASM linear stack is
+        // large, so nesting is safe. On native the default thread stack is too
+        // small for two nested interpret() invocations, so we instead run the inner
+        // interpret() on a dedicated thread that has its own 16 MB stack and block
+        // the calling future synchronously on the result (safe because the native
+        // executor — futures::executor::block_on — is already synchronous).
+        let compat = self.compat_mode;
+        let _eval_hook_guard =
+            runmat_runtime::interaction::replace_eval_hook(Some(std::sync::Arc::new(
+                move |expr: String| -> runmat_runtime::interaction::EvalHookFuture {
+                    // Shared eval logic, used by both the WASM async path and the
+                    // native thread path below.
+                    async fn eval_expr(
+                        expr: String,
+                        compat: runmat_parser::CompatMode,
+                    ) -> Result<Value, RuntimeError> {
+                        let wrapped = format!("__runmat_input_result__ = ({expr});");
+                        let ast = parse_with_options(&wrapped, ParserOptions::new(compat))
+                            .map_err(|e| {
+                                build_runtime_error(format!("input: parse error: {e}"))
+                                    .with_identifier("RunMat:input:ParseError")
+                                    .build()
+                            })?;
+                        let lowering = runmat_hir::lower(
+                            &ast,
+                            &LoweringContext::new(&HashMap::new(), &HashMap::new()),
+                        )
+                        .map_err(|e| {
+                            build_runtime_error(format!("input: lowering error: {e}"))
+                                .with_identifier("RunMat:input:LowerError")
+                                .build()
+                        })?;
+                        let result_idx = lowering.variables.get("__runmat_input_result__").copied();
+                        let bc = runmat_ignition::compile(&lowering.hir, &HashMap::new())
+                            .map_err(RuntimeError::from)?;
+                        let vars = runmat_ignition::interpret(&bc).await?;
+                        result_idx
+                            .and_then(|idx| vars.get(idx).cloned())
+                            .ok_or_else(|| {
+                                build_runtime_error("input: expression produced no value")
+                                    .with_identifier("RunMat:input:NoValue")
+                                    .build()
+                            })
+                    }
+
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        // On WASM: await the inner interpret() directly. The JS async
+                        // runtime handles both futures as cooperative state-machines and
+                        // the WASM linear stack is large enough for the extra frames.
+                        Box::pin(eval_expr(expr, compat))
+                    }
+
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        // On native: run interpret() on a dedicated thread so it gets
+                        // its own 16 MB stack, fully isolated from the outer interpret()
+                        // call stack. The result is sent back via a synchronous channel;
+                        // blocking on recv() is safe here because the native executor
+                        // (futures::executor::block_on) is itself synchronous.
+                        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+                        let spawn_result = std::thread::Builder::new()
+                            .stack_size(16 * 1024 * 1024)
+                            .spawn(move || {
+                                let result = futures::executor::block_on(eval_expr(expr, compat));
+                                let _ = tx.send(result);
+                            });
+                        Box::pin(async move {
+                            spawn_result.map_err(|err| {
+                                build_runtime_error(format!(
+                                    "input: failed to spawn eval thread: {err}"
+                                ))
+                                .with_identifier("RunMat:input:EvalThreadSpawnFailed")
+                                .build()
+                            })?;
+                            rx.recv().unwrap_or_else(|_| {
+                                Err(build_runtime_error("input: eval thread panicked")
+                                    .with_identifier("RunMat:input:EvalThreadPanic")
+                                    .build())
+                            })
+                        })
+                    }
+                },
+            )));
+
         if self.verbose {
             debug!("Executing: {}", input.trim());
         }

@@ -38,6 +38,7 @@ jit = ["dep:runmat-turbine"]
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 runmat-runtime = { workspace = true, features = ["plot-core"] }
 runmat-snapshot = { workspace = true, features = ["compression-native", "validation"] }
+futures = "0.3"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 runmat-runtime = { workspace = true, features = ["plot-web"] }
