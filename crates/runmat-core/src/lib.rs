@@ -1315,10 +1315,10 @@ impl RunMatSession {
                     {
                         // On native: run interpret() on a dedicated thread so it gets
                         // its own 16 MB stack, fully isolated from the outer interpret()
-                        // call stack. The result is sent back via a synchronous channel;
-                        // blocking on recv() is safe here because the native executor
-                        // (futures::executor::block_on) is itself synchronous.
-                        let (tx, rx) = std::sync::mpsc::sync_channel(1);
+                        // call stack. The result is sent back via a tokio oneshot channel
+                        // and awaited asynchronously so the tokio worker thread is never
+                        // blocked by a synchronous recv().
+                        let (tx, rx) = tokio::sync::oneshot::channel();
                         let spawn_result = std::thread::Builder::new()
                             .stack_size(16 * 1024 * 1024)
                             .spawn(move || {
@@ -1333,7 +1333,7 @@ impl RunMatSession {
                                 .with_identifier("RunMat:input:EvalThreadSpawnFailed")
                                 .build()
                             })?;
-                            rx.recv().unwrap_or_else(|_| {
+                            rx.await.unwrap_or_else(|_| {
                                 Err(build_runtime_error("input: eval thread panicked")
                                     .with_identifier("RunMat:input:EvalThreadPanic")
                                     .build())
