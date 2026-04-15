@@ -5429,7 +5429,6 @@ dependencies = [
  "openapiv3",
  "openssl",
  "openssl-sys",
- "progenitor",
  "progenitor-client",
  "rand 0.8.5",
  "reqwest 0.12.23",
@@ -5446,6 +5445,7 @@ dependencies = [
  "runmat-parser",
  "runmat-plot",
  "runmat-runtime",
+ "runmat-server-client",
  "runmat-snapshot",
  "runmat-telemetry",
  "runmat-time",
@@ -5575,6 +5575,7 @@ dependencies = [
  "runmat-telemetry",
  "runmat-time",
  "runmat-turbine",
+ "tokio",
  "tracing",
  "uuid",
  "wasm-bindgen-test",
@@ -5890,6 +5891,31 @@ dependencies = [
  "runmat-builtins",
  "runmat-macros",
  "runmat-runtime",
+]
+
+[[package]]
+name = "runmat-server-client"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "dirs 5.0.1",
+ "keyring",
+ "openapiv3",
+ "progenitor",
+ "progenitor-client",
+ "rand 0.8.5",
+ "regress",
+ "reqwest 0.12.23",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "tokio",
+ "url",
+ "uuid",
+ "webbrowser",
 ]
 
 [[package]]
