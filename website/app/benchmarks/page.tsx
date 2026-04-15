@@ -26,9 +26,6 @@ export default function BenchmarksPage() {
           <h1 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
             RunMat Benchmarks
           </h1>
-          <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
-            Reproducible, cross-language benchmarks comparing RunMat against common alternatives for representative workloads.
-          </p>
         </div>
 
         <div className="mt-16 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

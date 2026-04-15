@@ -54,9 +54,6 @@ export default async function ResourcesByTypePage({ params }: { params: Promise<
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl md:text-4xl">
             {label}
           </h1>
-          <p className="mt-6 text-foreground text-[0.938rem]">
-            Guides and walkthroughs curated for this category.
-          </p>
         </div>
 
         {items.length === 0 ? (

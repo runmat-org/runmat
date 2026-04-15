@@ -24,9 +24,6 @@ export default function BlogPage() {
           <h1 className="text-3xl sm:text-3xl md:text-5xl font-bold tracking-tight">
             RunMat Blog
           </h1>
-          <p className="mt-6 text-foreground text-[0.938rem] break-words">
-            Stories, insights, and updates from the RunMat development team
-          </p>
         </div>
 
         <div className="mt-16 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

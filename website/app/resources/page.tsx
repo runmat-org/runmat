@@ -53,16 +53,12 @@ export default function ResourcesPage() {
           <h1 className="text-2xl font-bold tracking-tight sm:text-3xl md:text-4xl">
             Resource Hub
           </h1>
-          <p className="mt-6 text-foreground text-[0.938rem]">
-            Hand-picked guides, docs, and benchmarks to learn RunMat.
-          </p>
         </div>
 
         {/* Browse by type */}
         <section className="space-y-6">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <h2 className="text-2xl font-semibold text-foreground">Browse by type</h2>
-            <span className="text-sm text-muted-foreground">Jump to a category</span>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {typesWithItems.map((type) => (
@@ -81,7 +77,6 @@ export default function ResourcesPage() {
         <section id="featured" className="space-y-6">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <h2 className="text-2xl font-semibold text-foreground">Featured</h2>
-            <span className="text-sm text-muted-foreground">Hand-picked highlights</span>
           </div>
           {featured.length ? (
             <div className="grid gap-6 lg:grid-cols-3">
