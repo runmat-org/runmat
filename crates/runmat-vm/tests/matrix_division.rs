@@ -1,13 +1,14 @@
+#[path = "support/mod.rs"]
 mod test_helpers;
 
 use runmat_accelerate::graph::{AccelNodeLabel, PrimitiveOp};
 use runmat_builtins::Value;
-use runmat_ignition::{compile, Instr};
 use runmat_parser::parse;
+use runmat_vm::{compile, Instr};
 use std::collections::HashMap;
 use test_helpers::{execute, lower};
 
-fn compile_bytecode(source: &str) -> runmat_ignition::Bytecode {
+fn compile_bytecode(source: &str) -> runmat_vm::Bytecode {
     let ast = parse(source).expect("parse");
     let hir = lower(&ast).expect("lower");
     compile(&hir, &HashMap::new()).expect("compile")
@@ -46,7 +47,7 @@ fn assert_same_complex_tensor(lhs: &Value, rhs: &Value) {
     }
 }
 
-fn has_builtin(bytecode: &runmat_ignition::Bytecode, name: &str) -> bool {
+fn has_builtin(bytecode: &runmat_vm::Bytecode, name: &str) -> bool {
     let graph = bytecode.accel_graph.as_ref().expect("accel graph");
     graph.nodes.iter().any(|node| match &node.label {
         AccelNodeLabel::Builtin { name: node_name } => node_name.eq_ignore_ascii_case(name),
@@ -54,7 +55,7 @@ fn has_builtin(bytecode: &runmat_ignition::Bytecode, name: &str) -> bool {
     })
 }
 
-fn count_primitives(bytecode: &runmat_ignition::Bytecode, op: PrimitiveOp) -> usize {
+fn count_primitives(bytecode: &runmat_vm::Bytecode, op: PrimitiveOp) -> usize {
     let graph = bytecode.accel_graph.as_ref().expect("accel graph");
     graph
         .nodes

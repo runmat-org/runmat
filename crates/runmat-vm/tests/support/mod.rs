@@ -12,7 +12,7 @@ where
     T: Send + 'static,
 {
     let handle = std::thread::Builder::new()
-        .name("runmat-ignition-test".to_string())
+        .name("runmat-vm-test".to_string())
         .stack_size(EXEC_STACK_BYTES)
         .spawn(f)
         .map_err(|err| RuntimeError::new(format!("failed to spawn test thread: {err}")))?;
@@ -24,7 +24,11 @@ where
 
 pub fn execute(program: &HirProgram) -> Result<Vec<Value>, RuntimeError> {
     let program = program.clone();
-    run_with_stack(move || block_on(runmat_ignition::execute(&program)))?
+    run_with_stack(move || {
+        let bc = runmat_vm::compile(&program, &std::collections::HashMap::new())
+            .map_err(RuntimeError::from)?;
+        block_on(runmat_vm::interpret(&bc))
+    })?
 }
 
 pub fn lower(program: &runmat_parser::Program) -> Result<HirProgram, SemanticError> {
@@ -32,7 +36,7 @@ pub fn lower(program: &runmat_parser::Program) -> Result<HirProgram, SemanticErr
 }
 
 #[allow(dead_code)]
-pub fn interpret(bytecode: &runmat_ignition::Bytecode) -> Result<Vec<Value>, RuntimeError> {
+pub fn interpret(bytecode: &runmat_vm::Bytecode) -> Result<Vec<Value>, RuntimeError> {
     let bytecode = bytecode.clone();
-    run_with_stack(move || block_on(runmat_ignition::interpret(&bytecode)))?
+    run_with_stack(move || block_on(runmat_vm::interpret(&bytecode)))?
 }

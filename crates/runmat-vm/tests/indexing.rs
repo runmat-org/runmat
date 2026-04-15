@@ -1,3 +1,4 @@
+#[path = "support/mod.rs"]
 mod test_helpers;
 
 use runmat_builtins::Value;

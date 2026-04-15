@@ -1,3 +1,4 @@
+#[path = "support/mod.rs"]
 mod test_helpers;
 
 use runmat_parser::parse;
@@ -501,7 +502,7 @@ fn import_ambiguity_specific_conflict_errors() {
     let program = "import Point.origin; import Circle.area; r = origin();";
     let ast = runmat_parser::parse(program).unwrap();
     let hir = lower(&ast).unwrap();
-    let res = runmat_ignition::compile(&hir, &HashMap::new());
+    let res = runmat_vm::compile(&hir, &HashMap::new());
     assert!(res.is_err());
 }
 #[test]
@@ -549,7 +550,7 @@ fn import_ambiguity_between_specifics_errors() {
     "#;
     let ast = runmat_parser::parse(program).unwrap();
     let hir = lower(&ast).unwrap();
-    let res = runmat_ignition::compile(&hir, &HashMap::new());
+    let res = runmat_vm::compile(&hir, &HashMap::new());
     assert!(res.is_err());
 }
 
@@ -563,7 +564,7 @@ fn import_ambiguity_between_wildcards_errors() {
     "#;
     let ast = runmat_parser::parse(program).unwrap();
     let hir = lower(&ast).unwrap();
-    let res = runmat_ignition::compile(&hir, &HashMap::new());
+    let res = runmat_vm::compile(&hir, &HashMap::new());
     assert!(res.is_err());
 }
 
@@ -627,7 +628,7 @@ fn import_wildcard_static_method_ambiguity_errors() {
     "#;
     let ast = runmat_parser::parse(program).unwrap();
     let hir = lower(&ast).unwrap();
-    let res = runmat_ignition::compile(&hir, &HashMap::new());
+    let res = runmat_vm::compile(&hir, &HashMap::new());
     assert!(res.is_err());
 }
 
@@ -676,7 +677,7 @@ fn unqualified_static_property_without_imports_errors() {
     "#;
     let ast = runmat_parser::parse(program).unwrap();
     let hir = lower(&ast).unwrap();
-    let res = runmat_ignition::compile(&hir, &HashMap::new());
+    let res = runmat_vm::compile(&hir, &HashMap::new());
     assert!(res.is_err());
 }
 
@@ -1220,7 +1221,7 @@ fn operator_overloading_full_grid_basic() {
         let ast = runmat_parser::parse(&program).unwrap();
         let hir = lower(&ast).unwrap();
         execute(&hir).unwrap_or_else(|err| {
-            let bc = runmat_ignition::compile(&hir, &HashMap::new()).unwrap();
+            let bc = runmat_vm::compile(&hir, &HashMap::new()).unwrap();
             panic!(
                 "operator overload script failed after stmt #{idx} `{stmt}`: {err}\nbytecode={:?}",
                 bc.instructions
@@ -1310,7 +1311,7 @@ fn operator_overloading_left_division_variants() {
 fn bitwise_or_row_vectors() {
     let program = "f = ([1 0 1] | [0 1 1]);";
     let hir = lower(&runmat_parser::parse(program).unwrap()).unwrap();
-    let bc = runmat_ignition::compile(&hir, &HashMap::new()).unwrap();
+    let bc = runmat_vm::compile(&hir, &HashMap::new()).unwrap();
     dbg!(&bc.instructions);
     let _ = interpret(&bc).unwrap();
 }
@@ -1750,7 +1751,7 @@ fn import_wildcard_vs_classstar_ambiguity_for_static_method() {
 	"#;
     let ast = runmat_parser::parse(program).unwrap();
     let hir = lower(&ast).unwrap();
-    let res = runmat_ignition::compile(&hir, &HashMap::new());
+    let res = runmat_vm::compile(&hir, &HashMap::new());
     assert!(res.is_err());
 }
 

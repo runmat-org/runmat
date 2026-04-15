@@ -29,3 +29,7 @@ default = ["native-accel"]
 test-classes = []
 native-accel = ["dep:runmat-accelerate"]
 plot-core = []
+
+[dev-dependencies]
+futures = "0.3"
+anyhow = "1"

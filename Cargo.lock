@@ -6021,6 +6021,8 @@ dependencies = [
 name = "runmat-vm"
 version = "0.3.2"
 dependencies = [
+ "anyhow",
+ "futures",
  "log",
  "miette",
  "once_cell",

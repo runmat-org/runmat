@@ -18,8 +18,7 @@ use runmat_accelerate_api::{
 use runmat_builtins::{Tensor, Value};
 use runmat_gc::gc_test_context;
 use runmat_hir::{lower as lower_hir, HirProgram, LoweringContext, SemanticError};
-use runmat_ignition::vm::interpret_function as interpret_function_async;
-use runmat_ignition::{compile, interpret as interpret_async, Instr};
+use runmat_vm::{compile, interpret as interpret_async, interpret_function as interpret_function_async, Instr};
 use runmat_parser::parse;
 use runmat_runtime::builtins::image::filters::fspecial::spec_from_request as test_fspecial_spec_from_request;
 use runmat_runtime::builtins::math::linalg::ops::mrdivide_host_real_for_provider;
@@ -27,12 +26,12 @@ use runmat_runtime::{gather_if_needed, gather_if_needed_async, RuntimeError};
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-fn interpret(bytecode: &runmat_ignition::Bytecode) -> Result<Vec<Value>, RuntimeError> {
+fn interpret(bytecode: &runmat_vm::Bytecode) -> Result<Vec<Value>, RuntimeError> {
     block_on(interpret_async(bytecode))
 }
 
 fn interpret_function(
-    bytecode: &runmat_ignition::Bytecode,
+    bytecode: &runmat_vm::Bytecode,
     vars: Vec<Value>,
 ) -> Result<Vec<Value>, RuntimeError> {
     block_on(interpret_function_async(bytecode, vars))
@@ -2850,7 +2849,7 @@ fn assert_real_sequence_matches(actual: &[f64], expected: &[f64]) {
     }
 }
 
-fn compile_and_interpret_value(source: &str) -> (runmat_ignition::Bytecode, Value) {
+fn compile_and_interpret_value(source: &str) -> (runmat_vm::Bytecode, Value) {
     let ast = parse(source).expect("parse");
     let hir = lower(&ast).expect("lower");
     let bytecode = compile(&hir, &HashMap::new()).expect("compile");

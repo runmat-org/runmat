@@ -1,7 +1,8 @@
+#[path = "support/mod.rs"]
 mod test_helpers;
 
-use runmat_ignition::{compile, instr::Instr};
 use runmat_parser::parse;
+use runmat_vm::{compile, Instr};
 use std::collections::HashMap;
 use std::convert::TryInto;
 use test_helpers::execute;

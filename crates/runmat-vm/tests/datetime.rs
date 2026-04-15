@@ -1,6 +1,7 @@
 use runmat_builtins::{StringArray, Value};
 use runmat_parser::parse;
 
+#[path = "support/mod.rs"]
 mod test_helpers;
 use test_helpers::{execute, lower};
 
