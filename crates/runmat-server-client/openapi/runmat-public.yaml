@@ -1,0 +1,3737 @@
+openapi: 3.0.3
+info:
+  title: RunMat Server API
+  description: ''
+  license:
+    name: ''
+  version: 0.2.8
+servers:
+- url: https://api.runmat.com
+paths:
+  /v1/auth/me:
+    get:
+      tags:
+      - auth::me
+      operationId: auth_me
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthMeResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/auth/resend-verification:
+    post:
+      tags:
+      - auth::resend_verification
+      operationId: auth_resend_verification
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthResendVerificationRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResendVerificationResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security:
+      - {}
+  /v1/auth/resolve:
+    post:
+      tags:
+      - auth::resolve
+      operationId: auth_resolve
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuthResolveRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResolveResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security:
+      - {}
+  /v1/lifecycle/intake:
+    post:
+      tags:
+      - intake
+      operationId: submit_web_intake
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebIntakeRequest'
+        required: true
+      responses:
+        '202':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebIntakeResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '500':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security:
+      - {}
+  /v1/orgs:
+    get:
+      tags:
+      - orgs::orgs_crud
+      operationId: list_orgs
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          nullable: true
+          minimum: 0
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgListResponse'
+        '401':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    post:
+      tags:
+      - orgs::orgs_crud
+      operationId: create_org
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrgCreateRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/server_org.Org'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/policy:
+    get:
+      tags:
+      - orgs::usage
+      operationId: get_policy
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PolicyResponse'
+  /v1/orgs/{orgId}/projects:
+    get:
+      tags:
+      - orgs::projects
+      operationId: list_projects
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          nullable: true
+          minimum: 0
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectListResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    post:
+      tags:
+      - orgs::projects
+      operationId: create_project
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectCreateRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/server_org.Project'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/projects/import-git:
+    post:
+      tags:
+      - orgs::projects
+      operationId: create_project_import
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectImportGitRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectImportGitResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/orgs/{orgId}/upgrade-request:
+    post:
+      tags:
+      - orgs::usage
+      operationId: create_upgrade_request
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpgradeRequestCreateRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpgradeRequestCreateResponse'
+  /v1/orgs/{orgId}/usage:
+    get:
+      tags:
+      - orgs::usage
+      operationId: get_usage
+      parameters:
+      - name: start
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: end
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UsagePeriodResponse'
+  /v1/orgs/{orgId}/usage/notices:
+    get:
+      tags:
+      - orgs::usage
+      operationId: list_usage_notices
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UsageNoticeResponse'
+  /v1/orgs/{orgId}/usage/rollup:
+    post:
+      tags:
+      - orgs::usage
+      operationId: usage_rollup_event
+      parameters:
+      - name: orgId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UsageRollupRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            text/plain:
+              schema:
+                type: boolean
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/data/chunks/upload-targets:
+    post:
+      tags:
+      - filesystem::data
+      operationId: chunk_upload_targets
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DataChunkUploadTargetsRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataChunkUploadTargetsResponse'
+  /v1/projects/{projectId}/data/manifest:
+    get:
+      tags:
+      - filesystem::data
+      operationId: manifest
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: version
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataManifestDescriptorResponse'
+  /v1/projects/{projectId}/fs/canonicalize:
+    get:
+      tags:
+      - filesystem::io
+      operationId: canonicalize
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsPathQuery'
+  /v1/projects/{projectId}/fs/commit:
+    post:
+      tags:
+      - filesystem::io
+      operationId: commit
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsCommitRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsCommitResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/fs/dir:
+    get:
+      tags:
+      - filesystem::dirs
+      operationId: list_dir
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/FsDirEntry'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    delete:
+      tags:
+      - filesystem::dirs
+      operationId: delete_dir
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: recursive
+        in: query
+        required: false
+        schema:
+          type: boolean
+          nullable: true
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            text/plain:
+              schema:
+                type: boolean
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/fs/download-url:
+    get:
+      tags:
+      - filesystem::io
+      operationId: download_url
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: versionId
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsDownloadUrlResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/fs/file:
+    delete:
+      tags:
+      - filesystem::dirs
+      operationId: delete_file
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            text/plain:
+              schema:
+                type: boolean
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/fs/git/receive:
+    post:
+      tags:
+      - filesystem::git
+      operationId: git_receive
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/octet-stream:
+            schema:
+              type: string
+              format: binary
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            text/plain:
+              schema:
+                type: boolean
+  /v1/projects/{projectId}/fs/git/refs:
+    get:
+      tags:
+      - filesystem::git
+      operationId: git_refs
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsGitRefsResponse'
+  /v1/projects/{projectId}/fs/git/upload:
+    get:
+      tags:
+      - filesystem::git
+      operationId: git_upload
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+  /v1/projects/{projectId}/fs/history/{versionId}:
+    delete:
+      tags:
+      - filesystem::manifest
+      operationId: delete_history_version
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: versionId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '204':
+          description: ''
+  /v1/projects/{projectId}/fs/manifest:
+    get:
+      tags:
+      - filesystem::manifest
+      operationId: manifest
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: versionId
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsManifestResponse'
+  /v1/projects/{projectId}/fs/manifest/history:
+    get:
+      tags:
+      - filesystem::manifest
+      operationId: manifest_history
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsManifestHistoryResponse'
+  /v1/projects/{projectId}/fs/manifest/update:
+    post:
+      tags:
+      - filesystem::manifest
+      operationId: manifest_update
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsManifestUpdateRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsCommitResponse'
+  /v1/projects/{projectId}/fs/manifest/urls:
+    get:
+      tags:
+      - filesystem::manifest
+      operationId: manifest_urls
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: versionId
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsManifestUrlsResponse'
+  /v1/projects/{projectId}/fs/metadata:
+    get:
+      tags:
+      - filesystem::io
+      operationId: metadata
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsMetadataResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/fs/mkdir:
+    post:
+      tags:
+      - filesystem::dirs
+      operationId: mkdir
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsMkdirRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            text/plain:
+              schema:
+                type: boolean
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/fs/read:
+    get:
+      tags:
+      - filesystem::io
+      summary: Reads file bytes from the project filesystem. This endpoint also accepts
+      description: |-
+        readonly reference paths like `reference:runmat/docs/search.md`, resolving
+        them through the bound RunMat reference variant.
+      operationId: read
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: offset
+        in: query
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: length
+        in: query
+        required: false
+        schema:
+          type: integer
+          format: int64
+          nullable: true
+          minimum: 0
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/fs/rename:
+    post:
+      tags:
+      - filesystem::dirs
+      operationId: rename
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsRenameRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            text/plain:
+              schema:
+                type: boolean
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/fs/retention:
+    get:
+      tags:
+      - filesystem::snapshots
+      operationId: get_retention
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsRetentionResponse'
+    post:
+      tags:
+      - filesystem::snapshots
+      operationId: update_retention
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsRetentionUpdateRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsRetentionResponse'
+  /v1/projects/{projectId}/fs/runs/index:
+    get:
+      tags:
+      - filesystem::runs
+      operationId: index
+      parameters:
+      - name: artifactRoot
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          nullable: true
+          minimum: 0
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: docPath
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: include
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsRunsIndexResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/fs/set-readonly:
+    post:
+      tags:
+      - filesystem::dirs
+      operationId: set_readonly
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsSetReadonlyRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            text/plain:
+              schema:
+                type: boolean
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/fs/snapshots:
+    get:
+      tags:
+      - filesystem::snapshots
+      operationId: list_snapshots
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsSnapshotListResponse'
+    post:
+      tags:
+      - filesystem::snapshots
+      operationId: create_snapshot
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsSnapshotCreateRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsSnapshotResponse'
+  /v1/projects/{projectId}/fs/snapshots/tags:
+    get:
+      tags:
+      - filesystem::snapshots
+      operationId: list_snapshot_tags
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsSnapshotTagListResponse'
+  /v1/projects/{projectId}/fs/snapshots/tags/{tag}:
+    delete:
+      tags:
+      - filesystem::snapshots
+      operationId: delete_snapshot_tag
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: tag
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            text/plain:
+              schema:
+                type: boolean
+  /v1/projects/{projectId}/fs/snapshots/{snapshotId}:
+    delete:
+      tags:
+      - filesystem::snapshots
+      operationId: delete_snapshot
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: snapshotId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            text/plain:
+              schema:
+                type: boolean
+  /v1/projects/{projectId}/fs/snapshots/{snapshotId}/diff:
+    get:
+      tags:
+      - filesystem::snapshots
+      operationId: snapshot_diff
+      parameters:
+      - name: baseSnapshotId
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: compareToCurrent
+        in: query
+        required: false
+        schema:
+          type: boolean
+          nullable: true
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: snapshotId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsSnapshotDiffResponse'
+  /v1/projects/{projectId}/fs/snapshots/{snapshotId}/entries:
+    get:
+      tags:
+      - filesystem::snapshots
+      operationId: list_snapshot_entries
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: snapshotId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsSnapshotEntryListResponse'
+  /v1/projects/{projectId}/fs/snapshots/{snapshotId}/git-export:
+    get:
+      tags:
+      - filesystem::git
+      operationId: snapshot_git_export
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: snapshotId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+  /v1/projects/{projectId}/fs/snapshots/{snapshotId}/restore:
+    post:
+      tags:
+      - filesystem::snapshots
+      operationId: restore_snapshot
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: snapshotId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/FsSnapshotRestoreRequest'
+              nullable: true
+        required: false
+      responses:
+        '200':
+          description: ''
+          content:
+            text/plain:
+              schema:
+                type: boolean
+  /v1/projects/{projectId}/fs/snapshots/{snapshotId}/tags:
+    post:
+      tags:
+      - filesystem::snapshots
+      operationId: set_snapshot_tag
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: snapshotId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsSnapshotTagRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsSnapshotTagResponse'
+  /v1/projects/{projectId}/fs/storage-summary:
+    get:
+      tags:
+      - filesystem::storage
+      operationId: storage_summary
+      parameters:
+      - name: artifactRoot
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsStorageSummaryResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/fs/storage/delete-category:
+    post:
+      tags:
+      - filesystem::storage
+      operationId: delete_storage_category
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsStorageDeleteCategoryRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsStorageDeleteCategoryResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/fs/upload-session:
+    post:
+      tags:
+      - filesystem::io
+      operationId: upload_session
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsUploadSessionRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsUploadSessionResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/fs/upload-session/abort:
+    post:
+      tags:
+      - filesystem::io
+      operationId: upload_session_abort
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsUploadSessionAbortRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsUploadSessionAbortResponse'
+  /v1/projects/{projectId}/fs/upload-session/chunks:
+    post:
+      tags:
+      - filesystem::io
+      operationId: upload_session_chunks
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsUploadSessionChunksRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsUploadSessionChunksResponse'
+  /v1/projects/{projectId}/fs/upload-session/complete:
+    post:
+      tags:
+      - filesystem::io
+      operationId: upload_session_complete
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsUploadSessionCompleteRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsCommitResponse'
+  /v1/projects/{projectId}/fs/upload-session/keepalive:
+    post:
+      tags:
+      - filesystem::io
+      operationId: upload_session_keepalive
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsUploadSessionKeepaliveRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsUploadSessionKeepaliveResponse'
+  /v1/projects/{projectId}/fs/upload-session/start:
+    post:
+      tags:
+      - filesystem::io
+      operationId: upload_session_start
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsUploadSessionStartRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsUploadSessionStartResponse'
+  /v1/projects/{projectId}/fs/upload-session/{sessionId}:
+    get:
+      tags:
+      - filesystem::io
+      operationId: upload_session_status
+      parameters:
+      - name: blobKey
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: sessionId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsUploadSessionStatusResponse'
+  /v1/projects/{projectId}/fs/write:
+    put:
+      tags:
+      - filesystem::io
+      operationId: write
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: offset
+        in: query
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 0
+      - name: truncate
+        in: query
+        required: true
+        schema:
+          type: boolean
+      - name: final
+        in: query
+        required: false
+        schema:
+          type: boolean
+          nullable: true
+      - name: hash
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsCommitResponse'
+        '202':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsWriteSessionResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/history:
+    get:
+      tags:
+      - history::list
+      operationId: list_history
+      parameters:
+      - name: path
+        in: query
+        required: true
+        schema:
+          type: string
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsHistoryListResponse'
+  /v1/projects/{projectId}/history/restore:
+    post:
+      tags:
+      - history::restore
+      operationId: restore_history
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/FsHistoryRestoreRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FsCommitResponse'
+  /v1/projects/{projectId}/import:
+    get:
+      tags:
+      - orgs::projects
+      operationId: get_project_import_status
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                allOf:
+                - $ref: '#/components/schemas/ProjectImportStatusResponse'
+                nullable: true
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '404':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/memberships:
+    get:
+      tags:
+      - orgs::projects
+      operationId: list_project_memberships
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          nullable: true
+          minimum: 0
+      - name: cursor
+        in: query
+        required: false
+        schema:
+          type: string
+          nullable: true
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProjectMembershipListResponse'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    post:
+      tags:
+      - orgs::projects
+      operationId: create_project_membership
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectMembershipCreateRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/server_org.ProjectMembership'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/projects/{projectId}/memberships/{membershipId}:
+    delete:
+      tags:
+      - orgs::projects
+      operationId: delete_project_membership
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: membershipId
+        in: path
+        required: true
+        schema:
+          type: string
+      responses:
+        '200':
+          description: ''
+          content:
+            text/plain:
+              schema:
+                type: boolean
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+    patch:
+      tags:
+      - orgs::projects
+      operationId: update_project_membership
+      parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema:
+          type: string
+      - name: membershipId
+        in: path
+        required: true
+        schema:
+          type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProjectMembershipUpdateRequest'
+        required: true
+      responses:
+        '200':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/server_org.ProjectMembership'
+        '403':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+  /v1/t:
+    post:
+      tags:
+      - telemetry
+      operationId: ingest_telemetry
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TelemetryIngestRequest'
+        required: true
+      responses:
+        '202':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TelemetryIngestResponse'
+        '400':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+        '500':
+          description: ''
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/crate.errors.ErrorResponse'
+      security:
+      - {}
+components:
+  schemas:
+    AuthMeResponse:
+      type: object
+      required:
+      - user
+      - orgs
+      properties:
+        orgs:
+          type: array
+          items:
+            $ref: '#/components/schemas/server_org.Org'
+        user:
+          $ref: '#/components/schemas/server_identity.UserProfile'
+    AuthResendVerificationRequest:
+      type: object
+      required:
+      - email
+      properties:
+        email:
+          type: string
+    AuthResendVerificationResponse:
+      type: object
+      required:
+      - accepted
+      properties:
+        accepted:
+          type: boolean
+    AuthResolveRequest:
+      type: object
+      properties:
+        client_kind:
+          type: string
+          nullable: true
+        email:
+          type: string
+          nullable: true
+    AuthResolveResponse:
+      type: object
+      required:
+      - mode
+      - redirect_url
+      properties:
+        audience:
+          type: string
+          nullable: true
+        client_id:
+          type: string
+          nullable: true
+        mode:
+          type: string
+        org_id:
+          type: string
+          nullable: true
+        redirect_url:
+          type: string
+        scope:
+          type: string
+          nullable: true
+    DataChunkDescriptor:
+      type: object
+      required:
+      - key
+      - object_id
+      - hash
+      - bytes_raw
+      - bytes_stored
+      properties:
+        bytes_raw:
+          type: integer
+          format: int64
+          minimum: 0
+        bytes_stored:
+          type: integer
+          format: int64
+          minimum: 0
+        hash:
+          type: string
+        key:
+          type: string
+        object_id:
+          type: string
+    DataChunkUploadTargetResponse:
+      type: object
+      required:
+      - key
+      - method
+      - upload_url
+      - headers
+      properties:
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        key:
+          type: string
+        method:
+          type: string
+        upload_url:
+          type: string
+    DataChunkUploadTargetsRequest:
+      type: object
+      required:
+      - dataset_path
+      - array
+      - chunks
+      properties:
+        array:
+          type: string
+        chunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataChunkDescriptor'
+        dataset_path:
+          type: string
+    DataChunkUploadTargetsResponse:
+      type: object
+      required:
+      - targets
+      properties:
+        targets:
+          type: array
+          items:
+            $ref: '#/components/schemas/DataChunkUploadTargetResponse'
+    DataManifestDescriptorResponse:
+      type: object
+      required:
+      - schema_version
+      - format
+      - dataset_id
+      - updated_at
+      - txn_sequence
+      properties:
+        dataset_id:
+          type: string
+        format:
+          type: string
+        schema_version:
+          type: integer
+          format: int32
+          minimum: 0
+        txn_sequence:
+          type: integer
+          format: int64
+          minimum: 0
+        updated_at:
+          type: string
+    ErrorBody:
+      type: object
+      required:
+      - code
+      - message
+      properties:
+        code:
+          type: string
+        details:
+          nullable: true
+        message:
+          type: string
+        requestId:
+          type: string
+          nullable: true
+        traceId:
+          type: string
+          nullable: true
+    FsCommitRequest:
+      type: object
+      required:
+      - path
+      - blobKey
+      - sizeBytes
+      properties:
+        blobKey:
+          type: string
+        etag:
+          type: string
+          nullable: true
+        hash:
+          type: string
+          nullable: true
+        path:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+    FsCommitResponse:
+      type: object
+      required:
+      - entry
+      - version
+      properties:
+        entry:
+          $ref: '#/components/schemas/server_filesystem.FsEntry'
+        version:
+          $ref: '#/components/schemas/server_filesystem.FsVersion'
+    FsDirEntry:
+      type: object
+      required:
+      - path
+      - fileName
+      - fileType
+      properties:
+        fileName:
+          type: string
+        fileType:
+          type: string
+        path:
+          type: string
+    FsDownloadUrlResponse:
+      type: object
+      required:
+      - downloadUrl
+      - expiresAt
+      properties:
+        downloadUrl:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+    FsGitRefEntry:
+      type: object
+      required:
+      - name
+      - snapshotId
+      - createdAt
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+        name:
+          type: string
+        snapshotId:
+          type: string
+    FsGitRefsResponse:
+      type: object
+      required:
+      - refs
+      properties:
+        head:
+          type: string
+          nullable: true
+        refs:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsGitRefEntry'
+    FsHistoryEntryResponse:
+      type: object
+      required:
+      - id
+      - projectId
+      - path
+      - blobKey
+      - size
+      - createdAt
+      properties:
+        blobKey:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+          nullable: true
+        etag:
+          type: string
+          nullable: true
+        hash:
+          type: string
+          nullable: true
+        id:
+          type: string
+        path:
+          type: string
+        projectId:
+          type: string
+        size:
+          type: integer
+          format: int64
+    FsHistoryListResponse:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsHistoryEntryResponse'
+    FsHistoryRestoreRequest:
+      type: object
+      required:
+      - versionId
+      properties:
+        versionId:
+          type: string
+    FsManifestHistoryEntry:
+      type: object
+      required:
+      - versionId
+      - createdAt
+      - sizeBytes
+      - totalSize
+      - shardCount
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+        shardCount:
+          type: integer
+          minimum: 0
+        sizeBytes:
+          type: integer
+          format: int64
+        totalSize:
+          type: integer
+          format: int64
+          minimum: 0
+        versionId:
+          type: string
+    FsManifestHistoryResponse:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsManifestHistoryEntry'
+    FsManifestResponse:
+      type: object
+      required:
+      - versionId
+      - manifest
+      properties:
+        manifest:
+          $ref: '#/components/schemas/FsShardManifest'
+        versionId:
+          type: string
+    FsManifestUpdateRequest:
+      type: object
+      required:
+      - path
+      - baseVersionId
+      - manifest
+      properties:
+        baseVersionId:
+          type: string
+        manifest:
+          $ref: '#/components/schemas/FsShardManifest'
+        path:
+          type: string
+    FsManifestUrlsResponse:
+      type: object
+      required:
+      - versionId
+      - manifest
+      - shards
+      - expiresAt
+      properties:
+        expiresAt:
+          type: string
+          format: date-time
+        manifest:
+          $ref: '#/components/schemas/FsShardManifest'
+        shards:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsShardUrlEntry'
+        versionId:
+          type: string
+    FsMetadataResponse:
+      type: object
+      required:
+      - fileType
+      - len
+      - readonly
+      properties:
+        etag:
+          type: string
+          nullable: true
+        fileType:
+          type: string
+        hash:
+          type: string
+          nullable: true
+        len:
+          type: integer
+          format: int64
+        modifiedAt:
+          type: string
+          format: date-time
+          nullable: true
+        readonly:
+          type: boolean
+    FsMkdirRequest:
+      type: object
+      required:
+      - path
+      - recursive
+      properties:
+        path:
+          type: string
+        recursive:
+          type: boolean
+    FsPathQuery:
+      type: object
+      required:
+      - path
+      properties:
+        path:
+          type: string
+    FsRenameRequest:
+      type: object
+      required:
+      - from
+      - to
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+    FsRetentionResponse:
+      type: object
+      required:
+      - projectId
+      - maxVersions
+      - isDefault
+      properties:
+        isDefault:
+          type: boolean
+        maxVersions:
+          type: integer
+          minimum: 0
+        projectId:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+          nullable: true
+    FsRetentionUpdateRequest:
+      type: object
+      required:
+      - maxVersions
+      properties:
+        maxVersions:
+          type: integer
+          minimum: 0
+    FsRunIndexItemResponse:
+      type: object
+      required:
+      - runId
+      - manifestPath
+      - createdAt
+      - cancelled
+      - schemaVersion
+      - summary
+      properties:
+        cancelled:
+          type: boolean
+        createdAt:
+          type: string
+        docPath:
+          type: string
+          nullable: true
+        manifest:
+          type: object
+        manifestPath:
+          type: string
+        runId:
+          type: string
+        runtimeFingerprint:
+          type: string
+          nullable: true
+        schemaVersion:
+          type: integer
+          format: int32
+        summary:
+          $ref: '#/components/schemas/FsRunIndexSummaryResponse'
+    FsRunIndexSummaryResponse:
+      type: object
+      required:
+      - cellCount
+      - figureCount
+      - hasWorkspace
+      - hasTrace
+      - hasLogs
+      - totalBytes
+      properties:
+        cellCount:
+          type: integer
+          minimum: 0
+        figureCount:
+          type: integer
+          minimum: 0
+        hasLogs:
+          type: boolean
+        hasTrace:
+          type: boolean
+        hasWorkspace:
+          type: boolean
+        totalBytes:
+          type: integer
+          format: int64
+          minimum: 0
+    FsRunsIndexResponse:
+      type: object
+      required:
+      - artifactRoot
+      - items
+      properties:
+        artifactRoot:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsRunIndexItemResponse'
+        nextCursor:
+          type: string
+          nullable: true
+    FsSetReadonlyRequest:
+      type: object
+      required:
+      - path
+      - readonly
+      properties:
+        path:
+          type: string
+        readonly:
+          type: boolean
+    FsShardEntry:
+      type: object
+      required:
+      - path
+      - size
+      properties:
+        path:
+          type: string
+        size:
+          type: integer
+          format: int64
+          minimum: 0
+    FsShardManifest:
+      type: object
+      required:
+      - version
+      - total_size
+      - shard_size
+      - shards
+      properties:
+        shard_size:
+          type: integer
+          format: int64
+          minimum: 0
+        shards:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsShardEntry'
+        total_size:
+          type: integer
+          format: int64
+          minimum: 0
+        version:
+          type: integer
+          format: int32
+          minimum: 0
+    FsShardUrlEntry:
+      type: object
+      required:
+      - path
+      - size
+      - url
+      properties:
+        path:
+          type: string
+        size:
+          type: integer
+          format: int64
+        url:
+          type: string
+    FsSnapshotCreateRequest:
+      type: object
+      properties:
+        includePaths:
+          type: array
+          items:
+            type: string
+          nullable: true
+        message:
+          type: string
+          nullable: true
+        parentId:
+          type: string
+          nullable: true
+        tag:
+          type: string
+          nullable: true
+    FsSnapshotDiffEntry:
+      type: object
+      required:
+      - path
+      - status
+      properties:
+        baseSize:
+          type: integer
+          format: int64
+          nullable: true
+        baseVersionId:
+          type: string
+          nullable: true
+        headSize:
+          type: integer
+          format: int64
+          nullable: true
+        headVersionId:
+          type: string
+          nullable: true
+        path:
+          type: string
+        status:
+          $ref: '#/components/schemas/FsSnapshotDiffStatus'
+    FsSnapshotDiffResponse:
+      type: object
+      required:
+      - snapshotId
+      - comparedToCurrent
+      - items
+      properties:
+        baseSnapshotId:
+          type: string
+          nullable: true
+        comparedToCurrent:
+          type: boolean
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsSnapshotDiffEntry'
+        snapshotId:
+          type: string
+    FsSnapshotDiffStatus:
+      type: string
+      enum:
+      - added
+      - modified
+      - deleted
+    FsSnapshotEntryListResponse:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsSnapshotEntryResponse'
+    FsSnapshotEntryResponse:
+      type: object
+      required:
+      - path
+      - name
+      - kind
+      - size
+      - readonly
+      properties:
+        currentVersionId:
+          type: string
+          nullable: true
+        kind:
+          type: string
+        name:
+          type: string
+        parentPath:
+          type: string
+          nullable: true
+        path:
+          type: string
+        readonly:
+          type: boolean
+        size:
+          type: integer
+          format: int64
+    FsSnapshotListResponse:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsSnapshotResponse'
+    FsSnapshotResponse:
+      type: object
+      required:
+      - id
+      - projectId
+      - createdAt
+      - tags
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+          nullable: true
+        id:
+          type: string
+        message:
+          type: string
+          nullable: true
+        parentId:
+          type: string
+          nullable: true
+        projectId:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+    FsSnapshotRestoreMode:
+      type: string
+      enum:
+      - replace_active
+      - append_snapshot
+    FsSnapshotRestoreRequest:
+      type: object
+      properties:
+        message:
+          type: string
+          nullable: true
+        mode:
+          allOf:
+          - $ref: '#/components/schemas/FsSnapshotRestoreMode'
+          nullable: true
+        tag:
+          type: string
+          nullable: true
+    FsSnapshotTagListResponse:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsSnapshotTagResponse'
+    FsSnapshotTagRequest:
+      type: object
+      required:
+      - tag
+      properties:
+        tag:
+          type: string
+    FsSnapshotTagResponse:
+      type: object
+      required:
+      - tag
+      - snapshotId
+      - createdAt
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+          nullable: true
+        snapshotId:
+          type: string
+        tag:
+          type: string
+    FsStorageBucketSummaryResponse:
+      type: object
+      required:
+      - key
+      - bytes
+      - count
+      properties:
+        bytes:
+          type: integer
+          format: int64
+        count:
+          type: integer
+          format: int64
+        key:
+          type: string
+    FsStorageCategorySummaryResponse:
+      type: object
+      required:
+      - key
+      - bytes
+      - count
+      properties:
+        bytes:
+          type: integer
+          format: int64
+        count:
+          type: integer
+          format: int64
+        key:
+          type: string
+    FsStorageDeleteCategoryRequest:
+      type: object
+      required:
+      - category
+      properties:
+        category:
+          type: string
+    FsStorageDeleteCategoryResponse:
+      type: object
+      required:
+      - category
+      - deletedCount
+      properties:
+        category:
+          type: string
+        deletedCount:
+          type: integer
+          format: int64
+    FsStorageSummaryResponse:
+      type: object
+      required:
+      - projectId
+      - totalBytes
+      - fileCount
+      - currentLiveBytes
+      - retainedTotalBytes
+      - retainedFsVersionBytes
+      - retainedChunkBytes
+      - categories
+      - buckets
+      - modelVersion
+      - updatedAt
+      properties:
+        buckets:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsStorageBucketSummaryResponse'
+        categories:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsStorageCategorySummaryResponse'
+        currentLiveBytes:
+          type: integer
+          format: int64
+        fileCount:
+          type: integer
+          format: int64
+        modelVersion:
+          type: integer
+          format: int32
+        projectId:
+          type: string
+        retainedChunkBytes:
+          type: integer
+          format: int64
+        retainedFsVersionBytes:
+          type: integer
+          format: int64
+        retainedTotalBytes:
+          type: integer
+          format: int64
+        totalBytes:
+          type: integer
+          format: int64
+        updatedAt:
+          type: string
+          format: date-time
+    FsUploadSessionAbortRequest:
+      type: object
+      required:
+      - sessionId
+      - blobKey
+      properties:
+        blobKey:
+          type: string
+        sessionId:
+          type: string
+    FsUploadSessionAbortResponse:
+      type: object
+      required:
+      - aborted
+      properties:
+        aborted:
+          type: boolean
+    FsUploadSessionChunkDescriptor:
+      type: object
+      required:
+      - chunkIndex
+      - offsetBytes
+      - sizeBytes
+      - chunkSha256
+      properties:
+        chunkIndex:
+          type: integer
+          format: int32
+        chunkSha256:
+          type: string
+        offsetBytes:
+          type: integer
+          format: int64
+        sizeBytes:
+          type: integer
+          format: int64
+    FsUploadSessionChunkTarget:
+      type: object
+      required:
+      - chunkIndex
+      - method
+      - uploadUrl
+      - headers
+      - expiresAt
+      properties:
+        chunkIndex:
+          type: integer
+          format: int32
+        expiresAt:
+          type: string
+          format: date-time
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        method:
+          type: string
+        uploadUrl:
+          type: string
+    FsUploadSessionChunksRequest:
+      type: object
+      required:
+      - sessionId
+      - blobKey
+      - chunks
+      properties:
+        blobKey:
+          type: string
+        chunks:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsUploadSessionChunkDescriptor'
+        sessionId:
+          type: string
+    FsUploadSessionChunksResponse:
+      type: object
+      required:
+      - sessionId
+      - targets
+      properties:
+        sessionId:
+          type: string
+        targets:
+          type: array
+          items:
+            $ref: '#/components/schemas/FsUploadSessionChunkTarget'
+    FsUploadSessionCompleteRequest:
+      type: object
+      required:
+      - sessionId
+      - path
+      - blobKey
+      - sizeBytes
+      - contentSha256
+      - chunkCount
+      properties:
+        blobKey:
+          type: string
+        chunkCount:
+          type: integer
+          minimum: 0
+        contentSha256:
+          type: string
+        hash:
+          type: string
+          nullable: true
+        path:
+          type: string
+        sessionId:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+    FsUploadSessionKeepaliveRequest:
+      type: object
+      required:
+      - sessionId
+      properties:
+        sessionId:
+          type: string
+    FsUploadSessionKeepaliveResponse:
+      type: object
+      required:
+      - updated
+      - expiresAt
+      properties:
+        expiresAt:
+          type: string
+          format: date-time
+        updated:
+          type: boolean
+    FsUploadSessionRequest:
+      type: object
+      required:
+      - path
+      - sizeBytes
+      properties:
+        contentType:
+          type: string
+          nullable: true
+        path:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+    FsUploadSessionResponse:
+      type: object
+      required:
+      - uploadUrl
+      - blobKey
+      - expiresAt
+      properties:
+        blobKey:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        uploadUrl:
+          type: string
+    FsUploadSessionStartRequest:
+      type: object
+      required:
+      - path
+      - sizeBytes
+      - contentSha256
+      properties:
+        contentSha256:
+          type: string
+        contentType:
+          type: string
+          nullable: true
+        path:
+          type: string
+        sizeBytes:
+          type: integer
+          format: int64
+    FsUploadSessionStartResponse:
+      type: object
+      required:
+      - sessionId
+      - blobKey
+      - strategy
+      - chunkSizeBytes
+      - parallelismHint
+      - expiresAt
+      properties:
+        blobKey:
+          type: string
+        chunkSizeBytes:
+          type: integer
+          format: int64
+        expiresAt:
+          type: string
+          format: date-time
+        parallelismHint:
+          type: integer
+          format: int32
+        sessionId:
+          type: string
+        strategy:
+          type: string
+    FsUploadSessionStatusResponse:
+      type: object
+      required:
+      - sessionId
+      - blobKey
+      - state
+      - expectedSizeBytes
+      - receivedSizeBytes
+      - receivedChunkCount
+      - updatedAt
+      - expiresAt
+      properties:
+        blobKey:
+          type: string
+        contentSha256:
+          type: string
+          nullable: true
+        expectedChunkCount:
+          type: integer
+          nullable: true
+          minimum: 0
+        expectedSizeBytes:
+          type: integer
+          format: int64
+        expiresAt:
+          type: string
+          format: date-time
+        receivedChunkCount:
+          type: integer
+          minimum: 0
+        receivedSizeBytes:
+          type: integer
+          format: int64
+        sessionId:
+          type: string
+        state:
+          type: string
+        updatedAt:
+          type: string
+          format: date-time
+    FsWriteSessionResponse:
+      type: object
+      required:
+      - sessionId
+      - nextOffset
+      properties:
+        nextOffset:
+          type: integer
+          format: int64
+        sessionId:
+          type: string
+    OrgCreateRequest:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+    OrgListResponse:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/server_org.Org'
+        nextCursor:
+          type: string
+          nullable: true
+    PolicyResponse:
+      type: object
+      required:
+      - orgId
+      - planTier
+      - source
+      - updatedAt
+      properties:
+        allowlist:
+          nullable: true
+        featureFlags:
+          nullable: true
+        llmSpendCapAmount:
+          type: number
+          format: double
+          nullable: true
+        llmSpendCapCurrency:
+          type: string
+          nullable: true
+        orgId:
+          type: string
+        planTier:
+          type: string
+        seatLimit:
+          type: integer
+          format: int32
+          nullable: true
+        source:
+          type: string
+        storagePolicyCapGb:
+          type: number
+          format: double
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+    ProjectCreateRequest:
+      type: object
+      required:
+      - name
+      properties:
+        name:
+          type: string
+    ProjectImportGitRequest:
+      type: object
+      required:
+      - url
+      properties:
+        name:
+          type: string
+          nullable: true
+        url:
+          type: string
+    ProjectImportGitResponse:
+      type: object
+      required:
+      - project
+      - import
+      properties:
+        import:
+          $ref: '#/components/schemas/ProjectImportStatusResponse'
+        project:
+          $ref: '#/components/schemas/server_org.Project'
+    ProjectImportStatusResponse:
+      type: object
+      required:
+      - project_id
+      - status
+      - phase
+      - source_url
+      - repo_host
+      - repo_owner
+      - repo_name
+      - files_written
+      - bytes_written
+      - error_details
+      - updated_at
+      properties:
+        bytes_written:
+          type: integer
+          format: int64
+        default_branch:
+          type: string
+          nullable: true
+        error_code:
+          type: string
+          nullable: true
+        error_details:
+          type: object
+        error_message:
+          type: string
+          nullable: true
+        estimated_total_bytes:
+          type: integer
+          format: int64
+          nullable: true
+        estimated_total_files:
+          type: integer
+          format: int64
+          nullable: true
+        files_written:
+          type: integer
+          format: int64
+        message:
+          type: string
+          nullable: true
+        phase:
+          type: string
+        project_id:
+          type: string
+        repo_host:
+          type: string
+        repo_name:
+          type: string
+        repo_owner:
+          type: string
+        resolved_commit_sha:
+          type: string
+          nullable: true
+        source_url:
+          type: string
+        status:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+    ProjectListResponse:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/server_org.Project'
+        nextCursor:
+          type: string
+          nullable: true
+    ProjectMembershipCreateRequest:
+      type: object
+      required:
+      - user_id
+      - role
+      properties:
+        role:
+          $ref: '#/components/schemas/server_org.ProjectRole'
+        user_id:
+          type: string
+    ProjectMembershipListResponse:
+      type: object
+      required:
+      - items
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/server_org.ProjectMembership'
+        nextCursor:
+          type: string
+          nullable: true
+    ProjectMembershipUpdateRequest:
+      type: object
+      required:
+      - role
+      properties:
+        role:
+          $ref: '#/components/schemas/server_org.ProjectRole'
+    TelemetryIngestRequest:
+      type: object
+      required:
+      - properties
+      - context
+      - payload
+      properties:
+        arch:
+          type: string
+          nullable: true
+        context:
+          type: object
+        currentUrl:
+          type: string
+          nullable: true
+        distinctId:
+          type: string
+          nullable: true
+        event:
+          type: string
+          nullable: true
+        eventLabel:
+          type: string
+          nullable: true
+        method:
+          type: string
+          nullable: true
+        os:
+          type: string
+          nullable: true
+        payload:
+          type: object
+        properties:
+          type: object
+        release:
+          type: string
+          nullable: true
+        runKind:
+          type: string
+          nullable: true
+        sessionId:
+          type: string
+          nullable: true
+        source:
+          type: string
+          nullable: true
+        success:
+          type: boolean
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+          nullable: true
+        uuid:
+          type: string
+          nullable: true
+    TelemetryIngestResponse:
+      type: object
+      required:
+      - accepted
+      - event
+      properties:
+        accepted:
+          type: boolean
+        event:
+          type: string
+    UpgradeRequestCreateRequest:
+      type: object
+      required:
+      - noticeChannel
+      - noticeCode
+      properties:
+        noticeChannel:
+          type: string
+        noticeCode:
+          type: string
+        usageCurrent:
+          type: number
+          format: double
+          nullable: true
+        usageLimit:
+          type: number
+          format: double
+          nullable: true
+        usageUnit:
+          type: string
+          nullable: true
+    UpgradeRequestCreateResponse:
+      type: object
+      required:
+      - status
+      - deduped
+      - notifiedAdminCount
+      properties:
+        deduped:
+          type: boolean
+        notifiedAdminCount:
+          type: integer
+          minimum: 0
+        status:
+          type: string
+    UsageNoticeCtaResponse:
+      type: object
+      required:
+      - kind
+      properties:
+        href:
+          type: string
+          nullable: true
+        kind:
+          type: string
+    UsageNoticeResponse:
+      type: object
+      required:
+      - id
+      - orgId
+      - channel
+      - code
+      - blocking
+      - audienceRole
+      - cta
+      - usage
+      - windowStart
+      - windowEnd
+      - firstEmittedAt
+      - lastEmittedAt
+      properties:
+        audienceRole:
+          type: string
+        blocking:
+          type: boolean
+        channel:
+          type: string
+        code:
+          type: string
+        cta:
+          $ref: '#/components/schemas/UsageNoticeCtaResponse'
+        firstEmittedAt:
+          type: string
+          format: date-time
+        id:
+          type: string
+        lastEmittedAt:
+          type: string
+          format: date-time
+        orgId:
+          type: string
+        projectId:
+          type: string
+          nullable: true
+        usage:
+          $ref: '#/components/schemas/UsageNoticeUsageResponse'
+        windowEnd:
+          type: string
+          format: date-time
+        windowStart:
+          type: string
+          format: date-time
+    UsageNoticeUsageResponse:
+      type: object
+      required:
+      - current
+      - limit
+      - unit
+      properties:
+        current:
+          type: number
+          format: double
+        limit:
+          type: number
+          format: double
+        unit:
+          type: string
+    UsagePeriodResponse:
+      type: object
+      required:
+      - orgId
+      - periodStart
+      - periodEnd
+      - updatedAt
+      properties:
+        costAmount:
+          type: number
+          format: double
+          nullable: true
+        costCurrency:
+          type: string
+          nullable: true
+        orgId:
+          type: string
+        periodEnd:
+          type: string
+          format: date-time
+        periodStart:
+          type: string
+          format: date-time
+        requests:
+          type: integer
+          format: int64
+          nullable: true
+        seats:
+          type: integer
+          format: int32
+          nullable: true
+        tokensIn:
+          type: integer
+          format: int64
+          nullable: true
+        tokensOut:
+          type: integer
+          format: int64
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+    UsageRollupRequest:
+      type: object
+      required:
+      - scope
+      - windowStart
+      - windowEnd
+      - usage
+      properties:
+        projectId:
+          type: string
+          nullable: true
+        scope:
+          type: string
+        usage: {}
+        windowEnd:
+          type: string
+          format: date-time
+        windowStart:
+          type: string
+          format: date-time
+    WebAttribution:
+      type: object
+      properties:
+        capturedAt:
+          type: string
+          format: date-time
+          nullable: true
+        fbclid:
+          type: string
+          nullable: true
+        gaClientId:
+          type: string
+          nullable: true
+        gbraid:
+          type: string
+          nullable: true
+        gclid:
+          type: string
+          nullable: true
+        landingPageUrl:
+          type: string
+          nullable: true
+        liFatId:
+          type: string
+          nullable: true
+        msclkid:
+          type: string
+          nullable: true
+        pageReferrer:
+          type: string
+          nullable: true
+        ttclid:
+          type: string
+          nullable: true
+        utmCampaign:
+          type: string
+          nullable: true
+        utmContent:
+          type: string
+          nullable: true
+        utmMedium:
+          type: string
+          nullable: true
+        utmSource:
+          type: string
+          nullable: true
+        utmTerm:
+          type: string
+          nullable: true
+        wbraid:
+          type: string
+          nullable: true
+    WebIntakeKind:
+      type: string
+      enum:
+      - newsletter
+      - contact
+      - desktop_access
+    WebIntakeRequest:
+      type: object
+      required:
+      - kind
+      - email
+      - runmat_source
+      properties:
+        attribution:
+          allOf:
+          - $ref: '#/components/schemas/WebAttribution'
+          nullable: true
+        campaign:
+          type: string
+          nullable: true
+        email:
+          type: string
+        firstname:
+          type: string
+          nullable: true
+        kind:
+          $ref: '#/components/schemas/WebIntakeKind'
+        lastname:
+          type: string
+          nullable: true
+        message:
+          type: string
+          nullable: true
+        name:
+          type: string
+          nullable: true
+        runmat_source:
+          type: string
+    WebIntakeResponse:
+      type: object
+      required:
+      - accepted
+      - queuedJobs
+      properties:
+        accepted:
+          type: boolean
+        queuedJobs:
+          type: integer
+          minimum: 0
+    crate.errors.ErrorResponse:
+      type: object
+      required:
+      - error
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorBody'
+    server_filesystem.FsEntry:
+      type: object
+      required:
+      - id
+      - projectId
+      - path
+      - name
+      - kind
+      - size
+      - readonly
+      - createdAt
+      - updatedAt
+      properties:
+        createdAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+          format: uuid
+          nullable: true
+        currentVersionId:
+          type: string
+          format: uuid
+          nullable: true
+        deletedAt:
+          type: string
+          format: date-time
+          nullable: true
+        etag:
+          type: string
+          nullable: true
+        id:
+          type: string
+          format: uuid
+        kind:
+          $ref: '#/components/schemas/server_filesystem.FsEntryKind'
+        name:
+          type: string
+        parentPath:
+          type: string
+          nullable: true
+        path:
+          type: string
+        projectId:
+          type: string
+          format: uuid
+        readonly:
+          type: boolean
+        size:
+          type: integer
+          format: int64
+        updatedAt:
+          type: string
+          format: date-time
+        updatedBy:
+          type: string
+          format: uuid
+          nullable: true
+    server_filesystem.FsEntryKind:
+      type: string
+      enum:
+      - file
+      - dir
+    server_filesystem.FsVersion:
+      type: object
+      required:
+      - id
+      - projectId
+      - path
+      - blobKey
+      - size
+      - createdAt
+      properties:
+        blobKey:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        createdBy:
+          type: string
+          format: uuid
+          nullable: true
+        etag:
+          type: string
+          nullable: true
+        hash:
+          type: string
+          nullable: true
+        id:
+          type: string
+          format: uuid
+        path:
+          type: string
+        projectId:
+          type: string
+          format: uuid
+        size:
+          type: integer
+          format: int64
+    server_identity.UserProfile:
+      type: object
+      required:
+      - id
+      - email
+      - name
+      properties:
+        analytics_id:
+          type: string
+          nullable: true
+        email:
+          type: string
+        id:
+          type: string
+        name:
+          type: string
+    server_org.Org:
+      type: object
+      required:
+      - id
+      - name
+      - created_at
+      - updated_at
+      properties:
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+          format: uuid
+          nullable: true
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+        id:
+          type: string
+        name:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+        updated_by:
+          type: string
+          format: uuid
+          nullable: true
+    server_org.Project:
+      type: object
+      required:
+      - id
+      - org_id
+      - name
+      - created_at
+      - updated_at
+      properties:
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+          format: uuid
+          nullable: true
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+        id:
+          type: string
+        name:
+          type: string
+        org_id:
+          type: string
+        updated_at:
+          type: string
+          format: date-time
+        updated_by:
+          type: string
+          format: uuid
+          nullable: true
+    server_org.ProjectMembership:
+      type: object
+      required:
+      - id
+      - org_id
+      - project_id
+      - user_id
+      - role
+      - created_at
+      - updated_at
+      properties:
+        created_at:
+          type: string
+          format: date-time
+        created_by:
+          type: string
+          format: uuid
+          nullable: true
+        deleted_at:
+          type: string
+          format: date-time
+          nullable: true
+        id:
+          type: string
+        org_id:
+          type: string
+        project_id:
+          type: string
+        role:
+          $ref: '#/components/schemas/server_org.ProjectRole'
+        updated_at:
+          type: string
+          format: date-time
+        updated_by:
+          type: string
+          format: uuid
+          nullable: true
+        user_id:
+          type: string
+    server_org.ProjectRole:
+      type: string
+      enum:
+      - read
+      - write
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+security:
+- bearerAuth: []
+tags:
+- name: Health
+- name: Auth
+- name: SSO
+- name: SCIM
