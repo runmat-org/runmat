@@ -192,7 +192,7 @@ RunMat’s strategy (by design) is:
 - Treat “toolbox breadth” as **packages** (rather than baking everything into the core).
 - Focus on **performance and portability**, especially for array-heavy numeric workloads.
 
-As an open source project, RunMat’s framing is discussed explicitly in [Design Philosophy](../DESIGN_PHILOSOPHY.md).
+As an open source project, RunMat’s framing is discussed explicitly in [Design Philosophy](/docs/design-philosophy).
 
 ---
 

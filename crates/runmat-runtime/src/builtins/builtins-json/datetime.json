@@ -94,30 +94,6 @@
   ],
   "links": [
     {
-      "label": "year",
-      "url": "./year"
-    },
-    {
-      "label": "month",
-      "url": "./month"
-    },
-    {
-      "label": "day",
-      "url": "./day"
-    },
-    {
-      "label": "hour",
-      "url": "./hour"
-    },
-    {
-      "label": "minute",
-      "url": "./minute"
-    },
-    {
-      "label": "second",
-      "url": "./second"
-    },
-    {
       "label": "string",
       "url": "./string"
     },
