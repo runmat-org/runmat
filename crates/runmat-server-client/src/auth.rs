@@ -415,22 +415,32 @@ fn load_refresh_token_auto(server_url: &str) -> Result<Option<String>> {
 fn store_token_auto(server_url: &str, token: &str) -> Result<()> {
     match store_token_keyring(server_url, token) {
         Ok(()) => Ok(()),
-        Err(_) => store_token_file(server_url, token),
+        Err(_) => {
+            // Evict any stale keyring entry so load_token_auto won't return it on
+            // the next call (keyring is preferred over file in the load path).
+            let _ = clear_token_keyring(server_url);
+            store_token_file(server_url, token)
+        }
     }
 }
 
 fn store_refresh_token_auto(server_url: &str, token: &str) -> Result<()> {
     match store_refresh_token_keyring(server_url, token) {
         Ok(()) => Ok(()),
-        Err(_) => store_refresh_token_file(server_url, token),
+        Err(_) => {
+            let _ = clear_refresh_token_keyring(server_url);
+            store_refresh_token_file(server_url, token)
+        }
     }
 }
 
 fn clear_refresh_token_auto(server_url: &str) -> Result<()> {
-    match clear_refresh_token_keyring(server_url) {
-        Ok(()) => Ok(()),
-        Err(_) => clear_refresh_token_file(server_url),
-    }
+    // Clear from both backends unconditionally: a previous store fallback may
+    // have left data in the file while the keyring still holds a stale entry,
+    // or vice-versa.  Treat keyring errors as non-fatal (keyring may be
+    // unavailable) and return the file result as the authoritative outcome.
+    let _ = clear_refresh_token_keyring(server_url);
+    clear_refresh_token_file(server_url)
 }
 
 fn write_token_payload_file(path: &Path, payload: &FileCredentialPayload) -> Result<()> {
@@ -494,6 +504,15 @@ fn clear_refresh_token_keyring(server_url: &str) -> Result<()> {
         Ok(_) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),
         Err(err) => Err(err).context("Failed to clear refresh token"),
+    }
+}
+
+fn clear_token_keyring(server_url: &str) -> Result<()> {
+    let entry = keyring_entry(server_url)?;
+    match entry.delete_password() {
+        Ok(_) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(err) => Err(err).context("Failed to clear token"),
     }
 }
 
