@@ -74,6 +74,7 @@ pub struct UserCallContext<'a> {
     pub name: &'a str,
     pub out_count: usize,
     pub bytecode_functions: &'a std::collections::HashMap<String, UserFunction>,
+    pub caller_functions: &'a mut std::collections::HashMap<String, UserFunction>,
     pub exception: ExceptionRouteContext<'a>,
 }
 
@@ -592,6 +593,7 @@ where
         name,
         out_count,
         bytecode_functions,
+        caller_functions,
         exception,
     } = ctx;
     let ExceptionRouteContext {
@@ -615,6 +617,9 @@ where
     } = prepared;
     let mut func_bytecode = crate::compile(&func_program, bytecode_functions)?;
     func_bytecode.source_id = func.source_id;
+    for (k, v) in func_bytecode.functions.iter() {
+        caller_functions.insert(k.clone(), v.clone());
+    }
 
     let func_result_vars = match interpret_counts(
         func_bytecode,

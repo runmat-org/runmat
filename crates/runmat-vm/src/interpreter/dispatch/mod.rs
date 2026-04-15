@@ -553,6 +553,7 @@ pub async fn dispatch_instruction(
                     name,
                     out_count: 1,
                     bytecode_functions,
+                    caller_functions: &mut context.functions,
                     exception: calls::ExceptionRouteContext {
                         try_stack,
                         vars,
@@ -588,6 +589,7 @@ pub async fn dispatch_instruction(
                     name,
                     out_count: *out_count,
                     bytecode_functions,
+                    caller_functions: &mut context.functions,
                     exception: calls::ExceptionRouteContext {
                         try_stack,
                         vars,
@@ -728,6 +730,7 @@ pub async fn dispatch_instruction(
                     name,
                     out_count: 1,
                     bytecode_functions,
+                    caller_functions: &mut context.functions,
                     exception: calls::ExceptionRouteContext {
                         try_stack,
                         vars,

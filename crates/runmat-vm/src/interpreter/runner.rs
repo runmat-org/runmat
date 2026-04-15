@@ -91,6 +91,27 @@ runmat_thread_local! {
     static USER_FUNCTION_VARS: RefCell<Option<*mut Vec<Value>>> = const { RefCell::new(None) };
 }
 
+runmat_thread_local! {
+    static DYNAMIC_USER_FUNCTIONS: RefCell<HashMap<String, UserFunction>> = RefCell::new(HashMap::new());
+}
+
+pub fn dynamic_user_functions_snapshot() -> HashMap<String, UserFunction> {
+    DYNAMIC_USER_FUNCTIONS.with(|slot| slot.borrow().clone())
+}
+
+fn clear_dynamic_user_functions() {
+    DYNAMIC_USER_FUNCTIONS.with(|slot| slot.borrow_mut().clear());
+}
+
+fn register_dynamic_user_functions(functions: &HashMap<String, UserFunction>) {
+    DYNAMIC_USER_FUNCTIONS.with(|slot| {
+        let mut map = slot.borrow_mut();
+        for (k, v) in functions {
+            map.insert(k.clone(), v.clone());
+        }
+    });
+}
+
 struct UserFunctionVarsGuard {
     previous: Option<*mut Vec<Value>>,
 }
@@ -169,6 +190,7 @@ async fn invoke_user_function_value(
         func_vars,
     } = prepared;
     let func_bytecode = crate::compile(&func_program, functions)?;
+    register_dynamic_user_functions(&func_bytecode.functions);
     let func_result_vars =
         interpret_function_with_counts(&func_bytecode, func_vars, name, 1, arg_count).await?;
     Ok(call_shared::first_output_value(
@@ -183,6 +205,10 @@ pub async fn interpret_with_vars(
     initial_vars: &mut [Value],
     current_function_name: Option<&str>,
 ) -> VmResult<InterpreterOutcome> {
+    let is_top_level = CALL_COUNTS.with(|cc| cc.borrow().is_empty());
+    if is_top_level {
+        clear_dynamic_user_functions();
+    }
     let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
     let state = Box::new(InterpreterState::new(
         bytecode.clone(),
