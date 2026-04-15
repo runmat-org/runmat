@@ -1,12 +1,11 @@
 use crate::bytecode::{EndExpr, UserFunction};
 use crate::indexing::end_expr as idx_end_expr;
+use crate::indexing::plan as idx_plan;
+use crate::indexing::plan::{build_expr_index_plan, build_index_plan, ExprPlanSpec};
 use crate::indexing::read_linear as idx_read_linear;
 use crate::indexing::read_slice as idx_read_slice;
-use crate::indexing::selectors as idx_selectors;
+use crate::indexing::selectors::build_slice_selectors;
 use crate::indexing::selectors::index_scalar_from_value;
-use crate::indexing::selectors::{
-    build_slice_plan, build_slice_selectors, selector_from_value_dim, SliceSelector,
-};
 use crate::indexing::write_linear as idx_write_linear;
 use crate::indexing::write_slice as idx_write_slice;
 use runmat_builtins::Value;
@@ -1026,101 +1025,39 @@ where
                     .await?,
                 ),
                 Value::Tensor(t) => {
-                    if *dims == 1 {
-                        stack.push(
-                            idx_write_slice::assign_tensor_slice_1d(
-                                t,
-                                *colon_mask,
-                                *end_mask,
-                                &numeric,
-                                rhs,
-                            )
-                            .await?,
-                        )
-                    } else {
-                        let mut selectors: Vec<SliceSelector> = Vec::with_capacity(*dims);
-                        let mut num_iter = 0usize;
-                        for d in 0..*dims {
-                            let is_colon = (*colon_mask & (1u32 << d)) != 0;
-                            let is_end = (*end_mask & (1u32 << d)) != 0;
-                            if is_colon {
-                                selectors.push(SliceSelector::Colon);
-                            } else if is_end {
-                                selectors
-                                    .push(SliceSelector::Scalar(*t.shape.get(d).unwrap_or(&1)));
-                            } else {
-                                let v = numeric.get(num_iter).ok_or(
-                                    crate::interpreter::errors::mex(
-                                        "MissingNumericIndex",
-                                        "missing numeric index",
-                                    ),
-                                )?;
-                                num_iter += 1;
-                                let dim_len = *t.shape.get(d).unwrap_or(&1);
-                                selectors.push(selector_from_value_dim(v, dim_len).await?);
-                            }
-                        }
-                        let vm_selectors: Vec<_> = selectors
-                            .iter()
-                            .map(|s| match s {
-                                SliceSelector::Colon => {
-                                    crate::indexing::selectors::SliceSelector::Colon
-                                }
-                                SliceSelector::Scalar(i) => {
-                                    crate::indexing::selectors::SliceSelector::Scalar(*i)
-                                }
-                                SliceSelector::Indices(v) => {
-                                    crate::indexing::selectors::SliceSelector::Indices(v.clone())
-                                }
-                                SliceSelector::LinearIndices {
-                                    values,
-                                    output_shape,
-                                } => crate::indexing::selectors::SliceSelector::LinearIndices {
-                                    values: values.clone(),
-                                    output_shape: output_shape.clone(),
-                                },
-                            })
-                            .collect();
-                        stack.push(idx_write_slice::assign_tensor_slice_nd(
-                            t,
-                            *dims,
-                            &vm_selectors,
-                            rhs,
-                        )?);
-                    }
+                    let selectors =
+                        build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &t.shape)
+                            .await?;
+                    let plan = build_index_plan(&selectors, *dims, &t.shape)?;
+                    stack.push(idx_write_slice::assign_tensor_with_plan(t, &plan, &rhs).await?);
                 }
-                Value::GpuTensor(handle) => stack.push(
-                    idx_write_slice::assign_gpu_store_slice(
-                        &handle,
+                Value::GpuTensor(handle) => stack.push({
+                    let selectors = build_slice_selectors(
                         *dims,
                         *colon_mask,
                         *end_mask,
                         &numeric,
-                        rhs,
+                        &handle.shape,
                     )
-                    .await?,
-                ),
+                    .await?;
+                    let plan = build_index_plan(&selectors, *dims, &handle.shape)?;
+                    idx_write_slice::assign_gpu_slice_with_plan(&handle, &plan, &rhs).await?
+                }),
                 Value::ComplexTensor(mut ct) => {
                     let selectors =
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &ct.shape)
                             .await
                             .map_err(|e| format!("slice assign: {e}"))?;
-                    let plan = build_slice_plan(&selectors, *dims, &ct.shape)
+                    let plan = build_index_plan(&selectors, *dims, &ct.shape)
                         .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     if plan.indices.is_empty() {
                         stack.push(Value::ComplexTensor(ct));
                         return Ok(true);
                     }
-                    let vm_plan = crate::indexing::selectors::SlicePlan {
-                        indices: plan.indices.clone(),
-                        output_shape: plan.output_shape.clone(),
-                        selection_lengths: plan.selection_lengths.clone(),
-                        dims: plan.dims,
-                    };
                     let rhs_view =
                         idx_write_slice::build_complex_rhs_view(&rhs, &plan.selection_lengths)
                             .map_err(|e| format!("slice assign: {e}"))?;
-                    idx_write_slice::scatter_complex_with_plan(&mut ct, &vm_plan, &rhs_view)
+                    idx_write_slice::scatter_complex_with_plan(&mut ct, &plan, &rhs_view)
                         .map_err(|e| format!("slice assign: {e}"))?;
                     stack.push(Value::ComplexTensor(ct));
                 }
@@ -1129,22 +1066,16 @@ where
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &sa.shape)
                             .await
                             .map_err(|e| format!("slice assign: {e}"))?;
-                    let plan = build_slice_plan(&selectors, *dims, &sa.shape)
+                    let plan = build_index_plan(&selectors, *dims, &sa.shape)
                         .map_err(|e| map_slice_plan_error("slice assign", e))?;
                     if plan.indices.is_empty() {
                         stack.push(Value::StringArray(sa));
                         return Ok(true);
                     }
-                    let vm_plan = crate::indexing::selectors::SlicePlan {
-                        indices: plan.indices.clone(),
-                        output_shape: plan.output_shape.clone(),
-                        selection_lengths: plan.selection_lengths.clone(),
-                        dims: plan.dims,
-                    };
                     let rhs_view =
                         idx_write_slice::build_string_rhs_view(&rhs, &plan.selection_lengths)
                             .map_err(|e| format!("slice assign: {e}"))?;
-                    idx_write_slice::scatter_string_with_plan(&mut sa, &vm_plan, &rhs_view)
+                    idx_write_slice::scatter_string_with_plan(&mut sa, &plan, &rhs_view)
                         .map_err(|e| format!("slice assign: {e}"))?;
                     stack.push(Value::StringArray(sa));
                 }
@@ -1475,12 +1406,13 @@ where
                 .await;
 
                 if let Ok((indices, output_shape)) = attempt {
-                    let vm_plan = idx_selectors::SlicePlan {
+                    let vm_plan = idx_plan::IndexPlan::new(
                         indices,
                         output_shape,
-                        selection_lengths: Vec::new(),
-                        dims: *dims,
-                    };
+                        Vec::new(),
+                        *dims,
+                        handle.shape.clone(),
+                    );
                     if let Ok(result) = idx_read_slice::read_gpu_slice_from_plan(handle, &vm_plan) {
                         stack.push(result);
                         return Ok(true);
@@ -1503,8 +1435,8 @@ where
             }
             match base {
                 Value::ComplexTensor(t) => {
-                    let vm_plan = idx_read_slice::build_expr_gather_plan(
-                        idx_read_slice::ExprGatherSpec {
+                    let vm_plan = build_expr_index_plan(
+                        ExprPlanSpec {
                             dims: *dims,
                             colon_mask: *colon_mask,
                             end_mask: *end_mask,
@@ -1540,8 +1472,8 @@ where
                     );
                 }
                 Value::Tensor(t) => {
-                    let vm_plan = idx_read_slice::build_expr_gather_plan(
-                        idx_read_slice::ExprGatherSpec {
+                    let vm_plan = build_expr_index_plan(
+                        ExprPlanSpec {
                             dims: *dims,
                             colon_mask: *colon_mask,
                             end_mask: *end_mask,
@@ -1581,16 +1513,10 @@ where
                         build_slice_selectors(*dims, *colon_mask, *end_mask, &numeric, &sa.shape)
                             .await
                             .map_err(|e| format!("slice: {e}"))?;
-                    let plan = build_slice_plan(&selectors, *dims, &sa.shape)
+                    let plan = build_index_plan(&selectors, *dims, &sa.shape)
                         .map_err(|e| map_slice_plan_error("slice", e))?;
-                    let vm_plan = idx_selectors::SlicePlan {
-                        indices: plan.indices.clone(),
-                        output_shape: plan.output_shape.clone(),
-                        selection_lengths: plan.selection_lengths.clone(),
-                        dims: plan.dims,
-                    };
                     stack.push(
-                        idx_read_slice::gather_string_slice(&sa, &vm_plan)
+                        idx_read_slice::gather_string_slice(&sa, &plan)
                             .map_err(|e| format!("slice: {e}"))?,
                     );
                 }
@@ -1708,8 +1634,8 @@ where
             }
             match base {
                 Value::ComplexTensor(mut t) => {
-                    let vm_plan = idx_read_slice::build_expr_gather_plan(
-                        idx_read_slice::ExprGatherSpec {
+                    let vm_plan = build_expr_index_plan(
+                        ExprPlanSpec {
                             dims: *dims,
                             colon_mask: *colon_mask,
                             end_mask: *end_mask,
@@ -1750,8 +1676,8 @@ where
                     stack.push(Value::ComplexTensor(t));
                 }
                 Value::Tensor(t) => {
-                    let selectors = idx_write_slice::build_expr_selectors(
-                        idx_write_slice::ExprSelectorSpec {
+                    let vm_plan = build_expr_index_plan(
+                        ExprPlanSpec {
                             dims: *dims,
                             colon_mask: *colon_mask,
                             end_mask: *end_mask,
@@ -1780,20 +1706,41 @@ where
                         },
                     )
                     .await?;
-                    stack.push(idx_write_slice::assign_tensor_slice_nd(
-                        t, *dims, &selectors, rhs,
-                    )?);
+                    stack.push(idx_write_slice::assign_tensor_with_plan(t, &vm_plan, &rhs).await?);
                 }
                 Value::GpuTensor(h) => {
-                    let updated = idx_write_slice::assign_gpu_store_slice(
-                        &h,
-                        *dims,
-                        *colon_mask,
-                        *end_mask,
-                        &numeric,
-                        rhs,
+                    let vm_plan = build_expr_index_plan(
+                        ExprPlanSpec {
+                            dims: *dims,
+                            colon_mask: *colon_mask,
+                            end_mask: *end_mask,
+                            range_dims,
+                            range_params: &range_params,
+                            range_start_exprs,
+                            range_step_exprs,
+                            range_end_exprs,
+                            numeric: &numeric,
+                            shape: &h.shape,
+                        },
+                        |dim_len, expr| {
+                            let expr = expr.clone();
+                            let vars_ref = &*vars;
+                            let functions_ref = functions;
+                            async move {
+                                resolve_range_end_index(
+                                    dim_len,
+                                    &expr,
+                                    vars_ref,
+                                    functions_ref,
+                                    call_user,
+                                )
+                                .await
+                            }
+                        },
                     )
                     .await?;
+                    let updated =
+                        idx_write_slice::assign_gpu_slice_with_plan(&h, &vm_plan, &rhs).await?;
                     stack.push(updated);
                 }
                 Value::Object(obj) => {

@@ -11,7 +11,8 @@ use crate::interpreter::timing::InterpreterTiming;
 use crate::runtime::call_stack::attach_call_frames;
 use crate::runtime::globals as runtime_globals;
 use crate::runtime::workspace::{
-    workspace_assign, workspace_clear, workspace_lookup, workspace_remove, workspace_snapshot,
+    refresh_workspace_state, workspace_assign, workspace_clear, workspace_lookup, workspace_remove,
+    workspace_snapshot,
 };
 use runmat_builtins::Value;
 use runmat_runtime::{
@@ -402,7 +403,7 @@ async fn run_interpreter_inner(
                     stored_value,
                 );
             };
-        if let Some(decision) = interp_dispatch::dispatch_instruction(
+        let dispatch_result = interp_dispatch::dispatch_instruction(
             interp_dispatch::DispatchMeta {
                 instr: &bytecode.instructions[pc],
                 var_names: &bytecode.var_names,
@@ -436,8 +437,24 @@ async fn run_interpreter_inner(
                 store_local_after_fallback_store: &mut store_local_after_fallback_store,
             },
         )
-        .await?
-        {
+        .await;
+        let dispatch_result = match dispatch_result {
+            Ok(result) => result,
+            Err(err) => match interp_dispatch::redirect_exception_to_catch(
+                err,
+                &mut try_stack,
+                &mut vars,
+                &mut last_exception,
+                &mut pc,
+                refresh_workspace_state,
+            ) {
+                interp_dispatch::ExceptionHandling::Caught => {
+                    continue;
+                }
+                interp_dispatch::ExceptionHandling::Uncaught(err) => return Err(*err),
+            },
+        };
+        if let Some(decision) = dispatch_result {
             match decision {
                 interp_dispatch::DispatchHandled::Generic(DispatchDecision::ContinueLoop) => {
                     continue

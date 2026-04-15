@@ -1,6 +1,5 @@
-use crate::indexing::selectors::{
-    build_slice_plan, build_slice_selectors, indices_from_value_linear, SlicePlan, SliceSelector,
-};
+use crate::indexing::plan::IndexPlan;
+use crate::indexing::selectors::SliceSelector;
 use crate::interpreter::errors::mex;
 use runmat_builtins::{CellArray, ComplexTensor, StringArray, Tensor, Value};
 use runmat_runtime::RuntimeError;
@@ -40,260 +39,6 @@ pub async fn object_subsasgn_paren(
         }
         other => Err(format!("slice subsasgn requires object/handle, got {other:?}").into()),
     }
-}
-
-pub async fn assign_tensor_slice_1d(
-    mut t: Tensor,
-    colon_mask: u32,
-    end_mask: u32,
-    numeric: &[Value],
-    rhs: Value,
-) -> Result<Value, RuntimeError> {
-    let total = t.data.len();
-    let is_colon = (colon_mask & 1u32) != 0;
-    let is_end = (end_mask & 1u32) != 0;
-    let lin_indices: Vec<usize> = if is_colon {
-        (1..=total).collect()
-    } else if is_end {
-        vec![total]
-    } else {
-        let v = numeric
-            .first()
-            .ok_or_else(|| mex("MissingNumericIndex", "missing numeric index"))?;
-        indices_from_value_linear(v, total).await?
-    };
-    match rhs {
-        Value::Num(v) => {
-            for &li in &lin_indices {
-                t.data[li - 1] = v;
-            }
-        }
-        Value::Tensor(rt) => {
-            if rt.data.len() == 1 {
-                let v = rt.data[0];
-                for &li in &lin_indices {
-                    t.data[li - 1] = v;
-                }
-            } else if rt.data.len() == lin_indices.len() {
-                for (k, &li) in lin_indices.iter().enumerate() {
-                    t.data[li - 1] = rt.data[k];
-                }
-            } else {
-                return Err("shape mismatch for linear slice assign".to_string().into());
-            }
-        }
-        _ => return Err("rhs must be numeric or tensor".to_string().into()),
-    }
-    Ok(Value::Tensor(t))
-}
-
-pub fn assign_tensor_slice_nd(
-    mut t: Tensor,
-    dims: usize,
-    selectors: &[SliceSelector],
-    rhs: Value,
-) -> Result<Value, RuntimeError> {
-    let rank = t.shape.len();
-    if dims == 2 {
-        let rows = if rank >= 1 { t.shape[0] } else { 1 };
-        let cols = if rank >= 2 { t.shape[1] } else { 1 };
-        match (&selectors[0], &selectors[1]) {
-            (SliceSelector::Colon, SliceSelector::Scalar(j)) => {
-                let j0 = *j - 1;
-                if j0 >= cols {
-                    let new_cols = j0 + 1;
-                    let new_rows = rows;
-                    let mut new_data = vec![0.0f64; new_rows * new_cols];
-                    for c in 0..cols {
-                        let src_off = c * rows;
-                        let dst_off = c * new_rows;
-                        new_data[dst_off..dst_off + rows]
-                            .copy_from_slice(&t.data[src_off..src_off + rows]);
-                    }
-                    t.data = new_data;
-                    t.shape = vec![new_rows, new_cols];
-                    t.rows = new_rows;
-                    t.cols = new_cols;
-                }
-                let start = j0 * rows;
-                match rhs {
-                    Value::Num(v) => {
-                        for r in 0..rows {
-                            t.data[start + r] = v;
-                        }
-                    }
-                    Value::Tensor(rt) => {
-                        let len = rt.data.len();
-                        if len == rows {
-                            for r in 0..rows {
-                                t.data[start + r] = rt.data[r];
-                            }
-                        } else if len == 1 {
-                            for r in 0..rows {
-                                t.data[start + r] = rt.data[0];
-                            }
-                        } else {
-                            return Err("shape mismatch for slice assign".to_string().into());
-                        }
-                    }
-                    _ => return Err("rhs must be numeric or tensor".to_string().into()),
-                }
-                return Ok(Value::Tensor(t));
-            }
-            (SliceSelector::Scalar(i), SliceSelector::Colon) => {
-                let i0 = *i - 1;
-                if i0 >= rows {
-                    let new_rows = i0 + 1;
-                    let new_cols = cols;
-                    let mut new_data = vec![0.0f64; new_rows * new_cols];
-                    for c in 0..cols {
-                        for r in 0..rows {
-                            new_data[r + c * new_rows] = t.data[r + c * rows];
-                        }
-                    }
-                    t.data = new_data;
-                    t.shape = vec![new_rows, new_cols];
-                    t.rows = new_rows;
-                    t.cols = new_cols;
-                }
-                match rhs {
-                    Value::Num(v) => {
-                        for c in 0..cols {
-                            t.data[i0 + c * rows] = v;
-                        }
-                    }
-                    Value::Tensor(rt) => {
-                        let len = rt.data.len();
-                        if len == cols {
-                            for c in 0..cols {
-                                t.data[i0 + c * rows] = rt.data[c];
-                            }
-                        } else if len == 1 {
-                            for c in 0..cols {
-                                t.data[i0 + c * rows] = rt.data[0];
-                            }
-                        } else {
-                            return Err("shape mismatch for slice assign".to_string().into());
-                        }
-                    }
-                    _ => return Err("rhs must be numeric or tensor".to_string().into()),
-                }
-                return Ok(Value::Tensor(t));
-            }
-            _ => {}
-        }
-    }
-
-    let mut per_dim_indices: Vec<Vec<usize>> = Vec::with_capacity(dims);
-    let full_shape: Vec<usize> = if rank < dims {
-        let mut s = t.shape.clone();
-        s.resize(dims, 1);
-        s
-    } else {
-        t.shape.clone()
-    };
-    for d in 0..dims {
-        let dim_len = full_shape[d];
-        let idxs = match &selectors[d] {
-            SliceSelector::Colon => (1..=dim_len).collect(),
-            SliceSelector::Scalar(i) => vec![*i],
-            SliceSelector::Indices(v) => v.clone(),
-            SliceSelector::LinearIndices { values: v, .. } => v.clone(),
-        };
-        if idxs.iter().any(|&i| i == 0 || i > dim_len) {
-            return Err(mex("IndexOutOfBounds", "Index out of bounds"));
-        }
-        per_dim_indices.push(idxs);
-    }
-    let mut strides: Vec<usize> = vec![0; dims];
-    let mut acc = 1usize;
-    for d in 0..dims {
-        strides[d] = acc;
-        acc *= full_shape[d];
-    }
-    let total_out: usize = per_dim_indices.iter().map(|v| v.len()).product();
-    enum RhsView {
-        Scalar(f64),
-        Tensor {
-            data: Vec<f64>,
-            shape: Vec<usize>,
-            strides: Vec<usize>,
-        },
-    }
-    let rhs_view = match rhs {
-        Value::Num(n) => RhsView::Scalar(n),
-        Value::Tensor(rt) => {
-            let mut shape = rt.shape.clone();
-            if shape.len() < dims {
-                shape.resize(dims, 1);
-            }
-            if shape.len() > dims {
-                if shape.iter().skip(dims).any(|&s| s != 1) {
-                    return Err("shape mismatch for slice assign".to_string().into());
-                }
-                shape.truncate(dims);
-            }
-            for d in 0..dims {
-                let out_len = per_dim_indices[d].len();
-                let rhs_len = shape[d];
-                if !(rhs_len == 1 || rhs_len == out_len) {
-                    return Err("shape mismatch for slice assign".to_string().into());
-                }
-            }
-            let mut rstrides = vec![0usize; dims];
-            let mut racc = 1usize;
-            for d in 0..dims {
-                rstrides[d] = racc;
-                racc *= shape[d];
-            }
-            RhsView::Tensor {
-                data: rt.data,
-                shape,
-                strides: rstrides,
-            }
-        }
-        _ => return Err("rhs must be numeric or tensor".to_string().into()),
-    };
-    let mut idx = vec![0usize; dims];
-    if total_out == 0 {
-        return Ok(Value::Tensor(t));
-    }
-    loop {
-        let mut lin = 0usize;
-        for d in 0..dims {
-            let i0 = per_dim_indices[d][idx[d]] - 1;
-            lin += i0 * strides[d];
-        }
-        match &rhs_view {
-            RhsView::Scalar(val) => t.data[lin] = *val,
-            RhsView::Tensor {
-                data,
-                shape,
-                strides,
-            } => {
-                let mut rlin = 0usize;
-                for d in 0..dims {
-                    let rhs_len = shape[d];
-                    let pos = if rhs_len == 1 { 0 } else { idx[d] };
-                    rlin += pos * strides[d];
-                }
-                t.data[lin] = data[rlin];
-            }
-        }
-        let mut d = 0usize;
-        while d < dims {
-            idx[d] += 1;
-            if idx[d] < per_dim_indices[d].len() {
-                break;
-            }
-            idx[d] = 0;
-            d += 1;
-        }
-        if d == dims {
-            break;
-        }
-    }
-    Ok(Value::Tensor(t))
 }
 
 pub enum ComplexRhsView {
@@ -349,7 +94,7 @@ pub fn build_complex_rhs_view(
 
 pub fn scatter_complex_with_plan(
     t: &mut ComplexTensor,
-    plan: &SlicePlan,
+    plan: &IndexPlan,
     rhs_view: &ComplexRhsView,
 ) -> Result<(), RuntimeError> {
     let dims = plan.dims;
@@ -465,7 +210,7 @@ pub fn build_string_rhs_view(
 
 pub fn scatter_string_with_plan(
     sa: &mut StringArray,
-    plan: &SlicePlan,
+    plan: &IndexPlan,
     rhs_view: &StringRhsView,
 ) -> Result<(), RuntimeError> {
     let dims = plan.dims;
@@ -531,6 +276,118 @@ pub fn scatter_string_with_plan(
         }
     }
     Ok(())
+}
+
+pub async fn materialize_rhs_real_for_plan(
+    rhs: &Value,
+    plan: &IndexPlan,
+) -> Result<Vec<f64>, RuntimeError> {
+    if plan.dims == 1 {
+        let count = plan.selection_lengths.first().copied().unwrap_or(0);
+        materialize_rhs_linear_real(rhs, count).await
+    } else {
+        materialize_rhs_nd_real(rhs, &plan.selection_lengths).await
+    }
+}
+
+pub fn scatter_real_with_plan(
+    t: &mut Tensor,
+    plan: &IndexPlan,
+    rhs_values: &[f64],
+) -> Result<(), RuntimeError> {
+    if rhs_values.len() != plan.indices.len() {
+        return Err(mex("ShapeMismatch", "shape mismatch for slice assign"));
+    }
+    for (&dst, &value) in plan.indices.iter().zip(rhs_values.iter()) {
+        t.data[dst as usize] = value;
+    }
+    Ok(())
+}
+
+pub async fn assign_tensor_with_plan(
+    mut t: Tensor,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    if plan.indices.is_empty() {
+        return Ok(Value::Tensor(t));
+    }
+    let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
+    scatter_real_with_plan(&mut t, plan, &rhs_values)?;
+    Ok(Value::Tensor(t))
+}
+
+pub async fn assign_gpu_slice_with_plan(
+    handle: &runmat_accelerate_api::GpuTensorHandle,
+    plan: &IndexPlan,
+    rhs: &Value,
+) -> Result<Value, RuntimeError> {
+    if plan.indices.is_empty() {
+        return Ok(Value::GpuTensor(handle.clone()));
+    }
+    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
+        mex(
+            "AccelerationProviderUnavailable",
+            "No acceleration provider registered",
+        )
+    })?;
+    if let Value::GpuTensor(vh) = rhs {
+        let rows = plan.base_shape.first().copied().unwrap_or(1);
+        let cols = plan.base_shape.get(1).copied().unwrap_or(1);
+        if let Some(col) = plan.properties.full_column {
+            if col < cols {
+                let v_rows = match vh.shape.len() {
+                    1 | 2 => vh.shape[0],
+                    _ => 0,
+                };
+                if v_rows == rows {
+                    if let Ok(new_h) = provider.scatter_column(handle, col, vh) {
+                        return Ok(Value::GpuTensor(new_h));
+                    }
+                }
+            }
+        }
+        if let Some(row) = plan.properties.full_row {
+            if row < rows {
+                let v_cols = match vh.shape.len() {
+                    1 => vh.shape[0],
+                    2 => vh.shape[1],
+                    _ => 0,
+                };
+                if v_cols == cols {
+                    if let Ok(new_h) = provider.scatter_row(handle, row, vh) {
+                        return Ok(Value::GpuTensor(new_h));
+                    }
+                }
+            }
+        }
+    }
+    let rhs_values = materialize_rhs_real_for_plan(rhs, plan).await?;
+    let value_shape = vec![rhs_values.len().max(1), 1];
+    let upload_result = if rhs_values.is_empty() {
+        provider.zeros(&[0, 1])
+    } else {
+        provider.upload(&runmat_accelerate_api::HostTensorView {
+            data: &rhs_values,
+            shape: &value_shape,
+        })
+    };
+    if let Ok(values_handle) = upload_result {
+        if provider
+            .scatter_linear(handle, &plan.indices, &values_handle)
+            .is_ok()
+        {
+            return Ok(Value::GpuTensor(handle.clone()));
+        }
+    }
+
+    let host = provider
+        .download(handle)
+        .await
+        .map_err(|e| format!("gather for slice assign: {e}"))?;
+    let mut t = Tensor::new(host.data, host.shape).map_err(|e| format!("slice assign: {e}"))?;
+    scatter_real_with_plan(&mut t, plan, &rhs_values)?;
+    upload_tensor_to_gpu(&t)
 }
 
 pub async fn materialize_rhs_linear_real(
@@ -732,110 +589,6 @@ pub fn upload_tensor_to_gpu(t: &Tensor) -> Result<Value, RuntimeError> {
         .upload(&view)
         .map_err(|e| format!("reupload after slice assign: {e}"))?;
     Ok(Value::GpuTensor(new_h))
-}
-
-pub async fn assign_gpu_store_slice(
-    handle: &runmat_accelerate_api::GpuTensorHandle,
-    dims: usize,
-    colon_mask: u32,
-    end_mask: u32,
-    numeric: &[Value],
-    rhs: Value,
-) -> Result<Value, RuntimeError> {
-    let provider = runmat_accelerate_api::provider().ok_or_else(|| {
-        mex(
-            "AccelerationProviderUnavailable",
-            "No acceleration provider registered",
-        )
-    })?;
-    let base_shape = handle.shape.clone();
-    let selectors = build_slice_selectors(dims, colon_mask, end_mask, numeric, &base_shape).await?;
-
-    if dims == 2 {
-        if let (Some(sel0), Some(sel1)) = (selectors.first(), selectors.get(1)) {
-            let rows = base_shape.first().copied().unwrap_or(1);
-            let cols = base_shape.get(1).copied().unwrap_or(1);
-            if let Value::GpuTensor(vh) = &rhs {
-                if let (SliceSelector::Colon, SliceSelector::Scalar(j)) = (sel0, sel1) {
-                    let j0 = *j - 1;
-                    if j0 < cols {
-                        let v_rows = match vh.shape.len() {
-                            1 | 2 => vh.shape[0],
-                            _ => 0,
-                        };
-                        if v_rows == rows {
-                            if let Ok(new_h) = provider.scatter_column(handle, j0, vh) {
-                                return Ok(Value::GpuTensor(new_h));
-                            }
-                        }
-                    }
-                }
-                if let (SliceSelector::Scalar(i), SliceSelector::Colon) = (sel0, sel1) {
-                    let i0 = *i - 1;
-                    if i0 < rows {
-                        let v_cols = match vh.shape.len() {
-                            1 => vh.shape[0],
-                            2 => vh.shape[1],
-                            _ => 0,
-                        };
-                        if v_cols == cols {
-                            if let Ok(new_h) = provider.scatter_row(handle, i0, vh) {
-                                return Ok(Value::GpuTensor(new_h));
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    if let Ok(plan) = build_slice_plan(&selectors, dims, &base_shape) {
-        if plan.indices.is_empty() {
-            return Ok(Value::GpuTensor(handle.clone()));
-        }
-        let values_result = if plan.dims == 1 {
-            let count = plan.selection_lengths.first().copied().unwrap_or(0);
-            materialize_rhs_linear_real(&rhs, count).await
-        } else {
-            materialize_rhs_nd_real(&rhs, &plan.selection_lengths).await
-        };
-        if let Ok(values) = values_result {
-            if values.len() == plan.indices.len() {
-                let value_shape = vec![values.len().max(1), 1];
-                let upload_result = if values.is_empty() {
-                    provider.zeros(&[0, 1])
-                } else {
-                    provider.upload(&runmat_accelerate_api::HostTensorView {
-                        data: &values,
-                        shape: &value_shape,
-                    })
-                };
-                if let Ok(values_handle) = upload_result {
-                    if provider
-                        .scatter_linear(handle, &plan.indices, &values_handle)
-                        .is_ok()
-                    {
-                        return Ok(Value::GpuTensor(handle.clone()));
-                    }
-                }
-            }
-        }
-    }
-
-    let host = provider
-        .download(handle)
-        .await
-        .map_err(|e| format!("gather for slice assign: {e}"))?;
-    let t = Tensor::new(host.data, host.shape).map_err(|e| format!("slice assign: {e}"))?;
-    let updated = if dims == 1 {
-        assign_tensor_slice_1d(t, colon_mask, end_mask, numeric, rhs).await?
-    } else {
-        assign_tensor_slice_nd(t, dims, &selectors, rhs)?
-    };
-    let Value::Tensor(updated) = updated else {
-        unreachable!()
-    };
-    upload_tensor_to_gpu(&updated)
 }
 
 pub struct ExprSelectorSpec<'a> {
