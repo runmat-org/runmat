@@ -63,11 +63,11 @@ const nextConfig: NextConfig = {
         permanent: true,
       },
 
-      // Privacy -> Terms
+      // Privacy — no dedicated page yet; temporary redirect until one is created
       {
         source: '/privacy',
         destination: '/docs/terms',
-        permanent: true,
+        permanent: false,
       },
 
       // Raw .md file URLs -> correct doc routes
