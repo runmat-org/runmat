@@ -6034,6 +6034,7 @@ dependencies = [
  "runmat-thread-local",
  "runmat-time",
  "serde",
+ "tracing",
 ]
 
 [[package]]

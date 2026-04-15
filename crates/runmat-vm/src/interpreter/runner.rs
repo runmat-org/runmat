@@ -1,6 +1,6 @@
 use crate::accel::fusion as accel_fusion;
 use crate::accel::residency as accel_residency;
-use crate::bytecode::{Bytecode, ExecutionContext, Instr, UserFunction};
+use crate::bytecode::{Bytecode, Instr, UserFunction};
 use crate::call::shared as call_shared;
 use crate::call::user as call_user;
 use crate::interpreter::api::{InterpreterOutcome, InterpreterState};
