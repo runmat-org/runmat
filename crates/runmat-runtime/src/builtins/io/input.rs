@@ -1,6 +1,6 @@
 //! MATLAB-compatible `input` builtin for line-oriented console interaction.
 
-use runmat_builtins::{CharArray, Tensor, Value};
+use runmat_builtins::{CharArray, LogicalArray, Tensor, Value};
 use runmat_macros::runtime_builtin;
 
 use crate::builtins::common::spec::{
@@ -168,13 +168,13 @@ async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
         return Ok(Value::Tensor(Tensor::zeros(vec![0, 0])));
     }
 
-    // Fast path 1: scalar literals and named constants.
+    // Fast path 1: scalar literals, named constants, and logical keywords.
     // Handles the vast majority of input() use cases without touching the VM.
-    if let Some(f) = parse_scalar_token(trimmed) {
-        return Ok(Value::Num(f));
+    if let Some(v) = parse_scalar_value(trimmed) {
+        return Ok(v);
     }
 
-    // Fast path 2: matrix/vector literals like `[1 2 3]`, `[1;2;3]`, `[1 2;3 4]`.
+    // Fast path 2: matrix/vector literals like `[1 2 3]`, `[1;2;3]`, `[true false]`.
     // Avoids recursive interpret() calls for this common case.
     if trimmed.starts_with('[') && trimmed.ends_with(']') {
         if let Some(v) = parse_matrix_literal(trimmed) {
@@ -210,19 +210,21 @@ async fn parse_numeric_response(line: &str) -> Result<Value, RuntimeError> {
         })
 }
 
-/// Parse a single token that represents a MATLAB numeric scalar or named constant.
-/// Returns `None` if the token is not a recognisable scalar (e.g. it contains
-/// brackets, commas, or looks like a function call).
-fn parse_scalar_token(s: &str) -> Option<f64> {
-    // Named constants (case-insensitive to match MATLAB behaviour).
+/// Parse a single MATLAB scalar token into a [`Value`].
+///
+/// Returns [`Value::Bool`] for `true`/`false` (case-insensitive), [`Value::Num`]
+/// for numeric literals and named constants (`pi`, `inf`, `nan`, `e`), and
+/// `None` for anything that looks like a matrix, function call, or unknown
+/// identifier.
+fn parse_scalar_value(s: &str) -> Option<Value> {
     match s.to_ascii_lowercase().as_str() {
-        "pi" => return Some(std::f64::consts::PI),
-        "inf" | "+inf" | "infinity" | "+infinity" => return Some(f64::INFINITY),
-        "-inf" | "-infinity" => return Some(f64::NEG_INFINITY),
-        "nan" => return Some(f64::NAN),
-        "e" => return Some(std::f64::consts::E),
-        "true" => return Some(1.0),
-        "false" => return Some(0.0),
+        "true" => return Some(Value::Bool(true)),
+        "false" => return Some(Value::Bool(false)),
+        "pi" => return Some(Value::Num(std::f64::consts::PI)),
+        "inf" | "+inf" | "infinity" | "+infinity" => return Some(Value::Num(f64::INFINITY)),
+        "-inf" | "-infinity" => return Some(Value::Num(f64::NEG_INFINITY)),
+        "nan" => return Some(Value::Num(f64::NAN)),
+        "e" => return Some(Value::Num(std::f64::consts::E)),
         _ => {}
     }
     // Plain numeric literals: integers, decimals, scientific notation, optional sign.
@@ -235,14 +237,18 @@ fn parse_scalar_token(s: &str) -> Option<f64> {
     if has_non_numeric {
         return None;
     }
-    s.parse::<f64>().ok()
+    s.parse::<f64>().ok().map(Value::Num)
 }
 
 /// Parse a MATLAB matrix literal of the form `[elements]`.
 ///
 /// Rows are separated by `;` and elements within a row by whitespace and/or `,`.
-/// Every element must be a token accepted by [`parse_scalar_token`].
+/// Every element must be a token accepted by [`parse_scalar_value`].
 /// Returns `None` if the literal is malformed or contains non-scalar elements.
+///
+/// Output type mirrors MATLAB semantics:
+/// - All-logical elements → [`Value::LogicalArray`]
+/// - Any numeric element  → [`Value::Tensor`] (logical elements coerced to `f64`)
 fn parse_matrix_literal(s: &str) -> Option<Value> {
     let inner = s.strip_prefix('[')?.strip_suffix(']')?;
     let inner = inner.trim();
@@ -251,7 +257,7 @@ fn parse_matrix_literal(s: &str) -> Option<Value> {
     }
 
     let row_strs: Vec<&str> = inner.split(';').collect();
-    let mut data: Vec<f64> = Vec::new();
+    let mut values: Vec<Value> = Vec::new();
     let mut nrows = 0usize;
     let mut ncols: Option<usize> = None;
 
@@ -269,7 +275,7 @@ fn parse_matrix_literal(s: &str) -> Option<Value> {
             _ => {}
         }
         for token in &tokens {
-            data.push(parse_scalar_token(token)?);
+            values.push(parse_scalar_value(token)?);
         }
         nrows += 1;
     }
@@ -278,10 +284,35 @@ fn parse_matrix_literal(s: &str) -> Option<Value> {
     if nrows == 0 || ncols == 0 {
         return Some(Value::Tensor(Tensor::zeros(vec![0, 0])));
     }
+    // Scalar: preserve the exact type (Bool or Num) rather than always wrapping in Tensor.
     if nrows == 1 && ncols == 1 {
-        return Some(Value::Num(data[0]));
+        return Some(values.remove(0));
     }
-    Tensor::new_2d(data, nrows, ncols).ok().map(Value::Tensor)
+
+    // All-logical → LogicalArray; any numeric element → Tensor (bools coerced to f64).
+    let all_logical = values.iter().all(|v| matches!(v, Value::Bool(_)));
+    if all_logical {
+        let data: Vec<u8> = values
+            .iter()
+            .map(|v| match v {
+                Value::Bool(b) => u8::from(*b),
+                _ => unreachable!(),
+            })
+            .collect();
+        LogicalArray::new(data, vec![nrows, ncols])
+            .ok()
+            .map(Value::LogicalArray)
+    } else {
+        let data: Vec<f64> = values
+            .iter()
+            .map(|v| match v {
+                Value::Num(f) => *f,
+                Value::Bool(b) => f64::from(u8::from(*b)),
+                _ => unreachable!(),
+            })
+            .collect();
+        Tensor::new_2d(data, nrows, ncols).ok().map(Value::Tensor)
+    }
 }
 
 #[cfg(test)]
@@ -345,6 +376,30 @@ pub(crate) mod tests {
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
+    fn true_input_returns_logical_not_double() {
+        push_queued_response(Ok(InteractionResponse::Line("true".into())));
+        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        assert_eq!(value, Value::Bool(true));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn false_input_returns_logical_not_double() {
+        push_queued_response(Ok(InteractionResponse::Line("false".into())));
+        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        assert_eq!(value, Value::Bool(false));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn bool_input_is_case_insensitive() {
+        push_queued_response(Ok(InteractionResponse::Line("TRUE".into())));
+        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        assert_eq!(value, Value::Bool(true));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
     fn column_vector_parses_without_eval_hook() {
         push_queued_response(Ok(InteractionResponse::Line("[1;2;3]".into())));
         let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
@@ -355,6 +410,49 @@ pub(crate) mod tests {
                 assert_eq!(t.data, vec![1.0, 2.0, 3.0]);
             }
             other => panic!("expected 3×1 tensor, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn logical_row_vector_parses_as_logical_array() {
+        push_queued_response(Ok(InteractionResponse::Line("[true false]".into())));
+        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        match value {
+            Value::LogicalArray(la) => {
+                assert_eq!(la.shape, vec![1, 2]);
+                assert_eq!(la.data, vec![1, 0]);
+            }
+            other => panic!("expected LogicalArray, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn logical_column_vector_parses_as_logical_array() {
+        push_queued_response(Ok(InteractionResponse::Line("[true; false]".into())));
+        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        match value {
+            Value::LogicalArray(la) => {
+                assert_eq!(la.shape, vec![2, 1]);
+                assert_eq!(la.data, vec![1, 0]);
+            }
+            other => panic!("expected LogicalArray, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn mixed_logical_and_numeric_coerces_to_double_tensor() {
+        push_queued_response(Ok(InteractionResponse::Line("[true 2.0]".into())));
+        let value = futures::executor::block_on(input_builtin(vec![])).expect("input");
+        match value {
+            Value::Tensor(t) => {
+                assert_eq!(t.rows, 1);
+                assert_eq!(t.cols, 2);
+                assert_eq!(t.data, vec![1.0, 2.0]);
+            }
+            other => panic!("expected Tensor, got {other:?}"),
         }
     }
 
