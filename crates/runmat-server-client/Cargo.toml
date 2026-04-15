@@ -1,6 +1,6 @@
 [package]
 name = "runmat-server-client"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 description = "Authenticated public API client and auth helpers for RunMat server integrations"
 authors = ["Dystr Team"]
