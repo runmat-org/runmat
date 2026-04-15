@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="220" viewBox="0 0 400 220">
+  <defs>
+    <pattern id="fine" width="10" height="10" patternUnits="userSpaceOnUse">
+      <path d="M10 0V10H0" fill="none" stroke="#e4d8be" stroke-width="0.4"/>
+    </pattern>
+    <pattern id="major" width="50" height="50" patternUnits="userSpaceOnUse">
+      <rect width="50" height="50" fill="url(#fine)"/>
+      <path d="M50 0V50H0" fill="none" stroke="#d4c49e" stroke-width="0.6"/>
+    </pattern>
+    <linearGradient id="fade" x1="0" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#f8f2e6"/>
+      <stop offset="100%" stop-color="#f2ead8"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="220" fill="url(#fade)"/>
+  <rect width="400" height="220" fill="url(#major)"/>
+  <!-- bar chart -->
+  <rect x="55" y="125" width="18" height="55" fill="#c8960a" opacity="0.2" rx="1"/>
+  <rect x="80" y="95" width="18" height="85" fill="#c8960a" opacity="0.25" rx="1"/>
+  <rect x="105" y="110" width="18" height="70" fill="#c8960a" opacity="0.2" rx="1"/>
+  <rect x="130" y="70" width="18" height="110" fill="#c8960a" opacity="0.3" rx="1"/>
+  <rect x="155" y="100" width="18" height="80" fill="#c8960a" opacity="0.22" rx="1"/>
+  <rect x="180" y="85" width="18" height="95" fill="#c8960a" opacity="0.28" rx="1"/>
+  <rect x="205" y="115" width="18" height="65" fill="#c8960a" opacity="0.2" rx="1"/>
+  <!-- trend line -->
+  <path d="M64 130 L89 100 L114 115 L139 75 L164 105 L189 90 L214 120" fill="none" stroke="#a07008" stroke-width="1.5" opacity="0.35" stroke-dasharray="4 3"/>
+  <!-- axis -->
+  <line x1="50" y1="182" x2="230" y2="182" stroke="#a07008" stroke-width="0.7" opacity="0.25"/>
+  <line x1="50" y1="182" x2="50" y2="55" stroke="#a07008" stroke-width="0.7" opacity="0.25"/>
+  <!-- matrix notation -->
+  <text x="275" y="70" font-family="monospace" font-size="8" fill="#a07008" opacity="0.25">[</text>
+  <text x="282" y="70" font-family="monospace" font-size="7" fill="#a07008" opacity="0.2">3.14  2.71  1.62</text>
+  <text x="282" y="82" font-family="monospace" font-size="7" fill="#a07008" opacity="0.2">0.58  1.73  2.24</text>
+  <text x="282" y="94" font-family="monospace" font-size="7" fill="#a07008" opacity="0.2">4.67  0.69  3.16</text>
+  <text x="370" y="94" font-family="monospace" font-size="8" fill="#a07008" opacity="0.25">]</text>
+  <!-- bracket lines -->
+  <line x1="277" y1="60" x2="277" y2="98" stroke="#a07008" stroke-width="0.8" opacity="0.2"/>
+  <line x1="277" y1="60" x2="280" y2="60" stroke="#a07008" stroke-width="0.8" opacity="0.2"/>
+  <line x1="277" y1="98" x2="280" y2="98" stroke="#a07008" stroke-width="0.8" opacity="0.2"/>
+  <line x1="368" y1="60" x2="368" y2="98" stroke="#a07008" stroke-width="0.8" opacity="0.2"/>
+  <line x1="368" y1="60" x2="365" y2="60" stroke="#a07008" stroke-width="0.8" opacity="0.2"/>
+  <line x1="368" y1="98" x2="365" y2="98" stroke="#a07008" stroke-width="0.8" opacity="0.2"/>
+  <!-- cross markers -->
+  <g stroke="#b8a070" stroke-width="0.5" opacity="0.35">
+    <line x1="297" y1="145" x2="303" y2="145"/><line x1="300" y1="142" x2="300" y2="148"/>
+    <line x1="347" y1="175" x2="353" y2="175"/><line x1="350" y1="172" x2="350" y2="178"/>
+  </g>
+</svg>

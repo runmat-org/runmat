@@ -32,7 +32,7 @@ export default function BenchmarksPage() {
         </div>
 
         <div className="mt-16 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {benchmarks.map((benchmark) => (
+          {benchmarks.map((benchmark, i) => (
             <ContentCard
               key={encodeURIComponent(benchmark.slug)}
               href={`/benchmarks/${encodeURIComponent(benchmark.slug)}`}
@@ -41,6 +41,7 @@ export default function BenchmarksPage() {
               imageAlt={benchmark.title}
               excerpt={benchmark.summary}
               ctaLabel="View Benchmark"
+              index={i}
             />
           ))}
         </div>

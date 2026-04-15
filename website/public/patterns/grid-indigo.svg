@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="220" viewBox="0 0 400 220">
+  <defs>
+    <pattern id="fine" width="10" height="10" patternUnits="userSpaceOnUse">
+      <path d="M10 0V10H0" fill="none" stroke="#c8c8e4" stroke-width="0.4"/>
+    </pattern>
+    <pattern id="major" width="50" height="50" patternUnits="userSpaceOnUse">
+      <rect width="50" height="50" fill="url(#fine)"/>
+      <path d="M50 0V50H0" fill="none" stroke="#b0b0d8" stroke-width="0.5"/>
+    </pattern>
+    <linearGradient id="fade" x1="0" y1="0" x2="0.5" y2="1">
+      <stop offset="0%" stop-color="#eeeef6"/>
+      <stop offset="100%" stop-color="#e6e6f2"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="220" fill="url(#fade)"/>
+  <rect width="400" height="220" fill="url(#major)"/>
+  <!-- parallel line field with rotation -->
+  <g stroke="#4040a0" stroke-width="0.6" opacity="0.1">
+    <line x1="40" y1="20" x2="160" y2="200"/>
+    <line x1="70" y1="20" x2="190" y2="200"/>
+    <line x1="100" y1="20" x2="220" y2="200"/>
+    <line x1="130" y1="20" x2="250" y2="200"/>
+    <line x1="160" y1="20" x2="280" y2="200"/>
+    <line x1="190" y1="20" x2="310" y2="200"/>
+    <line x1="220" y1="20" x2="340" y2="200"/>
+    <line x1="250" y1="20" x2="370" y2="200"/>
+  </g>
+  <!-- perpendicular set -->
+  <g stroke="#4040a0" stroke-width="0.6" opacity="0.08">
+    <line x1="40" y1="200" x2="160" y2="20"/>
+    <line x1="70" y1="200" x2="190" y2="20"/>
+    <line x1="100" y1="200" x2="220" y2="20"/>
+    <line x1="130" y1="200" x2="250" y2="20"/>
+    <line x1="160" y1="200" x2="280" y2="20"/>
+    <line x1="190" y1="200" x2="310" y2="20"/>
+    <line x1="220" y1="200" x2="340" y2="20"/>
+    <line x1="250" y1="200" x2="370" y2="20"/>
+  </g>
+  <!-- diamond highlights at intersections -->
+  <g fill="#4040a0" opacity="0.08">
+    <rect x="147" y="107" width="6" height="6" transform="rotate(45 150 110)"/>
+    <rect x="207" y="107" width="6" height="6" transform="rotate(45 210 110)"/>
+    <rect x="267" y="107" width="6" height="6" transform="rotate(45 270 110)"/>
+  </g>
+  <!-- cross markers -->
+  <g stroke="#6060b0" stroke-width="0.5" opacity="0.3">
+    <line x1="347" y1="25" x2="353" y2="25"/><line x1="350" y1="22" x2="350" y2="28"/>
+    <line x1="47" y1="195" x2="53" y2="195"/><line x1="50" y1="192" x2="50" y2="198"/>
+  </g>
+</svg>

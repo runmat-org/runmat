@@ -5,6 +5,25 @@ import Image from "next/image";
 import { ArrowUpRight } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 
+const GRID_PATTERNS = [
+  "/patterns/grid-blue.svg",
+  "/patterns/grid-green.svg",
+  "/patterns/grid-violet.svg",
+  "/patterns/grid-scatter.svg",
+  "/patterns/grid-heatmap.svg",
+  "/patterns/grid-vector.svg",
+  "/patterns/grid-histogram.svg",
+  "/patterns/grid-bar.svg",
+  "/patterns/grid-stem.svg",
+  "/patterns/grid-surf.svg",
+  "/patterns/grid-teal.svg",
+  "/patterns/grid-indigo.svg",
+  "/patterns/grid-coral.svg",
+  "/patterns/grid-navy.svg",
+  "/patterns/grid-sage.svg",
+  "/patterns/grid-plum.svg",
+];
+
 export interface ContentCardProps {
   href: string;
   title: string;
@@ -14,6 +33,7 @@ export interface ContentCardProps {
   excerpt?: string;
   date?: string;
   ctaLabel?: string;
+  index?: number;
 }
 
 export function ContentCard({
@@ -25,25 +45,23 @@ export function ContentCard({
   excerpt,
   date,
   ctaLabel = "Read",
+  index = 0,
 }: ContentCardProps) {
+  const pattern = GRID_PATTERNS[index % GRID_PATTERNS.length];
+
   return (
     <Link href={href} className="block h-full group">
-      <Card className="group overflow-hidden transition-all cursor-pointer h-full flex flex-col bg-muted/50 hover:bg-card">
-        <CardContent className="p-5 flex flex-col h-full gap-0">
-          {image ? (
-            <div className="relative w-full h-40 rounded-lg mb-3 overflow-hidden flex-shrink-0">
-              <Image
-                src={image}
-                alt={imageAlt ?? title}
-                fill
-                className="object-contain"
-                sizes="(max-width: 768px) 100vw, (max-width: 1024px) 50vw, 33vw"
-              />
-            </div>
-          ) : (
-            <div className="w-full h-40 rounded-lg mb-3 flex-shrink-0 bg-muted transition-all border border-border/50" />
-          )}
+      <Card className="group overflow-hidden transition-all cursor-pointer h-full flex flex-col bg-muted/50 hover:bg-card py-0 gap-0">
+        <div className="relative w-full h-44 overflow-hidden flex-shrink-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={pattern}
+            alt=""
+            className="absolute inset-0 w-full h-full object-cover"
+          />
+        </div>
 
+        <CardContent className="p-4 pt-3 flex flex-col flex-1 gap-0">
           {typeBadge && (
             <div
               className={`text-xs uppercase tracking-wider mb-2 ${typeBadge.color ? "" : "text-muted-foreground"}`}

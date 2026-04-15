@@ -185,7 +185,7 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
   };
   const breadcrumbJsonLdString = JSON.stringify(breadcrumbJsonLd).replace(/<\//g, "<\\/");
   return (
-    <div className="grid lg:grid-cols-[minmax(0,1fr)_220px] gap-8 lg:items-start overflow-visible">
+    <div className="grid lg:grid-cols-[minmax(0,1fr)_220px] gap-10 lg:items-start overflow-visible">
       <article className="prose dark:prose-invert max-w-none scroll-smooth min-w-0">
         <nav className="text-sm text-muted-foreground mb-4">
           {crumbs

@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="220" viewBox="0 0 400 220">
+  <defs>
+    <pattern id="fine" width="10" height="10" patternUnits="userSpaceOnUse">
+      <path d="M10 0V10H0" fill="none" stroke="#c2e0c8" stroke-width="0.4"/>
+    </pattern>
+    <pattern id="major" width="50" height="50" patternUnits="userSpaceOnUse">
+      <rect width="50" height="50" fill="url(#fine)"/>
+      <path d="M50 0V50H0" fill="none" stroke="#a8d0b0" stroke-width="0.6"/>
+    </pattern>
+    <linearGradient id="fade" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0%" stop-color="#e8f5eb"/>
+      <stop offset="100%" stop-color="#ddf0e2"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="220" fill="url(#fade)"/>
+  <rect width="400" height="220" fill="url(#major)"/>
+  <!-- concentric rings offset -->
+  <circle cx="140" cy="95" r="75" fill="none" stroke="#3a9e52" stroke-width="0.8" opacity="0.1"/>
+  <circle cx="140" cy="95" r="55" fill="none" stroke="#3a9e52" stroke-width="0.8" opacity="0.14"/>
+  <circle cx="140" cy="95" r="35" fill="none" stroke="#3a9e52" stroke-width="1" opacity="0.18"/>
+  <circle cx="140" cy="95" r="15" fill="none" stroke="#3a9e52" stroke-width="1" opacity="0.22"/>
+  <!-- second ring cluster -->
+  <circle cx="300" cy="140" r="60" fill="none" stroke="#3a9e52" stroke-width="0.8" opacity="0.08"/>
+  <circle cx="300" cy="140" r="40" fill="none" stroke="#3a9e52" stroke-width="0.8" opacity="0.12"/>
+  <circle cx="300" cy="140" r="20" fill="none" stroke="#3a9e52" stroke-width="0.8" opacity="0.16"/>
+  <!-- tangent lines -->
+  <line x1="60" y1="20" x2="220" y2="170" stroke="#3a9e52" stroke-width="0.5" opacity="0.08"/>
+  <line x1="240" y1="80" x2="360" y2="200" stroke="#3a9e52" stroke-width="0.5" opacity="0.08"/>
+  <!-- cross markers -->
+  <g stroke="#6aab76" stroke-width="0.5" opacity="0.3">
+    <line x1="47" y1="175" x2="53" y2="175"/><line x1="50" y1="172" x2="50" y2="178"/>
+    <line x1="347" y1="45" x2="353" y2="45"/><line x1="350" y1="42" x2="350" y2="48"/>
+    <line x1="197" y1="195" x2="203" y2="195"/><line x1="200" y1="192" x2="200" y2="198"/>
+  </g>
+</svg>

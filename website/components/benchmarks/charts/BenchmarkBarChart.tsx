@@ -1,12 +1,10 @@
 "use client";
 
-import { useId } from "react";
 import useMeasure from "react-use-measure";
 import { scaleBand, scaleLinear } from "@visx/scale";
 import { Group } from "@visx/group";
 import { AxisBottom, AxisLeft } from "@visx/axis";
-import { BarRounded } from "@visx/shape";
-import { LinearGradient } from "@visx/gradient";
+import { Bar } from "@visx/shape";
 import { Text } from "@visx/text";
 
 import { useTheme } from "next-themes";
@@ -18,7 +16,6 @@ interface BenchmarkBarChartProps {
 }
 
 export function BenchmarkBarChart({ data, height = 320 }: BenchmarkBarChartProps) {
-  const gradientId = useId();
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const fg = isDark ? "rgba(255,255,255,0.9)" : "rgba(0,0,0,0.8)";
@@ -69,9 +66,6 @@ export function BenchmarkBarChart({ data, height = 320 }: BenchmarkBarChartProps
         <div style={{ height: effectiveHeight }} />
       ) : (
           <svg width={width} height={effectiveHeight} role="img" aria-label="Benchmark bar chart">
-          <defs>
-            <LinearGradient id={gradientId} from="#5b8dff" to="#bb51ff" />
-          </defs>
           <Group left={margin.left} top={margin.top}>
             {/* Baseline grid */}
             <line
@@ -88,21 +82,19 @@ export function BenchmarkBarChart({ data, height = 320 }: BenchmarkBarChartProps
               const x = xScale(entry.label) ?? 0;
               const y = yScale(entry.speedup);
               const isHighlight = entry.impl === data.highlightImpl;
-              const fill = isHighlight ? `url(#${gradientId})` : barMuted;
-              const stroke = isHighlight ? barHighlightStroke : "transparent";
+              const fill = isHighlight ? "transparent" : barMuted;
+              const stroke = isHighlight ? "#a855f7" : "transparent";
               return (
                 <Group key={entry.impl}>
-                  <BarRounded
+                  <Bar
                     x={x}
                     y={y}
                     width={barWidth}
                     height={barHeight}
-                    radius={14}
-                    all
                     fill={fill}
                     stroke={stroke}
-                    strokeWidth={isHighlight ? 1.5 : 0}
-                    opacity={isHighlight ? 1 : 0.85}
+                    strokeWidth={isHighlight ? 3 : 0}
+                    opacity={1}
                   />
                   {isHighlight && (
                     <Text

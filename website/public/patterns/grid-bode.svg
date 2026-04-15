@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="220" viewBox="0 0 400 220">
+  <defs>
+    <pattern id="fine" width="10" height="10" patternUnits="userSpaceOnUse">
+      <path d="M10 0V10H0" fill="none" stroke="#c8d2dc" stroke-width="0.35"/>
+    </pattern>
+    <linearGradient id="fade" x1="0" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#edf0f5"/>
+      <stop offset="100%" stop-color="#e4e8f0"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="220" fill="url(#fade)"/>
+  <rect width="400" height="220" fill="url(#fine)"/>
+  <line x1="55" y1="95" x2="370" y2="95" stroke="#4a6080" stroke-width="0.5" opacity="0.12"/>
+  <line x1="55" y1="15" x2="55" y2="95" stroke="#4a6080" stroke-width="0.6" opacity="0.15"/>
+  <line x1="55" y1="95" x2="370" y2="95" stroke="#4a6080" stroke-width="0.6" opacity="0.15"/>
+  <path d="M60 35 L120 35 L140 36 L160 38 L180 42 L200 50 L215 58 L225 65 L240 74 L260 82 L280 86 L300 89 L320 91 L340 92 L360 93" fill="none" stroke="#3a6898" stroke-width="2" opacity="0.35"/>
+  <path d="M180 42 C190 30 200 25 210 32 C215 36 218 46 220 55" fill="none" stroke="#3a6898" stroke-width="2" opacity="0.35"/>
+  <line x1="55" y1="50" x2="370" y2="50" stroke="#3a6898" stroke-width="0.5" opacity="0.12" stroke-dasharray="4 4"/>
+  <text x="372" y="52" font-family="monospace" font-size="5" fill="#3a6898" opacity="0.18">-3dB</text>
+  <text x="40" y="55" font-family="monospace" font-size="6" fill="#4a6080" opacity="0.18" text-anchor="end">|H|</text>
+  <line x1="55" y1="195" x2="370" y2="195" stroke="#4a6080" stroke-width="0.6" opacity="0.15"/>
+  <line x1="55" y1="110" x2="55" y2="195" stroke="#4a6080" stroke-width="0.6" opacity="0.15"/>
+  <path d="M60 118 L100 118 L120 119 L140 122 L155 128 L170 138 L185 152 L200 165 L220 175 L245 182 L270 186 L300 189 L330 191 L360 192" fill="none" stroke="#3a6898" stroke-width="1.5" opacity="0.3"/>
+  <line x1="55" y1="155" x2="370" y2="155" stroke="#3a6898" stroke-width="0.5" opacity="0.1" stroke-dasharray="4 4"/>
+  <text x="372" y="157" font-family="monospace" font-size="5" fill="#3a6898" opacity="0.18">-90&#xB0;</text>
+  <text x="40" y="155" font-family="monospace" font-size="6" fill="#4a6080" opacity="0.18" text-anchor="end">&#x2220;H</text>
+  <text x="210" y="210" font-family="monospace" font-size="6" fill="#4a6080" opacity="0.18" text-anchor="middle">&#x03C9; (rad/s)</text>
+  <g font-family="monospace" font-size="5" fill="#4a6080" opacity="0.15">
+    <text x="60" y="205">10&#xB0;</text>
+    <text x="130" y="205">10&#xB9;</text>
+    <text x="200" y="205">10&#xB2;</text>
+    <text x="270" y="205">10&#xB3;</text>
+    <text x="340" y="205">10&#x2074;</text>
+  </g>
+</svg>

@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="220" viewBox="0 0 400 220">
+  <defs>
+    <pattern id="fine" width="10" height="10" patternUnits="userSpaceOnUse">
+      <path d="M10 0V10H0" fill="none" stroke="#dcd0e4" stroke-width="0.35"/>
+    </pattern>
+    <pattern id="major" width="50" height="50" patternUnits="userSpaceOnUse">
+      <rect width="50" height="50" fill="url(#fine)"/>
+      <path d="M50 0V50H0" fill="none" stroke="#c8b8d8" stroke-width="0.5"/>
+    </pattern>
+    <linearGradient id="fade" x1="0" y1="0" x2="0.8" y2="1">
+      <stop offset="0%" stop-color="#f2eef6"/>
+      <stop offset="100%" stop-color="#ece6f2"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="220" fill="url(#fade)"/>
+  <rect width="400" height="220" fill="url(#major)"/>
+  <!-- tessellated hexagons -->
+  <g fill="none" stroke="#6a3d9a" stroke-width="0.8" opacity="0.12">
+    <polygon points="120,50 145,38 170,50 170,75 145,87 120,75"/>
+    <polygon points="170,50 195,38 220,50 220,75 195,87 170,75"/>
+    <polygon points="220,50 245,38 270,50 270,75 245,87 220,75"/>
+    <polygon points="145,87 170,75 195,87 195,112 170,124 145,112"/>
+    <polygon points="195,87 220,75 245,87 245,112 220,124 195,112"/>
+    <polygon points="245,87 270,75 295,87 295,112 270,124 245,112"/>
+    <polygon points="120,125 145,112 170,124 170,150 145,162 120,150"/>
+    <polygon points="170,124 195,112 220,124 220,150 195,162 170,150"/>
+    <polygon points="220,124 245,112 270,124 270,150 245,162 220,150"/>
+  </g>
+  <!-- fill a few cells with varying opacity -->
+  <polygon points="170,50 195,38 220,50 220,75 195,87 170,75" fill="#6a3d9a" opacity="0.06"/>
+  <polygon points="195,87 220,75 245,87 245,112 220,124 195,112" fill="#6a3d9a" opacity="0.1"/>
+  <polygon points="145,87 170,75 195,87 195,112 170,124 145,112" fill="#6a3d9a" opacity="0.04"/>
+  <polygon points="220,124 245,112 270,124 270,150 245,162 220,150" fill="#6a3d9a" opacity="0.07"/>
+  <!-- connecting dots at vertices -->
+  <circle cx="195" cy="87" r="2" fill="#6a3d9a" opacity="0.15"/>
+  <circle cx="220" cy="75" r="2" fill="#6a3d9a" opacity="0.15"/>
+  <circle cx="245" cy="87" r="2" fill="#6a3d9a" opacity="0.15"/>
+  <circle cx="170" cy="75" r="2" fill="#6a3d9a" opacity="0.12"/>
+  <circle cx="220" cy="124" r="2" fill="#6a3d9a" opacity="0.12"/>
+  <!-- cross markers -->
+  <g stroke="#8a70b8" stroke-width="0.5" opacity="0.3">
+    <line x1="47" y1="45" x2="53" y2="45"/><line x1="50" y1="42" x2="50" y2="48"/>
+    <line x1="347" y1="175" x2="353" y2="175"/><line x1="350" y1="172" x2="350" y2="178"/>
+  </g>
+</svg>

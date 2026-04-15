@@ -67,7 +67,7 @@ export default async function ResourcesByTypePage({ params }: { params: Promise<
           </Card>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {items.map((item) => (
+            {items.map((item, i) => (
               <ContentCard
                 key={item.id}
                 href={item.href ?? "#"}
@@ -76,6 +76,7 @@ export default async function ResourcesByTypePage({ params }: { params: Promise<
                 imageAlt={item.imageAlt}
                 excerpt={item.description}
                 ctaLabel="View"
+                index={i}
               />
             ))}
           </div>

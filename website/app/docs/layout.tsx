@@ -26,11 +26,11 @@ function ConditionalLayout({ children }: { children: React.ReactNode }) {
   
   // For other pages, render with sidebar grid layout
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] gap-6">
+    <div className="grid grid-cols-1 lg:grid-cols-[260px_minmax(0,1fr)] gap-8">
       <Suspense fallback={<div className="hidden lg:block" />}> 
         <Sidebar />
       </Suspense>
-      <main className="min-w-0 lg:pl-6 lg:border-l lg:border-border/60 overflow-visible">{children}</main>
+      <main className="min-w-0 lg:pl-8 lg:border-l lg:border-border/60 overflow-visible">{children}</main>
     </div>
   );
 }

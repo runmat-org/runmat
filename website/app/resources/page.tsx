@@ -85,7 +85,7 @@ export default function ResourcesPage() {
           </div>
           {featured.length ? (
             <div className="grid gap-6 lg:grid-cols-3">
-              {featured.map((item) => (
+              {featured.map((item, i) => (
                 <ContentCard
                   key={item.id}
                   href={item.href ?? "#"}
@@ -95,6 +95,7 @@ export default function ResourcesPage() {
                   typeBadge={{ label: resourceTypeLabel(item.type) }}
                   excerpt={item.description}
                   ctaLabel="Read"
+                  index={i}
                 />
               ))}
             </div>
@@ -110,7 +111,7 @@ export default function ResourcesPage() {
           </div>
           {latest.length ? (
             <div className="grid gap-4 lg:grid-cols-3 sm:grid-cols-2">
-              {latest.map((item) => (
+              {latest.map((item, i) => (
                 <ContentCard
                   key={item.id}
                   href={item.href ?? "#"}
@@ -120,6 +121,7 @@ export default function ResourcesPage() {
                   typeBadge={{ label: resourceTypeLabel(item.type) }}
                   excerpt={item.description}
                   ctaLabel="View"
+                  index={i + featured.length}
                 />
               ))}
             </div>

@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="220" viewBox="0 0 400 220">
+  <defs>
+    <pattern id="fine" width="10" height="10" patternUnits="userSpaceOnUse">
+      <path d="M10 0V10H0" fill="none" stroke="#c2e0c8" stroke-width="0.35"/>
+    </pattern>
+    <pattern id="major" width="50" height="50" patternUnits="userSpaceOnUse">
+      <rect width="50" height="50" fill="url(#fine)"/>
+      <path d="M50 0V50H0" fill="none" stroke="#a8d0b0" stroke-width="0.5"/>
+    </pattern>
+    <linearGradient id="fade" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ecf5ef"/>
+      <stop offset="100%" stop-color="#e0ede4"/>
+    </linearGradient>
+  </defs>
+  <rect width="400" height="220" fill="url(#fade)"/>
+  <rect width="400" height="220" fill="url(#major)"/>
+  <!-- Delaunay triangulation -->
+  <g fill="none" stroke="#3a9e52" stroke-width="0.6" opacity="0.14">
+    <polygon points="50,40 130,25 100,90"/>
+    <polygon points="130,25 220,35 180,80"/>
+    <polygon points="100,90 180,80 130,25"/>
+    <polygon points="220,35 310,20 280,75"/>
+    <polygon points="180,80 280,75 220,35"/>
+    <polygon points="310,20 380,50 340,95"/>
+    <polygon points="280,75 340,95 310,20"/>
+    <polygon points="50,40 100,90 40,130"/>
+    <polygon points="100,90 180,80 160,145"/>
+    <polygon points="180,80 280,75 250,140"/>
+    <polygon points="280,75 340,95 320,155"/>
+    <polygon points="40,130 100,90 80,170"/>
+    <polygon points="100,90 160,145 80,170"/>
+    <polygon points="160,145 250,140 200,195"/>
+    <polygon points="250,140 320,155 280,200"/>
+    <polygon points="80,170 160,145 120,210"/>
+    <polygon points="160,145 200,195 120,210"/>
+    <polygon points="250,140 280,200 200,195"/>
+    <polygon points="320,155 370,180 280,200"/>
+  </g>
+  <!-- fill a few triangles subtly -->
+  <polygon points="180,80 280,75 250,140" fill="#3a9e52" opacity="0.04"/>
+  <polygon points="100,90 180,80 160,145" fill="#3a9e52" opacity="0.06"/>
+  <polygon points="160,145 250,140 200,195" fill="#3a9e52" opacity="0.05"/>
+  <polygon points="280,75 340,95 320,155" fill="#3a9e52" opacity="0.03"/>
+  <!-- vertices -->
+  <g fill="#3a9e52" opacity="0.12">
+    <circle cx="50" cy="40" r="2"/>
+    <circle cx="130" cy="25" r="2"/>
+    <circle cx="220" cy="35" r="2"/>
+    <circle cx="310" cy="20" r="2"/>
+    <circle cx="380" cy="50" r="1.5"/>
+    <circle cx="100" cy="90" r="2"/>
+    <circle cx="180" cy="80" r="2"/>
+    <circle cx="280" cy="75" r="2"/>
+    <circle cx="340" cy="95" r="2"/>
+    <circle cx="40" cy="130" r="1.5"/>
+    <circle cx="160" cy="145" r="2"/>
+    <circle cx="250" cy="140" r="2"/>
+    <circle cx="320" cy="155" r="2"/>
+    <circle cx="80" cy="170" r="1.5"/>
+    <circle cx="200" cy="195" r="2"/>
+    <circle cx="280" cy="200" r="1.5"/>
+    <circle cx="120" cy="210" r="1.5"/>
+    <circle cx="370" cy="180" r="1.5"/>
+  </g>
+</svg>
