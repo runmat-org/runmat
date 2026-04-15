@@ -424,21 +424,7 @@ pub async fn interpret_with_vars(
     initial_vars: &mut [Value],
     current_function_name: Option<&str>,
 ) -> VmResult<InterpreterOutcome> {
-    let call_counts = CALL_COUNTS.with(|cc| cc.borrow().clone());
-    let state = Box::new(InterpreterState::new(
-        bytecode.clone(),
-        initial_vars,
-        current_function_name,
-        call_counts,
-    ));
-    match Box::pin(run_interpreter(state, initial_vars)).await {
-        Ok(outcome) => Ok(outcome),
-        Err(err) => {
-            let err = attach_span_from_pc(bytecode, err);
-            let current_name = current_function_name.unwrap_or("<main>");
-            Err(attach_call_frames(bytecode, current_name, err))
-        }
-    }
+    runmat_vm::interpret_with_vars(bytecode, initial_vars, current_function_name).await
 }
 
 async fn run_interpreter(
@@ -891,31 +877,17 @@ pub async fn interpret_function(
     bytecode: &Bytecode,
     vars: Vec<Value>,
 ) -> Result<Vec<Value>, RuntimeError> {
-    // Delegate to the counted variant with anonymous name and zero counts
-    interpret_function_with_counts(bytecode, vars, "<anonymous>", 0, 0).await
+    runmat_vm::interpret_function(bytecode, vars).await
 }
 
 async fn interpret_function_with_counts(
     bytecode: &Bytecode,
-    mut vars: Vec<Value>,
+    vars: Vec<Value>,
     name: &str,
     out_count: usize,
     in_count: usize,
 ) -> Result<Vec<Value>, RuntimeError> {
-    // Push (nargin, nargout), run, then pop
-    CALL_COUNTS.with(|cc| {
-        cc.borrow_mut().push((in_count, out_count));
-    });
-    let res = Box::pin(interpret_with_vars(bytecode, &mut vars, Some(name))).await;
-    CALL_COUNTS.with(|cc| {
-        cc.borrow_mut().pop();
-    });
-    let res = match res {
-        Ok(InterpreterOutcome::Completed(values)) => Ok(values),
-        Err(e) => Err(e),
-    }?;
-    runtime_globals::persist_declared_for_bytecode(bytecode, name, &vars);
-    Ok(res)
+    runmat_vm::interpret_function_with_counts(bytecode, vars, name, out_count, in_count).await
 }
 
 #[cfg(test)]

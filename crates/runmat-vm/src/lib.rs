@@ -22,3 +22,6 @@ pub use bytecode::{
     UserFunction,
 };
 pub use compiler::CompileError;
+pub use interpreter::runner::{
+    interpret, interpret_function, interpret_function_with_counts, interpret_with_vars,
+};
