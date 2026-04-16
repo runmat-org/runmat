@@ -1256,7 +1256,7 @@ impl RunMatSession {
         // that users can type arbitrary MATLAB expressions at an input() prompt:
         // `sqrt(2)`, `pi/2`, `ones(3)`, `[1 2; 3 4]`, etc.
         //
-        // Stack-overflow hazard: the hook calls runmat_ignition::interpret() while
+        // Stack-overflow hazard: the hook calls runmat_vm::interpret() while
         // the outer interpret() is already on the call stack. On WASM the JS event
         // loop drives both as async state-machines and the WASM linear stack is
         // large, so nesting is safe. On native the default thread stack is too
@@ -1291,9 +1291,9 @@ impl RunMatSession {
                                 .build()
                         })?;
                         let result_idx = lowering.variables.get("__runmat_input_result__").copied();
-                        let bc = runmat_ignition::compile(&lowering.hir, &HashMap::new())
+                        let bc = runmat_vm::compile(&lowering.hir, &HashMap::new())
                             .map_err(RuntimeError::from)?;
-                        let vars = runmat_ignition::interpret(&bc).await?;
+                        let vars = runmat_vm::interpret(&bc).await?;
                         result_idx
                             .and_then(|idx| vars.get(idx).cloned())
                             .ok_or_else(|| {
