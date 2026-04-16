@@ -2066,7 +2066,7 @@ impl ScriptArtifactsPlan {
     fn from_cli(cli: &Cli) -> Result<Option<Self>> {
         let artifacts_dir = match (&cli.artifacts_dir, &cli.artifacts_manifest) {
             (Some(dir), _) => Some(dir.clone()),
-            (None, Some(manifest)) => manifest.parent().map(PathBuf::from),
+            (None, Some(manifest)) => manifest.parent().map(_normalize_manifest_parent),
             (None, None) => None,
         };
 
@@ -2086,6 +2086,14 @@ impl ScriptArtifactsPlan {
             figure_size: cli.figure_size.clone(),
             max_figures: cli.max_figures,
         }))
+    }
+}
+
+fn _normalize_manifest_parent(parent: &Path) -> PathBuf {
+    if parent.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        parent.to_path_buf()
     }
 }
 
