@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 fn is_success_status(code: &openapiv3::StatusCode) -> bool {
     match code {
@@ -137,10 +137,28 @@ fn generate_spec(input_path: PathBuf, output_name: &str) {
     fs::write(&out_file, tokens.to_string()).expect("write openapi client");
 }
 
+fn resolve_spec_path(manifest_dir: &Path) -> PathBuf {
+    // Published crates cannot read files outside the package root, so keep a
+    // crate-local copy for packaging and fall back to the workspace path while
+    // developing if that copy is missing.
+    let packaged_spec = manifest_dir.join("openapi/runmat-public.yaml");
+    if packaged_spec.is_file() {
+        return packaged_spec;
+    }
+
+    let workspace_spec = manifest_dir.join("../../openapi/runmat-public.yaml");
+    if workspace_spec.is_file() {
+        return workspace_spec;
+    }
+
+    panic!(
+        "could not find runmat-public.yaml at {} or {}",
+        packaged_spec.display(),
+        workspace_spec.display()
+    );
+}
+
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("manifest"));
-    generate_spec(
-        manifest_dir.join("../../openapi/runmat-public.yaml"),
-        "runmat_public.rs",
-    );
+    generate_spec(resolve_spec_path(&manifest_dir), "runmat_public.rs");
 }

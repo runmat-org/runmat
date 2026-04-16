@@ -8,7 +8,11 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+#[cfg(unix)]
+use std::io::Write;
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::{Path, PathBuf};
 use tokio::net::TcpListener;
 use tokio::time::{timeout, Duration};
 use url::Url;
@@ -40,7 +44,7 @@ pub enum CredentialStoreMode {
 
 impl Default for CredentialStoreMode {
     fn default() -> Self {
-        Self::File
+        Self::Auto
     }
 }
 
@@ -111,7 +115,7 @@ pub async fn execute_login(
     let server_url = resolve_server_url(&config, server)?;
     let credential_store = credential_store
         .or(config.credential_store)
-        .unwrap_or(CredentialStoreMode::File);
+        .unwrap_or(CredentialStoreMode::Auto);
     let auth = if let Some(api_key) = api_key {
         AuthToken {
             access_token: api_key,
@@ -202,7 +206,7 @@ pub async fn resolve_auth_token(config: &mut RemoteConfig, server_url: &str) -> 
             return Ok(value);
         }
     }
-    let credential_store = config.credential_store.unwrap_or(CredentialStoreMode::File);
+    let credential_store = config.credential_store.unwrap_or(CredentialStoreMode::Auto);
     let token = load_token(server_url, credential_store)?;
     let refresh = load_refresh_token(server_url, credential_store)?;
     let expired = config
@@ -250,23 +254,9 @@ pub fn map_public_error<T: std::fmt::Debug>(err: public_api::Error<T>) -> anyhow
     anyhow::anyhow!(err.to_string())
 }
 
-pub async fn fetch_auth_me(
-    config: &mut RemoteConfig,
-    server_override: Option<String>,
-) -> Result<public_api::types::AuthMeResponse> {
-    let server_url = resolve_server_url(config, server_override)?;
-    let token = resolve_auth_token(config, &server_url).await?;
-    let client = build_public_client(&server_url, &token)?;
-    client
-        .auth_me()
-        .await
-        .map_err(map_public_error)
-        .map(|response| response.into_inner())
-}
-
 fn load_token(server_url: &str, mode: CredentialStoreMode) -> Result<Option<String>> {
     match mode {
-        CredentialStoreMode::Auto => load_token_file(server_url),
+        CredentialStoreMode::Auto => load_token_auto(server_url),
         CredentialStoreMode::Secure => load_token_keyring(server_url),
         CredentialStoreMode::File => load_token_file(server_url),
         CredentialStoreMode::Memory => Ok(env::var(memory_token_key(server_url)).ok()),
@@ -275,7 +265,7 @@ fn load_token(server_url: &str, mode: CredentialStoreMode) -> Result<Option<Stri
 
 fn load_refresh_token(server_url: &str, mode: CredentialStoreMode) -> Result<Option<String>> {
     match mode {
-        CredentialStoreMode::Auto => load_refresh_token_file(server_url),
+        CredentialStoreMode::Auto => load_refresh_token_auto(server_url),
         CredentialStoreMode::Secure => load_refresh_token_keyring(server_url),
         CredentialStoreMode::File => load_refresh_token_file(server_url),
         CredentialStoreMode::Memory => Ok(env::var(memory_refresh_key(server_url)).ok()),
@@ -284,7 +274,7 @@ fn load_refresh_token(server_url: &str, mode: CredentialStoreMode) -> Result<Opt
 
 fn store_token(server_url: &str, token: &str, mode: CredentialStoreMode) -> Result<()> {
     match mode {
-        CredentialStoreMode::Auto => store_token_file(server_url, token),
+        CredentialStoreMode::Auto => store_token_auto(server_url, token),
         CredentialStoreMode::Secure => store_token_keyring(server_url, token),
         CredentialStoreMode::File => store_token_file(server_url, token),
         CredentialStoreMode::Memory => {
@@ -296,7 +286,7 @@ fn store_token(server_url: &str, token: &str, mode: CredentialStoreMode) -> Resu
 
 fn store_refresh_token(server_url: &str, token: &str, mode: CredentialStoreMode) -> Result<()> {
     match mode {
-        CredentialStoreMode::Auto => store_refresh_token_file(server_url, token),
+        CredentialStoreMode::Auto => store_refresh_token_auto(server_url, token),
         CredentialStoreMode::Secure => store_refresh_token_keyring(server_url, token),
         CredentialStoreMode::File => store_refresh_token_file(server_url, token),
         CredentialStoreMode::Memory => {
@@ -308,7 +298,7 @@ fn store_refresh_token(server_url: &str, token: &str, mode: CredentialStoreMode)
 
 fn clear_refresh_token(server_url: &str, mode: CredentialStoreMode) -> Result<()> {
     match mode {
-        CredentialStoreMode::Auto => clear_refresh_token_file(server_url),
+        CredentialStoreMode::Auto => clear_refresh_token_auto(server_url),
         CredentialStoreMode::Secure => clear_refresh_token_keyring(server_url),
         CredentialStoreMode::File => clear_refresh_token_file(server_url),
         CredentialStoreMode::Memory => {
@@ -362,8 +352,7 @@ fn store_token_file(server_url: &str, token: &str) -> Result<()> {
         access_token: Some(token.to_string()),
         refresh_token: refresh,
     };
-    fs::write(path, serde_json::to_string_pretty(&payload)?)
-        .context("Failed to write token file")?;
+    write_token_payload_file(&path, &payload)?;
     Ok(())
 }
 
@@ -377,8 +366,7 @@ fn store_refresh_token_file(server_url: &str, token: &str) -> Result<()> {
         access_token: access,
         refresh_token: Some(token.to_string()),
     };
-    fs::write(path, serde_json::to_string_pretty(&payload)?)
-        .context("Failed to write token file")?;
+    write_token_payload_file(&path, &payload)?;
     Ok(())
 }
 
@@ -392,8 +380,75 @@ fn clear_refresh_token_file(server_url: &str) -> Result<()> {
         access_token: access,
         refresh_token: None,
     };
-    fs::write(path, serde_json::to_string_pretty(&payload)?)
-        .context("Failed to write token file")?;
+    write_token_payload_file(&path, &payload)?;
+    Ok(())
+}
+
+fn load_token_auto(server_url: &str) -> Result<Option<String>> {
+    match load_token_keyring(server_url) {
+        Ok(Some(value)) => Ok(Some(value)),
+        Ok(None) | Err(_) => load_token_file(server_url),
+    }
+}
+
+fn load_refresh_token_auto(server_url: &str) -> Result<Option<String>> {
+    match load_refresh_token_keyring(server_url) {
+        Ok(Some(value)) => Ok(Some(value)),
+        Ok(None) | Err(_) => load_refresh_token_file(server_url),
+    }
+}
+
+fn store_token_auto(server_url: &str, token: &str) -> Result<()> {
+    match store_token_keyring(server_url, token) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            // Evict any stale keyring entry so load_token_auto won't return it on
+            // the next call (keyring is preferred over file in the load path).
+            let _ = clear_token_keyring(server_url);
+            store_token_file(server_url, token)
+        }
+    }
+}
+
+fn store_refresh_token_auto(server_url: &str, token: &str) -> Result<()> {
+    match store_refresh_token_keyring(server_url, token) {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            let _ = clear_refresh_token_keyring(server_url);
+            store_refresh_token_file(server_url, token)
+        }
+    }
+}
+
+fn clear_refresh_token_auto(server_url: &str) -> Result<()> {
+    // Clear from both backends unconditionally: a previous store fallback may
+    // have left data in the file while the keyring still holds a stale entry,
+    // or vice-versa.  Treat keyring errors as non-fatal (keyring may be
+    // unavailable) and return the file result as the authoritative outcome.
+    let _ = clear_refresh_token_keyring(server_url);
+    clear_refresh_token_file(server_url)
+}
+
+fn write_token_payload_file(path: &Path, payload: &FileCredentialPayload) -> Result<()> {
+    let contents = serde_json::to_vec_pretty(payload)?;
+    #[cfg(unix)]
+    {
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .mode(0o600)
+            .open(path)
+            .context("Failed to write token file")?;
+        file.write_all(&contents)
+            .context("Failed to write token file")?;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+            .context("Failed to set token file permissions")?;
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(path, contents).context("Failed to write token file")?;
+    }
     Ok(())
 }
 
@@ -435,6 +490,15 @@ fn clear_refresh_token_keyring(server_url: &str) -> Result<()> {
         Ok(_) => Ok(()),
         Err(keyring::Error::NoEntry) => Ok(()),
         Err(err) => Err(err).context("Failed to clear refresh token"),
+    }
+}
+
+fn clear_token_keyring(server_url: &str) -> Result<()> {
+    let entry = keyring_entry(server_url)?;
+    match entry.delete_password() {
+        Ok(_) => Ok(()),
+        Err(keyring::Error::NoEntry) => Ok(()),
+        Err(err) => Err(err).context("Failed to clear token"),
     }
 }
 

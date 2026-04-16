@@ -589,6 +589,13 @@ impl RunMatWasm {
         }
         let mut slot = self.session.borrow_mut();
         *slot = session;
+        // Re-install the async stdin handler on the new session if one was previously
+        // registered via setInputHandler. The JS function is still stored in JS_STDIN_HANDLER;
+        // we only need to re-wire the Rust-side handler on the freshly-created RunMatSession.
+        let has_stdin_handler = JS_STDIN_HANDLER.with(|s| s.borrow().is_some());
+        if has_stdin_handler {
+            slot.install_async_input_handler(|req| async move { js_input_request(req).await });
+        }
         runtime_reset_plot_state();
         runtime_invalidate_surface_revisions();
         Ok(())

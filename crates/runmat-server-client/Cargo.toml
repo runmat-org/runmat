@@ -1,6 +1,6 @@
 [package]
 name = "runmat-server-client"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2021"
 license-file = "../../LICENSE.md"
 homepage = "https://runmat.com"
