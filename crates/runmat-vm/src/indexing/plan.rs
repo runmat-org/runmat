@@ -65,7 +65,7 @@ fn derive_plan_properties(
     let cols = base_shape.get(1).copied().unwrap_or(1);
     if indices.len() == rows {
         let first = indices[0] as usize;
-        if first % rows == 0 {
+        if first.is_multiple_of(rows) {
             let col = first / rows;
             if col < cols
                 && indices
