@@ -455,7 +455,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
                       sizes="(max-width: 1024px) 100vw, 33vw"
                     />
                   ) : (
-                    <div className="h-full w-full bg-card" />
+                    <div className="h-full w-full bg-muted" />
                   )}
                 </div>
                 <div className="p-4 space-y-3">
