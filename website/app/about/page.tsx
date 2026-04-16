@@ -371,7 +371,7 @@ export default function AboutPage() {
               <div className="relative border-l-2 border-border ml-1.5 space-y-5 pl-6">
                 <div className="relative">
                   <span className="absolute -left-[calc(1.5rem+5px)] top-1 h-2.5 w-2.5 rounded-full bg-blue-500" />
-                  <p className="text-sm font-semibold text-[hsl(var(--brand))]">Aug 2025</p>
+                  <p className="text-sm font-semibold text-foreground">Aug 2025</p>
                   <p className="text-sm font-semibold text-foreground">CLI Launch</p>
                   <p className="text-sm text-muted-foreground">
                     ~5 ms startup, 150–180× faster than GNU Octave.{" "}
@@ -380,7 +380,7 @@ export default function AboutPage() {
                 </div>
                 <div className="relative">
                   <span className="absolute -left-[calc(1.5rem+5px)] top-1 h-2.5 w-2.5 rounded-full bg-green-500" />
-                  <p className="text-sm font-semibold text-green-400">Nov 2025</p>
+                  <p className="text-sm font-semibold text-foreground">Nov 2025</p>
                   <p className="text-sm font-semibold text-foreground">RunMat Accelerate</p>
                   <p className="text-sm text-muted-foreground">
                     Automatic GPU fusion — 82× faster than PyTorch on 1B-point math.{" "}
@@ -389,7 +389,7 @@ export default function AboutPage() {
                 </div>
                 <div className="relative">
                   <span className="absolute -left-[calc(1.5rem+5px)] top-1 h-2.5 w-2.5 rounded-full bg-amber-500" />
-                  <p className="text-sm font-semibold text-amber-400">Mar 2026</p>
+                  <p className="text-sm font-semibold text-foreground">Mar 2026</p>
                   <p className="text-sm font-semibold text-foreground">Browser Sandbox + RunMat Cloud</p>
                   <p className="text-sm text-muted-foreground">
                     Client-side WebAssembly execution, persistent projects, versioning, and collaboration.{" "}
