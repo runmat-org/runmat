@@ -143,8 +143,12 @@ function renderBuiltinDocBlocks(doc: BuiltinDocEntry): BuiltinDocBlock[] {
   }
 
   if (doc.links && doc.links.length > 0) {
-    const linkInline = renderSeeAlsoLinks(doc.links);
-    if (linkInline.length > 0) {
+    const isGuideLink = (url: string) => url.startsWith('/docs/') || url.startsWith('/blog/');
+    const functionLinks = doc.links.filter(l => l.url?.trim() && l.label?.trim() && !isGuideLink(l.url.trim()));
+    const guideLinks = doc.links.filter(l => l.url?.trim() && l.label?.trim() && isGuideLink(l.url.trim()));
+
+    if (functionLinks.length > 0) {
+      const hasThumbnails = functionLinks.some(link => link.thumbnail);
       blocks.push(createHeading(2, parseInline('Related functions to explore')));
       blocks.push({
         type: 'paragraph',
@@ -152,7 +156,32 @@ function renderBuiltinDocBlocks(doc: BuiltinDocEntry): BuiltinDocBlock[] {
           `These functions work well alongside \`${title}\`. Each page has runnable examples you can try in the browser.`
         ),
       });
-      blocks.push({ type: 'paragraph', content: linkInline });
+      if (hasThumbnails) {
+        blocks.push({
+          type: 'link-grid',
+          items: functionLinks.map(link => ({
+            label: link.label.trim(),
+            href: link.url.trim(),
+            thumbnail: link.thumbnail,
+          })),
+        });
+      } else {
+        const linkInline = renderSeeAlsoLinks(functionLinks);
+        if (linkInline.length > 0) {
+          blocks.push({ type: 'paragraph', content: linkInline });
+        }
+      }
+    }
+
+    if (guideLinks.length > 0) {
+      blocks.push(createHeading(2, parseInline('More plotting resources')));
+      blocks.push({
+        type: 'list',
+        ordered: false,
+        items: guideLinks.map(link => [
+          { type: 'link' as const, label: parseInline(link.label.trim()), href: link.url.trim() },
+        ]),
+      });
     }
   }
 
@@ -215,6 +244,15 @@ function renderExamples(examples: BuiltinDocExample[]): BuiltinDocBlock[] {
     if (hasText(example.output)) {
       blocks.push({ type: 'paragraph', content: [textNode('Expected output:')] });
       blocks.push(createCodeBlock(example.output, { language: 'matlab' }));
+    }
+    const exampleImage = example.image_webp || example.image;
+    if (exampleImage) {
+      blocks.push({
+        type: 'image',
+        src: exampleImage,
+        alt: description || 'Example output',
+        caption: 'Expected output:',
+      });
     }
   }
   return blocks;

@@ -55,12 +55,57 @@
       "output": "ans =\n    'image'"
     }
   ],
+  "faqs": [
+    {
+      "question": "How do I display RGB data with image?",
+      "answer": "Pass an MxNx3 array where the third dimension holds red, green, and blue channels. Values should be in `[0, 1]` for doubles or `[0, 255]` for uint8.\n\n```matlab\nimg = zeros(100, 100, 3);\nimg(:,:,1) = 1;           % full red\nimg(30:70, 30:70, 2) = 1; % green square\nimage(img);\n```"
+    },
+    {
+      "question": "When should I use image vs imagesc?",
+      "answer": "`image` displays pixel data as-is — either indexed colors through a colormap or direct RGB truecolor. `imagesc` automatically scales a 2-D matrix so its min and max span the full colormap range. If you're showing actual image pixels or pre-indexed data, use `image`. If you're visualizing a matrix of computed values as a heatmap, use `imagesc`."
+    },
+    {
+      "question": "Why does my image appear upside down?",
+      "answer": "By default, `image` sets the y-axis to go from top to bottom (row 1 at the top), which matches matrix indexing. If your coordinate system expects y to increase upward, call `axis xy` after `image` to flip the axis direction. Use `axis ij` to restore the default matrix-style orientation."
+    }
+  ],
   "links": [
-    { "label": "imagesc", "url": "./imagesc" },
-    { "label": "colormap", "url": "./colormap" },
-    { "label": "colorbar", "url": "./colorbar" },
-    { "label": "get", "url": "./get" },
-    { "label": "set", "url": "./set" }
+    {
+      "label": "imagesc",
+      "url": "./imagesc"
+    },
+    {
+      "label": "colormap",
+      "url": "./colormap"
+    },
+    {
+      "label": "colorbar",
+      "url": "./colorbar"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/image.rs`",

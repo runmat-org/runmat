@@ -17,6 +17,8 @@ export type BuiltinDocBlock =
   | { type: 'list'; ordered: boolean; items: BuiltinDocInlineNode[][] }
   | { type: 'code'; language?: string; runnable?: boolean; content: string }
   | { type: 'table'; headers: BuiltinDocInlineNode[][]; rows: BuiltinDocInlineNode[][][] }
+  | { type: 'image'; src: string; alt: string; caption?: string }
+  | { type: 'link-grid'; items: { label: string; href: string; thumbnail?: string }[] }
   | { type: 'divider' };
 
 type BuiltinDocRendererProps = {
@@ -96,6 +98,46 @@ function renderBlock(block: BuiltinDocBlock): React.ReactNode {
               ))}
             </tbody>
           </table>
+        </div>
+      );
+    case 'image':
+      return (
+        <figure className="my-8">
+          {block.caption && (
+            <figcaption className="mb-2 text-sm text-muted-foreground">
+              {block.caption}
+            </figcaption>
+          )}
+          <img
+            src={block.src}
+            alt={block.alt}
+            loading="lazy"
+            className="rounded-lg border border-border w-full max-w-2xl"
+          />
+        </figure>
+      );
+    case 'link-grid':
+      return (
+        <div className="my-8 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+          {block.items.map((item, index) => (
+            <a
+              key={index}
+              href={item.href}
+              className="group flex flex-col items-center gap-2 rounded-lg border border-border p-3 hover:border-blue-500/50 hover:bg-muted/50 transition-colors"
+            >
+              {item.thumbnail && (
+                <img
+                  src={item.thumbnail}
+                  alt={`${item.label} preview`}
+                  loading="lazy"
+                  className="rounded w-full h-auto aspect-[5/3] object-cover"
+                />
+              )}
+              <span className="text-sm font-mono text-foreground group-hover:text-blue-500 transition-colors">
+                {item.label}
+              </span>
+            </a>
+          ))}
         </div>
       );
     case 'divider':

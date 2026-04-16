@@ -34,12 +34,57 @@
       "input": "[X, Y] = meshgrid(linspace(-3, 3, 30), linspace(-3, 3, 30));\nZ = sin(X) .* cos(Y);\nsubplot(1, 2, 1);\nsurf(X, Y, Z);\nax = subplot(1, 2, 2);\nplot3(cos(0:0.1:5), sin(0:0.1:5), 0:0.1:5);\nzlabel(ax, 'Trajectory Height');"
     }
   ],
+  "faqs": [
+    {
+      "question": "When do I need zlabel vs just xlabel/ylabel?",
+      "answer": "`zlabel` only applies to 3-D axes — `surf`, `mesh`, `plot3`, `scatter3`, etc. For 2-D plots, the z-axis doesn't exist, so `zlabel` has no effect. If you're plotting in 3-D, always label all three axes so readers can orient themselves."
+    },
+    {
+      "question": "Can I use LaTeX formatting in zlabel?",
+      "answer": "You can use LaTeX-style inline math in the label string with standard TeX markup. Subscripts, superscripts, and Greek letters work in label text.\n\n```matlab\nzlabel('Temperature (\\circC)');\nzlabel('\\sigma_{z} (MPa)');\n```"
+    },
+    {
+      "question": "How do I style the z-axis label after creating it?",
+      "answer": "`zlabel` returns a text handle that works with `get` and `set`. You can change font weight, size, color, and other text properties through that handle.\n\n```matlab\nh = zlabel('Elevation (m)');\nset(h, 'FontWeight', 'bold', 'FontSize', 14);\n```"
+    }
+  ],
   "links": [
-    { "label": "view", "url": "./view" },
-    { "label": "plot3", "url": "./plot3" },
-    { "label": "surf", "url": "./surf" },
-    { "label": "get", "url": "./get" },
-    { "label": "set", "url": "./set" }
+    {
+      "label": "view",
+      "url": "./view"
+    },
+    {
+      "label": "plot3",
+      "url": "./plot3"
+    },
+    {
+      "label": "surf",
+      "url": "./surf"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/zlabel.rs`",

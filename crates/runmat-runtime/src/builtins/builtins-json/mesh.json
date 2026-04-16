@@ -9,6 +9,7 @@
     "3-D grid visualization"
   ],
   "summary": "Create wireframe surface plots for grids, height fields, and MATLAB `mesh` style visualization.",
+  "hero_image": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-mesh-hyperbolic-paraboloid.webp",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -50,14 +51,64 @@
       "description": "Inspect the returned surface handle from mesh",
       "input": "[X, Y] = meshgrid(1:20, 1:20);\nZ = X + Y;\nh = mesh(X, Y, Z);\nget(h, 'Type')",
       "output": "ans =\n    'surface'"
+    },
+    {
+      "description": "Saddle surface showing grid structure",
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 60), linspace(-3, 3, 60));\nZ = X.^2 - Y.^2;\n\nmesh(X, Y, Z);\ncolormap('jet');\ncolorbar;\ntitle('Hyperbolic Paraboloid');\nxlabel('x');\nylabel('y');\nzlabel('z = x^2 - y^2');\nview(40, 30);",
+      "image_webp": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-mesh-hyperbolic-paraboloid.webp"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Can I get a filled surface instead of wireframe?",
+      "answer": "That's what `surf` is for. `mesh` draws only the grid lines with transparent faces, while `surf` fills the faces with colormap-derived colors. If you want the wireframe look but with partial fill, there's no built-in blend — use `surf` with a low alpha or switch to `mesh` and accept the wireframe."
+    },
+    {
+      "question": "How do I combine a mesh with contour lines underneath?",
+      "answer": "Use `meshc` instead of `mesh`. It draws the same wireframe surface but projects contour lines onto the base plane automatically.\n\n```matlab\n[X, Y] = meshgrid(linspace(-2, 2, 50));\nZ = sin(X.^2 + Y.^2);\nmeshc(X, Y, Z);\n```"
+    },
+    {
+      "question": "Can I control transparency on a mesh plot?",
+      "answer": "Mesh plots don't have filled faces to make transparent — the faces are already open. If you need a semi-transparent surface, use `surf` and set the `FaceAlpha` property on the returned handle. The wireframe edges on `mesh` are always fully opaque."
     }
   ],
   "links": [
-    { "label": "surf", "url": "./surf" },
-    { "label": "meshc", "url": "./meshc" },
-    { "label": "view", "url": "./view" },
-    { "label": "zlabel", "url": "./zlabel" },
-    { "label": "colormap", "url": "./colormap" }
+    {
+      "label": "surf",
+      "url": "./surf"
+    },
+    {
+      "label": "meshc",
+      "url": "./meshc"
+    },
+    {
+      "label": "view",
+      "url": "./view"
+    },
+    {
+      "label": "zlabel",
+      "url": "./zlabel"
+    },
+    {
+      "label": "colormap",
+      "url": "./colormap"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/mesh.rs`",
