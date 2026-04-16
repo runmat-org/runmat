@@ -52,12 +52,57 @@
       "output": "ans =\n    'surface'"
     }
   ],
+  "faqs": [
+    {
+      "question": "Where do the contour lines appear in a surfc plot?",
+      "answer": "The contour lines are projected onto the base plane (the z-minimum of the axes). They sit below the surface as a 2-D footprint of the height field. The contour overlay uses the same colormap as the surface, so the colors stay consistent."
+    },
+    {
+      "question": "When should I use surfc vs calling surf and contour separately?",
+      "answer": "`surfc` handles the composite in one call — the contour is automatically projected to the base plane and shares the surface's colormap and axes state. If you call `surf` and `contour` separately, the contour sits at z=0 by default and you'd need to manage hold state and z-placement yourself. Use `surfc` unless you need the contour at a custom z-level or with different level spacing than the default."
+    },
+    {
+      "question": "Can I control how many contour levels surfc draws?",
+      "answer": "The contour overlay in `surfc` uses the default level-generation logic from the contour pipeline. If you need explicit control over level count or spacing, call `surf` and `contour` separately so you can pass a level vector to `contour` directly."
+    }
+  ],
   "links": [
-    { "label": "surf", "url": "./surf" },
-    { "label": "meshc", "url": "./meshc" },
-    { "label": "contour", "url": "./contour" },
-    { "label": "contourf", "url": "./contourf" },
-    { "label": "view", "url": "./view" }
+    {
+      "label": "surf",
+      "url": "./surf"
+    },
+    {
+      "label": "meshc",
+      "url": "./meshc"
+    },
+    {
+      "label": "contour",
+      "url": "./contour"
+    },
+    {
+      "label": "contourf",
+      "url": "./contourf"
+    },
+    {
+      "label": "view",
+      "url": "./view"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/surfc.rs`",

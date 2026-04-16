@@ -10,6 +10,7 @@
     "direction field"
   ],
   "summary": "Visualize 2-D vector fields with scalable arrows, GPU-aware execution, and MATLAB `quiver` call forms.",
+  "hero_image": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-quiver-gradient-vector.webp",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -57,14 +58,64 @@
     {
       "description": "Adjust arrow scaling and head size through the handle",
       "input": "[X, Y] = meshgrid(-2:0.5:2, -2:0.5:2);\nU = -Y;\nV = X;\nh = quiver(X, Y, U, V);\nset(h, 'AutoScaleFactor', 1.5, 'MaxHeadSize', 0.2, 'DisplayName', 'rotation');\nlegend;"
+    },
+    {
+      "description": "Gradient vector field over a scalar potential",
+      "input": "[X, Y] = meshgrid(linspace(-2, 2, 25), linspace(-2, 2, 25));\nZ = X .* exp(-X.^2 - Y.^2);\n[DX, DY] = gradient(Z, X(1,2)-X(1,1), Y(2,1)-Y(1,1));\n\ncontourf(X, Y, Z, 15);\nhold on;\nquiver(X, Y, DX, DY, 'k', 'LineWidth', 1);\nhold off;\n\ncolormap('turbo');\ncolorbar;\ntitle('Gradient Field over Scalar Potential');\nxlabel('x');\nylabel('y');",
+      "image_webp": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-quiver-gradient-vector.webp"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How do I control arrow lengths in a quiver plot?",
+      "answer": "Use the `'AutoScaleFactor'` property. A value of `1` means default scaling, `0` disables auto-scaling entirely (arrows drawn at raw data magnitude), and values like `1.5` or `2` make arrows proportionally longer.\n\n```matlab\nh = quiver(X, Y, U, V);\nset(h, 'AutoScaleFactor', 0); % raw magnitudes, no auto-scaling\n```"
+    },
+    {
+      "question": "Can I overlay quiver arrows on top of a contourf plot?",
+      "answer": "Yes. Plot the filled contour first, then call `hold on` and add the quiver layer. Both share the same axes, so the coordinate grids align automatically.\n\n```matlab\ncontourf(X, Y, Z);\nhold on;\nquiver(X, Y, U, V, 'Color', 'k');\n```"
+    },
+    {
+      "question": "Does RunMat support 3-D quiver plots?",
+      "answer": "Not yet. `quiver` currently handles 2-D vector fields only. For 3-D direction visualization, consider using `plot3` to draw line segments manually, or combine `scatter3` with custom arrow geometry."
     }
   ],
   "links": [
-    { "label": "area", "url": "./area" },
-    { "label": "plot", "url": "./plot" },
-    { "label": "legend", "url": "./legend" },
-    { "label": "get", "url": "./get" },
-    { "label": "set", "url": "./set" }
+    {
+      "label": "area",
+      "url": "./area"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "legend",
+      "url": "./legend"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/quiver.rs`",

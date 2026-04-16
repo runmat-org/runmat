@@ -36,11 +36,53 @@
       "output": "% Only the left subplot shows a legend"
     }
   ],
+  "faqs": [
+    {
+      "question": "How do I move the legend to a specific corner?",
+      "answer": "Pass the `'Location'` property when creating the legend, or update it afterward with `set`. Standard MATLAB location strings work: `'northeast'`, `'southwest'`, `'northwest'`, `'southeast'`, etc.\n\n```matlab\nlg = legend('a', 'b');\nset(lg, 'Location', 'northwest');\n```"
+    },
+    {
+      "question": "Can I show only some series in the legend?",
+      "answer": "Set `'DisplayName'` only on the series you want labeled, then call `legend` with no arguments. Series without a display name are excluded. Alternatively, pass explicit label strings to `legend` — only the first N plotted objects get entries."
+    },
+    {
+      "question": "Do I need to call legend again after adding more series with hold on?",
+      "answer": "Yes. The legend snapshot is taken when `legend` is called, so new series added after the initial `legend` call won't appear until you call `legend` again. Set display names on all series first, then call `legend` once at the end."
+    }
+  ],
   "links": [
-    { "label": "subplot", "url": "./subplot" },
-    { "label": "get", "url": "./get" },
-    { "label": "set", "url": "./set" },
-    { "label": "plot", "url": "./plot" }
+    {
+      "label": "subplot",
+      "url": "./subplot"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/legend.rs`",

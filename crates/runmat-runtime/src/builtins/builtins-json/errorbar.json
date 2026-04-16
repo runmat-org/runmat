@@ -9,6 +9,7 @@
     "matlab errorbar"
   ],
   "summary": "Plot data with symmetric or asymmetric error bars for uncertainty, intervals, and MATLAB `errorbar` workflows.",
+  "hero_image": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-error-measurements-intervals.webp",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -50,14 +51,64 @@
     {
       "description": "Style an error-bar object and label it for the legend",
       "input": "x = 1:5;\ny = [1 2 1.5 3 2.5];\nh = errorbar(x, y, 0.2*ones(size(x)), 0.2*ones(size(x)));\nset(h, 'LineWidth', 2, 'DisplayName', 'measurement');\nlegend;"
+    },
+    {
+      "description": "Measurements with confidence intervals",
+      "input": "x = 1:8;\ny = [2.1 3.4 4.2 5.8 5.5 6.1 7.3 8.0];\nneg = [0.3 0.4 0.2 0.5 0.6 0.3 0.4 0.3];\npos = [0.4 0.3 0.3 0.6 0.5 0.4 0.5 0.4];\n\nerrorbar(x, y, neg, pos, 'o-', 'LineWidth', 1.5);\ntitle('Tensile Strength vs. Sample');\nxlabel('Sample #');\nylabel('Strength (MPa)');\ngrid on;",
+      "image_webp": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-error-measurements-intervals.webp"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How do I plot asymmetric error bars?",
+      "answer": "Pass separate lower and upper error vectors. For vertical-only asymmetric bars, use `errorbar(x, y, neg, pos)` where `neg` is the downward extent and `pos` is the upward extent.\n\n```matlab\nx = 1:5;\ny = [2 3 2.5 4 3.5];\nneg = [0.1 0.2 0.15 0.3 0.1];\npos = [0.3 0.4 0.2 0.5 0.25];\nerrorbar(x, y, neg, pos);\n```"
+    },
+    {
+      "question": "Can I add horizontal error bars?",
+      "answer": "Yes. Use the six-argument form `errorbar(x, y, yneg, ypos, xneg, xpos)` to get both vertical and horizontal bars. If you only want horizontal bars, set the vertical error vectors to zero.\n\n```matlab\nx = 1:4; y = [3 4 2 5];\nerrorbar(x, y, zeros(size(x)), zeros(size(x)), 0.2*ones(size(x)), 0.3*ones(size(x)));\n```"
+    },
+    {
+      "question": "Can I combine error bars with a line or scatter plot?",
+      "answer": "Yes—`errorbar` already draws a line through the data points by default. To overlay error bars on a separate plot, call `hold on` first. The error bar handle supports the same `set` properties as line handles, so you can match colors and widths.\n\n```matlab\nplot(x, y, 'b-', 'LineWidth', 2);\nhold on;\nerrorbar(x, y, err, err, 'LineStyle', 'none', 'Color', 'b');\n```"
     }
   ],
   "links": [
-    { "label": "stem", "url": "./stem" },
-    { "label": "plot", "url": "./plot" },
-    { "label": "legend", "url": "./legend" },
-    { "label": "get", "url": "./get" },
-    { "label": "set", "url": "./set" }
+    {
+      "label": "stem",
+      "url": "./stem"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "legend",
+      "url": "./legend"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/errorbar.rs`",

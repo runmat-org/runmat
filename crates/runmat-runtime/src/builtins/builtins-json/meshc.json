@@ -52,12 +52,57 @@
       "output": "ans =\n    'surface'"
     }
   ],
+  "faqs": [
+    {
+      "question": "Where does the contour overlay appear in a meshc plot?",
+      "answer": "The contour lines are projected onto the base plane beneath the wireframe, at the z-minimum of the axes. This gives you a top-down height map below the 3-D wireframe so you can read both the grid structure and the level sets at the same time."
+    },
+    {
+      "question": "What's the difference between meshc and mesh?",
+      "answer": "`mesh` draws only the wireframe surface. `meshc` draws the same wireframe plus contour lines projected onto the base plane underneath. If you don't need the contour overlay, use `mesh` — it's the same surface rendering with less visual clutter."
+    },
+    {
+      "question": "Should I use meshc or surfc?",
+      "answer": "Both add contour projections to the base plane. The difference is the surface itself: `meshc` uses a wireframe (transparent faces, grid lines only), while `surfc` uses a shaded, filled surface. Pick `meshc` when you want to see through the geometry, and `surfc` when you want a solid surface on top."
+    }
+  ],
   "links": [
-    { "label": "mesh", "url": "./mesh" },
-    { "label": "surfc", "url": "./surfc" },
-    { "label": "contour", "url": "./contour" },
-    { "label": "contourf", "url": "./contourf" },
-    { "label": "view", "url": "./view" }
+    {
+      "label": "mesh",
+      "url": "./mesh"
+    },
+    {
+      "label": "surfc",
+      "url": "./surfc"
+    },
+    {
+      "label": "contour",
+      "url": "./contour"
+    },
+    {
+      "label": "contourf",
+      "url": "./contourf"
+    },
+    {
+      "label": "view",
+      "url": "./view"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/meshc.rs`",

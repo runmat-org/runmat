@@ -30,11 +30,53 @@
       "input": "[X, Y] = meshgrid(linspace(-3, 3, 40), linspace(-3, 3, 40));\nZ = sin(X) .* cos(Y);\nsubplot(1, 2, 1);\nsurf(X, Y, Z);\nshading flat;\nsubplot(1, 2, 2);\nsurf(X, Y, Z);\nshading faceted;"
     }
   ],
+  "faqs": [
+    {
+      "question": "What's the difference between interp, flat, and faceted shading?",
+      "answer": "`flat` fills each face with a single color (the value at one vertex). `interp` smoothly interpolates color across each face, producing a continuous gradient. `faceted` is like `flat` but with visible black edge lines between faces — this is the default `surf` appearance."
+    },
+    {
+      "question": "When should I use shading interp vs faceted?",
+      "answer": "Use `interp` when you want a smooth, publication-quality surface without visible grid edges — good for dense meshes or photorealistic renders. Use `faceted` (the default) when you want to see the mesh structure, which helps during debugging or when the grid resolution matters to the reader."
+    },
+    {
+      "question": "Does shading affect mesh plots or just surf?",
+      "answer": "It applies to both `surf` and `mesh` (and their variants like `surfc`, `meshc`). On a `mesh` plot the effect is most visible in how face colors are computed — `interp` smooths them, `flat` locks each face to one value. Edge visibility is controlled separately."
+    }
+  ],
   "links": [
-    { "label": "surf", "url": "./surf" },
-    { "label": "mesh", "url": "./mesh" },
-    { "label": "colormap", "url": "./colormap" },
-    { "label": "colorbar", "url": "./colorbar" }
+    {
+      "label": "surf",
+      "url": "./surf"
+    },
+    {
+      "label": "mesh",
+      "url": "./mesh"
+    },
+    {
+      "label": "colormap",
+      "url": "./colormap"
+    },
+    {
+      "label": "colorbar",
+      "url": "./colorbar"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs`",

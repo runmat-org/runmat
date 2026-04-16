@@ -51,11 +51,53 @@
       "output": "ans =\n    'log'"
     }
   ],
+  "faqs": [
+    {
+      "question": "When should I use semilogx instead of plot?",
+      "answer": "Use `semilogx` when your x-data spans several orders of magnitude and you care about relative differences across that range. Frequency response curves (Bode magnitude plots) are the classic example — frequencies from 1 Hz to 100 kHz are unreadable on a linear axis but spread evenly on a log scale."
+    },
+    {
+      "question": "How is semilogx different from calling plot and then switching the x-axis to log?",
+      "answer": "Functionally identical. `semilogx(x, y)` is shorthand for `plot(x, y)` followed by `set(gca, 'XScale', 'log')`. The convenience form just does both in one call and makes intent clearer when reading code."
+    },
+    {
+      "question": "What happens if my x-data contains zero or negative values?",
+      "answer": "Logarithmic axes only render positive values. Zero and negative x-values are silently excluded from the rendered line — the data handle still holds them, but they won't appear on the plot. Filter your data to the positive domain if you need a continuous curve."
+    }
+  ],
   "links": [
-    { "label": "plot", "url": "./plot" },
-    { "label": "semilogy", "url": "./semilogy" },
-    { "label": "loglog", "url": "./loglog" },
-    { "label": "axis", "url": "./axis" }
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "semilogy",
+      "url": "./semilogy"
+    },
+    {
+      "label": "loglog",
+      "url": "./loglog"
+    },
+    {
+      "label": "axis",
+      "url": "./axis"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/semilogx.rs`",

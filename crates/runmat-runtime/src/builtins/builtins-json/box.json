@@ -30,10 +30,45 @@
       "input": "subplot(1, 2, 1);\nplot(1:5, 1:5);\nbox off;\nsubplot(1, 2, 2);\nplot(1:5, [5 4 3 2 1]);\nbox on;"
     }
   ],
+  "faqs": [
+    {
+      "question": "When should I turn the box off?",
+      "answer": "Turn `box off` for a cleaner, more modern chart style — especially for presentations or publications where the top and right frame edges add visual noise without carrying data. Many style guides prefer open axes (left + bottom only) for scatter plots and line charts."
+    },
+    {
+      "question": "Does box interact with grid or axis settings?",
+      "answer": "`box`, `grid`, and `axis` are independent axes-state commands. Turning `box off` removes the outer frame but doesn't touch grid lines or axis limits. You can combine them freely: `box off; grid on; axis tight;` is a common clean-chart recipe."
+    }
+  ],
   "links": [
-    { "label": "axis", "url": "./axis" },
-    { "label": "grid", "url": "./grid" },
-    { "label": "subplot", "url": "./subplot" }
+    {
+      "label": "axis",
+      "url": "./axis"
+    },
+    {
+      "label": "grid",
+      "url": "./grid"
+    },
+    {
+      "label": "subplot",
+      "url": "./subplot"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs`",

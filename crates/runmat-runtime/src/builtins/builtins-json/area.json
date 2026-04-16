@@ -10,6 +10,7 @@
     "cumulative area visualization"
   ],
   "summary": "Create filled area plots for cumulative totals, stacked series, and MATLAB `area` workflows.",
+  "hero_image": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-area-stacked-energy-mix.webp",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -55,15 +56,68 @@
     {
       "description": "Change the baseline and label the series through the handle",
       "input": "x = 0:0.2:2;\nh = area(x, sin(x) + 2);\nset(h, 'BaseValue', 1, 'DisplayName', 'offset area');\nlegend;"
+    },
+    {
+      "description": "Stacked energy mix",
+      "input": "years = 2018:2025;\nsolar   = [5  8  12 18 25 33 42 50];\nwind    = [10 14 18 22 28 32 36 40];\nhydro   = [30 30 29 28 27 27 26 26];\nmix = [solar; wind; hydro]';\n\narea(years, mix);\ntitle('Energy Generation Mix');\nxlabel('Year');\nylabel('TWh');\nlegend('Solar', 'Wind', 'Hydro');\ngrid on;",
+      "image_webp": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-area-stacked-energy-mix.webp"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How do I create a stacked area chart?",
+      "answer": "Pass a matrix as the y-data. Each column becomes a stacked series, and RunMat accumulates them vertically so the total is visible at the top.\n\n```matlab\nx = 1:6;\nY = [2 3 1; 1 2 2; 3 1 2; 2 2 3; 1 3 1; 2 1 3];\narea(x, Y);\nlegend('A', 'B', 'C');\n```"
+    },
+    {
+      "question": "How do I control the transparency of an area plot?",
+      "answer": "Set `'FaceAlpha'` on the area handle to a value between 0 (fully transparent) and 1 (fully opaque). This is useful when overlaying multiple area series without stacking.\n\n```matlab\narea(x, y1);\nhold on;\nh = area(x, y2);\nset(h, 'FaceAlpha', 0.4);\n```"
+    },
+    {
+      "question": "What's the difference between area and plot?",
+      "answer": "`area` fills the region between the data line and the baseline, giving a visual sense of cumulative magnitude. `plot` just draws the line. Use `area` when the filled region conveys meaning—cumulative totals, part-to-whole breakdowns, or emphasizing the magnitude of a signal relative to a baseline."
     }
   ],
   "links": [
-    { "label": "quiver", "url": "./quiver" },
-    { "label": "bar", "url": "./bar" },
-    { "label": "plot", "url": "./plot" },
-    { "label": "legend", "url": "./legend" },
-    { "label": "get", "url": "./get" },
-    { "label": "set", "url": "./set" }
+    {
+      "label": "quiver",
+      "url": "./quiver"
+    },
+    {
+      "label": "bar",
+      "url": "./bar"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "legend",
+      "url": "./legend"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/area.rs`",

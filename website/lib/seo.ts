@@ -16,12 +16,16 @@ export type PageSeoOptions = {
   canonicalPath: string; // e.g. "/docs/cli"
   ogType?: "website" | "article";
   ogImagePath?: string; // e.g. "/docs/opengraph-image"
+  ogImageAlt?: string;
 };
 
 export function buildPageMetadata(opts: PageSeoOptions): Metadata {
   const canonical = toAbsoluteUrl(opts.canonicalPath);
   const ogImage = opts.ogImagePath ? toAbsoluteUrl(opts.ogImagePath) : undefined;
   const ogType = opts.ogType ?? "website";
+  const ogImageEntry = ogImage
+    ? [{ url: ogImage, ...(opts.ogImageAlt ? { alt: opts.ogImageAlt } : {}) }]
+    : undefined;
 
   return {
     title: opts.title,
@@ -32,13 +36,13 @@ export function buildPageMetadata(opts: PageSeoOptions): Metadata {
       description: opts.description,
       type: ogType,
       url: canonical,
-      ...(ogImage ? { images: [ogImage] } : {}),
+      ...(ogImageEntry ? { images: ogImageEntry } : {}),
     },
     twitter: {
       card: "summary_large_image",
       title: opts.title,
       description: opts.description,
-      ...(ogImage ? { images: [ogImage] } : {}),
+      ...(ogImageEntry ? { images: ogImageEntry } : {}),
     },
   };
 }

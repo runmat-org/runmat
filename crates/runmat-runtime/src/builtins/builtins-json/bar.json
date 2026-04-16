@@ -10,6 +10,7 @@
     "categorical comparison"
   ],
   "summary": "Create bar charts for categorical comparisons, grouped series, stacked values, and MATLAB `bar` workflows.",
+  "hero_image": "https://web.runmatstatic.com/builtin-image/runmat-matlab-bar-grouped-category.webp",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -51,14 +52,64 @@
     {
       "description": "Style a bar object and label it for the legend",
       "input": "h = bar([2 4 1 5]);\nset(h, 'FaceColor', 'g', 'DisplayName', 'counts');\nlegend;"
+    },
+    {
+      "description": "Grouped category comparison",
+      "input": "categories = {'Q1', 'Q2', 'Q3', 'Q4'};\nrevenue = [42 51 63 58; 38 45 52 61; 29 34 48 55];\n\nbar(revenue');\ntitle('Quarterly Revenue by Region');\nxlabel('Quarter');\nylabel('Revenue ($M)');\nlegend('North', 'South', 'West');\ngrid on;",
+      "image_webp": "https://web.runmatstatic.com/builtin-image/runmat-matlab-bar-grouped-category.webp"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How do I create grouped vs stacked bar charts?",
+      "answer": "Pass a matrix to `bar`. By default, each row becomes a group with side-by-side bars (one per column). To stack them instead, pass `'stacked'` as the second argument.\n\n```matlab\nY = [3 5 2; 4 6 1; 5 4 3];\nbar(Y);            % grouped (default)\nbar(Y, 'stacked'); % stacked\n```"
+    },
+    {
+      "question": "Can I make horizontal bar charts?",
+      "answer": "Use `barh` instead of `bar`. It takes the same inputs but draws bars horizontally. The y-axis becomes the category axis and the x-axis shows values.\n\n```matlab\nbarh([3 5 2 9]);\n```"
+    },
+    {
+      "question": "How do I set custom category labels on the x-axis?",
+      "answer": "After calling `bar`, use `set(gca, 'XTickLabel', ...)` to replace the default numeric labels with strings.\n\n```matlab\nbar([4 7 2]);\nset(gca, 'XTickLabel', {'Q1', 'Q2', 'Q3'});\n```\n\nThe label count should match the number of bar groups."
     }
   ],
   "links": [
-    { "label": "hist", "url": "./hist" },
-    { "label": "histogram", "url": "./histogram" },
-    { "label": "pie", "url": "./pie" },
-    { "label": "legend", "url": "./legend" },
-    { "label": "set", "url": "./set" }
+    {
+      "label": "hist",
+      "url": "./hist"
+    },
+    {
+      "label": "histogram",
+      "url": "./histogram"
+    },
+    {
+      "label": "pie",
+      "url": "./pie"
+    },
+    {
+      "label": "legend",
+      "url": "./legend"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/bar.rs`",
