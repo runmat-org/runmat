@@ -36,7 +36,7 @@ use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
 use std::fs;
 use std::io::{self, Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use telemetry_sink::{
     capture_provider_snapshot, sink as telemetry_sink, telemetry_client_id,
@@ -320,6 +320,31 @@ struct Cli {
     /// Override surface vertex budget for GPU LOD
     #[arg(long)]
     plot_surface_vertex_budget: Option<u64>,
+
+    /// Directory where run artifacts are written
+    #[arg(long, env = "RUNMAT_ARTIFACTS_DIR")]
+    artifacts_dir: Option<PathBuf>,
+
+    /// Path to write artifact manifest JSON
+    #[arg(long, env = "RUNMAT_ARTIFACTS_MANIFEST")]
+    artifacts_manifest: Option<PathBuf>,
+
+    /// Figure capture mode when artifact output is enabled
+    #[arg(
+        long,
+        value_enum,
+        env = "RUNMAT_CAPTURE_FIGURES",
+        default_value = "auto"
+    )]
+    capture_figures: CaptureFiguresMode,
+
+    /// Figure export size (WIDTHxHEIGHT)
+    #[arg(long, env = "RUNMAT_FIGURE_SIZE", default_value = "1280x720", value_parser = parse_figure_size)]
+    figure_size: FigureSize,
+
+    /// Maximum number of figures to export
+    #[arg(long, env = "RUNMAT_MAX_FIGURES", default_value = "8")]
+    max_figures: usize,
 
     // config_file is now handled by the config field above
     /// Generate sample configuration file
@@ -962,6 +987,19 @@ enum GcPreset {
     Debug,
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum CaptureFiguresMode {
+    Off,
+    Auto,
+    On,
+}
+
+#[derive(Clone, Debug)]
+struct FigureSize {
+    width: u32,
+    height: u32,
+}
+
 impl From<LogLevel> for log::LevelFilter {
     fn from(level: LogLevel) -> Self {
         match level {
@@ -1013,6 +1051,26 @@ fn parse_log_level_env(s: &str) -> Result<LogLevel, String> {
             "Invalid log level '{s}'. Expected: error, warn, info, debug, trace"
         )),
     }
+}
+
+fn parse_figure_size(s: &str) -> Result<FigureSize, String> {
+    let trimmed = s.trim();
+    let parts: Vec<&str> = trimmed.split('x').collect();
+    if parts.len() != 2 {
+        return Err(format!(
+            "Invalid figure size '{trimmed}'. Expected WIDTHxHEIGHT (e.g. 1280x720)"
+        ));
+    }
+    let width = parts[0]
+        .parse::<u32>()
+        .map_err(|_| format!("Invalid figure width '{}'", parts[0]))?;
+    let height = parts[1]
+        .parse::<u32>()
+        .map_err(|_| format!("Invalid figure height '{}'", parts[1]))?;
+    if width == 0 || height == 0 {
+        return Err("Figure size must be non-zero".to_string());
+    }
+    Ok(FigureSize { width, height })
 }
 
 #[tokio::main]
@@ -1851,7 +1909,7 @@ async fn execute_script_with_args(
     script: PathBuf,
     _args: Vec<String>,
     emit_bytecode_path: Option<PathBuf>,
-    _cli: &Cli,
+    cli: &Cli,
     config: &RunMatConfig,
 ) -> Result<()> {
     info!("Executing script: {script:?}");
@@ -1930,6 +1988,23 @@ async fn execute_script_with_args(
         .or_else(|| failure.as_ref().map(|info| info.code.clone()))
         .or_else(|| result.error.as_ref().map(|_| "runtime_error".to_string()));
     let success = error_payload.is_none();
+
+    if let Some(artifacts_plan) = ScriptArtifactsPlan::from_cli(cli)? {
+        if let Err(err) = write_script_artifacts(
+            &artifacts_plan,
+            &script,
+            &result,
+            execution_time,
+            success,
+            error_payload.as_deref(),
+        )
+        .await
+        {
+            warn!("Failed to write run artifacts: {err}");
+            eprintln!("Warning: failed to write run artifacts: {err}");
+        }
+    }
+
     if let Some(run) = script_run.take() {
         run.finish(TelemetryRunFinish {
             duration: Some(execution_time),
@@ -1976,6 +2051,196 @@ async fn execute_script_with_args(
     dump_provider_telemetry_if_requested();
 
     Ok(())
+}
+
+#[derive(Clone, Debug)]
+struct ScriptArtifactsPlan {
+    artifacts_dir: PathBuf,
+    manifest_path: PathBuf,
+    capture_figures: CaptureFiguresMode,
+    figure_size: FigureSize,
+    max_figures: usize,
+}
+
+impl ScriptArtifactsPlan {
+    fn from_cli(cli: &Cli) -> Result<Option<Self>> {
+        let artifacts_dir = match (&cli.artifacts_dir, &cli.artifacts_manifest) {
+            (Some(dir), _) => Some(dir.clone()),
+            (None, Some(manifest)) => manifest.parent().map(_normalize_manifest_parent),
+            (None, None) => None,
+        };
+
+        let Some(artifacts_dir) = artifacts_dir else {
+            return Ok(None);
+        };
+
+        let manifest_path = cli
+            .artifacts_manifest
+            .clone()
+            .unwrap_or_else(|| artifacts_dir.join("run_manifest.json"));
+
+        Ok(Some(Self {
+            artifacts_dir,
+            manifest_path,
+            capture_figures: cli.capture_figures,
+            figure_size: cli.figure_size.clone(),
+            max_figures: cli.max_figures,
+        }))
+    }
+}
+
+fn _normalize_manifest_parent(parent: &Path) -> PathBuf {
+    if parent.as_os_str().is_empty() {
+        PathBuf::from(".")
+    } else {
+        parent.to_path_buf()
+    }
+}
+
+async fn write_script_artifacts(
+    plan: &ScriptArtifactsPlan,
+    script: &Path,
+    result: &runmat_core::ExecutionResult,
+    execution_time: Duration,
+    success: bool,
+    error_identifier: Option<&str>,
+) -> Result<()> {
+    fs::create_dir_all(&plan.artifacts_dir).with_context(|| {
+        format!(
+            "Failed to create artifacts directory {}",
+            plan.artifacts_dir.display()
+        )
+    })?;
+
+    let figure_exports = export_touched_figures(plan, &result.figures_touched).await;
+
+    let mut stdout_bytes: usize = 0;
+    let mut stderr_bytes: usize = 0;
+    for stream in &result.streams {
+        match stream.stream {
+            ExecutionStreamKind::Stdout => stdout_bytes += stream.text.len(),
+            ExecutionStreamKind::Stderr => stderr_bytes += stream.text.len(),
+            ExecutionStreamKind::ClearScreen => {}
+        }
+    }
+
+    let manifest = serde_json::json!({
+        "schema_version": "runmat.artifacts.v1",
+        "script": script.to_string_lossy(),
+        "success": success,
+        "execution_time_ms": execution_time.as_millis() as u64,
+        "used_jit": result.used_jit,
+        "error_identifier": error_identifier,
+        "figures_touched": result.figures_touched,
+        "figure_exports": figure_exports,
+        "stream_summary": {
+            "entry_count": result.streams.len(),
+            "stdout_bytes": stdout_bytes,
+            "stderr_bytes": stderr_bytes,
+        },
+        "capture": {
+            "capture_figures": format!("{:?}", plan.capture_figures).to_lowercase(),
+            "figure_width": plan.figure_size.width,
+            "figure_height": plan.figure_size.height,
+            "max_figures": plan.max_figures,
+        }
+    });
+
+    if let Some(parent) = plan.manifest_path.parent() {
+        fs::create_dir_all(parent).with_context(|| {
+            format!(
+                "Failed to create manifest parent directory {}",
+                parent.display()
+            )
+        })?;
+    }
+    fs::write(
+        &plan.manifest_path,
+        serde_json::to_string_pretty(&manifest)
+            .context("Failed to serialize run artifacts manifest")?,
+    )
+    .with_context(|| {
+        format!(
+            "Failed to write artifacts manifest {}",
+            plan.manifest_path.display()
+        )
+    })?;
+
+    info!(
+        "Wrote run artifacts manifest: {}",
+        plan.manifest_path.display()
+    );
+    Ok(())
+}
+
+async fn export_touched_figures(
+    plan: &ScriptArtifactsPlan,
+    figures_touched: &[u32],
+) -> Vec<serde_json::Value> {
+    use runmat_runtime::builtins::plotting::{render_figure_snapshot, FigureHandle};
+
+    let capture_enabled = match plan.capture_figures {
+        CaptureFiguresMode::Off => false,
+        CaptureFiguresMode::Auto => !figures_touched.is_empty(),
+        CaptureFiguresMode::On => true,
+    };
+    if !capture_enabled {
+        return Vec::new();
+    }
+
+    let figures_dir = plan.artifacts_dir.join("figures");
+    if let Err(err) = fs::create_dir_all(&figures_dir) {
+        warn!(
+            "Failed to create figures artifact directory {}: {}",
+            figures_dir.display(),
+            err
+        );
+        return Vec::new();
+    }
+
+    let mut exports = Vec::new();
+
+    for (index, handle_raw) in figures_touched.iter().enumerate().take(plan.max_figures) {
+        let handle = FigureHandle::from(*handle_raw);
+        match render_figure_snapshot(
+            handle,
+            plan.figure_size.width,
+            plan.figure_size.height,
+            None,
+        )
+        .await
+        {
+            Ok(bytes) => {
+                let file_name = format!("figure_{:03}_h{}.png", index + 1, handle_raw);
+                let file_path = figures_dir.join(file_name);
+                if let Err(err) = fs::write(&file_path, bytes.as_slice()) {
+                    exports.push(serde_json::json!({
+                        "handle": handle_raw,
+                        "ok": false,
+                        "error": format!("failed_to_write: {}", err),
+                    }));
+                    continue;
+                }
+                exports.push(serde_json::json!({
+                    "handle": handle_raw,
+                    "ok": true,
+                    "path": file_path.to_string_lossy(),
+                    "format": "png",
+                    "width": plan.figure_size.width,
+                    "height": plan.figure_size.height,
+                }));
+            }
+            Err(err) => {
+                exports.push(serde_json::json!({
+                    "handle": handle_raw,
+                    "ok": false,
+                    "error": err.to_string(),
+                }));
+            }
+        }
+    }
+
+    exports
 }
 
 fn emit_bytecode(source: &str, config: &RunMatConfig) -> Result<String> {
