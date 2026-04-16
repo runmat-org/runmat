@@ -478,12 +478,7 @@ impl Ctx {
         }
 
         #[allow(clippy::type_complexity)]
-        #[allow(clippy::only_used_in_recursion)]
-        fn analyze_stmts(
-            #[allow(clippy::only_used_in_recursion)] outputs: &[VarId],
-            stmts: &[HirStmt],
-            mut env: HashMap<VarId, Type>,
-        ) -> Analysis {
+        fn analyze_stmts(stmts: &[HirStmt], mut env: HashMap<VarId, Type>) -> Analysis {
             let mut exits = Vec::new();
             let mut i = 0usize;
             while i < stmts.len() {
@@ -510,19 +505,19 @@ impl Ctx {
                         else_body,
                         ..
                     } => {
-                        let then_a = analyze_stmts(outputs, then_body, env.clone());
+                        let then_a = analyze_stmts(then_body, env.clone());
                         let mut out_env = then_a.fallthrough.unwrap_or_else(|| env.clone());
                         let mut all_exits = then_a.exits;
                         for (c, b) in elseif_blocks {
                             let _ = c;
-                            let a = analyze_stmts(outputs, b, env.clone());
+                            let a = analyze_stmts(b, env.clone());
                             if let Some(f) = a.fallthrough {
                                 out_env = join_env(&out_env, &f);
                             }
                             all_exits.extend(a.exits);
                         }
                         if let Some(else_body) = else_body {
-                            let a = analyze_stmts(outputs, else_body, env.clone());
+                            let a = analyze_stmts(else_body, env.clone());
                             if let Some(f) = a.fallthrough {
                                 out_env = join_env(&out_env, &f);
                             }
@@ -534,7 +529,7 @@ impl Ctx {
                         exits.extend(all_exits);
                     }
                     HirStmt::While { body, .. } => {
-                        let a = analyze_stmts(outputs, body, env.clone());
+                        let a = analyze_stmts(body, env.clone());
                         if let Some(f) = a.fallthrough {
                             env = join_env(&env, &f);
                         }
@@ -544,7 +539,7 @@ impl Ctx {
                         var, expr, body, ..
                     } => {
                         env.insert(*var, expr.ty.clone());
-                        let a = analyze_stmts(outputs, body, env.clone());
+                        let a = analyze_stmts(body, env.clone());
                         if let Some(f) = a.fallthrough {
                             env = join_env(&env, &f);
                         }
@@ -555,7 +550,7 @@ impl Ctx {
                     } => {
                         let mut out_env: Option<HashMap<VarId, Type>> = None;
                         for (_v, b) in cases {
-                            let a = analyze_stmts(outputs, b, env.clone());
+                            let a = analyze_stmts(b, env.clone());
                             if let Some(f) = a.fallthrough {
                                 out_env = Some(match out_env {
                                     Some(curr) => join_env(&curr, &f),
@@ -565,7 +560,7 @@ impl Ctx {
                             exits.extend(a.exits);
                         }
                         if let Some(otherwise) = otherwise {
-                            let a = analyze_stmts(outputs, otherwise, env.clone());
+                            let a = analyze_stmts(otherwise, env.clone());
                             if let Some(f) = a.fallthrough {
                                 out_env = Some(match out_env {
                                     Some(curr) => join_env(&curr, &f),
@@ -588,8 +583,8 @@ impl Ctx {
                         catch_body,
                         ..
                     } => {
-                        let a_try = analyze_stmts(outputs, try_body, env.clone());
-                        let a_catch = analyze_stmts(outputs, catch_body, env.clone());
+                        let a_try = analyze_stmts(try_body, env.clone());
+                        let a_catch = analyze_stmts(catch_body, env.clone());
                         let mut out_env = a_try.fallthrough.unwrap_or_else(|| env.clone());
                         if let Some(f) = a_catch.fallthrough {
                             out_env = join_env(&out_env, &f);
@@ -615,7 +610,7 @@ impl Ctx {
         }
 
         let initial_env: HashMap<VarId, Type> = HashMap::new();
-        let analysis = analyze_stmts(outputs, body, initial_env);
+        let analysis = analyze_stmts(body, initial_env);
         let mut per_output: Vec<Type> = vec![Type::Unknown; outputs.len()];
         let mut accumulate = |env: &HashMap<VarId, Type>| {
             for (i, out) in outputs.iter().enumerate() {

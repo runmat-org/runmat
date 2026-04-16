@@ -70,9 +70,8 @@ pub fn infer_function_variable_types(prog: &HirProgram) -> HashMap<String, HashM
         fallthrough: Option<HashMap<VarId, Type>>,
     }
 
-    #[allow(clippy::type_complexity, clippy::only_used_in_recursion)]
+    #[allow(clippy::type_complexity)]
     fn analyze_stmts(
-        #[allow(clippy::only_used_in_recursion)] outputs: &[VarId],
         stmts: &[HirStmt],
         mut env: HashMap<VarId, Type>,
         returns: &HashMap<String, Vec<Type>>,
@@ -282,7 +281,7 @@ pub fn infer_function_variable_types(prog: &HirProgram) -> HashMap<String, HashM
                             );
                         }
                     }
-                    let then_a = analyze_stmts(outputs, then_body, then_env, returns, func_defs);
+                    let then_a = analyze_stmts(then_body, then_env, returns, func_defs);
                     let mut out_env = then_a.fallthrough.clone().unwrap_or_else(|| env.clone());
                     let mut all_exits = then_a.exits.clone();
                     for (c, b) in elseif_blocks {
@@ -310,14 +309,14 @@ pub fn infer_function_variable_types(prog: &HirProgram) -> HashMap<String, HashM
                                 );
                             }
                         }
-                        let a = analyze_stmts(outputs, b, elseif_env, returns, func_defs);
+                        let a = analyze_stmts(b, elseif_env, returns, func_defs);
                         if let Some(f) = a.fallthrough {
                             out_env = join_env(&out_env, &f);
                         }
                         all_exits.extend(a.exits);
                     }
                     if let Some(else_body) = else_body {
-                        let a = analyze_stmts(outputs, else_body, env.clone(), returns, func_defs);
+                        let a = analyze_stmts(else_body, env.clone(), returns, func_defs);
                         if let Some(f) = a.fallthrough {
                             out_env = join_env(&out_env, &f);
                         }
@@ -329,7 +328,7 @@ pub fn infer_function_variable_types(prog: &HirProgram) -> HashMap<String, HashM
                     exits.extend(all_exits);
                 }
                 HirStmt::While { body, .. } => {
-                    let a = analyze_stmts(outputs, body, env.clone(), returns, func_defs);
+                    let a = analyze_stmts(body, env.clone(), returns, func_defs);
                     if let Some(f) = a.fallthrough {
                         env = join_env(&env, &f);
                     }
@@ -340,7 +339,7 @@ pub fn infer_function_variable_types(prog: &HirProgram) -> HashMap<String, HashM
                 } => {
                     let t = infer_expr_type(expr, &env, returns);
                     env.insert(*var, t);
-                    let a = analyze_stmts(outputs, body, env.clone(), returns, func_defs);
+                    let a = analyze_stmts(body, env.clone(), returns, func_defs);
                     if let Some(f) = a.fallthrough {
                         env = join_env(&env, &f);
                     }
@@ -351,7 +350,7 @@ pub fn infer_function_variable_types(prog: &HirProgram) -> HashMap<String, HashM
                 } => {
                     let mut out_env: Option<HashMap<VarId, Type>> = None;
                     for (_v, b) in cases {
-                        let a = analyze_stmts(outputs, b, env.clone(), returns, func_defs);
+                        let a = analyze_stmts(b, env.clone(), returns, func_defs);
                         if let Some(f) = a.fallthrough {
                             out_env = Some(match out_env {
                                 Some(curr) => join_env(&curr, &f),
@@ -361,7 +360,7 @@ pub fn infer_function_variable_types(prog: &HirProgram) -> HashMap<String, HashM
                         exits.extend(a.exits);
                     }
                     if let Some(otherwise) = otherwise {
-                        let a = analyze_stmts(outputs, otherwise, env.clone(), returns, func_defs);
+                        let a = analyze_stmts(otherwise, env.clone(), returns, func_defs);
                         if let Some(f) = a.fallthrough {
                             out_env = Some(match out_env {
                                 Some(curr) => join_env(&curr, &f),
@@ -384,9 +383,8 @@ pub fn infer_function_variable_types(prog: &HirProgram) -> HashMap<String, HashM
                     catch_body,
                     ..
                 } => {
-                    let a_try = analyze_stmts(outputs, try_body, env.clone(), returns, func_defs);
-                    let a_catch =
-                        analyze_stmts(outputs, catch_body, env.clone(), returns, func_defs);
+                    let a_try = analyze_stmts(try_body, env.clone(), returns, func_defs);
+                    let a_catch = analyze_stmts(catch_body, env.clone(), returns, func_defs);
                     let mut out_env = a_try.fallthrough.clone().unwrap_or_else(|| env.clone());
                     if let Some(f) = a_catch.fallthrough {
                         out_env = join_env(&out_env, &f);
@@ -415,8 +413,7 @@ pub fn infer_function_variable_types(prog: &HirProgram) -> HashMap<String, HashM
     for stmt in &prog.body {
         match stmt {
             HirStmt::Function { name, body, .. } => {
-                let empty: &[VarId] = &[];
-                let a = analyze_stmts(empty, body, HashMap::new(), &returns_map, &func_defs);
+                let a = analyze_stmts(body, HashMap::new(), &returns_map, &func_defs);
                 let mut env = HashMap::new();
                 for e in &a.exits {
                     env = join_env(&env, e);
@@ -431,14 +428,8 @@ pub fn infer_function_variable_types(prog: &HirProgram) -> HashMap<String, HashM
                     if let HirClassMember::Methods { body, .. } = m {
                         for s in body {
                             if let HirStmt::Function { name, body, .. } = s {
-                                let empty: &[VarId] = &[];
-                                let a = analyze_stmts(
-                                    empty,
-                                    body,
-                                    HashMap::new(),
-                                    &returns_map,
-                                    &func_defs,
-                                );
+                                let a =
+                                    analyze_stmts(body, HashMap::new(), &returns_map, &func_defs);
                                 let mut env = HashMap::new();
                                 for e in &a.exits {
                                     env = join_env(&env, e);
