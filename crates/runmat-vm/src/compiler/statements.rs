@@ -1,7 +1,7 @@
 //! Statement lowering.
 
-use crate::accel::idioms;
 use crate::compiler::core::{Compiler, LoopLabels};
+use crate::compiler::idioms;
 use crate::compiler::CompileError;
 use crate::instr::{EmitLabel, Instr};
 use runmat_hir::{HirExpr, HirExprKind, HirStmt};
@@ -23,6 +23,9 @@ fn label_for_expr(expr: &HirExpr) -> EmitLabel {
 
 impl Compiler {
     pub(crate) fn compile_stmt_impl(&mut self, stmt: &HirStmt) -> Result<(), CompileError> {
+        if idioms::try_lower_stmt_idiom(self, stmt)? {
+            return Ok(());
+        }
         match stmt {
             HirStmt::ExprStmt(expr, suppressed, _) => {
                 self.compile_expr(expr)?;
@@ -102,10 +105,6 @@ impl Compiler {
             HirStmt::For {
                 var, expr, body, ..
             } => {
-                if let Some(plan) = idioms::detect_stmt_idiom(expr, body) {
-                    idioms::lower_stmt_idiom(self, plan)?;
-                    return Ok(());
-                }
                 if let HirExprKind::Range(start, step, end) = &expr.kind {
                     self.compile_expr(start)?;
                     self.emit(Instr::StoreVar(var.0));

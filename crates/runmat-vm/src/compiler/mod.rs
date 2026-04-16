@@ -4,6 +4,7 @@ pub mod end_expr;
 pub mod error;
 pub mod expressions;
 pub mod functions;
+pub mod idioms;
 pub mod imports;
 pub mod lvalues;
 pub mod statements;
