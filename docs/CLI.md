@@ -63,6 +63,11 @@ Global options apply to all commands. Commands offer task-oriented workflows.
 - `--plot-mode <auto|gui|headless|jupyter>` (env: `RUNMAT_PLOT_MODE`).
 - `--plot-headless` (env: `RUNMAT_PLOT_HEADLESS`): force headless.
 - `--plot-backend <auto|wgpu|static|web>` (env: `RUNMAT_PLOT_BACKEND`).
+- `--artifacts-dir <path>` (env: `RUNMAT_ARTIFACTS_DIR`): write run artifacts to directory.
+- `--artifacts-manifest <path>` (env: `RUNMAT_ARTIFACTS_MANIFEST`): explicit manifest output path.
+- `--capture-figures <off|auto|on>` (env: `RUNMAT_CAPTURE_FIGURES`, default: `auto`): export touched figures when artifact output is enabled.
+- `--figure-size <WIDTHxHEIGHT>` (env: `RUNMAT_FIGURE_SIZE`, default: `1280x720`): figure export dimensions.
+- `--max-figures <n>` (env: `RUNMAT_MAX_FIGURES`, default: `8`): cap figure exports per script run.
 - `--generate-config`: print a sample config to stdout.
 - `--install-kernel`: install the Jupyter kernel.
 
@@ -104,6 +109,12 @@ runmat run <file.m> [-- arg1 arg2 ...]
 
 # shorthand
 runmat <file.m>
+
+# capture runtime artifacts and exported figures
+runmat model.m \
+  --artifacts-dir .runmat-artifacts \
+  --capture-figures auto \
+  --figure-size 1280x720
 ```
 
 Example `calc.m`:
@@ -114,6 +125,11 @@ x = 10 + 5
 ```sh
 runmat calc.m
 ```
+
+When `--artifacts-dir` or `--artifacts-manifest` is provided, RunMat writes a
+JSON manifest with execution metadata, stream summary, touched figure handles,
+and exported figure file paths (`.png` currently). This is useful for runtime
+debugging, CI capture, and external evaluation harnesses.
 
 ### kernel
 Start the Jupyter kernel.
