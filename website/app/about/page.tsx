@@ -205,7 +205,7 @@ export default function AboutPage() {
               </p>
             </div>
             <div className="order-1 lg:order-2 space-y-4">
-              <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Who we are</h2>
+              <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Who we are</h2>
               <p className="text-foreground text-[0.938rem]">
                 We&apos;re a small team with deep roots in engineering and enterprise software who spent years
                 watching talented people lose time to slow tools and expensive licenses. We started as Dystr in 2022 and learned one thing: engineers
@@ -226,7 +226,7 @@ export default function AboutPage() {
         <section className="py-16 md:py-24 lg:py-32">
           <Card className="mx-auto max-w-4xl border border-border/60 bg-muted/40 text-foreground">
             <CardContent className="py-8 text-center space-y-4">
-              <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Backed by</h2>
+              <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Backed by</h2>
               <div className="mx-auto grid max-w-2xl grid-cols-2 items-center justify-items-center gap-8 rounded-lg border border-border bg-white/90 px-8 py-6 sm:grid-cols-4 dark:bg-white/10">
                 <Link href="https://www.longjourney.vc/" target="_blank" rel="noreferrer">
                   <Image
@@ -273,7 +273,7 @@ export default function AboutPage() {
         <section className="py-16 md:py-24 lg:py-32">
           <div className="mx-auto max-w-4xl space-y-8">
             <div className="mx-auto max-w-2xl space-y-4 text-center">
-              <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Who is RunMat for</h2>
+              <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Who is RunMat for</h2>
               <p className="text-foreground text-[0.938rem]">
                 Engineers and researchers who do math on a computer — simulations, signal processing, finance, and more.
                 If you&apos;ve ever felt stuck between MATLAB&apos;s readability and Python&apos;s openness, RunMat
@@ -322,7 +322,7 @@ export default function AboutPage() {
               </p>
             </div>
             <div className="order-1 lg:order-2 space-y-4">
-              <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Easy to read, fast to run</h2>
+              <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Easy to read, fast to run</h2>
               <p className="text-foreground text-[0.938rem]">
                 Code generation is speeding up. More code gets written fast, but checking results is still slow.
               </p>
@@ -342,7 +342,7 @@ export default function AboutPage() {
         <section className="py-16 md:py-24 lg:py-32">
           <Card className="mx-auto max-w-4xl border border-border/60 bg-muted/40">
             <CardContent className="py-8 space-y-3 text-center">
-              <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Our mission</h2>
+              <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Our mission</h2>
               <p className="text-[0.938rem] sm:text-base text-foreground font-semibold">
                 To enable people to do math and physics that they couldn&apos;t do before by creating a modern,
                 high-performance alternative to MATLAB.
@@ -359,7 +359,7 @@ export default function AboutPage() {
         <section className="py-16 md:py-24 lg:py-32">
           <section className="mb-12">
             <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-              <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">What is RunMat today</h2>
+              <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">What is RunMat today</h2>
               <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
                 RunMat is an open-source runtime that executes MATLAB-syntax code (.m files) in the browser, on the desktop, and from the CLI. It covers 300+ core built-in functions with cross-vendor GPU acceleration via Metal, Vulkan, DirectX 12, and WebGPU, though it does not replicate Simulink or specialized toolboxes. The browser sandbox runs entirely client-side via WebAssembly. No account needed, no install, nothing leaves your machine.
               </p>
@@ -529,7 +529,7 @@ export default function AboutPage() {
         {/* Where We're Headed */}
         <section className="py-16 md:py-24 lg:py-32">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Where we&apos;re headed</h2>
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Where we&apos;re headed</h2>
           </div>
           <Card className="mx-auto max-w-2xl rounded-xl border border-border/60 bg-card shadow-sm">
             <CardContent className="py-6 md:py-8 space-y-4">
@@ -562,7 +562,7 @@ export default function AboutPage() {
         {/* Open Source */}
         <section className="py-16 md:py-24 lg:py-32">
           <div className="mx-auto max-w-2xl text-center">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground mb-12">Open source at the core</h2>
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground mb-12">Open source at the core</h2>
             <Card className="border border-border/60 bg-card shadow-sm">
               <CardContent className="py-8 space-y-4">
                 <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-full border border-border/60 bg-background/30 text-sm text-muted-foreground">

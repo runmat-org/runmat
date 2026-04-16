@@ -204,7 +204,7 @@ export default function HomePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               See your math in 3D
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
@@ -247,7 +247,7 @@ export default function HomePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Syntax you already know.
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground sm:leading-8">
@@ -277,7 +277,7 @@ export default function HomePage() {
       <section id="benchmarks" className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               The fastest runtime for your math
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground sm:leading-7">
@@ -307,7 +307,7 @@ export default function HomePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Debug with full visibility
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
@@ -337,7 +337,7 @@ export default function HomePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Every change versioned. No git required.
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
@@ -398,7 +398,7 @@ export default function HomePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Scale your math, not your toolchain
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
@@ -444,7 +444,7 @@ export default function HomePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto max-w-2xl text-center">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl mb-8">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl mb-8">
               Open source, MIT licensed
             </h2>
             <Card className="border border-border bg-card">
@@ -474,7 +474,7 @@ export default function HomePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Secure by design
             </h2>
             <p className="max-w-[42rem] text-[0.938rem] leading-relaxed text-foreground">

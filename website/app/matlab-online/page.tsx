@@ -290,7 +290,7 @@ export default function MatlabOnlinePage() {
               <div className="mb-2 p-0 text-sm font-semibold uppercase tracking-wider text-foreground">
                 MATLAB online alternative
               </div>
-              <h1 className="font-heading text-left leading-tight tracking-tight text-3xl sm:text-4xl md:text-5xl">
+              <h1 className="font-bold text-left leading-tight tracking-tight text-3xl sm:text-4xl md:text-5xl">
                 Run your MATLAB code in the browser blazing fast
               </h1>
               <p className="max-w-[42rem] leading-relaxed text-foreground text-[0.938rem]">
@@ -391,7 +391,7 @@ export default function MatlabOnlinePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6 lg:px-8">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">
               Meet RunMat: no license required
             </h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
@@ -475,7 +475,7 @@ export default function MatlabOnlinePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6 lg:px-8">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">How it works</h2>
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">How it works</h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">Get started in three simple steps.</p>
           </div>
           <div className="mx-auto max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
@@ -530,7 +530,7 @@ export default function MatlabOnlinePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6 lg:px-8">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Every change versioned. No git required.</h2>
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Every change versioned. No git required.</h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
               Every save creates a version automatically. Per-file history and full project snapshots are included on all{" "}
               <Link href="/pricing" className="underline hover:text-foreground/80">Cloud tiers</Link>, starting at $0 with 100 MB on the Hobby tier. Paid plans add project sharing with your team -- no git setup or merge conflicts.
@@ -569,7 +569,7 @@ export default function MatlabOnlinePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6 lg:px-8">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">The fastest runtime for your math</h2>
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">The fastest runtime for your math</h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
               RunMat fuses sequential operations into fewer GPU steps and keeps arrays on-device between steps. Less memory traffic, fewer kernel launches, faster scripts.
             </p>
@@ -596,7 +596,7 @@ export default function MatlabOnlinePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6 lg:px-8">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">RunMat vs. MATLAB Online</h2>
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">RunMat vs. MATLAB Online</h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">RunMat runs client-side with GPU acceleration and no account. MATLAB Online requires a license, runs on MathWorks&apos; servers, and caps free usage.</p>
           </div>
           <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-2">
@@ -754,7 +754,7 @@ export default function MatlabOnlinePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6 lg:px-8">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">What works today</h2>
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">What works today</h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">Core matrix workflows, plotting, and debugging ship today. Here is what is in progress.</p>
           </div>
           <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-2">
@@ -872,7 +872,7 @@ export default function MatlabOnlinePage() {
         <div className="container mx-auto px-4 md:px-6 lg:px-8">
           <div className="mx-auto max-w-5xl">
             <div className="rounded-lg border border-border bg-muted/40 p-8">
-              <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground mb-8">Built for teams</h2>
+              <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground mb-8">Built for teams</h2>
               <div className="grid gap-6 md:grid-cols-2">
                 <div className="flex items-start gap-4">
                   <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-border bg-secondary text-foreground">
@@ -925,7 +925,7 @@ export default function MatlabOnlinePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6 lg:px-8">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Frequently asked questions</h2>
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">Frequently asked questions</h2>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
               Common questions about RunMat and MATLAB compatibility.
             </p>

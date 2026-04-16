@@ -39,7 +39,7 @@ export default function ResourcesPage() {
       <div className="container mx-auto px-4 py-16 md:px-6 md:py-24 space-y-12">
         {/* Hero */}
         <div className="mx-auto max-w-[58rem] text-center">
-          <h1 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+          <h1 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
             Resource Hub
           </h1>
         </div>

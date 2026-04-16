@@ -110,7 +110,7 @@ export default function PricingPage() {
       <div className="container mx-auto px-4 md:px-6">
         <section className="w-full pt-16 md:pt-24 lg:pt-32 pb-10 md:pb-12">
           <div className="mx-auto max-w-3xl space-y-4 text-center">
-            <h1 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+            <h1 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Simple, transparent pricing
             </h1>
           </div>
@@ -203,7 +203,7 @@ export default function PricingPage() {
         {/* FAQ */}
         <section className="pt-8 md:pt-12 pb-16 md:pb-24 lg:pb-32">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-4 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">
               Frequently asked questions
             </h2>
           </div>

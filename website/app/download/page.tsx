@@ -29,7 +29,7 @@ export default function DownloadPage() {
         {/* Header */}
         <section className="w-full py-16 md:py-24 lg:py-32">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h1 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+            <h1 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Download RunMat
             </h1>
             <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
@@ -53,7 +53,7 @@ export default function DownloadPage() {
         {/* Alternative Installation Methods */}
         <section className="w-full py-16 md:py-24 lg:py-32">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Alternative installation methods
             </h2>
           </div>
@@ -116,7 +116,7 @@ export default function DownloadPage() {
         {/* Development Setup */}
         <section className="w-full py-16 md:py-24 lg:py-32">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Development environment
             </h2>
           </div>
@@ -166,7 +166,7 @@ export default function DownloadPage() {
         {/* Next Steps */}
         <section className="w-full py-16 md:py-24 lg:py-32">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Next steps
             </h2>
           </div>
@@ -212,7 +212,7 @@ export default function DownloadPage() {
         {/* Source Code */}
         <section className="w-full py-16 md:py-24 lg:py-32">
           <div className="mx-auto max-w-3xl text-center">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl mb-12">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl mb-12">
               Open source
             </h2>
             <div className="rounded-lg border border-border bg-card p-8 space-y-4">
