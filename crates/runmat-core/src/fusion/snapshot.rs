@@ -1,11 +1,11 @@
 use runmat_accelerate::fusion::FusionGroup;
 use runmat_accelerate::graph::{AccelGraph, ShapeInfo};
 
-use crate::{
+use super::{
     FusionPlanDecision, FusionPlanEdge, FusionPlanNode, FusionPlanShader, FusionPlanSnapshot,
 };
 
-pub fn build_fusion_snapshot(
+pub(crate) fn build_fusion_snapshot(
     graph: Option<&AccelGraph>,
     groups: &[FusionGroup],
 ) -> Option<FusionPlanSnapshot> {
