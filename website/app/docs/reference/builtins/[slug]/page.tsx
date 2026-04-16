@@ -52,7 +52,7 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
         type="application/ld+json"
         dangerouslySetInnerHTML={{ __html: builtinJsonLD(slug) }}
     />
-      <div className="container mx-auto px-4 md:px-6 pt-8">
+      <div className="pt-8">
         <p className="mb-4 text-sm text-muted-foreground leading-relaxed break-words">
           <Link href="/docs/matlab-function-reference" className="inline-flex items-center gap-1 text-muted-foreground hover:text-foreground transition-colors">
             <span aria-hidden="true">&larr;</span> All functions
@@ -60,9 +60,8 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
         </p>
         <BuiltinMetadataChips metadata={metadata} categoryAnchor={categoryAnchor} />
       </div>
-      <div className="container mx-auto px-4 md:px-6 pb-8">
-      <div className="grid gap-8 lg:grid-cols-[minmax(0,1fr)_220px]">
-        <article className="prose dark:prose-invert max-w-none min-w-0 prose-headings:font-semibold prose-h2:mt-8 prose-h2:mb-3 prose-h3:mt-6 prose-h3:mb-2 prose-pre:bg-muted prose-pre:border prose-pre:rounded-md prose-code:bg-muted prose-code:border prose-code:rounded-sm">
+      <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_220px] pb-8">
+        <article className="prose dark:prose-invert max-w-3xl min-w-0 prose-headings:font-semibold prose-h2:mt-8 prose-h2:mb-3 prose-h3:mt-6 prose-h3:mb-2 prose-pre:bg-muted prose-pre:border prose-pre:rounded-md prose-code:bg-muted prose-code:border prose-code:rounded-sm">
           <BuiltinDocRenderer blocks={blocks} />
         </article>
         <BuiltinsHeadingsNav toc={toc} />
@@ -70,7 +69,6 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
       <div className="mt-12 not-prose">
         <SandboxCta source={`builtin-docs-${slug}`} />
       </div>
-    </div>
     </>
   );
 }

@@ -15,8 +15,8 @@ type OnThisPageNavProps = {
 export function OnThisPageNav({
   headings,
   asideClassName = "hidden lg:block self-start sticky top-24 h-max w-[220px] shrink-0",
-  titleClassName = "text-xs font-semibold uppercase tracking-wider text-foreground mb-2",
-  listClassName = "text-sm space-y-1.5",
+  titleClassName = "text-xs font-semibold uppercase tracking-wider text-foreground mb-1.5",
+  listClassName = "text-sm space-y-1",
   getItemClassName = (depth) => (depth > 2 ? "pl-4" : undefined),
 }: OnThisPageNavProps) {
   const [activeId, setActiveId] = useState<string>(headings[0]?.id ?? "");

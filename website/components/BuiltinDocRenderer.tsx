@@ -109,7 +109,7 @@ function renderHeading(block: Extract<BuiltinDocBlock, { type: 'heading' }>) {
   const text = inlineToPlainText(block.text).replace(/`/g, '');
   const id = block.id ?? slugifyHeading(text);
   const headingClasses: Record<number, string> = {
-    1: 'text-2xl sm:text-3xl font-bold mt-10 mb-4 text-foreground first:mt-0 break-words',
+    1: 'text-xl sm:text-2xl font-bold mt-10 mb-4 text-foreground first:mt-0 break-words',
     2: 'group scroll-mt-24 text-lg sm:text-xl font-semibold mt-8 mb-3 text-foreground break-words',
     3: 'group scroll-mt-24 text-base sm:text-lg font-semibold mt-6 mb-2 text-foreground break-words',
     4: 'group scroll-mt-24 text-sm sm:text-base font-semibold mt-5 mb-2 text-foreground break-words',

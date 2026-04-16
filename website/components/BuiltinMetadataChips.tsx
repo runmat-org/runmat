@@ -33,8 +33,8 @@ export function BuiltinMetadataChips({ metadata, categoryAnchor }: BuiltinMetada
         >
           <div className="flex items-center gap-2">
             <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">GPU</span>
-            <Zap className="h-3.5 w-3.5 text-green-600 dark:text-green-400" />
-            <span className="font-medium text-green-600 dark:text-green-400">Yes</span>
+            <Zap className="h-3.5 w-3.5 text-muted-foreground" />
+            <span className="font-medium text-foreground">Yes</span>
           </div>
         </Badge>
       )}
