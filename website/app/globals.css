@@ -27,6 +27,7 @@
   --color-input: hsl(var(--input));
   --color-ring: hsl(var(--ring));
   --color-brand: hsl(var(--brand));
+  --color-code-surface: hsl(var(--code-surface));
   --radius: var(--radius);
   --radius-xs: 0.25rem;
   --radius-sm: 0.25rem;
