@@ -1990,7 +1990,7 @@ async fn execute_script_with_args(
     let success = error_payload.is_none();
 
     if let Some(artifacts_plan) = ScriptArtifactsPlan::from_cli(cli)? {
-        write_script_artifacts(
+        if let Err(err) = write_script_artifacts(
             &artifacts_plan,
             &script,
             &result,
@@ -1998,7 +1998,11 @@ async fn execute_script_with_args(
             success,
             error_payload.as_deref(),
         )
-        .await?;
+        .await
+        {
+            warn!("Failed to write run artifacts: {err}");
+            eprintln!("Warning: failed to write run artifacts: {err}");
+        }
     }
 
     if let Some(run) = script_run.take() {
@@ -2080,7 +2084,7 @@ impl ScriptArtifactsPlan {
             manifest_path,
             capture_figures: cli.capture_figures,
             figure_size: cli.figure_size.clone(),
-            max_figures: cli.max_figures.max(1),
+            max_figures: cli.max_figures,
         }))
     }
 }
