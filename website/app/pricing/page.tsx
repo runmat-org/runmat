@@ -206,9 +206,6 @@ export default function PricingPage() {
             <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">
               Frequently asked questions
             </h2>
-            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
-              Common questions about plans, billing, and RunMat Cloud.
-            </p>
           </div>
           <div className="mx-auto grid max-w-5xl gap-3 md:grid-cols-2">
             {pricingFaqItems.map(item => (

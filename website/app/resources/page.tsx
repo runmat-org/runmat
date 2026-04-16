@@ -1,8 +1,7 @@
 import { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, BookOpen, Newspaper, Sparkles } from "lucide-react";
 
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { ContentCard } from "@/components/content-card";
 import {
   getDisplayResourceTypes,
@@ -11,7 +10,6 @@ import {
   resourceTypeLabel,
   getResourceTypeLink,
 } from "@/lib/resources";
-import { typeColor } from "@/lib/type-colors";
 
 export const metadata: Metadata = {
   title: "Resources | RunMat",
@@ -24,15 +22,6 @@ export const metadata: Metadata = {
     url: "https://runmat.com/resources",
     type: "website",
   },
-};
-
-const TYPE_ICONS: Record<string, React.ReactNode> = {
-  docs: <BookOpen className="h-4 w-4" />,
-  guides: <Sparkles className="h-4 w-4" />,
-  blogs: <Newspaper className="h-4 w-4" />,
-  "case-studies": <Sparkles className="h-4 w-4" />,
-  webinars: <Sparkles className="h-4 w-4" />,
-  benchmarks: <Sparkles className="h-4 w-4" />,
 };
 
 export default function ResourcesPage() {
@@ -65,9 +54,7 @@ export default function ResourcesPage() {
               <TypeCard
                 key={type.type}
                 href={type.href}
-                icon={TYPE_ICONS[type.type] ?? <Sparkles className="h-5 w-5" />}
                 label={type.label}
-                type={type.type}
               />
             ))}
           </div>
@@ -127,32 +114,14 @@ export default function ResourcesPage() {
 
 function TypeCard({
   href,
-  icon,
   label,
-  type,
 }: {
   href: string;
-  icon: React.ReactNode;
   label: string;
-  type: string;
 }) {
-  const color = typeColor(type);
   return (
-    <Link href={href} className="block h-full group">
-      <Card className="h-full bg-muted/50 hover:bg-card transition-all rounded-lg p-5 text-left">
-        <CardHeader className="space-y-3 p-0">
-          <div
-            className="w-10 h-10 rounded-md flex items-center justify-center transition-colors"
-            style={{ color: color.text, backgroundColor: color.bg }}
-          >
-            {icon}
-          </div>
-          <div className="flex items-center justify-between w-full">
-            <span className="text-sm font-medium text-foreground">{label}</span>
-            <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground group-hover:translate-x-1 transition-all" />
-          </div>
-        </CardHeader>
-      </Card>
+    <Link href={href} className="block border border-border rounded-lg px-4 py-3 text-sm font-medium text-foreground hover:bg-accent transition-colors">
+      {label}
     </Link>
   );
 }
