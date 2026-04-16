@@ -4,6 +4,37 @@ _What's new across the RunMat runtime, cloud, and sandbox. For technical runtime
 
 ---
 
+## [v0.4.1](https://github.com/runmat-org/runmat/compare/v0.4.0...v0.4.1)
+
+_April 15, 2026_
+
+### Runtime
+
+#### Added
+- Expand `input()` compatibility — numeric prompts now accept logical values, named constants (`pi`, `inf`, `nan`), and matrix/vector literals with MATLAB-compatible output types. Complex expressions such as `sqrt(2)` and `ones(3)` now evaluate through the full MATLAB pipeline when an eval hook is available
+- Add configurable CLI credential storage for `runmat login` — `auto`, `secure`, `file`, and `memory`
+
+#### Changed
+- Improve CLI auth persistence — `auto` mode now prefers secure keyring storage and falls back to file-backed credentials with restricted permissions when secure storage is unavailable
+- Extract remote auth and public API client logic into a dedicated `runmat-server-client` crate
+
+#### Fixed
+- Fix native `input()` evaluation stack overflow by isolating nested prompt evaluation from the outer interpreter call stack
+- Fix GPU-backed selector indexing — GPU-resident index tensors now materialize correctly before linear and dimensional indexing
+
+### Sandbox
+
+#### Fixed
+- Fix workspace/variable display after `clear()` — variables assigned later in the same execution block now reappear correctly in workspace snapshots
+- Fix browser `input()` handling after session resets — reinitializing the WASM session now preserves the installed async input handler
+
+### Cloud
+
+#### Added
+- Expand the public API with project git import, project import status, usage notices, upgrade requests, chunk upload targets, data manifest access, run indexes, storage summaries, storage-category deletion, telemetry ingest, and web intake submission endpoints
+
+---
+
 ## [v0.4.0](https://github.com/runmat-org/runmat/compare/v0.3.2...v0.4.0)
 
 _April 13, 2026_
@@ -222,4 +253,3 @@ _August 10, 2025_
 #### Added
 - Initial release — lexer, architecture plan, project scaffolding
 - Add release workflow with macOS signing, cross-compilation, crates.io publishing
-
