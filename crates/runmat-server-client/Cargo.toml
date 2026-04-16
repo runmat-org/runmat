@@ -2,6 +2,8 @@
 name = "runmat-server-client"
 version = "0.4.1"
 edition = "2021"
+description = "Authenticated public API client and auth helpers for RunMat server integrations"
+authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
 homepage = "https://runmat.com"
 repository = "https://github.com/runmat-org/runmat"
