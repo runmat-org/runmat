@@ -113,9 +113,6 @@ export default function PricingPage() {
             <h1 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Simple, transparent pricing
             </h1>
-            <p className="mx-auto max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
-              Free runtime, $0 cloud tier, no account required. Paid plans for teams that need more.
-            </p>
           </div>
         </section>
 

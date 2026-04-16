@@ -2,8 +2,6 @@ import { Metadata } from "next";
 import { ContentCard } from "@/components/content-card";
 import { getPublicBlogPosts } from "@/lib/blog";
 
-import { SLUGS_WITH_THUMBNAIL } from "@/lib/thumbnail-config";
-
 export const metadata: Metadata = {
   title: "RunMat Blog - Stories and Insights",
   description: "Stories, insights, and updates from the RunMat development team. Learn about MATLAB compatibility, performance optimization, and the future of scientific computing.",
@@ -29,22 +27,17 @@ export default function BlogPage() {
         </div>
 
         <div className="mt-16 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {blogPosts.map((post, i) => {
-            const useImage = SLUGS_WITH_THUMBNAIL.has(post.slug);
-            return (
-              <ContentCard
-                key={post.slug}
-                href={`/blog/${post.slug}`}
-                title={post.title}
-                image={useImage ? post.image : undefined}
-                imageAlt={useImage ? post.imageAlt : undefined}
-                excerpt={post.description}
-                date={post.dateModified || post.date}
-                ctaLabel="Read"
-                index={i}
-              />
-            );
-          })}
+          {blogPosts.map((post, i) => (
+            <ContentCard
+              key={post.slug}
+              href={`/blog/${post.slug}`}
+              title={post.title}
+              excerpt={post.description}
+              date={post.dateModified || post.date}
+              ctaLabel="Read"
+              index={i}
+            />
+          ))}
         </div>
       </div>
     </div>

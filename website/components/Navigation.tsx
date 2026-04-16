@@ -230,7 +230,7 @@ export default function Navigation() {
           </div>
 
           {/* Desktop navigation */}
-          <nav className="hidden md:flex items-center space-x-2">
+          <nav className="hidden md:flex items-center">
             <Link
               href="https://github.com/runmat-org/runmat"
               target="_blank"

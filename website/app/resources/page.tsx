@@ -4,7 +4,6 @@ import { ArrowRight, BookOpen, Newspaper, Sparkles } from "lucide-react";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ContentCard } from "@/components/content-card";
-import { shouldShowImage } from "@/lib/thumbnail-config";
 import {
   getDisplayResourceTypes,
   getFeaturedResources,
@@ -81,22 +80,17 @@ export default function ResourcesPage() {
           </div>
           {featured.length ? (
             <div className="grid gap-6 lg:grid-cols-3">
-              {featured.map((item, i) => {
-                const useImg = shouldShowImage(item.slug);
-                return (
-                  <ContentCard
-                    key={item.id}
-                    href={item.href ?? "#"}
-                    title={item.title}
-                    image={useImg ? item.image : undefined}
-                    imageAlt={useImg ? item.imageAlt : undefined}
-                    typeBadge={{ label: resourceTypeLabel(item.type) }}
-                    excerpt={item.description}
-                    ctaLabel="Read"
-                    index={i}
-                  />
-                );
-              })}
+              {featured.map((item, i) => (
+                <ContentCard
+                  key={item.id}
+                  href={item.href ?? "#"}
+                  title={item.title}
+                  typeBadge={{ label: resourceTypeLabel(item.type) }}
+                  excerpt={item.description}
+                  ctaLabel="Read"
+                  index={i}
+                />
+              ))}
             </div>
           ) : (
             <EmptyState />
@@ -110,22 +104,17 @@ export default function ResourcesPage() {
           </div>
           {latest.length ? (
             <div className="grid gap-4 lg:grid-cols-3 sm:grid-cols-2">
-              {latest.map((item, i) => {
-                const useImg = shouldShowImage(item.slug);
-                return (
-                  <ContentCard
-                    key={item.id}
-                    href={item.href ?? "#"}
-                    title={item.title}
-                    image={useImg ? item.image : undefined}
-                    imageAlt={useImg ? item.imageAlt : undefined}
-                    typeBadge={{ label: resourceTypeLabel(item.type) }}
-                    excerpt={item.description}
-                    ctaLabel="View"
-                    index={i + featured.length}
-                  />
-                );
-              })}
+              {latest.map((item, i) => (
+                <ContentCard
+                  key={item.id}
+                  href={item.href ?? "#"}
+                  title={item.title}
+                  typeBadge={{ label: resourceTypeLabel(item.type) }}
+                  excerpt={item.description}
+                  ctaLabel="View"
+                  index={i + featured.length}
+                />
+              ))}
             </div>
           ) : (
             <EmptyState />

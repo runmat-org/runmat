@@ -3,7 +3,6 @@ import { notFound } from "next/navigation";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { ContentCard } from "@/components/content-card";
-import { shouldShowImage } from "@/lib/thumbnail-config";
 import {
   getResourcesByType,
   resourceTypeLabel,
@@ -65,21 +64,16 @@ export default async function ResourcesByTypePage({ params }: { params: Promise<
           </Card>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {items.map((item, i) => {
-              const useImg = shouldShowImage(item.slug);
-              return (
-                <ContentCard
-                  key={item.id}
-                  href={item.href ?? "#"}
-                  title={item.title}
-                  image={useImg ? item.image : undefined}
-                  imageAlt={useImg ? item.imageAlt : undefined}
-                  excerpt={item.description}
-                  ctaLabel="View"
-                  index={i}
-                />
-              );
-            })}
+            {items.map((item, i) => (
+              <ContentCard
+                key={item.id}
+                href={item.href ?? "#"}
+                title={item.title}
+                excerpt={item.description}
+                ctaLabel="View"
+                index={i}
+              />
+            ))}
           </div>
         )}
       </div>
