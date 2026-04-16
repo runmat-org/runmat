@@ -288,7 +288,8 @@ export default function AboutPage() {
                   muted
                   loop
                   playsInline
-                  poster="https://web.runmatstatic.com/video/posters/3d-interactive-plotting-runmat.png"
+                  preload="none"
+                  poster="https://web.runmatstatic.com/video/posters/3d-interactive-plotting-runmat.webp"
                   aria-label="RunMat 3D interactive plotting demo"
                 >
                   <source src="https://web.runmatstatic.com/video/3d-interactive-plotting-runmat.mp4" type="video/mp4" />
@@ -415,7 +416,7 @@ export default function AboutPage() {
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-muted-foreground">•</span>
-                  <p>Ignition interpreter for ~5 ms startup; Turbine JIT (Cranelift) for hot paths</p>
+                  <p>VM interpreter for ~5 ms startup; Turbine JIT (Cranelift) for hot paths</p>
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-muted-foreground">•</span>

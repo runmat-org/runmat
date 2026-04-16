@@ -192,7 +192,7 @@ RunMat’s strategy (by design) is:
 - Treat “toolbox breadth” as **packages** (rather than baking everything into the core).
 - Focus on **performance and portability**, especially for array-heavy numeric workloads.
 
-As an open source project, RunMat’s framing is discussed explicitly in [Design Philosophy](../DESIGN_PHILOSOPHY.md).
+As an open source project, RunMat’s framing is discussed explicitly in [Design Philosophy](/docs/design-philosophy).
 
 ---
 
@@ -236,7 +236,7 @@ To read more about RunMat Fusion, see [Introduction to RunMat GPU/Fusion](/docs/
 
 RunMat also invests heavily in the CPU story:
 
-- A fast-start interpreter tier (Ignition).
+- A fast-start VM interpreter tier.
 - A JIT compiler tier (Turbine/Cranelift) for hot paths.
 - A generational garbage collector (GC) tuned for numeric workloads.
 

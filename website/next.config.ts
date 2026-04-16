@@ -66,6 +66,133 @@ const nextConfig: NextConfig = {
         destination: '/docs/matlab-function-reference',
         permanent: true,
       },
+
+      // Privacy — no dedicated page yet; temporary redirect until one is created
+      {
+        source: '/privacy',
+        destination: '/docs/terms',
+        permanent: false,
+      },
+
+      // Raw .md file URLs -> correct doc routes
+      {
+        source: '/CLI.md',
+        destination: '/docs/cli',
+        permanent: true,
+      },
+      {
+        source: '/LANGUAGE_COVERAGE.md',
+        destination: '/docs/language-coverage',
+        permanent: true,
+      },
+      {
+        source: '/DESIGN_PHILOSOPHY.md',
+        destination: '/docs/design-philosophy',
+        permanent: true,
+      },
+      {
+        source: '/INTRODUCTION_TO_RUNMAT_GPU.md',
+        destination: '/docs/accelerate/fusion-intro',
+        permanent: true,
+      },
+      {
+        source: '/docs/CLI.md',
+        destination: '/docs/cli',
+        permanent: true,
+      },
+      {
+        source: '/docs/LIBRARY.md',
+        destination: '/docs/library',
+        permanent: true,
+      },
+      {
+        source: '/docs/LANGUAGE_COVERAGE.md',
+        destination: '/docs/language-coverage',
+        permanent: true,
+      },
+      {
+        source: '/docs/INTRODUCTION_TO_RUNMAT_GPU.md',
+        destination: '/docs/accelerate/fusion-intro',
+        permanent: true,
+      },
+      {
+        source: '/resources/DESIGN_PHILOSOPHY.md',
+        destination: '/docs/design-philosophy',
+        permanent: true,
+      },
+
+      // Old acceleration prefix -> correct routes
+      {
+        source: '/docs/acceleration/gpu/gpuArray',
+        destination: '/docs/reference/builtins/gpuarray',
+        permanent: true,
+      },
+      {
+        source: '/docs/acceleration/gpu/gather',
+        destination: '/docs/reference/builtins/gather',
+        permanent: true,
+      },
+
+      // Wrong accelerate sub-paths
+      {
+        source: '/docs/accelerate/gpu-residency',
+        destination: '/docs/accelerate/gpu-behavior',
+        permanent: true,
+      },
+      {
+        source: '/docs/accelerate/how-it-works',
+        destination: '/docs/how-it-works',
+        permanent: true,
+      },
+
+      // Old category-based reference paths -> flat builtins path
+      {
+        source: '/docs/reference/regex/:slug',
+        destination: '/docs/reference/builtins/:slug',
+        permanent: true,
+      },
+      {
+        source: '/docs/reference/trigonometry/:slug',
+        destination: '/docs/reference/builtins/:slug',
+        permanent: true,
+      },
+      {
+        source: '/docs/reference/introspection/:slug',
+        destination: '/docs/reference/builtins/:slug',
+        permanent: true,
+      },
+      {
+        source: '/docs/reference/diagnostics/:slug',
+        destination: '/docs/reference/builtins/:slug',
+        permanent: true,
+      },
+      {
+        source: '/docs/reference/core/:slug',
+        destination: '/docs/reference/builtins/:slug',
+        permanent: true,
+      },
+      {
+        source: '/docs/search/:slug',
+        destination: '/docs/reference/builtins/:slug',
+        permanent: true,
+      },
+
+      // Exact-match redirects for multi-segment old paths
+      {
+        source: '/docs/io/filetext/fread',
+        destination: '/docs/reference/builtins/fread',
+        permanent: true,
+      },
+      {
+        source: '/strings/core/strlength',
+        destination: '/docs/reference/builtins/strlength',
+        permanent: true,
+      },
+      {
+        source: '/builtins/io/repl_fs/cd',
+        destination: '/docs/reference/builtins/cd',
+        permanent: true,
+      },
     ];
   },
 };

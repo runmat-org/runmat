@@ -80,7 +80,7 @@ export default function HowItWorksPage() {
                   <h3 className="text-base sm:text-lg font-semibold">Phase 1: Instant Execution</h3>
                 </div>
                 <p className="text-[0.938rem] text-foreground leading-relaxed">
-                  Your code runs immediately through our <strong>Ignition interpreter</strong> — no compilation wait time.
+                  Your code runs immediately through our <strong>VM interpreter</strong> — no compilation wait time.
                   Perfect for interactive work, tests, and scripts. While executing, we profile which functions are hot.
                 </p>
               </CardContent>
@@ -381,11 +381,11 @@ export default function HowItWorksPage() {
           <h2 className="text-xl sm:text-2xl font-semibold mb-6 text-foreground">Deep Dive: How the Magic Happens</h2>
           
           <div className="space-y-8">
-            {/* Ignition Interpreter */}
+            {/* VM Interpreter */}
             <div>
               <h3 className="text-base sm:text-lg font-semibold mb-4 flex items-center">
                 <Zap className="h-6 w-6 mr-3 text-[hsl(var(--brand))]" />
-                The Ignition Interpreter: Speed from Day One
+                The VM Interpreter: Speed from Day One
               </h3>
               <p className="text-[0.938rem] text-foreground mb-4">
                 When you type <code>A = [1, 2; 3, 4]</code> and press enter, here&apos;s what happens in microseconds:

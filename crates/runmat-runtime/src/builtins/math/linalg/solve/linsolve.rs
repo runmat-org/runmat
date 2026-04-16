@@ -1008,6 +1008,7 @@ pub(crate) mod tests {
             .unwrap_or(0)
     }
 
+    #[cfg(feature = "wgpu")]
     fn kernel_launch_count(telemetry: &ProviderTelemetry, kernel: &str) -> usize {
         telemetry
             .kernel_launches
@@ -1198,6 +1199,8 @@ pub(crate) mod tests {
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
     #[test]
     fn linsolve_rcond_enforced() {
+        let _accel_guard = test_support::accel_test_lock();
+        clear_accel_provider_state();
         let a = Tensor::new(vec![1.0, 1.0, 1.0, 1.0 + 1e-12], vec![2, 2]).unwrap();
         let b = Tensor::new(vec![2.0, 2.0 + 1e-12], vec![2, 1]).unwrap();
         let mut opts = StructValue::new();

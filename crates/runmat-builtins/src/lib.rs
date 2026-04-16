@@ -2007,7 +2007,7 @@ impl CellArray {
                 expected
             ));
         }
-        // Note: data will be allocated into GC handles by callers (runtime/ignition) to avoid builtins↔gc cycles
+        // Note: data will be allocated into GC handles by callers (runtime/vm) to avoid builtins↔gc cycles
         let handles: Vec<GcPtr<Value>> = data
             .into_iter()
             .map(|v| unsafe { GcPtr::from_raw(Box::into_raw(Box::new(v))) })
@@ -2082,6 +2082,10 @@ impl ObjectInstance {
             class_name,
             properties: HashMap::new(),
         }
+    }
+
+    pub fn is_class(&self, name: &str) -> bool {
+        self.class_name == name
     }
 }
 

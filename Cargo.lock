@@ -5412,7 +5412,7 @@ dependencies = [
 
 [[package]]
 name = "runmat"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "atty",
@@ -5429,7 +5429,6 @@ dependencies = [
  "openapiv3",
  "openssl",
  "openssl-sys",
- "progenitor",
  "progenitor-client",
  "rand 0.8.5",
  "reqwest 0.12.23",
@@ -5441,15 +5440,16 @@ dependencies = [
  "runmat-filesystem",
  "runmat-gc",
  "runmat-hir",
- "runmat-ignition",
  "runmat-kernel",
  "runmat-parser",
  "runmat-plot",
  "runmat-runtime",
+ "runmat-server-client",
  "runmat-snapshot",
  "runmat-telemetry",
  "runmat-time",
  "runmat-turbine",
+ "runmat-vm",
  "rustyline",
  "serde",
  "serde_json",
@@ -5467,7 +5467,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-accelerate"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "bytemuck",
@@ -5485,10 +5485,10 @@ dependencies = [
  "runmat-async",
  "runmat-builtins",
  "runmat-hir",
- "runmat-ignition",
  "runmat-parser",
  "runmat-runtime",
  "runmat-time",
+ "runmat-vm",
  "rustfft",
  "serde",
  "serde_json",
@@ -5505,7 +5505,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-accelerate-api"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "once_cell",
@@ -5515,7 +5515,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-async"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "miette",
  "thiserror 1.0.69",
@@ -5523,7 +5523,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-builtins"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "indexmap 1.9.3",
  "inventory",
@@ -5538,7 +5538,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-config"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -5556,7 +5556,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-core"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "futures",
@@ -5567,7 +5567,6 @@ dependencies = [
  "runmat-builtins",
  "runmat-gc",
  "runmat-hir",
- "runmat-ignition",
  "runmat-lexer",
  "runmat-parser",
  "runmat-runtime",
@@ -5575,6 +5574,8 @@ dependencies = [
  "runmat-telemetry",
  "runmat-time",
  "runmat-turbine",
+ "runmat-vm",
+ "tokio",
  "tracing",
  "uuid",
  "wasm-bindgen-test",
@@ -5582,7 +5583,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-filesystem"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "async-trait",
  "axum 0.7.9",
@@ -5590,6 +5591,7 @@ dependencies = [
  "crossbeam-utils",
  "futures",
  "js-sys",
+ "log",
  "once_cell",
  "reqwest 0.12.23",
  "serde",
@@ -5606,7 +5608,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-gc"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "criterion",
  "futures",
@@ -5621,20 +5623,20 @@ dependencies = [
  "runmat-builtins",
  "runmat-gc-api",
  "runmat-hir",
- "runmat-ignition",
  "runmat-parser",
  "runmat-time",
+ "runmat-vm",
  "serde",
  "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "runmat-gc-api"
-version = "0.3.2"
+version = "0.4.0"
 
 [[package]]
 name = "runmat-hir"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "runmat-builtins",
  "runmat-lexer",
@@ -5647,32 +5649,8 @@ dependencies = [
 ]
 
 [[package]]
-name = "runmat-ignition"
-version = "0.3.2"
-dependencies = [
- "anyhow",
- "futures",
- "log",
- "miette",
- "once_cell",
- "runmat-accelerate",
- "runmat-accelerate-api",
- "runmat-async",
- "runmat-builtins",
- "runmat-gc",
- "runmat-hir",
- "runmat-lexer",
- "runmat-parser",
- "runmat-runtime",
- "runmat-thread-local",
- "runmat-time",
- "serde",
- "tracing",
-]
-
-[[package]]
 name = "runmat-kernel"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "env_logger 0.11.8",
@@ -5683,12 +5661,12 @@ dependencies = [
  "runmat-builtins",
  "runmat-core",
  "runmat-hir",
- "runmat-ignition",
  "runmat-parser",
  "runmat-plot",
  "runmat-runtime",
  "runmat-snapshot",
  "runmat-time",
+ "runmat-vm",
  "serde",
  "serde_json",
  "sha2",
@@ -5701,14 +5679,14 @@ dependencies = [
 
 [[package]]
 name = "runmat-lexer"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "logos",
 ]
 
 [[package]]
 name = "runmat-logging"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "chrono",
  "js-sys",
@@ -5726,7 +5704,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-lsp"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "env_logger 0.11.8",
@@ -5738,12 +5716,12 @@ dependencies = [
  "runmat-config",
  "runmat-core",
  "runmat-hir",
- "runmat-ignition",
  "runmat-lexer",
  "runmat-parser",
  "runmat-runtime",
  "runmat-static-analysis",
  "runmat-thread-local",
+ "runmat-vm",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
@@ -5754,7 +5732,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-macros"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "inventory",
  "proc-macro2",
@@ -5767,7 +5745,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-parser"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "logos",
  "runmat-lexer",
@@ -5776,7 +5754,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-plot"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "atty",
  "base64 0.22.1",
@@ -5820,7 +5798,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-runtime"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "accelerate-src",
  "anyhow",
@@ -5880,7 +5858,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-runtime-integration-tests"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "futures",
  "inventory",
@@ -5892,8 +5870,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-server-client"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "base64 0.22.1",
+ "chrono",
+ "dirs 5.0.1",
+ "keyring",
+ "openapiv3",
+ "progenitor",
+ "progenitor-client",
+ "rand 0.8.5",
+ "regress",
+ "reqwest 0.12.23",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "tokio",
+ "url",
+ "uuid",
+ "webbrowser",
+]
+
+[[package]]
 name = "runmat-snapshot"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "bincode",
@@ -5917,10 +5920,10 @@ dependencies = [
  "runmat-filesystem",
  "runmat-gc",
  "runmat-hir",
- "runmat-ignition",
  "runmat-parser",
  "runmat-runtime",
  "runmat-time",
+ "runmat-vm",
  "ruzstd",
  "serde",
  "sha2",
@@ -5932,7 +5935,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-static-analysis"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "runmat-builtins",
  "runmat-hir",
@@ -5944,7 +5947,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-telemetry"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "runmat-accelerate-api",
  "serde",
@@ -5953,11 +5956,11 @@ dependencies = [
 
 [[package]]
 name = "runmat-thread-local"
-version = "0.3.2"
+version = "0.4.0"
 
 [[package]]
 name = "runmat-time"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "instant",
  "js-sys",
@@ -5965,7 +5968,7 @@ dependencies = [
 
 [[package]]
 name = "runmat-turbine"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "cranelift",
  "cranelift-codegen",
@@ -5980,10 +5983,10 @@ dependencies = [
  "runmat-builtins",
  "runmat-gc",
  "runmat-hir",
- "runmat-ignition",
  "runmat-parser",
  "runmat-runtime",
  "runmat-time",
+ "runmat-vm",
  "stacker",
  "target-lexicon",
  "thiserror 1.0.69",
@@ -5991,8 +5994,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "runmat-vm"
+version = "0.4.0"
+dependencies = [
+ "anyhow",
+ "futures",
+ "log",
+ "miette",
+ "once_cell",
+ "runmat-accelerate",
+ "runmat-accelerate-api",
+ "runmat-builtins",
+ "runmat-gc",
+ "runmat-hir",
+ "runmat-parser",
+ "runmat-runtime",
+ "runmat-thread-local",
+ "runmat-time",
+ "serde",
+ "tracing",
+]
+
+[[package]]
 name = "runmat-wasm"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6007,12 +6032,12 @@ dependencies = [
  "runmat-builtins",
  "runmat-core",
  "runmat-filesystem",
- "runmat-ignition",
  "runmat-logging",
  "runmat-plot",
  "runmat-runtime",
  "runmat-telemetry",
  "runmat-thread-local",
+ "runmat-vm",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",

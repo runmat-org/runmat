@@ -1,4 +1,5 @@
 use once_cell::sync::OnceCell;
+use runmat_builtins::Value;
 use runmat_thread_local::runmat_thread_local;
 use std::cell::RefCell;
 use std::future::Future;
@@ -230,3 +231,51 @@ pub fn push_queued_response(response: Result<InteractionResponse, String>) {
 }
 
 // NOTE: The old suspend/resume control flow has been removed.
+
+// ---------------------------------------------------------------------------
+// Eval hook – lets runmat-core install a stateless expression evaluator so
+// that `input()` can parse numeric responses through the full MATLAB pipeline
+// instead of falling back to `str2double` (which cannot handle matrix literals,
+// named constants like `pi`, arithmetic, etc.).
+// ---------------------------------------------------------------------------
+
+/// Future returned by the eval hook.
+pub type EvalHookFuture = Pin<Box<dyn Future<Output = Result<Value, RuntimeError>> + 'static>>;
+
+/// Function signature for the eval hook.
+pub type EvalHookFn = dyn Fn(String) -> EvalHookFuture + Send + Sync;
+
+static EVAL_HOOK: OnceCell<RwLock<Option<Arc<EvalHookFn>>>> = OnceCell::new();
+
+fn eval_hook_slot() -> &'static RwLock<Option<Arc<EvalHookFn>>> {
+    EVAL_HOOK.get_or_init(|| RwLock::new(None))
+}
+
+/// RAII guard that restores the previous eval hook on drop.
+pub struct EvalHookGuard {
+    previous: Option<Arc<EvalHookFn>>,
+}
+
+impl Drop for EvalHookGuard {
+    fn drop(&mut self) {
+        let mut slot = eval_hook_slot()
+            .write()
+            .unwrap_or_else(|_| panic!("interaction eval hook lock poisoned"));
+        *slot = self.previous.take();
+    }
+}
+
+/// Replace the global eval hook for the duration of the returned guard's
+/// lifetime. Mirrors the pattern used by `replace_async_handler`.
+pub fn replace_eval_hook(hook: Option<Arc<EvalHookFn>>) -> EvalHookGuard {
+    let mut slot = eval_hook_slot()
+        .write()
+        .unwrap_or_else(|_| panic!("interaction eval hook lock poisoned"));
+    let previous = std::mem::replace(&mut *slot, hook);
+    EvalHookGuard { previous }
+}
+
+/// Return the currently installed eval hook, if any.
+pub fn current_eval_hook() -> Option<Arc<EvalHookFn>> {
+    eval_hook_slot().read().ok().and_then(|slot| slot.clone())
+}

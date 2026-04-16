@@ -118,7 +118,7 @@ team management.<br/><br/>
 
 - **Modern CPU runtime**
 
-  - Ignition interpreter for fast startup  
+  - VM interpreter for fast startup  
   - Turbine JIT (Cranelift) for hot paths  
   - Generational GC tuned for numeric code  
   - Memory-safe by design (Rust)
@@ -304,7 +304,7 @@ RunMat uses a tiered CPU runtime plus a fusion engine that automatically picks C
 
 | Component              | Purpose                                  | Technology / Notes                                                  |
 | ---------------------- | ---------------------------------------- | ------------------------------------------------------------------- |
-| ⚙️ runmat-ignition   | Baseline interpreter for instant startup | HIR → bytecode compiler, stack-based interpreter                    |
+| ⚙️ runmat-vm         | Baseline interpreter for instant startup | HIR → bytecode compiler, stack-based interpreter                    |
 | ⚡ runmat-turbine     | Optimizing JIT for hot code              | Cranelift backend, tuned for numeric workloads                      |
 | 🧠 runmat-gc         | High-performance memory management       | Generational GC with pointer compression                            |
 | 🚀 runmat-accelerate | GPU acceleration subsystem               | Fusion engine + auto-offload planner + `wgpu` backend               |
@@ -371,7 +371,7 @@ RunMat follows a **fast-by-default runtime, open extension model** philosophy:
 
 - **High-fidelity language coverage**: Core MATLAB syntax, operators, control flow, OOP, and indexing — not a subset, not a new language
 - **Extensive built-ins**: 300+ functions covering core MATLAB built-ins, with more added continuously
-- **Tiered execution**: Ignition interpreter for fast startup, Turbine JIT for hot code
+- **Tiered execution**: VM interpreter for fast startup, Turbine JIT for hot code
 - **GPU-first math**: Fusion engine automatically turns MATLAB code into fast GPU workloads
 - **Single portable binary**: One static binary includes the runtime, GPU engine, and plotting — fast startup, modern CLI, Jupyter kernel support
 - **Toolboxes as packages**: Signal processing, statistics, image processing, and other domains live as packages — the package manager is [in active design](https://runmat.com/docs/package-manager)
@@ -422,6 +422,7 @@ If you write math in MATLAB and hit performance walls on CPU, RunMat is built fo
   - [Configuration](docs/CONFIG.md)
 
 - **Language & runtime**
+  - [MATLAB compatibility](docs/COMPATIBILITY.md)
   - [Language reference](docs/LANGUAGE.md)
   - [Language coverage](docs/LANGUAGE_COVERAGE.md)
   - [Built-in function library](docs/LIBRARY.md)

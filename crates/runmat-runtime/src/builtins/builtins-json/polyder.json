@@ -32,7 +32,7 @@
   "tested": {
     "unit": "builtins::math::poly::polyder::tests",
     "integration": "builtins::math::poly::polyder::tests::{gpu_inputs_remain_on_device,gpu_product_matches_cpu,gpu_quotient_matches_cpu,wgpu_polyder_single_matches_cpu,wgpu_polyder_product_matches_cpu,wgpu_polyder_quotient_matches_cpu}",
-    "vm": "ignition::vm polyder multi-output dispatch"
+    "vm": "vm polyder multi-output dispatch"
   },
   "description": "`polyder` differentiates polynomials represented by their coefficient vectors. The coefficients follow MATLAB’s convention: the first element corresponds to the highest power of `x`. The builtin supports three related operations:\n\n1. `polyder(p)` returns the derivative of a polynomial `p`. 2. `polyder(p, a)` applies the product rule to the convolution `conv(p, a)`. 3. `[num, den] = polyder(u, v)` returns the derivative of a rational function `u(x) / v(x)` using the quotient rule, yielding the numerator `num` and denominator `den`.",
   "behaviors": [

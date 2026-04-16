@@ -40,11 +40,11 @@ fn indexing_with_end_and_member_method() {
         _ => panic!("expected deferred call form for A(5:end)"),
     }
     match &program.body[1] {
-        Stmt::ExprStmt(Expr::MethodCall(obj, name, args, _), false, _) => {
+        Stmt::ExprStmt(Expr::DottedInvoke(obj, name, args, _), false, _) => {
             assert!(matches!(**obj, Expr::Ident(ref n, _) if n == "obj"));
             assert_eq!(name, "method");
             assert_eq!(args.len(), 2);
         }
-        _ => panic!("expected method call expression"),
+        _ => panic!("expected dotted invoke expression"),
     }
 }

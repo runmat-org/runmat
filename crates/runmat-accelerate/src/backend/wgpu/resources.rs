@@ -60,7 +60,8 @@ impl KernelResourceRegistry {
     ) -> Arc<wgpu::Buffer> {
         let should_cache = !matches!(
             key,
-            UniformBufferKey::LenOpParams
+            UniformBufferKey::MatmulParams
+                | UniformBufferKey::LenOpParams
                 | UniformBufferKey::BinaryBroadcastParams
                 | UniformBufferKey::ScalarParamsF32
                 | UniformBufferKey::ScalarParamsF64

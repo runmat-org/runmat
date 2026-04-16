@@ -78,13 +78,13 @@ This section defines what lives where, and what should *not* leak across layers.
 - **Owns**: AST → HIR, HIR transforms, validation.
 - **Does not own**: execution, async scheduling, host APIs.
 
-### `runmat-ignition` (VM/interpreter)
+### VM Interpreter Layer
 
 - **Owns**: bytecode format and interpreter engine.
 - **Exposes**: a pollable interpreter core (“run until yield”).
 - **Must not depend on**: Tokio, JS/wasm bindings, GPU providers.
 
-Ignition should understand only:
+The VM should understand only:
 - “execute instruction stream”
 - “hit an await opcode / awaitable”
 - “produce Completed / Pending(awaitable-id) / Error”
@@ -101,7 +101,7 @@ Ignition should understand only:
 - **Owns**:
   - `RunMatSession` public API and workspace model
   - execution planning, cancellation wiring, profiling/tracing
-  - integration glue between ignition + runtime + GC + async substrate
+  - integration glue between the VM + runtime + GC + async substrate
 - **Exposes**:
   - `execute_async(...) -> ExecuteFuture`
   - convenience wrappers for native hosts (e.g., `execute_blocking` using a host executor)
@@ -178,7 +178,7 @@ Cancellation is best modeled as:
 
 ---
 
-## VM integration (Ignition) and bytecode changes
+## VM integration and bytecode changes
 
 ### Bytecode opcodes (minimum)
 
@@ -188,9 +188,9 @@ Cancellation is best modeled as:
 Optional but useful:
 - `YIELD` (explicit cooperative yield; mainly for runtime fairness/testing)
 
-### Ignition poll contract
+### VM poll contract
 
-Ignition should expose something like:
+The VM should expose something like:
 
 - `fn poll_execute(&mut self, cx: &mut Context<'_>) -> Poll<InterpreterDone>`
 
@@ -335,5 +335,3 @@ In particular, any solution that encodes suspension as a string/sentinel is cons
 and must be removed as part of the futures architecture rollout.
 
 The plan in `docs/ARCH_ASYNC_PLAN.md` describes how to retire the transitional mechanisms safely.
-
-

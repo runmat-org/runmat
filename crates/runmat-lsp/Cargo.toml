@@ -1,6 +1,6 @@
 [package]
 name = "runmat-lsp"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2021"
 description = "Language Server Protocol implementation for RunMat editors and tooling"
 homepage = "https://runmat.com"
@@ -28,7 +28,7 @@ runmat-parser = { workspace = true }
 runmat-hir = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-lexer = { workspace = true }
-runmat-ignition = { workspace = true }
+runmat-vm = { workspace = true }
 runmat-core = { workspace = true }
 runmat-config = { workspace = true }
 runmat-runtime = { workspace = true }

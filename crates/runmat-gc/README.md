@@ -145,7 +145,7 @@ The repository includes a broad test suite:
 - Allocator/collector unit tests: allocation, freeing, promotion, stats accuracy
 - Stress tests: large allocation cycles, nested cells/structs, interpreter integration under load
 - Rooting tests: explicit root add/remove; global/persistent lifetime; remembered-set scan correctness
-- Ignition integration tests: N-D gather/scatter loops, cell/struct/object updates under barriered writes
+- VM integration tests: N-D gather/scatter loops, cell/struct/object updates under barriered writes
 
 All tests can be run single-threaded for deterministic behavior:
 ```bash
@@ -153,12 +153,12 @@ cargo test --workspace -- --test-threads=1
 ```
 
 
-## Integration with the interpreter (Ignition)
+## Integration with the interpreter (VM)
 
 - The VM uses `GcPtr<Value>` throughout aggregates (e.g., `CellArray` stores `Vec<GcPtr<Value>>`).
 - All expansion and slice-assignment paths dereference `GcPtr` to read `Value` and write through handles 
   on mutation, with barrier calls at each write site.
-- The ignition runtime registers long-lived maps (globals/persistents) as roots for the duration of 
+- The VM runtime registers long-lived maps (globals/persistents) as roots for the duration of 
   execution.
 
 

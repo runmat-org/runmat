@@ -1,0 +1,50 @@
+{
+  "title": "hann",
+  "category": "math/signal",
+  "keywords": ["hann", "window", "signal processing", "dsp", "fft"],
+  "summary": "Generate a Hann window as an N-by-1 real column vector.",
+  "description": "`hann` generates Hann windows for signal-processing workflows such as spectral analysis and filter design. RunMat supports the common MATLAB call forms for symmetric and periodic windows, including optional single-precision output.",
+  "behaviors": [
+    "`hann(L)` returns an `L x 1` symmetric Hann window.",
+    "`hann(L, 'periodic')` returns the periodic form used in spectral-analysis workflows.",
+    "`hann(..., 'single')` returns a single-precision window; `'double'` is the default.",
+    "If `L` is noninteger, RunMat rounds it to the nearest integer before constructing the window.",
+    "`hann(0)` returns an empty `0 x 1` tensor.",
+    "`hann(1)` returns `1`.",
+    "For the symmetric case and `L > 1`, coefficients follow `0.5 - 0.5*cos(2*pi*n/(L-1))`.",
+    "The periodic form is constructed by evaluating a symmetric window of length `L + 1` and dropping the final sample."
+  ],
+  "examples": [
+    {
+      "description": "Generate a short Hann window",
+      "input": "w = hann(8);\ndisp(w')"
+    },
+    {
+      "description": "Generate a periodic Hann window for spectral analysis",
+      "input": "w = hann(8, 'periodic');\ndisp(w')"
+    },
+    {
+      "description": "Generate a single-precision Hann window",
+      "input": "w = hann(8, 'single');\nclass(w)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What is the difference between the symmetric and periodic Hann window?",
+      "answer": "Use the default symmetric window for filter-design style workflows. Use `'periodic'` for spectral analysis, where MATLAB and RunMat construct a symmetric window of length `L + 1` and drop the last sample so the sequence matches the periodicity assumptions of the DFT."
+    },
+    {
+      "question": "What shape does `hann(L)` return?",
+      "answer": "It returns an `L x 1` column vector, matching MATLAB's window-function convention."
+    },
+    {
+      "question": "Does `hann` support single precision?",
+      "answer": "Yes. Pass `'single'` as the final option to request a single-precision output. The default output type is double precision."
+    }
+  ],
+  "links": [
+    { "label": "hamming", "url": "./hamming" },
+    { "label": "blackman", "url": "./blackman" },
+    { "label": "fft", "url": "./fft" }
+  ]
+}

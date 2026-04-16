@@ -135,6 +135,7 @@ pub enum HirExprKind {
     End,
     Member(Box<HirExpr>, String),
     MemberDynamic(Box<HirExpr>, Box<HirExpr>),
+    DottedInvoke(Box<HirExpr>, String, Vec<HirExpr>),
     MethodCall(Box<HirExpr>, String, Vec<HirExpr>),
     AnonFunc {
         params: Vec<VarId>,
@@ -856,7 +857,7 @@ pub fn infer_expr_type_with_env(
                 }
             }
         }
-        K::MethodCall(base, method, args) => {
+        K::MethodCall(base, method, args) | K::DottedInvoke(base, method, args) => {
             let base_ty = infer_expr_type_with_env(base, env, func_returns);
             if let Type::DataDataset { arrays } = &base_ty {
                 match method.as_str() {
@@ -2911,6 +2912,11 @@ pub mod remapping {
                 Box::new(remap_expr(base, var_map)),
                 Box::new(remap_expr(name, var_map)),
             ),
+            HirExprKind::DottedInvoke(base, name, args) => HirExprKind::DottedInvoke(
+                Box::new(remap_expr(base, var_map)),
+                name.clone(),
+                args.iter().map(|a| remap_expr(a, var_map)).collect(),
+            ),
             HirExprKind::MethodCall(base, name, args) => HirExprKind::MethodCall(
                 Box::new(remap_expr(base, var_map)),
                 name.clone(),
@@ -3122,7 +3128,7 @@ pub mod remapping {
                 collect_expr_variables(base, vars);
                 collect_expr_variables(name, vars);
             }
-            HirExprKind::MethodCall(base, _, args) => {
+            HirExprKind::MethodCall(base, _, args) | HirExprKind::DottedInvoke(base, _, args) => {
                 collect_expr_variables(base, vars);
                 for a in args {
                     collect_expr_variables(a, vars);
@@ -3895,6 +3901,61 @@ impl Ctx {
                     HirExprKind::MemberDynamic(Box::new(b), Box::new(n)),
                     Type::Unknown,
                 )
+            }
+            DottedInvoke(base, name, args, _) => {
+                if let Ident(class_name, _) = &**base {
+                    let dotted_name = format!("{class_name}.{name}");
+                    if self.is_builtin_function(&dotted_name) {
+                        let lowered_args: Result<Vec<_>, _> =
+                            args.iter().map(|arg| self.lower_expr(arg)).collect();
+                        let lowered_args = lowered_args?;
+                        return Ok(HirExpr {
+                            kind: HirExprKind::FuncCall(dotted_name, lowered_args),
+                            ty: Type::Unknown,
+                            span,
+                        });
+                    }
+                    if self.is_static_method_class(class_name) {
+                        let metaclass = HirExpr {
+                            kind: HirExprKind::MetaClass(class_name.clone()),
+                            ty: Type::String,
+                            span: base.span(),
+                        };
+                        let lowered_args: Result<Vec<_>, _> =
+                            args.iter().map(|a| self.lower_expr(a)).collect();
+                        return Ok(HirExpr {
+                            kind: HirExprKind::MethodCall(
+                                Box::new(metaclass),
+                                name.clone(),
+                                lowered_args?,
+                            ),
+                            ty: Type::Unknown,
+                            span,
+                        });
+                    }
+                }
+                let b = self.lower_expr(base)?;
+                let lowered_args: Result<Vec<_>, _> =
+                    args.iter().map(|a| self.lower_expr(a)).collect();
+                let lowered_args = lowered_args?;
+                if matches!(b.ty, Type::Struct { .. }) {
+                    (
+                        HirExprKind::Index(
+                            Box::new(HirExpr {
+                                kind: HirExprKind::Member(Box::new(b), name.clone()),
+                                ty: Type::Unknown,
+                                span,
+                            }),
+                            lowered_args,
+                        ),
+                        Type::Unknown,
+                    )
+                } else {
+                    (
+                        HirExprKind::DottedInvoke(Box::new(b), name.clone(), lowered_args),
+                        Type::Unknown,
+                    )
+                }
             }
             MethodCall(base, name, args, _) => {
                 // Check if base is an identifier that should be treated as a class reference

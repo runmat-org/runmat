@@ -8,13 +8,13 @@ use cranelift::prelude::*;
 use cranelift_codegen::ir::ValueDef;
 use cranelift_jit::JITModule;
 use cranelift_module::{FuncId, Module};
-use runmat_ignition::Instr;
+use runmat_vm::Instr;
 use std::collections::{BTreeSet, HashMap};
 
 /// Context for compilation containing related parameters
 struct CompileContext<'a> {
     vars_ptr: Value,
-    function_definitions: &'a HashMap<String, runmat_ignition::UserFunction>,
+    function_definitions: &'a HashMap<String, runmat_vm::UserFunction>,
     module: &'a mut JITModule,
     runmat_call_user_function_id: FuncId,
 }
@@ -205,7 +205,7 @@ impl BytecodeCompiler {
         instructions: &[Instr],
         func: &mut codegen::ir::Function,
         _var_count: usize,
-        function_definitions: &std::collections::HashMap<String, runmat_ignition::UserFunction>,
+        function_definitions: &std::collections::HashMap<String, runmat_vm::UserFunction>,
         module: &mut JITModule,
         runmat_call_user_function_id: FuncId,
     ) -> Result<()> {
@@ -617,19 +617,20 @@ impl BytecodeCompiler {
                     | Instr::UPlus
                     | Instr::AndAnd(_)
                     | Instr::OrOr(_)
-                    | Instr::IndexSliceEx(_, _, _, _, _)
-                    | Instr::IndexRangeEnd { .. }
-                    | Instr::Index1DRangeEnd { .. }
-                    | Instr::StoreRangeEnd { .. }
+                    | Instr::IndexSliceExpr { .. }
+                    | Instr::StoreSliceExpr { .. }
                     | Instr::StoreSlice(_, _, _, _)
-                    | Instr::StoreSliceEx(_, _, _, _, _)
-                    | Instr::StoreSlice1DRangeEnd { .. }
                     | Instr::LoadMember(_)
+                    | Instr::LoadMemberOrInit(_)
                     | Instr::LoadMemberDynamic
+                    | Instr::LoadMemberDynamicOrInit
                     | Instr::StoreMember(_)
+                    | Instr::StoreMemberOrInit(_)
                     | Instr::StoreMemberDynamic
+                    | Instr::StoreMemberDynamicOrInit
                     | Instr::CreateClosure(_, _)
                     | Instr::CallMethod(_, _)
+                    | Instr::CallMethodOrMemberIndex(_, _)
                     | Instr::IndexCellExpand(_, _)
                     | Instr::StoreIndex(_)
                     | Instr::StoreIndexCell(_)
@@ -700,7 +701,7 @@ impl BytecodeCompiler {
         runmat_call_user_function_id: FuncId,
         func_name: &str,
         args: &[Value],
-        function_definitions: &std::collections::HashMap<String, runmat_ignition::UserFunction>,
+        function_definitions: &std::collections::HashMap<String, runmat_vm::UserFunction>,
     ) -> Result<Value> {
         // Look up the function definition
         let function_def = function_definitions

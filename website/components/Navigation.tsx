@@ -85,10 +85,10 @@ export default function Navigation() {
                     <li>
                       <NavigationMenuLink asChild>
                         <Link
-                          href="/docs/architecture"
+                          href="/docs/changelog"
                           className="whitespace-nowrap px-3 py-2 text-sm text-popover-foreground/90 transition-colors hover:bg-accent hover:text-accent-foreground focus:bg-accent focus:text-accent-foreground"
                         >
-                          Architecture
+                          Changelog
                         </Link>
                       </NavigationMenuLink>
                     </li>
@@ -298,12 +298,12 @@ export default function Navigation() {
                 Function Reference
               </Link>
               <Link
-                href="/docs/architecture"
+                href="/docs/changelog"
                 className="flex w-full items-center p-2 text-sm font-medium hover:bg-accent pl-6"
                 onClick={() => setMobileMenuOpen(false)}
               >
                 <Minus className="mr-2 h-3 w-3 text-muted-foreground" />
-                Architecture
+                Changelog
               </Link>
               <Link
                 href="/docs/cli"

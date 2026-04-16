@@ -9,7 +9,6 @@ use tracing::{debug, info, info_span, warn};
 use runmat_accelerate_api::provider as accel_provider;
 use runmat_accelerate_api::{provider_for_handle, ProviderPrecision};
 use runmat_hir::{LoweringContext, LoweringResult, SemanticError, SourceId};
-use runmat_ignition::CompileError;
 use runmat_lexer::{tokenize_detailed, Token as LexToken};
 pub use runmat_parser::CompatMode;
 use runmat_parser::{parse_with_options, ParserOptions, SyntaxError};
@@ -24,6 +23,7 @@ use runmat_snapshot::{Snapshot, SnapshotConfig, SnapshotLoader};
 use runmat_time::Instant;
 #[cfg(feature = "jit")]
 use runmat_turbine::TurbineEngine;
+use runmat_vm::CompileError;
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 #[cfg(not(target_arch = "wasm32"))]
@@ -275,7 +275,7 @@ fn telemetry_component_for_identifier(identifier: Option<&str>) -> Option<String
 struct PreparedExecution {
     ast: runmat_parser::Program,
     lowering: LoweringResult,
-    bytecode: runmat_ignition::Bytecode,
+    bytecode: runmat_vm::Bytecode,
 }
 
 #[derive(Debug, Default)]
@@ -909,8 +909,8 @@ impl RunMatSession {
             interrupt_flag: Arc::new(AtomicBool::new(false)),
             is_executing: false,
             async_input_handler: None,
-            callstack_limit: runmat_ignition::DEFAULT_CALLSTACK_LIMIT,
-            error_namespace: runmat_ignition::DEFAULT_ERROR_NAMESPACE.to_string(),
+            callstack_limit: runmat_vm::DEFAULT_CALLSTACK_LIMIT,
+            error_namespace: runmat_vm::DEFAULT_ERROR_NAMESPACE.to_string(),
             default_source_name: "<repl>".to_string(),
             source_name_override: None,
             telemetry_consent: true,
@@ -923,7 +923,7 @@ impl RunMatSession {
             compat_mode: CompatMode::Matlab,
         };
 
-        runmat_ignition::set_call_stack_limit(session.callstack_limit);
+        runmat_vm::set_call_stack_limit(session.callstack_limit);
 
         // Cache the shared plotting context (if a GPU provider is active) so the
         // runtime can wire zero-copy render paths without instantiating another
@@ -1071,7 +1071,7 @@ impl RunMatSession {
         let existing_functions = self.convert_hir_functions_to_user_functions();
         let mut bytecode = {
             let _span = info_span!("runtime.compile.bytecode").entered();
-            runmat_ignition::compile(&lowering.hir, &existing_functions)?
+            runmat_vm::compile(&lowering.hir, &existing_functions)?
         };
         bytecode.source_id = Some(source_id);
         let new_function_names: HashSet<String> = lowering.functions.keys().cloned().collect();
@@ -1148,8 +1148,8 @@ impl RunMatSession {
                     .build(),
             )
         })?;
-        runmat_ignition::set_call_stack_limit(self.callstack_limit);
-        runmat_ignition::set_error_namespace(&self.error_namespace);
+        runmat_vm::set_call_stack_limit(self.callstack_limit);
+        runmat_vm::set_error_namespace(&self.error_namespace);
         runmat_hir::set_error_namespace(&self.error_namespace);
         let exec_span = info_span!(
             "runtime.execute",
@@ -1250,6 +1250,99 @@ impl RunMatSession {
         let _async_input_guard =
             runmat_runtime::interaction::replace_async_handler(Some(runtime_async_handler));
 
+        // Install a stateless expression evaluator for `input()` numeric parsing.
+        //
+        // The hook runs the full parse → lower → compile → interpret pipeline so
+        // that users can type arbitrary MATLAB expressions at an input() prompt:
+        // `sqrt(2)`, `pi/2`, `ones(3)`, `[1 2; 3 4]`, etc.
+        //
+        // Stack-overflow hazard: the hook calls runmat_vm::interpret() while
+        // the outer interpret() is already on the call stack. On WASM the JS event
+        // loop drives both as async state-machines and the WASM linear stack is
+        // large, so nesting is safe. On native the default thread stack is too
+        // small for two nested interpret() invocations, so we instead run the inner
+        // interpret() on a dedicated thread that has its own 16 MB stack and block
+        // the calling future synchronously on the result (safe because the native
+        // executor — futures::executor::block_on — is already synchronous).
+        let compat = self.compat_mode;
+        let _eval_hook_guard =
+            runmat_runtime::interaction::replace_eval_hook(Some(std::sync::Arc::new(
+                move |expr: String| -> runmat_runtime::interaction::EvalHookFuture {
+                    // Shared eval logic, used by both the WASM async path and the
+                    // native thread path below.
+                    async fn eval_expr(
+                        expr: String,
+                        compat: runmat_parser::CompatMode,
+                    ) -> Result<Value, RuntimeError> {
+                        let wrapped = format!("__runmat_input_result__ = ({expr});");
+                        let ast = parse_with_options(&wrapped, ParserOptions::new(compat))
+                            .map_err(|e| {
+                                build_runtime_error(format!("input: parse error: {e}"))
+                                    .with_identifier("RunMat:input:ParseError")
+                                    .build()
+                            })?;
+                        let lowering = runmat_hir::lower(
+                            &ast,
+                            &LoweringContext::new(&HashMap::new(), &HashMap::new()),
+                        )
+                        .map_err(|e| {
+                            build_runtime_error(format!("input: lowering error: {e}"))
+                                .with_identifier("RunMat:input:LowerError")
+                                .build()
+                        })?;
+                        let result_idx = lowering.variables.get("__runmat_input_result__").copied();
+                        let bc = runmat_vm::compile(&lowering.hir, &HashMap::new())
+                            .map_err(RuntimeError::from)?;
+                        let vars = runmat_vm::interpret(&bc).await?;
+                        result_idx
+                            .and_then(|idx| vars.get(idx).cloned())
+                            .ok_or_else(|| {
+                                build_runtime_error("input: expression produced no value")
+                                    .with_identifier("RunMat:input:NoValue")
+                                    .build()
+                            })
+                    }
+
+                    #[cfg(target_arch = "wasm32")]
+                    {
+                        // On WASM: await the inner interpret() directly. The JS async
+                        // runtime handles both futures as cooperative state-machines and
+                        // the WASM linear stack is large enough for the extra frames.
+                        Box::pin(eval_expr(expr, compat))
+                    }
+
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        // On native: run interpret() on a dedicated thread so it gets
+                        // its own 16 MB stack, fully isolated from the outer interpret()
+                        // call stack. The result is sent back via a tokio oneshot channel
+                        // and awaited asynchronously so the tokio worker thread is never
+                        // blocked by a synchronous recv().
+                        let (tx, rx) = tokio::sync::oneshot::channel();
+                        let spawn_result = std::thread::Builder::new()
+                            .stack_size(16 * 1024 * 1024)
+                            .spawn(move || {
+                                let result = futures::executor::block_on(eval_expr(expr, compat));
+                                let _ = tx.send(result);
+                            });
+                        Box::pin(async move {
+                            spawn_result.map_err(|err| {
+                                build_runtime_error(format!(
+                                    "input: failed to spawn eval thread: {err}"
+                                ))
+                                .with_identifier("RunMat:input:EvalThreadSpawnFailed")
+                                .build()
+                            })?;
+                            rx.await.unwrap_or_else(|_| {
+                                Err(build_runtime_error("input: eval thread panicked")
+                                    .with_identifier("RunMat:input:EvalThreadPanic")
+                                    .build())
+                            })
+                        })
+                    }
+                },
+            )));
+
         if self.verbose {
             debug!("Executing: {}", input.trim());
         }
@@ -1291,10 +1384,8 @@ impl RunMatSession {
         if debug_trace {
             debug!(?assigned_snapshot, "[repl] assigned snapshot");
         }
-        let _pending_workspace_guard = runmat_ignition::push_pending_workspace(
-            updated_vars.clone(),
-            assigned_snapshot.clone(),
-        );
+        let _pending_workspace_guard =
+            runmat_vm::push_pending_workspace(updated_vars.clone(), assigned_snapshot.clone());
         if self.verbose {
             debug!("HIR generated successfully");
         }
@@ -1356,7 +1447,7 @@ impl RunMatSession {
         let is_expression_stmt = bytecode
             .instructions
             .last()
-            .map(|instr| matches!(instr, runmat_ignition::Instr::Pop))
+            .map(|instr| matches!(instr, runmat_vm::Instr::Pop))
             .unwrap_or(false);
 
         // Determine whether the final statement ended with a semicolon by inspecting the raw input.
@@ -1473,14 +1564,17 @@ impl RunMatSession {
 
             // For expressions, modify bytecode to store result in a temp variable instead of using stack
             let mut execution_bytecode = bytecode.clone();
-            if is_expression_stmt && !execution_bytecode.instructions.is_empty() {
+            if is_expression_stmt
+                && matches!(final_stmt_emit, FinalStmtEmitDisposition::Inline)
+                && !execution_bytecode.instructions.is_empty()
+            {
                 execution_bytecode.instructions.pop(); // Remove the Pop instruction
 
                 // Add StoreVar instruction to store the result in a temporary variable
                 let temp_var_id = std::cmp::max(execution_bytecode.var_count, max_var_id + 1);
                 execution_bytecode
                     .instructions
-                    .push(runmat_ignition::Instr::StoreVar(temp_var_id));
+                    .push(runmat_vm::Instr::StoreVar(temp_var_id));
                 execution_bytecode.var_count = temp_var_id + 1; // Expand variable count for temp variable
 
                 // Ensure our variable array can hold the temporary variable
@@ -1497,7 +1591,7 @@ impl RunMatSession {
             }
 
             match self.interpret_with_context(&execution_bytecode).await {
-                Ok(runmat_ignition::InterpreterOutcome::Completed(results)) => {
+                Ok(runmat_vm::InterpreterOutcome::Completed(results)) => {
                     // Only increment interpreter_fallback if JIT wasn't attempted
                     if !self.has_jit() || is_expression_stmt {
                         self.stats.interpreter_fallback += 1;
@@ -1538,6 +1632,7 @@ impl RunMatSession {
 
                     // For expressions, get the result from the temporary variable (capture for both display and type info)
                     if is_expression_stmt
+                        && matches!(final_stmt_emit, FinalStmtEmitDisposition::Inline)
                         && !execution_bytecode.instructions.is_empty()
                         && result_value.is_none()
                         && suppressed_value.is_none()
@@ -1617,8 +1712,7 @@ impl RunMatSession {
 
         // Update variable names mapping and function definitions if execution was successful
         if error.is_none() {
-            if let Some((mutated_names, assigned)) = runmat_ignition::take_updated_workspace_state()
-            {
+            if let Some((mutated_names, assigned)) = runmat_vm::take_updated_workspace_state() {
                 if debug_trace {
                     debug!(
                         ?mutated_names,
@@ -1939,18 +2033,18 @@ impl RunMatSession {
 
     pub fn set_callstack_limit(&mut self, limit: usize) {
         self.callstack_limit = limit;
-        runmat_ignition::set_call_stack_limit(limit);
+        runmat_vm::set_call_stack_limit(limit);
     }
 
     pub fn set_error_namespace(&mut self, namespace: impl Into<String>) {
         let namespace = namespace.into();
         let namespace = if namespace.trim().is_empty() {
-            runmat_ignition::DEFAULT_ERROR_NAMESPACE.to_string()
+            runmat_vm::DEFAULT_ERROR_NAMESPACE.to_string()
         } else {
             namespace
         };
         self.error_namespace = namespace.clone();
-        runmat_ignition::set_error_namespace(&namespace);
+        runmat_vm::set_error_namespace(&namespace);
         runmat_hir::set_error_namespace(&namespace);
     }
 
@@ -2046,10 +2140,10 @@ impl RunMatSession {
     /// Interpret bytecode with persistent variable context
     async fn interpret_with_context(
         &mut self,
-        bytecode: &runmat_ignition::Bytecode,
-    ) -> Result<runmat_ignition::InterpreterOutcome, RuntimeError> {
+        bytecode: &runmat_vm::Bytecode,
+    ) -> Result<runmat_vm::InterpreterOutcome, RuntimeError> {
         let source_name = self.current_source_name().to_string();
-        runmat_ignition::interpret_with_vars(
+        runmat_vm::interpret_with_vars(
             bytecode,
             &mut self.variable_array,
             Some(source_name.as_str()),
@@ -2060,7 +2154,7 @@ impl RunMatSession {
     /// Prepare variable array for execution by populating with existing values
     fn prepare_variable_array_for_execution(
         &mut self,
-        bytecode: &runmat_ignition::Bytecode,
+        bytecode: &runmat_vm::Bytecode,
         updated_var_mapping: &HashMap<String, usize>,
         debug_trace: bool,
     ) {
@@ -2104,9 +2198,7 @@ impl RunMatSession {
     }
 
     /// Convert stored HIR function definitions to UserFunction format for compilation
-    fn convert_hir_functions_to_user_functions(
-        &self,
-    ) -> HashMap<String, runmat_ignition::UserFunction> {
+    fn convert_hir_functions_to_user_functions(&self) -> HashMap<String, runmat_vm::UserFunction> {
         let mut user_functions = HashMap::new();
 
         for (name, hir_stmt) in &self.function_definitions {
@@ -2131,7 +2223,7 @@ impl RunMatSession {
                         let _ = (&source.name, &source.text);
                     }
                 }
-                let user_func = runmat_ignition::UserFunction {
+                let user_func = runmat_vm::UserFunction {
                     name: func_name.clone(),
                     params: params.clone(),
                     outputs: outputs.clone(),
@@ -2293,9 +2385,9 @@ fn last_expr_emits_value(body: &[runmat_hir::HirStmt]) -> bool {
     false
 }
 
-fn last_emit_var_index(bytecode: &runmat_ignition::Bytecode) -> Option<usize> {
+fn last_emit_var_index(bytecode: &runmat_vm::Bytecode) -> Option<usize> {
     for instr in bytecode.instructions.iter().rev() {
-        if let runmat_ignition::Instr::EmitVar { var_index, .. } = instr {
+        if let runmat_vm::Instr::EmitVar { var_index, .. } = instr {
             return Some(*var_index);
         }
     }
@@ -2459,6 +2551,23 @@ mod tests {
                 .any(|entry| entry.name == "x"),
             "workspace snapshot should include assigned variable"
         );
+    }
+
+    #[test]
+    fn workspace_reports_datetime_array_shape() {
+        let mut session =
+            RunMatSession::with_snapshot_bytes(false, false, None).expect("session init");
+        let result =
+            block_on(session.execute("d = datetime([739351; 739352], 'ConvertFrom', 'datenum');"))
+                .expect("exec succeeds");
+        let entry = result
+            .workspace
+            .values
+            .iter()
+            .find(|entry| entry.name == "d")
+            .expect("workspace entry for d");
+        assert_eq!(entry.class_name, "datetime");
+        assert_eq!(entry.shape, vec![2, 1]);
     }
 
     #[test]

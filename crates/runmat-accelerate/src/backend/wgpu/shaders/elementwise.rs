@@ -479,6 +479,13 @@ fn apply(a: f64) -> f64 {
         case 29u: { return gamma_real(a); }
         case 30u: { return factorial_real(a); }
         case 31u: { return f64(f32(a)); }
+        case 32u: {
+            let aa = abs(a);
+            if (aa == 0.0) {
+                return 0.0;
+            }
+            return ceil(log2(aa));
+        }
         default: { return a; }
     }
 }
@@ -709,6 +716,13 @@ fn apply(a: f32) -> f32 {
         case 29u: { return gamma_real(a); }
         case 30u: { return factorial_real(a); }
         case 31u: { return a; }
+        case 32u: {
+            let aa = abs(a);
+            if (aa == 0.0) {
+                return 0.0;
+            }
+            return ceil(log2(aa));
+        }
         default: { return a; }
     }
 }

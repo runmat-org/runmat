@@ -87,7 +87,7 @@ async fn atanh_gpu(handle: GpuTensorHandle) -> BuiltinResult<Value> {
         match gpu_domain_is_real(provider, &handle).await {
             Ok(true) => {
                 if let Ok(out) = provider.unary_atanh(&handle).await {
-                    return Ok(Value::GpuTensor(out));
+                    return Ok(gpu_helpers::resident_gpu_value(out));
                 }
             }
             Ok(false) => {

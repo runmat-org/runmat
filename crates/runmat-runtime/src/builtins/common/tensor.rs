@@ -305,3 +305,47 @@ pub fn parse_dimension(value: &Value, name: &str) -> Result<usize, String> {
 pub fn value_to_string(value: &Value) -> Option<String> {
     String::try_from(value).ok()
 }
+
+/// Return a canonical 2-D shape for a tensor given its shape slice and element count.
+///
+/// * Empty data (`len == 0`) → `[0, 1]` (MATLAB convention for empty arrays).
+/// * No shape info (`shape.is_empty()`) → `[1, 1]` (scalar).
+/// * Otherwise → the tensor's own shape.
+pub fn default_shape_for(shape: &[usize], len: usize) -> Vec<usize> {
+    if len == 0 {
+        vec![0, 1]
+    } else if shape.is_empty() {
+        vec![1, 1]
+    } else {
+        shape.to_vec()
+    }
+}
+
+/// Align two numeric tensors for a binary element-wise operation with scalar broadcasting.
+///
+/// Returns `(lhs_data, rhs_data, output_shape)`.  If either operand is a
+/// single element it is broadcast to the other's length.  `builtin` names the
+/// calling builtin and is embedded in the error message when the shapes are
+/// incompatible.
+pub fn binary_numeric_tensors(
+    lhs: &Tensor,
+    rhs: &Tensor,
+    context: &str,
+    builtin: &str,
+) -> crate::BuiltinResult<(Vec<f64>, Vec<f64>, Vec<usize>)> {
+    let lhs_shape = default_shape_for(&lhs.shape, lhs.data.len());
+    let rhs_shape = default_shape_for(&rhs.shape, rhs.data.len());
+    match (lhs.data.len(), rhs.data.len()) {
+        (1, 1) => Ok((vec![lhs.data[0]], vec![rhs.data[0]], vec![1, 1])),
+        (1, len) => Ok((vec![lhs.data[0]; len], rhs.data.clone(), rhs_shape)),
+        (len, 1) => Ok((lhs.data.clone(), vec![rhs.data[0]; len], lhs_shape)),
+        (left, right) if left == right && lhs_shape == rhs_shape => {
+            Ok((lhs.data.clone(), rhs.data.clone(), lhs_shape))
+        }
+        _ => Err(crate::build_runtime_error(format!(
+            "{context}: operands must be scalar or have matching sizes"
+        ))
+        .with_builtin(builtin)
+        .build()),
+    }
+}

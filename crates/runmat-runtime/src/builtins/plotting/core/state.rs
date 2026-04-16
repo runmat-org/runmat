@@ -2092,8 +2092,8 @@ mod tests {
 
     #[test]
     fn closing_last_figure_leaves_no_visible_figures() {
-        ensure_plot_test_env();
         let _guard = lock_plot_test_registry();
+        ensure_plot_test_env();
         reset_for_tests();
 
         let handle = new_figure_handle();

@@ -1,129 +1,36 @@
 use anyhow::{Context, Result};
-use base64::engine::general_purpose::URL_SAFE_NO_PAD;
-use base64::Engine;
 use chrono::{DateTime, Utc};
-use rand::RngCore;
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION};
-use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use serde::Deserialize;
 use std::env;
 use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command;
-use tokio::net::TcpListener;
-use tokio::time::{timeout, Duration};
-use url::Url;
 use uuid::Uuid;
 
 use runmat_config::RunMatConfig;
 use runmat_filesystem::{FsFileType, FsProvider, RemoteFsConfig, RemoteFsProvider};
 
-const DEFAULT_SERVER_URL: &str = "https://api.runmat.com";
-
-use crate::public_api;
 use crate::{
     FsCommand, OrgCommand, ProjectCommand, ProjectMembersCommand, ProjectRetentionCommand,
     RemoteCommand,
 };
+use runmat_server_client::auth::{
+    build_public_client, execute_login, map_public_error, resolve_auth_token, resolve_org_id,
+    resolve_project_id, resolve_server_url, CredentialStoreMode, RemoteConfig,
+};
+use runmat_server_client::public_api;
 
-#[derive(Default, Serialize, Deserialize)]
-struct RemoteConfig {
-    server_url: Option<String>,
-    org_id: Option<Uuid>,
-    project_id: Option<Uuid>,
-    token_expires_at: Option<DateTime<Utc>>,
-    token_endpoint: Option<String>,
-    token_client_id: Option<String>,
-}
-
-struct AuthToken {
-    access_token: String,
-    refresh_token: Option<String>,
-    expires_at: Option<DateTime<Utc>>,
-    token_endpoint: Option<String>,
-    client_id: Option<String>,
-}
-
-impl RemoteConfig {
-    fn load() -> Result<Self> {
-        let path = config_path()?;
-        if !path.exists() {
-            return Ok(Self::default());
-        }
-        let contents = fs::read_to_string(&path)
-            .with_context(|| format!("Failed to read config {}", path.display()))?;
-        serde_json::from_str(&contents).context("Failed to parse remote config")
-    }
-
-    fn save(&self) -> Result<()> {
-        let path = config_path()?;
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create config dir {}", parent.display()))?;
-        }
-        let contents = serde_json::to_string_pretty(self).context("Failed to serialize config")?;
-        fs::write(&path, contents)
-            .with_context(|| format!("Failed to write config {}", path.display()))?;
-        Ok(())
-    }
-}
-
-fn config_path() -> Result<PathBuf> {
-    if let Ok(dir) = env::var("RUNMAT_CLI_CONFIG_DIR") {
-        return Ok(PathBuf::from(dir).join("remote.json"));
-    }
-    let base = dirs::config_dir().context("Unable to locate config directory")?;
-    Ok(base.join("runmat").join("remote.json"))
-}
-
-pub async fn execute_login(
+pub async fn execute_login_command(
     server: Option<String>,
     api_key: Option<String>,
     email: Option<String>,
+    credential_store: CredentialStoreMode,
     org: Option<Uuid>,
     project: Option<Uuid>,
 ) -> Result<()> {
-    let mut config = RemoteConfig::load()?;
-    let server_url = resolve_server_url(&config, server)?;
-    let auth = if let Some(api_key) = api_key {
-        AuthToken {
-            access_token: api_key,
-            refresh_token: None,
-            expires_at: None,
-            token_endpoint: None,
-            client_id: None,
-        }
-    } else if let Ok(env_token) = env::var("RUNMAT_API_KEY") {
-        AuthToken {
-            access_token: env_token,
-            refresh_token: None,
-            expires_at: None,
-            token_endpoint: None,
-            client_id: None,
-        }
-    } else {
-        interactive_login(&server_url, email).await?
-    };
-    store_token(&server_url, auth.access_token.trim())?;
-    if let Some(refresh) = auth.refresh_token.as_deref() {
-        store_refresh_token(&server_url, refresh)?;
-    } else {
-        clear_refresh_token(&server_url)?;
-    }
-    config.token_expires_at = auth.expires_at;
-    config.token_endpoint = auth.token_endpoint;
-    config.token_client_id = auth.client_id;
-    config.server_url = Some(server_url.clone());
-    if let Some(org) = org {
-        config.org_id = Some(org);
-    }
-    if let Some(project) = project {
-        config.project_id = Some(project);
-    }
-    config.save()?;
-    println!("Stored credentials for {server_url}");
-    Ok(())
+    execute_login(server, api_key, email, org, project, Some(credential_store)).await
 }
 
 pub async fn execute_org_command(command: OrgCommand) -> Result<()> {
@@ -515,18 +422,6 @@ async fn select_project(project_id: Uuid) -> Result<()> {
     Ok(())
 }
 
-fn build_public_client(server_url: &str, token: &str) -> Result<public_api::Client> {
-    let mut headers = HeaderMap::new();
-    let auth_value =
-        HeaderValue::from_str(&format!("Bearer {token}")).context("Invalid auth token")?;
-    headers.insert(AUTHORIZATION, auth_value);
-    let client = reqwest::Client::builder()
-        .default_headers(headers)
-        .build()
-        .context("Failed to build HTTP client")?;
-    Ok(public_api::Client::new_with_client(server_url, client))
-}
-
 fn build_http_client(server_url: &str, token: &str) -> Result<(reqwest::Client, String)> {
     let mut headers = HeaderMap::new();
     let auth_value =
@@ -568,204 +463,6 @@ async fn run_with_remote_fs(
     runmat_filesystem::set_provider(std::sync::Arc::new(provider));
     let config = RunMatConfig::default();
     crate::execute_script_with_remote_provider(script, &config).await
-}
-
-fn resolve_server_url(config: &RemoteConfig, override_value: Option<String>) -> Result<String> {
-    if let Some(value) = override_value {
-        return Ok(value);
-    }
-    if let Ok(value) = env::var("RUNMAT_SERVER_URL") {
-        if !value.is_empty() {
-            return Ok(value);
-        }
-    }
-    if let Some(value) = &config.server_url {
-        return Ok(value.clone());
-    }
-    Ok(DEFAULT_SERVER_URL.to_string())
-}
-
-fn resolve_org_id(config: &RemoteConfig, override_value: Option<Uuid>) -> Result<Uuid> {
-    if let Some(value) = override_value {
-        return Ok(value);
-    }
-    if let Ok(value) = env::var("RUNMAT_ORG_ID") {
-        if !value.is_empty() {
-            return Uuid::parse_str(&value).context("RUNMAT_ORG_ID must be a UUID");
-        }
-    }
-    config
-        .org_id
-        .context(
-            "Organization id not configured. Use --org, set RUNMAT_ORG_ID, or run `runmat login --org <id>`."
-        )
-}
-
-fn resolve_project_id(config: &RemoteConfig, override_value: Option<Uuid>) -> Result<Uuid> {
-    if let Some(value) = override_value {
-        return Ok(value);
-    }
-    if let Ok(value) = env::var("RUNMAT_PROJECT_ID") {
-        if !value.is_empty() {
-            return Uuid::parse_str(&value).context("RUNMAT_PROJECT_ID must be a UUID");
-        }
-    }
-    config
-        .project_id
-        .context(
-            "Project id not configured. Use --project, set RUNMAT_PROJECT_ID, or run `runmat login --project <id>`."
-        )
-}
-
-async fn resolve_auth_token(config: &mut RemoteConfig, server_url: &str) -> Result<String> {
-    if let Ok(value) = env::var("RUNMAT_API_KEY") {
-        if !value.is_empty() {
-            return Ok(value);
-        }
-    }
-    let token = load_token(server_url)?;
-    let refresh = load_refresh_token(server_url)?;
-    let expired = config
-        .token_expires_at
-        .map(|expiry| expiry <= Utc::now() + chrono::Duration::seconds(30))
-        .unwrap_or(false);
-    if let Some(token) = token.as_ref() {
-        if !expired {
-            return Ok(token.clone());
-        }
-    }
-    if let (Some(refresh), Some(endpoint), Some(client_id)) = (
-        refresh,
-        config.token_endpoint.clone(),
-        config.token_client_id.clone(),
-    ) {
-        let refreshed = refresh_access_token(&endpoint, &client_id, &refresh).await?;
-        store_token(server_url, &refreshed.access_token)?;
-        if let Some(new_refresh) = refreshed.refresh_token.as_deref() {
-            store_refresh_token(server_url, new_refresh)?;
-        }
-        config.token_expires_at = refreshed.expires_at;
-        config.save()?;
-        return Ok(refreshed.access_token);
-    }
-    token.context(
-        "No stored credentials. Run `runmat login --server <url> --project <id>` or set RUNMAT_API_KEY."
-    )
-}
-
-fn load_token(server_url: &str) -> Result<Option<String>> {
-    let entry = keyring_entry(server_url)?;
-    match entry.get_password() {
-        Ok(value) => Ok(Some(value)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(err) => Err(err).context("Failed to access keyring"),
-    }
-}
-
-fn load_refresh_token(server_url: &str) -> Result<Option<String>> {
-    let entry = keyring_refresh_entry(server_url)?;
-    match entry.get_password() {
-        Ok(value) => Ok(Some(value)),
-        Err(keyring::Error::NoEntry) => Ok(None),
-        Err(err) => Err(err).context("Failed to access keyring"),
-    }
-}
-
-fn store_token(server_url: &str, token: &str) -> Result<()> {
-    let entry = keyring_entry(server_url)?;
-    entry
-        .set_password(token)
-        .context("Failed to store credentials")
-}
-
-fn store_refresh_token(server_url: &str, token: &str) -> Result<()> {
-    let entry = keyring_refresh_entry(server_url)?;
-    entry
-        .set_password(token)
-        .context("Failed to store refresh token")
-}
-
-fn clear_refresh_token(server_url: &str) -> Result<()> {
-    let entry = keyring_refresh_entry(server_url)?;
-    match entry.delete_password() {
-        Ok(_) => Ok(()),
-        Err(keyring::Error::NoEntry) => Ok(()),
-        Err(err) => Err(err).context("Failed to clear refresh token"),
-    }
-}
-
-fn keyring_entry(server_url: &str) -> Result<keyring::Entry> {
-    let account = Url::parse(server_url)
-        .ok()
-        .and_then(|url| url.host_str().map(|host| host.to_string()))
-        .unwrap_or_else(|| server_url.to_string());
-    keyring::Entry::new("runmat", &account).context("Failed to open keyring")
-}
-
-fn keyring_refresh_entry(server_url: &str) -> Result<keyring::Entry> {
-    let account = Url::parse(server_url)
-        .ok()
-        .and_then(|url| url.host_str().map(|host| format!("{host}:refresh")))
-        .unwrap_or_else(|| format!("{}:refresh", server_url));
-    keyring::Entry::new("runmat", &account).context("Failed to open keyring")
-}
-
-async fn interactive_login(server_url: &str, email: Option<String>) -> Result<AuthToken> {
-    let email = match email {
-        Some(value) => value,
-        None => prompt_for_email()?,
-    };
-    let client = public_api::Client::new(server_url);
-    let response = client
-        .auth_resolve(&public_api::types::AuthResolveRequest { email })
-        .await
-        .map_err(map_public_error)?
-        .into_inner();
-    let pkce = generate_pkce();
-    let (authorize_url, expected_state) =
-        apply_pkce_to_authorize_url(&response.redirect_url, &pkce)?;
-    let redirect_uri = extract_redirect_uri(&authorize_url)?;
-    let client_id = extract_client_id(&authorize_url)?;
-    let (host, port) = loopback_host_port(&redirect_uri)?;
-    let listener = TcpListener::bind((host.as_str(), port))
-        .await
-        .context("Failed to bind local callback listener")?;
-    let auth_url = authorize_url.as_str().to_string();
-    webbrowser::open(&auth_url).context("Failed to open browser")?;
-    let code = listen_for_auth_code(listener, &expected_state).await?;
-    let token_endpoint = discover_token_endpoint(&authorize_url).await?;
-    let token = exchange_code_for_token(
-        &token_endpoint,
-        &code,
-        &client_id,
-        redirect_uri.as_str(),
-        &pkce.verifier,
-    )
-    .await?;
-    Ok(AuthToken {
-        access_token: token.access_token,
-        refresh_token: token.refresh_token,
-        expires_at: token
-            .expires_in
-            .map(|value| Utc::now() + chrono::Duration::seconds(value)),
-        token_endpoint: Some(token_endpoint),
-        client_id: Some(client_id),
-    })
-}
-
-fn prompt_for_email() -> Result<String> {
-    let mut stdout = io::stdout();
-    stdout.write_all(b"Email: ").context("Failed to prompt")?;
-    stdout.flush().context("Failed to flush prompt")?;
-    let mut input = String::new();
-    io::stdin()
-        .read_line(&mut input)
-        .context("Failed to read input")?;
-    let email = input.trim().to_string();
-    if email.is_empty() {
-        anyhow::bail!("Email cannot be empty")
-    }
-    Ok(email)
 }
 
 #[derive(Deserialize)]
@@ -1467,261 +1164,12 @@ fn read_u64_env(key: &str) -> Option<u64> {
     env::var(key).ok().and_then(|value| value.parse().ok())
 }
 
-#[derive(Debug)]
-struct PkceState {
-    verifier: String,
-    challenge: String,
-    state: String,
-}
-
-fn generate_pkce() -> PkceState {
-    let mut verifier_bytes = [0u8; 32];
-    rand::rngs::OsRng.fill_bytes(&mut verifier_bytes);
-    let verifier = URL_SAFE_NO_PAD.encode(verifier_bytes);
-    let challenge = URL_SAFE_NO_PAD.encode(Sha256::digest(verifier.as_bytes()));
-    let mut state_bytes = [0u8; 16];
-    rand::rngs::OsRng.fill_bytes(&mut state_bytes);
-    let state = URL_SAFE_NO_PAD.encode(state_bytes);
-    PkceState {
-        verifier,
-        challenge,
-        state,
-    }
-}
-
-fn apply_pkce_to_authorize_url(redirect_url: &str, pkce: &PkceState) -> Result<(Url, String)> {
-    let mut url = Url::parse(redirect_url).context("Invalid redirect URL")?;
-    let mut has_challenge = false;
-    let mut has_method = false;
-    let mut state_value = None;
-    let mut scope_value = None;
-    let pairs = url
-        .query_pairs()
-        .map(|(key, value)| (key.to_string(), value.to_string()))
-        .collect::<Vec<_>>();
-    for (key, value) in &pairs {
-        match key.as_str() {
-            "code_challenge" => has_challenge = true,
-            "code_challenge_method" => has_method = true,
-            "state" => state_value = Some(value.to_string()),
-            "scope" => scope_value = Some(value.to_string()),
-            _ => {}
-        }
-    }
-    let mut updated_pairs = Vec::new();
-    for (key, value) in pairs {
-        if key == "scope" {
-            let mut scopes = value.split_whitespace().collect::<Vec<_>>();
-            if !scopes.contains(&"offline_access") {
-                scopes.push("offline_access");
-            }
-            updated_pairs.push((key, scopes.join(" ")));
-        } else {
-            updated_pairs.push((key, value));
-        }
-    }
-    if scope_value.is_none() {
-        updated_pairs.push(("scope".to_string(), "offline_access".to_string()));
-    }
-    url.set_query(None);
-    {
-        let mut pairs = url.query_pairs_mut();
-        for (key, value) in updated_pairs {
-            pairs.append_pair(&key, &value);
-        }
-        if !has_challenge {
-            pairs.append_pair("code_challenge", &pkce.challenge);
-        }
-        if !has_method {
-            pairs.append_pair("code_challenge_method", "S256");
-        }
-        if state_value.is_none() {
-            pairs.append_pair("state", &pkce.state);
-        }
-    }
-    let expected_state = state_value.unwrap_or_else(|| pkce.state.clone());
-    Ok((url, expected_state))
-}
-
-fn extract_redirect_uri(authorize_url: &Url) -> Result<Url> {
-    let redirect_uri = authorize_url
-        .query_pairs()
-        .find(|(key, _)| key == "redirect_uri")
-        .map(|(_, value)| value.to_string())
-        .context("Missing redirect_uri in auth URL")?;
-    Url::parse(&redirect_uri).context("Invalid redirect_uri")
-}
-
-fn extract_client_id(authorize_url: &Url) -> Result<String> {
-    authorize_url
-        .query_pairs()
-        .find(|(key, _)| key == "client_id")
-        .map(|(_, value)| value.to_string())
-        .context("Missing client_id in auth URL")
-}
-
-fn loopback_host_port(redirect_uri: &Url) -> Result<(String, u16)> {
-    if redirect_uri.scheme() != "http" {
-        anyhow::bail!(
-            "Interactive login requires http loopback redirect URIs; use --api-key instead."
-        );
-    }
-    let host = redirect_uri
-        .host_str()
-        .context("Missing redirect_uri host")?
-        .to_string();
-    if host != "127.0.0.1" && host != "localhost" {
-        anyhow::bail!("Interactive login requires a loopback redirect URI; use --api-key instead.");
-    }
-    let port = redirect_uri.port().unwrap_or(80);
-    Ok((host, port))
-}
-
-async fn listen_for_auth_code(listener: TcpListener, expected_state: &str) -> Result<String> {
-    let (stream, _) = timeout(Duration::from_secs(180), listener.accept())
-        .await
-        .context("Timed out waiting for login")?
-        .context("Failed to accept callback")?;
-    let mut buf = vec![0u8; 4096];
-    stream.readable().await.context("Failed to read callback")?;
-    let n = stream
-        .try_read(&mut buf)
-        .context("Failed to read callback")?;
-    let request = String::from_utf8_lossy(&buf[..n]);
-    let path = request
-        .lines()
-        .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .unwrap_or("/");
-    let callback_url =
-        Url::parse(&format!("http://localhost{path}")).context("Invalid callback URL")?;
-    let code = callback_url
-        .query_pairs()
-        .find(|(key, _)| key == "code")
-        .map(|(_, value)| value.to_string())
-        .context("Missing authorization code")?;
-    if let Some(state) = callback_url
-        .query_pairs()
-        .find(|(key, _)| key == "state")
-        .map(|(_, value)| value.to_string())
-    {
-        if state != expected_state {
-            anyhow::bail!("Login state mismatch")
-        }
-    }
-    let response = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\n<html><body><p>RunMat login complete. You can close this window.</p></body></html>";
-    let _ = stream.try_write(response.as_bytes());
-    Ok(code)
-}
-
-#[derive(Deserialize)]
-struct TokenResponse {
-    access_token: String,
-    #[serde(default)]
-    refresh_token: Option<String>,
-    #[serde(default)]
-    expires_in: Option<i64>,
-}
-
-#[derive(Deserialize)]
-struct OidcConfig {
-    token_endpoint: String,
-}
-
-async fn discover_token_endpoint(authorize_url: &Url) -> Result<String> {
-    let mut origin = authorize_url.clone();
-    origin.set_path("/");
-    origin.set_query(None);
-    origin.set_fragment(None);
-    let base = origin.as_str().trim_end_matches('/');
-    let discovery_url = format!("{base}/.well-known/openid-configuration");
-    let client = reqwest::Client::new();
-    if let Ok(response) = client.get(&discovery_url).send().await {
-        if response.status().is_success() {
-            if let Ok(config) = response.json::<OidcConfig>().await {
-                return Ok(config.token_endpoint);
-            }
-        }
-    }
-    Ok(format!("{base}/oauth/token"))
-}
-
-async fn exchange_code_for_token(
-    token_endpoint: &str,
-    code: &str,
-    client_id: &str,
-    redirect_uri: &str,
-    verifier: &str,
-) -> Result<TokenResponse> {
-    let client = reqwest::Client::new();
-    let response = client
-        .post(token_endpoint)
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("code", code),
-            ("client_id", client_id),
-            ("redirect_uri", redirect_uri),
-            ("code_verifier", verifier),
-        ])
-        .send()
-        .await
-        .context("Failed to request access token")?;
-    if !response.status().is_success() {
-        let status = response.status();
-        let text = response.text().await.unwrap_or_default();
-        anyhow::bail!("Token exchange failed ({status}): {text}")
-    }
-    let token = response
-        .json::<TokenResponse>()
-        .await
-        .context("Failed to parse access token")?;
-    Ok(token)
-}
-
-async fn refresh_access_token(
-    token_endpoint: &str,
-    client_id: &str,
-    refresh_token: &str,
-) -> Result<AuthToken> {
-    let client = reqwest::Client::new();
-    let response = client
-        .post(token_endpoint)
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("client_id", client_id),
-            ("refresh_token", refresh_token),
-        ])
-        .send()
-        .await
-        .context("Failed to refresh access token")?;
-    if !response.status().is_success() {
-        let status = response.status();
-        let text = response.text().await.unwrap_or_default();
-        anyhow::bail!("Token refresh failed ({status}): {text}")
-    }
-    let token = response
-        .json::<TokenResponse>()
-        .await
-        .context("Failed to parse refresh response")?;
-    Ok(AuthToken {
-        access_token: token.access_token,
-        refresh_token: token.refresh_token,
-        expires_at: token
-            .expires_in
-            .map(|value| Utc::now() + chrono::Duration::seconds(value)),
-        token_endpoint: Some(token_endpoint.to_string()),
-        client_id: Some(client_id.to_string()),
-    })
-}
-
-fn map_public_error<T: std::fmt::Debug>(err: public_api::Error<T>) -> anyhow::Error {
-    anyhow::anyhow!(err.to_string())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use runmat_server_client::auth::{resolve_project_id, RemoteConfig};
+    use std::env;
     use tempfile::tempdir;
+    use uuid::Uuid;
 
     #[test]
     fn remote_config_roundtrip() {
@@ -1750,27 +1198,5 @@ mod tests {
         let resolved = resolve_project_id(&config, None).expect("resolve");
         assert_eq!(resolved, project_id);
         env::remove_var("RUNMAT_PROJECT_ID");
-    }
-
-    #[test]
-    fn pkce_is_added_to_authorize_url() {
-        let pkce = generate_pkce();
-        let url = "https://auth.example/authorize?client_id=abc&redirect_uri=http%3A%2F%2F127.0.0.1%3A7777%2Fcallback&response_type=code";
-        let (updated, state) = apply_pkce_to_authorize_url(url, &pkce).expect("apply pkce");
-        let has_challenge = updated
-            .query_pairs()
-            .any(|(key, _)| key == "code_challenge");
-        let has_method = updated
-            .query_pairs()
-            .any(|(key, _)| key == "code_challenge_method");
-        let scope = updated
-            .query_pairs()
-            .find(|(key, _)| key == "scope")
-            .map(|(_, value)| value.to_string())
-            .unwrap_or_default();
-        assert!(has_challenge);
-        assert!(has_method);
-        assert!(scope.contains("offline_access"));
-        assert!(!state.is_empty());
     }
 }

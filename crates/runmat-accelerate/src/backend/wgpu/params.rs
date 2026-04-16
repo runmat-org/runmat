@@ -151,6 +151,202 @@ pub struct DiffParams {
     pub _pad: u32,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FftInitParams {
+    pub len: u32,
+    pub offset: u32,
+    pub total: u32,
+    pub target_len: u32,
+    pub inner_stride: u32,
+    pub current_len: u32,
+    pub copy_len: u32,
+    pub input_complex: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FftStageParams {
+    pub len: u32,
+    pub offset: u32,
+    pub total: u32,
+    pub target_len: u32,
+    pub inner_stride: u32,
+    pub stage_span: u32,
+    pub stage_half: u32,
+    pub twiddle_step: u32,
+    pub inverse: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub _pad2: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FftReorderParams {
+    pub len: u32,
+    pub offset: u32,
+    pub total: u32,
+    pub target_len: u32,
+    pub inner_stride: u32,
+    pub log2_len: u32,
+    pub inverse: u32,
+    pub _pad0: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FftStage3Params {
+    pub len: u32,
+    pub offset: u32,
+    pub total: u32,
+    pub target_len: u32,
+    pub inner_stride: u32,
+    pub stage_span: u32,
+    pub stage_third: u32,
+    pub twiddle_step: u32,
+    pub inverse: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub _pad2: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FftReorder3Params {
+    pub len: u32,
+    pub offset: u32,
+    pub total: u32,
+    pub target_len: u32,
+    pub inner_stride: u32,
+    pub digits: u32,
+    pub inverse: u32,
+    pub _pad0: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FftStage5Params {
+    pub len: u32,
+    pub offset: u32,
+    pub total: u32,
+    pub target_len: u32,
+    pub inner_stride: u32,
+    pub stage_span: u32,
+    pub stage_fifth: u32,
+    pub twiddle_step: u32,
+    pub inverse: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub _pad2: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FftReorder5Params {
+    pub len: u32,
+    pub offset: u32,
+    pub total: u32,
+    pub target_len: u32,
+    pub inner_stride: u32,
+    pub digits: u32,
+    pub inverse: u32,
+    pub _pad0: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FftReorderMixedParams {
+    pub len: u32,
+    pub offset: u32,
+    pub total: u32,
+    pub target_len: u32,
+    pub inner_stride: u32,
+    pub stage_count: u32,
+    pub inverse: u32,
+    pub _pad0: u32,
+    pub radices: [u32; 16],
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FftBluesteinPrepParams {
+    pub len: u32,
+    pub offset: u32,
+    pub total: u32,
+    pub target_len: u32,
+    pub inner_stride: u32,
+    pub current_len: u32,
+    pub copy_len: u32,
+    pub input_complex: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FftBluesteinKernelParams {
+    pub len: u32,
+    pub offset: u32,
+    pub total: u32,
+    pub target_len: u32,
+    pub m_len: u32,
+    pub inverse: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FftPointwiseBroadcastParams {
+    pub len: u32,
+    pub offset: u32,
+    pub total: u32,
+    pub m_len: u32,
+    pub inner_stride: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub _pad2: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FftBluesteinFinalizeParams {
+    pub len: u32,
+    pub offset: u32,
+    pub total: u32,
+    pub target_len: u32,
+    pub m_len: u32,
+    pub inner_stride: u32,
+    pub inverse: u32,
+    pub _pad0: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FftDirectParams {
+    pub len: u32,
+    pub offset: u32,
+    pub total: u32,
+    pub target_len: u32,
+    pub inner_stride: u32,
+    pub current_len: u32,
+    pub copy_len: u32,
+    pub input_complex: u32,
+    pub inverse: u32,
+    pub phase_scale: f32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub _pad2: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct FftExtractRealParams {
+    pub len: u32,
+    pub offset: u32,
+    pub total: u32,
+    pub _pad0: u32,
+}
+
 pub const FILTER_MAX_RANK: usize = PERMUTE_MAX_RANK;
 
 #[repr(C)]
@@ -627,6 +823,43 @@ pub struct LinspaceParamsF32 {
     pub chunk: u32,
     pub offset: u32,
     pub _pad1: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct WindowParams {
+    pub len: u32,
+    pub total: u32,
+    pub chunk: u32,
+    pub offset: u32,
+    pub kind: u32,
+    pub _pad0: u32,
+    pub _pad1: u32,
+    pub _pad2: u32,
+}
+
+pub type WindowParamsF64 = WindowParams;
+pub type WindowParamsF32 = WindowParams;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct PeaksParams {
+    pub n: u32,
+    pub total: u32,
+    pub chunk: u32,
+    pub offset: u32,
+}
+
+pub type PeaksParamsF64 = PeaksParams;
+pub type PeaksParamsF32 = PeaksParams;
+
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct PeaksXYParams {
+    pub total: u32,
+    pub chunk: u32,
+    pub offset: u32,
+    pub _pad: u32,
 }
 
 #[repr(C)]
