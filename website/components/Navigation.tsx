@@ -39,7 +39,7 @@ export default function Navigation() {
 
   return (
     <header className="sticky top-0 z-50 w-full border-b border-border bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-      <div className="container mx-auto flex h-9 items-center justify-between px-4 md:px-6">
+      <div className="container mx-auto flex items-center justify-between px-4 md:px-6">
         <div className="mr-4 hidden md:flex">
           <Link href="/" className="mr-6 flex items-center">
             <Image
@@ -230,12 +230,12 @@ export default function Navigation() {
           </div>
 
           {/* Desktop navigation */}
-          <nav className="hidden md:flex items-center gap-0">
+          <nav className="hidden md:flex items-center space-x-2">
             <Link
               href="https://github.com/runmat-org/runmat"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center justify-center h-9 px-2 text-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+              className="inline-flex items-center justify-center h-11 px-3 text-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
             >
               <SiGithub className="h-4 w-4" />
               <span className="sr-only">GitHub</span>
@@ -243,20 +243,20 @@ export default function Navigation() {
             <ThemeToggle />
             <Link
               href="/download"
-              className="inline-flex items-center gap-1.5 h-9 px-3 text-sm text-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+              className="inline-flex items-center gap-1.5 h-11 px-4 text-sm text-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
             >
               <Download className="h-4 w-4" />
               Download
             </Link>
             <Link
               href="/o/"
-              className="inline-flex items-center justify-center h-9 px-4 text-sm font-medium whitespace-nowrap border border-border text-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+              className="inline-flex items-center justify-center h-11 px-5 text-sm font-medium whitespace-nowrap border border-border text-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
             >
               Sign In
             </Link>
             <Link
               href="/sandbox"
-              className="inline-flex items-center justify-center h-9 px-5 text-sm font-semibold whitespace-nowrap bg-[hsl(var(--brand))] hover:bg-[hsl(var(--brand))]/90 text-white transition-colors"
+              className="inline-flex items-center justify-center h-11 px-6 text-sm font-semibold whitespace-nowrap bg-[hsl(var(--brand))] hover:bg-[hsl(var(--brand))]/90 text-white transition-colors"
               onClick={handleTryInBrowserClick}
               target="_blank"
               rel="noopener noreferrer"

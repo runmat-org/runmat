@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 
 import { Card, CardContent } from "@/components/ui/card";
 import { ContentCard } from "@/components/content-card";
+import { shouldShowImage } from "@/lib/thumbnail-config";
 import {
   getResourcesByType,
   resourceTypeLabel,
@@ -51,7 +52,7 @@ export default async function ResourcesByTypePage({ params }: { params: Promise<
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-16 md:px-6 md:py-24 space-y-10">
         <div className="mx-auto max-w-[58rem] text-center">
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl md:text-4xl">
+          <h1 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
             {label}
           </h1>
         </div>
@@ -64,18 +65,21 @@ export default async function ResourcesByTypePage({ params }: { params: Promise<
           </Card>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {items.map((item, i) => (
-              <ContentCard
-                key={item.id}
-                href={item.href ?? "#"}
-                title={item.title}
-                image={item.image}
-                imageAlt={item.imageAlt}
-                excerpt={item.description}
-                ctaLabel="View"
-                index={i}
-              />
-            ))}
+            {items.map((item, i) => {
+              const useImg = shouldShowImage(item.slug);
+              return (
+                <ContentCard
+                  key={item.id}
+                  href={item.href ?? "#"}
+                  title={item.title}
+                  image={useImg ? item.image : undefined}
+                  imageAlt={useImg ? item.imageAlt : undefined}
+                  excerpt={item.description}
+                  ctaLabel="View"
+                  index={i}
+                />
+              );
+            })}
           </div>
         )}
       </div>

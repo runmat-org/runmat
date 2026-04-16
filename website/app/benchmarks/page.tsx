@@ -34,8 +34,6 @@ export default function BenchmarksPage() {
               key={encodeURIComponent(benchmark.slug)}
               href={`/benchmarks/${encodeURIComponent(benchmark.slug)}`}
               title={benchmark.title}
-              image={benchmark.imageUrl}
-              imageAlt={benchmark.title}
               excerpt={benchmark.summary}
               ctaLabel="View Benchmark"
               index={i}

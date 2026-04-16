@@ -4,6 +4,7 @@ import { ArrowRight, BookOpen, Newspaper, Sparkles } from "lucide-react";
 
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ContentCard } from "@/components/content-card";
+import { shouldShowImage } from "@/lib/thumbnail-config";
 import {
   getDisplayResourceTypes,
   getFeaturedResources,
@@ -50,7 +51,7 @@ export default function ResourcesPage() {
       <div className="container mx-auto px-4 py-16 md:px-6 md:py-24 space-y-12">
         {/* Hero */}
         <div className="mx-auto max-w-[58rem] text-center">
-          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl md:text-4xl">
+          <h1 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
             Resource Hub
           </h1>
         </div>
@@ -80,19 +81,22 @@ export default function ResourcesPage() {
           </div>
           {featured.length ? (
             <div className="grid gap-6 lg:grid-cols-3">
-              {featured.map((item, i) => (
-                <ContentCard
-                  key={item.id}
-                  href={item.href ?? "#"}
-                  title={item.title}
-                  image={item.image}
-                  imageAlt={item.imageAlt}
-                  typeBadge={{ label: resourceTypeLabel(item.type) }}
-                  excerpt={item.description}
-                  ctaLabel="Read"
-                  index={i}
-                />
-              ))}
+              {featured.map((item, i) => {
+                const useImg = shouldShowImage(item.slug);
+                return (
+                  <ContentCard
+                    key={item.id}
+                    href={item.href ?? "#"}
+                    title={item.title}
+                    image={useImg ? item.image : undefined}
+                    imageAlt={useImg ? item.imageAlt : undefined}
+                    typeBadge={{ label: resourceTypeLabel(item.type) }}
+                    excerpt={item.description}
+                    ctaLabel="Read"
+                    index={i}
+                  />
+                );
+              })}
             </div>
           ) : (
             <EmptyState />
@@ -106,19 +110,22 @@ export default function ResourcesPage() {
           </div>
           {latest.length ? (
             <div className="grid gap-4 lg:grid-cols-3 sm:grid-cols-2">
-              {latest.map((item, i) => (
-                <ContentCard
-                  key={item.id}
-                  href={item.href ?? "#"}
-                  title={item.title}
-                  image={item.image}
-                  imageAlt={item.imageAlt}
-                  typeBadge={{ label: resourceTypeLabel(item.type) }}
-                  excerpt={item.description}
-                  ctaLabel="View"
-                  index={i + featured.length}
-                />
-              ))}
+              {latest.map((item, i) => {
+                const useImg = shouldShowImage(item.slug);
+                return (
+                  <ContentCard
+                    key={item.id}
+                    href={item.href ?? "#"}
+                    title={item.title}
+                    image={useImg ? item.image : undefined}
+                    imageAlt={useImg ? item.imageAlt : undefined}
+                    typeBadge={{ label: resourceTypeLabel(item.type) }}
+                    excerpt={item.description}
+                    ctaLabel="View"
+                    index={i + featured.length}
+                  />
+                );
+              })}
             </div>
           ) : (
             <EmptyState />
