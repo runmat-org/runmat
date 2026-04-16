@@ -807,15 +807,15 @@ pub(crate) mod tests {
     #[test]
     fn extractBetween_char_array_rows() {
         let chars = CharArray::new(
-            "GPUAccelerateIgnition".chars().collect(),
+            "GPUAccelerateVM".chars().collect(),
             1,
-            "GPUAccelerateIgnition".len(),
+            "GPUAccelerateVM".len(),
         )
         .unwrap();
         let result = extract_between_builtin(
             Value::CharArray(chars),
             Value::String("GPU".into()),
-            Value::String("tion".into()),
+            Value::String("VM".into()),
             Vec::new(),
         )
         .expect("extractBetween");
@@ -823,7 +823,7 @@ pub(crate) mod tests {
             Value::CharArray(out) => {
                 assert_eq!(out.rows, 1);
                 let text: String = out.data.iter().collect();
-                assert_eq!(text.trim_end(), "AccelerateIgni");
+                assert_eq!(text.trim_end(), "Accelerate");
             }
             other => panic!("expected char array, got {other:?}"),
         }

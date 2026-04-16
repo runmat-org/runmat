@@ -17,7 +17,7 @@ pub struct WindowConfig {
 impl Default for WindowConfig {
     fn default() -> Self {
         Self {
-            title: "RunMat - Interactive Visualization | Powered by Dystr".to_string(),
+            title: "RunMat Plot".to_string(),
             width: 1200,
             height: 800,
             resizable: true,

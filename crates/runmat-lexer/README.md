@@ -109,4 +109,4 @@ All lexer tests pass when running the crate tests on their own.
 ## Crate integration
 
 - This crate only produces tokens; it does not attempt to validate grammar.
-- Downstream crates (`runmat-parser`, `runmat-hir`, `runmat-ignition`, `runmat-turbine`) are responsible for structure and semantics.
+- Downstream crates (`runmat-parser`, `runmat-hir`, `runmat-vm`, `runmat-turbine`) are responsible for structure and semantics.

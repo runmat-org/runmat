@@ -389,7 +389,7 @@ fn test_repl_function_definition_and_call_same_statement() {
             "Function definition and call should succeed"
         );
 
-        // The REPL now properly uses the shared Ignition interpreter with function support
+        // The REPL now properly uses the shared VM interpreter with function support
         let exec_result = result.unwrap();
         if let Some(error) = &exec_result.error {
             panic!("Function call failed with error: {error}");

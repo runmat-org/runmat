@@ -26,7 +26,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::structs::core::setfield::tests",
-    "integration": "runmat_ignition::tests::functions::member_get_set_and_method_call_skeleton"
+    "integration": "runmat-vm/tests/functions.rs::member_get_set_and_method_call_skeleton"
   },
   "description": "`S = setfield(S, field, value)` returns a copy of the struct (or object) with `field` assigned to `value`. Additional field names and index cells let you update nested structures, struct arrays, and array elements contained within fields.",
   "behaviors": [

@@ -75,7 +75,7 @@ This installs the subscriber globally. `LogTracer` is initialized first so any `
 Environment controls
 --------------------
 - `RUST_LOG` / `RUNMAT_LOG`: standard `tracing_subscriber::EnvFilter` syntax.
-  - Example: `RUST_LOG=info,runmat_ignition=debug,runmat_accelerate=trace`
+  - Example: `RUST_LOG=info,runmat_vm=debug,runmat_accelerate=trace`
 - OTLP (optional, behind feature flags):
   - `RUNMAT_OTEL_EXPORT=1` (enable)
   - `RUNMAT_OTEL_ENDPOINT=<http(s) collector endpoint>`

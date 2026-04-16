@@ -25,13 +25,13 @@ use runmat_gc::{
     gc_allocate, gc_collect_major, gc_collect_minor, gc_get_config, gc_stats, GcConfig,
 };
 use runmat_hir::LoweringContext;
-use runmat_ignition::instr::Instr;
 use runmat_kernel::{ConnectionInfo, KernelConfig, KernelServer};
 use runmat_parser::ParserOptions;
 use runmat_runtime::build_runtime_error;
 use runmat_snapshot::presets::SnapshotPreset;
 use runmat_snapshot::{SnapshotBuilder, SnapshotConfig, SnapshotLoader};
 use runmat_time::Instant;
+use runmat_vm::instr::Instr;
 use std::collections::HashMap;
 use std::fmt::Write as FmtWrite;
 use std::fs;
@@ -170,8 +170,7 @@ fn format_diagnostic(
     version = env!("CARGO_PKG_VERSION"),
     about = "High-performance MATLAB/Octave code runtime",
     long_about = r#"
-RunMat is a modern, high-performance runtime for MATLAB/Octave code built 
-by Dystr (https://dystr.com).
+RunMat is a modern, high-performance runtime for MATLAB/Octave.
 
 It is built in Rust, and features a V8-inspired tiered execution model with a 
 baseline interpreter feeding an optimizing JIT compiler built on Cranelift.
@@ -1522,10 +1521,7 @@ async fn execute_repl(config: &RunMatConfig) -> Result<()> {
         return Ok(());
     }
 
-    println!(
-        "RunMat v{} by Dystr (https://dystr.com)",
-        env!("CARGO_PKG_VERSION")
-    );
+    println!("RunMat v{}", env!("CARGO_PKG_VERSION"));
     println!("Fast, free, modern MATLAB runtime with JIT compilation and GC");
     println!();
 
@@ -1988,7 +1984,7 @@ fn emit_bytecode(source: &str, config: &RunMatConfig) -> Result<String> {
         .map_err(|err| anyhow::anyhow!(format!("Parse error: {err:?}")))?;
     let lowering = runmat_hir::lower(&ast, &LoweringContext::empty())
         .map_err(|err| anyhow::anyhow!(format!("Lowering error: {err:?}")))?;
-    let mut bytecode = runmat_ignition::compile(&lowering.hir, &HashMap::new())
+    let mut bytecode = runmat_vm::compile(&lowering.hir, &HashMap::new())
         .map_err(|err| anyhow::anyhow!(format!("Compile error: {err:?}")))?;
     bytecode.var_names = lowering
         .var_names
@@ -2010,7 +2006,7 @@ fn write_bytecode_output(path: &PathBuf, output: &str) -> Result<()> {
     Ok(())
 }
 
-fn disassemble_bytecode(bytecode: &runmat_ignition::Bytecode) -> String {
+fn disassemble_bytecode(bytecode: &runmat_vm::Bytecode) -> String {
     let mut out = String::new();
     if !bytecode.var_names.is_empty() {
         let mut entries: Vec<_> = bytecode.var_names.iter().collect();

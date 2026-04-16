@@ -236,7 +236,7 @@ To read more about RunMat Fusion, see [Introduction to RunMat GPU/Fusion](/docs/
 
 RunMat also invests heavily in the CPU story:
 
-- A fast-start interpreter tier (Ignition).
+- A fast-start VM interpreter tier.
 - A JIT compiler tier (Turbine/Cranelift) for hot paths.
 - A generational garbage collector (GC) tuned for numeric workloads.
 
