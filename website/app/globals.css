@@ -242,14 +242,7 @@
     ry: 8px;
   }
 
-.gradient-brand {
-    color: hsl(var(--brand));
-    display: inline-block;
-    padding-bottom: 0.1em;
-    line-height: 1.2;
-  }
-
-  .brand-text {
+.brand-text {
     color: hsl(var(--brand));
   }
 

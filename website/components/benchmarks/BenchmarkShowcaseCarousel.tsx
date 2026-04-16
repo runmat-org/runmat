@@ -50,7 +50,7 @@ export function BenchmarkShowcaseCarousel({
               )}
               {activeSlide.headlineText && (
                 <p className="font-semibold text-foreground text-[clamp(1rem,2.6vw,1.35rem)]">
-                  <span className="gradient-brand font-semibold">
+                  <span className="text-[hsl(var(--brand))] font-semibold">
                     {activeSlide.headlineText}
                   </span>
                 </p>

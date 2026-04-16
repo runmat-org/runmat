@@ -91,7 +91,7 @@ export default function BenchmarkTicker({ slides, activeIndex, onSelect }: Bench
             <p
               className={cn(
                 "font-semibold leading-tight transition-colors duration-200",
-                isActive ? "text-2xl gradient-brand" : "text-lg text-muted-foreground"
+                isActive ? "text-2xl text-[hsl(var(--brand))]" : "text-lg text-muted-foreground"
               )}
             >
               {slide.heroLabel}
