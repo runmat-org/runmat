@@ -18,7 +18,7 @@ export default function DocsPage() {
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-16 md:px-6 md:py-6">
         <div className="mx-auto max-w-[58rem] text-center">
-          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
+          <h1 className="text-2xl font-bold tracking-tight sm:text-3xl md:text-4xl">
             RunMat Documentation
           </h1>
           <p className="mt-6 text-base text-muted-foreground sm:text-lg">
@@ -29,7 +29,7 @@ export default function DocsPage() {
         <div className="mt-16 grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {/* Getting Started */}
           <Link href="/docs/getting-started" className="block">
-            <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
+            <Card className="group relative overflow-hidden transition-colors hover:bg-muted cursor-pointer h-full">
               <CardHeader>
                 <div className="flex items-center gap-2">
                   <BookOpen className="h-6 w-6 text-primary" />
@@ -49,7 +49,7 @@ export default function DocsPage() {
 
           {/* How It Works */}
           <Link href="/docs/how-it-works" className="block">
-            <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
+            <Card className="group relative overflow-hidden transition-colors hover:bg-muted cursor-pointer h-full">
               <CardHeader>
                 <div className="flex items-center gap-2">
                   <Cpu className="h-6 w-6 text-primary" />
@@ -69,7 +69,7 @@ export default function DocsPage() {
 
           {/* CLI Reference (from repo docs) */}
           <Link href="/docs/cli" className="block">
-            <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
+            <Card className="group relative overflow-hidden transition-colors hover:bg-muted cursor-pointer h-full">
               <CardHeader>
                 <div className="flex items-center gap-2">
                   <Terminal className="h-6 w-6 text-primary" />
@@ -89,7 +89,7 @@ export default function DocsPage() {
 
           {/* Configuration (from repo docs) */}
           <Link href="/docs/configuration" className="block">
-            <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
+            <Card className="group relative overflow-hidden transition-colors hover:bg-muted cursor-pointer h-full">
               <CardHeader>
                 <div className="flex items-center gap-2">
                   <Settings className="h-6 w-6 text-primary" />
@@ -109,7 +109,7 @@ export default function DocsPage() {
 
           {/* Built-in Functions */}
           <Link href="/docs/matlab-function-reference" className="block">
-            <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
+            <Card className="group relative overflow-hidden transition-colors hover:bg-muted cursor-pointer h-full">
               <CardHeader>
                 <div className="flex items-center gap-2">
                   <Code className="h-6 w-6 text-primary" />
@@ -129,7 +129,7 @@ export default function DocsPage() {
 
           {/* Architecture (from repo docs) */}
           <Link href="/docs/architecture" className="block">
-            <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
+            <Card className="group relative overflow-hidden transition-colors hover:bg-muted cursor-pointer h-full">
               <CardHeader>
                 <div className="flex items-center gap-2">
                   <GitBranch className="h-6 w-6 text-primary" />
@@ -149,7 +149,7 @@ export default function DocsPage() {
 
           {/* Fusion Guide */}
           <Link href="/docs/fusion-guide" className="block">
-            <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
+            <Card className="group relative overflow-hidden transition-colors hover:bg-muted cursor-pointer h-full">
               <CardHeader>
                 <div className="flex items-center gap-2">
                   <Zap className="h-6 w-6 text-primary" />
@@ -169,7 +169,7 @@ export default function DocsPage() {
 
           {/* Roadmap */}
           <Link href="/docs/roadmap" className="block">
-            <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
+            <Card className="group relative overflow-hidden transition-colors hover:bg-muted cursor-pointer h-full">
             <CardHeader>
               <div className="flex items-center gap-2">
                 <Zap className="h-6 w-6 text-primary" />
@@ -189,7 +189,7 @@ export default function DocsPage() {
 
           {/* License */}
           <Link href="/license" className="block">
-            <Card className="group relative overflow-hidden transition-colors hover:bg-muted/50 cursor-pointer h-full">
+            <Card className="group relative overflow-hidden transition-colors hover:bg-muted cursor-pointer h-full">
               <CardHeader>
                 <div className="flex items-center gap-2">
                   <FileText className="h-6 w-6 text-primary" />
@@ -209,7 +209,7 @@ export default function DocsPage() {
         </div>
 
         {/* Quick Links */}
-        <div className="mt-16 rounded-lg border bg-muted/50 p-6">
+        <div className="mt-16 rounded-lg border p-6">
           <h2 className="mb-4 text-3xl font-semibold sm:text-4xl md:text-5xl">Quick Links</h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <Button variant="outline" size="default" asChild>

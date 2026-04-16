@@ -11,6 +11,7 @@ import { curveLinear } from "@visx/curve";
 import { Circle } from "@visx/shape";
 import { Text } from "@visx/text";
 
+import { useTheme } from "next-themes";
 import type { BenchmarkLineChartData, BenchmarkLinePoint } from "@/lib/marketing-benchmarks";
 import { formatNumber } from "@/lib/number-format";
 
@@ -19,10 +20,21 @@ interface BenchmarkLineChartProps {
   height?: number;
 }
 
-const SERIES_COLORS = ["#7dd3fc", "#f1f5f9", "#a5b4fc", "#f472b6"];
+const SERIES_COLORS_DARK = ["#7dd3fc", "#f1f5f9", "#a5b4fc", "#f472b6"];
+const SERIES_COLORS_LIGHT = ["#2563eb", "#374151", "#6366f1", "#db2777"];
 
 export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartProps) {
   const gradientId = useId();
+  const { resolvedTheme } = useTheme();
+  const isDark = resolvedTheme === "dark";
+  const SERIES_COLORS = isDark ? SERIES_COLORS_DARK : SERIES_COLORS_LIGHT;
+  const fg = isDark ? "rgba(255,255,255,0.9)" : "rgba(0,0,0,0.8)";
+  const fgMuted = isDark ? "rgba(255,255,255,0.6)" : "rgba(0,0,0,0.5)";
+  const gridStroke = isDark ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)";
+  const axisStroke = isDark ? "rgba(255,255,255,0.25)" : "rgba(0,0,0,0.4)";
+  const dotFill = isDark ? "#f8fafc" : "#1e293b";
+  const nonHighlightStroke = isDark ? "rgba(255,255,255,0.65)" : "rgba(0,0,0,0.5)";
+  const dotNonHighlight = isDark ? "rgba(255,255,255,0.7)" : "rgba(0,0,0,0.5)";
   const [ref, bounds] = useMeasure();
   const width = bounds.width;
   const isCompact = width > 0 && width < 520;
@@ -120,10 +132,10 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
                     return (
                       <div
                         key={series.impl}
-                        className={`flex items-center gap-2 text-white/80 ${series.impl === data.highlightImpl ? "font-semibold text-white" : ""}`}
+                        className={`flex items-center gap-2 text-foreground/80 ${series.impl === data.highlightImpl ? "font-semibold text-foreground" : ""}`}
                       >
                         <span className="inline-block w-8 shrink-0" style={lineStyle} />
-                        <span className={series.impl === data.highlightImpl ? "text-white font-semibold" : undefined}>
+                        <span className={series.impl === data.highlightImpl ? "text-foreground font-semibold" : undefined}>
                           {series.label}
                         </span>
                       </div>
@@ -134,7 +146,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
             <GridRows
               scale={yScale}
               width={innerWidth}
-              stroke="rgba(255,255,255,0.08)"
+              stroke={gridStroke}
               pointerEvents="none"
                 tickValues={yScale.ticks(3)}
               />
@@ -143,7 +155,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
                 series.impl === data.baselineImpl ? 1 : point.speedup ?? 0;
               const color =
                 series.impl === data.highlightImpl ? `url(#${gradientId})` : SERIES_COLORS[idx % SERIES_COLORS.length];
-              const strokeColor = series.impl === data.highlightImpl ? "#a855f7" : "rgba(255,255,255,0.65)";
+              const strokeColor = series.impl === data.highlightImpl ? "#a855f7" : nonHighlightStroke;
 
               return (
                 <Group key={series.impl}>
@@ -182,7 +194,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
                       cx={xScale(point.param)}
                       cy={yScale(pointValue(point))}
                       r={series.impl === data.highlightImpl ? 5 : 4}
-                      fill={series.impl === data.highlightImpl ? "#f8fafc" : "rgba(255,255,255,0.7)"}
+                      fill={series.impl === data.highlightImpl ? dotFill : dotNonHighlight}
                       stroke={series.impl === data.highlightImpl ? "#a855f7" : "transparent"}
                       strokeWidth={2}
                       opacity={series.impl === data.highlightImpl ? 1 : 0.75}
@@ -194,12 +206,12 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
 
             <AxisLeft
               scale={yScale}
-              tickStroke="rgba(255,255,255,0.25)"
-              stroke="rgba(255,255,255,0.25)"
+              tickStroke={axisStroke}
+              stroke={axisStroke}
               numTicks={3}
                 tickFormat={(value) => `${Number(value).toFixed(0)}×`}
               tickLabelProps={() => ({
-                fill: "rgba(255,255,255,0.95)",
+                fill: fg,
                 fontSize: isCompact ? 12 : 14,
                 dx: isCompact ? -24 : -35,
                 dy: 5,
@@ -209,13 +221,13 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
             <AxisBottom
               top={innerHeight}
               scale={xScale}
-              tickStroke="rgba(255,255,255,0.2)"
-              stroke="rgba(255,255,255,0.2)"
+              tickStroke={axisStroke}
+              stroke={axisStroke}
                 numTicks={xTickValues ? undefined : isCompact ? 4 : 5}
                 tickValues={xTickValues}
               tickFormat={(value) => formatNumber(Number(value))}
               tickLabelProps={() => ({
-                fill: "rgba(255,255,255,0.9)",
+                fill: fg,
                 fontSize: isCompact ? 12 : 14,
                 dy: isCompact ? 4 : 5,
                 dx: isCompact ? -6 : -20,
@@ -230,7 +242,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
                 y={isCompact ? -44 : -50}
               transform="rotate(-90)"
               textAnchor="middle"
-                fill="rgba(255,255,255,0.9)"
+                fill={fg}
                 fontSize={isCompact ? 12 : 14}
             >
                 x faster than NumPy
@@ -239,7 +251,7 @@ export function BenchmarkLineChart({ data, height = 320 }: BenchmarkLineChartPro
               x={innerWidth / 2}
                 y={innerHeight + (isCompact ? 54 : 60)}
               textAnchor="middle"
-                fill="rgba(255,255,255,0.9)"
+                fill={fg}
                 fontSize={isCompact ? 12 : 14}
             >
               {data.paramLabel ?? data.paramKey}

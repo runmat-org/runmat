@@ -13,7 +13,7 @@ plot(a, b);`;
 export function BrowserTabContent() {
   return (
     <div className="space-y-6">
-      <p className="text-muted-foreground">
+      <p className="text-foreground">
         RunMat in the browser gives you a full IDE—editor, file explorer, console, and live plots—all running locally. No installation. Visit{" "}
         <Link
           href="/sandbox"
@@ -31,20 +31,20 @@ export function BrowserTabContent() {
 
       <div>
         <h3 className="text-lg font-semibold mb-2 text-foreground">The interface</h3>
-        <p className="text-muted-foreground text-sm mb-2">
+        <p className="text-foreground text-sm mb-2">
           Three main areas: <strong>Sidebar</strong> (file tree, + to add files), <strong>Editor</strong> (code, Cmd/Ctrl+S to save), <strong>Runtime Panel</strong> (Run, Figures, Console, Variables). Panels are resizable.
         </p>
       </div>
 
-      <Card>
+      <Card className="bg-background">
         <CardHeader>
           <CardTitle className="flex items-center text-base">
-            <span className="bg-blue-100 dark:bg-blue-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-blue-600 mr-3">1</span>
+            <span className="bg-secondary rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-[hsl(var(--brand))] mr-3">1</span>
             Run the demo
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-muted-foreground text-sm">
+          <p className="text-foreground text-sm">
             Try this example — paste it into a new file or run it directly:
           </p>
           <div className="relative group">
@@ -61,47 +61,47 @@ export function BrowserTabContent() {
               <MatlabInlineCodeBlock code={DEMO_CODE} preClassName="rounded-md p-4 !my-0 language-matlab" />
             </div>
           </div>
-          <p className="text-muted-foreground text-sm">
+          <p className="text-foreground text-sm">
             Click the purple <strong>▶ Run demo.m</strong> button in the Runtime Panel. A Figure tab appears with the sine wave; the Variables tab shows workspace variables with types, shapes, and CPU/GPU residency.
           </p>
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="bg-background">
         <CardHeader>
           <CardTitle className="flex items-center text-base">
-            <span className="bg-orange-100 dark:bg-orange-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-orange-600 mr-3">2</span>
+            <span className="bg-orange-100 dark:bg-orange-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-orange-600 dark:text-orange-400 mr-3">2</span>
             Edit and experiment
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-muted-foreground text-sm">
+          <p className="text-foreground text-sm">
             Try changing the plot — for example, swap <code className="rounded bg-muted px-1 py-0.5">sin</code> for <code className="rounded bg-muted px-1 py-0.5">cos</code> and re-run:
           </p>
           <div className="rounded-md overflow-hidden">
             <MatlabInlineCodeBlock code={'b = cos(a);'} preClassName="rounded-md p-4 !my-0 language-matlab" />
           </div>
-          <p className="text-muted-foreground text-sm">
+          <p className="text-foreground text-sm">
             Use <strong>Ctrl+Enter</strong> (Windows/Linux) or <strong>Cmd+Enter</strong> (macOS) to run without clicking the button.
           </p>
         </CardContent>
       </Card>
 
-      <Card>
+      <Card className="bg-background">
         <CardHeader>
           <CardTitle className="flex items-center text-base">
-            <span className="bg-green-100 dark:bg-green-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-green-600 mr-3">3</span>
+            <span className="bg-green-100 dark:bg-green-900/30 rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold text-green-600 dark:text-green-400 mr-3">3</span>
             Create your own script
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <p className="text-muted-foreground text-sm">
+          <p className="text-foreground text-sm">
             Click <strong>+</strong> in the sidebar → <strong>Create file (.m)</strong> → name it (e.g. <code className="rounded bg-muted px-1 py-0.5">my_script.m</code>). The editor supports standard MATLAB syntax; large arrays get automatic GPU acceleration via WebGPU.
           </p>
         </CardContent>
       </Card>
 
-      <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-muted-foreground">
+      <div className="rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20 p-4 text-sm text-foreground">
         <strong className="text-foreground">Sandbox storage:</strong> Files live in your browser tab. No account required; your code never leaves your machine. Files are cleared when you close or refresh the tab. Sign in free for 100 MB cloud storage with automatic versioning, or use the CLI for local persistence.
       </div>
     </div>

@@ -108,26 +108,23 @@ export default function PricingPage() {
         }}
       />
       <div className="container mx-auto px-4 md:px-6">
-        <section className="w-full py-16 md:py-24 lg:py-32">
-          <div className="mx-auto max-w-3xl space-y-5 text-center">
-            <h1 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">
+        <section className="w-full pt-16 md:pt-24 lg:pt-32 pb-10 md:pb-12">
+          <div className="mx-auto max-w-3xl space-y-4 text-center">
+            <h1 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Simple, transparent pricing
             </h1>
-            <p className="mx-auto max-w-[42rem] leading-relaxed text-base text-muted-foreground sm:text-lg">
-              Free runtime, $0 cloud tier, no account required. Paid plans for teams that need more.
-            </p>
           </div>
         </section>
 
-        <section className="pb-20 md:pb-28">
+        <section className="pb-16 md:pb-24 lg:pb-32">
           <div className="grid gap-4 lg:grid-cols-3">
-            <Card className="flex h-full flex-col border border-border/60 bg-muted/40">
+            <Card className="flex h-full flex-col border border-border/60">
               <CardHeader className="space-y-3 pb-4">
                 <Badge className="w-fit bg-green-500/20 text-green-800 border-green-600/50 dark:text-green-200 dark:border-green-400/40 hover:bg-green-500/20">
                   Open Source Runtime
                 </Badge>
-                <CardTitle className="text-xl text-foreground">RunMat</CardTitle>
-                <p className="text-xs text-muted-foreground">Open-source, GPU-accelerated math runtime. MATLAB syntax, no account required.</p>
+                <CardTitle className="text-lg font-semibold text-foreground">RunMat</CardTitle>
+                <p className="text-[0.938rem] text-foreground">Open-source, GPU-accelerated math runtime. MATLAB syntax, no account required.</p>
                 <p className="text-3xl font-bold text-foreground">Free, forever</p>
               </CardHeader>
               <CardContent className="flex flex-1 min-h-0 flex-col space-y-6">
@@ -152,7 +149,7 @@ export default function PricingPage() {
                   </Button>
                   <Button
                     asChild
-                    className="w-full rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow border-0 hover:from-blue-600 hover:to-purple-700 transition-colors"
+                    className="w-full rounded-none border-0 bg-[hsl(var(--brand))] text-white transition-opacity shadow-none hover:bg-[hsl(var(--brand))]/90"
                   >
                     <Link href="/sandbox">Open Sandbox</Link>
                   </Button>
@@ -162,13 +159,13 @@ export default function PricingPage() {
 
             <CloudPricingCard />
 
-            <Card className="flex h-full flex-col border border-border/60 bg-muted/40">
+            <Card className="flex h-full flex-col border border-border/60">
               <CardHeader className="space-y-3 pb-4">
                 <Badge className="w-fit bg-amber-500/20 text-amber-800 border-amber-600/50 dark:text-amber-200 dark:border-amber-400/40 hover:bg-amber-500/20">
                   Enterprise
                 </Badge>
-                <CardTitle className="text-xl text-foreground">RunMat Enterprise</CardTitle>
-                <p className="text-xs text-muted-foreground">Everything in RunMat Cloud, plus on-prem deployment and compliance.</p>
+                <CardTitle className="text-lg font-semibold text-foreground">RunMat Enterprise</CardTitle>
+                <p className="text-[0.938rem] text-foreground">Everything in RunMat Cloud, plus on-prem deployment and compliance.</p>
                 <p className="text-3xl font-bold text-foreground">Custom</p>
                 <p className="text-sm text-muted-foreground">Self-hosted deployment for secure, air-gapped environments.</p>
               </CardHeader>
@@ -185,7 +182,7 @@ export default function PricingPage() {
                 </div>
                 <Button
                   asChild
-                  className="w-full rounded-lg bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow border-0 hover:from-blue-600 hover:to-purple-700 transition-colors"
+                  className="w-full rounded-none border-0 bg-[hsl(var(--brand))] text-white transition-opacity shadow-none hover:bg-[hsl(var(--brand))]/90"
                 >
                   <Link
                     href="/contact?type=enterprise"
@@ -204,28 +201,25 @@ export default function PricingPage() {
         <CompareProductsTable />
 
         {/* FAQ */}
-        <section className="py-16 md:py-24 lg:py-32">
-          <div className="mx-auto max-w-4xl space-y-3 text-center mb-8">
-            <h2 className="text-3xl md:text-4xl font-bold text-foreground">
+        <section className="pt-8 md:pt-12 pb-16 md:pb-24 lg:pb-32">
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-4 text-center mb-12">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl text-foreground">
               Frequently asked questions
             </h2>
-            <p className="text-lg text-muted-foreground">
-              Common questions about plans, billing, and RunMat Cloud.
-            </p>
           </div>
-          <div className="mx-auto grid max-w-5xl gap-4 md:grid-cols-2">
+          <div className="mx-auto grid max-w-5xl gap-3 md:grid-cols-2">
             {pricingFaqItems.map(item => (
               <details
                 key={item.question}
-                className="group self-start rounded-xl border border-border/60 bg-card shadow-lg"
+                className="group self-start rounded-lg border border-border/60 bg-card shadow-sm"
               >
-                <summary className="flex cursor-pointer list-none items-center justify-between px-6 py-4 text-foreground">
-                  <span className="text-lg font-medium">{item.question}</span>
-                  <span className="text-muted-foreground transition-transform duration-200 group-open:rotate-180">
+                <summary className="flex cursor-pointer list-none items-center justify-between px-4 py-2.5 text-foreground">
+                  <span className="text-xs font-medium">{item.question}</span>
+                  <span className="text-muted-foreground transition-transform duration-200 group-open:rotate-180 ml-2 shrink-0">
                     ⌄
                   </span>
                 </summary>
-                <div className="px-6 pb-4 text-lg text-muted-foreground">
+                <div className="px-4 pb-3 text-xs text-foreground leading-relaxed">
                   {item.answerContent ?? item.answer}
                 </div>
               </details>
@@ -234,7 +228,7 @@ export default function PricingPage() {
         </section>
 
         <div className="text-center pb-16">
-          <p className="text-muted-foreground">
+          <p className="text-[0.938rem] text-foreground">
             Still have questions?{" "}
             <Link href="/contact" className="underline hover:text-foreground">
               Get in touch

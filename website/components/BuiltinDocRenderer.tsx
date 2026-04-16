@@ -43,23 +43,23 @@ function renderBlock(block: BuiltinDocBlock): React.ReactNode {
       return renderHeading(block);
     case 'paragraph':
       return (
-        <p className="my-6 text-muted-foreground leading-relaxed break-words">
+        <p className="my-4 text-foreground text-[0.938rem] leading-relaxed break-words">
           {renderInlineNodes(block.content)}
         </p>
       );
     case 'list':
       return block.ordered ? (
-        <ol className="my-6 ml-6 space-y-2 list-decimal marker:text-blue-500 break-words">
+        <ol className="my-4 ml-6 space-y-1.5 list-decimal marker:text-muted-foreground break-words">
           {block.items.map((item, index) => (
-            <li key={index} className="text-muted-foreground leading-relaxed pl-2 break-words">
+            <li key={index} className="text-foreground text-[0.938rem] leading-relaxed pl-2 break-words">
               {renderInlineNodes(item)}
             </li>
           ))}
         </ol>
       ) : (
-        <ul className="my-6 ml-6 space-y-2 list-disc marker:text-blue-500 break-words">
+        <ul className="my-4 ml-6 space-y-1.5 list-disc marker:text-muted-foreground break-words">
           {block.items.map((item, index) => (
-            <li key={index} className="text-muted-foreground leading-relaxed pl-2 break-words">
+            <li key={index} className="text-foreground text-[0.938rem] leading-relaxed pl-2 break-words">
               {renderInlineNodes(item)}
             </li>
           ))}
@@ -70,26 +70,26 @@ function renderBlock(block: BuiltinDocBlock): React.ReactNode {
     case 'table':
       return (
         <div className="my-8 mx-0 overflow-x-auto max-w-full">
-          <table className="w-full min-w-full sm:min-w-[500px] border-collapse border border-border rounded-lg table-mobile-wrap">
-            <thead className="bg-muted">
-              <tr className="border-b border-border last:border-b-0">
+          <table className="w-full caption-bottom text-sm table-mobile-wrap">
+            <thead className="[&_tr]:border-b">
+              <tr className="border-b border-border transition-colors">
                 {block.headers.map((header, index) => (
                   <th
                     key={index}
-                    className="border border-border px-2 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm text-left font-semibold text-foreground"
+                    className="px-4 py-3 text-left align-middle text-sm font-medium text-muted-foreground"
                   >
                     {renderInlineNodes(header)}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody>
+            <tbody className="[&_tr:last-child]:border-0">
               {block.rows.map((row, rowIndex) => (
-                <tr key={rowIndex} className="border-b border-border last:border-b-0">
+                <tr key={rowIndex} className="border-b border-border transition-colors">
                   {row.map((cell, cellIndex) => (
                     <td
                       key={cellIndex}
-                      className="border border-border px-2 py-2 sm:px-4 sm:py-3 text-xs sm:text-sm text-muted-foreground"
+                      className="px-4 py-3 align-middle text-sm text-foreground"
                     >
                       {renderInlineNodes(cell)}
                     </td>
@@ -151,12 +151,12 @@ function renderHeading(block: Extract<BuiltinDocBlock, { type: 'heading' }>) {
   const text = inlineToPlainText(block.text).replace(/`/g, '');
   const id = block.id ?? slugifyHeading(text);
   const headingClasses: Record<number, string> = {
-    1: 'text-3xl sm:text-4xl md:text-5xl font-bold mt-12 mb-6 text-foreground first:mt-0 break-words',
-    2: 'group scroll-mt-24 text-xl sm:text-2xl md:text-3xl font-semibold mt-10 mb-5 text-foreground break-words',
-    3: 'group scroll-mt-24 text-lg sm:text-xl md:text-2xl font-semibold mt-8 mb-4 text-foreground break-words',
-    4: 'group scroll-mt-24 text-base sm:text-lg md:text-xl font-semibold mt-6 mb-3 text-foreground break-words',
-    5: 'group scroll-mt-24 text-sm sm:text-base md:text-lg font-semibold mt-5 mb-2 text-foreground break-words',
-    6: 'group scroll-mt-24 text-sm sm:text-base font-semibold mt-4 mb-2 text-foreground break-words',
+    1: 'text-xl sm:text-2xl font-bold mt-10 mb-4 text-foreground first:mt-0 break-words',
+    2: 'group scroll-mt-24 text-lg sm:text-xl font-semibold mt-8 mb-3 text-foreground break-words',
+    3: 'group scroll-mt-24 text-base sm:text-lg font-semibold mt-6 mb-2 text-foreground break-words',
+    4: 'group scroll-mt-24 text-sm sm:text-base font-semibold mt-5 mb-2 text-foreground break-words',
+    5: 'group scroll-mt-24 text-sm font-semibold mt-4 mb-1.5 text-foreground break-words',
+    6: 'group scroll-mt-24 text-sm font-semibold mt-3 mb-1.5 text-foreground break-words',
   };
 
   const Tag = (`h${block.level}` as React.ElementType);
@@ -228,7 +228,7 @@ function renderInlineNodes(nodes: BuiltinDocInlineNode[]): React.ReactNode[] {
           <a
             key={index}
             href={node.href}
-            className="text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline underline-offset-4 transition-colors"
+            className="text-[hsl(var(--brand))] hover:text-[hsl(var(--brand))]/80 underline underline-offset-4 transition-colors"
           >
             {renderInlineNodes(node.label)}
           </a>

@@ -9,14 +9,15 @@ import { Users, GitBranch, Camera, Lock, Shield, Eye, ClipboardCheck, Cpu, Monit
 import dynamic from "next/dynamic";
 import Hero from "@/components/Hero";
 import LazyVideo from "@/components/LazyVideo";
+import { SandboxCta } from "@/components/SandboxCta";
 
 const MatlabCodeCard = dynamic(() => import("@/components/MatlabCodeCard"), {
-  loading: () => <div className="w-full max-w-3xl h-[120px] rounded-3xl bg-muted/40 animate-pulse" />,
+  loading: () => <div className="w-full max-w-3xl h-[120px] rounded-lg bg-muted/40 animate-pulse" />,
 });
 
 const BenchmarkShowcaseBlock = dynamic(
   () => import("@/components/benchmarks/BenchmarkShowcaseBlock"),
-  { loading: () => <div className="w-full h-[300px] rounded-xl bg-muted/40 animate-pulse" /> },
+  { loading: () => <div className="w-full h-[300px] rounded-lg bg-muted/40 animate-pulse" /> },
 );
 
 const jsonLd = {
@@ -183,7 +184,7 @@ export const metadata: Metadata = {
 
 export default function HomePage() {
   return (
-    <div className="flex flex-col min-h-screen home-page home-page-depth">
+    <div className="flex flex-col min-h-screen home-page">
       <script
         type="application/ld+json"
         dangerouslySetInnerHTML={{
@@ -200,19 +201,19 @@ export default function HomePage() {
       <Hero />
 
       {/* Fastest to Visualize: 3D plotting */}
-      <section className="w-full py-16 md:py-24 lg:py-32 bg-muted/50">
+      <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               See your math in 3D
             </h2>
-            <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-lg">
+            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
               GPU-accelerated 2D and 3D plotting, built into the same environment as your code. Your plots are part of the same computation chain as your math. No copying data between systems, no separate plotting library.
             </p>
           </div>
           <div className="mx-auto max-w-3xl">
-            <div className="rounded-xl border border-border overflow-hidden elevated-panel">
-              <Link href="/sandbox" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-b-none rounded-t-xl overflow-hidden">
+            <div className="rounded-lg border border-border overflow-hidden elevated-panel">
+              <Link href="/sandbox" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-b-none rounded-t-lg overflow-hidden">
                 <LazyVideo
                   className="w-full h-auto"
                   muted
@@ -227,15 +228,15 @@ export default function HomePage() {
             </div>
           </div>
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center flex-wrap text-center mt-8">
-            <Link href="/blog/matlab-plotting-guide" className="text-sm text-muted-foreground hover:text-foreground underline">
+            <Link href="/blog/matlab-plotting-guide" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
               Plotting guide
             </Link>
-            <span className="hidden sm:inline text-muted-foreground">•</span>
-            <Link href="/docs/plotting" className="text-sm text-muted-foreground hover:text-foreground underline">
+            <span className="hidden sm:inline text-foreground/50">•</span>
+            <Link href="/docs/plotting" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
               Plotting documentation
             </Link>
-            <span className="hidden sm:inline text-muted-foreground">•</span>
-            <Link href="/docs/matlab-function-reference#plotting" className="text-sm text-muted-foreground hover:text-foreground underline">
+            <span className="hidden sm:inline text-foreground/50">•</span>
+            <Link href="/docs/matlab-function-reference#plotting" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
               Plotting function reference
             </Link>
           </div>
@@ -246,10 +247,10 @@ export default function HomePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Syntax you already know.
             </h2>
-            <p className="max-w-[42rem] leading-relaxed text-base text-muted-foreground sm:text-lg sm:leading-8">
+            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground sm:leading-8">
               MATLAB syntax reads like the whiteboard: one line of math, one line of code. You and your team already know it. Write the math you mean, and RunMat routes it across CPU and GPU automatically.
             </p>
           </div>
@@ -257,15 +258,15 @@ export default function HomePage() {
             <MatlabCodeCard />
           </div>
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center flex-wrap text-center mt-8">
-            <Link href="/docs/language-coverage" className="text-sm text-muted-foreground hover:text-foreground underline">
+            <Link href="/docs/language-coverage" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
               Language guide
             </Link>
-            <span className="hidden sm:inline text-muted-foreground">•</span>
-            <Link href="/docs/matlab-function-reference" className="text-sm text-muted-foreground hover:text-foreground underline">
+            <span className="hidden sm:inline text-foreground/50">•</span>
+            <Link href="/docs/matlab-function-reference" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
               Built-in function reference
             </Link>
-            <span className="hidden sm:inline text-muted-foreground">•</span>
-            <Link href="/blog/in-defense-of-matlab-whiteboard-style-code" className="text-sm text-muted-foreground hover:text-foreground underline">
+            <span className="hidden sm:inline text-foreground/50">•</span>
+            <Link href="/blog/in-defense-of-matlab-whiteboard-style-code" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
               Why whiteboard-style code still matters
             </Link>
           </div>
@@ -273,13 +274,13 @@ export default function HomePage() {
       </section>
 
       {/* Fastest to Run: fusion / GPU */}
-      <section id="benchmarks" className="w-full py-16 md:py-24 lg:py-32 bg-muted/50">
+      <section id="benchmarks" className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               The fastest runtime for your math
             </h2>
-            <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-lg sm:leading-7">
+            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground sm:leading-7">
               RunMat runs math faster because of how the runtime is engineered. Fusion merges sequential operations into fewer GPU steps; residency keeps your arrays on-device between steps. That means less memory traffic, fewer program launches, and faster scripts.
             </p>
           </div>
@@ -289,11 +290,11 @@ export default function HomePage() {
           </div>
 
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center flex-wrap text-center mt-8">
-            <Link href="/docs/accelerate/fusion-intro" className="text-sm text-muted-foreground hover:text-foreground underline">
+            <Link href="/docs/accelerate/fusion-intro" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
               How fusion works
             </Link>
-            <span className="hidden sm:inline text-muted-foreground">•</span>
-            <Link href="/benchmarks" className="text-sm text-muted-foreground hover:text-foreground underline">
+            <span className="hidden sm:inline text-foreground/50">•</span>
+            <Link href="/benchmarks" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
               See the benchmarks
             </Link>
           </div>
@@ -306,16 +307,16 @@ export default function HomePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Debug with full visibility
             </h2>
-            <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-lg">
+            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
               Debug faster by seeing everything as you write. Hover any variable to see its shape and type. Click on an intermediate value to inspect it. Dimension mismatches are flagged in the editor before you run.
             </p>
           </div>
           <div className="mx-auto max-w-3xl">
-            <div className="rounded-xl border border-border overflow-hidden elevated-panel">
-              <Link href="/sandbox" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-b-none rounded-t-xl overflow-hidden">
+            <div className="rounded-lg border border-border overflow-hidden elevated-panel">
+              <Link href="/sandbox" className="block focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 rounded-b-none rounded-t-lg overflow-hidden">
                 <LazyVideo
                   className="w-full h-auto"
                   muted
@@ -336,17 +337,17 @@ export default function HomePage() {
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Every change versioned. No git required.
             </h2>
-            <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-lg">
+            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
               Every save is a version, automatically. Per-file history and full project snapshots track every change, even on terabyte-scale datasets. Share projects with your team, no git setup, no merge conflicts.
             </p>
           </div>
           <div className="mx-auto max-w-5xl grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
             <Link
               href="/sandbox"
-              className="rounded-2xl border border-border overflow-hidden min-h-[380px] md:row-span-3 bg-muted/40 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              className="rounded-lg border border-border overflow-hidden min-h-[380px] md:row-span-3 bg-card focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
             >
               <LazyVideo
                 className="w-full h-full min-h-[380px] object-cover object-left-top"
@@ -359,34 +360,34 @@ export default function HomePage() {
                 <source src="https://web.runmatstatic.com/video/runmat-versioning.mp4" type="video/mp4" />
               </LazyVideo>
             </Link>
-            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
+            <div className="rounded-lg border border-border bg-card p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
                 <GitBranch className="h-5 w-5" />
               </span>
-              <h3 className="text-lg font-semibold text-gray-100">Automatic file history</h3>
-              <p className="text-sm text-gray-300 mt-1">Every save creates a version. Browse the timeline, restore any previous state. No commits, no staging.</p>
+              <h3 className="text-lg font-semibold text-foreground">Automatic file history</h3>
+              <p className="text-[0.938rem] text-foreground mt-1">Every save creates a version. Browse the timeline, restore any previous state. No commits, no staging.</p>
             </div>
-            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
+            <div className="rounded-lg border border-border bg-card p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
                 <Camera className="h-5 w-5" />
               </span>
-              <h3 className="text-lg font-semibold text-gray-100">Project snapshots</h3>
-              <p className="text-sm text-gray-300 mt-1">Capture your entire project in one click. Restore instantly. A clean timeline with no merge conflicts.</p>
+              <h3 className="text-lg font-semibold text-foreground">Project snapshots</h3>
+              <p className="text-[0.938rem] text-foreground mt-1">Capture your entire project in one click. Restore instantly. A clean timeline with no merge conflicts.</p>
             </div>
-            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
+            <div className="rounded-lg border border-border bg-card p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
                 <Users className="h-5 w-5" />
               </span>
-              <h3 className="text-lg font-semibold text-gray-100">Cloud project sharing</h3>
-              <p className="text-sm text-gray-300 mt-1">Share projects with colleagues instantly. No shared drives, no emailing files.</p>
+              <h3 className="text-lg font-semibold text-foreground">Cloud project sharing</h3>
+              <p className="text-[0.938rem] text-foreground mt-1">Share projects with colleagues instantly. No shared drives, no emailing files.</p>
             </div>
           </div>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link href="/docs/versioning" className="text-sm text-muted-foreground hover:text-foreground underline">
+            <Link href="/docs/versioning" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
               How versioning works
             </Link>
-            <span className="hidden sm:inline text-muted-foreground">•</span>
-            <Link href="/docs/collaboration" className="text-sm text-muted-foreground hover:text-foreground underline">
+            <span className="hidden sm:inline text-foreground/50">•</span>
+            <Link href="/docs/collaboration" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
               Collaboration and teams
             </Link>
           </div>
@@ -394,45 +395,45 @@ export default function HomePage() {
       </section>
 
       {/* Fastest to Scale: GPU portability, storage */}
-      <section className="w-full py-16 md:py-24 lg:py-32 bg-muted/50">
+      <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
           <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-4xl md:text-5xl">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Scale your math, not your toolchain
             </h2>
-            <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-lg">
+            <p className="max-w-[42rem] leading-relaxed text-[0.938rem] text-foreground">
               Same code runs on Apple, Nvidia, and ARM GPUs across macOS, Windows, and Linux. For large data, a sharded cloud filesystem handles multi-petabyte datasets with parallel reads and writes designed for NIC saturation. Delta snapshots version your datasets efficiently without duplicating terabytes.
             </p>
           </div>
           <div className="mx-auto max-w-5xl grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
-            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
+            <div className="rounded-lg border border-border bg-card p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
                 <Cpu className="h-5 w-5" />
               </span>
-              <h3 className="text-lg font-semibold text-gray-100">Any GPU</h3>
-              <p className="text-sm text-gray-300 mt-1">Metal on Mac, Vulkan on Linux and ARM, DirectX 12 on Windows. No CUDA dependency.</p>
+              <h3 className="text-lg font-semibold text-foreground">Any GPU</h3>
+              <p className="text-[0.938rem] text-foreground mt-1">Metal on Mac, Vulkan on Linux and ARM, DirectX 12 on Windows. No CUDA dependency.</p>
             </div>
-            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
+            <div className="rounded-lg border border-border bg-card p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
                 <Monitor className="h-5 w-5" />
               </span>
-              <h3 className="text-lg font-semibold text-gray-100">Any OS</h3>
-              <p className="text-sm text-gray-300 mt-1">macOS, Windows, Linux, and headless servers. Same runtime, same results.</p>
+              <h3 className="text-lg font-semibold text-foreground">Any OS</h3>
+              <p className="text-[0.938rem] text-foreground mt-1">macOS, Windows, Linux, and headless servers. Same runtime, same results.</p>
             </div>
-            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/10 to-[#0E1421] p-6">
-              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400 mb-3">
+            <div className="rounded-lg border border-border bg-card p-6">
+              <span className="inline-flex h-10 w-10 items-center justify-center rounded-lg bg-foreground/10 text-foreground mb-3">
                 <HardDrive className="h-5 w-5" />
               </span>
-              <h3 className="text-lg font-semibold text-gray-100">High-bandwidth cloud filesystem</h3>
-              <p className="text-sm text-gray-300 mt-1">Sharded storage for multi-petabyte datasets. Parallel reads and writes designed for NIC saturation. Delta snapshots for efficient dataset versioning.</p>
+              <h3 className="text-lg font-semibold text-foreground">High-bandwidth cloud filesystem</h3>
+              <p className="text-[0.938rem] text-foreground mt-1">Sharded, petabyte-scale storage with parallel I/O and delta snapshots for efficient versioning.</p>
             </div>
           </div>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Link href="#" className="text-sm text-muted-foreground hover:text-foreground underline">
+            <Link href="#" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
               Learn more about RunMat filesystem
             </Link>
-            <span className="hidden sm:inline text-muted-foreground">•</span>
-            <Link href="/contact" className="text-sm text-muted-foreground hover:text-foreground underline">
+            <span className="hidden sm:inline text-foreground/50">•</span>
+            <Link href="/contact" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
               Contact RunMat team
             </Link>
           </div>
@@ -442,23 +443,23 @@ export default function HomePage() {
       {/* Open Source Runtime */}
       <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
-          <div className="mx-auto max-w-3xl text-center">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl mb-8">
+          <div className="mx-auto max-w-2xl text-center">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl mb-8">
               Open source, MIT licensed
             </h2>
-            <Card className="border border-border/60 bg-[#0E1421] shadow-lg">
+            <Card className="border border-border bg-card">
               <CardContent className="py-8 space-y-4">
                 <Link
                   href="https://github.com/runmat-org/runmat"
                   target="_blank"
                   rel="noreferrer"
-                  className="mx-auto flex h-28 w-28 items-center justify-center rounded-full border border-border/60 bg-background/30 text-gray-400 hover:text-gray-200 transition-colors"
+                  className="mx-auto flex h-16 w-16 items-center justify-center rounded-full border border-border bg-secondary text-foreground hover:text-foreground/80 transition-opacity"
                 >
-                  <SiGithub className="h-14 w-14" />
+                  <SiGithub className="h-8 w-8" />
                 </Link>
-                <p className="text-gray-300 text-lg">
+                <p className="text-[0.938rem] text-foreground">
                   Read every line of code that runs your math. Fork it, audit it, self-host it. No vendor lock-in, no black boxes. The runtime is on{" "}
-                  <Link href="https://github.com/runmat-org/runmat" className="underline text-blue-300 hover:text-blue-200" target="_blank" rel="noreferrer">
+                  <Link href="https://github.com/runmat-org/runmat" className="underline text-[hsl(var(--brand))] hover:text-[hsl(var(--brand))]/80" target="_blank" rel="noreferrer">
                     GitHub
                   </Link>
                   {" "}and actively maintained.
@@ -470,64 +471,64 @@ export default function HomePage() {
       </section>
 
       {/* Designed for Enterprise */}
-      <section className="w-full py-16 md:py-24 lg:py-32 bg-muted/50">
+      <section className="w-full py-16 md:py-24 lg:py-32">
         <div className="container mx-auto px-4 md:px-6">
-          <div className="mx-auto max-w-4xl space-y-4 text-center">
-            <h2 className="font-heading text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
+          <div className="mx-auto flex max-w-[58rem] flex-col items-center space-y-8 text-center mb-12">
+            <h2 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
               Secure by design
             </h2>
-            <p className="text-muted-foreground text-lg">
+            <p className="max-w-[42rem] text-[0.938rem] leading-relaxed text-foreground">
               Security, compliance, and deployment options for teams that protect proprietary research and engineering data.
             </p>
           </div>
-          <div className="mx-auto mt-10 max-w-5xl">
-            <div className="rounded-2xl border border-purple-500/30 bg-gradient-to-br from-purple-500/15 via-[#0E1421] to-[#0A0F1C] p-8 shadow-lg">
+          <div className="mx-auto max-w-5xl">
+            <div className="rounded-lg border border-border bg-card p-8">
               <div className="mt-4 grid gap-6 md:grid-cols-2">
                 <div className="flex items-start gap-4">
-                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400">
+                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-foreground/10 text-foreground">
                     <Lock className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-xl font-medium text-gray-100">SSO &amp; SCIM</p>
-                    <p className="text-base text-gray-300">Integrate with your identity provider. Provision and deprovision users automatically.</p>
+                    <p className="text-xl font-medium text-foreground">SSO &amp; SCIM</p>
+                    <p className="text-[0.938rem] text-foreground">Integrate with your identity provider. Provision and deprovision users automatically.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4">
-                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400">
+                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-foreground/10 text-foreground">
                     <Shield className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-xl font-medium text-gray-100">ITAR-compliant deployment</p>
-                    <p className="text-base text-gray-300">Self-hosted, air-gapped option available for export-controlled environments.</p>
+                    <p className="text-xl font-medium text-foreground">ITAR-compliant deployment</p>
+                    <p className="text-[0.938rem] text-foreground">Self-hosted, air-gapped option available for export-controlled environments.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4">
-                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400">
+                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-foreground/10 text-foreground">
                     <Eye className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-xl font-medium text-gray-100">Open source &amp; auditable</p>
-                    <p className="text-base text-gray-300">MIT-licensed runtime. Inspect every line of code that runs your math.</p>
+                    <p className="text-xl font-medium text-foreground">Open source &amp; auditable</p>
+                    <p className="text-[0.938rem] text-foreground">MIT-licensed runtime. Inspect every line of code that runs your math.</p>
                   </div>
                 </div>
                 <div className="flex items-start gap-4">
-                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-purple-500/30 bg-purple-500/10 text-gray-400">
+                  <span className="mt-1 inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-foreground/10 text-foreground">
                     <ClipboardCheck className="h-5 w-5" />
                   </span>
                   <div>
-                    <p className="text-xl font-medium text-gray-100">SOC 2 ready</p>
-                    <p className="text-base text-gray-300">Built to SOC 2 standards. Audit planned for Q2 2026.</p>
+                    <p className="text-xl font-medium text-foreground">SOC 2 ready</p>
+                    <p className="text-[0.938rem] text-foreground">Built to SOC 2 standards. Audit planned for Q2 2026.</p>
                   </div>
                 </div>
               </div>
             </div>
           </div>
           <div className="flex flex-col sm:flex-row gap-4 justify-center mt-8">
-            <Link href="/contact" className="text-sm text-muted-foreground hover:text-foreground underline">
+            <Link href="/contact" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
               Contact RunMat
             </Link>
-            <span className="hidden sm:inline text-muted-foreground">•</span>
-            <Link href="/blog/mission-critical-math-airgap" className="text-sm text-muted-foreground hover:text-foreground underline">
+            <span className="hidden sm:inline text-foreground/50">•</span>
+            <Link href="/blog/mission-critical-math-airgap" className="text-[0.938rem] text-foreground underline hover:text-foreground/80">
               Air-gapped deployment guide
             </Link>
           </div>
@@ -536,36 +537,8 @@ export default function HomePage() {
 
       {/* Final CTA */}
       <section className="w-full py-16 md:py-24 lg:py-32">
-        <div className="container mx-auto px-4 md:px-6">
-          <Card className="mx-auto max-w-3xl border border-purple-500/30 bg-gradient-to-r from-purple-500/10 to-blue-500/10 shadow-lg">
-            <CardContent className="py-8 space-y-4 text-center">
-              <h2 className="text-3xl md:text-4xl font-bold text-foreground">
-                Try it now
-              </h2>
-              <p className="text-muted-foreground text-lg">
-                Free, instant, no sign-up. Open the sandbox and write your first script in seconds.
-              </p>
-              <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-                <Button
-                  size="lg"
-                  asChild
-                  className="h-12 px-8 text-base font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200"
-                >
-                  <Link
-                    href="/sandbox"
-                    data-ph-capture-attribute-destination="sandbox"
-                    data-ph-capture-attribute-source="home-bottom-cta"
-                    data-ph-capture-attribute-cta="launch-sandbox"
-                  >
-                    Launch the sandbox
-                  </Link>
-                </Button>
-                <Button variant="outline" size="lg" asChild className="h-12 px-8 text-base">
-                  <Link href="/pricing">View pricing</Link>
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+        <div className="container mx-auto px-4 md:px-6 max-w-3xl">
+          <SandboxCta source="home-bottom-cta" secondaryLabel="View pricing" secondaryHref="/pricing" />
         </div>
       </section>
     </div>

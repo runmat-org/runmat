@@ -443,7 +443,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
               <Link
                 key={related.slug}
                 href={`/blog/${related.slug}`}
-                className="group block h-full rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden hover:bg-muted/50 transition-colors"
+                className="group block h-full rounded-xl border bg-card text-card-foreground shadow-sm overflow-hidden hover:bg-muted transition-colors"
               >
                 <div className="relative w-full h-48">
                   {related.image ? (
@@ -455,7 +455,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
                       sizes="(max-width: 1024px) 100vw, 33vw"
                     />
                   ) : (
-                    <div className="w-full h-full bg-gradient-to-br from-slate-900 via-slate-800 to-slate-700" />
+                    <div className="h-full w-full bg-muted" />
                   )}
                 </div>
                 <div className="p-4 space-y-3">

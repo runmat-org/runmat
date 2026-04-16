@@ -27,7 +27,7 @@ export default function NewsletterCta({
             <h3 className="text-lg font-semibold">{title}</h3>
           )}
           {description && (
-            <p className="text-sm text-muted-foreground mt-1">{description}</p>
+            <p className="text-[0.938rem] text-foreground mt-1">{description}</p>
           )}
         </div>
       )}

@@ -51,12 +51,9 @@ export default async function ResourcesByTypePage({ params }: { params: Promise<
     <div className="min-h-screen bg-background">
       <div className="container mx-auto px-4 py-16 md:px-6 md:py-24 space-y-10">
         <div className="mx-auto max-w-[58rem] text-center">
-          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
+          <h1 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
             {label}
           </h1>
-          <p className="mt-6 text-base text-muted-foreground sm:text-lg">
-            Guides and walkthroughs curated for this category.
-          </p>
         </div>
 
         {items.length === 0 ? (
@@ -67,15 +64,14 @@ export default async function ResourcesByTypePage({ params }: { params: Promise<
           </Card>
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            {items.map((item) => (
+            {items.map((item, i) => (
               <ContentCard
                 key={item.id}
                 href={item.href ?? "#"}
                 title={item.title}
-                image={item.image}
-                imageAlt={item.imageAlt}
                 excerpt={item.description}
                 ctaLabel="View"
+                index={i}
               />
             ))}
           </div>
