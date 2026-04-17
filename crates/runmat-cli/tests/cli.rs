@@ -445,7 +445,8 @@ fn test_command_output_is_structured() {
     assert!(stdout.contains("Version:"));
     assert!(stdout.contains("Runtime Configuration:"));
     assert!(stdout.contains("Environment:"));
-    assert!(stdout.contains("Available Commands:"));
+    assert!(stdout.contains("Help:"));
+    assert!(stdout.contains("runmat --help"));
 }
 
 #[test]

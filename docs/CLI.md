@@ -44,7 +44,7 @@ Global options apply to all commands. Commands offer task-oriented workflows.
 
 ## Global options
 
-- `--version`, `-V`: print RunMat version and exit (use `runmat version --detailed` for component breakdown).
+- `--version`, `-V`: print RunMat version and exit (use `runmat version --detailed` for build details).
 - `--debug` (env: `RUNMAT_DEBUG`): enable debug logging.
 - `--log-level <error|warn|info|debug|trace>` (env: `RUNMAT_LOG_LEVEL`, default: `warn`).
 - `--timeout <secs>` (env: `RUNMAT_TIMEOUT`, default: `300`): execution timeout.
@@ -244,12 +244,12 @@ runmat project retention set <max-versions> [--project <project-id>]
 ```sh
 runmat version [--detailed]
 ```
-With `--detailed`, prints component breakdown (lexer, parser, interpreter, JIT,
-GC, runtime, kernel, plotting).
+With `--detailed`, prints build details including the Rust version, target triple,
+and build profile.
 
 ### info
 Show structured system information: versions, CLI/runtime config, env, GC
-status, and available commands.
+status, and pointers to the built-in help output.
 
 ```sh
 runmat info
@@ -333,17 +333,6 @@ Examples:
 runmat snapshot create -o stdlib.snapshot --compression zstd -O speed
 runmat snapshot info stdlib.snapshot
 ```
-
-### plot
-Interactive plotting window (GUI) or headless demo plot.
-
-```sh
-runmat plot [--mode <auto|gui|headless|jupyter>] [--width W] [--height H]
-```
-
-- `headless` mode generates a sample plot (`sample_plot.png`) using the static
-  backend. GUI/Jupyter options are integrated with the plotting crate and
-  environment detection; Jupyter mode will be expanded in future releases.
 
 ### config
 Configuration management helpers.
@@ -471,24 +460,8 @@ runmat snapshot create -o stdlib.snapshot
 runmat --snapshot stdlib.snapshot repl
 ```
 
-### Headless demo plot export
-```sh
-runmat plot --mode headless
-ls sample_plot.png
-```
-
-## Why this is better than MATLAB's CLI
-
-- Modern subcommand design (repl, run, kernel, snapshot, benchmark, gc, config) instead of a
-  monolithic binary with sparse flags.
-- First-class JIT and GC control with real-time stats.
-- Snapshot tooling for fast startup and reproducible deployments.
-- Built-in benchmarker with throughput/latency reporting.
-- Clean, typed configuration with YAML/JSON/TOML and clear precedence.
-- Structured, readable outputs suitable for automation and CI.
-- Built for modern environments: CI/CD, containers, headless servers without X.
-
 ## Exit codes
 
 - `0`: success
-- non-zero: validation errors, file not found, runtime errors, or command failures
+- `1`: command execution, runtime, validation, or file/config errors
+- `2`: invalid CLI usage (for example, unknown flags or malformed arguments)
