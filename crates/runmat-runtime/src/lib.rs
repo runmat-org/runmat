@@ -9,6 +9,7 @@
     clippy::too_many_arguments,
     clippy::useless_conversion
 )]
+#![cfg_attr(target_arch = "wasm32", allow(dead_code))]
 
 use crate::builtins::common::format::format_variadic;
 use runmat_builtins::Value;
@@ -100,7 +101,7 @@ pub fn make_cell_with_shape(values: Vec<Value>, shape: Vec<usize>) -> Result<Val
     {
         let ca = runmat_builtins::CellArray::new_with_shape(values, shape)
             .map_err(|e| format!("Cell creation error: {e}"))?;
-        return Ok(Value::Cell(ca));
+        Ok(Value::Cell(ca))
     }
 
     #[cfg(not(target_arch = "wasm32"))]

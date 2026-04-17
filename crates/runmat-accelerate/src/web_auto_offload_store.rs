@@ -2,8 +2,6 @@
 //!
 //! This is intentionally best-effort: failures must never prevent execution.
 
-#![cfg(target_arch = "wasm32")]
-
 use js_sys::{Object, Reflect};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
