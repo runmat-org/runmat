@@ -1,0 +1,85 @@
+{
+  "title": "gcf",
+  "category": "plotting",
+  "keywords": [
+    "gcf",
+    "current figure",
+    "figure handle",
+    "plotting"
+  ],
+  "summary": "Return the numeric handle of the current figure.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/gcf.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`gcf` reads plotting state only. It does not execute numeric GPU kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "integration": "runmat-plot/tests/renderer_tests.rs"
+  },
+  "description": "`gcf` returns the numeric handle of the figure that is currently selected for plotting operations.",
+  "behaviors": [
+    "`gcf()` returns a scalar numeric figure handle.",
+    "The value changes after commands like `figure(n)` or `figure('next')` select a different figure.",
+    "Subsequent plotting commands target the same current figure until another figure is selected."
+  ],
+  "examples": [
+    {
+      "description": "Read the current figure handle",
+      "input": "figure(2);\nf = gcf()",
+      "output": "f = 2"
+    },
+    {
+      "description": "Observe the handle change after selecting a different figure",
+      "input": "figure(1);\nf1 = gcf();\nfigure(4);\nf2 = gcf();",
+      "output": "f1 = 1\nf2 = 4"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What type of value does `gcf` return?",
+      "answer": "It returns a scalar double representing the current figure handle."
+    },
+    {
+      "question": "Does `gcf` create a plot?",
+      "answer": "No. It only reports which figure is currently selected."
+    },
+    {
+      "question": "Does `gcf` run on the GPU?",
+      "answer": "No. It only reads host-side plotting state."
+    }
+  ],
+  "links": [
+    {
+      "label": "figure",
+      "url": "./figure"
+    },
+    {
+      "label": "gca",
+      "url": "./gca"
+    },
+    {
+      "label": "clf",
+      "url": "./clf"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/gcf.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/gcf.rs"
+  },
+  "gpu_residency": "`gcf` returns a host-side numeric handle and does not interact with GPU residency.",
+  "gpu_behavior": [
+    "`gcf` performs no provider dispatch; it simply reads the current figure handle from plotting state."
+  ]
+}

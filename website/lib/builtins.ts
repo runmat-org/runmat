@@ -56,6 +56,7 @@ export type BuiltinDocJsonEncodeOption = {
 
 export type BuiltinDoc = {
   title: string;
+  aliases?: string[];
   category: string;
   keywords: string[];
   summary: string;
@@ -110,6 +111,7 @@ export function loadBuiltinDocs(): BuiltinDocEntry[] {
     const normalized: BuiltinDoc = {
       ...parsed,
       title,
+      aliases: normalizeStringArray(parsed.aliases),
       gpu_behavior: normalizeStringArray(parsed.gpu_behavior),
     };
     docs.push({ ...normalized, slug: slugFromTitle(title) });

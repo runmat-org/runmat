@@ -1,0 +1,90 @@
+{
+  "title": "cla",
+  "category": "plotting",
+  "keywords": [
+    "cla",
+    "clear axes",
+    "plotting",
+    "subplot"
+  ],
+  "summary": "Clear the contents of the current axes without clearing the whole figure.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/cla.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`cla` clears plotting state only. It does not execute numeric GPU kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 0,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "integration": "runmat-plot/tests/renderer_tests.rs"
+  },
+  "description": "`cla` clears the current axes only. This is useful when a figure contains multiple subplots and you want to clear one axes without disturbing the rest of the figure.",
+  "behaviors": [
+    "`cla()` clears the active axes.",
+    "The current subplot selection determines which axes are cleared.",
+    "Other axes in the same figure are left untouched.",
+    "`cla` resets the line-style cycle for the cleared axes so subsequent plots start from the default style sequence again."
+  ],
+  "examples": [
+    {
+      "description": "Clear only the active subplot",
+      "input": "subplot(1, 2, 1);\nplot(1:5, 1:5);\nsubplot(1, 2, 2);\nplot(1:5, [5 4 3 2 1]);\ncla();",
+      "output": "% only the second subplot is cleared"
+    },
+    {
+      "description": "Clear the current axes and plot again",
+      "input": "plot(1:5, 1:5);\ncla();\nplot(1:5, [1 2 3 4 5]);",
+      "output": "% the second plot starts on an empty axes"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is `cla` different from `clf`?",
+      "answer": "`cla` clears only the current axes, while `clf` clears the entire current figure."
+    },
+    {
+      "question": "Does `cla` affect other subplots?",
+      "answer": "No. It clears only the active axes."
+    },
+    {
+      "question": "Does `cla` run on the GPU?",
+      "answer": "No. It only mutates host-side plotting state."
+    }
+  ],
+  "links": [
+    {
+      "label": "clf",
+      "url": "./clf"
+    },
+    {
+      "label": "subplot",
+      "url": "./subplot"
+    },
+    {
+      "label": "gca",
+      "url": "./gca"
+    },
+    {
+      "label": "hold",
+      "url": "./hold"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs"
+  },
+  "gpu_residency": "`cla` only mutates plotting state and does not affect array residency.",
+  "gpu_behavior": [
+    "`cla` performs no provider dispatch; it clears the active axes from the plotting registry and renderer state."
+  ]
+}

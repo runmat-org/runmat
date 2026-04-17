@@ -1,0 +1,94 @@
+{
+  "title": "gca",
+  "category": "plotting",
+  "keywords": [
+    "gca",
+    "current axes",
+    "axes handle",
+    "plotting"
+  ],
+  "summary": "Return the handle for the current axes, or a struct describing the active axes state.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/gca.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`gca` reads plotting state only. It does not execute numeric GPU kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::gca::tests"
+  },
+  "description": "`gca` returns the encoded handle for the current axes. RunMat also supports a `'struct'` mode that returns a small struct snapshot describing the active figure, subplot grid, and selected axes index.",
+  "behaviors": [
+    "`gca()` returns a scalar numeric axes handle.",
+    "`gca('struct')` returns a struct with fields `handle`, `figure`, `rows`, `cols`, and `index`.",
+    "The current axes reflect the active subplot when `subplot` has been used.",
+    "Unsupported arguments raise `gca` plotting errors."
+  ],
+  "examples": [
+    {
+      "description": "Read the current axes handle",
+      "input": "figure(1);\nax = gca()",
+      "output": "% ax is a numeric axes handle"
+    },
+    {
+      "description": "Inspect the active subplot layout",
+      "input": "subplot(2, 2, 3);\ninfo = gca(\"struct\")",
+      "output": "info =\n  struct with fields:\n    handle\n    figure\n    rows\n    cols\n    index"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What is special about `gca('struct')`?",
+      "answer": "It is a RunMat extension that returns a struct snapshot of the active axes state instead of just the encoded numeric handle."
+    },
+    {
+      "question": "Does `gca` reflect `subplot` selection?",
+      "answer": "Yes. When a subplot is active, `gca` reports that subplot's axes handle and metadata."
+    },
+    {
+      "question": "Does `gca` run on the GPU?",
+      "answer": "No. It only reads host-side plotting state."
+    }
+  ],
+  "links": [
+    {
+      "label": "figure",
+      "url": "./figure"
+    },
+    {
+      "label": "gcf",
+      "url": "./gcf"
+    },
+    {
+      "label": "subplot",
+      "url": "./subplot"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/gca.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/gca.rs"
+  },
+  "gpu_residency": "`gca` returns host-side handles or structs and does not interact with GPU residency.",
+  "gpu_behavior": [
+    "`gca` performs no provider dispatch; it only reads the active axes state from the plotting registry."
+  ]
+}

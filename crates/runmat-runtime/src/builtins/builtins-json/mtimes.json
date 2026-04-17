@@ -1,8 +1,12 @@
 {
   "title": "mtimes",
+  "aliases": [
+    "matmul"
+  ],
   "category": "math/linalg/ops",
   "keywords": [
     "mtimes",
+    "matmul",
     "matrix multiplication",
     "linear algebra",
     "gpu"
@@ -107,6 +111,10 @@
     {
       "question": "Can `mtimes` fuse with other GPU ops?",
       "answer": "Providers may fuse GEMM with adjacent operations; otherwise fusion falls back to the standard kernels."
+    },
+    {
+      "question": "Is `matmul` a RunMat builtin name?",
+      "answer": "No. RunMat follows MATLAB here: matrix multiplication is documented as `mtimes(A, B)` and the `A * B` operator rather than a separate `matmul()` function."
     }
   ],
   "links": [

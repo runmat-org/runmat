@@ -1,0 +1,86 @@
+{
+  "title": "month",
+  "category": "datetime",
+  "keywords": [
+    "month",
+    "datetime",
+    "date component",
+    "calendar month"
+  ],
+  "summary": "Extract month numbers from datetime values.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/datetime.month.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "datetime values are host-side objects; `month` extracts the month on the CPU."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "integration": "runmat-ignition/tests/datetime.rs"
+  },
+  "description": "`month` extracts the calendar month from a datetime scalar or array and returns the result as doubles with the same shape as the input.",
+  "behaviors": [
+    "`month(t)` accepts datetime scalars and datetime arrays.",
+    "The output shape matches the input shape.",
+    "Month values use the standard 1-through-12 numbering.",
+    "Passing a non-datetime value raises a datetime-specific error."
+  ],
+  "examples": [
+    {
+      "description": "Extract the month from a scalar datetime",
+      "input": "t = datetime(2024, 4, 9, 13, 30, 0);\nm = month(t)",
+      "output": "m = 4"
+    },
+    {
+      "description": "Extract months from a datetime array",
+      "input": "t = datetime([2024 2025], [1 6], [15 20]);\nm = month(t)",
+      "output": "m =\n     1     6"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What numbering does `month` use?",
+      "answer": "It returns January as `1` through December as `12`."
+    },
+    {
+      "question": "Does `month` preserve the input shape?",
+      "answer": "Yes. The numeric output has the same size as the input datetime array."
+    },
+    {
+      "question": "Does `month` run on the GPU?",
+      "answer": "No. datetime values are host-side objects, so `month` executes on the CPU."
+    }
+  ],
+  "links": [
+    {
+      "label": "datetime",
+      "url": "./datetime"
+    },
+    {
+      "label": "year",
+      "url": "./year"
+    },
+    {
+      "label": "day",
+      "url": "./day"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/datetime/mod.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/datetime/mod.rs"
+  },
+  "gpu_residency": "No. `month` reads datetime objects on the CPU and returns ordinary host-side numeric arrays.",
+  "gpu_behavior": [
+    "`month` does not dispatch GPU kernels; it extracts the month component from CPU-side datetime objects."
+  ]
+}

@@ -30,6 +30,7 @@ export type BuiltinDoc = {
   key: string;
   title: string;
   slug: string;
+  aliases?: string[];
   category: string;
   categoryPath: string[];
   keywords: string[];
@@ -54,7 +55,7 @@ export type BuiltinDoc = {
 
 export type BuiltinManifestEntry = Pick<
   BuiltinDoc,
-  "key" | "title" | "slug" | "category" | "categoryPath" | "keywords" | "summary"
+  "key" | "title" | "slug" | "aliases" | "category" | "categoryPath" | "keywords" | "summary"
 > & {
   exampleCount: number;
 };

@@ -1,0 +1,99 @@
+{
+  "title": "figure",
+  "category": "plotting",
+  "keywords": [
+    "figure",
+    "plotting",
+    "graphics handle",
+    "window selection"
+  ],
+  "summary": "Create a new figure or select an existing figure handle.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/figure.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`figure` manages plotting state and handles. It does not execute numeric GPU kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "integration": "runmat-plot/tests/renderer_tests.rs"
+  },
+  "description": "`figure` creates or selects the active plotting figure. With no arguments it allocates a fresh figure handle and makes that figure current. Passing a positive numeric handle selects that figure, creating it if it does not already exist. Passing `'next'` is equivalent to asking for a fresh figure.",
+  "behaviors": [
+    "`figure()` creates a new figure and returns its numeric handle.",
+    "`figure(n)` selects figure `n`. If that handle does not exist yet, RunMat creates it.",
+    "`figure('next')` creates a new figure instead of selecting an existing one.",
+    "The selected figure becomes the target for subsequent plotting commands such as `plot`, `subplot`, `gca`, `clf`, and `hold`."
+  ],
+  "examples": [
+    {
+      "description": "Create a fresh figure",
+      "input": "f = figure()",
+      "output": "% f is a positive numeric figure handle"
+    },
+    {
+      "description": "Create another figure with the explicit 'next' selector",
+      "input": "f1 = figure();\nf2 = figure(\"next\")",
+      "output": "% f2 is a different figure handle from f1"
+    },
+    {
+      "description": "Select a specific figure handle",
+      "input": "figure(3);\nplot(1:5, [1 4 2 5 3]);",
+      "output": "% plotting now targets figure 3"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Does `figure(n)` require the handle to exist already?",
+      "answer": "No. RunMat selects figure `n`, creating it on demand if necessary."
+    },
+    {
+      "question": "What does `figure('next')` do?",
+      "answer": "It forces creation of a new figure rather than reusing an existing handle."
+    },
+    {
+      "question": "Does `figure` draw anything by itself?",
+      "answer": "No. It only manages the active figure selection. Plotting happens when you call builtins like `plot`, `scatter`, or `surf`."
+    }
+  ],
+  "links": [
+    {
+      "label": "gcf",
+      "url": "./gcf"
+    },
+    {
+      "label": "gca",
+      "url": "./gca"
+    },
+    {
+      "label": "clf",
+      "url": "./clf"
+    },
+    {
+      "label": "subplot",
+      "url": "./subplot"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/figure.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/figure.rs"
+  },
+  "gpu_residency": "`figure` only updates plotting state and returns a host-side numeric handle. It does not affect array residency.",
+  "gpu_behavior": [
+    "`figure` performs no provider dispatch. GPU-resident arrays passed to later plotting calls may still remain on device when the renderer supports that path."
+  ]
+}

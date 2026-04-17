@@ -1,0 +1,97 @@
+{
+  "title": "strjoin",
+  "category": "strings/transform",
+  "keywords": [
+    "strjoin",
+    "join strings",
+    "delimiter",
+    "row-wise join"
+  ],
+  "summary": "Join text across each input row using an explicit delimiter.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/strjoin.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "Text processing runs on the CPU; GPU-resident inputs are gathered before joining."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 2,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "integration": "tests/strings/string_processing.m"
+  },
+  "description": "`strjoin` joins text across each row of the input using the delimiter you provide. RunMat's current implementation accepts string scalars, string arrays, and character arrays, converts character-array rows into strings, and returns a column string array containing one joined result per input row.",
+  "behaviors": [
+    "`strjoin(str, delim)` requires an explicit delimiter argument in the current implementation.",
+    "String arrays are joined row-wise across columns, producing one output string per row.",
+    "Character arrays are first interpreted row-by-row and then joined the same way.",
+    "The return type is always a string array.",
+    "Empty inputs with zero rows or zero columns currently return an empty `0x0` string array.",
+    "Cell arrays of character vectors are not currently accepted by this implementation."
+  ],
+  "examples": [
+    {
+      "description": "Join a row vector of strings with commas",
+      "input": "labels = [\"alpha\" \"beta\" \"gamma\"];\nout = strjoin(labels, \", \")",
+      "output": "out = \"alpha, beta, gamma\""
+    },
+    {
+      "description": "Join each row of a string matrix independently",
+      "input": "names = [\"Ada\" \"Lovelace\"; \"Grace\" \"Hopper\"];\nout = strjoin(names, \" \")",
+      "output": "out = 2×1 string\n    \"Ada Lovelace\"\n    \"Grace Hopper\""
+    },
+    {
+      "description": "Join rows of a character array",
+      "input": "chars = ['ab'; 'cd'];\nout = strjoin(chars, \"-\")",
+      "output": "out = 2×1 string\n    \"a-b\"\n    \"c-d\""
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Is the delimiter optional?",
+      "answer": "Not in the current RunMat implementation. Pass `strjoin(str, delim)` explicitly."
+    },
+    {
+      "question": "Does `strjoin` join by row or by column?",
+      "answer": "It joins across columns within each row, returning one output string per input row."
+    },
+    {
+      "question": "Can I pass a cell array of character vectors?",
+      "answer": "Not currently. This implementation accepts string scalars, string arrays, and character arrays."
+    }
+  ],
+  "links": [
+    {
+      "label": "join",
+      "url": "./join"
+    },
+    {
+      "label": "split",
+      "url": "./split"
+    },
+    {
+      "label": "string",
+      "url": "./string"
+    },
+    {
+      "label": "char",
+      "url": "./char"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/lib.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/lib.rs"
+  },
+  "gpu_residency": "No. `strjoin` gathers text to host memory and returns a host-side string array.",
+  "gpu_behavior": [
+    "`strjoin` performs no provider dispatch. GPU-resident text inputs are gathered before the join is computed on the CPU."
+  ]
+}

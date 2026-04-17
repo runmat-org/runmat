@@ -1,0 +1,97 @@
+{
+  "title": "hold",
+  "category": "plotting",
+  "keywords": [
+    "hold",
+    "hold on",
+    "hold off",
+    "plotting",
+    "append plots"
+  ],
+  "summary": "Control whether new plots replace or append to the current axes.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/hold.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`hold` changes plotting state only. It does not execute numeric GPU kernels."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "integration": "runmat-plot/tests/renderer_tests.rs"
+  },
+  "description": "`hold` controls whether subsequent plotting commands append to the current axes or replace existing plot objects. The state is tracked per axes, so different subplots can have different hold settings.",
+  "behaviors": [
+    "`hold()` toggles the current hold state.",
+    "`hold('on')` enables appending to the current axes.",
+    "`hold('off')` disables appending so later plots replace the axes contents.",
+    "`hold('all')` is currently treated the same as `hold('on')`.",
+    "Logical and numeric scalar inputs are accepted: zero means off and nonzero means on."
+  ],
+  "examples": [
+    {
+      "description": "Append a second line to the same axes",
+      "input": "x = 0:0.1:1;\nplot(x, x);\nhold on;\nplot(x, x.^2);",
+      "output": "% both lines remain visible on the current axes"
+    },
+    {
+      "description": "Disable appending again",
+      "input": "hold off;\nplot(1:5, [5 4 3 2 1]);",
+      "output": "% the new plot replaces the previous axes contents"
+    },
+    {
+      "description": "Toggle hold state programmatically",
+      "input": "state1 = hold();\nstate2 = hold();",
+      "output": "% state1 and state2 reflect the toggled boolean state"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Is hold state per figure or per axes?",
+      "answer": "It is tracked per axes, so one subplot can be in hold mode while another is not."
+    },
+    {
+      "question": "What does `hold('all')` do?",
+      "answer": "RunMat currently treats `'all'` the same as `'on'`."
+    },
+    {
+      "question": "What does the return value mean?",
+      "answer": "It is the resulting boolean hold state after applying the command."
+    }
+  ],
+  "links": [
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "cla",
+      "url": "./cla"
+    },
+    {
+      "label": "clf",
+      "url": "./clf"
+    },
+    {
+      "label": "subplot",
+      "url": "./subplot"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/hold.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/hold.rs"
+  },
+  "gpu_residency": "`hold` only mutates plotting state and does not affect array residency.",
+  "gpu_behavior": [
+    "`hold` performs no provider dispatch; it updates per-axes plotting state in the host-side registry."
+  ]
+}

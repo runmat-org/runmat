@@ -1,0 +1,92 @@
+{
+  "title": "subsref",
+  "category": "oop/indexing",
+  "keywords": [
+    "subsref",
+    "object indexing",
+    "overloaded indexing",
+    "dot indexing"
+  ],
+  "summary": "Dispatch object indexing requests to a class-specific `Class.subsref` implementation.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/subsref.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`subsref` is object-dispatch logic and executes on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 3,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "integration": "runmat-ignition/tests/functions.rs"
+  },
+  "description": "`subsref(obj, kind, payload)` is the advanced builtin that RunMat uses to implement overloaded indexing on objects and handle objects. Normal MATLAB syntax such as `obj.field`, `obj(2)`, and `obj{1}` generally lowers to this mechanism automatically. The global builtin resolves the receiver's class name and forwards the request to `Class.subsref`.",
+  "behaviors": [
+    "The receiver must be an object or handle object.",
+    "The `kind` argument selects the indexing form: `'.'`, `'()'`, or `'{}'`.",
+    "For dot indexing, `payload` is typically a field/property name string.",
+    "For `()` and `{}` indexing, `payload` is typically a cell array of indices.",
+    "The builtin forwards the call to the receiver's class-specific `Class.subsref` implementation.",
+    "Prefer normal indexing syntax in user code; direct calls to `subsref` are mainly useful for advanced dispatch or testing."
+  ],
+  "examples": [
+    {
+      "description": "Index a datetime array explicitly",
+      "input": "t = datetime([2024 2025], [1 6], [15 20]);\nitem = subsref(t, \"()\", {2})",
+      "output": "item =\n  20-Jun-2025 00:00:00"
+    },
+    {
+      "description": "Read a datetime property explicitly",
+      "input": "t = datetime(2024, 4, 9);\nfmt = subsref(t, \".\", \"Format\")",
+      "output": "fmt =\n    'dd-MMM-yyyy HH:mm:ss'"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "Should I call `subsref` directly in normal code?",
+      "answer": "Usually no. Prefer ordinary syntax like `obj.field` or `obj(2)`. Direct calls are mainly for advanced dispatch and testing."
+    },
+    {
+      "question": "What values can `kind` take?",
+      "answer": "RunMat's object-dispatch path expects `'.'`, `'()'`, or `'{}'`."
+    },
+    {
+      "question": "What does the global `subsref` actually do?",
+      "answer": "It resolves the receiver's class and forwards the operation to that class's `Class.subsref` implementation."
+    }
+  ],
+  "links": [
+    {
+      "label": "subsasgn",
+      "url": "./subsasgn"
+    },
+    {
+      "label": "datetime",
+      "url": "./datetime"
+    },
+    {
+      "label": "duration",
+      "url": "./duration"
+    },
+    {
+      "label": "containers.Map",
+      "url": "./containers.map"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/lib.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/lib.rs"
+  },
+  "gpu_residency": "`subsref` is host-side object dispatch and does not itself manage GPU residency.",
+  "gpu_behavior": [
+    "`subsref` performs no provider dispatch; it forwards indexing requests to the appropriate class-specific host implementation."
+  ]
+}

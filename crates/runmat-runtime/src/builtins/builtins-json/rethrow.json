@@ -1,0 +1,87 @@
+{
+  "title": "rethrow",
+  "category": "diagnostics",
+  "keywords": [
+    "rethrow",
+    "exception",
+    "catch",
+    "error propagation"
+  ],
+  "summary": "Propagate a caught exception without handling it locally.",
+  "references": [
+    "https://www.mathworks.com/help/matlab/ref/mexception.rethrow.html"
+  ],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [],
+    "broadcasting": "none",
+    "notes": "`rethrow` is a control-flow builtin and always executes on the host."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "integration": "runmat-ignition/tests/exceptions.rs"
+  },
+  "description": "`rethrow` re-raises an exception so that an outer `catch` block or the embedding runtime can handle it. When you pass an `MException`, RunMat preserves its identifier and message. Passing a string creates a fresh error with that message. In Ignition-compiled `catch` blocks, `rethrow()` with no explicit argument also rethrows the most recently caught exception.",
+  "behaviors": [
+    "`rethrow(err)` preserves the identifier and message of an `MException` value.",
+    "`rethrow(message)` raises a fresh error using the supplied string as the message.",
+    "Other value types produce a generic `RunMat:error`-style failure describing the value.",
+    "`rethrow` never returns normally; it immediately transfers control outward to the next enclosing error handler.",
+    "In Ignition `catch` blocks, `rethrow()` with no argument uses the most recently caught exception."
+  ],
+  "examples": [
+    {
+      "description": "Propagate an exception to an outer catch block",
+      "input": "try\n    try\n        error(\"RunMat:demo:badInput\", \"Bad input.\");\n    catch err\n        rethrow(err);\n    end\ncatch outer\n    disp(outer.identifier)\nend",
+      "output": "RunMat:demo:badInput"
+    },
+    {
+      "description": "Use the no-argument shorthand inside an Ignition catch block",
+      "input": "try\n    try\n        error(\"RunMat:oops\", \"x\");\n    catch\n        rethrow();\n    end\ncatch err\n    disp(err.message)\nend",
+      "output": "x"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I use `rethrow` instead of `error`?",
+      "answer": "Use `rethrow` when you want to propagate the current exception rather than constructing a new one from scratch."
+    },
+    {
+      "question": "Does `rethrow(err)` preserve the original identifier?",
+      "answer": "Yes. When `err` is an `MException`, RunMat preserves both the identifier and the message."
+    },
+    {
+      "question": "Is `rethrow()` without an argument supported?",
+      "answer": "Yes in Ignition catch-block execution, where it reuses the most recently caught exception."
+    }
+  ],
+  "links": [
+    {
+      "label": "error",
+      "url": "./error"
+    },
+    {
+      "label": "warning",
+      "url": "./warning"
+    },
+    {
+      "label": "assert",
+      "url": "./assert"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/lib.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/lib.rs"
+  },
+  "gpu_residency": "`rethrow` is control flow only and never executes on the GPU.",
+  "gpu_behavior": [
+    "`rethrow` performs no provider dispatch; it raises or propagates a host-side runtime error immediately."
+  ]
+}
