@@ -117,7 +117,9 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatConfig) ->
             remote::execute_project_command(project_command).await
         }
         Commands::Fs { fs_command } => remote::execute_fs_command(fs_command).await,
-        Commands::Remote { remote_command } => remote::execute_remote_command(remote_command).await,
+        Commands::Remote { remote_command } => {
+            remote::execute_remote_command(remote_command, cli, config).await
+        }
         Commands::Pkg { pkg_command } => pkg::execute_pkg_command(pkg_command).await,
     }
 }

@@ -9,8 +9,9 @@ use std::io::{self, Write};
 use std::path::PathBuf;
 use uuid::Uuid;
 
+use crate::cli::Cli;
 use crate::cli::FsCommand;
-use crate::commands::script::execute_script_with_current_cli;
+use crate::commands::script::execute_script_contents;
 use crate::remote::shared::read_u64_env;
 use crate::remote::{git, history, snapshots};
 
@@ -263,11 +264,13 @@ pub async fn run_with_remote_fs(
     script: PathBuf,
     project: Option<Uuid>,
     server: Option<String>,
+    cli: &Cli,
+    config: &RunMatConfig,
 ) -> Result<()> {
-    let mut config = RemoteConfig::load()?;
-    let project_id = resolve_project_id(&config, project)?;
-    let server_url = resolve_server_url(&config, server)?;
-    let token = resolve_auth_token(&mut config, &server_url).await?;
+    let mut remote_config = RemoteConfig::load()?;
+    let project_id = resolve_project_id(&remote_config, project)?;
+    let server_url = resolve_server_url(&remote_config, server)?;
+    let token = resolve_auth_token(&mut remote_config, &server_url).await?;
     let shard_threshold_bytes = read_u64_env("RUNMAT_FS_SHARD_THRESHOLD_BYTES")
         .unwrap_or(RemoteFsConfig::default().shard_threshold_bytes);
     let shard_size_bytes = read_u64_env("RUNMAT_FS_SHARD_SIZE_BYTES")
@@ -285,7 +288,14 @@ pub async fn run_with_remote_fs(
         ..RemoteFsConfig::default()
     })
     .context("Failed to initialize remote filesystem")?;
+    let script_bytes = provider
+        .read(script.as_path())
+        .await
+        .with_context(|| format!("Failed to read remote script file: {}", script.display()))?;
+    let script_content = String::from_utf8(script_bytes)
+        .with_context(|| format!("Remote script is not valid UTF-8: {}", script.display()))?;
+
     runmat_filesystem::set_provider(std::sync::Arc::new(provider));
-    let config = RunMatConfig::default();
-    execute_script_with_current_cli(script, &config).await
+    let source_name = PathBuf::from(format!("remote:{}", script.display()));
+    execute_script_contents(source_name, script_content, cli.emit_bytecode.clone(), cli, config).await
 }

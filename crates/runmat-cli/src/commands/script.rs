@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use clap::Parser;
 use log::{info, warn};
 use runmat_config::RunMatConfig;
 use runmat_core::{
@@ -27,14 +26,6 @@ pub async fn execute_script(
     execute_script_with_args(script, vec![], emit_bytecode_path, cli, config).await
 }
 
-pub(crate) async fn execute_script_with_current_cli(
-    script: PathBuf,
-    config: &RunMatConfig,
-) -> Result<()> {
-    let cli = Cli::parse();
-    execute_script_with_args(script, vec![], None, &cli, config).await
-}
-
 pub async fn execute_script_with_args(
     script: PathBuf,
     _args: Vec<String>,
@@ -46,6 +37,18 @@ pub async fn execute_script_with_args(
 
     let content = fs::read_to_string(&script)
         .with_context(|| format!("Failed to read script file: {script:?}"))?;
+
+    execute_script_contents(script, content, emit_bytecode_path, cli, config).await
+}
+
+pub(crate) async fn execute_script_contents(
+    script: PathBuf,
+    content: String,
+    emit_bytecode_path: Option<PathBuf>,
+    cli: &Cli,
+    config: &RunMatConfig,
+) -> Result<()> {
+    info!("Executing script source: {script:?}");
 
     if let Some(path) = &emit_bytecode_path {
         let output = emit_bytecode(&content, config)

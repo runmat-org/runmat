@@ -41,6 +41,7 @@ pub async fn execute_project_command(command: ProjectCommand) -> Result<()> {
         ProjectCommand::Members { members_command } => {
             execute_project_members_command(members_command).await
         }
+        ProjectCommand::Fs { fs_command } => execute_fs_command(fs_command).await,
         ProjectCommand::Retention { retention_command } => {
             execute_project_retention_command(retention_command).await
         }
@@ -52,13 +53,17 @@ pub async fn execute_fs_command(command: FsCommand) -> Result<()> {
     fs::execute_fs_command(command).await
 }
 
-pub async fn execute_remote_command(command: RemoteCommand) -> Result<()> {
+pub async fn execute_remote_command(
+    command: RemoteCommand,
+    cli: &crate::cli::Cli,
+    config: &runmat_config::RunMatConfig,
+) -> Result<()> {
     match command {
         RemoteCommand::Run {
             script,
             project,
             server,
-        } => fs::run_with_remote_fs(script, project, server).await,
+        } => fs::run_with_remote_fs(script, project, server, cli, config).await,
     }
 }
 

@@ -42,6 +42,11 @@ pub enum ProjectCommand {
         #[command(subcommand)]
         members_command: ProjectMembersCommand,
     },
+    /// Project filesystem commands
+    Fs {
+        #[command(subcommand)]
+        fs_command: FsCommand,
+    },
     /// Project retention policy
     Retention {
         #[command(subcommand)]
@@ -299,9 +304,9 @@ pub enum FsCommand {
 
 #[derive(Subcommand, Clone)]
 pub enum RemoteCommand {
-    /// Run a script with remote filesystem
+    /// Load and run a script from the remote filesystem
     Run {
-        /// Script path
+        /// Remote script path
         script: PathBuf,
         /// Project id override
         #[arg(long)]

@@ -1,36 +1,47 @@
 # RunMat CLI
 
-RunMat ships with a modern, ergonomic command-line interface designed for both
-everyday users and power users. It goes far beyond what MATLAB's `matlab` CLI
-offers: first-class subcommands, rich help, environment-variable integration,
-snapshot management, a built-in benchmarker, a Jupyter kernel, and deep control
-over the JIT compiler and garbage collector.
+RunMat ships with a task-oriented command-line interface for running scripts,
+working interactively, operating Jupyter kernels, and managing remote
+project-backed storage. Use this page as a workflow guide first, then fall back
+to `runmat --help` and `runmat <command> --help` for the full generated
+reference.
 
-**Try RunMat without installing:** the [browser sandbox](https://runmat.com/sandbox) runs in your browser with no CLI. For installation and CLI vs browser paths, see [Getting Started](/docs/getting-started).
+**Try RunMat without installing:** the [browser sandbox](https://runmat.com/sandbox)
+runs in your browser with no CLI. For installation and broader product setup,
+see [Getting Started](/docs/getting-started).
 
-Read this end-to-end once, then use it as a reference.
+## Installation
+
+```bash
+# Quick install
+
+## Linux/macOS
+curl -fsSL https://runmat.com/install.sh | sh
+
+## Windows PowerShell
+iwr https://runmat.com/install.ps1 | iex
+
+# Alternative installation methods
+
+## Homebrew (macOS/Linux)
+brew install runmat-org/tap/runmat
+
+## Cargo
+cargo install runmat --features gui
+
+## Build from source
+git clone https://github.com/runmat-org/runmat.git
+cd runmat && cargo build --release --features gui
+```
 
 ## Quick start
 
 ```sh
-# Start interactive REPL (JIT on by default)
+# Start the REPL
 runmat
 
-# Run a script
-runmat my_script.m
-
-# Pipe a script to RunMat
-echo "x = 1 + 2" | runmat
-
-# System info (current config, env, GC status)
-runmat info
-
-# Benchmark a script (5 iterations, enable JIT explicitly)
-runmat benchmark my_script.m --iterations 5 --jit
-
-# Create and inspect a snapshot
-runmat snapshot create -o stdlib.snapshot
-runmat snapshot info stdlib.snapshot
+# Run a local script
+runmat model.m
 ```
 
 ## Usage
@@ -40,253 +51,195 @@ runmat [GLOBAL OPTIONS] [COMMAND] [ARGS]
 runmat [GLOBAL OPTIONS] <script.m>
 ```
 
-Global options apply to all commands. Commands offer task-oriented workflows.
+RunMat supports both:
+- direct script execution: `runmat my_script.m`
+- explicit subcommands: `runmat repl`, `runmat benchmark ...`, `runmat project fs ls ...`
 
-## Global options
+## Core workflows
 
-- `--version`, `-V`: print RunMat version and exit (use `runmat version --detailed` for build details).
-- `--debug` (env: `RUNMAT_DEBUG`): enable debug logging.
-- `--log-level <error|warn|info|debug|trace>` (env: `RUNMAT_LOG_LEVEL`, default: `warn`).
-- `--timeout <secs>` (env: `RUNMAT_TIMEOUT`, default: `300`): execution timeout.
-- `--callstack-limit <n>` (env: `RUNMAT_CALLSTACK_LIMIT`, default: `200`): call stack frames retained.
-- `--error-namespace <name>` (env: `RUNMAT_ERROR_NAMESPACE`, default: `RunMat`): error identifier prefix.
-- `--config <path>` (env: `RUNMAT_CONFIG`): load configuration file.
-- `--no-jit` (env: `RUNMAT_JIT_DISABLE`): disable JIT (interpreter only).
-- `--jit-threshold <n>` (env: `RUNMAT_JIT_THRESHOLD`, default: `10`): hotspot threshold.
-- `--jit-opt-level <none|size|speed|aggressive>` (env: `RUNMAT_JIT_OPT_LEVEL`, default: `speed`).
-- `--gc-preset <low-latency|high-throughput|low-memory|debug>` (env: `RUNMAT_GC_PRESET`).
-- `--gc-young-size <MB>` (env: `RUNMAT_GC_YOUNG_SIZE`): young generation size.
-- `--gc-threads <n>` (env: `RUNMAT_GC_THREADS`): max GC threads.
-- `--gc-stats` (env: `RUNMAT_GC_STATS`): collect and display GC statistics.
-- `--verbose`: verbose REPL/execution output.
-- `--snapshot <path>` (env: `RUNMAT_SNAPSHOT_PATH`): preload snapshot.
-- `--plot-mode <auto|gui|headless|jupyter>` (env: `RUNMAT_PLOT_MODE`).
-- `--plot-headless` (env: `RUNMAT_PLOT_HEADLESS`): force headless.
-- `--plot-backend <auto|wgpu|static|web>` (env: `RUNMAT_PLOT_BACKEND`).
-- `--artifacts-dir <path>` (env: `RUNMAT_ARTIFACTS_DIR`): write run artifacts to directory.
-- `--artifacts-manifest <path>` (env: `RUNMAT_ARTIFACTS_MANIFEST`): explicit manifest output path.
-- `--capture-figures <off|auto|on>` (env: `RUNMAT_CAPTURE_FIGURES`, default: `auto`): export touched figures when artifact output is enabled.
-- `--figure-size <WIDTHxHEIGHT>` (env: `RUNMAT_FIGURE_SIZE`, default: `1280x720`): figure export dimensions.
-- `--max-figures <n>` (env: `RUNMAT_MAX_FIGURES`, default: `8`): cap figure exports per script run.
-- `--generate-config`: print a sample config to stdout.
-- `--install-kernel`: install the Jupyter kernel.
-
-Environment booleans accept: `1/0`, `true/false`, `yes/no`, `on/off`,
-`enable/disable`.
-
-### repl
-Start interactive REPL.
-
-```sh
-runmat repl [--verbose]
-```
-
-Interactive commands inside the REPL:
-- `.info`: detailed system information
-- `.stats`: execution statistics (total, JIT vs interpreter, avg time)
-- `.gc`: GC statistics summary
-
-Display note:
-N-D numeric/logical/complex arrays are shown page-by-page (for example, `A(:, :, 1)`) for manageable sizes. Very large N-D arrays fall back to compact shape summaries.
-
-Example:
-```text
-runmat> x = 1 + 2
-ans = 3
-runmat> y = [1, 2; 3, 4]
-ans = [2x2 matrix]
-runmat> .stats
-Execution Statistics:
-  Total: 2, JIT: 0, Interpreter: 2
-  Average time: 0.12ms
-```
-
-### run
-Execute a MATLAB/Octave script file.
+### Run a script
 
 ```sh
 runmat run <file.m> [-- arg1 arg2 ...]
 
 # shorthand
 runmat <file.m>
+```
 
-# capture runtime artifacts and exported figures
+Useful variants:
+
+```sh
+# Emit bytecode to stdout
+runmat --emit-bytecode model.m
+
+# Emit bytecode to a file
+runmat --emit-bytecode bytecode.txt model.m
+
+# Capture artifacts and exported figures
 runmat model.m \
   --artifacts-dir .runmat-artifacts \
   --capture-figures auto \
   --figure-size 1280x720
 ```
 
-Example `calc.m`:
-```matlab
-x = 10 + 5
-```
+When `--artifacts-dir` or `--artifacts-manifest` is set, RunMat writes a JSON
+manifest describing execution metadata, stream sizes, touched figure handles,
+and exported figure paths.
+
+### Interactive REPL
 
 ```sh
-runmat calc.m
+runmat
+runmat repl
+runmat repl --verbose
 ```
 
-When `--artifacts-dir` or `--artifacts-manifest` is provided, RunMat writes a
-JSON manifest with execution metadata, stream summary, touched figure handles,
-and exported figure file paths (`.png` currently). This is useful for runtime
-debugging, CI capture, and external evaluation harnesses.
+Built-in REPL commands:
+- `.info`: detailed system information
+- `.stats`: execution statistics
+- `.gc`: garbage collector summary
+- `.gc-info`: garbage collector summary with header
+- `.gc-collect`: force garbage collection
+- `.reset-stats`: reset execution statistics
+- `help`: show REPL help
+- `exit`, `quit`: leave the REPL
 
-### kernel
-Start the Jupyter kernel.
+### Jupyter kernel
 
 ```sh
-runmat kernel \
-  [--ip 127.0.0.1] [--key <string>] \
-  [--transport tcp] [--signature-scheme hmac-sha256] \
-  [--shell-port 0] [--iopub-port 0] [--stdin-port 0] [--control-port 0] [--hb-port 0] \
-  [--connection-file <path>] 
+# Install the kernel spec
+runmat --install-kernel
+
+# Start a kernel directly
+runmat kernel
+
+# Start from an existing connection file
+runmat kernel-connection connection.json
 ```
 
-Env vars: `RUNMAT_KERNEL_IP`, `RUNMAT_KERNEL_KEY`, and optional port vars
-`RUNMAT_SHELL_PORT`, `RUNMAT_IOPUB_PORT`, `RUNMAT_STDIN_PORT`,
-`RUNMAT_CONTROL_PORT`, `RUNMAT_HB_PORT`.
+Advanced kernel flags exist for IP, ports, transport, signature scheme, and
+connection-file output. Use `runmat kernel --help` when you need to wire RunMat
+into an existing Jupyter environment manually.
 
-- `kernel-connection <connection.json>`: start with an existing connection file.
-
-## Commands
-
-### pkg (coming soon)
-Package manager commands. These are not yet released; the binary will acknowledge the command and exit
-with status 0 once the initial scaffolding lands.
-
-```sh
-runmat pkg add <name>[@version]
-runmat pkg remove <name>
-runmat pkg install
-runmat pkg update
-runmat pkg publish
-```
-
-All pkg subcommands currently print: "RunMat package manager is coming soon. Track progress in the repo."
-
-### fs
-Remote filesystem commands. These require `runmat login` and a configured project.
-
-```sh
-runmat fs ls /data
-runmat fs read /data/example.mat --output example.mat
-runmat fs write /data/example.mat ./example.mat
-runmat fs mkdir /data/new --recursive
-runmat fs rm /data/example.mat
-
-# Manifest workflows
-runmat fs manifest-history /data/dataset
-runmat fs manifest-restore <version-id>
-runmat fs manifest-update /data/dataset --base-version <version-id> --manifest ./manifest.json
-
-# Version history
-runmat fs history /data/example.mat
-runmat fs restore <version-id>
-runmat fs history-delete <version-id>
-
-# Snapshots
-runmat fs snapshot-list
-runmat fs snapshot-create --message "baseline" --tag baseline
-runmat fs snapshot-restore <snapshot-id>
-runmat fs snapshot-delete <snapshot-id>
-runmat fs snapshot-tag-list
-runmat fs snapshot-tag-set <snapshot-id> <tag>
-runmat fs snapshot-tag-delete <tag>
-
-# Git sync
-runmat fs git-clone ./project-repo
-runmat fs git-pull
-runmat fs git-push
-```
-
-### remote
-Run scripts against the remote filesystem.
-
-```sh
-runmat remote run /scripts/job.m --project <project-id> --server https://api.runmat.example
-```
-
-If `--server` is omitted, the CLI defaults to `https://api.runmat.com`.
-
-### replay (coming soon)
-
-Replay artifact inspection/export commands are planned but not yet shipped in the CLI.
-Current replay persistence/switching is available through runtime APIs and host integrations.
-
-Planned command surface:
-
-```sh
-runmat replay runs list [--doc <path>]
-runmat replay run show <run-id>
-runmat replay scene export <run-id> [--output scene.json]
-runmat replay scene import <file>
-runmat replay workspace export <run-id> [--output workspace.json]
-```
-
-### project select
-Set the default project for remote filesystem commands.
-
-```sh
-runmat project select <project-id>
-```
-
-### project retention
-Manage per-project version retention.
-
-```sh
-runmat project retention get [--project <project-id>]
-runmat project retention set <max-versions> [--project <project-id>]
-```
-
-`max-versions=0` disables pruning (unlimited history).
-
-### version
-```sh
-runmat version [--detailed]
-```
-With `--detailed`, prints build details including the Rust version, target triple,
-and build profile.
-
-### info
-Show structured system information: versions, CLI/runtime config, env, GC
-status, and pointers to the built-in help output.
+### Diagnostics
 
 ```sh
 runmat info
+runmat version
+runmat version --detailed
 ```
 
-### accel-info
-Show acceleration provider information: device name/backend, fused pipeline cache
-hits/misses, last warmup duration, and reduction defaults (two-pass threshold and workgroup size).
+- `info` prints runtime configuration, selected environment variables, GC
+  status, and pointers to built-in help.
+- `version --detailed` prints build details useful in bug reports and support
+  threads.
+
+## Remote and project workflows
+
+Remote commands are project-scoped. A typical flow is:
+
+1. authenticate with `runmat login`
+2. inspect orgs and projects
+3. select a default project
+4. use `project fs ...` or `remote run ...`
+
+### Authenticate
 
 ```sh
-runmat accel-info [--json] [--reset]
+runmat login --server https://api.runmat.com
 ```
 
-- `--json`: output provider information and telemetry as JSON.
-- `--reset`: reset provider telemetry counters after printing.
+You can also supply:
+- `--api-key <token>` for non-interactive login
+- `--email <address>` for interactive login
+- `--credential-store <auto|secure|file|memory>`
+- `--org <org-id>` and `--project <project-id>` to seed defaults
 
-Notes:
-- When built without the `wgpu` feature, the command reports that no GPU provider
-  is available.
-- Reduction defaults can be overridden at runtime via environment variables
-  (see below).
-- Warmup duration reflects the provider's most recent warmup pass (including on-disk cache precompile),
-  when available.
-
-### accel-calibrate
-Apply auto-offload calibration from benchmark-suite telemetry results. Available when RunMat is built with the `wgpu` feature.
+### Inspect and select projects
 
 ```sh
-runmat accel-calibrate <suite-results.json> [--dry-run] [--json]
+runmat org list
+
+runmat project list
+runmat project list --org <org-id>
+runmat project create my-project
+runmat project members list
+runmat project select <project-id>
+runmat project retention get
+runmat project retention set 20
 ```
 
-- `<suite-results.json>`: path to suite results JSON produced by the benchmark harness.
-- `--dry-run`: preview updates without persisting the calibration cache.
-- `--json`: emit calibration outcome as JSON.
+`project retention set 0` means unlimited history.
 
-### gc
-Garbage collection utilities.
+### Remote files
+
+The canonical namespace is `project fs ...`:
+
+```sh
+runmat project fs ls /data
+runmat project fs read /data/example.mat --output example.mat
+runmat project fs write /data/example.mat ./example.mat
+runmat project fs mkdir /data/new --recursive
+runmat project fs rm /data/example.mat
+```
+
+The shorter top-level `fs ...` form still works as a shorthand:
+
+```sh
+runmat fs ls /data
+```
+
+The filesystem surface also includes:
+- file history: `history`, `restore`, `history-delete`
+- manifest history: `manifest-history`, `manifest-restore`, `manifest-update`
+- project snapshots: `snapshot-list`, `snapshot-create`, `snapshot-restore`,
+  `snapshot-delete`, `snapshot-tag-*`
+- git sync: `git-clone`, `git-pull`, `git-push`
+
+Use `runmat project fs --help` or `runmat fs --help` for the full subcommand
+tree.
+
+### Run a remote script
+
+```sh
+runmat remote run /scripts/job.m
+runmat remote run /scripts/job.m --project <project-id>
+runmat remote run /scripts/job.m --server https://api.runmat.com
+```
+
+`remote run` loads the script from the remote filesystem, then executes it
+using the current RunMat CLI configuration. This is different from `runmat
+local_script.m`, which reads the source from local disk.
+
+## Tooling and diagnostics
+
+### Configuration
+
+```sh
+runmat config show
+runmat config generate -o .runmat.yaml
+runmat config validate .runmat.yaml
+runmat config paths
+```
+
+### Snapshots
+
+```sh
+runmat snapshot create -o stdlib.snapshot --compression zstd -O speed
+runmat snapshot info stdlib.snapshot
+runmat snapshot presets
+runmat snapshot validate stdlib.snapshot
+```
+
+### Benchmarking
+
+```sh
+runmat benchmark <file.m> [--iterations N] [--jit]
+```
+
+`--iterations` defaults to `10`.
+
+### Garbage collection
 
 ```sh
 runmat gc stats
@@ -296,168 +249,139 @@ runmat gc config
 runmat gc stress --allocations 10000
 ```
 
-Example:
-```text
-$ runmat gc major
-Major GC collected 1234 objects in 8.2ms
-```
-
-### benchmark
-Built-in benchmark driver.
+### Acceleration diagnostics
 
 ```sh
-runmat benchmark <file.m> [--iterations N] [--jit]
+runmat accel-info [--json] [--reset]
+runmat accel-calibrate <suite-results.json> [--dry-run] [--json]
 ```
 
-Example `loop.m`:
-```matlab
-total = 0; for i = 1:1000; total = total + i; end
-```
+- `accel-info` prints provider and telemetry details.
+- `accel-calibrate` is available when RunMat is built with the `wgpu` feature.
+- For feature-specific or GPU-provider-specific behavior, prefer the command
+  help and acceleration-focused docs over this page.
+
+## Global flags
+
+Global flags apply to both direct script execution and subcommands.
+
+### Logging and control
+
+- `--version`, `-V`: print the version and exit
+- `--debug`: enable debug logging
+- `--log-level <error|warn|info|debug|trace>`: set log verbosity
+- `--config <path>`: load a configuration file
+- `--generate-config`: print a sample config to stdout
+
+### Execution and diagnostics
+
+- `--timeout <secs>`: execution timeout, default `300`
+- `--callstack-limit <n>`: retained call-stack frames, default `200`
+- `--error-namespace <name>`: error identifier prefix
+- `--verbose`: verbose REPL / execution output
+- `--snapshot <path>`: preload a standard-library snapshot
+- `--emit-bytecode [PATH]`: emit bytecode instead of executing a script
+
+### JIT and GC
+
+- `--no-jit`: disable JIT compilation
+- `--jit-threshold <n>`: JIT trigger threshold, default `10`
+- `--jit-opt-level <none|size|speed|aggressive>`: JIT optimization level
+- `--gc-preset <low-latency|high-throughput|low-memory|debug>`
+- `--gc-young-size <MB>`
+- `--gc-threads <n>`
+- `--gc-stats`
+
+### Plotting and artifacts
+
+- `--plot-mode <auto|gui|headless|jupyter>`
+- `--plot-headless`
+- `--plot-backend <auto|wgpu|static|web>`
+- `--plot-scatter-target <n>`
+- `--plot-surface-vertex-budget <n>`
+- `--artifacts-dir <path>`
+- `--artifacts-manifest <path>`
+- `--capture-figures <off|auto|on>`
+- `--figure-size <WIDTHxHEIGHT>`
+- `--max-figures <n>`
+
+### Integrations
+
+- `--install-kernel`: install the RunMat Jupyter kernel
+
+## Environment variables
+
+Most execution-related globals also have environment variable forms. Boolean
+values accept `1/0`, `true/false`, `yes/no`, `on/off`, and `enable/disable`.
+
+### General
+
+- `RUNMAT_DEBUG`
+- `RUNMAT_LOG_LEVEL`
+- `RUNMAT_TIMEOUT`
+- `RUNMAT_CALLSTACK_LIMIT`
+- `RUNMAT_ERROR_NAMESPACE`
+- `RUNMAT_CONFIG`
+- `RUNMAT_SNAPSHOT_PATH`
+
+### JIT and GC
+
+- `RUNMAT_JIT_ENABLE`
+- `RUNMAT_JIT_DISABLE`
+- `RUNMAT_JIT_THRESHOLD`
+- `RUNMAT_JIT_OPT_LEVEL`
+- `RUNMAT_GC_PRESET`
+- `RUNMAT_GC_YOUNG_SIZE`
+- `RUNMAT_GC_THREADS`
+- `RUNMAT_GC_STATS`
+
+### Plotting and artifacts
+
+- `RUNMAT_PLOT_MODE`
+- `RUNMAT_PLOT_HEADLESS`
+- `RUNMAT_PLOT_BACKEND`
+- `RUNMAT_ARTIFACTS_DIR`
+- `RUNMAT_ARTIFACTS_MANIFEST`
+- `RUNMAT_CAPTURE_FIGURES`
+- `RUNMAT_FIGURE_SIZE`
+- `RUNMAT_MAX_FIGURES`
+
+### Kernel
+
+- `RUNMAT_KERNEL_IP`
+- `RUNMAT_KERNEL_KEY`
+- `RUNMAT_SHELL_PORT`
+- `RUNMAT_IOPUB_PORT`
+- `RUNMAT_STDIN_PORT`
+- `RUNMAT_CONTROL_PORT`
+- `RUNMAT_HB_PORT`
+
+## Precedence
+
+CLI flags override environment variables, which override configuration files,
+which override built-in defaults.
+
+See `/docs/configuration` for configuration file discovery and formats.
+
+## CI, headless, and containers
+
+RunMat is intended to work in both interactive shells and non-interactive
+environments.
 
 ```sh
-runmat benchmark loop.m --iterations 5 --jit
+# Force headless execution in CI
+RUNMAT_PLOT_MODE=headless RUNMAT_JIT_DISABLE=1 runmat tests/current_feature_test.m
+
+# Headless benchmark run
+RUNMAT_PLOT_MODE=headless RUNMAT_GC_PRESET=high-throughput \
+  runmat benchmark perf.m --iterations 10 --jit
 ```
 
-### snapshot
-Manage standard library snapshots.
-
-```sh
-runmat snapshot create -o <file> [-O <none|size|speed|aggressive>] [--compression <none|lz4|zstd>]
-runmat snapshot info <file>
-runmat snapshot presets
-runmat snapshot validate <file>
-```
-
-Examples:
-```sh
-runmat snapshot create -o stdlib.snapshot --compression zstd -O speed
-runmat snapshot info stdlib.snapshot
-```
-
-### config
-Configuration management helpers.
-
-```sh
-runmat config show
-runmat config generate [-o .runmat.yaml]
-runmat config validate <file>
-runmat config paths
-```
-
-`generate` writes a complete sample file to help you get started.
-
-## Environment variables (reference)
-
-- Logging and control:
-  - `RUNMAT_DEBUG` (bool)
-  - `RUNMAT_LOG_LEVEL` = `error|warn|info|debug|trace`
-  - `RUNMAT_TIMEOUT` (seconds)
-  - `RUNMAT_CONFIG` (config file path)
-  - `RUNMAT_SNAPSHOT_PATH` (snapshot to preload)
-
-- JIT:
-  - `RUNMAT_JIT_ENABLE` (bool, default true)
-  - `RUNMAT_JIT_DISABLE` (bool, if true overrides enable)
-  - `RUNMAT_JIT_THRESHOLD` (integer)
-  - `RUNMAT_JIT_OPT_LEVEL` = `none|size|speed|aggressive`
-
-- GC:
-  - `RUNMAT_GC_PRESET` = `low-latency|high-throughput|low-memory|debug`
-  - `RUNMAT_GC_YOUNG_SIZE` (MB)
-  - `RUNMAT_GC_THREADS` (integer)
-  - `RUNMAT_GC_STATS` (bool)
-
-- Plotting:
-  - `RUNMAT_PLOT_MODE` = `auto|gui|headless|jupyter`
-  - `RUNMAT_PLOT_HEADLESS` (bool)
-  - `RUNMAT_PLOT_BACKEND` = `auto|wgpu|static|web`
-
-- Kernel:
-  - `RUNMAT_KERNEL_IP`, `RUNMAT_KERNEL_KEY`
-  - Optional ports: `RUNMAT_SHELL_PORT`, `RUNMAT_IOPUB_PORT`, `RUNMAT_STDIN_PORT`, `RUNMAT_CONTROL_PORT`, `RUNMAT_HB_PORT`
-
-### Acceleration provider (RunMat Accelerate)
-
-These control GPU workgroup sizing, reductions, and provider debugging:
-
-- `RUNMAT_WG` (u32)
-  - Global compute workgroup size used in WGSL at module creation.
-    Applies to elementwise kernels and fused kernels (including fused reductions).
-    Default: `512`.
-- `RUNMAT_MATMUL_TILE` (u32)
-  - Square tile size for matmul kernels. Default: `16`.
-- `RUNMAT_REDUCTION_WG` (u32)
-  - Default workgroup size for provider-managed reduction kernels when a call site
-    opts into provider defaults (e.g., passes `0`). Default: `512`.
-- `RUNMAT_TWO_PASS_THRESHOLD` (usize)
-  - Threshold for reduction length per slice above which the provider uses a two-pass kernel.
-    Default: `1024`.
-- `RUNMAT_DEBUG_PIPELINE_ONLY` (bool)
-  - When set, the provider stops after pipeline compilation and skips buffer
-    creation/dispatch. Useful for triaging driver pipeline creation behavior.
-- `RUNMAT_PIPELINE_CACHE_DIR` (path)
-  - Overrides the on-disk pipeline cache directory. Defaults to the OS cache
-    directory (e.g., `$XDG_CACHE_HOME/runmat/pipelines` or platform equivalent),
-    falling back to `target/tmp/wgpu-pipeline-cache-<device>` when not set.
-
-The provider clamps `RUNMAT_WG`, `RUNMAT_MATMUL_TILE`, and
-`RUNMAT_REDUCTION_WG` to the adapter's compute limits
-(`max_compute_workgroup_size_*`, `max_compute_invocations_per_workgroup`)
-so DX12/Metal/Vulkan backends never see invalid workgroup sizes.
-
-## Precedence model
-
-CLI flags > environment variables > configuration files > built-in defaults.
-See `/docs/configuration` for file formats and discovery.
-
-## Operating environments
-
-RunMat's CLI is designed to work identically in interactive shells and
-non-interactive environments:
-
-- CI/CD: set headless plotting and deterministic JIT options.
-  - Env hints: `CI`, `GITHUB_ACTIONS`, `HEADLESS`, `NO_GUI` — presence is enough (any value).
-  - To force via config var: set `RUNMAT_PLOT_MODE=headless` (must be exactly `headless`).
-  - Example (GitHub Actions):
-    ```sh
-    RUNMAT_PLOT_MODE=headless RUNMAT_JIT_DISABLE=1 runmat run tests/current_feature_test.m
-    ```
-- Docker/containers: no display required; headless by default when `NO_GUI` or `HEADLESS` is set.
-  ```Dockerfile
-  FROM debian:stable-slim
-  # install runmat binary (copy or package) and dependencies
-  ENV NO_GUI=1 RUNMAT_PLOT_MODE=headless
-  CMD ["runmat", "info"]
-  ```
-- Headless servers/HPC: disable GUI and tune GC/JIT:
-  ```sh
-  RUNMAT_PLOT_MODE=headless RUNMAT_GC_PRESET=high-throughput runmat benchmark perf.m --iterations 10 --jit
-  ```
-
-RunMat also auto-detects headless contexts and falls back to safe defaults.
-
-## Examples
-
-### Run a simple script with JIT disabled
-```sh
-RUNMAT_JIT_DISABLE=1 runmat my_script.m
-```
-
-### Create a minimal config and run with it
-```sh
-runmat config generate -o .runmat.yaml
-runmat --config .runmat.yaml info
-```
-
-### GC stress test
-```sh
-runmat gc stress --allocations 200000
-```
-
-### Snapshot for faster startup
-```sh
-runmat snapshot create -o stdlib.snapshot
-runmat --snapshot stdlib.snapshot repl
+```Dockerfile
+FROM debian:stable-slim
+# install runmat binary and runtime dependencies
+ENV NO_GUI=1 RUNMAT_PLOT_MODE=headless
+CMD ["runmat", "info"]
 ```
 
 ## Exit codes
@@ -465,3 +389,9 @@ runmat --snapshot stdlib.snapshot repl
 - `0`: success
 - `1`: command execution, runtime, validation, or file/config errors
 - `2`: invalid CLI usage (for example, unknown flags or malformed arguments)
+
+## Not yet available
+
+`runmat pkg ...` exists as a placeholder command family, but the package manager
+is not shipped yet. The current subcommands print a "coming soon" message and
+exit successfully.

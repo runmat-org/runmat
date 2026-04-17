@@ -2,7 +2,7 @@
 name = "runmat"
 version = "0.4.0"
 edition = "2021"
-description = "High-performance MATLAB/Octave runtime with Jupyter kernel support"
+description = "High-performance MATLAB/Octave syntax mathematical runtime"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"
 readme = "../../README.md"
