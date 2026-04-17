@@ -76,17 +76,6 @@ export const docsTree: DocsNode[] = [
     children: [
       { title: "Builtin Function Reference", externalHref: "/docs/matlab-function-reference" },
       { title: "Library Reference", slug: ["library"], file: "docs/LIBRARY.md", seo: { description: "How RunMat's built-in MATLAB functions are implemented and organized.", keywords: ["standard library", "builtins", "MATLAB functions"] } },
-      {
-        title: "Package Manager",
-        slug: ["package-manager"],
-        file: "docs/PACKAGE_MANAGER.md",
-        seo: {
-          description: "Draft design for the RunMat package system: registries, semver, native (Rust) and source (MATLAB) packages.",
-          keywords: ["package manager", "registry", "Rust", "MATLAB", "builtins"],
-          ogTitle: "RunMat Package Manager (Draft)",
-          ogDescription: "How native and source packages will work in RunMat.",
-        },
-      },
       { title: "CLI Reference", slug: ["cli"], file: "docs/CLI.md", seo: { description: "RunMat CLI commands, flags, environment variables, and examples.", keywords: ["RunMat CLI", "command line", "flags"] } },
       { title: "Configuration", slug: ["configuration"], file: "docs/CONFIG.md", seo: { description: "Configure RunMat: files, environment overrides, and precedence.", keywords: ["RunMat config", "configuration", "YAML", "TOML", "JSON"] } },
       {

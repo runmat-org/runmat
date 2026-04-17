@@ -355,11 +355,6 @@ pub enum Commands {
         #[command(subcommand)]
         fs_command: FsCommand,
     },
-    /// Package manager (coming soon)
-    Pkg {
-        #[command(subcommand)]
-        pkg_command: PkgCommand,
-    },
 }
 
 #[derive(Subcommand, Clone)]
@@ -425,18 +420,4 @@ pub enum ConfigCommand {
     },
     /// Show configuration file locations
     Paths,
-}
-
-#[derive(Subcommand, Clone)]
-pub enum PkgCommand {
-    /// Add a dependency (coming soon)
-    Add { name: String },
-    /// Remove a dependency (coming soon)
-    Remove { name: String },
-    /// Install dependencies (coming soon)
-    Install,
-    /// Update dependencies (coming soon)
-    Update,
-    /// Publish current package (coming soon)
-    Publish,
 }

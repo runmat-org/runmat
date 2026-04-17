@@ -5,7 +5,7 @@ use runmat_accelerate::AccelerateInitOptions;
 use runmat_config::{self as config, ConfigLoader, PlotMode, RunMatConfig};
 
 use crate::app::dispatch;
-use crate::cli::{Cli, Commands, GcPreset, LogLevel, OptLevel};
+use crate::cli::{Cli, GcPreset, LogLevel, OptLevel};
 use crate::commands::jupyter;
 use crate::logging::format_log_record;
 use crate::telemetry;
@@ -23,14 +23,7 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
 
     let mut config = match load_configuration(&cli) {
         Ok(c) => c,
-        Err(e) => {
-            if matches!(cli.command, Some(Commands::Pkg { .. })) {
-                eprintln!("Warning: {e}. Using default configuration for pkg command.");
-                RunMatConfig::default()
-            } else {
-                return Err(e);
-            }
-        }
+        Err(e) => return Err(e),
     };
     apply_cli_overrides(&mut config, &cli);
 

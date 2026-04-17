@@ -390,8 +390,3 @@ CMD ["runmat", "info"]
 - `1`: command execution, runtime, validation, or file/config errors
 - `2`: invalid CLI usage (for example, unknown flags or malformed arguments)
 
-## Not yet available
-
-`runmat pkg ...` exists as a placeholder command family, but the package manager
-is not shipped yet. The current subcommands print a "coming soon" message and
-exit successfully.

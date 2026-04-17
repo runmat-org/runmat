@@ -10,7 +10,6 @@ use anyhow::{Context, Result};
 use clap::ValueEnum;
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -52,9 +51,6 @@ pub struct RunMatConfig {
     pub kernel: KernelConfig,
     /// Logging configuration
     pub logging: LoggingConfig,
-    /// Package manager configuration
-    #[serde(default)]
-    pub packages: PackagesConfig,
 }
 
 /// Runtime execution configuration
@@ -449,66 +445,6 @@ pub struct KernelPorts {
     pub heartbeat: Option<u16>,
 }
 
-/// Package manager configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PackagesConfig {
-    /// Enable package manager
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    /// Registries to search for packages (first match wins)
-    #[serde(default = "default_registries")]
-    pub registries: Vec<Registry>,
-    /// Dependencies declared by the workspace (name -> spec)
-    #[serde(default)]
-    pub dependencies: HashMap<String, PackageSpec>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Registry {
-    /// Registry logical name
-    pub name: String,
-    /// Base URL for index/API (e.g., https://packages.runmat.com)
-    pub url: String,
-}
-
-/// Package specification
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "source", rename_all = "kebab-case")]
-pub enum PackageSpec {
-    /// Resolve from a registry by name
-    Registry {
-        /// Semver range (e.g. "^1.2"), or exact version
-        version: String,
-        /// Optional registry override (defaults to first registry)
-        #[serde(default)]
-        registry: Option<String>,
-        /// Optional feature flags
-        #[serde(default)]
-        features: Vec<String>,
-        /// Optional mark for optional dependency
-        #[serde(default)]
-        optional: bool,
-    },
-    /// Git repository
-    Git {
-        url: String,
-        #[serde(default)]
-        rev: Option<String>,
-        #[serde(default)]
-        features: Vec<String>,
-        #[serde(default)]
-        optional: bool,
-    },
-    /// Local path dependency (useful for development)
-    Path {
-        path: String,
-        #[serde(default)]
-        features: Vec<String>,
-        #[serde(default)]
-        optional: bool,
-    },
-}
-
 /// Logging configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoggingConfig {
@@ -666,13 +602,6 @@ fn default_max_render_time() -> u32 {
 
 fn default_lod_threshold() -> u32 {
     10000 // Points threshold for LOD
-}
-
-fn default_registries() -> Vec<Registry> {
-    vec![Registry {
-        name: "runmat".to_string(),
-        url: "https://packages.runmat.com".to_string(),
-    }]
 }
 
 impl Default for RuntimeConfig {

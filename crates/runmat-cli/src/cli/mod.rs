@@ -8,7 +8,7 @@ pub use remote::{
     FsCommand, OrgCommand, ProjectCommand, ProjectMembersCommand, ProjectRetentionCommand,
     RemoteCommand,
 };
-pub use root::{Cli, Commands, ConfigCommand, GcCommand, PkgCommand, SnapshotCommand};
+pub use root::{Cli, Commands, ConfigCommand, GcCommand, SnapshotCommand};
 pub use value_types::{
     CaptureFiguresMode, CompressionAlg, FigureSize, GcPreset, LogLevel, OptLevel,
 };

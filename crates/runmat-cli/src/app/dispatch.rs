@@ -2,7 +2,7 @@ use anyhow::Result;
 use runmat_config::RunMatConfig;
 
 use crate::cli::{Cli, Commands};
-use crate::commands::{accel, benchmark, config, gc, kernel, pkg, repl, script, snapshot, version};
+use crate::commands::{accel, benchmark, config, gc, kernel, repl, script, snapshot, version};
 use crate::remote;
 
 pub async fn dispatch(cli: &Cli, config: &RunMatConfig) -> Result<()> {
@@ -120,6 +120,5 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatConfig) ->
         Commands::Remote { remote_command } => {
             remote::execute_remote_command(remote_command, cli, config).await
         }
-        Commands::Pkg { pkg_command } => pkg::execute_pkg_command(pkg_command).await,
     }
 }
