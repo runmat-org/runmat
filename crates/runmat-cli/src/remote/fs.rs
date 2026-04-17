@@ -297,5 +297,12 @@ pub async fn run_with_remote_fs(
 
     runmat_filesystem::set_provider(std::sync::Arc::new(provider));
     let source_name = PathBuf::from(format!("remote:{}", script.display()));
-    execute_script_contents(source_name, script_content, cli.emit_bytecode.clone(), cli, config).await
+    execute_script_contents(
+        source_name,
+        script_content,
+        cli.emit_bytecode.clone(),
+        cli,
+        config,
+    )
+    .await
 }

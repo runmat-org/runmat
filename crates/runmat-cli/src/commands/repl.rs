@@ -1,10 +1,12 @@
 use anyhow::{Context, Result};
 use log::info;
-use runmat_config::RunMatConfig;
+use owo_colors::OwoColorize;
+use runmat_config::{GcPreset, JitOptLevel, RunMatConfig};
 use runmat_core::{RunMatSession, TelemetryHost, TelemetryRunConfig, TelemetryRunFinish};
 use runmat_gc::gc_collect_major;
 use runmat_time::Instant;
 use std::io::{self, Read};
+use supports_color::Stream;
 
 use crate::commands::session::create_session;
 use crate::commands::streams::emit_execution_streams;
@@ -59,33 +61,7 @@ pub async fn execute_repl(config: &RunMatConfig) -> Result<()> {
         return Ok(());
     }
 
-    println!("RunMat v{}", env!("CARGO_PKG_VERSION"));
-    println!("Fast, free, modern MATLAB runtime with JIT compilation and GC");
-    println!();
-
-    if enable_jit {
-        println!(
-            "JIT compiler: enabled (Cranelift optimization level: {:?})",
-            config.jit.optimization_level
-        );
-    } else {
-        println!("JIT compiler: disabled (interpreter mode)");
-    }
-    println!(
-        "Garbage collector: {:?}",
-        config
-            .gc
-            .preset
-            .map(|p| format!("{p:?}"))
-            .unwrap_or_else(|| "default".to_string())
-    );
-    if let Some(snapshot_info) = engine.snapshot_info() {
-        println!("{snapshot_info}");
-    } else {
-        println!("No snapshot loaded - standard library will be compiled on demand");
-    }
-    println!("Type 'help' for help, 'exit' to quit, '.info' for system information");
-    println!();
+    print_repl_banner(config, &engine);
 
     loop {
         let readline = rl.readline("runmat> ");
@@ -115,6 +91,233 @@ pub async fn execute_repl(config: &RunMatConfig) -> Result<()> {
 
     finalize_repl_session(&engine, session_start, repl_run);
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct BannerCapabilities {
+    color: bool,
+    truecolor: bool,
+}
+
+#[derive(Clone, Copy)]
+enum BannerTone {
+    Label,
+    Brand,
+    Bright,
+    Muted,
+}
+
+fn print_repl_banner(config: &RunMatConfig, engine: &RunMatSession) {
+    let caps = detect_banner_capabilities();
+
+    println!(
+        "{}",
+        style_text(
+            &format!("RunMat {}", env!("CARGO_PKG_VERSION")),
+            &caps,
+            BannerTone::Brand
+        )
+    );
+    println!(
+        "{}",
+        style_text(
+            "MATLAB-compatible runtime for CPU + GPU",
+            &caps,
+            BannerTone::Bright
+        )
+    );
+    println!(
+        "{}",
+        style_text("https://runmat.com", &caps, BannerTone::Muted)
+    );
+    println!();
+    println!("{}", format_gpu_line(config, &caps));
+    println!("{}", format_runtime_line(config, engine, &caps));
+    println!();
+    println!("{}", format_help_line(&caps));
+    println!();
+}
+
+fn detect_banner_capabilities() -> BannerCapabilities {
+    let decorated = atty::is(atty::Stream::Stdout)
+        && std::env::var("TERM")
+            .map(|term| term != "dumb")
+            .unwrap_or(true);
+    let color_level = if decorated {
+        supports_color::on(Stream::Stdout)
+    } else {
+        None
+    };
+    BannerCapabilities {
+        color: color_level.is_some(),
+        truecolor: color_level.map(|level| level.has_16m).unwrap_or(false),
+    }
+}
+
+fn format_gpu_line(config: &RunMatConfig, caps: &BannerCapabilities) -> String {
+    let label = style_text("GPU:", caps, BannerTone::Label);
+
+    if !config.accelerate.enabled {
+        return format!(
+            "{label} {}",
+            style_text("disabled by config", caps, BannerTone::Bright)
+        );
+    }
+
+    if let Some(provider) = runmat_accelerate_api::provider() {
+        let info = provider.device_info_struct();
+        let auto_offload = if config.accelerate.auto_offload.enabled {
+            style_text("(auto-offload enabled)", caps, BannerTone::Muted)
+        } else {
+            style_text("(auto-offload disabled)", caps, BannerTone::Muted)
+        };
+
+        if matches!(
+            info.backend.as_deref(),
+            Some(backend) if backend.eq_ignore_ascii_case("inprocess")
+        ) || info.name.eq_ignore_ascii_case("InProcess")
+        {
+            return format!(
+                "{} {} {}",
+                label,
+                style_text("CPU fallback", caps, BannerTone::Bright),
+                auto_offload
+            );
+        }
+
+        let backend = info
+            .backend
+            .as_deref()
+            .map(titlecase_backend)
+            .unwrap_or("GPU");
+
+        return format!(
+            "{} {} {}",
+            label,
+            style_text(
+                &format!("{} ({backend})", info.name),
+                caps,
+                BannerTone::Bright
+            ),
+            auto_offload
+        );
+    }
+
+    let unavailable = if cfg!(feature = "wgpu") {
+        "unavailable"
+    } else {
+        "unavailable in this build"
+    };
+
+    format!(
+        "{label} {}",
+        style_text(unavailable, caps, BannerTone::Bright)
+    )
+}
+
+fn format_runtime_line(
+    config: &RunMatConfig,
+    engine: &RunMatSession,
+    caps: &BannerCapabilities,
+) -> String {
+    let jit_value = if config.jit.enabled {
+        style_text(
+            jit_opt_level_label(config.jit.optimization_level),
+            caps,
+            BannerTone::Bright,
+        )
+    } else {
+        style_text("off", caps, BannerTone::Bright)
+    };
+    let gc_value = style_text(gc_preset_label(config.gc.preset), caps, BannerTone::Bright);
+    let snapshot_value = if engine.snapshot_info().is_some() {
+        style_text("loaded", caps, BannerTone::Bright)
+    } else {
+        style_text("none", caps, BannerTone::Bright)
+    };
+
+    format!(
+        "{} {}\n{} {}\n{} {}",
+        style_text("JIT:", caps, BannerTone::Label),
+        jit_value,
+        style_text("GC:", caps, BannerTone::Label),
+        gc_value,
+        style_text("Snapshot:", caps, BannerTone::Label),
+        snapshot_value
+    )
+}
+
+fn format_help_line(caps: &BannerCapabilities) -> String {
+    let help = style_text("help", caps, BannerTone::Bright);
+    let info = style_text(".info", caps, BannerTone::Bright);
+    let exit = style_text("exit", caps, BannerTone::Bright);
+    style_text(
+        &format!("Enter code to execute, or `{help}`, `{exit}` or `{info}`."),
+        caps,
+        BannerTone::Muted,
+    )
+}
+
+fn titlecase_backend(value: &str) -> &str {
+    match value.to_ascii_lowercase().as_str() {
+        "metal" => "Metal",
+        "vulkan" => "Vulkan",
+        "dx12" => "DX12",
+        "dx11" => "DX11",
+        "opengl" => "OpenGL",
+        "webgpu" => "WebGPU",
+        other => {
+            if other == "cuda" {
+                "CUDA"
+            } else {
+                value
+            }
+        }
+    }
+}
+
+fn jit_opt_level_label(level: JitOptLevel) -> &'static str {
+    match level {
+        JitOptLevel::None => "none",
+        JitOptLevel::Size => "size",
+        JitOptLevel::Speed => "speed",
+        JitOptLevel::Aggressive => "aggressive",
+    }
+}
+
+fn gc_preset_label(preset: Option<GcPreset>) -> &'static str {
+    match preset {
+        Some(GcPreset::LowLatency) => "low-latency",
+        Some(GcPreset::HighThroughput) => "high-throughput",
+        Some(GcPreset::LowMemory) => "low-memory",
+        Some(GcPreset::Debug) => "debug",
+        None => "default",
+    }
+}
+
+fn style_text(text: &str, caps: &BannerCapabilities, tone: BannerTone) -> String {
+    if !caps.color {
+        return text.to_string();
+    }
+
+    match tone {
+        BannerTone::Label => {
+            if caps.truecolor {
+                format!("{}", text.truecolor(79, 140, 255).bold())
+            } else {
+                format!("{}", text.bright_blue().bold())
+            }
+        }
+        BannerTone::Brand => {
+            if caps.truecolor {
+                format!("{}", text.truecolor(194, 108, 255).bold())
+            } else {
+                format!("{}", text.bright_magenta().bold())
+            }
+        }
+        BannerTone::Bright => format!("{}", text.bold().bright_white()),
+        BannerTone::Muted => format!("{}", text.dimmed()),
+    }
 }
 
 async fn process_repl_line(
@@ -233,38 +436,22 @@ fn finalize_repl_session(
 }
 
 fn show_repl_help() {
-    println!("RunMat REPL Help");
-    println!("=================");
+    println!("RunMat REPL");
     println!();
-    println!("Commands:");
-    println!("  exit, quit        Exit the REPL");
-    println!("  help              Show this help message");
-    println!("  .info             Show detailed system information");
-    println!("  .stats            Show execution statistics");
-    println!("  .gc               Show garbage collector statistics");
-    println!("  .gc-info          Show garbage collector statistics with header");
-    println!("  .gc-collect       Force garbage collection");
-    println!("  .reset-stats      Reset execution statistics");
+    println!("Commands");
+    println!("  help            Show this help");
+    println!("  exit, quit      Exit the REPL");
+    println!("  .info           Show runtime information");
+    println!("  .stats          Show execution statistics");
+    println!("  .gc             Show garbage collector summary");
+    println!("  .gc-info        Show garbage collector summary with header");
+    println!("  .gc-collect     Force garbage collection");
+    println!("  .reset-stats    Reset execution statistics");
     println!();
-    println!("MATLAB/Octave syntax is supported:");
-    println!("  x = 1 + 2                         # Assignment");
-    println!("  y = [1, 2, 3]                    # Vectors");
-    println!("  z = [1, 2; 3, 4]                 # Matrices");
-    println!("  if x > 0; disp('positive'); end  # Control flow");
-    println!("  for i = 1:5; disp(i); end        # Loops");
+    println!("Examples");
+    println!("  x = 1 + 2");
+    println!("  y = [1, 2; 3, 4]");
+    println!("  for i = 1:5; disp(i); end");
     println!();
-    println!("Features:");
-    println!("  • JIT compilation with Cranelift for optimal performance");
-    println!("  • Generational garbage collection with configurable policies");
-    println!("  • High-performance BLAS/LAPACK operations on matrices");
-    println!("  • Interpreter fallback for unsupported JIT patterns");
-    println!("  • Real-time performance monitoring and statistics");
-    println!();
-    println!("Performance Tips:");
-    println!("  • Repeated code automatically gets JIT compiled");
-    println!("  • Matrix operations use optimized BLAS routines");
-    println!("  • Use '.stats' to monitor JIT compilation effectiveness");
-    println!("  • Use '.gc' to monitor memory usage and collection");
-    println!();
-    println!("Press Enter after each statement to execute.");
+    println!("Use `.info` for runtime details.");
 }

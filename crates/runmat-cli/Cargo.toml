@@ -43,7 +43,8 @@ base64 = "0.22"
 rand = "0.8"
 sha2 = "0.10"
 webbrowser = "0.8"
-runmat-server-client = { workspace = true }
+owo-colors = "4.3.0"
+supports-color = "3.0.2"
 
 # Ensure vendored OpenSSL can be enabled for cross targets (feature unification)
 openssl = { version = "0.10", optional = true }
@@ -67,6 +68,7 @@ runmat-config = { version = "=0.4.0", path = "../runmat-config", features = ["ac
 runmat-time = { version = "=0.4.0", path = "../runmat-time" }
 runmat-filesystem = { version = "=0.4.0", path = "../runmat-filesystem" }
 runmat-telemetry = { version = "=0.4.0", path = "../runmat-telemetry" }
+runmat-server-client = { workspace = true }
 
 [features]
 # High-level feature toggles (default build keeps everything enabled)
