@@ -85,7 +85,7 @@ pub use arrays::create_range;
 pub use concatenation::create_matrix_from_values;
 pub use elementwise::{elementwise_div, elementwise_mul, elementwise_neg, elementwise_pow, power};
 pub use indexing::perform_indexing;
-// Explicitly re-export for external users (ignition VM) that build matrices from values
+// Explicitly re-export for external users of the VM that build matrices from values
 // (kept above)
 // Note: constants and mathematics modules only contain #[runtime_builtin] functions
 // and don't export public items, so they don't need to be re-exported
@@ -119,7 +119,7 @@ pub(crate) fn make_cell(values: Vec<Value>, rows: usize, cols: usize) -> Result<
     make_cell_with_shape(values, vec![rows, cols])
 }
 
-// Internal builtin to construct a cell from a vector of values (used by ignition)
+// Internal builtin to construct a cell from a vector of values (used by the VM)
 #[runmat_macros::runtime_builtin(name = "__make_cell", builtin_path = "crate")]
 async fn make_cell_builtin(rest: Vec<Value>) -> crate::BuiltinResult<Value> {
     let rows = 1usize;

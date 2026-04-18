@@ -30,6 +30,9 @@ export type BuiltinDocExample = {
   description: string;
   input: string;
   output?: string;
+  image?: string;
+  image_webp?: string;
+  matlab_script?: string;
 };
 
 export type BuiltinDocFAQ = {
@@ -40,6 +43,7 @@ export type BuiltinDocFAQ = {
 export type BuiltinDocLink = {
   label: string;
   url: string;
+  thumbnail?: string;
 };
 
 export type BuiltinDocSyntax = {
@@ -61,6 +65,7 @@ export type BuiltinDoc = {
   summary: string;
   references: string[];
   description?: string;
+  hero_image?: string;
   behaviors?: string[];
   examples?: BuiltinDocExample[];
   faqs?: BuiltinDocFAQ[];

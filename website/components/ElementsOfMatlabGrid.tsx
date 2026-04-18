@@ -142,22 +142,18 @@ export default function ElementsOfMatlabGrid({ builtins }: { builtins: Builtin[]
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
           placeholder="Search tiles (e.g., size, colon, table, plot)"
-          className="flex-1 text-sm rounded-md border border-border bg-muted/40 pr-3 pl-3 py-2.5 h-10 focus:outline-none focus:ring-2 focus:ring-primary/60 focus:border-primary placeholder:text-muted-foreground/80 shadow-sm"
+          className="flex-1 text-sm rounded-md border border-border pr-3 pl-3 py-2.5 h-10 focus:outline-none focus:ring-2 focus:ring-primary/60 focus:border-primary placeholder:text-muted-foreground/80 shadow-sm"
         />
         <div className="flex items-center gap-2 shrink-0">
           <span className="text-sm text-muted-foreground whitespace-nowrap">View:</span>
-          <div className="flex items-center gap-1 border border-border rounded-md p-1 bg-muted/40 shrink-0">
+          <div className="flex items-center gap-1 border border-border rounded-md p-1 shrink-0">
             <button
               onClick={() => setViewMode('grid')}
               className={`h-8 px-3 text-sm font-medium rounded-md transition-all inline-flex items-center justify-center gap-1.5 ${
                 viewMode === 'grid' 
-                  ? 'shadow-sm' 
+                  ? 'bg-foreground text-background shadow-sm' 
                   : 'hover:bg-accent hover:text-accent-foreground'
               }`}
-              style={viewMode === 'grid' ? {
-                backgroundColor: '#ffffff',
-                color: '#000000',
-              } : undefined}
               aria-label="Grid view"
             >
               <Grid3x3 className="h-4 w-4" />
@@ -167,13 +163,9 @@ export default function ElementsOfMatlabGrid({ builtins }: { builtins: Builtin[]
               onClick={() => setViewMode('list')}
               className={`h-8 px-3 text-sm font-medium rounded-md transition-all inline-flex items-center justify-center gap-1.5 ${
                 viewMode === 'list' 
-                  ? 'shadow-sm' 
+                  ? 'bg-foreground text-background shadow-sm' 
                   : 'hover:bg-accent hover:text-accent-foreground'
               }`}
-              style={viewMode === 'list' ? {
-                backgroundColor: '#ffffff',
-                color: '#000000',
-              } : undefined}
               aria-label="List view"
             >
               <List className="h-4 w-4" />
@@ -183,13 +175,9 @@ export default function ElementsOfMatlabGrid({ builtins }: { builtins: Builtin[]
               onClick={() => setViewMode('tags')}
               className={`h-8 px-3 text-sm font-medium rounded-md transition-all inline-flex items-center justify-center gap-1.5 ${
                 viewMode === 'tags' 
-                  ? 'shadow-sm' 
+                  ? 'bg-foreground text-background shadow-sm' 
                   : 'hover:bg-accent hover:text-accent-foreground'
               }`}
-              style={viewMode === 'tags' ? {
-                backgroundColor: '#ffffff',
-                color: '#000000',
-              } : undefined}
               aria-label="Chips view"
             >
               <Tags className="h-4 w-4" />
@@ -387,7 +375,7 @@ function ElementTile({ builtin }: { builtin: Builtin }) {
     >
       <Link href={`/docs/reference/builtins/${builtin.slug}`} className="block h-full">
         <Card 
-          className="group hover:opacity-90 transition-opacity cursor-pointer h-full flex flex-col gap-2 py-2.5 px-3 border-0 shadow-sm rounded-lg"
+          className="group hover:brightness-90 transition-all cursor-pointer h-full flex flex-col gap-2 py-2.5 px-3 border-0 shadow-sm rounded-lg"
           style={{ backgroundColor: categoryColor, minHeight: '139px' }}
         >
           {/* Title */}
@@ -429,29 +417,29 @@ function ElementTile({ builtin }: { builtin: Builtin }) {
             opacity: showTooltip ? 1 : 0,
           }}
         >
-          <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-xl p-4 text-sm relative" style={{ backgroundColor: '#111827' }}>
+          <div className="bg-popover text-popover-foreground border border-border rounded-lg shadow-sm p-4 text-sm relative">
             {/* Function Name */}
-            <div className="font-semibold text-base mb-2 text-white">
+            <div className="font-semibold text-base mb-2">
               {builtin.name}
             </div>
             
             {/* First Paragraph Description */}
-            <div className="text-gray-300 leading-relaxed whitespace-pre-wrap">
+            <div className="text-muted-foreground leading-relaxed whitespace-pre-wrap">
               {firstParagraph}
             </div>
 
             {/* Arrow - positioned based on tooltip position */}
             {tooltipPosition === 'top' && (
-              <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-px w-0 h-0 border-t-[8px] border-t-gray-900 border-x-[8px] border-x-transparent" />
+              <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-px w-0 h-0 border-t-[8px] border-t-popover border-x-[8px] border-x-transparent" />
             )}
             {tooltipPosition === 'bottom' && (
-              <div className="absolute bottom-full left-1/2 -translate-x-1/2 -mb-px w-0 h-0 border-b-[8px] border-b-gray-900 border-x-[8px] border-x-transparent" />
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 -mb-px w-0 h-0 border-b-[8px] border-b-popover border-x-[8px] border-x-transparent" />
             )}
             {tooltipPosition === 'left' && (
-              <div className="absolute left-full top-1/2 -translate-y-1/2 -ml-px w-0 h-0 border-l-[8px] border-l-gray-900 border-y-[8px] border-y-transparent" />
+              <div className="absolute left-full top-1/2 -translate-y-1/2 -ml-px w-0 h-0 border-l-[8px] border-l-popover border-y-[8px] border-y-transparent" />
             )}
             {tooltipPosition === 'right' && (
-              <div className="absolute right-full top-1/2 -translate-y-1/2 -mr-px w-0 h-0 border-r-[8px] border-r-gray-900 border-y-[8px] border-y-transparent" />
+              <div className="absolute right-full top-1/2 -translate-y-1/2 -mr-px w-0 h-0 border-r-[8px] border-r-popover border-y-[8px] border-y-transparent" />
             )}
           </div>
         </div>
@@ -619,11 +607,8 @@ function TagChip({ builtin }: { builtin: Builtin }) {
     >
       <Link href={`/docs/reference/builtins/${builtin.slug}`} className="group">
         <div
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all hover:scale-105 hover:shadow-md cursor-pointer border border-transparent hover:border-white/20"
-          style={{ 
-            backgroundColor: categoryColor,
-            color: 'white'
-          }}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm font-medium transition-all hover:shadow-md cursor-pointer border border-transparent hover:border-white/20 text-white"
+          style={{ backgroundColor: categoryColor }}
         >
           <span>{builtin.name}</span>
           {badges.length > 0 && (
@@ -650,29 +635,29 @@ function TagChip({ builtin }: { builtin: Builtin }) {
             opacity: showTooltip ? 1 : 0,
           }}
         >
-          <div className="bg-gray-900 border border-gray-700 rounded-lg shadow-xl p-4 text-sm relative" style={{ backgroundColor: '#111827' }}>
+          <div className="bg-popover text-popover-foreground border border-border rounded-lg shadow-sm p-4 text-sm relative">
             {/* Function Name */}
-            <div className="font-semibold text-base mb-2 text-white">
+            <div className="font-semibold text-base mb-2">
               {builtin.name}
             </div>
             
             {/* First Paragraph Description */}
-            <div className="text-gray-300 leading-relaxed whitespace-pre-wrap">
+            <div className="text-muted-foreground leading-relaxed whitespace-pre-wrap">
               {firstParagraph}
             </div>
 
             {/* Arrow - positioned based on tooltip position */}
             {tooltipPosition === 'top' && (
-              <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-px w-0 h-0 border-t-[8px] border-t-gray-900 border-x-[8px] border-x-transparent" />
+              <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-px w-0 h-0 border-t-[8px] border-t-popover border-x-[8px] border-x-transparent" />
             )}
             {tooltipPosition === 'bottom' && (
-              <div className="absolute bottom-full left-1/2 -translate-x-1/2 -mb-px w-0 h-0 border-b-[8px] border-b-gray-900 border-x-[8px] border-x-transparent" />
+              <div className="absolute bottom-full left-1/2 -translate-x-1/2 -mb-px w-0 h-0 border-b-[8px] border-b-popover border-x-[8px] border-x-transparent" />
             )}
             {tooltipPosition === 'left' && (
-              <div className="absolute left-full top-1/2 -translate-y-1/2 -ml-px w-0 h-0 border-l-[8px] border-l-gray-900 border-y-[8px] border-y-transparent" />
+              <div className="absolute left-full top-1/2 -translate-y-1/2 -ml-px w-0 h-0 border-l-[8px] border-l-popover border-y-[8px] border-y-transparent" />
             )}
             {tooltipPosition === 'right' && (
-              <div className="absolute right-full top-1/2 -translate-y-1/2 -mr-px w-0 h-0 border-r-[8px] border-r-gray-900 border-y-[8px] border-y-transparent" />
+              <div className="absolute right-full top-1/2 -translate-y-1/2 -mr-px w-0 h-0 border-r-[8px] border-r-popover border-y-[8px] border-y-transparent" />
             )}
           </div>
         </div>
@@ -689,7 +674,7 @@ function ListTile({ builtin }: { builtin: Builtin }) {
   return (
     <Link href={`/docs/reference/builtins/${builtin.slug}`} className="block">
       <div 
-        className="group hover:opacity-90 transition-opacity cursor-pointer rounded-md px-4 py-2.5 flex items-center gap-4"
+        className="group hover:bg-muted transition-colors cursor-pointer rounded-md px-4 py-2.5 flex items-center gap-4"
       >
         <div 
           className="w-2.5 h-2.5 rounded-full shrink-0"
@@ -737,8 +722,8 @@ function ViewAllTile({
       aria-label={`Expand ${formatCategoryName(category)} to show all ${totalCount} functions`}
     >
       <Card 
-        className="group hover:opacity-90 transition-opacity cursor-pointer h-full flex flex-col gap-2 py-2.5 px-3 border-0 shadow-sm border-dashed border-2 rounded-lg"
-        style={{ backgroundColor: '#1f2937', borderColor: 'rgba(255, 255, 255, 0.3)', minHeight: '139px' }}
+        className="group hover:brightness-90 transition-all cursor-pointer h-full flex flex-col gap-2 py-2.5 px-3 bg-card border-border shadow-sm border-dashed border-2 rounded-lg"
+        style={{ minHeight: '139px' }}
       >
         {/* Title */}
         <div className="font-semibold text-base leading-tight text-white flex items-center gap-1.5">
@@ -773,8 +758,8 @@ function CollapseTile({
       aria-label={`Collapse ${formatCategoryName(category)} to show fewer functions`}
     >
       <Card 
-        className="group hover:opacity-90 transition-opacity cursor-pointer h-full flex flex-col gap-2 py-2.5 px-3 border-0 shadow-sm border-dashed border-2 rounded-lg"
-        style={{ backgroundColor: '#1f2937', borderColor: 'rgba(255, 255, 255, 0.3)', minHeight: '139px' }}
+        className="group hover:brightness-90 transition-all cursor-pointer h-full flex flex-col gap-2 py-2.5 px-3 bg-card border-border shadow-sm border-dashed border-2 rounded-lg"
+        style={{ minHeight: '139px' }}
       >
         {/* Title */}
         <div className="font-semibold text-base leading-tight text-white flex items-center gap-1.5">

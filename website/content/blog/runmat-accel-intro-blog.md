@@ -230,7 +230,7 @@ flowchart TD
   D -. "size thresholds + transfer costs (refined at runtime)" .-> C
 
   subgraph CPU["CPU"]
-    CJ["Ignition ➜ JIT (small arrays)<br/>Profiles hot loops; V8-style"]
+    CJ["VM ➜ JIT (small arrays)<br/>Profiles hot loops; V8-style"]
     CB["CPU BLAS<br/>(Big CPU math or FP64)"]
   end
 
@@ -392,5 +392,4 @@ Yes. The planner chooses CPU JIT/BLAS or GPU per step. Fusion keeps GPU regions 
 
 **How do I report an issue or contribute?**  
  Open an issue or PR in the repository. Include OS, GPU/CPU info, a minimal script, and steps to reproduce. [GitHub](https://github.com/runmat-org/runmat)
-
 

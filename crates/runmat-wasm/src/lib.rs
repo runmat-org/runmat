@@ -348,11 +348,11 @@ impl SessionConfig {
             gpu_buffer_pool_max_per_key: opts.gpu_buffer_pool_max_per_key,
             callstack_limit: opts
                 .callstack_limit
-                .unwrap_or(runmat_ignition::DEFAULT_CALLSTACK_LIMIT),
+                .unwrap_or(runmat_vm::DEFAULT_CALLSTACK_LIMIT),
             error_namespace: opts
                 .error_namespace
                 .clone()
-                .unwrap_or_else(|| runmat_ignition::DEFAULT_ERROR_NAMESPACE.to_string()),
+                .unwrap_or_else(|| runmat_vm::DEFAULT_ERROR_NAMESPACE.to_string()),
         }
     }
 

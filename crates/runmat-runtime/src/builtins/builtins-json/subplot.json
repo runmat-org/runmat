@@ -36,11 +36,53 @@
       "output": "% Only the first subplot uses a logarithmic x-axis"
     }
   ],
+  "faqs": [
+    {
+      "question": "How do I control the number of rows and columns in a subplot layout?",
+      "answer": "The first two arguments to `subplot(m, n, p)` set the grid dimensions: `m` rows and `n` columns. The third argument `p` selects which slot to activate, counted in row-major order starting at 1. `subplot(3, 1, 2)` gives you the middle row of a three-row single-column layout."
+    },
+    {
+      "question": "Can two subplots share the same x-axis range?",
+      "answer": "Set matching limits on both axes manually with `axis` or `set`. There's no automatic `linkaxes` yet, but explicit limits keep them in sync.\n\n```matlab\nsubplot(2, 1, 1); plot(0:10, rand(1, 11)); axis([0 10 0 1]);\nsubplot(2, 1, 2); plot(0:10, rand(1, 11)); axis([0 10 0 1]);\n```"
+    },
+    {
+      "question": "Can I make subplots of unequal sizes?",
+      "answer": "You can span multiple grid slots by passing a vector as the third argument. `subplot(2, 2, [1 2])` creates a subplot that spans the entire top row of a 2x2 grid, while the bottom row keeps two separate panels."
+    }
+  ],
   "links": [
-    { "label": "plot", "url": "./plot" },
-    { "label": "legend", "url": "./legend" },
-    { "label": "get", "url": "./get" },
-    { "label": "set", "url": "./set" }
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "legend",
+      "url": "./legend"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/subplot.rs`",

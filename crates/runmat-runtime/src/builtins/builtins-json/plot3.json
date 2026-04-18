@@ -53,11 +53,53 @@
       "output": "ans =\n    'line'"
     }
   ],
+  "faqs": [
+    {
+      "question": "How do I plot a 3-D trajectory from parametric equations?",
+      "answer": "Generate a parameter vector `t`, compute x(t), y(t), z(t), and pass all three to `plot3`. The line connects points in parameter order.\n\n```matlab\nt = linspace(0, 10*pi, 500);\nplot3(sin(t), cos(t), t);\nzlabel('z');\n```"
+    },
+    {
+      "question": "Can I overlay plot3 lines with scatter3 points?",
+      "answer": "Yes — use `hold on` between calls. Both `plot3` and `scatter3` share the same 3-D axes and camera state, so they compose directly.\n\n```matlab\nt = linspace(0, 4*pi, 200);\nplot3(cos(t), sin(t), t);\nhold on;\nscatter3(cos(t(1:20:end)), sin(t(1:20:end)), t(1:20:end));\n```"
+    },
+    {
+      "question": "How do I control the camera angle on a plot3 figure?",
+      "answer": "Call `view(az, el)` after plotting. `az` is the azimuth (horizontal rotation) and `el` is the elevation (vertical tilt), both in degrees. `view(3)` gives the default 3-D perspective. Camera state is subplot-local, so each subplot can have its own angle."
+    }
+  ],
   "links": [
-    { "label": "scatter3", "url": "./scatter3" },
-    { "label": "view", "url": "./view" },
-    { "label": "zlabel", "url": "./zlabel" },
-    { "label": "legend", "url": "./legend" }
+    {
+      "label": "scatter3",
+      "url": "./scatter3"
+    },
+    {
+      "label": "view",
+      "url": "./view"
+    },
+    {
+      "label": "zlabel",
+      "url": "./zlabel"
+    },
+    {
+      "label": "legend",
+      "url": "./legend"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/plot3.rs`",

@@ -54,10 +54,45 @@
       "output": "% Use histogram(...) instead when you want bin-edge semantics and an object handle"
     }
   ],
+  "faqs": [
+    {
+      "question": "What's the actual difference between hist and histogram?",
+      "answer": "The critical difference is how the second argument is interpreted. `hist(data, v)` treats `v` as **bin centers**. `histogram(data, 'BinEdges', v)` treats `v` as **bin edges**. Beyond that, `histogram` returns a handle object with properties you can query via `get`, while `hist` is a fire-and-forget plotting command."
+    },
+    {
+      "question": "When should I use hist instead of histogram?",
+      "answer": "Use `hist` when you're porting legacy MATLAB code that relies on center-based binning or when you want a quick distribution plot without needing a handle object. For anything new—especially if you need normalization modes, bin-edge control, or programmatic access to bin counts—use `histogram` instead."
+    }
+  ],
   "links": [
-    { "label": "histogram", "url": "./histogram" },
-    { "label": "bar", "url": "./bar" },
-    { "label": "pie", "url": "./pie" }
+    {
+      "label": "histogram",
+      "url": "./histogram"
+    },
+    {
+      "label": "bar",
+      "url": "./bar"
+    },
+    {
+      "label": "pie",
+      "url": "./pie"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/hist.rs`",

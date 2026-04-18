@@ -8,10 +8,10 @@ use runmat_builtins::{self, BuiltinFunction, Constant, Type};
 use runmat_hir::{
     HirDiagnostic, HirDiagnosticSeverity, HirStmt, LoweringContext, LoweringResult, SemanticError,
 };
-use runmat_ignition::{compile, CompileError};
 use runmat_lexer::{tokenize_detailed, SpannedToken, Token};
 pub use runmat_parser::CompatMode;
 use runmat_parser::{parse_with_options, ParserOptions};
+use runmat_vm::{compile, CompileError};
 use std::collections::HashMap;
 use std::fmt::Write;
 
@@ -488,7 +488,7 @@ fn diagnostic_for_compile_error(error: &CompileError, text: &str) -> Diagnostic 
         severity: Some(DiagnosticSeverity::ERROR),
         code: None,
         code_description: None,
-        source: Some("runmat-ignition".into()),
+        source: Some("runmat-vm".into()),
         message,
         related_information: None,
         tags: None,

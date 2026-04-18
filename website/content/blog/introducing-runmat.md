@@ -205,7 +205,7 @@ For a broader landscape view, see our comparison of RunMat vs Octave, Julia, and
 
 ## How it works
 
-- **Ignition interpreter**: immediate execution, great for REPL and scripts.
+- **VM interpreter**: immediate execution, great for REPL and scripts.
 - **Turbine JIT**: hot functions get compiled to optimized machine code (Cranelift backend).
 - **Slim builtins**: a curated set in core; everything else via packages. Docs are generated from runtime metadata.
 - **Great developer experience**: built in Jupyter kernel, flow-sensitive inference for great autocomplete and type hints, and more.

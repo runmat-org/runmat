@@ -15,8 +15,8 @@ export default async function BuiltinsIndexPage() {
     const builtins = loadBuiltins();
     return (
         <div className="container mx-auto px-4 md:px-6 py-8">
-            <h1 className="text-3xl md:text-4xl font-bold mb-2">Builtin Function Reference</h1>
-            <p className="text-muted-foreground mb-6">
+            <h1 className="text-2xl sm:text-3xl font-bold mb-2">Builtin Function Reference</h1>
+            <p className="text-foreground text-[0.938rem] mb-6">
                 Discover MATLAB-compatible builtins implemented in RunMat. Search by name, category, or keywords.
             </p>
             <Suspense fallback={<div>Loading...</div>}>

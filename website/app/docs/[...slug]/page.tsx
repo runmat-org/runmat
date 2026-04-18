@@ -190,8 +190,8 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
   };
   const breadcrumbJsonLdString = JSON.stringify(breadcrumbJsonLd).replace(/<\//g, "<\\/");
   return (
-    <div className="grid lg:grid-cols-[minmax(0,1fr)_220px] gap-8 lg:items-start overflow-visible">
-      <article className="prose dark:prose-invert max-w-none scroll-smooth min-w-0">
+    <div className="grid lg:grid-cols-[minmax(0,1fr)_220px] gap-10 lg:items-start overflow-visible">
+      <article className="prose dark:prose-invert max-w-3xl scroll-smooth min-w-0">
         <nav className="text-sm text-muted-foreground mb-4">
           {crumbs
             .filter((c) => c.title)
@@ -239,17 +239,6 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
 
 // Map well-known slug prefixes to repo files when not present in the manifest
 function fallbackForSlug(slug: string[]) {
-  if (slug.length === 2 && slug[0] === "ignition") {
-    const map: Record<string, string> = {
-      "compiler-pipeline": "crates/runmat-ignition/COMPILER_PIPELINE.md",
-      "instr-set": "crates/runmat-ignition/INSTR_SET.md",
-      "indexing-and-slicing": "crates/runmat-ignition/INDEXING_AND_SLICING.md",
-      "error-model": "docs/ERROR_MODEL.md",
-      "oop-semantics": "crates/runmat-ignition/OOP_SEMANTICS.md",
-    };
-    const file = map[slug[1]];
-    if (file) return { title: toTitleCase(slug[1].replace(/-/g, " ")), slug, file };
-  }
   return undefined;
 }
 
@@ -273,4 +262,3 @@ function findRepoRoot(start: string): string | undefined {
   }
   return undefined;
 }
-

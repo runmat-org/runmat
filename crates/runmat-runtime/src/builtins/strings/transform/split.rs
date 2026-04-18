@@ -701,7 +701,7 @@ pub(crate) mod tests {
     #[test]
     fn split_character_array_rows() {
         let mut row1: Vec<char> = "GPU Accelerate".chars().collect();
-        let mut row2: Vec<char> = "Ignition Engine".chars().collect();
+        let mut row2: Vec<char> = "VM Engine".chars().collect();
         let width = row1.len().max(row2.len());
         row1.resize(width, ' ');
         row2.resize(width, ' ');
@@ -717,7 +717,7 @@ pub(crate) mod tests {
                     array.data,
                     vec![
                         "GPU".to_string(),
-                        "Ignition".to_string(),
+                        "VM".to_string(),
                         "Accelerate".to_string(),
                         "Engine".to_string()
                     ]
@@ -732,7 +732,7 @@ pub(crate) mod tests {
     fn split_string_array_multiple_columns() {
         let data = vec![
             "RunMat Core".to_string(),
-            "Ignition Interpreter".to_string(),
+            "VM Interpreter".to_string(),
             "Accelerate Engine".to_string(),
             "<missing>".to_string(),
         ];
@@ -746,7 +746,7 @@ pub(crate) mod tests {
                     array.data,
                     vec![
                         "RunMat".to_string(),
-                        "Ignition".to_string(),
+                        "VM".to_string(),
                         "Core".to_string(),
                         "Interpreter".to_string(),
                         "Accelerate".to_string(),

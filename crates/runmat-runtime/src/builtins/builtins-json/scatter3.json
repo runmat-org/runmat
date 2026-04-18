@@ -10,6 +10,7 @@
     "gpu plotting"
   ],
   "summary": "Create 3-D scatter plots for spatial point clouds, encoded markers, and MATLAB `scatter3` workflows.",
+  "hero_image": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-scatter3-3D-point-cloud.webp",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -52,14 +53,64 @@
       "description": "Use subplot-local camera state with multiple 3-D plots",
       "input": "subplot(1, 2, 1);\nscatter3(1:10, rand(1,10), rand(1,10));\nview(3);\nsubplot(1, 2, 2);\nscatter3(rand(1,10), rand(1,10), rand(1,10));\nview(2);",
       "output": "% The two subplots keep independent 3-D view state"
+    },
+    {
+      "description": "3D point cloud with color-coded altitude",
+      "input": "n = 2000;\ntheta = 4*pi*rand(1, n);\nr = sqrt(rand(1, n));\nx = r .* cos(theta);\ny = r .* sin(theta);\nz = sin(3*r) ./ (1 + r);\n\nscatter3(x, y, z, 12, z, 'filled');\ncolormap('turbo');\ncolorbar;\ntitle('3-D Point Cloud — Altitude Encoded');\nxlabel('x');\nylabel('y');\nzlabel('z');\nview(35, 25);\ngrid on;",
+      "image_webp": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-scatter3-3D-point-cloud.webp"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How do I size scatter3 points by a data variable?",
+      "answer": "Pass a size vector as the fourth argument. Each element controls the marker area for the corresponding point.\n\n```matlab\nt = linspace(0, 4*pi, 200);\nsizes = linspace(5, 50, 200);\nscatter3(cos(t), sin(t), t, sizes);\n```\n\nA scalar fourth argument sets all points to the same size."
+    },
+    {
+      "question": "Can I color scatter3 points by a fourth variable?",
+      "answer": "Pass a color vector as the fifth argument after the size vector. Each value maps through the active colormap. Add `colorbar` to show the mapping.\n\n```matlab\nscatter3(x, y, z, 20, myValues);\ncolormap('turbo');\ncolorbar;\n```"
+    },
+    {
+      "question": "How do I rotate or orbit a scatter3 plot?",
+      "answer": "Use `view(az, el)` to set the camera angle programmatically. `az` is the horizontal orbit in degrees, `el` is the vertical tilt. `view(3)` gives the standard 3-D default. Each subplot keeps its own independent camera state, so you can show the same data from multiple angles in a subplot grid."
     }
   ],
   "links": [
-    { "label": "plot3", "url": "./plot3" },
-    { "label": "scatter", "url": "./scatter" },
-    { "label": "view", "url": "./view" },
-    { "label": "zlabel", "url": "./zlabel" },
-    { "label": "subplot", "url": "./subplot" }
+    {
+      "label": "plot3",
+      "url": "./plot3"
+    },
+    {
+      "label": "scatter",
+      "url": "./scatter"
+    },
+    {
+      "label": "view",
+      "url": "./view"
+    },
+    {
+      "label": "zlabel",
+      "url": "./zlabel"
+    },
+    {
+      "label": "subplot",
+      "url": "./subplot"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/scatter3.rs`",

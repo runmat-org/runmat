@@ -30,11 +30,53 @@
       "input": "[X, Y] = meshgrid(linspace(-3, 3, 40), linspace(-3, 3, 40));\nZ = sin(X) .* cos(Y);\nsubplot(1, 2, 1);\ncontourf(X, Y, Z);\ncolorbar on;\nsubplot(1, 2, 2);\nsurf(X, Y, Z);\ncolorbar off;"
     }
   ],
+  "faqs": [
+    {
+      "question": "How do I add a label to the colorbar?",
+      "answer": "Use `ylabel` on the colorbar handle, or label the axes directly. In practice, the colorbar inherits its scale from the data range of the parent plot, and you annotate it through standard label commands on the axes.\n\n```matlab\nimagesc(peaks(50));\ncolorbar on;\nylabel('Intensity');\n```"
+    },
+    {
+      "question": "Can I limit the colorbar range without clipping the data?",
+      "answer": "Set `caxis([cmin cmax])` (or `clim([cmin cmax])`) on the axes to control the color mapping range. Values outside that range get clamped to the endpoint colors, but the underlying data stays intact."
+    },
+    {
+      "question": "Does the colorbar track across subplots automatically?",
+      "answer": "No. Colorbar state is subplot-local, so each axes manages its own colorbar independently. You need to call `colorbar on` in each subplot where you want one visible."
+    }
+  ],
   "links": [
-    { "label": "colormap", "url": "./colormap" },
-    { "label": "imagesc", "url": "./imagesc" },
-    { "label": "surf", "url": "./surf" },
-    { "label": "contourf", "url": "./contourf" }
+    {
+      "label": "colormap",
+      "url": "./colormap"
+    },
+    {
+      "label": "imagesc",
+      "url": "./imagesc"
+    },
+    {
+      "label": "surf",
+      "url": "./surf"
+    },
+    {
+      "label": "contourf",
+      "url": "./contourf"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs`",

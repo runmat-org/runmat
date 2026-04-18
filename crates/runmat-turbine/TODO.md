@@ -147,4 +147,4 @@ Since we want a production-hardened system with (to start) full MATLAB code exec
 - Optional: compile `LoadBool` to numeric 1.0/0.0 in JIT to remove fallback in trivial paths.
 - Add a JIT-engine mode toggle in harness to run critical suites (indexing/scatter, try/catch, expansion) under JIT and assert zero fallbacks for covered ops.
 
-- Added complete opcode coverage to `crates/runmat-ignition/INSTR_SET.md`, so the JIT plan can target each instruction precisely.
+- Added complete opcode coverage and module ownership to `crates/runmat-vm/MODULE_MAP.md`, so the JIT plan can target each instruction precisely.

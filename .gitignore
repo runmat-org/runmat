@@ -12,6 +12,7 @@
 /core.*
 **/core.*
 **/*.core
+!**/core.rs
 
 # Generated website content
 website/content/builtins.json

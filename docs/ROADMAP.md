@@ -35,7 +35,7 @@ The below tracks the progress of the project towards the 1.0 release to date.
  - [x] Extend parser to support control flow, function definitions and array
       indexing so that typical MATLAB files can be parsed without errors.
 - [x] High-level IR (`runmat-hir`) with scope and type annotations.
-- [x] Simple interpreter running on an unoptimised bytecode (`runmat-ignition`).
+- [x] Simple interpreter running on an unoptimised bytecode (`runmat-vm`).
 - [x] Headless plotting backend emitting SVG/PNG.
 - [x] Jupyter kernel communication skeleton.
 

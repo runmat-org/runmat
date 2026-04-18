@@ -1,8 +1,8 @@
 use runmat_accelerate::fusion::{detect_fusion_groups, FusionKind, FusionPlan};
 use runmat_accelerate::graph::{AccelGraph, AccelNodeLabel, PrimitiveOp, ValueOrigin};
 use runmat_hir::{HirProgram, LoweringContext, SemanticError};
-use runmat_ignition::compile;
 use runmat_parser::parse;
+use runmat_vm::compile;
 use std::collections::HashMap;
 use std::sync::Once;
 
