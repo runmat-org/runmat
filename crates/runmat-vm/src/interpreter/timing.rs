@@ -1,7 +1,5 @@
 #[cfg(not(target_arch = "wasm32"))]
 use runmat_time::Instant;
-#[cfg(target_arch = "wasm32")]
-type Instant = ();
 
 #[cfg(not(target_arch = "wasm32"))]
 pub struct InterpreterTiming {
