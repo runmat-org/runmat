@@ -29,7 +29,7 @@ pub async fn drawnow_builtin() -> BuiltinResult<bool> {
                 .with_builtin("drawnow")
                 .build()
         })?;
-        return Ok(true);
+        Ok(true)
     }
 
     #[cfg(not(all(target_arch = "wasm32", feature = "plot-web")))]
