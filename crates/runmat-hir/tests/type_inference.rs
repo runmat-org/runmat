@@ -127,6 +127,26 @@ fn multi_lhs_resolution_from_summary() {
 }
 
 #[test]
+fn infer_function_variable_types_tracks_struct_field_writes() {
+    let prog = lower("function y = f(s); s.x = 1; y = 0; end");
+    let envs = infer_function_variable_types(&prog);
+    let env = envs.get("f").unwrap();
+    let s_id = if let runmat_hir::HirStmt::Function { params, .. } = &prog.body[0] {
+        params[0]
+    } else {
+        panic!("expected function")
+    };
+    assert_eq!(
+        env.get(&s_id)
+            .cloned()
+            .unwrap_or(runmat_builtins::Type::Unknown),
+        runmat_builtins::Type::Struct {
+            known_fields: Some(vec!["x".to_string()])
+        }
+    );
+}
+
+#[test]
 fn infer_range_shape_in_globals() {
     let result = lower_result("x = 0:1:100; y = sin(x);");
     match &result.hir.body[0] {
@@ -195,6 +215,38 @@ fn infer_range_shape_in_globals() {
             }
         );
     }
+}
+
+#[test]
+fn infer_global_types_track_trycatch_assignments() {
+    let result = lower_result("try; x = 1; catch; x = 2; end");
+    let x_id = runmat_hir::VarId(*result.variables.get("x").unwrap());
+    let globals =
+        runmat_hir::infer_global_variable_types(&result.hir, &result.inferred_function_returns);
+    assert_eq!(
+        globals
+            .get(&x_id)
+            .cloned()
+            .unwrap_or(runmat_builtins::Type::Unknown),
+        runmat_builtins::Type::Num
+    );
+}
+
+#[test]
+fn infer_global_types_track_struct_lvalue_assignments() {
+    let result = lower_result("s.x = 1;");
+    let s_id = runmat_hir::VarId(*result.variables.get("s").unwrap());
+    let globals =
+        runmat_hir::infer_global_variable_types(&result.hir, &result.inferred_function_returns);
+    assert_eq!(
+        globals
+            .get(&s_id)
+            .cloned()
+            .unwrap_or(runmat_builtins::Type::Unknown),
+        runmat_builtins::Type::Struct {
+            known_fields: Some(vec!["x".to_string()])
+        }
+    );
 }
 
 #[test]

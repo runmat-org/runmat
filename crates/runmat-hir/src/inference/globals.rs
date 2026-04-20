@@ -1,28 +1,15 @@
-use super::shared::{resolve_context_from_args, FuncDef};
+use super::shared::{
+    apply_lvalue_type_effects, collect_function_defs, join_env,
+    refine_multi_assign_outputs_from_func, resolve_context_from_args, Analysis, FuncDef,
+};
 use crate::inference::expr::infer_expr_type_with_env;
-use crate::{HirClassMember, HirExprKind, HirProgram, HirStmt, Type, VarId};
+use crate::{HirExprKind, HirProgram, HirStmt, Type, VarId};
 use std::collections::HashMap;
 
 pub fn infer_global_variable_types(
     prog: &HirProgram,
     returns: &HashMap<String, Vec<Type>>,
 ) -> HashMap<VarId, Type> {
-    #[derive(Clone)]
-    struct Analysis {
-        exits: Vec<HashMap<VarId, Type>>,
-        fallthrough: Option<HashMap<VarId, Type>>,
-    }
-
-    fn join_env(a: &HashMap<VarId, Type>, b: &HashMap<VarId, Type>) -> HashMap<VarId, Type> {
-        let mut out = a.clone();
-        for (k, v) in b {
-            out.entry(*k)
-                .and_modify(|t| *t = t.unify(v))
-                .or_insert_with(|| v.clone());
-        }
-        out
-    }
-
     #[allow(clippy::type_complexity, clippy::only_used_in_recursion)]
     fn analyze_stmts(
         stmts: &[HirStmt],
@@ -59,32 +46,13 @@ pub fn infer_global_variable_types(
                                     per_out = vec![out_type; vars.len()];
                                 }
                             }
-                            if let Some((params, outs, body)) = func_defs.get(name).cloned() {
-                                let mut penv: HashMap<VarId, Type> = HashMap::new();
-                                for p in params {
-                                    penv.insert(p, Type::Num);
-                                }
-                                let mut out_types: Vec<Type> = vec![Type::Unknown; outs.len()];
-                                for s in &body {
-                                    if let HirStmt::Assign(var, rhs, _, _) = s {
-                                        if let Some(pos) = outs.iter().position(|o| o == var) {
-                                            let t = infer_expr_type_with_env(rhs, &penv, returns);
-                                            out_types[pos] = out_types[pos].unify(&t);
-                                        }
-                                    }
-                                }
-                                if per_out.is_empty() {
-                                    per_out = out_types;
-                                } else {
-                                    for (i, t) in out_types.into_iter().enumerate() {
-                                        if matches!(per_out.get(i), Some(Type::Unknown)) {
-                                            if let Some(slot) = per_out.get_mut(i) {
-                                                *slot = t;
-                                            }
-                                        }
-                                    }
-                                }
-                            }
+                            refine_multi_assign_outputs_from_func(
+                                name,
+                                &mut per_out,
+                                returns,
+                                func_defs,
+                                infer_expr_type_with_env,
+                            );
                         }
                         for (i, v) in vars.iter().enumerate() {
                             if let Some(id) = v {
@@ -215,12 +183,27 @@ pub fn infer_global_variable_types(
                         env = join_env(&env, e);
                     }
                 }
+                HirStmt::TryCatch {
+                    try_body,
+                    catch_body,
+                    ..
+                } => {
+                    let a_try = analyze_stmts(try_body, env.clone(), returns, func_defs);
+                    let a_catch = analyze_stmts(catch_body, env.clone(), returns, func_defs);
+                    let mut out_env = a_try.fallthrough.clone().unwrap_or_else(|| env.clone());
+                    if let Some(f) = a_catch.fallthrough {
+                        out_env = join_env(&out_env, &f);
+                    }
+                    env = out_env;
+                    exits.extend(a_try.exits);
+                    exits.extend(a_catch.exits);
+                }
                 HirStmt::Function { .. } | HirStmt::ClassDef { .. } => {}
-                HirStmt::Global(_, _)
-                | HirStmt::Persistent(_, _)
-                | HirStmt::Import { .. }
-                | HirStmt::TryCatch { .. }
-                | HirStmt::AssignLValue(_, _, _, _) => {}
+                HirStmt::AssignLValue(lv, expr, _, _) => {
+                    apply_lvalue_type_effects(&mut env, lv);
+                    let _ = infer_expr_type_with_env(expr, &env, returns);
+                }
+                HirStmt::Global(_, _) | HirStmt::Persistent(_, _) | HirStmt::Import { .. } => {}
             }
             i += 1;
         }
@@ -231,42 +214,7 @@ pub fn infer_global_variable_types(
         }
     }
 
-    let mut func_defs: HashMap<String, FuncDef> = HashMap::new();
-    for stmt in &prog.body {
-        if let HirStmt::Function {
-            name,
-            params,
-            outputs,
-            body,
-            ..
-        } = stmt
-        {
-            func_defs.insert(
-                name.clone(),
-                (params.clone(), outputs.clone(), body.clone()),
-            );
-        } else if let HirStmt::ClassDef { members, .. } = stmt {
-            for m in members {
-                if let HirClassMember::Methods { body, .. } = m {
-                    for s in body {
-                        if let HirStmt::Function {
-                            name,
-                            params,
-                            outputs,
-                            body,
-                            ..
-                        } = s
-                        {
-                            func_defs.insert(
-                                name.clone(),
-                                (params.clone(), outputs.clone(), body.clone()),
-                            );
-                        }
-                    }
-                }
-            }
-        }
-    }
+    let func_defs = collect_function_defs(prog);
 
     let analysis = analyze_stmts(&prog.body, HashMap::new(), returns, &func_defs);
     let mut out: HashMap<VarId, Type> = HashMap::new();

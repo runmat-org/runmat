@@ -47,7 +47,6 @@ pub fn lower(
     let body = ctx.lower_stmts(&prog.body)?;
     let var_types = ctx.var_types.clone();
     let hir = HirProgram { body, var_types };
-    let _ = infer_function_output_types(&hir);
     validate_classdefs(&hir)?;
 
     let mut variables: HashMap<String, usize> = HashMap::new();
