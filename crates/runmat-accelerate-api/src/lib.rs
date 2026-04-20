@@ -2020,6 +2020,15 @@ pub trait AccelProvider: Send + Sync {
     fn kron(&self, _a: &GpuTensorHandle, _b: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("kron not supported by provider"))
     }
+    /// Compute the cross product of 3-element vectors along a matching dimension.
+    fn cross(
+        &self,
+        _lhs: &GpuTensorHandle,
+        _rhs: &GpuTensorHandle,
+        _dim: Option<usize>,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("cross not supported by provider"))
+    }
     fn reduce_sum<'a>(
         &'a self,
         _a: &'a GpuTensorHandle,

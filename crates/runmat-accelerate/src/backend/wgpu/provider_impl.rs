@@ -12153,6 +12153,134 @@ impl WgpuProvider {
         }
     }
 
+    pub(crate) fn cross_exec(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+        dim: Option<usize>,
+    ) -> Result<GpuTensorHandle> {
+        let entry_lhs = self.get_entry(lhs)?;
+        let entry_rhs = self.get_entry(rhs)?;
+        ensure!(
+            entry_lhs.shape == entry_rhs.shape,
+            "cross: shape mismatch between inputs"
+        );
+
+        let shape = if entry_lhs.shape.is_empty() {
+            vec![1, 1]
+        } else {
+            entry_lhs.shape.clone()
+        };
+        let rank = shape.len();
+        let target_dim = match dim {
+            Some(target_dim) => {
+                ensure!(
+                    target_dim >= 1 && target_dim <= rank,
+                    "cross: dimension {} exceeds the number of array dimensions ({})",
+                    target_dim,
+                    rank
+                );
+                ensure!(
+                    shape[target_dim - 1] == 3,
+                    "cross: dimension {} must have length 3",
+                    target_dim
+                );
+                target_dim
+            }
+            None => shape
+                .iter()
+                .position(|&extent| extent == 3)
+                .map(|idx| idx + 1)
+                .ok_or_else(|| anyhow!("cross: inputs must have a dimension of length 3"))?,
+        };
+        let dim_index = target_dim - 1;
+        let total_len = entry_lhs.len;
+        if total_len == 0 {
+            return self.zeros_exec(&shape);
+        }
+
+        let stride_before = product_checked(&shape[..dim_index])
+            .ok_or_else(|| anyhow!("cross: internal dimension overflow"))?;
+        let stride_after = product_checked(&shape[dim_index + 1..])
+            .ok_or_else(|| anyhow!("cross: internal dimension overflow"))?;
+        let slice_stride = stride_before
+            .checked_mul(3)
+            .ok_or_else(|| anyhow!("cross: internal dimension overflow"))?;
+        let slice_count = stride_before
+            .checked_mul(stride_after)
+            .ok_or_else(|| anyhow!("cross: internal dimension overflow"))?;
+
+        let mut comp1 = Vec::with_capacity(slice_count);
+        let mut comp2 = Vec::with_capacity(slice_count);
+        let mut comp3 = Vec::with_capacity(slice_count);
+        for after in 0..stride_after {
+            let slice_base = after
+                .checked_mul(slice_stride)
+                .ok_or_else(|| anyhow!("cross: internal index overflow"))?;
+            for before in 0..stride_before {
+                let idx1 = slice_base + before;
+                let idx2 = idx1 + stride_before;
+                let idx3 = idx2 + stride_before;
+                comp1.push(
+                    u32::try_from(idx1).map_err(|_| anyhow!("cross: GPU index exceeds limits"))?,
+                );
+                comp2.push(
+                    u32::try_from(idx2).map_err(|_| anyhow!("cross: GPU index exceeds limits"))?,
+                );
+                comp3.push(
+                    u32::try_from(idx3).map_err(|_| anyhow!("cross: GPU index exceeds limits"))?,
+                );
+            }
+        }
+
+        let mut reduced_shape = shape.clone();
+        reduced_shape[dim_index] = 1;
+
+        let a1 = self.gather_linear_exec(lhs, &comp1, &reduced_shape)?;
+        let a2 = self.gather_linear_exec(lhs, &comp2, &reduced_shape)?;
+        let a3 = self.gather_linear_exec(lhs, &comp3, &reduced_shape)?;
+        let b1 = self.gather_linear_exec(rhs, &comp1, &reduced_shape)?;
+        let b2 = self.gather_linear_exec(rhs, &comp2, &reduced_shape)?;
+        let b3 = self.gather_linear_exec(rhs, &comp3, &reduced_shape)?;
+
+        let a2b3 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a2, &b3)?;
+        let a3b2 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a3, &b2)?;
+        let c1 =
+            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a2b3, &a3b2)?;
+
+        let a3b1 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a3, &b1)?;
+        let a1b3 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a1, &b3)?;
+        let c2 =
+            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a3b1, &a1b3)?;
+
+        let a1b2 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a1, &b2)?;
+        let a2b1 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a2, &b1)?;
+        let c3 =
+            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a1b2, &a2b1)?;
+
+        let out = self.zeros_exec(&shape)?;
+        let scatter_result = (|| -> Result<()> {
+            self.scatter_linear_exec(&out, &comp1, &c1)?;
+            self.scatter_linear_exec(&out, &comp2, &c2)?;
+            self.scatter_linear_exec(&out, &comp3, &c3)?;
+            Ok(())
+        })();
+
+        for handle in [
+            &a1, &a2, &a3, &b1, &b2, &b3, &a2b3, &a3b2, &c1, &a3b1, &a1b3, &c2, &a1b2, &a2b1, &c3,
+        ] {
+            let _ = self.free(handle);
+        }
+
+        match scatter_result {
+            Ok(()) => Ok(out),
+            Err(err) => {
+                let _ = self.free(&out);
+                Err(err)
+            }
+        }
+    }
+
     pub(crate) fn elem_eq_exec(
         &self,
         a: &GpuTensorHandle,
@@ -14526,6 +14654,14 @@ impl AccelProvider for WgpuProvider {
 
     fn kron(&self, a: &GpuTensorHandle, b: &GpuTensorHandle) -> Result<GpuTensorHandle> {
         self.kron_exec(a, b)
+    }
+    fn cross(
+        &self,
+        lhs: &GpuTensorHandle,
+        rhs: &GpuTensorHandle,
+        dim: Option<usize>,
+    ) -> Result<GpuTensorHandle> {
+        self.cross_exec(lhs, rhs, dim)
     }
     fn reshape(&self, handle: &GpuTensorHandle, new_shape: &[usize]) -> Result<GpuTensorHandle> {
         let new_len = if new_shape.is_empty() {
