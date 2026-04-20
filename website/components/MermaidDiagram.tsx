@@ -58,7 +58,7 @@ export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
           startOnLoad: true,
           theme: theme === 'dark' ? 'dark' : 'default',
           flowchart: {
-            htmlLabels: false,
+            htmlLabels: true,
             useMaxWidth: true,
             curve: 'basis',
           },
