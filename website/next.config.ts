@@ -74,6 +74,15 @@ const nextConfig: NextConfig = {
         permanent: false,
       },
 
+      // Lexer docs — crate README was deleted in the lexer crate split (fbd1d97f) and
+      // replacement is pending the compiler docs rewrite. Temporary so Google re-crawls
+      // once the canonical destination exists.
+      {
+        source: '/docs/internals/lexer',
+        destination: '/docs/architecture',
+        permanent: false,
+      },
+
       // Raw .md file URLs -> correct doc routes
       {
         source: '/CLI.md',
