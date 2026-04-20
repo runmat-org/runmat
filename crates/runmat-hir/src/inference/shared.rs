@@ -346,19 +346,19 @@ pub fn eval_const_num(expr: &HirExpr) -> Option<f64> {
 pub(crate) fn literal_value_from_expr(expr: &HirExpr) -> runmat_builtins::LiteralValue {
     use runmat_builtins::LiteralValue;
 
-    if let Some(value) = eval_const_num(expr) {
-        return LiteralValue::Number(value);
-    }
-
     match &expr.kind {
         HirExprKind::String(text) => LiteralValue::String(text.clone()),
         HirExprKind::Constant(name) => match name.to_ascii_lowercase().as_str() {
             "true" => LiteralValue::Bool(true),
             "false" => LiteralValue::Bool(false),
-            _ => LiteralValue::Unknown,
+            _ => eval_const_num(expr)
+                .map(LiteralValue::Number)
+                .unwrap_or(LiteralValue::Unknown),
         },
         HirExprKind::Tensor(rows) => literal_vector_from_tensor(rows),
-        _ => LiteralValue::Unknown,
+        _ => eval_const_num(expr)
+            .map(LiteralValue::Number)
+            .unwrap_or(LiteralValue::Unknown),
     }
 }
 
@@ -607,5 +607,12 @@ mod literal_context_tests {
                 LiteralValue::Bool(false),
             ]
         );
+    }
+
+    #[test]
+    fn resolve_context_exposes_boolean_literals() {
+        let args = vec![expr(HirExprKind::Constant("true".to_string()))];
+        let ctx = resolve_context_from_args(&args);
+        assert_eq!(ctx.literal_bool_at(0), Some(true));
     }
 }

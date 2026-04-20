@@ -5,7 +5,7 @@ use super::shared::{
     FuncDef,
 };
 use crate::{HirClassMember, HirExpr, HirExprKind, HirProgram, HirStmt, Type, VarId};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 pub fn infer_function_output_types(prog: &HirProgram) -> HashMap<String, Vec<Type>> {
     fn infer_expr_type(
@@ -203,24 +203,6 @@ pub fn infer_function_output_types(prog: &HirProgram) -> HashMap<String, Vec<Typ
         .iter()
         .map(|n| (n.clone(), Vec::new()))
         .collect();
-
-    let mut globals: HashSet<VarId> = HashSet::new();
-    let mut persistents: HashSet<VarId> = HashSet::new();
-    for stmt in &prog.body {
-        if let HirStmt::Global(vs, _) = stmt {
-            for (v, _n) in vs {
-                globals.insert(*v);
-            }
-        }
-    }
-    for stmt in &prog.body {
-        if let HirStmt::Persistent(vs, _) = stmt {
-            for (v, _n) in vs {
-                persistents.insert(*v);
-            }
-        }
-    }
-    let _ = (&globals, &persistents);
 
     let func_defs = collect_function_defs(prog);
 
