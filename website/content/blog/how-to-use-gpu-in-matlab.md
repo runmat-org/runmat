@@ -223,14 +223,14 @@ Every Mac sold since late 2020 has an Apple Silicon chip with a capable GPU that
 
 | Chip | FP32 throughput (approx) |
 |------|--------------------------|
-| M1 | 2.6 TFLOPS |
-| M2 | 3.6 TFLOPS |
-| M3 | 4.1 TFLOPS |
-| M3 Max | 14 TFLOPS |
-| M4 | ~4 TFLOPS |
-| M4 Max | ~50 TFLOPS |
+| M1 | ~2.6 TFLOPS |
+| M2 | ~3.6 TFLOPS |
+| M3 | ~4.1 TFLOPS |
+| M3 Max (40-core GPU) | ~14 TFLOPS |
+| M4 | ~4.6 TFLOPS |
+| M4 Max (40-core GPU) | ~18 TFLOPS |
 
-That's in the same league as a mid-to-high NVIDIA RTX card, sitting idle in MATLAB's eyes.
+Numbers are public estimates; exact figures vary with GPU core count and sustained clocks. Even the base chips sit in the same league as a mid-range discrete GPU, idle in MATLAB's eyes.
 
 ### Why MATLAB GPU doesn't work on Mac
 
@@ -306,7 +306,7 @@ m = mean(y, 'all');
 fprintf("m = %.6f\n", double(m));
 ```
 
-If you have multiple GPUs in your system (e.g. an integrated Intel plus a discrete AMD on Linux), RunMat picks the most capable one by default. You can override the choice via environment variable if you need to pin execution to a specific adapter.
+If you have multiple GPUs (e.g. an integrated Intel plus a discrete AMD on Linux), set `RUNMAT_ACCEL_WGPU_POWER=high` to prefer the discrete card or `low` to favour integrated. The default is `auto`, which lets wgpu pick based on the system's own hint.
 
 The [install link](/download) covers Windows and Linux builds. If you just want to confirm things work before installing, the [browser sandbox](https://runmat.com/sandbox) uses WebGPU, which dispatches to your AMD or Intel GPU through the same underlying drivers.
 
