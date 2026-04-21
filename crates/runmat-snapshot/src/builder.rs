@@ -917,7 +917,7 @@ impl SnapshotBuilder {
                 jit_hints.push(JitHint {
                     pattern: builtin.name.clone(),
                     hint_type: self.determine_jit_hint_type(&builtin.category),
-                    priority: builtin.optimization_level.clone(),
+                    priority: builtin.optimization_level,
                     expected_performance_gain: self
                         .estimate_jit_performance_gain(&builtin.complexity),
                 });
