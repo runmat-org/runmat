@@ -251,11 +251,16 @@ fn format_help_line(caps: &BannerCapabilities) -> String {
     let help = style_text("help", caps, BannerTone::Bright);
     let info = style_text(".info", caps, BannerTone::Bright);
     let exit = style_text("exit", caps, BannerTone::Bright);
-    style_text(
-        &format!("Enter code to execute, or `{help}`, `{exit}` or `{info}`."),
-        caps,
-        BannerTone::Muted,
-    )
+    [
+        style_text("Enter code to execute, or", caps, BannerTone::Muted),
+        format!(" `{help}`"),
+        style_text(",", caps, BannerTone::Muted),
+        format!(" `{exit}`"),
+        style_text(" or", caps, BannerTone::Muted),
+        format!(" `{info}`"),
+        style_text(".", caps, BannerTone::Muted),
+    ]
+    .concat()
 }
 
 fn titlecase_backend(value: &str) -> &str {

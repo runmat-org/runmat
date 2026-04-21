@@ -32,6 +32,13 @@ pub fn sink() -> Option<Arc<dyn TelemetrySink>> {
         .map(|client| client.clone() as Arc<dyn TelemetrySink>)
 }
 
+/// Drain any queued telemetry before the process exits.
+pub fn shutdown() {
+    if let Some(client) = CLIENT.get() {
+        client.shutdown();
+    }
+}
+
 /// Capture the current acceleration provider snapshot, if one is registered.
 pub fn capture_provider_snapshot() -> Option<ProviderSnapshot> {
     runmat_accelerate_api::provider().map(|provider| ProviderSnapshot {

@@ -5,12 +5,12 @@ use runmat_accelerate::AccelerateInitOptions;
 use runmat_config::{self as config, ConfigLoader, PlotMode, RunMatConfig};
 
 use crate::app::dispatch;
-use crate::cli::{Cli, GcPreset, LogLevel, OptLevel};
+use crate::cli::{Cli, CliOverrideSources, GcPreset, LogLevel, OptLevel};
 use crate::commands::jupyter;
 use crate::logging::format_log_record;
 use crate::telemetry;
 
-pub async fn run_cli(cli: Cli) -> Result<()> {
+pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> Result<()> {
     if cli.generate_config {
         let sample_config = ConfigLoader::generate_sample_config();
         println!("{sample_config}");
@@ -25,7 +25,7 @@ pub async fn run_cli(cli: Cli) -> Result<()> {
         Ok(c) => c,
         Err(e) => return Err(e),
     };
-    apply_cli_overrides(&mut config, &cli);
+    apply_cli_overrides(&mut config, &cli, &sources);
 
     telemetry::init(&config.telemetry);
 
@@ -162,24 +162,34 @@ fn load_configuration(cli: &Cli) -> Result<RunMatConfig> {
 }
 
 /// Apply CLI argument overrides to configuration
-fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli) {
+fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli, sources: &CliOverrideSources) {
     if cli.no_jit {
         config.jit.enabled = false;
     }
-    config.jit.threshold = cli.jit_threshold;
-    config.jit.optimization_level = match cli.jit_opt_level {
-        OptLevel::None => config::JitOptLevel::None,
-        OptLevel::Size => config::JitOptLevel::Size,
-        OptLevel::Speed => config::JitOptLevel::Speed,
-        OptLevel::Aggressive => config::JitOptLevel::Aggressive,
-    };
+    if sources.jit_threshold {
+        config.jit.threshold = cli.jit_threshold;
+    }
+    if sources.jit_opt_level {
+        config.jit.optimization_level = match cli.jit_opt_level {
+            OptLevel::None => config::JitOptLevel::None,
+            OptLevel::Size => config::JitOptLevel::Size,
+            OptLevel::Speed => config::JitOptLevel::Speed,
+            OptLevel::Aggressive => config::JitOptLevel::Aggressive,
+        };
+    }
 
-    config.runtime.timeout = cli.timeout;
-    config.runtime.callstack_limit = cli.callstack_limit;
+    if sources.timeout {
+        config.runtime.timeout = cli.timeout;
+    }
+    if sources.callstack_limit {
+        config.runtime.callstack_limit = cli.callstack_limit;
+    }
     if let Some(error_namespace) = &cli.error_namespace {
         config.runtime.error_namespace = error_namespace.clone();
     }
-    config.runtime.verbose = cli.verbose;
+    if sources.verbose {
+        config.runtime.verbose = cli.verbose;
+    }
     if let Some(snapshot) = &cli.snapshot {
         config.runtime.snapshot_path = Some(snapshot.clone());
     }
@@ -202,7 +212,9 @@ fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli) {
     if let Some(threads) = cli.gc_threads {
         config.gc.threads = Some(threads);
     }
-    config.gc.collect_stats = cli.gc_stats;
+    if sources.gc_stats {
+        config.gc.collect_stats = cli.gc_stats;
+    }
 
     if let Some(plot_mode) = &cli.plot_mode {
         config.plotting.mode = *plot_mode;
@@ -228,14 +240,18 @@ fn apply_cli_overrides(config: &mut RunMatConfig, cli: &Cli) {
         config.plotting.surface_vertex_budget = Some(budget);
     }
 
-    config.logging.debug = cli.debug;
-    config.logging.level = match cli.log_level {
-        LogLevel::Error => config::LogLevel::Error,
-        LogLevel::Warn => config::LogLevel::Warn,
-        LogLevel::Info => config::LogLevel::Info,
-        LogLevel::Debug => config::LogLevel::Debug,
-        LogLevel::Trace => config::LogLevel::Trace,
-    };
+    if sources.debug {
+        config.logging.debug = cli.debug;
+    }
+    if sources.log_level {
+        config.logging.level = match cli.log_level {
+            LogLevel::Error => config::LogLevel::Error,
+            LogLevel::Warn => config::LogLevel::Warn,
+            LogLevel::Info => config::LogLevel::Info,
+            LogLevel::Debug => config::LogLevel::Debug,
+            LogLevel::Trace => config::LogLevel::Trace,
+        };
+    }
 }
 
 /// Configure GC from the loaded configuration

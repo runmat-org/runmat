@@ -66,12 +66,12 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatConfig) ->
                 control_port,
                 hb_port,
                 connection_file,
-                cli.timeout,
+                config.runtime.timeout,
             )
             .await
         }
         Commands::KernelConnection { connection_file } => {
-            kernel::execute_kernel_with_connection(connection_file, cli.timeout).await
+            kernel::execute_kernel_with_connection(connection_file, config.runtime.timeout).await
         }
         Commands::Run { file, args } => {
             script::execute_script_with_args(file, args, cli.emit_bytecode.clone(), cli, config)
@@ -81,7 +81,7 @@ async fn execute_command(command: Commands, cli: &Cli, config: &RunMatConfig) ->
             version::show_version(detailed);
             Ok(())
         }
-        Commands::Info => version::show_system_info(cli).await,
+        Commands::Info => version::show_system_info(config).await,
         Commands::AccelInfo { json, reset } => accel::show_accel_info(json, reset).await,
         #[cfg(feature = "wgpu")]
         Commands::AccelCalibrate {

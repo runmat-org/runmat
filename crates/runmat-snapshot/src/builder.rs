@@ -516,14 +516,16 @@ impl SnapshotBuilder {
         _name: &str,
         category: &BuiltinCategory,
     ) -> OptimizationLevel {
-        match category {
+        let inferred = match category {
             BuiltinCategory::LinearAlgebra | BuiltinCategory::MatrixOps => {
                 OptimizationLevel::MaxPerformance
             }
             BuiltinCategory::Math | BuiltinCategory::Trigonometric => OptimizationLevel::Aggressive,
             BuiltinCategory::Statistics => OptimizationLevel::Basic,
             _ => OptimizationLevel::None,
-        }
+        };
+
+        cap_optimization_level(inferred, self.config.max_optimization_level)
     }
 
     /// Build HIR cache for standard library functions
@@ -1197,6 +1199,26 @@ impl SnapshotBuilder {
     }
 }
 
+fn cap_optimization_level(
+    inferred: OptimizationLevel,
+    max_level: OptimizationLevel,
+) -> OptimizationLevel {
+    if optimization_rank(inferred) > optimization_rank(max_level) {
+        max_level
+    } else {
+        inferred
+    }
+}
+
+fn optimization_rank(level: OptimizationLevel) -> u8 {
+    match level {
+        OptimizationLevel::None => 0,
+        OptimizationLevel::Basic => 1,
+        OptimizationLevel::Aggressive => 2,
+        OptimizationLevel::MaxPerformance => 3,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1280,6 +1302,32 @@ mod tests {
             builder.infer_computational_complexity("abs"),
             ComputationalComplexity::Constant
         ));
+    }
+
+    #[test]
+    fn test_optimization_level_respects_config_cap() {
+        let config = SnapshotConfig {
+            max_optimization_level: OptimizationLevel::Basic,
+            ..SnapshotConfig::default()
+        };
+        let builder = SnapshotBuilder::new(config);
+
+        assert_eq!(
+            builder.infer_optimization_level("matmul", &BuiltinCategory::LinearAlgebra),
+            OptimizationLevel::Basic
+        );
+        assert_eq!(
+            builder.infer_optimization_level("sin", &BuiltinCategory::Trigonometric),
+            OptimizationLevel::Basic
+        );
+        assert_eq!(
+            builder.infer_optimization_level("mean", &BuiltinCategory::Statistics),
+            OptimizationLevel::Basic
+        );
+        assert_eq!(
+            builder.infer_optimization_level("disp", &BuiltinCategory::Utility),
+            OptimizationLevel::None
+        );
     }
 
     #[test]

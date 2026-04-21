@@ -1,7 +1,6 @@
 use anyhow::Result;
+use runmat_config::RunMatConfig;
 use runmat_gc::gc_stats;
-
-use crate::cli::Cli;
 
 pub fn show_version(detailed: bool) {
     println!("RunMat v{}", env!("CARGO_PKG_VERSION"));
@@ -26,7 +25,7 @@ pub fn show_version(detailed: bool) {
     }
 }
 
-pub async fn show_system_info(cli: &Cli) -> Result<()> {
+pub async fn show_system_info(config: &RunMatConfig) -> Result<()> {
     println!("RunMat System Information");
     println!("==========================");
     println!();
@@ -45,24 +44,30 @@ pub async fn show_system_info(cli: &Cli) -> Result<()> {
     println!("Runtime Configuration:");
     println!(
         "  JIT Compiler: {}",
-        if !cli.no_jit { "enabled" } else { "disabled" }
+        if config.jit.enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
     );
-    println!("  JIT Threshold: {}", cli.jit_threshold);
-    println!("  JIT Optimization: {:?}", cli.jit_opt_level);
+    println!("  JIT Threshold: {}", config.jit.threshold);
+    println!("  JIT Optimization: {:?}", config.jit.optimization_level);
     println!(
         "  GC Preset: {:?}",
-        cli.gc_preset
+        config
+            .gc
+            .preset
             .as_ref()
             .map(|p| format!("{p:?}"))
             .unwrap_or_else(|| "default".to_string())
     );
-    if let Some(young_size) = cli.gc_young_size {
+    if let Some(young_size) = config.gc.young_size_mb {
         println!("  GC Young Generation: {young_size}MB");
     }
-    if let Some(threads) = cli.gc_threads {
+    if let Some(threads) = config.gc.threads {
         println!("  GC Threads: {threads}");
     }
-    println!("  GC Statistics: {}", cli.gc_stats);
+    println!("  GC Statistics: {}", config.gc.collect_stats);
     println!();
 
     println!("Environment:");

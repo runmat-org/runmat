@@ -150,14 +150,18 @@ impl TelemetryClient {
             std::thread::sleep(Duration::from_millis(5));
         }
     }
+
+    pub(crate) fn shutdown(&self) {
+        match self.drain_mode {
+            RuntimeTelemetryDrainMode::None => {}
+            RuntimeTelemetryDrainMode::All => self.wait_for(&self.pending_total),
+        }
+    }
 }
 
 impl Drop for TelemetryClient {
     fn drop(&mut self) {
         self.sender.take();
-        match self.drain_mode {
-            RuntimeTelemetryDrainMode::None => {}
-            RuntimeTelemetryDrainMode::All => self.wait_for(&self.pending_total),
-        }
+        self.shutdown();
     }
 }

@@ -1,8 +1,10 @@
 use anyhow::Result;
-use clap::Parser;
+use clap::{CommandFactory, FromArgMatches};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    let cli = runmat::Cli::parse();
-    runmat::run_cli(cli).await
+    let matches = runmat::Cli::command().get_matches();
+    let cli = runmat::Cli::from_arg_matches(&matches)?;
+    let sources = runmat::CliOverrideSources::from_matches(&matches);
+    runmat::run_cli(cli, sources).await
 }

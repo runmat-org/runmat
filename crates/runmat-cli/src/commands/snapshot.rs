@@ -20,7 +20,7 @@ pub async fn execute_snapshot_command(snapshot_command: SnapshotCommand) -> Resu
                 config.compression_algorithm = comp.into();
             }
 
-            let _optimization_level = match optimization {
+            config.max_optimization_level = match optimization {
                 OptLevel::None => runmat_snapshot::OptimizationLevel::None,
                 OptLevel::Size => runmat_snapshot::OptimizationLevel::Basic,
                 OptLevel::Speed => runmat_snapshot::OptimizationLevel::Aggressive,

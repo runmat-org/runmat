@@ -126,7 +126,7 @@ pub enum ComputationalComplexity {
 }
 
 /// Optimization level for JIT compilation hints
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OptimizationLevel {
     None,
     Basic,
@@ -371,6 +371,9 @@ pub struct SnapshotConfig {
     /// Progress reporting
     pub progress_reporting: bool,
 
+    /// Maximum optimization level to apply while building snapshot hints
+    pub max_optimization_level: OptimizationLevel,
+
     /// Maximum cache size
     pub max_cache_size: usize,
 
@@ -406,6 +409,7 @@ impl Default for SnapshotConfig {
             memory_mapping_enabled: true,
             parallel_loading: true,
             progress_reporting: false,
+            max_optimization_level: OptimizationLevel::MaxPerformance,
             max_cache_size: 128 * 1024 * 1024, // 128MB
             cache_eviction_policy: CacheEvictionPolicy::Adaptive,
         }

@@ -6,8 +6,10 @@ pub mod logging;
 pub mod remote;
 pub mod telemetry;
 
-pub use cli::Cli;
+pub use cli::{Cli, CliOverrideSources};
 
-pub async fn run_cli(cli: Cli) -> anyhow::Result<()> {
-    app::bootstrap::run_cli(cli).await
+pub async fn run_cli(cli: Cli, sources: CliOverrideSources) -> anyhow::Result<()> {
+    let result = app::bootstrap::run_cli(cli, sources).await;
+    telemetry::shutdown();
+    result
 }

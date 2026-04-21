@@ -1,5 +1,4 @@
 use clap::ValueEnum;
-use runmat_gc::GcConfig;
 
 #[derive(Clone, Debug, ValueEnum)]
 pub enum CompressionAlg {
@@ -55,29 +54,6 @@ pub enum CaptureFiguresMode {
 pub struct FigureSize {
     pub width: u32,
     pub height: u32,
-}
-
-impl From<LogLevel> for log::LevelFilter {
-    fn from(level: LogLevel) -> Self {
-        match level {
-            LogLevel::Error => log::LevelFilter::Error,
-            LogLevel::Warn => log::LevelFilter::Warn,
-            LogLevel::Info => log::LevelFilter::Info,
-            LogLevel::Debug => log::LevelFilter::Debug,
-            LogLevel::Trace => log::LevelFilter::Trace,
-        }
-    }
-}
-
-impl From<GcPreset> for GcConfig {
-    fn from(preset: GcPreset) -> Self {
-        match preset {
-            GcPreset::LowLatency => GcConfig::low_latency(),
-            GcPreset::HighThroughput => GcConfig::high_throughput(),
-            GcPreset::LowMemory => GcConfig::low_memory(),
-            GcPreset::Debug => GcConfig::debug(),
-        }
-    }
 }
 
 impl From<CompressionAlg> for runmat_snapshot::CompressionAlgorithm {

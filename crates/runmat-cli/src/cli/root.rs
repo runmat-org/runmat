@@ -1,4 +1,5 @@
-use clap::{Parser, Subcommand};
+use clap::parser::ValueSource;
+use clap::{ArgMatches, Parser, Subcommand};
 use runmat_config::{PlotBackend, PlotMode};
 use runmat_server_client::auth::CredentialStoreMode;
 use std::path::PathBuf;
@@ -203,6 +204,39 @@ pub struct Cli {
 
     /// MATLAB script file to execute (alternative to subcommands)
     pub script: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct CliOverrideSources {
+    pub debug: bool,
+    pub log_level: bool,
+    pub timeout: bool,
+    pub callstack_limit: bool,
+    pub jit_threshold: bool,
+    pub jit_opt_level: bool,
+    pub gc_stats: bool,
+    pub verbose: bool,
+}
+
+impl CliOverrideSources {
+    pub fn from_matches(matches: &ArgMatches) -> Self {
+        Self {
+            debug: Self::was_provided(matches, "debug"),
+            log_level: Self::was_provided(matches, "log_level"),
+            timeout: Self::was_provided(matches, "timeout"),
+            callstack_limit: Self::was_provided(matches, "callstack_limit"),
+            jit_threshold: Self::was_provided(matches, "jit_threshold"),
+            jit_opt_level: Self::was_provided(matches, "jit_opt_level"),
+            gc_stats: Self::was_provided(matches, "gc_stats"),
+            verbose: Self::was_provided(matches, "verbose"),
+        }
+    }
+
+    fn was_provided(matches: &ArgMatches, id: &str) -> bool {
+        matches
+            .value_source(id)
+            .is_some_and(|source| source != ValueSource::DefaultValue)
+    }
 }
 
 #[derive(Subcommand, Clone)]
