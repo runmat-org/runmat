@@ -30,7 +30,7 @@
     "unit": "builtins::io::repl_fs::exist::tests",
     "integration": "builtins::io::repl_fs::exist::tests::exist_detects_workspace_variables"
   },
-  "description": "`exist(name)` returns an integer code that identifies which kind of item named `name` is currently available. The codes match MATLAB:\n\n| Code | Meaning                                   | | ---- | ----------------------------------------- | | 0    | Item not found                            | | 1    | Variable in the active workspace          | | 2    | File (including scripts and most data files) | | 3    | MEX-file                                  | | 4    | Simulink® model (`.slx` / `.mdl`)         | | 5    | Built-in MATLAB function                  | | 6    | P-code (`.p` / `.pp`)                     | | 7    | Folder                                    | | 8    | Class definition                          |\n\nPass a second argument to restrict the lookup (for example, `'file'`, `'dir'`, `'builtin'`, `'class'`, `'mex'`, `'pcode'`, `'method'`, or `'handle'`). The builtin mirrors MATLAB semantics for string handling, search order, and numeric return values.",
+  "description": "`exist(name)` returns an integer code that identifies which kind of item named `name` is currently available. The codes match MATLAB:\n\n| Code | Meaning |\n| ---- | ------- |\n| 0    | Item not found |\n| 1    | Variable in the active workspace |\n| 2    | File (including scripts and most data files) |\n| 3    | MEX-file |\n| 4    | Simulink® model (`.slx` / `.mdl`) |\n| 5    | Built-in MATLAB function |\n| 6    | P-code (`.p` / `.pp`) |\n| 7    | Folder |\n| 8    | Class definition |\n\nPass a second argument to restrict the lookup (for example, `'file'`, `'dir'`, `'builtin'`, `'class'`, `'mex'`, `'pcode'`, `'method'`, or `'handle'`). The builtin mirrors MATLAB semantics for string handling, search order, and numeric return values.",
   "behaviors": [
     "Searches follow MATLAB's precedence: variables first, then built-ins, classes, compiled code (MEX/P-code), standard files, and finally folders.",
     "When you omit the type, `exist` returns the first match respecting this precedence.",
@@ -112,6 +112,18 @@
     {
       "question": "What are the return codes for exist in MATLAB?",
       "answer": "`exist` returns `0` (not found), `1` (variable in workspace), `2` (file on path), `3` (MEX file), `4` (Simulink model), `5` (built-in function), `7` (folder), or `8` (Java class). RunMat supports codes 0, 1, 2, 5, and 7."
+    },
+    {
+      "question": "What does each `exist` return value mean?",
+      "answer": "— The complete MATLAB table is:\n\n| Code | Meaning |\n|------|---------|\n| `0` | Not found |\n| `1` | Variable in the active workspace |\n| `2` | File (including `.m` scripts, `.mat`, and most data files on the path) |\n| `3` | MEX-file (compiled C/C++/Fortran) |\n| `4` | Simulink model (`.slx` / `.mdl`) |\n| `5` | Built-in function |\n| `6` | P-code file (`.p`) |\n| `7` | Folder |\n| `8` | Class (classdef or `@Class` folder) |\n\nUse the two-argument form (`exist(name, 'file')`, `exist(name, 'dir')`, `exist(name, 'builtin')`, `exist(name, 'class')`) when you want to restrict the search to a single kind."
+    },
+    {
+      "question": "How do I check if a variable or file exists before using it?",
+      "answer": "— Use the two-argument form so the result is unambiguous:\n\n```matlab\nif exist('myVar', 'var')\n    disp(myVar);\nend\n\nif exist('data.mat', 'file')\n    load('data.mat');\nend\n```\n\nFor files specifically, `isfile('data.mat')` and `isfolder('outdir')` return plain logicals and are often clearer than `exist` alone."
+    },
+    {
+      "question": "How do I create a folder only if it doesn't already exist?",
+      "answer": "— Combine `exist` with `mkdir`:\n\n```matlab\nif ~exist('outdir', 'dir')\n    mkdir('outdir');\nend\n```\n\nA newer, equally idiomatic alternative is `if ~isfolder('outdir'), mkdir('outdir'); end`. `mkdir` itself is a no-op when the folder already exists (it just prints a warning), so either pattern is safe."
     }
   ],
   "links": [
@@ -199,5 +211,17 @@
   "gpu_residency": "No. `exist` gathers any GPU-resident string inputs transparently. The lookup, file system checks, and return value are always host-side operations. Keeping text on the GPU offers no performance benefits, so you can pass regular character vectors or string scalars.",
   "gpu_behavior": [
     "The builtin runs entirely on the host CPU. If any argument lives on the GPU, RunMat gathers it to host memory before performing the lookup. Providers do not implement dedicated hooks for `exist`, and the result is always returned as a host-resident double scalar. Documented behaviour is identical regardless of whether acceleration is enabled."
-  ]
+  ],
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "tf = exist(name)\ntf = exist(name, kind)"
+    },
+    "points": [
+      "`name` is a character vector or string scalar identifying what to look up. It may be a simple name (`\"alpha\"`, `\"sin\"`), a file path (`\"utilities/process_data\"`), or a package-qualified identifier (`\"pkg.Widget\"`).",
+      "`kind` is an optional character vector or string scalar that restricts the search to a single category. Accepted values are `'var'`, `'file'`, `'dir'`, `'builtin'`, and `'class'` (plus the RunMat extensions `'mex'`, `'pcode'`, `'method'`, and `'handle'`).",
+      "Returns `tf`, an integer code between `0` and `8`: `0` (not found), `1` (variable), `2` (file), `3` (MEX file), `4` (Simulink model), `5` (built-in), `6` (P-code), `7` (folder), `8` (class).",
+      "When `kind` is omitted, MATLAB precedence applies (variables first, then built-ins, classes, compiled code, files, and folders)."
+    ]
+  }
 }

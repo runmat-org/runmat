@@ -67,6 +67,11 @@ export const docsTree: DocsNode[] = [
           ogDescription: "Why RunMat focuses on a minimal core and a powerful package system.",
         },
       },
+      {
+        title: "Correctness & Trust",
+        slug: ["correctness"],
+        file: "docs/CORRECTNESS.md",
+      },
       { title: "How It Works", externalHref: "/docs/how-it-works" },
       { title: "Roadmap", slug: ["roadmap"], file: "docs/ROADMAP.md", seo: { description: "RunMat's development roadmap and progress.", keywords: ["roadmap", "development", "progress"] } },
     ],

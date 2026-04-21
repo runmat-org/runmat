@@ -116,6 +116,22 @@
     {
       "question": "What happens if the eigenvector matrix is singular?",
       "answer": "When the right eigenvectors form a singular matrix, RunMat falls back to computing left eigenvectors from the conjugate-transposed problem. If that fails, requesting the third output raises an error, matching MATLAB’s failure behaviour."
+    },
+    {
+      "question": "What equation does `eig` solve?",
+      "answer": "For the standard form `[V, D] = eig(A)`, the outputs satisfy `A*V = V*D`, where the columns of `V` are right eigenvectors and `D` is a diagonal matrix of eigenvalues. The generalized form `A*V = B*V*D` (called as `eig(A, B)` in MATLAB) is recognised but not yet implemented in RunMat and raises a descriptive error."
+    },
+    {
+      "question": "How do I get just the eigenvalues versus eigenvalues and eigenvectors?",
+      "answer": "Call `d = eig(A)` with a single output to get a column vector of eigenvalues only. Use `[V, D] = eig(A)` to also get the eigenvectors, or `[V, D, W] = eig(A)` to additionally get the left eigenvectors in `W`."
+    },
+    {
+      "question": "Are the eigenvalues returned by `eig` sorted?",
+      "answer": "No. Unlike `svd`, which returns singular values in descending order, `eig` returns eigenvalues in whatever order the underlying decomposition produces. Sort them yourself when you need ordering, for example `[d, idx] = sort(diag(D)); D = diag(d); V = V(:, idx);`."
+    },
+    {
+      "question": "When should I use `eig` versus `eigs`?",
+      "answer": "Use `eig` for dense matrices when you want the full spectrum. Use `eigs` for sparse or very large matrices when you only need a few eigenvalues (for example the `k` largest or smallest), since it uses iterative Arnoldi/Lanczos methods instead of a full factorization."
     }
   ],
   "links": [
@@ -148,9 +164,35 @@
     "label": "crates/runmat-runtime/src/builtins/math/linalg/factor/eig.rs",
     "url": "crates/runmat-runtime/src/builtins/math/linalg/factor/eig.rs"
   },
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "d = eig(A)\n[V, D] = eig(A)\n[V, D, W] = eig(A)\nd = eig(A, B)\n[V, D] = eig(A, B)\neig(___, balanceOption)\neig(___, 'vector')\neig(___, 'matrix')"
+    },
+    "points": [
+      "`A` is a square matrix. Logical and integer inputs are promoted to double; complex inputs remain complex throughout the factorization.",
+      "`B` is an optional second square matrix that turns the call into the generalized problem `A*V = B*V*D`. RunMat recognises this syntax but does not yet implement it and raises a descriptive error.",
+      "`V` contains the right eigenvectors as columns; `D` is a diagonal matrix of eigenvalues satisfying `A*V = V*D`.",
+      "`W` (three-output form) holds the left eigenvectors as columns, satisfying `W' * A = D * W'`, and is scaled so that `W' * V = I`.",
+      "The trailing selector `'vector'` returns the eigenvalues as a column vector in the second output; `'matrix'` (the default) returns the diagonal-matrix form.",
+      "`balanceOption` is `'balance'` (default) or `'nobalance'`. The option is accepted for MATLAB compatibility; balancing is currently a no-op."
+    ]
+  },
   "gpu_behavior": [
     "The WGPU provider implements the reserved `eig` hook by downloading the input, running the same CPU decomposition used by the host path, and immediately re-uploading the double-precision eigenvalues, eigenvectors, and diagonal matrix. When the spectrum is real, the outputs therefore remain on the GPU without any user intervention.",
     "If any output requires complex storage or you pass `'nobalance'`, RunMat automatically falls back to the host implementation and returns CPU-resident arrays. The `'vector'` selector also triggers this transparent host fallback today. Reapply `gpuArray` if you want to continue on the device after such a fallback.",
     "Because `eig` is a residency sink, the fusion planner treats it as a barrier and does not attempt to fuse surrounding elementwise work."
-  ]
+  ],
+  "validation": {
+    "summary": "`eig` calls the production LAPACK routines `dgeev` and `zgeev` via the `lapack` Rust crate, which uses Apple Accelerate on macOS and OpenBLAS on Linux, the same libraries NumPy, SciPy, and MATLAB's own eigensolvers rely on. CPU correctness is exercised by the in-module tests linked below; GPU residency is validated at the host-fallback boundary described above rather than via a separate GPU eigensolver.",
+    "implementation": {
+      "label": "crates/runmat-runtime/src/builtins/math/linalg/factor/eig.rs",
+      "url": "https://github.com/runmat-org/runmat/blob/dev/crates/runmat-runtime/src/builtins/math/linalg/factor/eig.rs"
+    },
+    "parity_test": {
+      "label": "eig unit tests",
+      "url": "https://github.com/runmat-org/runmat/blob/dev/crates/runmat-runtime/src/builtins/math/linalg/factor/eig.rs"
+    },
+    "tolerance": "CPU-only validated; no dedicated GPU eigensolver"
+  }
 }

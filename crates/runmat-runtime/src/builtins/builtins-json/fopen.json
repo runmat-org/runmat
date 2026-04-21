@@ -116,6 +116,18 @@
     {
       "question": "What file modes does fopen support?",
       "answer": "`fopen` supports `'r'` (read), `'w'` (write, creates or overwrites), `'a'` (append), `'r+'` (read and write), `'w+'` (read and write, truncates), and `'a+'` (read and append)."
+    },
+    {
+      "question": "How do I read a file with a specific encoding?",
+      "answer": "Pass the encoding as the fourth argument after the machine-format placeholder, for example `fid = fopen('data.txt', 'r', 'n', 'UTF-8')`. RunMat accepts `'UTF-8'`, `'US-ASCII'`, `'ISO-8859-1'` (alias `'latin1'`), `'windows-1252'`, `'shift_jis'`, and `'system'`."
+    },
+    {
+      "question": "Do I need to `fclose` every file I open?",
+      "answer": "Yes. Every successful `fopen` registers a handle that holds OS resources until you call `fclose(fid)`. For robust code, tie the close to an `onCleanup` object so the file is released even if your code errors partway through:\n\n```matlab\nfid = fopen('data.txt', 'r');\ncleanup = onCleanup(@() fclose(fid));\n% ... use fid freely ...\n```"
+    },
+    {
+      "question": "Should I always check the return value of `fopen`?",
+      "answer": "Yes. Request two outputs so you can surface a useful error message: `[fid, errmsg] = fopen(filename, 'r'); if fid == -1, error(errmsg); end`. Without this guard, subsequent calls like `fread(fid)` fail with a generic invalid-identifier error that hides the real cause."
     }
   ],
   "links": [
@@ -159,6 +171,20 @@
   "source": {
     "label": "crates/runmat-runtime/src/builtins/io/filetext/fopen.rs",
     "url": "crates/runmat-runtime/src/builtins/io/filetext/fopen.rs"
+  },
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "fileID = fopen(filename)\nfileID = fopen(filename, permission)\nfileID = fopen(filename, permission, machinefmt)\nfileID = fopen(filename, permission, machinefmt, encodingIn)\n[fileID, errmsg] = fopen(___)\nfilename = fopen(fileID)\n[filename, permission, machinefmt, encodingOut] = fopen(fileID)\nfIDs = fopen('all')"
+    },
+    "points": [
+      "`filename` is a character vector or string scalar naming the file. Relative paths are resolved against the current working directory.",
+      "`permission` is one of `'r'`, `'w'`, `'a'`, `'r+'`, `'w+'`, `'a+'`, or `'A'`, optionally suffixed with `'t'` (text mode) or `'b'` (binary mode).",
+      "`machinefmt` selects the endianness for binary reads and writes. Common values are `'native'` (alias `'n'`), `'ieee-le'` (little-endian), and `'ieee-be'` (big-endian).",
+      "`encodingIn` is the text encoding used for subsequent reads and writes. Accepted values include `'UTF-8'` (default for text mode), `'US-ASCII'`, `'ISO-8859-1'` (`'latin1'`), `'windows-1252'`, `'shift_jis'`, and `'system'`.",
+      "On success `fileID` is a positive integer. On failure it is `-1`, and the optional second output `errmsg` contains the operating-system error message.",
+      "Passing an existing `fileID` returns its recorded metadata; `fopen('all')` returns a row vector of every currently open user file identifier."
+    ]
   },
   "gpu_behavior": [
     "`fopen` always executes on the CPU. When a filename argument resides on a GPU array, RunMat gathers it to host memory before opening the file. File identifiers and their associated metadata are managed by a host-side registry that other builtins (such as `fclose`, `fread`, and `fwrite`) consult."

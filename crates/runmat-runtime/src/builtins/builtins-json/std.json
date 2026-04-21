@@ -107,6 +107,18 @@
     {
       "question": "Are complex inputs supported?",
       "answer": "Not yet. RunMat currently requires real inputs for `std`. Convert complex data to magnitude or separate real/imaginary parts before calling the builtin."
+    },
+    {
+      "question": "What does `std` compute by default?",
+      "answer": "— By default MATLAB's `std` returns the **sample** standard deviation, dividing by `n - 1` (Bessel's correction). This differs from NumPy's `np.std`, which defaults to the population formula (dividing by `n`, i.e. `ddof = 0`). To match NumPy's default in MATLAB use `std(A, 1)`; to match MATLAB's default in NumPy use `np.std(A, ddof=1)`."
+    },
+    {
+      "question": "How do I compute population standard deviation (divide by `n`) in MATLAB?",
+      "answer": "— Pass `1` as the normalisation flag: `std(A, 1)` divides by `n` instead of `n - 1`. The same flag works with the other signatures: `std(A, 1, dim)`, `std(A, 1, 'all')`, or `std(A, 1, vecdim)`. Use `std(A, 0)` or `std(A, [])` to keep the default sample behaviour."
+    },
+    {
+      "question": "How do I handle `NaN` values when computing `std`?",
+      "answer": "— Add `'omitnan'` as the final argument to skip missing values: `std(A, 0, 1, 'omitnan')` (or `std(A, 'omitnan')` if you accept the default normalisation and dimension). The default `'includenan'` propagates a single `NaN` to the corresponding output slice. If an entire slice is `NaN` under `'omitnan'`, the result for that slice is `NaN`."
     }
   ],
   "links": [
@@ -186,5 +198,30 @@
   "gpu_residency": "Usually you do not need to call `gpuArray` manually. The fusion planner keeps tensors on the GPU across fused expressions and gathers them only when necessary. For explicit control or MATLAB compatibility, you can still call `gpuArray`/`gather` yourself.",
   "gpu_behavior": [
     "When RunMat Accelerate is active, device-resident tensors remain on the GPU whenever the provider implements the relevant hooks. Providers that expose `reduce_std_dim`/`reduce_std` execute the reduction in-place on the device; the default WGPU backend currently supports two-dimensional inputs, single-axis reductions, and `'includenan'` only. Whenever `'omitnan'`, multi-axis reductions, or unsupported shapes are requested, RunMat transparently gathers the data to the host, computes the result there, and then applies the requested output template (`'native'`, `'like'`) before returning."
-  ]
+  ],
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "S = std(A)\nS = std(A, w)\nS = std(A, w, dim)\nS = std(A, w, \"all\")\nS = std(A, w, vecdim)\nS = std(___, nanflag)"
+    },
+    "points": [
+      "`A` is the numeric array to summarise. Logical inputs are promoted to double; complex inputs are not supported yet.",
+      "`w` is the normalisation flag: `0` (or `[]`) divides by `n - 1` for the sample / Bessel-corrected estimator (MATLAB's default), while `1` divides by `n` for the population estimator. MATLAB also documents `w` as a weight vector; weighted standard deviations are reported as not-yet-implemented in RunMat.",
+      "`dim` picks the dimension to reduce (default: the first non-singleton dimension). Use `\"all\"` to collapse every dimension into a scalar, or `vecdim` (a vector such as `[1 3]`) to reduce several axes in one call.",
+      "`nanflag` is an optional `'omitnan'` or `'includenan'` token (default `'includenan'`) controlling how `NaN` values are treated.",
+      "Returns `S`, the standard deviation, with the reduced dimension collapsed to length `1`."
+    ]
+  },
+  "validation": {
+    "summary": "`std` uses the shared reduction infrastructure in `runmat-runtime`, which implements a two-pass Welford-style algorithm on the CPU and a matching reduction kernel on the GPU. The reduction-parity test suite runs the same inputs through both paths and asserts agreement within tolerance on every merge.",
+    "implementation": {
+      "label": "crates/runmat-runtime/src/builtins/math/reduction/std.rs",
+      "url": "https://github.com/runmat-org/runmat/blob/dev/crates/runmat-runtime/src/builtins/math/reduction/std.rs"
+    },
+    "parity_test": {
+      "label": "reduction_parity.rs",
+      "url": "https://github.com/runmat-org/runmat/blob/dev/crates/runmat-runtime/tests/reduction_parity.rs"
+    },
+    "tolerance": "1e-9 (f64), 1e-3 (f32)"
+  }
 }

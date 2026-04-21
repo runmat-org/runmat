@@ -8,7 +8,6 @@ authors:
 readTime: "16 min read"
 slug: "matlab-fprintf"
 tags: ["MATLAB", "fprintf", "debugging", "RunMat", "scientific computing"]
-collections: ["guides"]
 keywords: "fprintf MATLAB, MATLAB fprintf format specifiers, MATLAB print to file, MATLAB fprintf examples, MATLAB debugging, MATLAB fprintf vs disp, fprintf vs disp MATLAB, MATLAB vs Python debugging, MATLAB fprintf newline, MATLAB fprintf repeats array, MATLAB fprintf column major, MATLAB fprintf no loop, MATLAB fprintf GPU"
 excerpt: "fprintf is a formatting function that got conscripted into debugging because MATLAB never shipped anything better. Here's what it's actually for, and what to use instead."
 image: "https://web.runmatstatic.com/blog-images/matlab-fprintf.png"

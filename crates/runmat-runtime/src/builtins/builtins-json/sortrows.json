@@ -133,6 +133,14 @@
     {
       "question": "Is sortrows a stable sort?",
       "answer": "Yes. `sortrows` uses a stable sorting algorithm, meaning rows with equal sort keys retain their original relative order."
+    },
+    {
+      "question": "Is there a `sortrows` equivalent in NumPy or pandas?",
+      "answer": "— In pandas use `df.sort_values(by=['col1', 'col2'], ascending=[True, False])`. In NumPy there is no direct `sortrows`, but `A[np.lexsort(A.T[::-1])]` sorts rows lexicographically (NumPy's `lexsort` reads its keys in reverse priority, so the `[::-1]` restores MATLAB's left-to-right order). For descending columns, negate the corresponding key: `np.lexsort([-A[:, 1], A[:, 0]])`."
+    },
+    {
+      "question": "How do I sort by multiple columns with different directions?",
+      "answer": "— Pass a signed column vector as the second argument. Positive entries sort ascending, negative entries sort descending. For example, `sortrows(A, [1 -2])` sorts column `1` ascending and column `2` descending, and `sortrows(A, [3 -1 2])` orders by column `3` ascending, column `1` descending, then column `2` ascending as a tiebreaker. You can also write `sortrows(A, [1 2], {'ascend','descend'})` for the equivalent name-based form."
     }
   ],
   "links": [
@@ -190,5 +198,17 @@
     "When the provider lacks the hook—or cannot honour a specific combination of options such as `'MissingPlacement','first'` or `'MissingPlacement','last'`—RunMat gathers the tensor and performs the sort on the host while preserving MATLAB semantics.",
     "Name-value options that the provider does not advertize fall back automatically; callers do not need to special-case GPU vs CPU execution.",
     "The permutation indices are emitted as double-precision column vectors so they can be reused directly for MATLAB-style indexing."
-  ]
+  ],
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "B = sortrows(A)\nB = sortrows(A, column)\nB = sortrows(A, column, direction)\n[B, index] = sortrows(___)"
+    },
+    "points": [
+      "`A` is the data to sort — typically a numeric or character matrix. Tables and timetables are also accepted by MATLAB's `sortrows` API (RunMat currently supports matrix and char-array inputs fully).",
+      "`column` selects the sort keys. It can be a single column index or a vector of indices; negative entries sort that column in descending order (for example, `[1 -3]` sorts ascending by column `1` then descending by column `3`).",
+      "`direction` is an optional `'ascend'` or `'descend'` string, or a cell array of strings matching `column` entry-for-entry. It can be combined with signed `column` vectors to override per-column directions.",
+      "`index` is the optional second output: a row-permutation vector such that `B = A(index, :)`. Use it to reorder paired arrays or to undo the sort."
+    ]
+  }
 }

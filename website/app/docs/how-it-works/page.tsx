@@ -149,6 +149,13 @@ export default function HowItWorksPage() {
           <p className="text-[0.938rem] text-foreground leading-relaxed font-medium">
             No device flags. No kernel code. Just math that runs at maximum speed.
           </p>
+          <p className="text-[0.938rem] text-foreground leading-relaxed mt-4">
+            Every GPU path is tolerance-checked against the CPU reference on every merge.{" "}
+            <Link href="/docs/correctness" className="text-[hsl(var(--brand))] hover:underline">
+              See the full correctness methodology and parity-test index
+            </Link>
+            .
+          </p>
         </section>
 
         {/* Language and Semantics */}

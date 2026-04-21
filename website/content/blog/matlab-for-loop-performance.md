@@ -8,7 +8,6 @@ authors:
 readTime: "18 min read"
 slug: "matlab-for-loop-performance"
 tags: ["MATLAB", "performance", "vectorization", "loops", "RunMat", "GPU"]
-collections: ["guides"]
 keywords: "MATLAB for loop slow, MATLAB vectorization, speed up MATLAB code, MATLAB for loop vs vectorized, MATLAB performance optimization, MATLAB loop performance, preallocation MATLAB, why are MATLAB loops slow, MATLAB for loop alternative, MATLAB JIT compiler, MATLAB parfor vs for, MATLAB for loop speed, MATLAB loop optimization"
 excerpt: "MATLAB for loops are slow because of interpreter overhead, not because iteration is inherently expensive. Here's what actually causes the slowdown, what vectorization costs you, and how a compiled runtime changes the tradeoff."
 image: "https://web.runmatstatic.com/blog-images/matlab-for-loop-performance.png"

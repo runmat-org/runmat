@@ -96,6 +96,11 @@ The assistant also closes the compatibility gap: when a MATLAB script uses a fun
 - [Fusion Engine](https://runmat.com/docs/accelerate/fusion-intro): How RunMat fuses sequential ops into fewer GPU kernels
 - [GPU in MATLAB Guide](https://runmat.com/blog/how-to-use-gpu-in-matlab): GPU setup guide comparing MATLAB's CUDA-only approach with RunMat's cross-vendor alternative
 
+## Guides
+
+- [MATLAB Plotting Guide](https://runmat.com/blog/matlab-plotting-guide): 20+ runnable examples covering line plots, scatter, bar, 3D surfaces, contour, subplots, animations, and GPU-accelerated rendering
+- [MATLAB FFT Guide](https://runmat.com/blog/matlab-fft-guide): Computing and plotting FFT spectra with MATLAB syntax — single-sided spectra, windowing, 2D FFT, and GPU-accelerated visualization
+
 ## Debugging and Diagnostics
 
 - [fprintf and Modern Debugging](https://runmat.com/blog/matlab-fprintf): Why fprintf is a poor debugger and what RunMat provides instead (variable explorer, structured logging, execution tracing)

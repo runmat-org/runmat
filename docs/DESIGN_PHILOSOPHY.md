@@ -36,7 +36,7 @@ What we deliberately do not put in the core:
 MATLAB is a language, a large proprietary standard library, an IDE, and an ecosystem of toolboxes. We treat each separately.
 
 - The language is a syntax and semantics for arrays, functions, control flow, and errors. That we support in the core.
-- The library (built-ins) is open-ended. RunMat ships a standard library and lets packages provide the rest. Documentation is generated from the runtime (not a hand-maintained spreadsheet of parity; parity is not a product goal).
+- The library (built-ins) is open-ended. RunMat ships a standard library and lets packages provide the rest. Documentation is generated from the runtime (not a hand-maintained spreadsheet of parity; parity is not a product goal). We don't chase bit-exact parity with MATLAB, but we do publish the validation methodology for every numerical path — see [Correctness & Trust](/docs/correctness) for the full coverage table, reference implementations, and parity tests.
 - RunMat is not an IDE. It is a runtime that can be used with any IDE (such as Cursor, VSCode, or IntelliJ).
 
 This separation keeps the core maintainable and lets the community move fast without destabilizing the runtime.
@@ -116,4 +116,5 @@ RunMat is for people who want a fast, pleasant MATLAB-style environment that evo
 - [High-Level Architecture](/docs/architecture) -- RunMat's V8-inspired execution model and subsystems.
 - [Package Manager](/docs/package-manager) -- the package system for extending RunMat.
 - [Introduction to RunMat Fusion](/docs/accelerate/fusion-intro) -- GPU data residency and fusion.
+- [Correctness & Trust](/docs/correctness) -- how we validate every numerical path, with the full coverage table and parity-test index.
 - [Language Reference](/docs/language) -- compatibility modes and MATLAB syntax support.

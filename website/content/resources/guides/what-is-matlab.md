@@ -6,7 +6,7 @@ dateModified: "2026-01-14"
 readTime: "8 min read"
 image: "https://web.runmatstatic.com/blog-images/matrix-math.png"
 imageAlt: "What is MATLAB"
-resourceType: "guides"
+resourceType: "docs"
 author: "RunMat Team"
 authors:
   - name: "Julie Ruiz"

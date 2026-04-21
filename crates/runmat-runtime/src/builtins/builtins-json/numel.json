@@ -104,6 +104,14 @@
     {
       "question": "Can I use numel with cell arrays and structs?",
       "answer": "Yes. `numel` counts the number of cells in a cell array or the number of elements in a struct array. It does not recurse into cell contents or struct fields."
+    },
+    {
+      "question": "What is the difference between `numel` and `length`?",
+      "answer": "— `numel` counts every element across all dimensions, while `length` returns the size of the largest dimension. For example, `numel(rand(3,4,5))` returns `60`, but `length(rand(3,4,5))` returns `5` (the largest dim). Use `numel` whenever you want the total element count."
+    },
+    {
+      "question": "Should I use `numel` or `size` to count elements?",
+      "answer": "— Use `numel(A)` when you want the total number of elements (a single scalar). Use `size(A, dim)` when you need the length of a specific dimension, and `size(A)` when you need the full shape vector. `numel(A)` is equivalent to `prod(size(A))`."
     }
   ],
   "links": [
@@ -150,5 +158,16 @@
   },
   "gpu_behavior": [
     "`numel` does not launch GPU kernels or register provider hooks. When the input is a GPU tensor, the runtime consults the shape metadata stored in the handle to compute the count. If the active provider omits this metadata, RunMat downloads the tensor once to recover the correct answer. The builtin always returns a host double scalar and never allocates device memory, so it can safely be used inside fused GPU expressions without breaking residency."
-  ]
+  ],
+  "syntax": {
+    "example": {
+      "description": "Syntax",
+      "input": "n = numel(A)\nn = numel(A, dim1, dim2, ...)"
+    },
+    "points": [
+      "`A` is the input array. Any class is accepted: numeric, logical, char, string, cell, struct, or table.",
+      "`dim1, dim2, ...` are optional positive-integer subscripts. When supplied, `numel` returns the number of elements of the selected submatrix, equivalent to `numel(A(index1, index2, ...))`. This form is rarely used and is included for MathWorks parity.",
+      "Returns `n`, a double-precision scalar giving the total element count (or the element count of the requested subregion)."
+    ]
+  }
 }

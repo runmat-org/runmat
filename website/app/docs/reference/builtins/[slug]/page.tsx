@@ -10,6 +10,7 @@ import {
   type BuiltinDocLink,
   type BuiltinDocFAQ,
   type BuiltinDocJsonEncodeOption,
+  type BuiltinDocValidation,
 } from '@/lib/builtins';
 import { BuiltinDocRenderer, type BuiltinDocBlock, type BuiltinDocInlineNode } from '@/components/BuiltinDocRenderer';
 import { slugifyHeading } from '@/lib/utils';
@@ -86,7 +87,7 @@ function renderBuiltinDocBlocks(doc: BuiltinDocEntry): BuiltinDocBlock[] {
   const descriptionHeader = doc.summary?.trim()
     ? `\`${title}\` — ${doc.summary.trim()}`
     : `\`${title}\``;
-  const behaviorHeader = `How \`${title}\` works in RunMat`;
+  const behaviorHeader = `How \`${title}\` works`;
   const examplesHeader = doc.examples && doc.examples.length === 1
     ? 'Example'
     : 'Examples';
@@ -121,13 +122,17 @@ function renderBuiltinDocBlocks(doc: BuiltinDocEntry): BuiltinDocBlock[] {
   }
 
   if (doc.gpu_behavior && doc.gpu_behavior.length > 0) {
-    blocks.push(createHeading(2, parseInline(`How \`${title}\` runs on the GPU`)));
+    blocks.push(createHeading(2, parseInline(`How RunMat runs \`${title}\` on the GPU`)));
     blocks.push(...linkKnownTerms(renderParagraphBlocks(doc.gpu_behavior)));
   }
 
   if (hasText(doc.gpu_residency)) {
     blocks.push(createHeading(2, parseInline('GPU memory and residency')));
     blocks.push(...linkKnownTerms(parseMarkdownBlocks(doc.gpu_residency)));
+  }
+
+  if (doc.validation) {
+    blocks.push(...renderValidation(doc.validation, title));
   }
 
   if (doc.examples && doc.examples.length > 0) {
@@ -253,6 +258,53 @@ function renderExamples(examples: BuiltinDocExample[]): BuiltinDocBlock[] {
       });
     }
   }
+  return blocks;
+}
+
+function renderValidation(validation: BuiltinDocValidation, title: string): BuiltinDocBlock[] {
+  const blocks: BuiltinDocBlock[] = [];
+  blocks.push(createHeading(2, parseInline(`How RunMat validates \`${title}\``)));
+  if (hasText(validation.summary)) {
+    blocks.push(...parseMarkdownBlocks(validation.summary));
+  }
+  const listItems: BuiltinDocInlineNode[][] = [];
+  if (validation.implementation?.url && validation.implementation?.label) {
+    listItems.push([
+      textNode('Implementation: '),
+      {
+        type: 'link',
+        label: [textNode(validation.implementation.label)],
+        href: validation.implementation.url,
+      },
+    ]);
+  }
+  if (validation.parity_test?.url && validation.parity_test?.label) {
+    listItems.push([
+      textNode('Parity test: '),
+      {
+        type: 'link',
+        label: [textNode(validation.parity_test.label)],
+        href: validation.parity_test.url,
+      },
+    ]);
+  }
+  if (hasText(validation.tolerance)) {
+    listItems.push([textNode(`Tolerance: ${validation.tolerance}`)]);
+  }
+  if (listItems.length > 0) {
+    blocks.push({ type: 'list', ordered: false, items: listItems });
+  }
+  if (hasText(validation.limitations)) {
+    blocks.push(...parseMarkdownBlocks(validation.limitations));
+  }
+  blocks.push({
+    type: 'paragraph',
+    content: [
+      textNode('See '),
+      { type: 'link', label: [textNode('Correctness & Trust')], href: '/docs/correctness' },
+      textNode(' for the full methodology and coverage table.'),
+    ],
+  });
   return blocks;
 }
 
@@ -530,6 +582,16 @@ function parseInline(text: string): BuiltinDocInlineNode[] {
       }
     }
 
+    if (char === '*' && text[index + 1] === '*') {
+      const end = text.indexOf('**', index + 2);
+      if (end !== -1 && end > index + 2) {
+        const inner = text.slice(index + 2, end);
+        nodes.push({ type: 'strong', content: parseInline(inner) });
+        index = end + 2;
+        continue;
+      }
+    }
+
     if (char === '[') {
       const closeBracket = text.indexOf(']', index + 1);
       const openParen = closeBracket !== -1 ? text.indexOf('(', closeBracket + 1) : -1;
@@ -545,9 +607,11 @@ function parseInline(text: string): BuiltinDocInlineNode[] {
 
     const nextBacktick = text.indexOf('`', index);
     const nextLink = text.indexOf('[', index);
+    const nextBold = text.indexOf('**', index);
     let nextIndex = text.length;
     if (nextBacktick !== -1) nextIndex = Math.min(nextIndex, nextBacktick);
     if (nextLink !== -1) nextIndex = Math.min(nextIndex, nextLink);
+    if (nextBold !== -1) nextIndex = Math.min(nextIndex, nextBold);
     if (nextIndex === index) {
       nodes.push(textNode(text[index]));
       index += 1;
@@ -565,6 +629,7 @@ function inlineToPlainText(nodes: BuiltinDocInlineNode[]): string {
   return nodes.map((node) => {
     if (node.type === 'text' || node.type === 'code') return node.value;
     if (node.type === 'link') return inlineToPlainText(node.label);
+    if (node.type === 'strong') return inlineToPlainText(node.content);
     return '';
   }).join('');
 }
