@@ -6008,7 +6008,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "runmat-wasm"
+name = "runmat-vm"
 version = "0.4.1"
 dependencies = [
  "anyhow",
