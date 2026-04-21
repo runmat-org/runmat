@@ -16,6 +16,7 @@ use crate::commands::session::create_session;
 use crate::commands::streams::emit_execution_streams;
 use crate::diagnostics::format_frontend_error;
 use crate::telemetry::{capture_provider_snapshot, TelemetryRunKind};
+use crate::AlreadyReportedCliError;
 
 pub async fn execute_script(
     script: PathBuf,
@@ -95,7 +96,7 @@ pub(crate) async fn execute_script_contents(
             } else {
                 eprintln!("Execution error: {err}");
             }
-            std::process::exit(1);
+            return Err(AlreadyReportedCliError.into());
         }
     };
 
@@ -152,10 +153,10 @@ pub(crate) async fn execute_script_contents(
                 Some(&content),
             )
         );
-        std::process::exit(1);
+        return Err(AlreadyReportedCliError.into());
     } else if let Some(error) = error_payload {
         eprintln!("{error}");
-        std::process::exit(1);
+        return Err(AlreadyReportedCliError.into());
     } else {
         if result.used_jit {
             info!("Script executed successfully in {:?} (JIT)", execution_time);

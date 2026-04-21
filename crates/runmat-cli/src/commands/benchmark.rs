@@ -10,7 +10,9 @@ use std::time::Duration;
 
 use crate::cli::Cli;
 use crate::commands::session::create_session;
+use crate::diagnostics::format_frontend_error;
 use crate::telemetry::{capture_provider_snapshot, RuntimeExecutionCounters, TelemetryRunKind};
+use crate::AlreadyReportedCliError;
 
 pub async fn execute_benchmark(
     file: PathBuf,
@@ -44,12 +46,68 @@ pub async fn execute_benchmark(
 
     println!("Warming up...");
     for _ in 0..3 {
-        let _ = engine.execute(&content).await.map_err(anyhow::Error::new)?;
+        if let Err(err) = engine.execute(&content).await {
+            let failure = err.telemetry_failure_info();
+            if let Some(run) = bench_run.take() {
+                run.finish(TelemetryRunFinish {
+                    duration: Some(total_time),
+                    success: false,
+                    jit_used: false,
+                    error: Some(failure.code.clone()),
+                    failure: Some(failure),
+                    host: Some(TelemetryHost::Cli),
+                    counters: Some(RuntimeExecutionCounters {
+                        total_executions: 0,
+                        jit_compiled: 0,
+                        interpreter_fallback: 0,
+                    }),
+                    provider: capture_provider_snapshot(),
+                });
+            }
+            if let Some(diag) =
+                format_frontend_error(&err, file.to_string_lossy().as_ref(), &content)
+            {
+                eprintln!("{diag}");
+            } else {
+                eprintln!("Benchmark error: {err}");
+            }
+            return Err(AlreadyReportedCliError.into());
+        }
     }
 
     println!("Running benchmark...");
     for i in 1..=iterations {
-        let result = engine.execute(&content).await.map_err(anyhow::Error::new)?;
+        let result = match engine.execute(&content).await {
+            Ok(result) => result,
+            Err(err) => {
+                let failure = err.telemetry_failure_info();
+                let counters = RuntimeExecutionCounters {
+                    total_executions: i.saturating_sub(1) as u64,
+                    jit_compiled: jit_executions,
+                    interpreter_fallback: interpreter_executions,
+                };
+                if let Some(run) = bench_run.take() {
+                    run.finish(TelemetryRunFinish {
+                        duration: Some(total_time),
+                        success: false,
+                        jit_used: false,
+                        error: Some(failure.code.clone()),
+                        failure: Some(failure),
+                        host: Some(TelemetryHost::Cli),
+                        counters: Some(counters),
+                        provider: capture_provider_snapshot(),
+                    });
+                }
+                if let Some(diag) =
+                    format_frontend_error(&err, file.to_string_lossy().as_ref(), &content)
+                {
+                    eprintln!("{diag}");
+                } else {
+                    eprintln!("Benchmark error: {err}");
+                }
+                return Err(AlreadyReportedCliError.into());
+            }
+        };
 
         let iter_duration = Duration::from_millis(result.execution_time_ms);
         if let Some(error) = result
@@ -90,7 +148,7 @@ pub async fn execute_benchmark(
             } else {
                 error!("Benchmark iteration {i} failed: {error}");
             }
-            std::process::exit(1);
+            return Err(AlreadyReportedCliError.into());
         }
 
         total_time += iter_duration;

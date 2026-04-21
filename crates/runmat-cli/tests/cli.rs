@@ -450,6 +450,7 @@ fn test_script_with_syntax_error() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("error") || stderr.contains("failed"));
+    assert!(!stderr.contains("Error: command failed"));
 }
 
 #[test]
