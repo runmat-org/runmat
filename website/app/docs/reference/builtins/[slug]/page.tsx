@@ -62,13 +62,15 @@ export default async function BuiltinDetailPage({ params }: { params: Promise<{ 
         <BuiltinMetadataChips metadata={metadata} categoryAnchor={categoryAnchor} />
       </div>
       <div className="grid gap-10 lg:grid-cols-[minmax(0,1fr)_220px] pb-8">
-        <article className="prose dark:prose-invert max-w-3xl min-w-0 prose-headings:font-semibold prose-h2:mt-8 prose-h2:mb-3 prose-h3:mt-6 prose-h3:mb-2 prose-pre:bg-muted prose-pre:border prose-pre:rounded-md prose-code:bg-muted prose-code:border prose-code:rounded-sm">
-          <BuiltinDocRenderer blocks={blocks} />
-        </article>
+        <div className="min-w-0">
+          <article className="prose dark:prose-invert max-w-3xl min-w-0 prose-headings:font-semibold prose-h2:mt-8 prose-h2:mb-3 prose-h3:mt-6 prose-h3:mb-2 prose-pre:bg-muted prose-pre:border prose-pre:rounded-md prose-code:bg-muted prose-code:border prose-code:rounded-sm">
+            <BuiltinDocRenderer blocks={blocks} />
+          </article>
+          <div className="mt-12 not-prose max-w-3xl">
+            <SandboxCta source={`builtin-docs-${slug}`} />
+          </div>
+        </div>
         <BuiltinsHeadingsNav toc={toc} />
-      </div>
-      <div className="mt-12 not-prose">
-        <SandboxCta source={`builtin-docs-${slug}`} />
       </div>
     </>
   );
