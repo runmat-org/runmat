@@ -2,6 +2,7 @@ export type BuiltinDocExample = {
   description: string;
   input: string;
   output?: string;
+  image_webp?: string;
 };
 
 export type BuiltinDocFAQ = {
@@ -34,6 +35,7 @@ export type BuiltinDoc = {
   categoryPath: string[];
   keywords: string[];
   summary: string;
+  hero_image?: string;
   references?: string[];
   description?: string;
   behaviors?: string[];
