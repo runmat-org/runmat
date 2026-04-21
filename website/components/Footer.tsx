@@ -63,21 +63,21 @@ export default function Footer() {
         </div>
         <div className="grid w-full md:flex-1 gap-y-6 md:gap-x-8 md:grid-cols-[minmax(6rem,1fr)_minmax(6rem,1fr)] text-sm text-muted-foreground">
           <div>
-            <h3 className="text-foreground font-semibold mb-2">Company</h3>
-            <ul className="space-y-1">
-              <li><Link href="/about" className="hover:underline">About</Link></li>
-              <li><Link href="/pricing" className="hover:underline">Pricing</Link></li>
-              <li><Link href="/contact" className="hover:underline">Contact</Link></li>
-              <li><Link href="/license" className="hover:underline">License</Link></li>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground mb-3">Company</h3>
+            <ul className="space-y-1.5">
+              <li><Link href="/about" className="hover:text-foreground transition-colors">About</Link></li>
+              <li><Link href="/pricing" className="hover:text-foreground transition-colors">Pricing</Link></li>
+              <li><Link href="/contact" className="hover:text-foreground transition-colors">Contact</Link></li>
+              <li><Link href="/license" className="hover:text-foreground transition-colors">License</Link></li>
             </ul>
           </div>
           <div>
-            <h3 className="text-foreground font-semibold mb-2">Learn</h3>
-            <ul className="space-y-1">
-              <li><Link href="/docs" className="hover:underline">Docs</Link></li>
-              <li><Link href="/blog" className="hover:underline">Blog</Link></li>
-              <li><Link href="/benchmarks" className="hover:underline">Benchmarks</Link></li>
-              <li><Link href="/matlab-online" className="hover:underline">RunMat vs MATLAB Online</Link></li>
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-foreground mb-3">Learn</h3>
+            <ul className="space-y-1.5">
+              <li><Link href="/docs" className="hover:text-foreground transition-colors">Docs</Link></li>
+              <li><Link href="/blog" className="hover:text-foreground transition-colors">Blog</Link></li>
+              <li><Link href="/benchmarks" className="hover:text-foreground transition-colors">Benchmarks</Link></li>
+              <li><Link href="/matlab-online" className="hover:text-foreground transition-colors">RunMat vs MATLAB Online</Link></li>
             </ul>
           </div>
         </div>
@@ -91,7 +91,7 @@ export default function Footer() {
       </div>
       <div className="border-t">
         <div className="container flex flex-col items-center justify-between gap-4 py-6 md:flex-row">
-          <div className="text-sm text-center md:text-left" style={{ color: 'hsl(var(--muted-foreground))' }}>
+          <div className="text-sm text-center md:text-left text-muted-foreground">
             <p>
             © {currentYear} Dystr Inc. All rights reserved. MIT+ Licensed.
             {" · "}
@@ -104,9 +104,9 @@ export default function Footer() {
               RunMat is not affiliated with, endorsed by, or sponsored by The MathWorks, Inc. or the Free Software Foundation.
             </p>
           </div>
-          <p className="flex items-center text-center text-sm md:text-left" style={{ color: 'hsl(var(--muted-foreground))' }}>
+          <p className="flex items-center text-center text-sm md:text-left text-muted-foreground">
             Made with
-            <Heart className="mx-1 h-4 w-4 fill-red-500 text-red-500" />
+            <Heart className="mx-1 h-4 w-4 fill-destructive text-destructive" />
             for the scientific community by{" "}
             <Link
               href={dystrHref}

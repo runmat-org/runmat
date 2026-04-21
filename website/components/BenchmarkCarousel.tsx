@@ -51,8 +51,8 @@ export default function BenchmarkCarousel({ svgs }: BenchmarkCarouselProps) {
         onClick={goToPrevious}
         type="button"
         className={cn(
-          "absolute left-24 top-1/2 -translate-y-1/2 z-20 bg-background/80 backdrop-blur-sm hover:bg-background",
-          "shadow-lg border-2"
+          "absolute left-24 top-1/2 -translate-y-1/2 z-20 bg-background hover:bg-background",
+          "shadow-sm border border-border"
         )}
         aria-label="Previous slide"
       >
@@ -65,8 +65,8 @@ export default function BenchmarkCarousel({ svgs }: BenchmarkCarouselProps) {
         onClick={goToNext}
         type="button"
         className={cn(
-          "absolute right-24 top-1/2 -translate-y-1/2 z-20 bg-background/80 backdrop-blur-sm hover:bg-background",
-          "shadow-lg border-2"
+          "absolute right-24 top-1/2 -translate-y-1/2 z-20 bg-background hover:bg-background",
+          "shadow-sm border border-border"
         )}
         aria-label="Next slide"
       >

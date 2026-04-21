@@ -18,7 +18,7 @@ export function BrowserTab() {
       <Button
         size="lg"
         onClick={handleClick}
-        className="h-12 px-8 text-base font-semibold bg-gradient-to-r from-blue-500 to-purple-600 text-white shadow-xl border-0 transition-all duration-200 hover:from-blue-600 hover:to-purple-700"
+        className="h-12 px-8 text-base font-semibold bg-[hsl(var(--brand))] text-white border-0 shadow-none hover:bg-[hsl(var(--brand))]/90"
         data-ph-capture-attribute-destination="sandbox"
         data-ph-capture-attribute-source="hero-tabs-browser"
         data-ph-capture-attribute-cta="launch-browser-app"

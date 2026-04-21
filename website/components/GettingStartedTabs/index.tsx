@@ -56,7 +56,7 @@ export function GettingStartedTabs() {
     <div className="w-full">
       <div
         role="tablist"
-        className="flex flex-wrap gap-2 border-b border-border mb-6"
+        className="flex gap-0 border-b border-border mb-6"
         aria-label="Get started with RunMat"
       >
         {tabs.map(({ id, label, icon }) => {
@@ -71,28 +71,15 @@ export function GettingStartedTabs() {
               aria-controls={panelId(id)}
               onClick={() => setActiveTab(id)}
               className={cn(
-                "relative inline-flex items-center gap-2 px-4 py-3 text-sm font-medium transition-colors cursor-pointer",
+                "relative inline-flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors cursor-pointer -mb-px",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                "rounded-t-md",
                 isActive
-                  ? "text-foreground bg-muted/10"
-                  : "text-muted-foreground bg-muted/70 hover:text-foreground hover:bg-muted/60"
+                  ? "text-foreground border-b-2 border-foreground"
+                  : "text-muted-foreground hover:text-foreground"
               )}
             >
               <span aria-hidden="true">{icon}</span>
               <span>{label}</span>
-              {isActive && (
-                <span
-                  className="absolute bottom-0 left-0 right-0 h-[3px] bg-[#a78bfa]"
-                  aria-hidden="true"
-                />
-              )}
-              {isActive && (
-                <span
-                  className="absolute top-0 left-2 right-2 h-px bg-primary/70"
-                  aria-hidden="true"
-                />
-              )}
             </button>
           );
         })}

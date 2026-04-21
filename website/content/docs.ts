@@ -197,7 +197,7 @@ export const docsTree: DocsNode[] = [
           ogDescription: "How RunMat unifies filesystem access across native and browser runtimes.",
         },
       },
-      { title: "Lexer", slug: ["internals", "lexer"], file: "crates/runmat-lexer/README.md", seo: { description: "Tokenizer for MATLAB/Octave with contextual apostrophe and section markers.", keywords: ["lexer", "tokens", "logos", "MATLAB"] } },
+      // Lexer entry removed pending compiler docs rewrite; crate README was deleted in fbd1d97f (lexer crate split).
       { title: "Parser", slug: ["internals", "parser"], file: "crates/runmat-parser/README.md", seo: { description: "Precedence-based parser for MATLAB/Octave with statements, OOP, and command-form.", keywords: ["parser", "AST", "MATLAB", "Octave"] } },
       { title: "HIR", slug: ["internals", "hir"], file: "crates/runmat-hir/README.md", seo: { description: "High-level IR with flow-sensitive inference and class/import validations.", keywords: ["HIR", "type inference", "SSA", "MATLAB"] } },
       // Additional VM internals pages can be added here when dedicated docs are promoted.

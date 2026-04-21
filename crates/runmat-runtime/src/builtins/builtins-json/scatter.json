@@ -53,12 +53,57 @@
       "input": "x = 1:10;\nh1 = scatter(x, x);\nset(h1, 'DisplayName', 'linear');\nhold on;\nh2 = scatter(x, x.^2);\nset(h2, 'DisplayName', 'quadratic');\nlegend;"
     }
   ],
+  "faqs": [
+    {
+      "question": "How do I color scatter points by a third variable?",
+      "answer": "Set the `CData` property on the scatter handle to a vector the same length as x and y. The values map into the current colormap.\n\n```matlab\nx = randn(1, 100);\ny = randn(1, 100);\nz = x.^2 + y.^2;\nh = scatter(x, y);\nset(h, 'CData', z);\ncolorbar;\n```\n\nEach point gets a color proportional to its `z` value. Call `colorbar` to show the mapping."
+    },
+    {
+      "question": "What's the difference between scatter and plot?",
+      "answer": "`scatter` draws unconnected markers and supports per-point size (`SizeData`) and per-point color (`CData`). `plot` connects points with lines and applies uniform styling to the whole series. Use `scatter` when the individual point properties carry meaning; use `plot` when the connection between points is what matters."
+    },
+    {
+      "question": "How do I control marker size in scatter?",
+      "answer": "Pass a scalar or vector to `SizeData` via the handle. A scalar sets uniform size; a vector sets per-point sizes.\n\n```matlab\nh = scatter(x, y);\nset(h, 'SizeData', 40);          % uniform size\nset(h, 'SizeData', abs(y) * 50); % size proportional to |y|\n```\n\nThe size unit is points squared, matching MATLAB conventions."
+    }
+  ],
   "links": [
-    { "label": "plot", "url": "./plot" },
-    { "label": "scatter3", "url": "./scatter3" },
-    { "label": "legend", "url": "./legend" },
-    { "label": "get", "url": "./get" },
-    { "label": "set", "url": "./set" }
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "scatter3",
+      "url": "./scatter3"
+    },
+    {
+      "label": "legend",
+      "url": "./legend"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/scatter.rs`",

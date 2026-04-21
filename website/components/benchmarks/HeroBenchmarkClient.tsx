@@ -89,7 +89,7 @@ export default function HeroBenchmarkClient({ slides }: HeroBenchmarkClientProps
               Fastest runtime for
             </h1>
             <BenchmarkTicker slides={slides} activeIndex={activeIndex} onSelect={goToIndex} />
-            <p className="max-w-[42rem] leading-relaxed text-muted-foreground text-base sm:text-lg">
+            <p className="max-w-[42rem] leading-relaxed text-foreground text-[0.938rem]">
               RunMat automatically fuses operations and intelligently
               routes between CPU/GPU. Write math in MATLAB syntax, and RunMat will run it blazing fast.
             </p>

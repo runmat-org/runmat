@@ -9,6 +9,7 @@
     "matlab pie"
   ],
   "summary": "Create pie charts for part-to-whole comparisons, exploded slices, and MATLAB `pie` workflows.",
+  "hero_image": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-apie-budget.webp",
   "requires_feature": null,
   "tested": {
     "unit": "builtins::plotting::pie::tests",
@@ -34,12 +35,56 @@
     {
       "description": "Use labels for slice names",
       "input": "values = [5 3 2];\nlabels = {'compute', 'io', 'render'};\npie(values, labels);"
+    },
+    {
+      "description": "Budget allocation",
+      "input": "values = [35 25 20 12 8];\nlabels = {'Engineering', 'Marketing', 'Operations', 'R&D', 'Admin'};\nexplode = [1 0 0 0 0];\n\npie(values, explode);\ntitle('Annual Budget Allocation');\nlegend(labels);",
+      "image_webp": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-apie-budget.webp"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How do I explode specific slices out of the pie?",
+      "answer": "Pass an explode vector the same length as your values. A `1` pulls that slice outward; a `0` keeps it flush.\n\n```matlab\npie([4 2 3 1], [0 1 0 0]);\n```\n\nThis explodes only the second slice. You can explode multiple slices by setting more entries to `1`."
+    },
+    {
+      "question": "How do I add percentage labels to slices?",
+      "answer": "By default, `pie` displays percentage labels on each slice. To use custom labels instead, pass a cell array of strings as the second argument.\n\n```matlab\npie([5 3 2], {'compute 50%', 'io 30%', 'render 20%'});\n```\n\nIf you want no labels at all, pass empty strings for each slice."
+    },
+    {
+      "question": "When should I use a pie chart vs a bar chart?",
+      "answer": "Pie charts work well when you have a small number of slices (2–5) and the point is to show each slice's share of a whole. Once you go beyond ~6 slices or need to compare absolute values across categories, `bar` is almost always clearer—humans are better at comparing lengths than angles. If two slices are close in size and the difference matters, use `bar`."
     }
   ],
   "links": [
-    { "label": "bar", "url": "./bar" },
-    { "label": "histogram", "url": "./histogram" },
-    { "label": "legend", "url": "./legend" }
+    {
+      "label": "bar",
+      "url": "./bar"
+    },
+    {
+      "label": "histogram",
+      "url": "./histogram"
+    },
+    {
+      "label": "legend",
+      "url": "./legend"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/pie.rs`",

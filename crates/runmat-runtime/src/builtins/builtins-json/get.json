@@ -36,11 +36,53 @@
       "input": "plot(1:5, 1:5);\nlg = legend('series');\nget(lg, 'Orientation')"
     }
   ],
+  "faqs": [
+    {
+      "question": "How do I see all available properties on a handle?",
+      "answer": "Call `get(h)` with no property name. It returns a struct containing every known property for that handle type. This is the fastest way to discover what's queryable on a line, axes, legend, or text object."
+    },
+    {
+      "question": "Can I query properties on axes handles, not just plot objects?",
+      "answer": "Yes. `get(gca, 'XScale')` reads the x-axis scale mode, `get(gca, 'View')` reads the camera angle, and so on. Axes handles, legend handles, text handles, and plot-child handles all go through the same `get` interface."
+    },
+    {
+      "question": "What happens if I query a property that doesn't exist?",
+      "answer": "RunMat raises a plotting error rather than returning empty or silently succeeding. If you're unsure whether a property exists, call `get(h)` first to inspect the full property struct."
+    }
+  ],
   "links": [
-    { "label": "set", "url": "./set" },
-    { "label": "legend", "url": "./legend" },
-    { "label": "subplot", "url": "./subplot" },
-    { "label": "plot", "url": "./plot" }
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "legend",
+      "url": "./legend"
+    },
+    {
+      "label": "subplot",
+      "url": "./subplot"
+    },
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/get.rs`",

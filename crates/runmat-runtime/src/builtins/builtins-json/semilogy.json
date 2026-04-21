@@ -35,11 +35,53 @@
       "output": "ans =\n    'log'"
     }
   ],
+  "faqs": [
+    {
+      "question": "When is semilogy the right choice over a linear plot?",
+      "answer": "Whenever the interesting structure lives in multiplicative changes along Y — exponential decay, growth rates, signal attenuation. On a log y-axis, `exp(-t)` becomes a straight line, which makes decay constants easy to read directly from the slope."
+    },
+    {
+      "question": "How do I visualize exponential decay and read the time constant?",
+      "answer": "Plot with `semilogy` and the decay appears as a straight line. The slope of that line is the decay rate. For `exp(-t/tau)`, the signal drops by a factor of `e` every `tau` units along the x-axis.\n\n```matlab\nt = linspace(0, 10, 200);\nsemilogy(t, exp(-t/3)); % tau = 3\ngrid on;\n```"
+    },
+    {
+      "question": "What about zero or negative y-values on a log y-axis?",
+      "answer": "They're excluded from rendering since log of zero or negative numbers is undefined. The data handle still stores them, but only positive y-values produce visible points. If your data crosses zero, consider splitting into positive and negative series or using a linear axis."
+    }
+  ],
   "links": [
-    { "label": "plot", "url": "./plot" },
-    { "label": "semilogx", "url": "./semilogx" },
-    { "label": "loglog", "url": "./loglog" },
-    { "label": "axis", "url": "./axis" }
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "semilogx",
+      "url": "./semilogx"
+    },
+    {
+      "label": "loglog",
+      "url": "./loglog"
+    },
+    {
+      "label": "axis",
+      "url": "./axis"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/semilogy.rs`",

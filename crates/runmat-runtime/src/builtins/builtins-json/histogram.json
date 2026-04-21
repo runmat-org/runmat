@@ -10,6 +10,7 @@
     "distribution analysis"
   ],
   "summary": "Create histogram objects with bin-edge semantics, normalization controls, and MATLAB `histogram` workflows.",
+  "hero_image": "https://web.runmatstatic.com/builtin-image/runmat-matlab-histogram-plot-overlaid-distributions.webp",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -52,13 +53,60 @@
       "description": "Apply normalization through histogram semantics",
       "input": "data = randn(1, 500);\nh = histogram(data, 'Normalization', 'probability');\nget(h, 'Normalization')",
       "output": "ans =\n    'probability'"
+    },
+    {
+      "description": "Overlaid distributions",
+      "input": "a = 2 + 1.2*randn(1, 5000);\nb = 4 + 0.8*randn(1, 5000);\n\nh1 = histogram(a, 'BinEdges', -2:0.25:8, 'Normalization', 'probability');\nset(h1, 'DisplayName', 'Process A');\nhold on;\nh2 = histogram(b, 'BinEdges', -2:0.25:8, 'Normalization', 'probability');\nset(h2, 'DisplayName', 'Process B');\nhold off;\n\ntitle('Distribution Comparison');\nxlabel('Measurement');\nylabel('Probability');\nlegend;\ngrid on;",
+      "image_webp": "https://web.runmatstatic.com/builtin-image/runmat-matlab-histogram-plot-overlaid-distributions.webp"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How do I set a specific number of bins?",
+      "answer": "Pass the bin count as a second positional argument or use the `'NumBins'` name-value pair.\n\n```matlab\ndata = randn(1, 1000);\nhistogram(data, 30);                    % 30 bins\nhistogram(data, 'NumBins', 50);         % 50 bins\nhistogram(data, 'BinEdges', -3:0.1:3); % exact edges\n```\n\nExplicit `BinEdges` gives you full control over where each bin starts and ends."
+    },
+    {
+      "question": "How do I overlay two distributions on the same axes?",
+      "answer": "Use `hold on` between `histogram` calls and set `'Normalization'` to `'probability'` so both distributions are on a comparable scale.\n\n```matlab\nhistogram(randn(1,1000), 'Normalization', 'probability');\nhold on;\nhistogram(randn(1,1000) + 2, 'Normalization', 'probability');\nlegend('dist A', 'dist B');\n```"
+    },
+    {
+      "question": "What's the difference between histogram and hist?",
+      "answer": "`histogram` is the modern API: it uses bin-edge semantics, returns a handle object you can inspect with `get`/`set`, and supports normalization modes like `'probability'` and `'pdf'`. `hist` is the legacy API that interprets a second vector argument as bin centers. Use `histogram` for new code unless you specifically need center-based binning from a legacy workflow."
     }
   ],
   "links": [
-    { "label": "hist", "url": "./hist" },
-    { "label": "bar", "url": "./bar" },
-    { "label": "get", "url": "./get" },
-    { "label": "set", "url": "./set" }
+    {
+      "label": "hist",
+      "url": "./hist"
+    },
+    {
+      "label": "bar",
+      "url": "./bar"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/histogram.rs`",

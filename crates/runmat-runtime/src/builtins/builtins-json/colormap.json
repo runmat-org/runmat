@@ -30,12 +30,57 @@
       "input": "[X, Y] = meshgrid(linspace(-3, 3, 40), linspace(-3, 3, 40));\nZ = sin(X) .* cos(Y);\nsubplot(1, 2, 1);\nsurf(X, Y, Z);\ncolormap('parula');\nsubplot(1, 2, 2);\ncontourf(X, Y, Z);\ncolormap('turbo');"
     }
   ],
+  "faqs": [
+    {
+      "question": "What colormaps are available?",
+      "answer": "RunMat ships with: `parula`, `viridis`, `plasma`, `inferno`, `magma`, `turbo`, `jet`, `hot`, `cool`, `spring`, `summer`, `autumn`, `winter`, `gray`, `bone`, `copper`, `pink`, and `lines`. Unknown names raise an error — no silent fallback."
+    },
+    {
+      "question": "Which colormaps are perceptually uniform?",
+      "answer": "`viridis`, `plasma`, `inferno`, and `magma` are designed so that equal steps in data value produce equal perceptual changes in color. Use these for quantitative data where you want the visual contrast to faithfully represent magnitude differences. `parula` is also a good default. Avoid `jet` for quantitative work — it introduces false banding."
+    },
+    {
+      "question": "Can I define a custom colormap?",
+      "answer": "Not yet — `colormap` currently accepts named strings only. Custom N×3 RGB matrices are on the roadmap. For now, pick the closest built-in option or combine subplot-level colormaps to get variety across panels."
+    }
+  ],
   "links": [
-    { "label": "colorbar", "url": "./colorbar" },
-    { "label": "imagesc", "url": "./imagesc" },
-    { "label": "image", "url": "./image" },
-    { "label": "surf", "url": "./surf" },
-    { "label": "contourf", "url": "./contourf" }
+    {
+      "label": "colorbar",
+      "url": "./colorbar"
+    },
+    {
+      "label": "imagesc",
+      "url": "./imagesc"
+    },
+    {
+      "label": "image",
+      "url": "./image"
+    },
+    {
+      "label": "surf",
+      "url": "./surf"
+    },
+    {
+      "label": "contourf",
+      "url": "./contourf"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs`",

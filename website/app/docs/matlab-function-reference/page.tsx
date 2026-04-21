@@ -60,13 +60,7 @@ export default async function ElementsOfMatlabPage() {
         dangerouslySetInnerHTML={{ __html: buildJsonLd(builtins) }}
       />
       <div className="mb-8">
-        <h1 className="text-3xl md:text-4xl font-bold mb-2">Built-in Function Reference</h1>
-        <p className="text-muted-foreground max-w-3xl">
-          {builtins.filter(b => !(b as Record<string, unknown>).internal).length}+ built-in functions
-          covering math, linear algebra, statistics, string processing, file I/O, and more.
-          Most are MATLAB-compatible. The library keeps growing with RunMat-native additions.
-          Free, open-source, GPU-accelerated on Apple, Nvidia, and AMD hardware.
-        </p>
+        <h1 className="text-2xl sm:text-3xl font-bold mb-3">Built-in Function Reference</h1>
       </div>
       <ElementsOfMatlabGrid builtins={builtins} />
     </>

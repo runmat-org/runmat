@@ -30,10 +30,49 @@
       "input": "subplot(1, 2, 1);\nplot(1:5, 1:5);\ngrid off;\nsubplot(1, 2, 2);\nplot(1:5, [5 4 3 2 1]);\ngrid on;"
     }
   ],
+  "faqs": [
+    {
+      "question": "Does RunMat support minor grid lines?",
+      "answer": "Not yet — `grid on` enables major grid lines only. Minor grid support (the MATLAB `grid minor` form) is planned. For now, you get the primary tick grid, which covers most use cases."
+    },
+    {
+      "question": "Can I style the grid line color or width?",
+      "answer": "Grid styling is tied to axes properties. You can adjust the grid appearance through the axes handle with `set(gca, 'GridColor', [0.5 0.5 0.5])` and related properties when the axes property path supports them. Check `get(gca)` to see what's currently exposed."
+    },
+    {
+      "question": "Does grid state carry across subplots?",
+      "answer": "No. Grid visibility is subplot-local. Calling `grid on` in one panel doesn't turn it on in others — you need to enable it explicitly in each subplot where you want grid lines."
+    }
+  ],
   "links": [
-    { "label": "axis", "url": "./axis" },
-    { "label": "box", "url": "./box" },
-    { "label": "subplot", "url": "./subplot" }
+    {
+      "label": "axis",
+      "url": "./axis"
+    },
+    {
+      "label": "box",
+      "url": "./box"
+    },
+    {
+      "label": "subplot",
+      "url": "./subplot"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/cmds.rs`",

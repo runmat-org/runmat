@@ -35,11 +35,53 @@
       "output": "% Both axes report 'log'"
     }
   ],
+  "faqs": [
+    {
+      "question": "Why do power-law relationships appear as straight lines on a log-log plot?",
+      "answer": "Taking the log of both sides of `y = a * x^b` gives `log(y) = log(a) + b * log(x)`, which is linear in log-space. The slope of the line equals the exponent `b`, and the y-intercept gives `log(a)`. That's why log-log is the standard way to identify and compare power laws."
+    },
+    {
+      "question": "How is loglog different from semilogx or semilogy?",
+      "answer": "`semilogx` only logs the x-axis (linear y), `semilogy` only logs the y-axis (linear x), and `loglog` logs both. Use `loglog` when both dimensions span orders of magnitude — spectrum plots, scaling benchmarks, fractal dimension analysis."
+    },
+    {
+      "question": "Can I mix loglog with other scale modes in a subplot layout?",
+      "answer": "Yes. Axes scale state is subplot-local, so `loglog` in one panel doesn't affect neighbors.\n\n```matlab\nsubplot(1, 2, 1);\nloglog(x, x.^(-2));\nsubplot(1, 2, 2);\nplot(x, x.^(-2)); % linear axes here\n```"
+    }
+  ],
   "links": [
-    { "label": "plot", "url": "./plot" },
-    { "label": "semilogx", "url": "./semilogx" },
-    { "label": "semilogy", "url": "./semilogy" },
-    { "label": "axis", "url": "./axis" }
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "semilogx",
+      "url": "./semilogx"
+    },
+    {
+      "label": "semilogy",
+      "url": "./semilogy"
+    },
+    {
+      "label": "axis",
+      "url": "./axis"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/loglog.rs`",

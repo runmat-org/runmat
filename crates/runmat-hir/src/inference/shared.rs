@@ -1,4 +1,4 @@
-use crate::{HirExpr, HirExprKind, HirStmt, Type, VarId};
+use crate::{HirClassMember, HirExpr, HirExprKind, HirLValue, HirProgram, HirStmt, Type, VarId};
 use runmat_parser as parser;
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -6,6 +6,250 @@ use std::sync::OnceLock;
 static CONST_NUM_LOOKUP: OnceLock<HashMap<String, f64>> = OnceLock::new();
 
 pub(crate) type FuncDef = (Vec<VarId>, Vec<VarId>, Vec<HirStmt>);
+
+#[derive(Clone)]
+pub(crate) struct Analysis {
+    pub(crate) exits: Vec<HashMap<VarId, Type>>,
+    pub(crate) fallthrough: Option<HashMap<VarId, Type>>,
+}
+
+pub(crate) fn join_env(a: &HashMap<VarId, Type>, b: &HashMap<VarId, Type>) -> HashMap<VarId, Type> {
+    let mut out = a.clone();
+    for (k, v) in b {
+        out.entry(*k)
+            .and_modify(|t| *t = t.unify(v))
+            .or_insert_with(|| v.clone());
+    }
+    out
+}
+
+pub(crate) fn collect_function_defs(prog: &HirProgram) -> HashMap<String, FuncDef> {
+    let mut func_defs: HashMap<String, FuncDef> = HashMap::new();
+    for stmt in &prog.body {
+        if let HirStmt::Function {
+            name,
+            params,
+            outputs,
+            body,
+            ..
+        } = stmt
+        {
+            func_defs.insert(
+                name.clone(),
+                (params.clone(), outputs.clone(), body.clone()),
+            );
+        } else if let HirStmt::ClassDef { members, .. } = stmt {
+            for m in members {
+                if let HirClassMember::Methods { body, .. } = m {
+                    for s in body {
+                        if let HirStmt::Function {
+                            name,
+                            params,
+                            outputs,
+                            body,
+                            ..
+                        } = s
+                        {
+                            func_defs.insert(
+                                name.clone(),
+                                (params.clone(), outputs.clone(), body.clone()),
+                            );
+                        }
+                    }
+                }
+            }
+        }
+    }
+    func_defs
+}
+
+pub(crate) fn refine_multi_assign_outputs_from_func(
+    name: &str,
+    per_out: &mut Vec<Type>,
+    returns: &HashMap<String, Vec<Type>>,
+    func_defs: &HashMap<String, FuncDef>,
+    infer_expr: impl Fn(&HirExpr, &HashMap<VarId, Type>, &HashMap<String, Vec<Type>>) -> Type,
+) {
+    let needs_fallback = per_out.is_empty() || per_out.iter().any(|t| matches!(t, Type::Unknown));
+    if !needs_fallback {
+        return;
+    }
+
+    if let Some((params, outs, body)) = func_defs.get(name).cloned() {
+        let mut penv: HashMap<VarId, Type> = HashMap::new();
+        for p in params {
+            penv.insert(p, Type::Num);
+        }
+        let mut out_types: Vec<Type> = vec![Type::Unknown; outs.len()];
+        for s in &body {
+            if let HirStmt::Assign(var, rhs, _, _) = s {
+                if let Some(pos) = outs.iter().position(|o| o == var) {
+                    let t = infer_expr(rhs, &penv, returns);
+                    out_types[pos] = out_types[pos].unify(&t);
+                }
+            }
+        }
+        if per_out.is_empty() {
+            *per_out = out_types;
+        } else {
+            for (i, t) in out_types.into_iter().enumerate() {
+                if matches!(per_out.get(i), Some(Type::Unknown)) {
+                    if let Some(slot) = per_out.get_mut(i) {
+                        *slot = t;
+                    }
+                }
+            }
+        }
+    }
+}
+
+pub(crate) fn apply_struct_field_assertions(
+    env: &mut HashMap<VarId, Type>,
+    assertions: impl IntoIterator<Item = (VarId, String)>,
+) {
+    for (vid, field) in assertions {
+        let mut known = match env.get(&vid) {
+            Some(Type::Struct { known_fields }) => known_fields.clone(),
+            _ => Some(Vec::new()),
+        };
+        if let Some(list) = &mut known {
+            if !list.iter().any(|f| f == &field) {
+                list.push(field);
+                list.sort();
+                list.dedup();
+            }
+        }
+        env.insert(
+            vid,
+            Type::Struct {
+                known_fields: known,
+            },
+        );
+    }
+}
+
+pub(crate) fn collect_struct_field_assertions(e: &HirExpr, out: &mut Vec<(VarId, String)>) {
+    use HirExprKind as K;
+
+    fn trim_quotes(s: &str) -> String {
+        let t = s.trim();
+        t.trim_matches('\'').to_string()
+    }
+
+    fn extract_field_literal(e: &HirExpr) -> Option<String> {
+        match &e.kind {
+            HirExprKind::String(s) => Some(trim_quotes(s)),
+            _ => None,
+        }
+    }
+
+    fn extract_field_list(e: &HirExpr) -> Vec<String> {
+        match &e.kind {
+            HirExprKind::String(s) => vec![trim_quotes(s)],
+            HirExprKind::Cell(rows) => {
+                let mut out = Vec::new();
+                for row in rows {
+                    for it in row {
+                        if let Some(v) = extract_field_literal(it) {
+                            out.push(v);
+                        }
+                    }
+                }
+                out
+            }
+            _ => Vec::new(),
+        }
+    }
+
+    match &e.kind {
+        K::Unary(parser::UnOp::Not, _inner) => {}
+        K::Binary(left, parser::BinOp::AndAnd, right)
+        | K::Binary(left, parser::BinOp::BitAnd, right) => {
+            collect_struct_field_assertions(left, out);
+            collect_struct_field_assertions(right, out);
+        }
+        K::FuncCall(name, args) => {
+            let lname = name.as_str();
+            if lname.eq_ignore_ascii_case("isfield") && args.len() >= 2 {
+                if let HirExprKind::Var(vid) = args[0].kind {
+                    if let Some(f) = extract_field_literal(&args[1]) {
+                        out.push((vid, f));
+                    }
+                }
+            }
+            if lname.eq_ignore_ascii_case("ismember") && args.len() >= 2 {
+                let mut fields: Vec<String> = Vec::new();
+                let mut target: Option<VarId> = None;
+                if let HirExprKind::FuncCall(ref n0, ref a0) = args[0].kind {
+                    if n0.eq_ignore_ascii_case("fieldnames") && a0.len() == 1 {
+                        if let HirExprKind::Var(vid) = a0[0].kind {
+                            target = Some(vid);
+                        }
+                    }
+                }
+                if let HirExprKind::FuncCall(ref n1, ref a1) = args[1].kind {
+                    if n1.eq_ignore_ascii_case("fieldnames") && a1.len() == 1 {
+                        if let HirExprKind::Var(vid) = a1[0].kind {
+                            target = Some(vid);
+                        }
+                    }
+                }
+                if fields.is_empty() {
+                    fields.extend(extract_field_list(&args[0]));
+                }
+                if fields.is_empty() {
+                    fields.extend(extract_field_list(&args[1]));
+                }
+                if let Some(vid) = target {
+                    for f in fields {
+                        out.push((vid, f));
+                    }
+                }
+            }
+            if (lname.eq_ignore_ascii_case("any") || lname.eq_ignore_ascii_case("all"))
+                && !args.is_empty()
+            {
+                collect_struct_field_assertions(&args[0], out);
+            }
+            if (lname.eq_ignore_ascii_case("strcmp") || lname.eq_ignore_ascii_case("strcmpi"))
+                && args.len() >= 2
+            {
+                let mut target: Option<VarId> = None;
+                if let HirExprKind::FuncCall(ref n0, ref a0) = args[0].kind {
+                    if n0.eq_ignore_ascii_case("fieldnames") && a0.len() == 1 {
+                        if let HirExprKind::Var(vid) = a0[0].kind {
+                            target = Some(vid);
+                        }
+                    }
+                }
+                if let HirExprKind::FuncCall(ref n1, ref a1) = args[1].kind {
+                    if n1.eq_ignore_ascii_case("fieldnames") && a1.len() == 1 {
+                        if let HirExprKind::Var(vid) = a1[0].kind {
+                            target = Some(vid);
+                        }
+                    }
+                }
+                let mut fields = Vec::new();
+                fields.extend(extract_field_list(&args[0]));
+                fields.extend(extract_field_list(&args[1]));
+                if let Some(vid) = target {
+                    for f in fields {
+                        out.push((vid, f));
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+pub(crate) fn apply_lvalue_type_effects(env: &mut HashMap<VarId, Type>, lv: &HirLValue) {
+    if let HirLValue::Member(base, field) = lv {
+        if let HirExprKind::Var(vid) = base.kind {
+            apply_struct_field_assertions(env, [(vid, field.clone())]);
+        }
+    }
+}
 
 pub(crate) fn logical_binary_result(lhs: &Type, rhs: &Type) -> Type {
     match (lhs, rhs) {
@@ -102,19 +346,19 @@ pub fn eval_const_num(expr: &HirExpr) -> Option<f64> {
 pub(crate) fn literal_value_from_expr(expr: &HirExpr) -> runmat_builtins::LiteralValue {
     use runmat_builtins::LiteralValue;
 
-    if let Some(value) = eval_const_num(expr) {
-        return LiteralValue::Number(value);
-    }
-
     match &expr.kind {
         HirExprKind::String(text) => LiteralValue::String(text.clone()),
         HirExprKind::Constant(name) => match name.to_ascii_lowercase().as_str() {
             "true" => LiteralValue::Bool(true),
             "false" => LiteralValue::Bool(false),
-            _ => LiteralValue::Unknown,
+            _ => eval_const_num(expr)
+                .map(LiteralValue::Number)
+                .unwrap_or(LiteralValue::Unknown),
         },
         HirExprKind::Tensor(rows) => literal_vector_from_tensor(rows),
-        _ => LiteralValue::Unknown,
+        _ => eval_const_num(expr)
+            .map(LiteralValue::Number)
+            .unwrap_or(LiteralValue::Unknown),
     }
 }
 
@@ -363,5 +607,12 @@ mod literal_context_tests {
                 LiteralValue::Bool(false),
             ]
         );
+    }
+
+    #[test]
+    fn resolve_context_exposes_boolean_literals() {
+        let args = vec![expr(HirExprKind::Constant("true".to_string()))];
+        let ctx = resolve_context_from_args(&args);
+        assert_eq!(ctx.literal_bool_at(0), Some(true));
     }
 }
