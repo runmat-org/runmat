@@ -22,6 +22,7 @@ export const docsTree: DocsNode[] = [
   {
     title: "Overview",
     children: [
+      { title: "Install", externalHref: "/download" },
       { title: "Getting Started", externalHref: "/docs/getting-started" },
       {
         title: "Browser Guide",
