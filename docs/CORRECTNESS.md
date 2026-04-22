@@ -27,7 +27,7 @@ jsonLd:
           name: "How does RunMat validate numerical accuracy?"
           acceptedAnswer:
             "@type": "Answer"
-            text: "Three mechanisms. First, inherited correctness from established Rust crates (rustfft for FFT, nalgebra for SVD and dense linear algebra, num-complex for complex arithmetic). Second, optional FFI to platform-native BLAS and LAPACK (Apple Accelerate on macOS, OpenBLAS on Linux), the same libraries NumPy, SciPy, and MATLAB's own solvers rely on. Third, in-repo solvers validated against external references or RunMat's own CPU path. RunMat ships 422 total builtins; the 111 that live under crates/runmat-runtime/src/builtins/math/ are the numerical-math subset where tolerance-based validation applies, and those ship with 1,635 co-located test functions plus 41 integration-level test files covering GPU-vs-CPU parity, fusion engine, feature-gated FFI, and RNG statistics. Counts accurate as of 2026-04-17."
+            text: "Three mechanisms. First, inherited correctness from established Rust crates (rustfft for FFT, nalgebra for SVD and dense linear algebra, num-complex for complex arithmetic). Second, optional FFI to platform-native BLAS and LAPACK (Apple Accelerate on macOS, OpenBLAS on Linux), the same libraries NumPy, SciPy, and MATLAB's own solvers rely on. Third, in-repo solvers validated against external references or RunMat's own CPU path. RunMat ships 422 total builtins; the 111 that live under crates/runmat-runtime/src/builtins/math/ are the numerical-math subset where tolerance-based validation applies, and those ship with 1,635 co-located test functions plus 41 integration-level test files covering GPU-vs-CPU parity, fusion engine, feature-gated FFI, and RNG statistics."
         - "@type": "Question"
           name: "What reference implementations does RunMat validate against?"
           acceptedAnswer:
@@ -52,7 +52,7 @@ jsonLd:
           name: "Are all builtins validated?"
           acceptedAnswer:
             "@type": "Answer"
-            text: "Yes, for the builtins where tolerance-based validation is the right question. Of RunMat's 422 total builtins, 111 are numerical-math builtins (under crates/runmat-runtime/src/builtins/math/); all but two common.rs helper modules in that subset carry co-located unit tests, and a smaller GPU-accelerated, LAPACK-wrapped, or cross-cutting reduction subset additionally has integration-level parity tests. The remaining 311 builtins handle string, array, plotting, I/O, and OOP; these are validated by behavioural tests rather than tolerance-based parity, since 'fprintf returned the right text' doesn't have an atol. We never silently remove a row: if validation regresses, the row updates to reflect that. Counts accurate as of 2026-04-17."
+            text: "Yes, for the builtins where tolerance-based validation is the right question. Of RunMat's 422 total builtins, 111 are numerical-math builtins (under crates/runmat-runtime/src/builtins/math/); all but two common.rs helper modules in that subset carry co-located unit tests, and a smaller GPU-accelerated, LAPACK-wrapped, or cross-cutting reduction subset additionally has integration-level parity tests. The remaining 311 builtins handle string, array, plotting, I/O, and OOP; these are validated by behavioural tests rather than tolerance-based parity, since 'fprintf returned the right text' doesn't have an atol. We never silently remove a row: if validation regresses, the row updates to reflect that."
         - "@type": "Question"
           name: "Can I run the validation tests myself?"
           acceptedAnswer:
@@ -165,10 +165,6 @@ Numerical math builtins typically include CPU and GPU implementations. CPU imple
 
 Where RunMat implements a builtin itself, such as GPU implementations of each builtin, it tests against a known-correct reference to a documented floating-point tolerance.
 
-This page documents and communicates the methodology for how we validate the correctness of RunMat's numerical math builtins in more detail.
-
-*Counts cited throughout this document were verified against the `main` branch on **2026-04-17**. They drift as the runtime evolves; the [CI commitment](#ci-commitment) describes how we keep them current.*
-
 ---
 
 ## How we measure numerical correctness
@@ -181,9 +177,9 @@ What we do to ensure this:
 
 - Every numerical builtin has a reference implementation and an automated test that compares representative evaluation cases against it, typically including positive, negative, and edge cases.
 - Reference implementations are measured to the target numeric type's maximum floating-point precision and documented inline in the test source.
-- CI/CD gates releases and verifies that all tests execute and resolve within their tolerance limits. CI/CD tests run on macOS, Windows (Intel CPU + NVIDIA GPU), Linux (Intel CPU + NVIDIA GPU), and Linux (ARM CPU + GPU), ensuring numerical correctness is evaluated across the underlying hardware platforms executing the operations.
+- CI/CD gates releases and verifies that all tests execute and resolve within their tolerance limits. CI/CD tests run on macOS, Windows (Intel CPU + NVIDIA GPU), Linux (Intel CPU + NVIDIA GPU), and Linux (ARM CPU + GPU).
 
-Read more about the RunMat [Design Philosophy](/docs/design-philosophy) here, or continue below for a deeper dive on how we validate the correctness of RunMat's numerical math builtins.
+See also: [Design Philosophy](/docs/design-philosophy).
 
 ---
 
@@ -200,7 +196,7 @@ RunMat's builtins fall into three correctness tiers, tested differently:
 
 ### Validation spans the entire math tree
 
-We'll use the [FFT deep dive below](#deep-dive-validating-fft) as an example. It crosses a CPU/GPU boundary against an external reference (`rustfft`), which makes it a good example to show the various components of the methodology in action. The same pattern runs across RunMat's numerical tree:
+We'll use the [FFT deep dive below](#deep-dive-validating-fft) as a worked example: it crosses a CPU/GPU boundary against an external reference (`rustfft`). The same pattern runs across the rest of the math tree:
 
 - RunMat ships **422 total builtins** across math, linear algebra, array ops, string, plotting, I/O, and OOP. The 111 builtins where tolerance-based numerical validation applies all live under [`crates/runmat-runtime/src/builtins/math/`](https://github.com/runmat-org/runmat/tree/main/crates/runmat-runtime/src/builtins/math). String handling, file I/O, figure rendering, and the rest are validated by behavioural tests instead; they don't have an "`atol`" to document.
 - Those 111 numerical-math modules ship with co-located `#[cfg(test)]` suites, totalling **1,635 `#[test]` functions**.
@@ -240,13 +236,13 @@ The below is a representative list of the reference implementations RunMat is te
 | **BLAS / LAPACK (optional)** | FFI via [`blas`](https://crates.io/crates/blas) 0.22, [`lapack`](https://crates.io/crates/lapack) 0.19; [`accelerate-src`](https://crates.io/crates/accelerate-src) (macOS) / [`openblas-src`](https://crates.io/crates/openblas-src) (Linux)<br />→ [`blas_lapack.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/tests/blas_lapack.rs) | `1e-10` | — |
 | **Random number generation** | Custom `RunMatLCG` (in-repo)<br />→ [`rng.rs`](https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/tests/rng.rs) | Statistical: `|mean|` < 0.01, `|variance − 1|` < 0.02 at n=1M | — |
 
-For the full set, see the individual test files in the repo. Builtin tests are co-located with the builtin implementation. Other tests are located in their respective domain boundaries.
+For the full set, see the individual test files in the repo. Builtin tests are co-located with the builtin implementation. Other tests live under `crates/*/tests/`.
 
 ---
 
 ## Deep dive: validating FFT
 
-The FFT, IFFT, and their companion operations are core operations in signal processing and linear algebra. They are used in a wide variety of applications.
+The FFT, IFFT, and their companion operations are core operations in signal processing and linear algebra.
 
 In RunMat, the FFT is implemented across two backends:
 
@@ -286,8 +282,6 @@ cargo test -p runmat-accelerate --features wgpu --test fft_staged
 cargo test -p runmat-accelerate --features wgpu --test fused_square_mean_all_parity
 ```
 
-RunMat has thousands of tests covering the surface of the system. 
-
 To run the above tests, `git clone` the repo [runmat-org/runmat](https://github.com/runmat-org/runmat) and run the corresponding command.
 
 ---
@@ -307,7 +301,7 @@ To run the above tests, `git clone` the repo [runmat-org/runmat](https://github.
 
 ## Bit-identical reproducibility between environments
 
-RunMat builtins are validated to tolerance limits, not to bit-identical output across every environment, because of the limits of IEEE 754 floating-point arithmetic and differences in underlying hardware implementations. This is a well-studied and well-understood problem in numerical computing. See [PyTorch's numerical-accuracy note](https://pytorch.org/docs/stable/notes/numerical_accuracy.html), [NumPy's discussion of reproducibility](https://numpy.org/doc/stable/reference/random/bit_generators/index.html), and Intel's [CNR documentation](https://www.intel.com/content/www/us/en/developer/articles/technical/introduction-to-the-conditional-numerical-reproducibility-cnr.html) for more details.
+RunMat builtins are validated to tolerance limits, not to bit-identical output across every environment, because of the limits of IEEE 754 floating-point arithmetic and differences in underlying hardware implementations. This is a well-studied problem in numerical computing. See [PyTorch's numerical-accuracy note](https://pytorch.org/docs/stable/notes/numerical_accuracy.html), [NumPy's discussion of reproducibility](https://numpy.org/doc/stable/reference/random/bit_generators/index.html), and Intel's [CNR documentation](https://www.intel.com/content/www/us/en/developer/articles/technical/introduction-to-the-conditional-numerical-reproducibility-cnr.html) for more details.
 
 ---
 
