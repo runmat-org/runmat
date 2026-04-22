@@ -357,13 +357,19 @@ pub fn gradient_real_tensor_host(
     } = tensor;
     let dim_index = dim.saturating_sub(1);
     let mut shape = matlab_gradient_shape(&shape, data.len());
-    while shape.len() <= dim_index {
-        shape.push(1);
-    }
 
     if data.is_empty() {
-        return Tensor::new_with_dtype(Vec::new(), shape, dtype)
+        // Return early before the `push(1)` padding loop: that loop would give a
+        // shape like [1] or [1,1] whose product is 1 ≠ 0, violating Tensor's
+        // invariant. Use the normalised shape directly, falling back to [0,0] if
+        // matlab_gradient_shape returned an empty vec (untyped empty tensor).
+        let empty_shape = if shape.is_empty() { vec![0, 0] } else { shape };
+        return Tensor::new_with_dtype(Vec::new(), empty_shape, dtype)
             .map_err(|e| gradient_error(format!("gradient: {e}")));
+    }
+
+    while shape.len() <= dim_index {
+        shape.push(1);
     }
 
     let mut ext_shape = shape.clone();
@@ -417,13 +423,17 @@ pub fn gradient_complex_tensor_host(
     let ComplexTensor { data, shape, .. } = tensor;
     let dim_index = dim.saturating_sub(1);
     let mut shape = matlab_gradient_shape(&shape, data.len());
-    while shape.len() <= dim_index {
-        shape.push(1);
-    }
 
     if data.is_empty() {
-        return ComplexTensor::new(Vec::new(), shape)
+        // Same fix as gradient_real_tensor_host: avoid padding the shape with 1s
+        // before the early return, which would produce product ≠ 0 for empty data.
+        let empty_shape = if shape.is_empty() { vec![0, 0] } else { shape };
+        return ComplexTensor::new(Vec::new(), empty_shape)
             .map_err(|e| gradient_error(format!("gradient: {e}")));
+    }
+
+    while shape.len() <= dim_index {
+        shape.push(1);
     }
 
     let mut ext_shape = shape.clone();
