@@ -92,7 +92,7 @@ async fn hypot_gpu_pair(a: GpuTensorHandle, b: GpuTensorHandle) -> BuiltinResult
     if let Some(provider) = runmat_accelerate_api::provider() {
         if a.shape == b.shape {
             if let Ok(handle) = provider.elem_hypot(&a, &b).await {
-                return Ok(Value::GpuTensor(handle));
+                return Ok(gpu_helpers::resident_gpu_value(handle));
             }
         }
     }
@@ -391,6 +391,30 @@ pub(crate) mod tests {
         match result {
             Value::Num(v) => assert!(v.is_nan()),
             other => panic!("expected NaN scalar, got {other:?}"),
+        }
+    }
+
+    /// IEEE 754 / MATLAB require hypot(Inf, Inf) = Inf.
+    /// The scaling form lo/hi = Inf/Inf = NaN, so the host path must not regress.
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn hypot_both_infinite_is_inf() {
+        let result =
+            hypot_builtin(Value::Num(f64::INFINITY), Value::Num(f64::INFINITY)).expect("hypot inf");
+        match result {
+            Value::Num(v) => assert!(v.is_infinite() && v > 0.0, "expected +Inf, got {v}"),
+            other => panic!("expected +Inf scalar, got {other:?}"),
+        }
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn hypot_one_infinite_is_inf() {
+        let result =
+            hypot_builtin(Value::Num(f64::INFINITY), Value::Num(3.0)).expect("hypot inf/finite");
+        match result {
+            Value::Num(v) => assert!(v.is_infinite() && v > 0.0, "expected +Inf, got {v}"),
+            other => panic!("expected +Inf scalar, got {other:?}"),
         }
     }
 

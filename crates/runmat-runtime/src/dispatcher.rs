@@ -1,6 +1,8 @@
 use crate::{build_runtime_error, make_cell_with_shape, new_object_builtin, RuntimeError};
-use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, HostTensorOwned};
-use runmat_builtins::{builtin_functions, LogicalArray, NumericDType, Tensor, Value};
+use runmat_accelerate_api::{AccelProvider, GpuTensorHandle, GpuTensorStorage, HostTensorOwned};
+use runmat_builtins::{
+    builtin_functions, ComplexTensor, LogicalArray, NumericDType, Tensor, Value,
+};
 
 /// Return `true` when the passed value is a GPU-resident tensor handle.
 pub fn is_gpu_value(value: &Value) -> bool {
@@ -61,7 +63,11 @@ fn gather_if_needed_async_impl<'a>(
                             .build()
                     })?;
                 runmat_accelerate_api::clear_residency(handle);
-                let runmat_accelerate_api::HostTensorOwned { data, shape } = host;
+                let runmat_accelerate_api::HostTensorOwned {
+                    data,
+                    shape,
+                    storage,
+                } = host;
                 if is_logical {
                     let bits: Vec<u8> =
                         data.iter().map(|&v| if v != 0.0 { 1 } else { 0 }).collect();
@@ -71,6 +77,25 @@ fn gather_if_needed_async_impl<'a>(
                             .build()
                     })?;
                     Ok(Value::LogicalArray(logical))
+                } else if storage == GpuTensorStorage::ComplexInterleaved {
+                    let mut data = data;
+                    let precision = runmat_accelerate_api::handle_precision(handle)
+                        .unwrap_or_else(|| provider.precision());
+                    if matches!(precision, runmat_accelerate_api::ProviderPrecision::F32) {
+                        for value in &mut data {
+                            *value = (*value as f32) as f64;
+                        }
+                    }
+                    let mut complex = Vec::with_capacity(data.len() / 2);
+                    for chunk in data.chunks_exact(2) {
+                        complex.push((chunk[0], chunk[1]));
+                    }
+                    let tensor = ComplexTensor::new(complex, shape).map_err(|e| {
+                        build_runtime_error(format!("gather: {e}"))
+                            .with_identifier("RunMat:gather:TensorShapeError")
+                            .build()
+                    })?;
+                    Ok(Value::ComplexTensor(tensor))
                 } else {
                     let mut data = data;
                     let precision = runmat_accelerate_api::handle_precision(handle)

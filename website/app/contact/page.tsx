@@ -57,13 +57,13 @@ export default function ContactPage() {
           __html: JSON.stringify(jsonLd).replace(/<\//g, "<\\/"),
         }}
       />
-      <div className="container mx-auto px-4 md:px-6 lg:px-8 pt-12 md:pt-16 lg:pt-20 pb-16 md:pb-24 lg:pb-32">
+      <div className="container mx-auto px-4 md:px-6 lg:px-8 pt-8 md:pt-12 lg:pt-16 pb-16 md:pb-24 lg:pb-32">
         <section className="mx-auto max-w-lg">
-          <div className="mb-8 space-y-3 text-center">
-            <h1 className="text-3xl font-bold text-foreground md:text-4xl">
+          <div className="mb-6 space-y-2 text-center">
+            <h1 className="text-2xl font-bold text-foreground sm:text-3xl">
               Get in touch
             </h1>
-            <p className="text-lg text-muted-foreground">
+            <p className="text-[0.938rem] text-foreground">
               Have a question about RunMat Enterprise, partnerships, or anything else? Fill out the
               form below and we&apos;ll get back to you.
             </p>

@@ -166,6 +166,46 @@ fn two_dots_are_two_dots_not_ellipsis() {
 }
 
 #[test]
+fn leading_dot_literals_tokenize_as_floats() {
+    let src = ".1 .25e-2";
+    let tokens = tokenize(src);
+    assert_eq!(tokens, vec![Token::Float, Token::Float]);
+}
+
+#[test]
+fn leading_dot_imaginary_literals_tokenize_as_float_plus_ident() {
+    let src = ".1i .5e-2j";
+    let tokens = tokenize(src);
+    assert_eq!(
+        tokens,
+        vec![Token::Float, Token::Ident, Token::Float, Token::Ident]
+    );
+}
+
+#[test]
+fn leading_dot_range_step_tokenizes_as_float() {
+    let src = "0:.1:10";
+    let tokens = tokenize(src);
+    assert_eq!(
+        tokens,
+        vec![
+            Token::Integer,
+            Token::Colon,
+            Token::Float,
+            Token::Colon,
+            Token::Integer,
+        ]
+    );
+}
+
+#[test]
+fn leading_dot_float_does_not_break_property_access() {
+    let src = "obj.field";
+    let tokens = tokenize(src);
+    assert_eq!(tokens, vec![Token::Ident, Token::Dot, Token::Ident]);
+}
+
+#[test]
 fn unknown_character_mixed_with_idents() {
     let src = "a!b";
     let tokens = tokenize(src);

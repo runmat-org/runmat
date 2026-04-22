@@ -9,6 +9,7 @@
     "matlab stem"
   ],
   "summary": "Create stem plots for discrete signals, sequence visualization, and MATLAB `stem` workflows.",
+  "hero_image": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-stem-discrete-sampled-signal.webp",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -51,14 +52,64 @@
       "description": "Inspect a stem handle after plotting",
       "input": "h = stem(1:5, [2 1 3 2 4]);\nget(h, 'Type')",
       "output": "ans =\n    'stem'"
+    },
+    {
+      "description": "Discrete sampled signal",
+      "input": "n = 0:31;\nx = sin(2*pi*n/16) .* (0.9 .^ n);\n\nstem(n, x);\ntitle('Sampled Decaying Sinusoid');\nxlabel('Sample index n');\nylabel('x[n]');\ngrid on;",
+      "image_webp": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-stem-discrete-sampled-signal.webp"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I use stem instead of plot?",
+      "answer": "`stem` is designed for discrete sequences where each sample is an independent value at a specific index—think impulse responses, sampled signals, or coefficient arrays. `plot` connects points with a continuous line, which implies interpolation between samples. If your data is inherently discrete and the gaps between samples matter, `stem` communicates that visually."
+    },
+    {
+      "question": "How do I customize the markers on a stem plot?",
+      "answer": "Use the handle returned by `stem` with `set` to change marker shape, size, fill, and color.\n\n```matlab\nh = stem(1:8, [3 1 4 1 5 9 2 6]);\nset(h, 'Marker', 's', 'MarkerSize', 8, 'Filled', true, 'MarkerFaceColor', 'r');\n```\n\nMarker properties go through the same shared property model as `plot` and `scatter`, so the same property names work."
+    },
+    {
+      "question": "Can I change the baseline of a stem plot?",
+      "answer": "Yes. Set the `'BaseValue'` property on the stem handle to shift the baseline from the default of 0.\n\n```matlab\nh = stem(1:5, [2 4 1 3 5]);\nset(h, 'BaseValue', 2);\n```\n\nStems will then extend from y=2 to each data point rather than from y=0."
     }
   ],
   "links": [
-    { "label": "stairs", "url": "./stairs" },
-    { "label": "errorbar", "url": "./errorbar" },
-    { "label": "legend", "url": "./legend" },
-    { "label": "get", "url": "./get" },
-    { "label": "set", "url": "./set" }
+    {
+      "label": "stairs",
+      "url": "./stairs"
+    },
+    {
+      "label": "errorbar",
+      "url": "./errorbar"
+    },
+    {
+      "label": "legend",
+      "url": "./legend"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/stem.rs`",

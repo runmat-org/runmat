@@ -52,14 +52,14 @@ function CopyableCommand({ command, bgColor }: { command: string; bgColor: strin
           }}
         >
           {copied ? (
-            <Check className="h-4 w-4 text-green-400" />
+            <Check className="h-4 w-4 text-green-600 dark:text-green-400" />
           ) : (
             <Copy className="h-4 w-4" />
           )}
         </button>
       </div>
       {copied && (
-        <div className="absolute -top-8 right-2 bg-green-600 text-white text-xs px-2 py-1 rounded">
+        <div className="absolute -top-8 right-2 text-green-600 dark:text-green-400 text-xs px-2 py-1 rounded">
           Copied!
         </div>
       )}
@@ -106,20 +106,20 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
           <CardContent>
             <CopyableCommand 
               command="curl -fsSL https://runmat.com/install.sh | sh"
-              bgColor="bg-gray-900"
+              bgColor="bg-[var(--editor-background)]"
             />
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader className="text-center pb-3">
-            <Monitor className="h-8 w-8 mx-auto mb-2 text-blue-600" />
+            <Monitor className="h-8 w-8 mx-auto mb-2 text-[hsl(var(--brand))]" />
             <CardTitle className="text-lg">Windows</CardTitle>
           </CardHeader>
           <CardContent>
             <CopyableCommand 
               command="iwr https://runmat.com/install.ps1 | iex"
-              bgColor="bg-blue-900"
+              bgColor="bg-[var(--editor-background)]"
             />
           </CardContent>
         </Card>
@@ -137,8 +137,8 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
           command: winFlavor === 'ps7'
             ? 'iwr https://runmat.com/install.ps1 | iex'
             : 'iwr https://runmat.com/install.ps1 -UseBasicParsing | iex',
-          bgColor: 'bg-blue-900',
-          iconColor: 'text-blue-600',
+          bgColor: 'bg-[var(--editor-background)]',
+          iconColor: 'text-[hsl(var(--brand))]',
           description: null,
         };
       case 'mac':
@@ -146,7 +146,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
           title: 'macOS',
           icon: Terminal,
           command: 'curl -fsSL https://runmat.com/install.sh | sh',
-          bgColor: 'bg-gray-900',
+          bgColor: 'bg-[var(--editor-background)]',
           iconColor: 'text-green-600',
           description: null
         };
@@ -155,7 +155,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
           title: 'Linux',
           icon: Terminal,
           command: 'curl -fsSL https://runmat.com/install.sh | sh',
-          bgColor: 'bg-gray-900',
+          bgColor: 'bg-[var(--editor-background)]',
           iconColor: 'text-green-600',
           description: null
         };
@@ -164,7 +164,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
           title: 'Your System',
           icon: Terminal,
           command: 'curl -fsSL https://runmat.com/install.sh | sh',
-          bgColor: 'bg-gray-900',
+          bgColor: 'bg-[var(--editor-background)]',
           iconColor: 'text-green-600',
           description: null
         };
@@ -179,26 +179,26 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
       <div className={className}>
         <div className="text-center mb-4">
           <Icon className={`h-6 w-6 mx-auto mb-2 ${osInfo.iconColor}`} />
-          <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+          <h3 className="text-lg font-semibold text-foreground">
             Install for {osInfo.title}
           </h3>
         </div>
         <CopyableCommand command={osInfo.command} bgColor={osInfo.bgColor} />
         {selectedOS === 'windows' && (
-          <div className="mt-3 flex items-center justify-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+          <div className="mt-3 flex items-center justify-center gap-2 text-xs text-muted-foreground">
             <span>Need a different PowerShell?</span>
             <button
-              className={`px-2 py-1 rounded ${winFlavor === 'ps7' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}
+              className={`px-2 py-1 rounded ${winFlavor === 'ps7' ? 'bg-[hsl(var(--brand))] text-white' : 'bg-secondary'}`}
               onClick={() => setWinFlavor('ps7')}
             >PS 7+</button>
             <button
-              className={`px-2 py-1 rounded ${winFlavor === 'ps5' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}
+              className={`px-2 py-1 rounded ${winFlavor === 'ps5' ? 'bg-[hsl(var(--brand))] text-white' : 'bg-secondary'}`}
               onClick={() => setWinFlavor('ps5')}
             >PS 5.x</button>
           </div>
         )}
         {osInfo.description && (
-          <p className="text-sm text-gray-600 dark:text-gray-300 text-center mt-2">
+          <p className="text-sm text-muted-foreground text-center mt-2">
             {osInfo.description}
           </p>
         )}
@@ -219,14 +219,14 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
         {/* Intentionally no descriptive line above for Windows; keep UI simple */}
 
         {selectedOS === 'windows' && (
-          <div className="mt-3 flex items-center justify-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+          <div className="mt-3 flex items-center justify-center gap-2 text-xs text-muted-foreground">
             <span>Need a different PowerShell?</span>
             <button
-              className={`px-2 py-1 rounded ${winFlavor === 'ps7' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}
+              className={`px-2 py-1 rounded ${winFlavor === 'ps7' ? 'bg-[hsl(var(--brand))] text-white' : 'bg-secondary'}`}
               onClick={() => setWinFlavor('ps7')}
             >PS 7+</button>
             <button
-              className={`px-2 py-1 rounded ${winFlavor === 'ps5' ? 'bg-blue-600 text-white' : 'bg-gray-200 dark:bg-gray-700'}`}
+              className={`px-2 py-1 rounded ${winFlavor === 'ps5' ? 'bg-[hsl(var(--brand))] text-white' : 'bg-secondary'}`}
               onClick={() => setWinFlavor('ps5')}
             >PS 5.x</button>
           </div>
@@ -234,7 +234,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
         
         {selectedOS !== 'unknown' && (
           <div className="mt-4 pt-4">
-            <p className="text-xs text-gray-500 dark:text-gray-400 text-center mb-3">
+            <p className="text-xs text-muted-foreground text-center mb-3">
               Not {getOSInfo().title}? Pick your platform:
             </p>
             <div className="flex justify-center gap-2">
@@ -247,7 +247,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
                       label: "windows",
                     });
                   }}
-                  className="px-3 py-1 text-xs bg-gray-200 hover:bg-gray-300 text-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 rounded-md transition-colors"
+                  className="px-3 py-1 text-xs bg-secondary hover:bg-accent text-foreground rounded-md transition-colors"
                 >
                   Windows
                 </button>
@@ -261,7 +261,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
                       label: "mac",
                     });
                   }}
-                  className="px-3 py-1 text-xs bg-gray-200 hover:bg-gray-300 text-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 rounded-md transition-colors"
+                  className="px-3 py-1 text-xs bg-secondary hover:bg-accent text-foreground rounded-md transition-colors"
                 >
                   macOS
                 </button>
@@ -275,7 +275,7 @@ export function OSInstallCommand({ variant = 'full', className = '' }: OSInstall
                       label: "linux",
                     });
                   }}
-                  className="px-3 py-1 text-xs bg-gray-200 hover:bg-gray-300 text-gray-800 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 rounded-md transition-colors"
+                  className="px-3 py-1 text-xs bg-secondary hover:bg-accent text-foreground rounded-md transition-colors"
                 >
                   Linux
                 </button>

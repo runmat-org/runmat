@@ -1,6 +1,8 @@
+use runmat_config::{ConfigLoader, JitOptLevel, RunMatConfig};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Command;
+use tempfile::TempDir;
 
 // Helper function to get the binary path
 fn get_binary_path() -> PathBuf {
@@ -300,6 +302,30 @@ fn test_config_file_env_var() {
     let output = run_runmat_with_env(&["info"], env);
     // Should work even if config file doesn't exist (using defaults)
     assert!(output.status.success());
+}
+
+#[test]
+fn test_config_file_values_are_not_overridden_by_cli_defaults() {
+    let temp_dir = TempDir::new().unwrap();
+    let config_path = temp_dir.path().join("runmat.yaml");
+    let mut config = RunMatConfig::default();
+    config.runtime.timeout = 42;
+    config.runtime.callstack_limit = 321;
+    config.jit.threshold = 25;
+    config.jit.optimization_level = JitOptLevel::Size;
+    config.gc.collect_stats = true;
+    ConfigLoader::save_to_file(&config, &config_path).unwrap();
+
+    let mut env = HashMap::new();
+    env.insert("RUNMAT_CONFIG", config_path.to_str().unwrap());
+
+    let output = run_runmat_with_env(&["info"], env);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("JIT Threshold: 25"));
+    assert!(stdout.contains("JIT Optimization: Size"));
+    assert!(stdout.contains("GC Statistics: true"));
 }
 
 #[test]

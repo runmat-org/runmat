@@ -10,7 +10,6 @@ use anyhow::{Context, Result};
 use clap::ValueEnum;
 use log::{debug, info};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -52,9 +51,6 @@ pub struct RunMatConfig {
     pub kernel: KernelConfig,
     /// Logging configuration
     pub logging: LoggingConfig,
-    /// Package manager configuration
-    #[serde(default)]
-    pub packages: PackagesConfig,
 }
 
 /// Runtime execution configuration
@@ -184,9 +180,26 @@ pub struct TelemetryConfig {
     /// Bounded queue size for async delivery
     #[serde(default = "default_telemetry_queue")]
     pub queue_size: usize,
+    /// Deliver telemetry synchronously on the caller thread
+    #[serde(default)]
+    pub sync_mode: bool,
+    /// Drain policy used when the process exits
+    #[serde(default)]
+    pub drain_mode: TelemetryDrainMode,
+    /// Maximum time to wait for telemetry drain on shutdown
+    #[serde(default = "default_telemetry_drain_timeout_ms")]
+    pub drain_timeout_ms: u64,
     /// Require ingestion key (self-built binaries default to false)
     #[serde(default = "default_true")]
     pub require_ingestion_key: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ValueEnum, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum TelemetryDrainMode {
+    None,
+    #[default]
+    All,
 }
 
 impl Default for TelemetryConfig {
@@ -197,6 +210,9 @@ impl Default for TelemetryConfig {
             http_endpoint: None,
             udp_endpoint: Some("udp.telemetry.runmat.com:7846".to_string()),
             queue_size: default_telemetry_queue(),
+            sync_mode: false,
+            drain_mode: TelemetryDrainMode::All,
+            drain_timeout_ms: default_telemetry_drain_timeout_ms(),
             require_ingestion_key: true,
         }
     }
@@ -217,6 +233,10 @@ impl Default for AccelerateConfig {
 
 fn default_telemetry_queue() -> usize {
     256
+}
+
+fn default_telemetry_drain_timeout_ms() -> u64 {
+    50
 }
 
 /// Auto-offload planner configuration
@@ -425,66 +445,6 @@ pub struct KernelPorts {
     pub heartbeat: Option<u16>,
 }
 
-/// Package manager configuration
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct PackagesConfig {
-    /// Enable package manager
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    /// Registries to search for packages (first match wins)
-    #[serde(default = "default_registries")]
-    pub registries: Vec<Registry>,
-    /// Dependencies declared by the workspace (name -> spec)
-    #[serde(default)]
-    pub dependencies: HashMap<String, PackageSpec>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Registry {
-    /// Registry logical name
-    pub name: String,
-    /// Base URL for index/API (e.g., https://packages.runmat.com)
-    pub url: String,
-}
-
-/// Package specification
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "source", rename_all = "kebab-case")]
-pub enum PackageSpec {
-    /// Resolve from a registry by name
-    Registry {
-        /// Semver range (e.g. "^1.2"), or exact version
-        version: String,
-        /// Optional registry override (defaults to first registry)
-        #[serde(default)]
-        registry: Option<String>,
-        /// Optional feature flags
-        #[serde(default)]
-        features: Vec<String>,
-        /// Optional mark for optional dependency
-        #[serde(default)]
-        optional: bool,
-    },
-    /// Git repository
-    Git {
-        url: String,
-        #[serde(default)]
-        rev: Option<String>,
-        #[serde(default)]
-        features: Vec<String>,
-        #[serde(default)]
-        optional: bool,
-    },
-    /// Local path dependency (useful for development)
-    Path {
-        path: String,
-        #[serde(default)]
-        features: Vec<String>,
-        #[serde(default)]
-        optional: bool,
-    },
-}
-
 /// Logging configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoggingConfig {
@@ -642,13 +602,6 @@ fn default_max_render_time() -> u32 {
 
 fn default_lod_threshold() -> u32 {
     10000 // Points threshold for LOD
-}
-
-fn default_registries() -> Vec<Registry> {
-    vec![Registry {
-        name: "runmat".to_string(),
-        url: "https://packages.runmat.com".to_string(),
-    }]
 }
 
 impl Default for RuntimeConfig {
@@ -1016,6 +969,19 @@ impl ConfigLoader {
                 config.telemetry.queue_size = parsed.max(MIN_QUEUE_SIZE);
             }
         }
+        if let Some(sync_mode) = env_bool("RUNMAT_TELEMETRY_SYNC", &[]) {
+            config.telemetry.sync_mode = sync_mode;
+        }
+        if let Some(drain_mode) = env_value("RUNMAT_TELEMETRY_DRAIN", &[]) {
+            if let Some(parsed) = parse_telemetry_drain_mode(&drain_mode) {
+                config.telemetry.drain_mode = parsed;
+            }
+        }
+        if let Some(drain_timeout) = env_value("RUNMAT_TELEMETRY_DRAIN_TIMEOUT_MS", &[]) {
+            if let Ok(parsed) = drain_timeout.trim().parse::<u64>() {
+                config.telemetry.drain_timeout_ms = parsed;
+            }
+        }
 
         // Acceleration settings
         if let Some(accel) = env_value("RUNMAT_ACCEL_ENABLE", &[]) {
@@ -1251,6 +1217,16 @@ fn parse_power_preference(value: &str) -> Option<AccelPowerPreference> {
     }
 }
 
+fn parse_telemetry_drain_mode(value: &str) -> Option<TelemetryDrainMode> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "started" | "start" | "session" | "all" | "full" | "both" | "runtime" => {
+            Some(TelemetryDrainMode::All)
+        }
+        "none" | "off" | "" => Some(TelemetryDrainMode::None),
+        _ => None,
+    }
+}
+
 fn env_value(primary: &str, aliases: &[&str]) -> Option<String> {
     env::var(primary)
         .ok()
@@ -1427,5 +1403,24 @@ mod tests {
         assert!(config.telemetry.udp_endpoint.is_none());
         std::env::remove_var("RUNMAT_TELEMETRY_ENDPOINT");
         std::env::remove_var("RUNMAT_TELEMETRY_UDP_ENDPOINT");
+    }
+
+    #[test]
+    fn telemetry_runtime_env_overrides_promote_into_config() {
+        let _lock = ENV_GUARD.lock().unwrap();
+        std::env::set_var("RUNMAT_TELEMETRY_SYNC", "1");
+        std::env::set_var("RUNMAT_TELEMETRY_DRAIN", "none");
+        std::env::set_var("RUNMAT_TELEMETRY_DRAIN_TIMEOUT_MS", "250");
+
+        let mut config = RunMatConfig::default();
+        ConfigLoader::apply_environment_variables(&mut config).unwrap();
+
+        assert!(config.telemetry.sync_mode);
+        assert_eq!(config.telemetry.drain_mode, TelemetryDrainMode::None);
+        assert_eq!(config.telemetry.drain_timeout_ms, 250);
+
+        std::env::remove_var("RUNMAT_TELEMETRY_SYNC");
+        std::env::remove_var("RUNMAT_TELEMETRY_DRAIN");
+        std::env::remove_var("RUNMAT_TELEMETRY_DRAIN_TIMEOUT_MS");
     }
 }

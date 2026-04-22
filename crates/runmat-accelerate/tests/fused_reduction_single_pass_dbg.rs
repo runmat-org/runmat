@@ -134,6 +134,7 @@ fn fused_single_pass_sum_mul_no_alias() {
             cv.insert(v_dim, Value::Num(1.0));
             cv
         },
+        materialized_stores: Vec::new(),
         output: Some(v_sum),
         kernel: FusionKernelSpec {
             kind: FusionKind::Reduction,

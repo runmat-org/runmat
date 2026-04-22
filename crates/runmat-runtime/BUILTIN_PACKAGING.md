@@ -4,7 +4,7 @@ This document captures the builtin authoring, GPU integration, and automation bl
 
 ## Goals
 - One Rust source file per builtin containing code, GPU/fusion specs, and unit tests.
-- Inventory-backed metadata that fuels both the runtime (Ignition/Turbine + Accelerate) and authoring tools.
+- Inventory-backed metadata that fuels both the runtime (VM/Turbine + Accelerate) and authoring tools.
 - First-class support for scalar and variadic signatures, GPU offload, fusion planning, and BLAS/LAPACK fallbacks.
 - Tooling that can emit structured metadata for the Next.js site and drive Codex-based authoring sessions.
 

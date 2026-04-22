@@ -4,22 +4,21 @@ This document serves as the evolving roadmap for **RunMat** to track the progres
 
 ## Vision
 
-RunMat is a fast, local-first MATLAB-compatible runtime. Same syntax engineers have used for decades, with a modern stack underneath: Rust, a JIT compiler, and automatic GPU acceleration. We're building the foundation first—a runtime engineers can adopt without workflow changes or procurement headaches—with richer tooling and assistance for math and physics work to follow.
+RunMat is a fast, local-first MATLAB-compatible runtime. Same syntax engineers have used for decades, with a modern stack underneath: Rust, a JIT compiler, and automatic GPU acceleration. RunMat runs as a CLI, in the browser via WebAssembly, and (soon) as a native desktop app. We're building the foundation first—a runtime engineers can adopt without workflow changes or procurement headaches—with richer tooling and assistance for math and physics work to follow.
 
 ## Current Shape
 
 - **CLI** — Install and run `runmat` in the terminal; REPL, script execution, Jupyter kernel.
-- **Browser** — No-install sandbox at [runmat.com/sandbox](https://runmat.com/sandbox); full IDE experience, local execution in the browser via WebAssembly/WebGPU.
+- **Browser** — Live at [runmat.com/sandbox](https://runmat.com/sandbox); full IDE with code and notebook editors, GPU-accelerated plotting, variable inspector, and file management — all running locally in the browser via WebAssembly and WebGPU.
 - **Desktop app** — In development; will offer a native-style experience, local project management, and optional integrations.
 
 ## Towards 1.0
 
 The core language and runtime are complete. The major remaining items are:
 
-- The GUI plotting backend has a few edges that need to be smoothed out.
 - The package manager needs to be implemented.
 - The JIT currently optimizes a subset of the language, with an interpreter fallback for operations that are currently not implemented in the JIT. Full JIT coverage will be implemented before the 1.0 release.
-- Continued expansion of built-in function coverage. RunMat now has extensive built-in function coverage across arrays, linear algebra, FFT/signal processing, statistics, strings, and I/O. Additional functions continue to be added based on user needs.
+- Continued expansion of built-in function coverage. RunMat ships 330+ built-in functions across arrays, linear algebra, FFT/signal processing, statistics, plotting, strings, and I/O. Additional functions continue to be added based on user needs.
 
 The below tracks the progress of the project towards the 1.0 release to date.
 
@@ -36,7 +35,7 @@ The below tracks the progress of the project towards the 1.0 release to date.
  - [x] Extend parser to support control flow, function definitions and array
       indexing so that typical MATLAB files can be parsed without errors.
 - [x] High-level IR (`runmat-hir`) with scope and type annotations.
-- [x] Simple interpreter running on an unoptimised bytecode (`runmat-ignition`).
+- [x] Simple interpreter running on an unoptimised bytecode (`runmat-vm`).
 - [x] Headless plotting backend emitting SVG/PNG.
 - [x] Jupyter kernel communication skeleton.
 
@@ -56,5 +55,16 @@ The below tracks the progress of the project towards the 1.0 release to date.
 - [x] Implement LSP server.
 - [x] Implement VSCode / Cursor extension.
 - [x] Complete Accelerate (GPU) support.
-- [ ] Finish plotting library integration.
+- [x] Finish plotting library integration.
 - [ ] Implement package manager.
+
+### Milestone P4 - Browser, Cloud & Sandbox
+
+- [x] Compile runtime to WebAssembly with WebGPU acceleration.
+- [x] Deploy sandbox web app with full IDE experience.
+- [x] Service worker plotting with GPU-accelerated rendering.
+- [x] Cloud infrastructure (GCP, Terraform, Docker Compose).
+- [x] Organizations, projects, and memberships.
+- [ ] Notebook editor with markdown and code cells.
+- [ ] RunMat Agent v1 with streaming and persistence.
+- [ ] Desktop app with native experience and local project management.

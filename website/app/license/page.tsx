@@ -89,15 +89,15 @@ export default function LicensePage() {
           __html: JSON.stringify(jsonLd).replace(/<\//g, "<\\/"),
         }}
       />
-      <div className="container mx-auto max-w-4xl px-4 md:px-6 py-16 md:py-24">
+      <div className="container mx-auto max-w-4xl px-4 md:px-6 py-16 md:py-24 lg:py-32">
         
         {/* Header */}
         <div className="mb-12">
           <Badge variant="secondary" className="mb-4">Legal</Badge>
-          <h1 className="text-4xl lg:text-5xl font-bold mb-6 text-foreground">
+          <h1 className="text-2xl sm:text-3xl font-bold mb-6 text-foreground">
             RunMat License
           </h1>
-          <p className="text-xl text-muted-foreground leading-relaxed">
+          <p className="text-[0.938rem] text-foreground leading-relaxed">
             RunMat is free and open source software with clear, fair licensing terms. 
             This page explains what you can and cannot do with RunMat.
           </p>
@@ -105,7 +105,7 @@ export default function LicensePage() {
 
         {/* Summary Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-12">
-          <Card className="border-green-300 dark:border-green-800 bg-green-50 dark:bg-green-950/50 shadow-lg">
+          <Card className="border-green-300 dark:border-green-800 bg-green-50 dark:bg-green-950/50 shadow-sm">
             <CardHeader className="text-center pb-3">
               <CheckCircle className="h-8 w-8 mx-auto mb-2 text-green-600 dark:text-green-400" />
               <CardTitle className="text-lg text-foreground dark:text-green-100 font-semibold">Free for Most Uses</CardTitle>
@@ -117,7 +117,7 @@ export default function LicensePage() {
             </CardContent>
           </Card>
 
-          <Card className="border-orange-300 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/50 shadow-lg">
+          <Card className="border-orange-300 dark:border-orange-800 bg-orange-50 dark:bg-orange-950/50 shadow-sm">
             <CardHeader className="text-center pb-3">
               <AlertCircle className="h-8 w-8 mx-auto mb-2 text-orange-600 dark:text-orange-400" />
               <CardTitle className="text-lg text-foreground dark:text-orange-100 font-semibold">Attribution Required</CardTitle>
@@ -129,13 +129,13 @@ export default function LicensePage() {
             </CardContent>
           </Card>
 
-          <Card className="border-blue-300 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/50 shadow-lg">
+          <Card className="bg-card border-border">
             <CardHeader className="text-center pb-3">
-              <HelpCircle className="h-8 w-8 mx-auto mb-2 text-blue-300 dark:text-blue-400" />
-              <CardTitle className="text-lg text-foreground dark:text-blue-100 font-semibold">Special Rules</CardTitle>
+              <HelpCircle className="h-8 w-8 mx-auto mb-2 text-[hsl(var(--brand))]" />
+              <CardTitle className="text-lg text-foreground font-semibold">Special Rules</CardTitle>
             </CardHeader>
             <CardContent className="text-center">
-              <p className="text-sm text-foreground dark:text-blue-200 font-medium">
+              <p className="text-sm text-foreground font-medium">
                 Commercial scientific software companies must keep modifications open source
               </p>
             </CardContent>
@@ -144,14 +144,14 @@ export default function LicensePage() {
 
         {/* FAQ Section */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-8 text-foreground">
+          <h2 className="text-xl sm:text-2xl font-bold mb-8 text-foreground">
             Frequently Asked Questions
           </h2>
           
           <div className="space-y-6">
             <Card>
               <CardHeader>
-                <CardTitle className="text-xl text-foreground">
+                <CardTitle className="text-lg font-semibold text-foreground">
                   Can I use RunMat for free?
                 </CardTitle>
               </CardHeader>
@@ -172,7 +172,7 @@ export default function LicensePage() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-xl text-foreground">
+                <CardTitle className="text-lg font-semibold text-foreground">
                   What does &quot;attribution required&quot; mean?
                 </CardTitle>
               </CardHeader>
@@ -194,7 +194,7 @@ export default function LicensePage() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-xl text-foreground">
+                <CardTitle className="text-lg font-semibold text-foreground">
                   What are the special rules for scientific software companies?
                 </CardTitle>
               </CardHeader>
@@ -217,7 +217,7 @@ export default function LicensePage() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-xl text-foreground">
+                <CardTitle className="text-lg font-semibold text-foreground">
                   Can I create proprietary software that uses RunMat?
                 </CardTitle>
               </CardHeader>
@@ -239,7 +239,7 @@ export default function LicensePage() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-xl text-foreground">
+                <CardTitle className="text-lg font-semibold text-foreground">
                   How does this compare to other open source licenses?
                 </CardTitle>
               </CardHeader>
@@ -260,7 +260,7 @@ export default function LicensePage() {
 
             <Card>
               <CardHeader>
-                <CardTitle className="text-xl text-foreground">
+                <CardTitle className="text-lg font-semibold text-foreground">
                   I&apos;m still not sure if my use case is allowed. What should I do?
                 </CardTitle>
               </CardHeader>
@@ -269,7 +269,7 @@ export default function LicensePage() {
                   When in doubt, reach out! We&apos;re happy to clarify licensing questions and work with you 
                   to ensure your use case is properly covered.
                 </p>
-                <div className="flex items-center space-x-2 text-blue-600 dark:text-blue-400">
+                <div className="flex items-center space-x-2 text-[hsl(var(--brand))]">
                   <Mail className="h-4 w-4" />
                   <Link href="mailto:legal@dystr.com" className="hover:underline">
                     legal@dystr.com
@@ -282,7 +282,7 @@ export default function LicensePage() {
 
         {/* Full License Text */}
         <section className="mb-12">
-          <h2 className="text-3xl font-bold mb-8 text-foreground">
+          <h2 className="text-xl sm:text-2xl font-bold mb-8 text-foreground">
             Full License Text         
           </h2>
           
@@ -329,15 +329,15 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
 
         {/* Contact Section */}
         <section>
-          <Card className="bg-blue-50 dark:bg-blue-950/50 border-blue-200 dark:border-blue-800">
+          <Card className="bg-card border-border">
             <CardContent className="p-6 text-center">
-              <h3 className="text-lg font-semibold mb-3 text-muted-foreground">
+              <h3 className="text-lg font-semibold mb-3 text-foreground">
                 Need Legal Clarification?
               </h3>
-              <p className="text-muted-foreground mb-4">
+              <p className="text-[0.938rem] text-foreground mb-4">
                 Our legal team is happy to help clarify licensing questions or discuss commercial licensing options.
               </p>
-              <p className="text-xs text-muted-foreground mb-4">
+              <p className="text-xs text-foreground mb-4">
                 New to MATLAB? Read the primer{" "}
                 <Link href="/blog/what-is-matlab" className="underline">
                   What is MATLAB?
@@ -345,10 +345,10 @@ THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLI
                 .
               </p>
               <div className="flex items-center justify-center space-x-2">
-                <Mail className="h-4 w-4 text-blue-600 dark:text-blue-400" />
+                <Mail className="h-4 w-4 text-[hsl(var(--brand))]" />
                 <Link 
                   href="mailto:legal@dystr.com" 
-                  className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                  className="text-[hsl(var(--brand))] hover:underline font-medium"
                 >
                   legal@dystr.com
                 </Link>

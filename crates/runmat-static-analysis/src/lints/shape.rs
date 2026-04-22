@@ -183,7 +183,7 @@ pub fn lint_shapes(result: &LoweringResult) -> Vec<HirDiagnostic> {
                     });
                 }
             }
-            parser::BinOp::Div => {
+            parser::BinOp::RightDiv => {
                 if let Some(false) =
                     runmat_builtins::shape_rules::right_divide_compatible(&lhs_ty, &rhs_ty)
                 {

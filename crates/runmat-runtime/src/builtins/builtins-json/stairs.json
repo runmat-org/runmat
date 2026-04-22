@@ -9,6 +9,7 @@
     "matlab stairs"
   ],
   "summary": "Create step plots for sampled signals, piecewise-constant data, and MATLAB `stairs` workflows.",
+  "hero_image": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-stairs-piecewise-constant-step.webp",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -49,14 +50,64 @@
     {
       "description": "Style a stairs object and label it for the legend",
       "input": "h = stairs(0:4, [1 2 2 3 5]);\nset(h, 'Color', 'm', 'LineWidth', 2, 'DisplayName', 'sampled signal');\nlegend;"
+    },
+    {
+      "description": "Piecewise-constant step response",
+      "input": "t = 0:0.5:10;\ny = 1 - exp(-0.5*t);\n\nh = stairs(t, y);\nset(h, 'LineWidth', 2);\ntitle('First-Order Step Response');\nxlabel('Time (s)');\nylabel('Output');\ngrid on;",
+      "image_webp": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-stairs-piecewise-constant-step.webp"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "When should I use stairs instead of plot?",
+      "answer": "`stairs` draws piecewise-constant steps between points, while `plot` linearly interpolates. Use `stairs` when your data is held constant between samples—DAC output, quantized signals, sample-and-hold systems, or any situation where the value doesn't change smoothly between observations."
+    },
+    {
+      "question": "How do I visualize a digital signal with stairs?",
+      "answer": "Pass your time vector and signal values directly. The staircase rendering naturally represents digital/discrete-time signals where values snap between levels.\n\n```matlab\nt = 0:0.01:1;\nsignal = double(square(2*pi*5*t) > 0);\nstairs(t, signal);\nylim([-0.2 1.2]);\n```\n\nThis avoids the misleading diagonal transitions that `plot` would draw between high and low states."
+    },
+    {
+      "question": "Can I add markers to a stairs plot?",
+      "answer": "Yes. Set the `'Marker'` property on the returned handle, just like you would with `plot`.\n\n```matlab\nh = stairs(0:4, [1 3 2 4 1]);\nset(h, 'Marker', 'o', 'MarkerSize', 6);\n```\n\nMarkers appear at each data point (the step corners), not along the flat segments."
     }
   ],
   "links": [
-    { "label": "plot", "url": "./plot" },
-    { "label": "stem", "url": "./stem" },
-    { "label": "scatter", "url": "./scatter" },
-    { "label": "legend", "url": "./legend" },
-    { "label": "set", "url": "./set" }
+    {
+      "label": "plot",
+      "url": "./plot"
+    },
+    {
+      "label": "stem",
+      "url": "./stem"
+    },
+    {
+      "label": "scatter",
+      "url": "./scatter"
+    },
+    {
+      "label": "legend",
+      "url": "./legend"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/stairs.rs`",

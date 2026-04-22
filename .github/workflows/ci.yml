@@ -189,6 +189,7 @@ jobs:
         if: runner.os == 'macOS'
         env:
           RUST_BACKTRACE: 1
+          RUST_TEST_THREADS: 1
         run: |
           set -o pipefail
           cargo test --all-targets --all-features 2>&1 | tee test.log

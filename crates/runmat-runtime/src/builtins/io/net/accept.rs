@@ -62,7 +62,7 @@ pub(crate) fn test_guard() -> std::sync::MutexGuard<'static, ()> {
     TCP_CLIENT_TEST_GUARD
         .get_or_init(|| Mutex::new(()))
         .lock()
-        .unwrap()
+        .unwrap_or_else(|poison| poison.into_inner())
 }
 
 pub(crate) fn insert_client(

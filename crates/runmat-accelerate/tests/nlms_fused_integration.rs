@@ -161,6 +161,7 @@ fn nlms_two_fused_reductions_integration() {
                 cv.insert(v_dim, Value::Num(1.0));
                 cv
             },
+            materialized_stores: Vec::new(),
             output: Some(v_sum),
             kernel: FusionKernelSpec {
                 kind: FusionKind::Reduction,
@@ -305,6 +306,7 @@ fn nlms_two_fused_reductions_integration() {
                 cv.insert(v_dim, Value::Num(1.0));
                 cv
             },
+            materialized_stores: Vec::new(),
             output: Some(v_sum),
             kernel: FusionKernelSpec {
                 kind: FusionKind::Reduction,
@@ -355,6 +357,7 @@ fn nlms_two_fused_reductions_integration() {
             stack_pattern: vec![],
             constants: HashMap::new(),
             const_values: HashMap::new(),
+            materialized_stores: Vec::new(),
             output: Some(v_out),
             kernel: FusionKernelSpec {
                 kind: FusionKind::ElementwiseChain,
@@ -374,7 +377,7 @@ fn nlms_two_fused_reductions_integration() {
             ],
         };
         let e_val = execute_elementwise(req).expect("fused elementwise sub");
-        match e_val {
+        match e_val.final_value {
             Value::GpuTensor(h) => h,
             _ => panic!("expected GPU tensor for e"),
         }
@@ -482,6 +485,7 @@ fn nlms_two_fused_reductions_integration() {
                 cv.insert(v_all, Value::String("all".to_string()));
                 cv
             },
+            materialized_stores: Vec::new(),
             output: Some(v_mean),
             kernel: FusionKernelSpec {
                 kind: FusionKind::Reduction,

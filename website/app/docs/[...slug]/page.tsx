@@ -161,32 +161,37 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
   };
   const pageJsonLdString = JSON.stringify(pageJsonLd).replace(/<\//g, "<\\/");
   const crumbs = findPathBySlug(slug) ?? [];
+  const breadcrumbItems = crumbs
+    .filter((c) => c.title)
+    .map((c) => {
+      const item = c.slug
+        ? `${baseUrl}/docs/${c.slug.join("/")}`
+        : c.externalHref
+          ? `${baseUrl}${c.externalHref}`
+          : undefined;
+      if (!item) return undefined;
+      return {
+        "@type": "ListItem" as const,
+        name: c.title,
+        item,
+      };
+    })
+    .filter((entry): entry is { "@type": "ListItem"; name: string; item: string } => Boolean(entry?.item));
   const breadcrumbJsonLd = {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
       { "@type": "ListItem", position: 1, name: "Docs", item: `${baseUrl}/docs` },
-      ...crumbs
-        .filter((c) => c.title)
-        .map((c, i) => {
-          const item = c.slug
-            ? `${baseUrl}/docs/${c.slug.join("/")}`
-            : c.externalHref
-              ? `${baseUrl}${c.externalHref}`
-              : undefined;
-          return {
-            "@type": "ListItem" as const,
-            position: i + 2,
-            name: c.title,
-            ...(item ? { item } : {}),
-          };
-        }),
+      ...breadcrumbItems.map((entry, i) => ({
+        ...entry,
+        position: i + 2,
+      })),
     ],
   };
   const breadcrumbJsonLdString = JSON.stringify(breadcrumbJsonLd).replace(/<\//g, "<\\/");
   return (
-    <div className="grid lg:grid-cols-[minmax(0,1fr)_220px] gap-8 lg:items-start overflow-visible">
-      <article className="prose dark:prose-invert max-w-none scroll-smooth min-w-0">
+    <div className="grid lg:grid-cols-[minmax(0,1fr)_220px] gap-10 lg:items-start overflow-visible">
+      <article className="prose dark:prose-invert max-w-3xl scroll-smooth min-w-0">
         <nav className="text-sm text-muted-foreground mb-4">
           {crumbs
             .filter((c) => c.title)
@@ -227,24 +232,13 @@ export default async function DocPage({ params }: { params: Promise<{ slug?: str
         {/* Client search/results overlay */}
         <DocsContentSwitch source={body} />
       </article>
-      <HeadingsNav source={body} />
+      <HeadingsNav source={body} maxDepth={slug.join("/") === "changelog" ? 2 : undefined} />
     </div>
   );
 }
 
 // Map well-known slug prefixes to repo files when not present in the manifest
 function fallbackForSlug(slug: string[]) {
-  if (slug.length === 2 && slug[0] === "ignition") {
-    const map: Record<string, string> = {
-      "compiler-pipeline": "crates/runmat-ignition/COMPILER_PIPELINE.md",
-      "instr-set": "crates/runmat-ignition/INSTR_SET.md",
-      "indexing-and-slicing": "crates/runmat-ignition/INDEXING_AND_SLICING.md",
-      "error-model": "docs/ERROR_MODEL.md",
-      "oop-semantics": "crates/runmat-ignition/OOP_SEMANTICS.md",
-    };
-    const file = map[slug[1]];
-    if (file) return { title: toTitleCase(slug[1].replace(/-/g, " ")), slug, file };
-  }
   return undefined;
 }
 
@@ -268,4 +262,3 @@ function findRepoRoot(start: string): string | undefined {
   }
   return undefined;
 }
-

@@ -23,7 +23,7 @@
   <a href="https://runmat.com/sandbox"><strong>Try it now — no install needed</strong></a> · <a href="https://runmat.com/docs">Docs</a> · <a href="https://runmat.com/blog">Blog</a> · <a href="https://runmat.com">Website</a>
 </p>
 
-<p align="center"><em>Status: Pre-release (v0.3) — core runtime and GPU engine pass thousands of tests. Expect a few rough edges.</em></p>
+<p align="center"><em>Status: Pre-release (v0.4) — core runtime and GPU engine pass thousands of tests. Expect a few rough edges.</em></p>
 
 ---
 
@@ -118,7 +118,7 @@ team management.<br/><br/>
 
 - **Modern CPU runtime**
 
-  - Ignition interpreter for fast startup  
+  - VM interpreter for fast startup  
   - Turbine JIT (Cranelift) for hot paths  
   - Generational GC tuned for numeric code  
   - Memory-safe by design (Rust)
@@ -145,9 +145,9 @@ team management.<br/><br/>
 
 - **Plotting**
 
-  - Interactive 2D and 3D plots  
-  - Line, scatter, and surface plots supported today  
-  - Some advanced plot types (box plots, violin plots) are still in progress  
+  - Interactive 2D and 3D plots with GPU-accelerated rendering
+  - 30+ plot types: line, scatter, bar, surface, mesh, histogram, stem, errorbar, area, contour, pie, plot3, imagesc, and log-scale variants
+  - Graphics handles, subplot state, annotation builtins (`title`, `xlabel`, `legend`), and 3D camera controls
 
   Open-source plotting engine demo (works in CLI and in the browser sandbox):
 
@@ -304,7 +304,7 @@ RunMat uses a tiered CPU runtime plus a fusion engine that automatically picks C
 
 | Component              | Purpose                                  | Technology / Notes                                                  |
 | ---------------------- | ---------------------------------------- | ------------------------------------------------------------------- |
-| ⚙️ runmat-ignition   | Baseline interpreter for instant startup | HIR → bytecode compiler, stack-based interpreter                    |
+| ⚙️ runmat-vm         | Baseline interpreter for instant startup | HIR → bytecode compiler, stack-based interpreter                    |
 | ⚡ runmat-turbine     | Optimizing JIT for hot code              | Cranelift backend, tuned for numeric workloads                      |
 | 🧠 runmat-gc         | High-performance memory management       | Generational GC with pointer compression                            |
 | 🚀 runmat-accelerate | GPU acceleration subsystem               | Fusion engine + auto-offload planner + `wgpu` backend               |
@@ -312,7 +312,7 @@ RunMat uses a tiered CPU runtime plus a fusion engine that automatically picks C
 | 🎨 runmat-plot       | Plotting layer                           | Interactive 2D/3D plots; some advanced plot types still in progress |
 | 🌐 runmat-wasm       | WebAssembly build of the runtime         | Runs in any browser; powers the sandbox at runmat.com               |
 | 📸 runmat-snapshot   | Fast startup snapshots                   | Binary blob serialization / restore                                 |
-| 🧰 runmat-runtime    | Core runtime + 300+ builtin functions    | BLAS/LAPACK integration and other CPU/GPU-accelerated operations    |
+| 🧰 runmat-runtime    | Core runtime + 330+ builtin functions    | BLAS/LAPACK integration and other CPU/GPU-accelerated operations    |
 
 
 ### Why this matters
@@ -370,8 +370,8 @@ For more details, see [Introduction to RunMat GPU](https://runmat.com/docs/accel
 RunMat follows a **fast-by-default runtime, open extension model** philosophy:
 
 - **High-fidelity language coverage**: Core MATLAB syntax, operators, control flow, OOP, and indexing — not a subset, not a new language
-- **Extensive built-ins**: 300+ functions covering core MATLAB built-ins, with more added continuously
-- **Tiered execution**: Ignition interpreter for fast startup, Turbine JIT for hot code
+- **Extensive built-ins**: 330+ functions covering core MATLAB built-ins, with more added continuously
+- **Tiered execution**: VM interpreter for fast startup, Turbine JIT for hot code
 - **GPU-first math**: Fusion engine automatically turns MATLAB code into fast GPU workloads
 - **Single portable binary**: One static binary includes the runtime, GPU engine, and plotting — fast startup, modern CLI, Jupyter kernel support
 - **Toolboxes as packages**: Signal processing, statistics, image processing, and other domains live as packages — the package manager is [in active design](https://runmat.com/docs/package-manager)
@@ -422,6 +422,7 @@ If you write math in MATLAB and hit performance walls on CPU, RunMat is built fo
   - [Configuration](docs/CONFIG.md)
 
 - **Language & runtime**
+  - [MATLAB compatibility](docs/COMPATIBILITY.md)
   - [Language reference](docs/LANGUAGE.md)
   - [Language coverage](docs/LANGUAGE_COVERAGE.md)
   - [Built-in function library](docs/LIBRARY.md)

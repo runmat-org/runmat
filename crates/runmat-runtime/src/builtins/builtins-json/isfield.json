@@ -26,7 +26,7 @@
   "requires_feature": null,
   "tested": {
     "unit": "builtins::structs::core::isfield::tests",
-    "integration": "runmat_ignition::functions::struct_isfield_multi_and_fieldnames"
+    "integration": "runmat-vm/tests/functions.rs::struct_isfield_multi_and_fieldnames"
   },
   "description": "`tf = isfield(S, name)` returns a logical value that indicates whether the struct `S` defines the field `name`. When `name` is a string array or a cell array of names, `isfield` returns a logical array with the same size, reporting the result for each requested field.",
   "behaviors": [

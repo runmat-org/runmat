@@ -90,6 +90,7 @@ fn isreal_host(value: Value) -> BuiltinResult<Value> {
         Value::StringArray(_) => false,
         Value::Struct(_) => false,
         Value::Cell(_) => false,
+        Value::Object(obj) if obj.is_class("duration") => true,
         Value::Object(_) => false,
         Value::HandleObject(_) => false,
         Value::Listener(_) => false,
@@ -191,6 +192,18 @@ pub(crate) mod tests {
         assert_eq!(cell_flag, Value::Bool(false));
         assert_eq!(struct_flag, Value::Bool(false));
         assert_eq!(object_flag, Value::Bool(false));
+    }
+
+    #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+    #[test]
+    fn isreal_reports_true_for_duration_objects() {
+        let value = crate::call_builtin(
+            "duration",
+            &[Value::Num(1.0), Value::Num(30.0), Value::Num(0.0)],
+        )
+        .expect("duration");
+        let flag = run_isreal(value).expect("isreal duration");
+        assert_eq!(flag, Value::Bool(true));
     }
 
     #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

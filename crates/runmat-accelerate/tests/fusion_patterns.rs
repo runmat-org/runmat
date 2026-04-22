@@ -1,8 +1,8 @@
 use runmat_accelerate::fusion::{detect_fusion_groups, FusionKind, FusionPlan};
 use runmat_accelerate::graph::{AccelGraph, AccelNodeLabel, PrimitiveOp, ValueOrigin};
 use runmat_hir::{HirProgram, LoweringContext, SemanticError};
-use runmat_ignition::compile;
 use runmat_parser::parse;
+use runmat_vm::compile;
 use std::collections::HashMap;
 use std::sync::Once;
 
@@ -56,7 +56,7 @@ fn stats_centered_gram_pattern() {
     assert!(count_primitives(&graph, PrimitiveOp::Sub) >= 1);
     assert!(count_primitives(&graph, PrimitiveOp::Transpose) >= 1);
     assert!(count_primitives(&graph, PrimitiveOp::Mul) >= 1);
-    assert!(count_primitives(&graph, PrimitiveOp::Div) >= 1);
+    assert!(count_primitives(&graph, PrimitiveOp::ElemDiv) >= 1);
     assert!(has_builtin(&graph, "diag"));
 }
 
@@ -168,7 +168,7 @@ fn monte_carlo_factor_risk_pattern() {
     assert!(count_primitives(&graph, PrimitiveOp::Sub) >= 1);
     assert!(count_primitives(&graph, PrimitiveOp::Transpose) >= 1);
     assert!(count_primitives(&graph, PrimitiveOp::Mul) >= 2);
-    assert!(count_primitives(&graph, PrimitiveOp::Div) >= 1);
+    assert!(count_primitives(&graph, PrimitiveOp::ElemDiv) >= 1);
     assert!(has_builtin(&graph, "diag"));
 }
 

@@ -13,10 +13,12 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::RwLock;
 
+type ResidencyMarkFn = fn(&GpuTensorHandle);
 type ResidencyClearFn = fn(&GpuTensorHandle);
 type SequenceThresholdFn = fn() -> Option<usize>;
 type WorkgroupSizeHintFn = fn() -> Option<u32>;
 
+static RESIDENCY_MARK: OnceCell<ResidencyMarkFn> = OnceCell::new();
 static RESIDENCY_CLEAR: OnceCell<ResidencyClearFn> = OnceCell::new();
 static SEQUENCE_THRESHOLD_PROVIDER: OnceCell<SequenceThresholdFn> = OnceCell::new();
 static WORKGROUP_SIZE_HINT_PROVIDER: OnceCell<WorkgroupSizeHintFn> = OnceCell::new();
@@ -29,11 +31,27 @@ static TRANSPOSED_HANDLES: Lazy<RwLock<HashMap<u64, TransposeInfo>>> =
 
 static HANDLE_PRECISIONS: Lazy<RwLock<HashMap<u64, ProviderPrecision>>> =
     Lazy::new(|| RwLock::new(HashMap::new()));
+static HANDLE_STORAGES: Lazy<RwLock<HashMap<u64, GpuTensorStorage>>> =
+    Lazy::new(|| RwLock::new(HashMap::new()));
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TransposeInfo {
     pub base_rows: usize,
     pub base_cols: usize,
+}
+
+/// Register a callback used to mark residency tracking when GPU tensors are
+/// created or returned by device-side execution paths.
+pub fn register_residency_mark(handler: ResidencyMarkFn) {
+    let _ = RESIDENCY_MARK.set(handler);
+}
+
+/// Mark residency metadata for the provided GPU tensor handle, if a backend
+/// has registered a handler via [`register_residency_mark`].
+pub fn mark_residency(handle: &GpuTensorHandle) {
+    if let Some(handler) = RESIDENCY_MARK.get() {
+        handler(handle);
+    }
 }
 
 /// Register a callback used to clear residency tracking when GPU tensors are
@@ -184,6 +202,18 @@ pub fn handle_is_transposed(handle: &GpuTensorHandle) -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum GpuTensorStorage {
+    Real,
+    ComplexInterleaved,
+}
+
+impl Default for GpuTensorStorage {
+    fn default() -> Self {
+        Self::Real
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GpuTensorHandle {
     pub shape: Vec<usize>,
     pub device_id: u32,
@@ -262,6 +292,26 @@ pub struct WgpuBufferRef {
     pub shape: Vec<usize>,
     pub element_size: usize,
     pub precision: ProviderPrecision,
+}
+
+pub fn set_handle_storage(handle: &GpuTensorHandle, storage: GpuTensorStorage) {
+    if let Ok(mut guard) = HANDLE_STORAGES.write() {
+        guard.insert(handle.buffer_id, storage);
+    }
+}
+
+pub fn handle_storage(handle: &GpuTensorHandle) -> GpuTensorStorage {
+    HANDLE_STORAGES
+        .read()
+        .ok()
+        .and_then(|guard| guard.get(&handle.buffer_id).cloned())
+        .unwrap_or(GpuTensorStorage::Real)
+}
+
+pub fn clear_handle_storage(handle: &GpuTensorHandle) {
+    if let Ok(mut guard) = HANDLE_STORAGES.write() {
+        guard.remove(&handle.buffer_id);
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -351,6 +401,7 @@ pub struct ProviderLinsolveOptions {
     pub conjugate: bool,
     pub symmetric: bool,
     pub posdef: bool,
+    pub need_rcond: bool,
     pub rcond: Option<f64>,
 }
 
@@ -838,13 +889,23 @@ pub struct ProviderDispatchStats {
     pub total_wall_time_ns: u64,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderFallbackStat {
+    pub reason: String,
+    pub count: u64,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ProviderTelemetry {
     pub fused_elementwise: ProviderDispatchStats,
     pub fused_reduction: ProviderDispatchStats,
     pub matmul: ProviderDispatchStats,
+    pub linsolve: ProviderDispatchStats,
+    pub mldivide: ProviderDispatchStats,
+    pub mrdivide: ProviderDispatchStats,
     pub upload_bytes: u64,
     pub download_bytes: u64,
+    pub solve_fallbacks: Vec<ProviderFallbackStat>,
     pub fusion_cache_hits: u64,
     pub fusion_cache_misses: u64,
     pub bind_group_cache_hits: u64,
@@ -1167,6 +1228,34 @@ pub trait AccelProvider: Send + Sync {
     /// Generate a 2-D correlation kernel matching MATLAB's `fspecial` builtin.
     fn fspecial(&self, _request: &FspecialRequest) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("fspecial not supported by provider"))
+    }
+
+    /// Evaluate the `peaks` test surface on an n×n grid spanning [-3,3]×[-3,3].
+    /// Returns the Z matrix (n×n) as a GPU tensor.
+    fn peaks(&self, _n: usize) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("peaks not supported by provider"))
+    }
+
+    /// Evaluate the `peaks` formula element-wise on caller-supplied GPU coordinate tensors.
+    /// X and Y must have the same shape. Returns a Z tensor of the same shape.
+    fn peaks_xy(
+        &self,
+        _x: &GpuTensorHandle,
+        _y: &GpuTensorHandle,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("peaks_xy not supported by provider"))
+    }
+
+    fn hann_window(&self, _len: usize, _periodic: bool) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("hann_window not supported by provider"))
+    }
+
+    fn hamming_window(&self, _len: usize, _periodic: bool) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("hamming_window not supported by provider"))
+    }
+
+    fn blackman_window(&self, _len: usize, _periodic: bool) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("blackman_window not supported by provider"))
     }
 
     /// Apply an N-D correlation/convolution with padding semantics matching MATLAB's `imfilter`.
@@ -1592,6 +1681,12 @@ pub trait AccelProvider: Send + Sync {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("unary_pow2 not supported by provider")
     }
+    fn unary_nextpow2<'a>(
+        &'a self,
+        _a: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("unary_nextpow2 not supported by provider")
+    }
     fn pow2_scale(
         &self,
         _mantissa: &GpuTensorHandle,
@@ -1864,6 +1959,12 @@ pub trait AccelProvider: Send + Sync {
     ) -> AccelProviderFuture<'a, GpuTensorHandle> {
         unsupported_future("ifft_dim not supported by provider")
     }
+    fn fft_extract_real<'a>(
+        &'a self,
+        _handle: &'a GpuTensorHandle,
+    ) -> AccelProviderFuture<'a, GpuTensorHandle> {
+        unsupported_future("fft_extract_real not supported by provider")
+    }
     fn unique<'a>(
         &'a self,
         _handle: &'a GpuTensorHandle,
@@ -1918,6 +2019,15 @@ pub trait AccelProvider: Send + Sync {
     /// Compute the Kronecker product of two tensors, matching MATLAB semantics.
     fn kron(&self, _a: &GpuTensorHandle, _b: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("kron not supported by provider"))
+    }
+    /// Compute the cross product of 3-element vectors along a matching dimension.
+    fn cross(
+        &self,
+        _lhs: &GpuTensorHandle,
+        _rhs: &GpuTensorHandle,
+        _dim: Option<usize>,
+    ) -> anyhow::Result<GpuTensorHandle> {
+        Err(anyhow::anyhow!("cross not supported by provider"))
     }
     fn reduce_sum<'a>(
         &'a self,
@@ -2140,6 +2250,27 @@ pub trait AccelProvider: Send + Sync {
         ))
     }
 
+    /// Execute a single fused elementwise kernel that writes `num_outputs` output buffers in one
+    /// dispatch. The shader is expected to declare `output0`, `output1`, … `output{N-1}` storage
+    /// bindings (at binding indices `inputs.len()` through `inputs.len() + num_outputs - 1`) and a
+    /// uniform `params` binding at `inputs.len() + num_outputs`.
+    ///
+    /// Providers that do not override this method fall back to calling `fused_elementwise` once
+    /// per output, which preserves correctness at the cost of the O(N²) dispatch overhead this
+    /// method is designed to eliminate.
+    fn fused_elementwise_multi(
+        &self,
+        _shader: &str,
+        _inputs: &[GpuTensorHandle],
+        _output_shape: &[usize],
+        _len: usize,
+        _num_outputs: usize,
+    ) -> anyhow::Result<Vec<GpuTensorHandle>> {
+        Err(anyhow::anyhow!(
+            "fused_elementwise_multi not supported by provider"
+        ))
+    }
+
     /// Build a numeric tensor where NaNs in `a` are replaced with 0.0 (device side).
     fn map_nan_to_zero(&self, _a: &GpuTensorHandle) -> anyhow::Result<GpuTensorHandle> {
         Err(anyhow::anyhow!("map_nan_to_zero not supported by provider"))
@@ -2190,8 +2321,12 @@ pub trait AccelProvider: Send + Sync {
             fused_elementwise: ProviderDispatchStats::default(),
             fused_reduction: ProviderDispatchStats::default(),
             matmul: ProviderDispatchStats::default(),
+            linsolve: ProviderDispatchStats::default(),
+            mldivide: ProviderDispatchStats::default(),
+            mrdivide: ProviderDispatchStats::default(),
             upload_bytes: 0,
             download_bytes: 0,
+            solve_fallbacks: Vec::new(),
             fusion_cache_hits: hits,
             fusion_cache_misses: misses,
             bind_group_cache_hits: 0,
@@ -2395,6 +2530,7 @@ pub fn provider() -> Option<&'static dyn AccelProvider> {
 
 /// Clear the globally registered provider. Intended for tests to ensure deterministic behaviour.
 pub fn clear_provider() {
+    replace_thread_provider(None);
     if let Ok(mut guard) = GLOBAL_PROVIDER.write() {
         *guard = None;
     }
@@ -2496,6 +2632,7 @@ pub async fn try_elem_atan2(y: &GpuTensorHandle, x: &GpuTensorHandle) -> Option<
 pub struct HostTensorOwned {
     pub data: Vec<f64>,
     pub shape: Vec<usize>,
+    pub storage: GpuTensorStorage,
 }
 
 #[derive(Debug)]

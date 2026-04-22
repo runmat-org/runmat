@@ -36,13 +36,61 @@
       "output": "% Returns a 1x2 vector [60 20]"
     }
   ],
+  "faqs": [
+    {
+      "question": "What do azimuth and elevation mean in view(az, el)?",
+      "answer": "Azimuth is the horizontal rotation around the z-axis (0° looks along the y-axis toward the origin). Elevation is the angle above the x-y plane (0° is level, 90° is directly overhead). `view(45, 30)` gives the classic isometric-ish perspective for 3-D surfaces."
+    },
+    {
+      "question": "How do I reset to the default 2-D or 3-D view?",
+      "answer": "`view(2)` sets the camera to top-down (azimuth 0, elevation 90) — useful for looking at a surface as a heatmap. `view(3)` restores the default 3-D camera at `[-37.5, 30]`, which is the standard MATLAB 3-D preset."
+    },
+    {
+      "question": "Can I set different view angles per subplot?",
+      "answer": "Yes. View state is subplot-local. Pass the axes handle explicitly to target a specific panel.\n\n```matlab\nax1 = subplot(1, 2, 1); surf(X, Y, Z); view(ax1, 0, 90);\nax2 = subplot(1, 2, 2); surf(X, Y, Z); view(ax2, 45, 30);\n```"
+    }
+  ],
   "links": [
-    { "label": "plot3", "url": "./plot3" },
-    { "label": "scatter3", "url": "./scatter3" },
-    { "label": "surf", "url": "./surf" },
-    { "label": "zlabel", "url": "./zlabel" },
-    { "label": "get", "url": "./get" },
-    { "label": "set", "url": "./set" }
+    {
+      "label": "plot3",
+      "url": "./plot3"
+    },
+    {
+      "label": "scatter3",
+      "url": "./scatter3"
+    },
+    {
+      "label": "surf",
+      "url": "./surf"
+    },
+    {
+      "label": "zlabel",
+      "url": "./zlabel"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/view.rs`",

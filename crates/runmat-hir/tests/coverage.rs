@@ -195,7 +195,7 @@ fn methods_members_handles_and_anon() {
     assert_eq!(prog.body.len(), 5);
     match &prog.body[1] {
         HirStmt::ExprStmt(expr, true, _) => {
-            assert!(matches!(expr.kind, HirExprKind::MethodCall(_, _, _)))
+            assert!(matches!(expr.kind, HirExprKind::DottedInvoke(_, _, _)))
         }
         _ => panic!(),
     }

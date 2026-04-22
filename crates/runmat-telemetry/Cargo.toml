@@ -1,6 +1,6 @@
 [package]
 name = "runmat-telemetry"
-version = "0.3.2"
+version = "0.4.1"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../../LICENSE.md"

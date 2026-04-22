@@ -9,6 +9,7 @@
     "matlab contourf"
   ],
   "summary": "Create filled contour plots for level regions, scalar fields, and MATLAB `contourf` workflows.",
+  "hero_image": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-contourf-interference-pattern.webp",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -50,14 +51,64 @@
       "description": "Inspect the returned contour-fill handle",
       "input": "[X, Y] = meshgrid(1:20, 1:20);\nZ = X - Y;\nh = contourf(X, Y, Z);\nget(h, 'Type')",
       "output": "ans =\n    'contour'"
+    },
+    {
+      "description": "Filled scalar field with explicit levels",
+      "input": "[X, Y] = meshgrid(linspace(-3, 3, 150), linspace(-3, 3, 150));\nZ = sin(X) .* cos(Y) + 0.5*sin(2*X + Y);\n\ncontourf(X, Y, Z, 25);\ncolormap('turbo');\ncolorbar;\ntitle('Interference Pattern — Filled Contours');\nxlabel('x');\nylabel('y');\naxis equal;",
+      "image_webp": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-contourf-interference-pattern.webp"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What's the difference between contourf and contour?",
+      "answer": "`contourf` fills the regions between contour levels with solid colors from the colormap. `contour` draws only the boundary lines. If you're building a heatmap-style visualization where color bands carry meaning, `contourf` is the right choice. If you just need iso-lines overlaid on something else, use `contour`."
+    },
+    {
+      "question": "How does the colormap interact with contourf?",
+      "answer": "Each filled region maps to a range in the active colormap based on its contour level. Calling `colormap('hot')` after `contourf` recolors all regions immediately. Pair it with `colorbar` to show the value-to-color mapping.\n\n```matlab\ncontourf(X, Y, Z, 15);\ncolormap('hot');\ncolorbar;\n```"
+    },
+    {
+      "question": "How do I control the number of filled levels?",
+      "answer": "Pass an integer as the fourth argument to set the level count: `contourf(X, Y, Z, 20)` creates 20 levels. For exact control, pass a vector of level values instead: `contourf(X, Y, Z, [-1 -0.5 0 0.5 1])`. More levels give smoother color transitions but add rendering cost on large grids."
     }
   ],
   "links": [
-    { "label": "contour", "url": "./contour" },
-    { "label": "colorbar", "url": "./colorbar" },
-    { "label": "colormap", "url": "./colormap" },
-    { "label": "surfc", "url": "./surfc" },
-    { "label": "meshc", "url": "./meshc" }
+    {
+      "label": "contour",
+      "url": "./contour"
+    },
+    {
+      "label": "colorbar",
+      "url": "./colorbar"
+    },
+    {
+      "label": "colormap",
+      "url": "./colormap"
+    },
+    {
+      "label": "surfc",
+      "url": "./surfc"
+    },
+    {
+      "label": "meshc",
+      "url": "./meshc"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/contourf.rs`",

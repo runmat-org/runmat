@@ -10,7 +10,7 @@ This document explains the “why” and the “how” of that design.
 
 - Full MATLAB language support: the core implements the MATLAB grammar and semantics, not a small subset.
 - Core set of built-ins: RunMat includes a core set of MATLAB built-ins, with clear docs and tests.
-- Tiered CPU execution: Ignition interpreter for fast startup, Turbine JIT for hot code.
+- Tiered CPU execution: VM interpreter for fast startup, Turbine JIT for hot code.
 - GPU-first math: a GPU layer and a Fusion engine that turns MATLAB-style code into fast GPU workloads when shapes and patterns fit.
 - Small, portable runtime: single static binary, fast startup, modern CLI, and Jupyter kernel support.
 - Toolboxes on top: signal, stats, image, optimization, and other domains sit above the core as libraries and packages.
@@ -21,7 +21,7 @@ The core runtime implements:
 
 - Values and arrays: numeric scalars, column-major dense tensors, logical and string types, cells/structs sufficient for MATLAB-style programming.
 - Semantics you can reason about: deterministic evaluation order, explicit error identifiers, predictable promotion rules, clear indexing (N-D slicing, logical masks, `end` arithmetic) with well-defined error behavior.
-- Execution engine: an interpreter (Ignition) with an optimizing JIT (Turbine) via Cranelift. The interpreter produces profiling signals that drive JIT compilation.
+- Execution engine: a VM interpreter with an optimizing JIT (Turbine) via Cranelift. The interpreter produces profiling signals that drive JIT compilation.
 - Memory model: a generational, mark-and-sweep GC with safe handles, write barriers, and conscious promotion heuristics; no raw pointers exposed to user code.
 - A handful of built-ins in core: just enough to bootstrap the system, test semantics, and enable packages (arrays, math primitives, string utilities, error handling). Everything else belongs in packages.
 

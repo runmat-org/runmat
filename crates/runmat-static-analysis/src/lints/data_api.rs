@@ -125,7 +125,9 @@ fn collect_tx_bindings_from_stmts(stmts: &[HirStmt], tx_vars: &mut HashSet<VarId
 
 fn expr_is_begin_call(expr: &HirExpr) -> bool {
     match &expr.kind {
-        HirExprKind::MethodCall(_, method, _) => method == "begin",
+        HirExprKind::MethodCall(_, method, _) | HirExprKind::DottedInvoke(_, method, _) => {
+            method == "begin"
+        }
         HirExprKind::FuncCall(name, _) => name == "Dataset.begin",
         _ => false,
     }
@@ -170,7 +172,10 @@ fn infer_binding_from_expr(
             }
             (None, None)
         }
-        HirExprKind::MethodCall(base, method, args) if method == "array" => {
+        HirExprKind::MethodCall(base, method, args)
+        | HirExprKind::DottedInvoke(base, method, args)
+            if method == "array" =>
+        {
             if let HirExprKind::Var(ds_var) = base.kind {
                 if let Some(dataset) = datasets.get(&ds_var) {
                     if let Some(name_expr) = args.first() {
@@ -222,7 +227,8 @@ fn analyze_data_expr(
     diags: &mut Vec<HirDiagnostic>,
 ) {
     match &expr.kind {
-        HirExprKind::MethodCall(base, method, args) => {
+        HirExprKind::MethodCall(base, method, args)
+        | HirExprKind::DottedInvoke(base, method, args) => {
             if method == "array" {
                 if let HirExprKind::Var(ds_var) = base.kind {
                     if let Some(dataset) = datasets.get(&ds_var) {
@@ -550,7 +556,8 @@ fn walk_expr_general(
                 walk_expr_general(arg, diags, non_tx_write_count, tx_vars);
             }
         }
-        HirExprKind::MethodCall(base, method, args) => {
+        HirExprKind::MethodCall(base, method, args)
+        | HirExprKind::DottedInvoke(base, method, args) => {
             if method == "write" {
                 let in_tx =
                     matches!(base.kind, HirExprKind::Var(var_id) if tx_vars.contains(&var_id));
@@ -626,7 +633,11 @@ fn walk_stmt_general(
 ) {
     match stmt {
         HirStmt::ExprStmt(expr, _, _) => {
-            if matches!(&expr.kind, HirExprKind::MethodCall(_, method, _) if method == "commit") {
+            if matches!(
+                &expr.kind,
+                HirExprKind::MethodCall(_, method, _) | HirExprKind::DottedInvoke(_, method, _)
+                    if method == "commit"
+            ) {
                 diags.push(HirDiagnostic {
                     message: "consider checking transaction commit outcomes in shared workflows"
                         .to_string(),

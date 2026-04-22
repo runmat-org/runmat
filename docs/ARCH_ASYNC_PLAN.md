@@ -19,7 +19,7 @@ This is the **working plan** for implementing the async/futures architecture des
 
 ### Finalized baseline
 
-- Execution is **async end‑to‑end** (`RunMatSession::execute` and ignition VM are async).
+- Execution is **async end‑to‑end** (`RunMatSession::execute` and the VM are async).
 - Builtins return `Result<T, RuntimeError>` with structured diagnostics.
 - `RuntimeControlFlow`, pending frames, and resume loops are removed.
 - WASM input handlers are Promise‑backed and return typed responses.

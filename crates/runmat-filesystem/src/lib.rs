@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use log::warn;
 use once_cell::sync::OnceCell;
 use std::ffi::OsString;
 use std::fmt;
@@ -201,11 +202,24 @@ pub struct DirEntry {
 pub struct ReadManyEntry {
     path: PathBuf,
     bytes: Option<Vec<u8>>,
+    error: Option<String>,
 }
 
 impl ReadManyEntry {
     pub fn new(path: PathBuf, bytes: Option<Vec<u8>>) -> Self {
-        Self { path, bytes }
+        Self {
+            path,
+            bytes,
+            error: None,
+        }
+    }
+
+    pub fn with_error(path: PathBuf, error: String) -> Self {
+        Self {
+            path,
+            bytes: None,
+            error: Some(error),
+        }
     }
 
     pub fn path(&self) -> &Path {
@@ -218,6 +232,10 @@ impl ReadManyEntry {
 
     pub fn into_bytes(self) -> Option<Vec<u8>> {
         self.bytes
+    }
+
+    pub fn error(&self) -> Option<&str> {
+        self.error.as_deref()
     }
 }
 
@@ -267,8 +285,22 @@ pub trait FsProvider: Send + Sync + 'static {
     async fn read_many(&self, paths: &[PathBuf]) -> io::Result<Vec<ReadManyEntry>> {
         let mut entries = Vec::with_capacity(paths.len());
         for path in paths {
-            let bytes = self.read(path).await.ok();
-            entries.push(ReadManyEntry::new(path.clone(), bytes));
+            let entry = match self.read(path).await {
+                Ok(payload) => ReadManyEntry::new(path.clone(), Some(payload)),
+                Err(error) => {
+                    warn!(
+                        "fs.read_many.miss path={} kind={:?} error={}",
+                        path.to_string_lossy(),
+                        error.kind(),
+                        error
+                    );
+                    ReadManyEntry::with_error(
+                        path.clone(),
+                        format!("kind={:?}; error={}", error.kind(), error),
+                    )
+                }
+            };
+            entries.push(entry);
         }
         Ok(entries)
     }
@@ -384,7 +416,7 @@ fn resolve_path(path: &Path) -> PathBuf {
         if let Ok(base) = current_dir() {
             return base.join(path);
         }
-        return PathBuf::from("/").join(path);
+        PathBuf::from("/").join(path)
     }
     #[cfg(not(target_arch = "wasm32"))]
     {
@@ -463,7 +495,7 @@ pub fn set_current_dir(path: impl AsRef<Path>) -> io::Result<()> {
             .write()
             .expect("filesystem current dir lock poisoned");
         *guard = canonical;
-        return Ok(());
+        Ok(())
     }
     #[cfg(not(target_arch = "wasm32"))]
     {

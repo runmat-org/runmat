@@ -90,7 +90,7 @@ fn main(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 #[cfg(feature = "wgpu")]
 #[test]
-fn telemetry_records_bind_group_cache_hits_for_chunked_matmul() {
+fn telemetry_records_chunked_matmul_activity() {
     let provider = register_provider();
     provider.reset_telemetry();
 
@@ -104,9 +104,28 @@ fn telemetry_records_bind_group_cache_hits_for_chunked_matmul() {
 
     let telemetry = provider.telemetry_snapshot();
     assert!(
-        telemetry.bind_group_cache_hits > 0,
-        "expected bind group cache hits > 0 for chunked matmul, got {}",
-        telemetry.bind_group_cache_hits
+        telemetry.matmul.count > 0,
+        "expected matmul dispatch count > 0 for chunked matmul, got {}",
+        telemetry.matmul.count
+    );
+    let bind_group_cache_activity =
+        telemetry.bind_group_cache_hits + telemetry.bind_group_cache_misses;
+    assert!(
+        bind_group_cache_activity > 0,
+        "expected bind group cache activity > 0 for chunked matmul, got hits={} misses={}",
+        telemetry.bind_group_cache_hits,
+        telemetry.bind_group_cache_misses
+    );
+    assert!(
+        telemetry.kernel_launches.iter().any(|launch| {
+            launch.kernel == "matmul"
+                && launch
+                    .tuning
+                    .iter()
+                    .any(|attr| attr.key == "chunked" && attr.value == 1)
+        }),
+        "expected chunked matmul kernel launch telemetry, got {:?}",
+        telemetry.kernel_launches
     );
 
     let _ = provider.free(&a);

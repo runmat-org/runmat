@@ -516,14 +516,16 @@ impl SnapshotBuilder {
         _name: &str,
         category: &BuiltinCategory,
     ) -> OptimizationLevel {
-        match category {
+        let inferred = match category {
             BuiltinCategory::LinearAlgebra | BuiltinCategory::MatrixOps => {
                 OptimizationLevel::MaxPerformance
             }
             BuiltinCategory::Math | BuiltinCategory::Trigonometric => OptimizationLevel::Aggressive,
             BuiltinCategory::Statistics => OptimizationLevel::Basic,
             _ => OptimizationLevel::None,
-        }
+        };
+
+        cap_optimization_level(inferred, self.config.max_optimization_level)
     }
 
     /// Build HIR cache for standard library functions
@@ -666,7 +668,7 @@ impl SnapshotBuilder {
 
         // Compile HIR functions to bytecode
         for (name, hir) in &hir_cache.functions {
-            match runmat_ignition::compile(hir, &HashMap::new()) {
+            match runmat_vm::compile(hir, &HashMap::new()) {
                 Ok(bytecode) => {
                     stdlib_bytecode.insert(name.clone(), bytecode);
 
@@ -727,18 +729,18 @@ impl SnapshotBuilder {
     }
 
     /// Create bytecode for sequence
-    fn create_sequence_bytecode(&self, source: &str) -> runmat_ignition::Bytecode {
+    fn create_sequence_bytecode(&self, source: &str) -> runmat_vm::Bytecode {
         match self.compile_to_hir(source) {
-            Ok(hir) => runmat_ignition::compile(&hir, &HashMap::new())
-                .unwrap_or_else(|_| runmat_ignition::Bytecode::empty()),
-            Err(_) => runmat_ignition::Bytecode::empty(),
+            Ok(hir) => runmat_vm::compile(&hir, &HashMap::new())
+                .unwrap_or_else(|_| runmat_vm::Bytecode::empty()),
+            Err(_) => runmat_vm::Bytecode::empty(),
         }
     }
 
     /// Identify hotspot bytecode for JIT optimization
     fn identify_hotspot_bytecode(
         &self,
-        stdlib_bytecode: &HashMap<String, runmat_ignition::Bytecode>,
+        stdlib_bytecode: &HashMap<String, runmat_vm::Bytecode>,
     ) -> Vec<HotspotBytecode> {
         let mut hotspots = Vec::new();
 
@@ -758,7 +760,7 @@ impl SnapshotBuilder {
     }
 
     /// Check if bytecode is a hotspot candidate
-    fn is_hotspot_candidate(&self, name: &str, bytecode: &runmat_ignition::Bytecode) -> bool {
+    fn is_hotspot_candidate(&self, name: &str, bytecode: &runmat_vm::Bytecode) -> bool {
         // Functions with loops or many instructions are good candidates
         bytecode.instructions.len() > 10
             || name.contains("loop")
@@ -766,7 +768,7 @@ impl SnapshotBuilder {
             || bytecode.instructions.iter().any(|instr| {
                 matches!(
                     instr,
-                    runmat_ignition::Instr::Jump(_) | runmat_ignition::Instr::JumpIfFalse(_)
+                    runmat_vm::Instr::Jump(_) | runmat_vm::Instr::JumpIfFalse(_)
                 )
             })
     }
@@ -798,7 +800,7 @@ impl SnapshotBuilder {
     fn generate_bytecode_optimization_hints(
         &self,
         name: &str,
-        _bytecode: &runmat_ignition::Bytecode,
+        _bytecode: &runmat_vm::Bytecode,
     ) -> Vec<OptimizationHint> {
         let mut hints = Vec::new();
 
@@ -915,7 +917,7 @@ impl SnapshotBuilder {
                 jit_hints.push(JitHint {
                     pattern: builtin.name.clone(),
                     hint_type: self.determine_jit_hint_type(&builtin.category),
-                    priority: builtin.optimization_level.clone(),
+                    priority: builtin.optimization_level,
                     expected_performance_gain: self
                         .estimate_jit_performance_gain(&builtin.complexity),
                 });
@@ -1197,6 +1199,26 @@ impl SnapshotBuilder {
     }
 }
 
+fn cap_optimization_level(
+    inferred: OptimizationLevel,
+    max_level: OptimizationLevel,
+) -> OptimizationLevel {
+    if optimization_rank(inferred) > optimization_rank(max_level) {
+        max_level
+    } else {
+        inferred
+    }
+}
+
+fn optimization_rank(level: OptimizationLevel) -> u8 {
+    match level {
+        OptimizationLevel::None => 0,
+        OptimizationLevel::Basic => 1,
+        OptimizationLevel::Aggressive => 2,
+        OptimizationLevel::MaxPerformance => 3,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1280,6 +1302,32 @@ mod tests {
             builder.infer_computational_complexity("abs"),
             ComputationalComplexity::Constant
         ));
+    }
+
+    #[test]
+    fn test_optimization_level_respects_config_cap() {
+        let config = SnapshotConfig {
+            max_optimization_level: OptimizationLevel::Basic,
+            ..SnapshotConfig::default()
+        };
+        let builder = SnapshotBuilder::new(config);
+
+        assert_eq!(
+            builder.infer_optimization_level("matmul", &BuiltinCategory::LinearAlgebra),
+            OptimizationLevel::Basic
+        );
+        assert_eq!(
+            builder.infer_optimization_level("sin", &BuiltinCategory::Trigonometric),
+            OptimizationLevel::Basic
+        );
+        assert_eq!(
+            builder.infer_optimization_level("mean", &BuiltinCategory::Statistics),
+            OptimizationLevel::Basic
+        );
+        assert_eq!(
+            builder.infer_optimization_level("disp", &BuiltinCategory::Utility),
+            OptimizationLevel::None
+        );
     }
 
     #[test]

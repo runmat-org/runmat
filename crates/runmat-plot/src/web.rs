@@ -352,7 +352,6 @@ impl WebRenderer {
                 self.camera_controller
                     .mouse_press(position, map_mouse_button(button), modifiers);
                 self.last_pointer_position = position;
-                self.plot_renderer.note_camera_interaction();
                 true
             }
             PlotEvent::MouseRelease {
@@ -402,7 +401,7 @@ impl WebRenderer {
                     );
                 }
                 self.last_pointer_position = position;
-                self.plot_renderer.note_camera_interaction();
+                self.plot_renderer.note_axes_camera_interaction(axes_index);
                 true
             }
             PlotEvent::MouseWheel {
@@ -459,7 +458,7 @@ impl WebRenderer {
                     );
                 }
                 self.last_pointer_position = position;
-                self.plot_renderer.note_camera_interaction();
+                self.plot_renderer.note_axes_camera_interaction(axes_index);
                 true
             }
             PlotEvent::Resize { .. } => true,
@@ -567,7 +566,9 @@ impl WebRenderer {
                 apply_camera_state(camera, camera_state);
             }
         }
-        self.plot_renderer.note_camera_interaction();
+        for idx in 0..state.axes.len() {
+            self.plot_renderer.note_axes_camera_interaction(idx);
+        }
     }
 
     /// Redraw the last figure that was provided.

@@ -10,6 +10,7 @@
     "gpu surface rendering"
   ],
   "summary": "Create shaded 3-D surface plots from grids or mesh coordinates with GPU-backed rendering and MATLAB `surf` semantics.",
+  "hero_image": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-surf-damped-radial-ripple.webp",
   "gpu_support": {
     "elementwise": false,
     "reduction": false,
@@ -52,16 +53,72 @@
       "description": "Adjust camera state and z-axis labeling for a surface",
       "input": "[X, Y] = meshgrid(linspace(-2, 2, 60), linspace(-2, 2, 60));\nZ = X .* exp(-X.^2 - Y.^2);\nh = surf(X, Y, Z);\nzlabel('Height');\nview(45, 30);\nget(h, 'Type')",
       "output": "ans =\n    'surface'"
+    },
+    {
+      "description": "Damped radial ripple with interpolated shading",
+      "input": "[X, Y] = meshgrid(linspace(-4, 4, 200), linspace(-4, 4, 200));\nR = sqrt(X.^2 + Y.^2) + 0.01;\nZ = sin(3*R) ./ R;\n\nsurf(X, Y, Z);\nshading interp;\ncolormap('turbo');\ncolorbar;\ntitle('Damped Radial Wavefield');\nxlabel('x');\nylabel('y');\nzlabel('Amplitude');\nview(35, 25);",
+      "image_webp": "https://web.runmatstatic.com/builtin-image/runmat-matlab-plot-surf-damped-radial-ripple.webp"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How do I change the colormap on a surf plot?",
+      "answer": "Call `colormap` after `surf` to swap the palette. The colormap applies to the current axes, so it works per-subplot.\n\n```matlab\nsurf(X, Y, Z);\ncolormap('turbo');\n```\n\nAny named colormap (`'parula'`, `'jet'`, `'hot'`, etc.) or an Nx3 matrix of RGB values works here."
+    },
+    {
+      "question": "How do I rotate or set the 3-D viewing angle?",
+      "answer": "Use `view(az, el)` where `az` is the azimuth in degrees and `el` is the elevation. For example, `view(45, 30)` gives you a 45-degree orbit at 30 degrees above the xy-plane. `view(3)` is a shortcut for the default 3-D perspective, and `view(2)` snaps to a top-down 2-D projection."
+    },
+    {
+      "question": "What's the difference between surf and mesh?",
+      "answer": "`surf` renders a shaded, filled surface where face colors come from the colormap. `mesh` draws only the wireframe grid lines with no face fill. Use `surf` when you want to visualize the shape as a solid surface, and `mesh` when you want to see through the geometry to understand the grid structure underneath."
     }
   ],
   "links": [
-    { "label": "mesh", "url": "./mesh" },
-    { "label": "surfc", "url": "./surfc" },
-    { "label": "view", "url": "./view" },
-    { "label": "zlabel", "url": "./zlabel" },
-    { "label": "colormap", "url": "./colormap" },
-    { "label": "shading", "url": "./shading" },
-    { "label": "colorbar", "url": "./colorbar" }
+    {
+      "label": "mesh",
+      "url": "./mesh"
+    },
+    {
+      "label": "surfc",
+      "url": "./surfc"
+    },
+    {
+      "label": "view",
+      "url": "./view"
+    },
+    {
+      "label": "zlabel",
+      "url": "./zlabel"
+    },
+    {
+      "label": "colormap",
+      "url": "./colormap"
+    },
+    {
+      "label": "shading",
+      "url": "./shading"
+    },
+    {
+      "label": "colorbar",
+      "url": "./colorbar"
+    },
+    {
+      "label": "Choosing the right plot type",
+      "url": "/docs/plotting/choosing-the-right-plot-type"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
   ],
   "source": {
     "label": "`crates/runmat-runtime/src/builtins/plotting/ops/surf.rs`",

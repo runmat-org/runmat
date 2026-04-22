@@ -1,6 +1,6 @@
 [package]
 name = "runmat-kernel"
-version = "0.3.2"
+version = "0.4.1"
 edition = "2021"
 authors = ["Dystr Team"]
 license-file = "../LICENSE.md"
@@ -18,7 +18,7 @@ log = { workspace = true }
 thiserror = { workspace = true }
 chrono = { workspace = true }
 runmat-hir = { workspace = true }
-runmat-ignition = { workspace = true }
+runmat-vm = { workspace = true }
 runmat-parser = { workspace = true }
 runmat-builtins = { workspace = true }
 runmat-runtime = { workspace = true, features = ["plot-core"] }

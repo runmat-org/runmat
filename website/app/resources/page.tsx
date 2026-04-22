@@ -1,8 +1,7 @@
 import { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, BookOpen, Newspaper, Sparkles } from "lucide-react";
 
-import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { ContentCard } from "@/components/content-card";
 import {
   getDisplayResourceTypes,
@@ -11,7 +10,6 @@ import {
   resourceTypeLabel,
   getResourceTypeLink,
 } from "@/lib/resources";
-import { typeColor } from "@/lib/type-colors";
 
 export const metadata: Metadata = {
   title: "Resources | RunMat",
@@ -24,15 +22,6 @@ export const metadata: Metadata = {
     url: "https://runmat.com/resources",
     type: "website",
   },
-};
-
-const TYPE_ICONS: Record<string, React.ReactNode> = {
-  docs: <BookOpen className="h-4 w-4" />,
-  guides: <Sparkles className="h-4 w-4" />,
-  blogs: <Newspaper className="h-4 w-4" />,
-  "case-studies": <Sparkles className="h-4 w-4" />,
-  webinars: <Sparkles className="h-4 w-4" />,
-  benchmarks: <Sparkles className="h-4 w-4" />,
 };
 
 export default function ResourcesPage() {
@@ -50,28 +39,22 @@ export default function ResourcesPage() {
       <div className="container mx-auto px-4 py-16 md:px-6 md:py-24 space-y-12">
         {/* Hero */}
         <div className="mx-auto max-w-[58rem] text-center">
-          <h1 className="text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl lg:text-7xl">
+          <h1 className="font-bold text-3xl leading-[1.1] sm:text-3xl md:text-5xl">
             Resource Hub
           </h1>
-          <p className="mt-6 text-base text-muted-foreground sm:text-lg">
-            Hand-picked guides, docs, and benchmarks to learn RunMat.
-          </p>
         </div>
 
         {/* Browse by type */}
         <section className="space-y-6">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <h2 className="text-2xl font-semibold text-foreground">Browse by type</h2>
-            <span className="text-sm text-muted-foreground">Jump to a category</span>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
             {typesWithItems.map((type) => (
               <TypeCard
                 key={type.type}
                 href={type.href}
-                icon={TYPE_ICONS[type.type] ?? <Sparkles className="h-5 w-5" />}
                 label={type.label}
-                type={type.type}
               />
             ))}
           </div>
@@ -81,20 +64,18 @@ export default function ResourcesPage() {
         <section id="featured" className="space-y-6">
           <div className="flex items-center justify-between flex-wrap gap-2">
             <h2 className="text-2xl font-semibold text-foreground">Featured</h2>
-            <span className="text-sm text-muted-foreground">Hand-picked highlights</span>
           </div>
           {featured.length ? (
             <div className="grid gap-6 lg:grid-cols-3">
-              {featured.map((item) => (
+              {featured.map((item, i) => (
                 <ContentCard
                   key={item.id}
                   href={item.href ?? "#"}
                   title={item.title}
-                  image={item.image}
-                  imageAlt={item.imageAlt}
                   typeBadge={{ label: resourceTypeLabel(item.type) }}
                   excerpt={item.description}
                   ctaLabel="Read"
+                  index={i}
                 />
               ))}
             </div>
@@ -110,16 +91,15 @@ export default function ResourcesPage() {
           </div>
           {latest.length ? (
             <div className="grid gap-4 lg:grid-cols-3 sm:grid-cols-2">
-              {latest.map((item) => (
+              {latest.map((item, i) => (
                 <ContentCard
                   key={item.id}
                   href={item.href ?? "#"}
                   title={item.title}
-                  image={item.image}
-                  imageAlt={item.imageAlt}
                   typeBadge={{ label: resourceTypeLabel(item.type) }}
                   excerpt={item.description}
                   ctaLabel="View"
+                  index={i + featured.length}
                 />
               ))}
             </div>
@@ -134,32 +114,14 @@ export default function ResourcesPage() {
 
 function TypeCard({
   href,
-  icon,
   label,
-  type,
 }: {
   href: string;
-  icon: React.ReactNode;
   label: string;
-  type: string;
 }) {
-  const color = typeColor(type);
   return (
-    <Link href={href} className="block h-full group">
-      <Card className="h-full bg-muted/5 hover:bg-muted/50 transition-all rounded-lg p-5 text-left">
-        <CardHeader className="space-y-3 p-0">
-          <div
-            className="w-10 h-10 rounded-md flex items-center justify-center transition-colors"
-            style={{ color: color.text, backgroundColor: color.bg }}
-          >
-            {icon}
-          </div>
-          <div className="flex items-center justify-between w-full">
-            <span className="text-sm font-medium text-foreground">{label}</span>
-            <ArrowRight className="w-4 h-4 text-muted-foreground group-hover:text-foreground group-hover:translate-x-1 transition-all" />
-          </div>
-        </CardHeader>
-      </Card>
+    <Link href={href} className="block border border-border rounded-lg px-4 py-3 text-sm font-medium text-foreground hover:bg-accent transition-colors">
+      {label}
     </Link>
   );
 }

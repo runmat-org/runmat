@@ -36,6 +36,9 @@
         },
         {
           "paths": ["/sQuv/static/:path*"]
+        },
+        {
+          "paths": ["/api/builtin-examples"]
         }
       ]
     }
