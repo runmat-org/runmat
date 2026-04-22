@@ -546,3 +546,15 @@ jobs:
             --publish-interval 30 \
             --no-verify \
             --token "$CARGO_REGISTRY_TOKEN"
+
+  publish-bindings:
+    if: github.event_name == 'push'
+    name: Publish wasm bindings to npm
+    needs: [publish-crates]
+    uses: ./.github/workflows/wasm-bindings.yml
+    secrets: inherit
+    with:
+      ref: ${{ github.ref_name }}
+      release_channel: prod
+      version: ${{ github.ref_name }}
+      publish: true
