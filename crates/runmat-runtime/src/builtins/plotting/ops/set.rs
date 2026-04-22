@@ -235,7 +235,7 @@ mod tests {
         .unwrap();
         let figure = clone_figure(crate::builtins::plotting::state::FigureHandle::from(7777))
             .expect("figure should exist");
-        assert_eq!(figure.super_title.as_deref(), Some("Overview"));
+        assert_eq!(figure.sg_title.as_deref(), Some("Overview"));
     }
 
     #[test]

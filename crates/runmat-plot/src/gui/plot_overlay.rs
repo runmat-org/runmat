@@ -487,13 +487,13 @@ impl PlotOverlay {
         }
     }
 
-    fn reserve_super_title_band(
+    fn reserve_sg_title_band(
         &self,
         outer: Rect,
         plot_renderer: &PlotRenderer,
         scale: f32,
     ) -> (Rect, Option<Rect>) {
-        let Some(title) = plot_renderer.overlay_super_title().map(String::as_str) else {
+        let Some(title) = plot_renderer.overlay_sg_title().map(String::as_str) else {
             return (outer, None);
         };
         if !Self::has_visible_text(Some(title)) {
@@ -523,7 +523,7 @@ impl PlotOverlay {
     ) -> Vec<Rect> {
         let plot_area = Self::outer_plot_area_for_axes(outer, plot_renderer);
         let (plot_area, _) = if show_title {
-            self.reserve_super_title_band(plot_area, plot_renderer, font_scale)
+            self.reserve_sg_title_band(plot_area, plot_renderer, font_scale)
         } else {
             (plot_area, None)
         };
@@ -979,8 +979,8 @@ impl PlotOverlay {
 
         let (rows, cols) = plot_renderer.figure_axes_grid();
         let plot_rect = Self::outer_plot_area_for_axes(available_rect, plot_renderer);
-        let (plot_rect, super_title_rect) = if config.show_title {
-            self.reserve_super_title_band(plot_rect, plot_renderer, config.font_scale)
+        let (plot_rect, sg_title_rect) = if config.show_title {
+            self.reserve_sg_title_band(plot_rect, plot_renderer, config.font_scale)
         } else {
             (plot_rect, None)
         };
@@ -989,13 +989,13 @@ impl PlotOverlay {
         // camera fitting and axis_equal settings will control aspect.
         let plot_area_rect = plot_rect;
 
-        if let Some(title_rect) = super_title_rect {
-            if let Some(title) = plot_renderer.overlay_super_title() {
+        if let Some(title_rect) = sg_title_rect {
+            if let Some(title) = plot_renderer.overlay_sg_title() {
                 self.draw_title_in_rect(
                     ui,
                     title_rect,
                     title,
-                    Some(plot_renderer.overlay_super_title_style()),
+                    Some(plot_renderer.overlay_sg_title_style()),
                     config.font_scale,
                 );
             }

@@ -4,8 +4,8 @@ use runmat_plot::plots::{LegendStyle, TextStyle};
 use super::state::{
     axes_handle_exists, axes_handles_for_figure, axes_metadata_snapshot, axes_state_snapshot,
     current_axes_handle_for_figure, decode_axes_handle, decode_plot_object_handle,
-    figure_handle_exists, figure_has_super_title, legend_entries_snapshot, select_axes_for_figure,
-    set_legend_for_axes, set_super_title_properties_for_figure,
+    figure_handle_exists, figure_has_sg_title, legend_entries_snapshot, select_axes_for_figure,
+    set_legend_for_axes, set_sg_title_properties_for_figure,
     set_text_annotation_properties_for_axes, set_text_properties_for_axes, FigureHandle,
     PlotObjectKind,
 };
@@ -109,7 +109,7 @@ pub fn set_properties(
             let mut style = if matches!(kind, PlotObjectKind::SuperTitle) {
                 super::state::clone_figure(handle)
                     .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure")))?
-                    .super_title_style
+                    .sg_title_style
             } else {
                 axes_metadata_snapshot(handle, axes_index)
                     .map_err(|err| map_figure_error(builtin, err))?
@@ -120,7 +120,7 @@ pub fn set_properties(
                 apply_text_property(&mut text, &mut style, &key, &pair[1], builtin)?;
             }
             if matches!(kind, PlotObjectKind::SuperTitle) {
-                set_super_title_properties_for_figure(handle, text, Some(style))
+                set_sg_title_properties_for_figure(handle, text, Some(style))
                     .map_err(|err| map_figure_error(builtin, err))?;
             } else {
                 set_text_properties_for_axes(handle, axes_index, kind, text, Some(style))
@@ -236,9 +236,9 @@ fn get_figure_property(
     let axes = axes_handles_for_figure(handle).map_err(|err| map_figure_error(builtin, err))?;
     let current_axes =
         current_axes_handle_for_figure(handle).map_err(|err| map_figure_error(builtin, err))?;
-    let super_title_handle =
+    let sg_title_handle =
         super::state::encode_plot_object_handle(handle, 0, PlotObjectKind::SuperTitle);
-    let has_super_title = figure_has_super_title(handle);
+    let has_sg_title = figure_has_sg_title(handle);
     match property.map(canonical_property_name) {
         None => {
             let mut st = StructValue::new();
@@ -247,13 +247,13 @@ fn get_figure_property(
             st.insert("Type", Value::String("figure".into()));
             st.insert("CurrentAxes", Value::Num(current_axes));
             let mut children = axes;
-            if has_super_title {
-                children.push(super_title_handle);
+            if has_sg_title {
+                children.push(sg_title_handle);
             }
             st.insert("Children", handles_value(children));
             st.insert("Parent", Value::Num(f64::NAN));
             st.insert("Name", Value::String(format!("Figure {}", handle.as_u32())));
-            st.insert("SGTitle", Value::Num(super_title_handle));
+            st.insert("SGTitle", Value::Num(sg_title_handle));
             Ok(Value::Struct(st))
         }
         Some("number") => Ok(Value::Num(handle.as_u32() as f64)),
@@ -261,14 +261,14 @@ fn get_figure_property(
         Some("currentaxes") => Ok(Value::Num(current_axes)),
         Some("children") => Ok(handles_value({
             let mut children = axes;
-            if has_super_title {
-                children.push(super_title_handle);
+            if has_sg_title {
+                children.push(sg_title_handle);
             }
             children
         })),
         Some("parent") => Ok(Value::Num(f64::NAN)),
         Some("name") => Ok(Value::String(format!("Figure {}", handle.as_u32()))),
-        Some("sgtitle") => Ok(Value::Num(super_title_handle)),
+        Some("sgtitle") => Ok(Value::Num(sg_title_handle)),
         Some(other) => Err(plotting_error(
             builtin,
             format!("{builtin}: unsupported figure property `{other}`"),
@@ -473,7 +473,7 @@ fn get_text_property(
         PlotObjectKind::SuperTitle => {
             let figure = super::state::clone_figure(handle)
                 .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure")))?;
-            (figure.super_title, figure.super_title_style)
+            (figure.sg_title, figure.sg_title_style)
         }
         PlotObjectKind::Title
         | PlotObjectKind::XLabel
@@ -2815,7 +2815,7 @@ fn apply_figure_text_alias(
     if let Some(text) = value_as_text_string(value) {
         match kind {
             PlotObjectKind::SuperTitle => {
-                set_super_title_properties_for_figure(handle, Some(text), None)
+                set_sg_title_properties_for_figure(handle, Some(text), None)
                     .map_err(|err| map_figure_error(builtin, err))?;
             }
             _ => unreachable!(),
@@ -2839,10 +2839,10 @@ fn apply_figure_text_alias(
     let figure = super::state::clone_figure(src_handle)
         .ok_or_else(|| plotting_error(builtin, format!("{builtin}: invalid figure handle")))?;
     let (text, style) = match kind {
-        PlotObjectKind::SuperTitle => (figure.super_title, figure.super_title_style),
+        PlotObjectKind::SuperTitle => (figure.sg_title, figure.sg_title_style),
         _ => unreachable!(),
     };
-    set_super_title_properties_for_figure(handle, text, Some(style))
+    set_sg_title_properties_for_figure(handle, text, Some(style))
         .map_err(|err| map_figure_error(builtin, err))?;
     Ok(())
 }

@@ -121,8 +121,8 @@ export interface FigureLayout {
 
 export interface FigureMetadata {
   title?: string;
-  superTitle?: string;
-  superTitleStyle?: FigureTextStyle;
+  sgTitle?: string;
+  sgTitleStyle?: FigureTextStyle;
   xLabel?: string;
   yLabel?: string;
   gridEnabled: boolean;

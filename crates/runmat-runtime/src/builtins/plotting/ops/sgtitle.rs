@@ -7,9 +7,7 @@ use crate::builtins::plotting::style::value_as_f64;
 use crate::builtins::plotting::type_resolvers::handle_scalar_type;
 use crate::builtins::plotting::{
     plotting_error,
-    state::{
-        current_figure_handle, figure_handle_exists, set_super_title_for_figure, FigureHandle,
-    },
+    state::{current_figure_handle, figure_handle_exists, set_sg_title_for_figure, FigureHandle},
 };
 
 #[runtime_builtin(
@@ -35,7 +33,7 @@ pub fn sgtitle_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
             )
         })?;
     let style = parse_text_style_pairs("sgtitle", &rest[1..])?;
-    set_super_title_for_figure(target, &text, style).map_err(|err| map_figure_error("sgtitle", err))
+    set_sg_title_for_figure(target, &text, style).map_err(|err| map_figure_error("sgtitle", err))
 }
 
 fn split_figure_target<'a>(
@@ -125,7 +123,7 @@ mod tests {
         assert_eq!(kind, PlotObjectKind::SuperTitle);
 
         let fig = clone_figure(figure).unwrap();
-        assert_eq!(fig.super_title.as_deref(), Some("Overview"));
+        assert_eq!(fig.sg_title.as_deref(), Some("Overview"));
     }
 
     #[test]
@@ -143,12 +141,9 @@ mod tests {
         .unwrap();
 
         let figure = clone_figure(FigureHandle::from(321)).unwrap();
-        assert_eq!(figure.super_title.as_deref(), Some("Figure Overview"));
-        assert_eq!(figure.super_title_style.font_size, Some(18.0));
-        assert_eq!(
-            figure.super_title_style.font_weight.as_deref(),
-            Some("bold")
-        );
+        assert_eq!(figure.sg_title.as_deref(), Some("Figure Overview"));
+        assert_eq!(figure.sg_title_style.font_size, Some(18.0));
+        assert_eq!(figure.sg_title_style.font_weight.as_deref(), Some("bold"));
     }
 
     #[test]
@@ -185,7 +180,7 @@ mod tests {
         let current = current_figure_handle();
         sgtitle_builtin(vec![Value::Num(42.0)]).unwrap();
         let fig = clone_figure(current).unwrap();
-        assert_eq!(fig.super_title.as_deref(), Some("42"));
+        assert_eq!(fig.sg_title.as_deref(), Some("42"));
     }
 
     #[test]
@@ -196,7 +191,7 @@ mod tests {
         let current = current_figure_handle();
         sgtitle_builtin(vec![Value::Num(99.0)]).unwrap();
         let fig = clone_figure(current).unwrap();
-        assert_eq!(fig.super_title.as_deref(), Some("99"));
+        assert_eq!(fig.sg_title.as_deref(), Some("99"));
     }
 
     #[test]
@@ -207,7 +202,7 @@ mod tests {
         sgtitle_builtin(vec![Value::Num(pi)]).unwrap();
         let fig = clone_figure(current).unwrap();
         let expected = format!("{pi}");
-        assert_eq!(fig.super_title.as_deref(), Some(expected.as_str()));
+        assert_eq!(fig.sg_title.as_deref(), Some(expected.as_str()));
     }
 
     #[test]
@@ -218,11 +213,11 @@ mod tests {
         let _ = figure_builtin(vec![Value::Num(7.0)]).unwrap();
         sgtitle_builtin(vec![Value::Num(7.0), Value::String("Seven".into())]).unwrap();
         let fig = clone_figure(FigureHandle::from(7)).unwrap();
-        assert_eq!(fig.super_title.as_deref(), Some("Seven"));
+        assert_eq!(fig.sg_title.as_deref(), Some("Seven"));
     }
 
     #[test]
-    fn figure_children_excludes_super_title_handle_before_sgtitle_called() {
+    fn figure_children_excludes_sg_title_handle_before_sgtitle_called() {
         // Before sgtitle is invoked the Children array must contain only the axes handles,
         // not a spurious super-title text object.
         let _guard = setup();
