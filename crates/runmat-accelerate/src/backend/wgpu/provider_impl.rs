@@ -7114,6 +7114,7 @@ impl WgpuProvider {
                     spacing,
                     _pad0: 0.0,
                     _pad1: 0.0,
+                    _pad2: 0.0,
                 },
                 "runmat-gradient-params",
             ),

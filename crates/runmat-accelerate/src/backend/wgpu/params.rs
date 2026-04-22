@@ -159,7 +159,7 @@ pub struct DiffParams {
     pub _pad: u32,
 }
 
-#[repr(C)]
+#[repr(C, align(16))]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct GradientParamsF64 {
     pub stride_before: u32,
@@ -169,6 +169,7 @@ pub struct GradientParamsF64 {
     pub spacing: f64,
     pub _pad0: f64,
     pub _pad1: f64,
+    pub _pad2: f64,
 }
 
 #[repr(C)]

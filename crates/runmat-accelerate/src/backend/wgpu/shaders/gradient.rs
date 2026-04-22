@@ -11,6 +11,7 @@ struct GradientParams {
     spacing: f64,
     _pad0: f64,
     _pad1: f64,
+    _pad2: f64,
 };
 
 @group(0) @binding(0) var<storage, read> Input: Tensor;
