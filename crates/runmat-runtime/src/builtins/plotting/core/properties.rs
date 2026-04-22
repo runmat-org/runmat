@@ -485,16 +485,16 @@ fn get_text_property(
         }
         PlotObjectKind::Legend => unreachable!(),
     };
+    let parent = if matches!(kind, PlotObjectKind::SuperTitle) {
+        Value::Num(handle.as_u32() as f64)
+    } else {
+        Value::Num(super::state::encode_axes_handle(handle, axes_index))
+    };
     match property.map(canonical_property_name) {
         None => {
             let mut st = StructValue::new();
             st.insert("Type", Value::String("text".into()));
-            let parent = if matches!(kind, PlotObjectKind::SuperTitle) {
-                Value::Num(handle.as_u32() as f64)
-            } else {
-                Value::Num(super::state::encode_axes_handle(handle, axes_index))
-            };
-            st.insert("Parent", parent);
+            st.insert("Parent", parent.clone());
             st.insert("Children", handles_value(Vec::new()));
             st.insert("String", text_value(text));
             st.insert("Visible", Value::Bool(style.visible));
@@ -515,6 +515,9 @@ fn get_text_property(
             }
             Ok(Value::Struct(st))
         }
+        Some("type") => Ok(Value::String("text".into())),
+        Some("parent") => Ok(parent),
+        Some("children") => Ok(handles_value(Vec::new())),
         Some("string") => Ok(text_value(text)),
         Some("visible") => Ok(Value::Bool(style.visible)),
         Some("fontsize") => Ok(style

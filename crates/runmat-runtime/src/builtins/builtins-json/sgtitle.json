@@ -27,7 +27,7 @@
     },
     {
       "description": "Style the figure-level title and inspect the returned handle",
-      "input": "subplot(1, 2, 1);\nimagesc(peaks(20));\nsubplot(1, 2, 2);\ncontour(peaks(20));\nh = sgtitle('Field Comparison', 'FontSize', 18, 'FontWeight', 'bold');\nget(h, 'Type')",
+      "input": "subplot(1, 2, 1);\nimagesc(peaks(20));\nsubplot(1, 2, 2);\nimagesc(peaks(20));\nh = sgtitle('Field Comparison', 'FontSize', 18, 'FontWeight', 'bold');\nget(h, 'Type')",
       "output": "ans =\n    'text'"
     },
     {

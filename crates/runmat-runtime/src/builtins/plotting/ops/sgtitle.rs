@@ -123,6 +123,8 @@ mod tests {
         let handle = sgtitle_builtin(vec![Value::String("Top".into())]).unwrap();
         let string = get_builtin(vec![Value::Num(handle), Value::String("String".into())]).unwrap();
         assert_eq!(string, Value::String("Top".into()));
+        let ty = get_builtin(vec![Value::Num(handle), Value::String("Type".into())]).unwrap();
+        assert_eq!(ty, Value::String("text".into()));
     }
 
     #[test]
