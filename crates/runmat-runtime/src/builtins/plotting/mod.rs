@@ -96,6 +96,8 @@ pub(crate) mod semilogx;
 pub(crate) mod semilogy;
 #[path = "ops/set.rs"]
 pub(crate) mod set;
+#[path = "ops/sgtitle.rs"]
+pub(crate) mod sgtitle;
 #[path = "ops/stairs.rs"]
 pub(crate) mod stairs;
 #[path = "ops/stem.rs"]

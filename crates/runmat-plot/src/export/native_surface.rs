@@ -270,7 +270,7 @@ impl NativeSurfaceRenderContext {
         };
         self.apply_background_policy();
         self.config.show_grid = figure.grid_enabled;
-        self.config.show_title = figure.title.is_some();
+        self.config.show_title = figure.has_any_titles();
 
         self.renderer.set_figure(figure.clone());
         if let Some(camera) = camera {

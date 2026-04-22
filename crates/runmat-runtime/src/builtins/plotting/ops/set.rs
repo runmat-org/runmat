@@ -223,6 +223,22 @@ mod tests {
     }
 
     #[test]
+    fn set_updates_figure_sgtitle() {
+        let _guard = setup();
+        let fig =
+            crate::builtins::plotting::figure::figure_builtin(vec![Value::Num(7777.0)]).unwrap();
+        set_builtin(vec![
+            Value::Num(fig),
+            Value::String("SGTitle".into()),
+            Value::String("Overview".into()),
+        ])
+        .unwrap();
+        let figure = clone_figure(crate::builtins::plotting::state::FigureHandle::from(7777))
+            .expect("figure should exist");
+        assert_eq!(figure.super_title.as_deref(), Some("Overview"));
+    }
+
+    #[test]
     fn set_updates_stem_properties() {
         let _guard = setup();
         let handle = crate::builtins::plotting::stem::stem_builtin(vec![Value::Tensor(

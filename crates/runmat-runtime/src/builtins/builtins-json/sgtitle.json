@@ -1,0 +1,90 @@
+{
+  "title": "sgtitle",
+  "category": "plotting",
+  "keywords": [
+    "sgtitle",
+    "super title",
+    "subplot title",
+    "figure title",
+    "matlab sgtitle"
+  ],
+  "summary": "Set a title centered above the entire figure, especially for multi-subplot layouts.",
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::plotting::sgtitle::tests"
+  },
+  "description": "`sgtitle` sets or updates a figure-level title that is rendered once above the full figure rather than attached to a single axes. In RunMat phase 1, it targets the current figure by default or an explicit figure handle when one is passed, returns a text handle, participates in `get` and `set`, and persists through scene replay and export.",
+  "behaviors": [
+    "The returned value is a text handle that can be inspected or updated through `get` and `set`.",
+    "Unlike `title`, `sgtitle` is figure-scoped and is drawn once above all subplot panels.",
+    "String scalars, char arrays, string arrays, and cell arrays can all be used to create multiline super titles.",
+    "Text styling properties such as `FontSize`, `FontWeight`, `FontAngle`, `Color`, `Interpreter`, and `Visible` use the shared plotting text-property system."
+  ],
+  "examples": [
+    {
+      "description": "Add a super title above a subplot figure",
+      "input": "subplot(2, 2, 1);\nplot(1:10, rand(1, 10));\nsubplot(2, 2, 2);\nplot(1:10, rand(1, 10));\nsubplot(2, 2, 3);\nplot(1:10, rand(1, 10));\nsubplot(2, 2, 4);\nplot(1:10, rand(1, 10));\nsgtitle('Experiment Summary');"
+    },
+    {
+      "description": "Style the figure-level title and inspect the returned handle",
+      "input": "subplot(1, 2, 1);\nimagesc(peaks(20));\nsubplot(1, 2, 2);\ncontour(peaks(20));\nh = sgtitle('Field Comparison', 'FontSize', 18, 'FontWeight', 'bold');\nget(h, 'Type')",
+      "output": "ans =\n    'text'"
+    },
+    {
+      "description": "Target an explicit figure handle",
+      "input": "fig = figure(42);\nsubplot(1, 2, 1);\nplot(0:0.1:1, sin(0:0.1:1));\nsubplot(1, 2, 2);\nplot(0:0.1:1, cos(0:0.1:1));\nsgtitle(fig, 'Sine and Cosine');"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "How is sgtitle different from title?",
+      "answer": "`title` attaches text to the current axes, so each subplot can have its own panel title. `sgtitle` attaches text to the figure as a whole and is drawn once above all panels. Use `title` for per-panel labels and `sgtitle` for the overall figure heading."
+    },
+    {
+      "question": "Can I update the super title after creating it?",
+      "answer": "Yes. `sgtitle` returns a text handle, so you can inspect or update it with `get` and `set`.\n\n```matlab\nh = sgtitle('Initial Title');\nset(h, 'String', 'Updated Title', 'FontWeight', 'bold');\n```"
+    },
+    {
+      "question": "What target objects are supported?",
+      "answer": "Phase 1 supports the current figure by default and explicit figure handles through `sgtitle(fig, txt, ...)`. Larger MATLAB target containers such as panels or tabs are tracked separately and are not part of the current implementation."
+    }
+  ],
+  "links": [
+    {
+      "label": "title",
+      "url": "./title"
+    },
+    {
+      "label": "subplot",
+      "url": "./subplot"
+    },
+    {
+      "label": "figure",
+      "url": "./figure"
+    },
+    {
+      "label": "get",
+      "url": "./get"
+    },
+    {
+      "label": "set",
+      "url": "./set"
+    },
+    {
+      "label": "Styling plots and axes",
+      "url": "/docs/plotting/styling-plots-and-axes"
+    },
+    {
+      "label": "Plot replay and export",
+      "url": "/docs/plotting/plot-replay-and-export"
+    },
+    {
+      "label": "Complete plotting guide",
+      "url": "/blog/matlab-plotting-guide"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/plotting/ops/sgtitle.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/plotting/ops/sgtitle.rs"
+  }
+}
