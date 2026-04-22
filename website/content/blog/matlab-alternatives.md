@@ -478,11 +478,11 @@ plot(t, x);
 
 ## Can I trust the numerics?
 
-The honest answer is: none of these runtimes are bit-exactly equivalent to MATLAB. IEEE 754 arithmetic produces different least-significant bits depending on operation ordering, fused multiply-adds, SIMD width, and compiler flags. Bit-exact parity is impossible in principle and no runtime that claims otherwise is telling the truth.
+Bit-exact parity with MATLAB isn't a meaningful goal for any runtime. IEEE 754 arithmetic produces different least-significant bits depending on operation ordering, fused multiply-adds, SIMD width, and compiler flags — two MATLAB installs on different CPUs already disagree on the last bit. The useful question is whether you can audit the validation.
 
-What matters is whether you can audit the validation. MATLAB is a closed binary: the evidence chain stops at the vendor. NumPy/SciPy and Octave are open source and document their dependencies, but neither publishes a consolidated per-builtin coverage table. Julia is open source with strong test coverage in its standard library, but documenting *every* numerical backend is left to package authors.
+MATLAB is a closed binary: the evidence chain stops at the vendor. NumPy/SciPy and Octave are open source and document their dependencies, but neither publishes a consolidated per-builtin coverage table. Julia is open source with strong test coverage in its standard library, but documenting *every* numerical backend is left to package authors.
 
-RunMat publishes a single [Correctness & Trust](/docs/correctness) page listing every numerical builtin, its implementation (external Rust crate, LAPACK routine, or in-repo solver), a live GitHub link to the parity test, and the enforced tolerance (`1e-9` for f64, `1e-3` for f32). Every GPU-accelerated path is tolerance-checked against its CPU reference; every parity test ships in the repository and runs with standard `cargo test` — no MATLAB license, no external data files. If a dependency version bump breaks a tolerance in CI, the bump doesn't ship.
+RunMat publishes a single [Correctness & Trust](/docs/correctness) page listing every numerical builtin, its implementation (external Rust crate, LAPACK routine, or in-repo solver), a live GitHub link to the parity test, and the enforced tolerance. Every GPU-accelerated path is tolerance-checked against its CPU reference; every parity test ships in the repository and runs with standard `cargo test` — no MATLAB license, no external data files. If a dependency version bump breaks a tolerance in CI, the bump doesn't ship.
 
 ## Version Control and Reproducibility
 
