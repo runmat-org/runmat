@@ -58,6 +58,12 @@ concurrency:
 jobs:
   build-and-publish:
     runs-on: ["self-hosted", "linux", "GCP"]
+    # Environment-scoped secrets (NPM_TOKEN) require the job to declare the
+    # correct environment.  When triggered by a direct push or workflow_dispatch
+    # the job runs in the Dev environment; when called from release.yml via
+    # workflow_call the caller already has Production in scope and passes the
+    # secret explicitly, so this resolves to Production here as well.
+    environment: ${{ inputs.release_channel == 'prod' && 'Production' || 'Dev' }}
     env:
       RUST_BACKTRACE: 1
       RUSTFLAGS: "-Copt-level=1"
