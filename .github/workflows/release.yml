@@ -559,11 +559,6 @@ jobs:
     if: github.event_name == 'push'
     name: Publish wasm bindings to npm
     needs: [publish-crates]
-    # environment: Production must be set here so that the Production-scoped
-    # NPM_TOKEN secret is in scope and passed to the reusable workflow via
-    # secrets: inherit.  Without it GitHub excludes environment-scoped secrets
-    # from the inherited set and the publish steps silently receive an empty token.
-    environment: Production
     uses: ./.github/workflows/wasm-bindings.yml
     secrets: inherit
     with:
