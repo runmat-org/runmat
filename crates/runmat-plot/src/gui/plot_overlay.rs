@@ -514,14 +514,19 @@ impl PlotOverlay {
         )
     }
 
-    pub fn compute_subplot_plot_rects(
+    fn compute_subplot_plot_rects_impl(
         &self,
         outer: Rect,
         plot_renderer: &PlotRenderer,
         font_scale: f32,
+        show_title: bool,
     ) -> Vec<Rect> {
         let plot_area = Self::outer_plot_area_for_axes(outer, plot_renderer);
-        let (plot_area, _) = self.reserve_super_title_band(plot_area, plot_renderer, font_scale);
+        let (plot_area, _) = if show_title {
+            self.reserve_super_title_band(plot_area, plot_renderer, font_scale)
+        } else {
+            (plot_area, None)
+        };
         let (rows, cols) = plot_renderer.figure_axes_grid();
         if rows * cols <= 1 {
             vec![
@@ -545,6 +550,15 @@ impl PlotOverlay {
                 })
                 .collect()
         }
+    }
+
+    pub fn compute_subplot_plot_rects(
+        &self,
+        outer: Rect,
+        plot_renderer: &PlotRenderer,
+        font_scale: f32,
+    ) -> Vec<Rect> {
+        self.compute_subplot_plot_rects_impl(outer, plot_renderer, font_scale, true)
     }
 
     pub fn snap_rect_to_pixels(rect: Rect, pixels_per_point: f32) -> Rect {
@@ -621,7 +635,7 @@ impl PlotOverlay {
         font_scale: f32,
         pixels_per_point: f32,
     ) -> Vec<Rect> {
-        self.compute_subplot_plot_rects(outer, plot_renderer, font_scale)
+        self.compute_subplot_plot_rects_impl(outer, plot_renderer, font_scale, true)
             .into_iter()
             .map(|rect| Self::snap_rect_to_pixels(rect, pixels_per_point))
             .collect()
