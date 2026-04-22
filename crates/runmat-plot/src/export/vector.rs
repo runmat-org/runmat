@@ -179,7 +179,7 @@ impl VectorExporter {
 
         // Render per-axes titles from AxesMetadata (set by title(), not sgtitle()).
         // This must happen before the plot elements loop to avoid duplicate rendering.
-        for ax in 0..(rows * cols) {
+        for (ax, vp) in axes_vps.iter().copied().enumerate().take(rows * cols) {
             if let Some(meta) = figure.axes_metadata.get(ax) {
                 let title_text = meta
                     .title
@@ -187,7 +187,6 @@ impl VectorExporter {
                     .map(str::trim)
                     .filter(|t| !t.is_empty());
                 if let Some(title) = title_text {
-                    let vp = axes_vps[ax];
                     let style = &meta.title_style;
                     let fs = style.font_size.map(|s| s.max(10.0)).unwrap_or(14.0);
                     let fill = style
