@@ -133,13 +133,13 @@ function renderBuiltinDocBlocks(doc: BuiltinDocEntry): BuiltinDocBlock[] {
     blocks.push(...linkKnownTerms(parseMarkdownBlocks(doc.gpu_residency)));
   }
 
-  if (doc.validation) {
-    blocks.push(...renderValidation(doc.validation, title));
-  }
-
   if (doc.examples && doc.examples.length > 0) {
     blocks.push(createHeading(2, parseInline(examplesHeader)));
     blocks.push(...renderExamples(doc.examples));
+  }
+
+  if (doc.validation) {
+    blocks.push(...renderValidation(doc.validation, title));
   }
 
   if (doc.faqs && doc.faqs.length > 0) {

@@ -36,6 +36,7 @@
 - Non-blocking execution -- code runs asynchronously; the IDE stays interactive during long computations and GPU readbacks never stall the browser
 - Built-in versioning -- automatic per-save file history and project snapshots without requiring git
 - AI-native architecture -- the runtime is co-designed with an integrated AI assistant (coming soon; see section below)
+- Auditable numerical correctness -- every numerical builtin traces to a named reference implementation (rustfft, nalgebra, LAPACK, or the CPU path), a pinned version, and an automated parity test with a documented tolerance; see the Numerical Correctness section below
 
 ## Where RunMat goes beyond GNU Octave
 
@@ -95,6 +96,10 @@ The assistant also closes the compatibility gap: when a MATLAB script uses a fun
 
 - [Fusion Engine](https://runmat.com/docs/accelerate/fusion-intro): How RunMat fuses sequential ops into fewer GPU kernels
 - [GPU in MATLAB Guide](https://runmat.com/blog/how-to-use-gpu-in-matlab): GPU setup guide comparing MATLAB's CUDA-only approach with RunMat's cross-vendor alternative
+
+## Numerical Correctness
+
+- [Correctness & Trust](https://runmat.com/docs/correctness): How RunMat validates numerical accuracy. Every numerical builtin is backed by a named reference implementation (established Rust crates like rustfft and nalgebra, optional FFI to system BLAS/LAPACK via Apple Accelerate or OpenBLAS, or RunMat's own CPU path for GPU kernels), a pinned version, and an automated parity test with a documented tolerance. Of RunMat's ~450 total builtins, ~110 are numerical-math builtins where tolerance-based validation applies; those ship with ~1,635 co-located test functions plus ~40 integration-level parity tests covering GPU-vs-CPU, fusion-engine, feature-gated FFI, and RNG-statistics paths. The remaining ~340 builtins (string, array, plotting, I/O, OOP) are validated by behavioural tests instead. Tolerances are chosen per operation rather than by a universal rule: most F64 tests bound absolute error between 1e-9 and 1e-12, most F32 tests bound between 1e-5 and 1e-6, and operations where absolute magnitudes grow with problem size use relative bounds like 5e-4 * max(|reference|, 1). RunMat targets numerical accuracy within documented tolerances, not bit-identical reproduction of any particular binary (no mainstream runtime can do that across hardware without an explicit performance-costing mode -- Intel calls this the CNR tradeoff). Every parity test is runnable with standard `cargo test` against a fresh `git clone` of the public repository.
 
 ## Guides
 
