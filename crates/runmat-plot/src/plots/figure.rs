@@ -328,16 +328,13 @@ impl Figure {
     }
 
     pub fn has_any_titles(&self) -> bool {
-        self.super_title
-            .as_deref()
-            .map(str::trim)
-            .is_some_and(|text| !text.is_empty())
-            || self.axes_metadata.iter().any(|meta| {
-                meta.title
-                    .as_deref()
-                    .map(str::trim)
-                    .is_some_and(|text| !text.is_empty())
-            })
+        let non_empty = |s: Option<&str>| s.map(str::trim).is_some_and(|t| !t.is_empty());
+        non_empty(self.super_title.as_deref())
+            || non_empty(self.title.as_deref())
+            || self
+                .axes_metadata
+                .iter()
+                .any(|meta| non_empty(meta.title.as_deref()))
     }
 
     /// Set the figure title
