@@ -167,11 +167,11 @@
     "summary": "`conv2` uses an in-repo implementation for both the direct (`conv2(A, B)`) and separable (`conv2(u, v, A)`) forms. The module-level tests cover `'full'`, `'same'`, and `'valid'` shapes against reference outputs. The GPU path currently defers to the CPU implementation via the in-process provider and returns a GPU handle; a native WGPU `conv2d` kernel is tracked as follow-up.",
     "implementation": {
       "label": "crates/runmat-runtime/src/builtins/math/signal/conv2.rs",
-      "url": "https://github.com/runmat-org/runmat/blob/dev/crates/runmat-runtime/src/builtins/math/signal/conv2.rs"
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/conv2.rs"
     },
     "parity_test": {
       "label": "conv2 unit tests",
-      "url": "https://github.com/runmat-org/runmat/blob/dev/crates/runmat-runtime/src/builtins/math/signal/conv2.rs"
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/signal/conv2.rs"
     },
     "tolerance": "1e-9 (f64), 1e-3 (f32)"
   }

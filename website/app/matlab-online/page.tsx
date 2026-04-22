@@ -806,7 +806,7 @@ export default function MatlabOnlinePage() {
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-green-600 dark:text-green-400">•</span>
-                  <p>330+ built-in functions</p>
+                  <p>400+ built-in functions</p>
                 </div>
                 <div className="flex items-start gap-2">
                   <span className="mt-1 text-green-600 dark:text-green-400">•</span>

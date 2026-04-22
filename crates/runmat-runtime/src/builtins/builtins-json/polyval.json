@@ -181,11 +181,11 @@
     "summary": "`polyval` evaluates the polynomial using the standard Horner recurrence, the same scheme MATLAB and NumPy's `polyval` use. The CPU implementation covers real and complex coefficients plus the `polyfit` prediction-interval form. The GPU path has a dedicated Horner kernel for real inputs and falls back to CPU for complex or prediction-interval calls.",
     "implementation": {
       "label": "crates/runmat-runtime/src/builtins/math/poly/polyval.rs",
-      "url": "https://github.com/runmat-org/runmat/blob/dev/crates/runmat-runtime/src/builtins/math/poly/polyval.rs"
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/poly/polyval.rs"
     },
     "parity_test": {
       "label": "polyval unit tests",
-      "url": "https://github.com/runmat-org/runmat/blob/dev/crates/runmat-runtime/src/builtins/math/poly/polyval.rs"
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/poly/polyval.rs"
     },
     "tolerance": "1e-9 (f64), 1e-3 (f32)"
   }

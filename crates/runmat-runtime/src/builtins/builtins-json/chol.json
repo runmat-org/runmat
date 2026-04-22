@@ -170,11 +170,11 @@
     "summary": "`chol` delegates to LAPACK's `dpotrf`/`zpotrf` when the `lapack-backed-linalg` feature is enabled and falls back to an in-repo Cholesky implementation otherwise. Both paths share the same test suite. The GPU provider hook reuploads the CPU-computed factor so device residency is preserved without a separate GPU Cholesky kernel.",
     "implementation": {
       "label": "crates/runmat-runtime/src/builtins/math/linalg/factor/chol.rs",
-      "url": "https://github.com/runmat-org/runmat/blob/dev/crates/runmat-runtime/src/builtins/math/linalg/factor/chol.rs"
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/factor/chol.rs"
     },
     "parity_test": {
       "label": "chol unit tests",
-      "url": "https://github.com/runmat-org/runmat/blob/dev/crates/runmat-runtime/src/builtins/math/linalg/factor/chol.rs"
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/factor/chol.rs"
     },
     "tolerance": "CPU-only validated; GPU path reuploads host-computed factors"
   }

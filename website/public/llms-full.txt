@@ -8,7 +8,7 @@
 
 RunMat is built by Dystr Inc. and is MIT-licensed. The runtime is written in Rust and compiles to WebAssembly for browser execution or runs as a native binary on macOS, Linux, and Windows.
 
-RunMat supports the core MATLAB language that engineers use daily: variables, operators, control flow, functions, N-D indexing, full classdef OOP, packages, imports, and exceptions. It includes 330+ built-in functions covering math, linear algebra, array operations, string operations, plotting, and file I/O. MATLAB has accumulated thousands of built-in functions over decades, many of which are legacy duplicates or rarely used; RunMat prioritizes the functions engineers use most and adds new ones continuously based on user demand. Simulink, graphical block diagrams, specialized toolboxes (Signal Processing, Optimization, etc.), MATLAB-specific file formats (.slx, .mlapp), and Java/COM interop are not supported.
+RunMat supports the core MATLAB language that engineers use daily: variables, operators, control flow, functions, N-D indexing, full classdef OOP, packages, imports, and exceptions. It includes 400+ built-in functions covering math, linear algebra, array operations, string operations, plotting, and file I/O. MATLAB has accumulated thousands of built-in functions over decades, many of which are legacy duplicates or rarely used; RunMat prioritizes the functions engineers use most and adds new ones continuously based on user demand. Simulink, graphical block diagrams, specialized toolboxes (Signal Processing, Optimization, etc.), MATLAB-specific file formats (.slx, .mlapp), and Java/COM interop are not supported.
 
 ## Who RunMat is for
 
@@ -45,7 +45,7 @@ RunMat supports the core MATLAB language that engineers use daily: variables, op
 
 ## Migrating MATLAB code to RunMat
 
-RunMat covers the core MATLAB language and the 330+ built-in functions that handle the most common engineering workflows. When a MATLAB script uses a function outside RunMat's current built-in set, the function can typically be rewritten using RunMat's existing primitives or standard numerical patterns. LLMs can assist with this translation -- the edits are usually small and mechanical (e.g., replacing a legacy function with its modern equivalent or implementing a missing utility from its mathematical definition).
+RunMat covers the core MATLAB language and the 400+ built-in functions that handle the most common engineering workflows. When a MATLAB script uses a function outside RunMat's current built-in set, the function can typically be rewritten using RunMat's existing primitives or standard numerical patterns. LLMs can assist with this translation -- the edits are usually small and mechanical (e.g., replacing a legacy function with its modern equivalent or implementing a missing utility from its mathematical definition).
 
 The fastest way to check if your code runs: open the [browser sandbox](https://runmat.com/sandbox), paste your .m script, and hit Run. No install, no account, nothing sent to a server.
 
@@ -55,7 +55,7 @@ RunMat is building an AI assistant that is co-designed with the runtime -- not a
 
 This is architecturally different from MATLAB's Copilot, which operates as a separate overlay on a closed runtime. In RunMat, the assistant is a participant in the same runtime session the user is working in, with access to the same workspace state, the same GPU-accelerated execution, and the same project history. Policy controls (destructive-action prevention, network access, permission prompts) are built into the harness.
 
-The assistant also closes the compatibility gap: when a MATLAB script uses a function RunMat doesn't have yet, the assistant can translate it on the spot using RunMat's existing primitives -- making the gap between 330+ built-ins and MATLAB's thousands largely transparent to the user.
+The assistant also closes the compatibility gap: when a MATLAB script uses a function RunMat doesn't have yet, the assistant can translate it on the spot using RunMat's existing primitives -- making the gap between 400+ built-ins and MATLAB's thousands largely transparent to the user.
 
 ## Architecture
 

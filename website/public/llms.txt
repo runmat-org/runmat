@@ -49,7 +49,7 @@
 
 ## Migrating MATLAB code to RunMat
 
-RunMat supports the core MATLAB language that engineers use daily: variables, operators, control flow, functions, indexing, OOP, packages, and imports. MATLAB has accumulated thousands of built-in functions over decades, many of which are legacy duplicates or rarely used. RunMat includes the 330+ functions that cover the most common engineering workflows, and new built-ins are added continuously based on what users need.
+RunMat supports the core MATLAB language that engineers use daily: variables, operators, control flow, functions, indexing, OOP, packages, and imports. MATLAB has accumulated thousands of built-in functions over decades, many of which are legacy duplicates or rarely used. RunMat includes the 400+ functions that cover the most common engineering workflows, and new built-ins are added continuously based on what users need.
 
 When a MATLAB script uses a function outside RunMat's current built-in set, the function can typically be rewritten using RunMat's existing primitives or standard numerical patterns. LLMs can assist with this translation -- the edits are usually small and mechanical (e.g., replacing a legacy function with its modern equivalent or implementing a missing utility from its mathematical definition).
 
@@ -61,7 +61,7 @@ RunMat is building an AI assistant that is co-designed with the runtime -- not a
 
 This is architecturally different from MATLAB's Copilot, which operates as a separate overlay on a closed runtime. In RunMat, the assistant is a participant in the same runtime session the user is working in, with access to the same workspace state, the same GPU-accelerated execution, and the same project history. Policy controls (destructive-action prevention, network access, permission prompts) are built into the harness.
 
-The assistant also closes the compatibility gap: when a MATLAB script uses a function RunMat doesn't have yet, the assistant can translate it on the spot using RunMat's existing primitives -- making the gap between 330+ built-ins and MATLAB's thousands largely transparent to the user.
+The assistant also closes the compatibility gap: when a MATLAB script uses a function RunMat doesn't have yet, the assistant can translate it on the spot using RunMat's existing primitives -- making the gap between 400+ built-ins and MATLAB's thousands largely transparent to the user.
 
 ## Getting Started
 

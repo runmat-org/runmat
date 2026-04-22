@@ -1,6 +1,6 @@
 # MATLAB Compatibility
 
-RunMat is a high-performance runtime for MATLAB code. It supports ~99% of core MATLAB language syntax, 330+ built-in functions, and full `classdef` OOP — with automatic GPU acceleration across all major vendors. No license required.
+RunMat is a high-performance runtime for MATLAB code. It supports ~99% of core MATLAB language syntax, 400+ built-in functions, and full `classdef` OOP — with automatic GPU acceleration across all major vendors. No license required.
 
 This page summarizes what works, what doesn't, and where to look for details. For the full feature-by-feature matrix, see [Language Coverage](/docs/language-coverage). For individual functions, see the [Built-in Function Reference](/docs/matlab-function-reference).
 
@@ -24,7 +24,7 @@ Full details: [Language Coverage](/docs/language-coverage)
 
 ## Built-in functions
 
-RunMat includes 330+ core MATLAB built-in functions covering math, linear algebra, array creation and manipulation, string operations, file I/O, and more. Notable additions include `peaks` (GPU-accelerated), `clear`/`clc`/`close all` session management, and full `mldivide` (backslash) linear system solving.
+RunMat includes 400+ core MATLAB built-in functions covering math, linear algebra, array creation and manipulation, string operations, file I/O, and more. Notable additions include `peaks` (GPU-accelerated), `clear`/`clc`/`close all` session management, and full `mldivide` (backslash) linear system solving.
 
 Browse the complete list: [Built-in Function Reference](/docs/matlab-function-reference)
 
@@ -52,7 +52,7 @@ RunMat focuses on core MATLAB — the language, operators, data types, and gener
 
 | MATLAB Toolbox | RunMat Status | Notes |
 | :--- | :---: | :--- |
-| Core MATLAB | ✅ | ~99% language, 330+ functions, full OOP, GPU |
+| Core MATLAB | ✅ | ~99% language, 400+ functions, full OOP, GPU |
 | Simulink | ❌ | RunMat is script-based only; no block-diagram modeling |
 | Signal Processing | ❌ | Not implemented |
 | Control System | ❌ | Not implemented |

@@ -216,11 +216,11 @@
     "summary": "`std` uses the shared reduction infrastructure in `runmat-runtime`, which implements a two-pass Welford-style algorithm on the CPU and a matching reduction kernel on the GPU. The reduction-parity test suite runs the same inputs through both paths and asserts agreement within tolerance on every merge.",
     "implementation": {
       "label": "crates/runmat-runtime/src/builtins/math/reduction/std.rs",
-      "url": "https://github.com/runmat-org/runmat/blob/dev/crates/runmat-runtime/src/builtins/math/reduction/std.rs"
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/std.rs"
     },
     "parity_test": {
       "label": "reduction_parity.rs",
-      "url": "https://github.com/runmat-org/runmat/blob/dev/crates/runmat-runtime/tests/reduction_parity.rs"
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/tests/reduction_parity.rs"
     },
     "tolerance": "1e-9 (f64), 1e-3 (f32)"
   }

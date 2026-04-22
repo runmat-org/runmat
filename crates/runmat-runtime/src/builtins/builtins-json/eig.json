@@ -187,11 +187,11 @@
     "summary": "`eig` calls the production LAPACK routines `dgeev` and `zgeev` via the `lapack` Rust crate, which uses Apple Accelerate on macOS and OpenBLAS on Linux, the same libraries NumPy, SciPy, and MATLAB's own eigensolvers rely on. CPU correctness is exercised by the in-module tests linked below; GPU residency is validated at the host-fallback boundary described above rather than via a separate GPU eigensolver.",
     "implementation": {
       "label": "crates/runmat-runtime/src/builtins/math/linalg/factor/eig.rs",
-      "url": "https://github.com/runmat-org/runmat/blob/dev/crates/runmat-runtime/src/builtins/math/linalg/factor/eig.rs"
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/factor/eig.rs"
     },
     "parity_test": {
       "label": "eig unit tests",
-      "url": "https://github.com/runmat-org/runmat/blob/dev/crates/runmat-runtime/src/builtins/math/linalg/factor/eig.rs"
+      "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/linalg/factor/eig.rs"
     },
     "tolerance": "CPU-only validated; no dedicated GPU eigensolver"
   }

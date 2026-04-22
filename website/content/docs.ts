@@ -157,7 +157,7 @@ export const docsTree: DocsNode[] = [
         slug: ["compatibility"],
         file: "docs/COMPATIBILITY.md",
         seo: {
-          description: "RunMat MATLAB compatibility: language coverage, 300+ built-in functions, plotting, toolbox status, and known limitations.",
+          description: "RunMat MATLAB compatibility: language coverage, 400+ built-in functions, plotting, toolbox status, and known limitations.",
           keywords: ["MATLAB compatibility", "MATLAB alternative", "RunMat compatibility", "Octave alternative", "MATLAB migration"],
           ogTitle: "MATLAB Compatibility",
           ogDescription: "How compatible is RunMat with MATLAB? Language coverage, function reference, toolbox status, and GPU acceleration.",
