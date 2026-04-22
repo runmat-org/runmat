@@ -87,10 +87,10 @@ use crate::backend::wgpu::config::{
 };
 use crate::backend::wgpu::params::{
     BandwidthParams, Conv1dParams, CummaxParams, CumminParams, CumprodParams, CumsumParams,
-    DiffParams, FilterParams, ImageNormalizeUniforms, LinearGatherParams, LinearScatterParams,
-    QrPowerIterParams, SymmetryParamsF32, SymmetryParamsF64, SyrkParams, IMAGE_NORMALIZE_FLAG_BIAS,
-    IMAGE_NORMALIZE_FLAG_GAIN, IMAGE_NORMALIZE_FLAG_GAMMA, SYRK_FLAG_ACCUMULATE,
-    SYRK_FLAG_FILL_BOTH,
+    DiffParams, FilterParams, GradientParamsF32, GradientParamsF64, ImageNormalizeUniforms,
+    LinearGatherParams, LinearScatterParams, QrPowerIterParams, SymmetryParamsF32,
+    SymmetryParamsF64, SyrkParams, IMAGE_NORMALIZE_FLAG_BIAS, IMAGE_NORMALIZE_FLAG_GAIN,
+    IMAGE_NORMALIZE_FLAG_GAMMA, SYRK_FLAG_ACCUMULATE, SYRK_FLAG_FILL_BOTH,
 };
 use crate::backend::wgpu::pipelines::{ImageNormalizeBootstrap, WgpuPipelines};
 use crate::backend::wgpu::residency::{BufferResidency, BufferUsageClass};
@@ -1387,6 +1387,24 @@ fn normalize_concat_shape(mut shape: Vec<usize>, dim_zero: usize) -> Vec<usize> 
         shape.pop();
     }
     normalize_scalar_shape(&shape)
+}
+
+fn normalize_gradient_shape(shape: &[usize], len: usize) -> Vec<usize> {
+    if shape.is_empty() {
+        if len == 0 {
+            Vec::new()
+        } else {
+            vec![1, 1]
+        }
+    } else if shape.len() == 1 {
+        if shape[0] == 1 {
+            vec![1, 1]
+        } else {
+            vec![1, shape[0]]
+        }
+    } else {
+        shape.to_vec()
+    }
 }
 
 fn conv1d_output_shape(len: usize, orientation: ProviderConvOrientation) -> Vec<usize> {
@@ -7026,6 +7044,141 @@ impl WgpuProvider {
             }
         }
         Ok(current)
+    }
+
+    pub(crate) fn gradient_exec(
+        &self,
+        handle: &GpuTensorHandle,
+        dim: usize,
+        spacing: f64,
+    ) -> Result<GpuTensorHandle> {
+        let entry = self.get_entry(handle)?;
+
+        ensure!(
+            entry.storage == GpuTensorStorage::Real,
+            "gradient: complex GPU gradients are not implemented"
+        );
+
+        let mut ext_shape = normalize_gradient_shape(&entry.shape, entry.len);
+        if ext_shape.is_empty() {
+            ext_shape = vec![0, 0];
+        }
+        while ext_shape.len() <= dim {
+            ext_shape.push(1);
+        }
+
+        let len_dim = ext_shape[dim];
+        let mut out_shape = normalize_gradient_shape(&entry.shape, entry.len);
+        if out_shape.is_empty() {
+            out_shape = vec![0, 0];
+        }
+        while out_shape.len() <= dim {
+            out_shape.push(1);
+        }
+
+        let out_buffer = self.create_storage_buffer(entry.len, "runmat-gradient-out");
+        if entry.len == 0 {
+            return Ok(self.register_existing_buffer(out_buffer, out_shape, 0));
+        }
+
+        let stride_before = if dim == 0 {
+            1usize
+        } else {
+            product_checked(&ext_shape[..dim])
+                .ok_or_else(|| anyhow!("gradient: stride computation overflow"))?
+                .max(1)
+        };
+        let stride_after = if dim + 1 >= ext_shape.len() {
+            1usize
+        } else {
+            product_checked(&ext_shape[dim + 1..])
+                .ok_or_else(|| anyhow!("gradient: stride computation overflow"))?
+                .max(1)
+        };
+
+        let expected_len = stride_before
+            .checked_mul(len_dim.max(1))
+            .and_then(|v| v.checked_mul(stride_after))
+            .ok_or_else(|| anyhow!("gradient: tensor size exceeds GPU limits"))?;
+        ensure!(
+            expected_len == entry.len,
+            "gradient: tensor shape mismatch (expected {} elements, got {})",
+            expected_len,
+            entry.len
+        );
+
+        let block = stride_before
+            .checked_mul(len_dim.max(1))
+            .ok_or_else(|| anyhow!("gradient: block size exceeds GPU limits"))?;
+        ensure!(
+            len_dim <= u32::MAX as usize
+                && stride_before <= u32::MAX as usize
+                && block <= u32::MAX as usize
+                && entry.len <= u32::MAX as usize,
+            "gradient: tensor exceeds GPU kernel limits"
+        );
+
+        let params_buffer = match self.precision {
+            NumericPrecision::F64 => self.uniform_buffer(
+                &GradientParamsF64 {
+                    stride_before: stride_before as u32,
+                    segment_len: len_dim as u32,
+                    block: block as u32,
+                    total: entry.len as u32,
+                    spacing,
+                    _pad0: 0.0,
+                    _pad1: 0.0,
+                },
+                "runmat-gradient-params",
+            ),
+            NumericPrecision::F32 => self.uniform_buffer(
+                &GradientParamsF32 {
+                    meta0: crate::backend::wgpu::params::PackedU32([
+                        stride_before as u32,
+                        len_dim as u32,
+                        block as u32,
+                        entry.len as u32,
+                    ]),
+                    meta1: crate::backend::wgpu::params::PackedF32([spacing as f32, 0.0, 0.0, 0.0]),
+                },
+                "runmat-gradient-params",
+            ),
+        };
+
+        let bind_group = self
+            .device_ref()
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("runmat-gradient-bind"),
+                layout: &self.pipelines.gradient.layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: entry.buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: out_buffer.as_ref().as_entire_binding(),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 2,
+                        resource: params_buffer.as_entire_binding(),
+                    },
+                ],
+            });
+
+        let workgroups = crate::backend::wgpu::dispatch::common::dispatch_size(
+            entry.len as u32,
+            crate::backend::wgpu::config::WORKGROUP_SIZE,
+        );
+        crate::backend::wgpu::dispatch::gradient::run(
+            self.device_ref(),
+            self.queue_ref(),
+            &self.pipelines.gradient.pipeline,
+            &bind_group,
+            workgroups,
+        );
+
+        Ok(self.register_existing_buffer(out_buffer, out_shape, entry.len))
     }
 
     pub(crate) fn repmat_exec(
@@ -14465,6 +14618,15 @@ impl AccelProvider for WgpuProvider {
         dim: usize,
     ) -> Result<GpuTensorHandle> {
         self.diff_exec(handle, dim, order)
+    }
+
+    fn gradient_dim(
+        &self,
+        handle: &GpuTensorHandle,
+        dim: usize,
+        spacing: f64,
+    ) -> Result<GpuTensorHandle> {
+        self.gradient_exec(handle, dim, spacing)
     }
 
     fn cumsum_scan(

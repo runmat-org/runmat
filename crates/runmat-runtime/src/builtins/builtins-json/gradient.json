@@ -1,0 +1,119 @@
+{
+  "title": "gradient",
+  "category": "math/reduction",
+  "keywords": [
+    "gradient",
+    "numerical gradient",
+    "finite difference",
+    "derivative",
+    "gpu"
+  ],
+  "summary": "Numerical gradients using central differences with MATLAB-compatible output ordering.",
+  "references": [],
+  "gpu_support": {
+    "elementwise": false,
+    "reduction": false,
+    "precisions": [
+      "f32",
+      "f64"
+    ],
+    "broadcasting": "matlab",
+    "notes": "Scalar-spacing gradients call the provider's `gradient_dim` hook and can stay GPU-resident. Coordinate-vector spacing falls back to the host in this implementation."
+  },
+  "fusion": {
+    "elementwise": false,
+    "reduction": false,
+    "max_inputs": 1,
+    "constants": "inline"
+  },
+  "requires_feature": null,
+  "tested": {
+    "unit": "builtins::math::reduction::gradient::tests",
+    "integration": "builtins::math::reduction::gradient::tests::gradient_gpu_scalar_spacing_matches_cpu_and_stays_resident"
+  },
+  "description": "`gradient(F)` computes numerical derivatives with central differences in the interior and one-sided differences at the boundaries. For matrices, a single output returns the derivative along columns, while multiple outputs follow MATLAB ordering: first columns, then rows, then higher dimensions.",
+  "behaviors": [
+    "`gradient(F)` chooses the first non-singleton dimension for vectors and returns the column-direction derivative for matrices.",
+    "`[FX, FY] = gradient(F)` on a matrix returns `FX` for dimension 2 (across columns) and `FY` for dimension 1 (down rows), matching MATLAB.",
+    "`gradient(F, h)` applies the same scalar spacing to every returned dimension.",
+    "`gradient(F, hx, hy, ...)` accepts one scalar spacing per output dimension. In v1, each spacing must be scalar.",
+    "Interior points use central differences `(f(i+1) - f(i-1)) / (2*h)`, while the first and last points use one-sided differences.",
+    "Real, logical, and scalar numeric inputs promote through the standard tensor conversion path. Complex host inputs are supported by differentiating the real and imaginary parts independently.",
+    "When a GPU tensor is passed and the active provider implements `gradient_dim`, scalar-spacing gradients stay resident on the device. Complex GPU tensors and coordinate-vector spacing currently gather to the host."
+  ],
+  "examples": [
+    {
+      "description": "Differentiating a row vector",
+      "input": "v = [1 4 9];\ng = gradient(v)",
+      "output": "g = [3 4 5]"
+    },
+    {
+      "description": "Requesting both matrix gradient components",
+      "input": "A = [1 2; 3 4];\n[FX, FY] = gradient(A)",
+      "output": "FX =\n     1     1\n     1     1\n\nFY =\n     2     2\n     2     2"
+    },
+    {
+      "description": "Using scalar spacing on GPU data",
+      "input": "G = gpuArray(single([1 4 9]));\nD = gradient(G, 2);\nout = gather(D)",
+      "output": "out = single([1.5 2.0 2.5])"
+    },
+    {
+      "description": "Feeding `gradient` into a vector-field plot",
+      "input": "[X, Y] = meshgrid(linspace(-2, 2, 25), linspace(-2, 2, 25));\nZ = X .* exp(-X.^2 - Y.^2);\n[DX, DY] = gradient(Z, X(1,2)-X(1,1), Y(2,1)-Y(1,1));\nquiver(X, Y, DX, DY)"
+    }
+  ],
+  "faqs": [
+    {
+      "question": "What finite-difference stencil does `gradient` use?",
+      "answer": "RunMat matches MATLAB's shape-preserving behavior: central differences in the interior and first-order one-sided differences at the boundaries."
+    },
+    {
+      "question": "Why does a matrix return the x-direction first?",
+      "answer": "MATLAB defines the first matrix output along dimension 2 (columns), then dimension 1 (rows). RunMat preserves that ordering so plotting workflows like `quiver` line up correctly."
+    },
+    {
+      "question": "Can I pass coordinate vectors for spacing?",
+      "answer": "Not in this version. `gradient(F, X)` and vector-valued `hx`, `hy`, ... are reserved for a follow-up implementation."
+    },
+    {
+      "question": "Does `gradient` support GPU arrays?",
+      "answer": "Yes for default spacing and scalar spacings. With an active provider such as WGPU, the scalar-spacing path stays on the GPU via the `gradient_dim` hook."
+    },
+    {
+      "question": "Do complex inputs work?",
+      "answer": "Yes on the host. Complex GPU tensors currently gather to the host before differencing."
+    }
+  ],
+  "links": [
+    {
+      "label": "diff",
+      "url": "./diff"
+    },
+    {
+      "label": "meshgrid",
+      "url": "./meshgrid"
+    },
+    {
+      "label": "quiver",
+      "url": "./quiver"
+    },
+    {
+      "label": "gpuArray",
+      "url": "./gpuarray"
+    },
+    {
+      "label": "gather",
+      "url": "./gather"
+    }
+  ],
+  "source": {
+    "label": "`crates/runmat-runtime/src/builtins/math/reduction/gradient.rs`",
+    "url": "https://github.com/runmat-org/runmat/blob/main/crates/runmat-runtime/src/builtins/math/reduction/gradient.rs"
+  },
+  "gpu_residency": "Manual `gpuArray` promotion is optional. When a scalar-spacing gradient starts with GPU-resident data and the active provider implements `gradient_dim`, RunMat keeps the result on the device. If the provider lacks the hook, if spacing is specified with coordinate vectors, or if the input is complex GPU data, RunMat gathers to the host and preserves MATLAB-compatible results.",
+  "gpu_behavior": [
+    "The WGPU backend implements `gradient_dim`, so scalar-spacing gradients execute on the device and return GPU tensors for both single-output and multi-output calls.",
+    "The simple in-process provider also exposes `gradient_dim`, allowing provider-level parity tests without requiring a physical GPU.",
+    "Coordinate-vector spacing is intentionally out of scope for this version and falls back to host evaluation."
+  ]
+}

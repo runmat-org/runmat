@@ -41,8 +41,9 @@ use runmat_runtime::builtins::math::linalg::structure::bandwidth::bandwidth_host
 use runmat_runtime::builtins::math::linalg::structure::ishermitian::ishermitian_host_real_data;
 use runmat_runtime::builtins::math::linalg::structure::issymmetric::issymmetric_host_real_data;
 use runmat_runtime::builtins::math::linalg::structure::symrcm::symrcm_host_real_data;
-use runmat_runtime::builtins::math::reduction::compute_median_inplace;
-use runmat_runtime::builtins::math::reduction::diff_tensor_host;
+use runmat_runtime::builtins::math::reduction::{
+    compute_median_inplace, diff_tensor_host, gradient_real_tensor_host,
+};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
@@ -3949,6 +3950,27 @@ impl AccelProvider for InProcessProvider {
         let diffed =
             diff_tensor_host(tensor, order, Some(dim + 1)).map_err(|e| anyhow!("diff_dim: {e}"))?;
         let Tensor { data, shape, .. } = diffed;
+        Ok(self.allocate_tensor(data, shape))
+    }
+
+    fn gradient_dim(
+        &self,
+        handle: &GpuTensorHandle,
+        dim: usize,
+        spacing: f64,
+    ) -> Result<GpuTensorHandle> {
+        let data = {
+            let guard = registry().lock().unwrap();
+            guard
+                .get(&handle.buffer_id)
+                .ok_or_else(|| anyhow!("gradient_dim: unknown tensor handle {}", handle.buffer_id))?
+                .clone()
+        };
+        let tensor =
+            Tensor::new(data, handle.shape.clone()).map_err(|e| anyhow!("gradient_dim: {e}"))?;
+        let gradiented = gradient_real_tensor_host(tensor, dim + 1, spacing)
+            .map_err(|e| anyhow!("gradient_dim: {e}"))?;
+        let Tensor { data, shape, .. } = gradiented;
         Ok(self.allocate_tensor(data, shape))
     }
 
