@@ -26,12 +26,14 @@ pub fn sgtitle_builtin(args: Vec<Value>) -> crate::BuiltinResult<f64> {
     if rest.is_empty() {
         return Err(plotting_error("sgtitle", "sgtitle: expected text input"));
     }
-    let text = super::op_common::value_as_text_string(&rest[0]).ok_or_else(|| {
-        plotting_error(
-            "sgtitle",
-            "sgtitle: expected text as char array, string, string array, or cell array of strings",
-        )
-    })?;
+    let text = super::op_common::value_as_text_string(&rest[0])
+        .or_else(|| format_num_as_title_text(&rest[0]))
+        .ok_or_else(|| {
+            plotting_error(
+                "sgtitle",
+                "sgtitle: expected text as char array, string, string array, or cell array of strings",
+            )
+        })?;
     let style = parse_text_style_pairs("sgtitle", &rest[1..])?;
     set_super_title_for_figure(target, &text, style).map_err(|err| map_figure_error("sgtitle", err))
 }
@@ -40,18 +42,40 @@ fn split_figure_target<'a>(
     builtin: &'static str,
     args: &'a [Value],
 ) -> crate::BuiltinResult<(FigureHandle, &'a [Value])> {
-    if let Some(first) = args.first() {
-        if let Some(handle) = try_parse_figure_target(first) {
-            if figure_handle_exists(handle) {
-                return Ok((handle, &args[1..]));
+    // Only attempt handle detection when there is a subsequent argument to serve as title text.
+    // Without this guard, `sgtitle(42)` would be misread as targeting figure 42 with no text,
+    // making it impossible to use a numeric value as title text when that figure exists.
+    if args.len() >= 2 {
+        if let Some(first) = args.first() {
+            if let Some(handle) = try_parse_figure_target(first) {
+                if figure_handle_exists(handle) {
+                    return Ok((handle, &args[1..]));
+                }
+                return Err(plotting_error(
+                    builtin,
+                    format!("{builtin}: invalid figure handle"),
+                ));
             }
-            return Err(plotting_error(
-                builtin,
-                format!("{builtin}: invalid figure handle"),
-            ));
         }
     }
     Ok((current_figure_handle(), args))
+}
+
+/// Converts a finite scalar number to a title string, matching MATLAB's behaviour of
+/// accepting numeric values wherever text is expected in annotation builtins.
+fn format_num_as_title_text(value: &Value) -> Option<String> {
+    let n = match value {
+        Value::Num(n) => *n,
+        _ => return None,
+    };
+    if !n.is_finite() {
+        return None;
+    }
+    if n.fract() == 0.0 && n.abs() < 1e15 {
+        Some(format!("{}", n as i64))
+    } else {
+        Some(format!("{n}"))
+    }
 }
 
 fn try_parse_figure_target(value: &Value) -> Option<FigureHandle> {
@@ -140,5 +164,48 @@ mod tests {
         ])
         .unwrap_err();
         assert!(err.message.contains("unsupported property"));
+    }
+
+    #[test]
+    fn sgtitle_numeric_title_when_figure_with_same_number_exists() {
+        // Regression: sgtitle(42) must set the title to "42" on the current figure even when
+        // figure 42 exists, rather than consuming 42 as a handle and erroring with "expected text".
+        let _guard = setup();
+        let _ = figure_builtin(vec![Value::Num(42.0)]).unwrap();
+        let current = current_figure_handle();
+        sgtitle_builtin(vec![Value::Num(42.0)]).unwrap();
+        let fig = clone_figure(current).unwrap();
+        assert_eq!(fig.super_title.as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn sgtitle_numeric_title_when_no_figure_with_that_number() {
+        // sgtitle(99) should set the title to "99" on the current figure when figure 99 does not
+        // exist (previously errored with "invalid figure handle").
+        let _guard = setup();
+        let current = current_figure_handle();
+        sgtitle_builtin(vec![Value::Num(99.0)]).unwrap();
+        let fig = clone_figure(current).unwrap();
+        assert_eq!(fig.super_title.as_deref(), Some("99"));
+    }
+
+    #[test]
+    fn sgtitle_float_numeric_title() {
+        let _guard = setup();
+        let current = current_figure_handle();
+        sgtitle_builtin(vec![Value::Num(3.14)]).unwrap();
+        let fig = clone_figure(current).unwrap();
+        assert_eq!(fig.super_title.as_deref(), Some("3.14"));
+    }
+
+    #[test]
+    fn sgtitle_explicit_handle_with_text_still_works() {
+        // When there are 2+ args and the first is a valid figure handle, it is still treated as
+        // the target figure — the pre-existing behaviour must be preserved.
+        let _guard = setup();
+        let _ = figure_builtin(vec![Value::Num(7.0)]).unwrap();
+        sgtitle_builtin(vec![Value::Num(7.0), Value::String("Seven".into())]).unwrap();
+        let fig = clone_figure(FigureHandle::from(7)).unwrap();
+        assert_eq!(fig.super_title.as_deref(), Some("Seven"));
     }
 }
