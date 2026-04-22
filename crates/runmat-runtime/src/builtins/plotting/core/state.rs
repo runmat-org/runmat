@@ -1830,7 +1830,6 @@ fn with_figure_mut<R>(
     f: impl FnOnce(&mut FigureState) -> R,
 ) -> Result<(R, Figure), FigureError> {
     let mut reg = registry();
-    reg.current = handle;
     let state = get_state_mut(&mut reg, handle);
     let result = f(state);
     state.revision = state.revision.wrapping_add(1);
