@@ -139,17 +139,22 @@ impl VectorExporter {
             } else {
                 ""
             };
+            // Scale the band height and baseline with the font size so that
+            // large FontSize values don't overflow into subplot content.
+            let padding = (fs * 0.4).max(8.0f32);
+            let text_y = (fs + padding).round() as i32;
+            let band_height = text_y as f32 + padding;
             writeln!(
                 &mut svg,
                 "  <text x=\"{}\" y=\"{}\" text-anchor=\"middle\" font-size=\"{}\" fill=\"{}\" font-family=\"sans-serif\"{}>{}</text>",
                 self.settings.width * 0.5,
-                24,
+                text_y,
                 fs,
                 fill,
                 weight,
                 xml_escape(figure.sg_title.as_deref().unwrap_or_default())
             ).map_err(|e| format!("SVG write error: {e}"))?;
-            40.0f32
+            band_height
         } else {
             0.0f32
         };
