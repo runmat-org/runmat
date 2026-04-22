@@ -54,7 +54,7 @@ use runmat_runtime::builtins::math::linalg::structure::ishermitian::ishermitian_
 use runmat_runtime::builtins::math::linalg::structure::issymmetric::ensure_matrix_shape as ensure_symmetry_shape;
 use runmat_runtime::builtins::math::linalg::structure::symrcm::symrcm_host_real_data;
 use runmat_runtime::builtins::math::poly::polyfit::polyfit_host_real_for_provider;
-use runmat_runtime::builtins::math::reduction::compute_median_inplace;
+use runmat_runtime::builtins::math::reduction::{compute_median_inplace, matlab_gradient_shape};
 use runmat_runtime::RuntimeError;
 use runmat_time::Instant;
 use serde::{Deserialize, Serialize};
@@ -1390,21 +1390,7 @@ fn normalize_concat_shape(mut shape: Vec<usize>, dim_zero: usize) -> Vec<usize> 
 }
 
 fn normalize_gradient_shape(shape: &[usize], len: usize) -> Vec<usize> {
-    if shape.is_empty() {
-        if len == 0 {
-            Vec::new()
-        } else {
-            vec![1, 1]
-        }
-    } else if shape.len() == 1 {
-        if shape[0] == 1 {
-            vec![1, 1]
-        } else {
-            vec![1, shape[0]]
-        }
-    } else {
-        shape.to_vec()
-    }
+    matlab_gradient_shape(shape, len)
 }
 
 fn conv1d_output_shape(len: usize, orientation: ProviderConvOrientation) -> Vec<usize> {

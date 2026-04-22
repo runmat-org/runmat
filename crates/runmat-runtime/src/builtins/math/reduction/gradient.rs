@@ -293,7 +293,7 @@ fn value_len(value: &Value) -> usize {
     }
 }
 
-fn matlab_gradient_shape(shape: &[usize], len: usize) -> Vec<usize> {
+pub fn matlab_gradient_shape(shape: &[usize], len: usize) -> Vec<usize> {
     if shape.is_empty() {
         if len == 0 {
             Vec::new()

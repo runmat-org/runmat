@@ -19,7 +19,7 @@ pub(crate) mod type_resolvers;
 pub(crate) mod var;
 
 pub use self::diff::diff_tensor_host;
-pub use self::gradient::{gradient_complex_tensor_host, gradient_real_tensor_host};
+pub use self::gradient::{gradient_complex_tensor_host, gradient_real_tensor_host, matlab_gradient_shape};
 pub use self::median::compute_median_inplace;
 pub use cummax::evaluate as evaluate_cummax;
 pub use cummin::evaluate as evaluate_cummin;
