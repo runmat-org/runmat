@@ -1,0 +1,244 @@
+name: WASM Bindings
+
+on:
+  push:
+    branches:
+      - dev
+    paths:
+      - "bindings/ts/**"
+      - "crates/runmat-wasm/**"
+      - "crates/runmat-runtime/**"
+      - "crates/runmat-lsp/**"
+      - "scripts/test-wasm-headless.sh"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/wasm-bindings.yml"
+  workflow_call:
+    inputs:
+      ref:
+        description: Git ref to publish from
+        required: true
+        type: string
+      release_channel:
+        description: Publication channel
+        required: true
+        type: string
+      version:
+        description: Exact package version for production releases
+        required: false
+        type: string
+      publish:
+        description: Whether to publish to npm
+        required: false
+        default: true
+        type: boolean
+    secrets:
+      NPM_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Git ref to publish from
+        required: true
+        default: dev
+        type: string
+      publish:
+        description: Whether to publish to npm
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: wasm-bindings-${{ github.event_name }}-${{ inputs.ref || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build-and-publish:
+    runs-on: ["self-hosted", "linux", "GCP"]
+    # Environment-scoped secrets (NPM_TOKEN) require the job to declare the
+    # correct environment.  When triggered by a direct push or workflow_dispatch
+    # the job runs in the Dev environment; when called from release.yml via
+    # workflow_call the caller already has Production in scope and passes the
+    # secret explicitly, so this resolves to Production here as well.
+    environment: ${{ inputs.release_channel == 'prod' && 'Production' || 'Dev' }}
+    env:
+      RUST_BACKTRACE: 1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.ref || github.ref_name }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Add wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install npm dependencies
+        working-directory: bindings/ts
+        run: npm ci
+
+      - name: Build wasm32 target
+        run: RUNMAT_GENERATE_WASM_REGISTRY=1 cargo build -p runmat-wasm --target wasm32-unknown-unknown
+
+      - name: Run wasm headless tests
+        env:
+          WASM_BINDGEN_TEST_TIMEOUT: "300"
+        run: scripts/test-wasm-headless.sh
+
+      - name: Build bindings package
+        working-directory: bindings/ts
+        run: npm run build
+
+      - name: Lint bindings package
+        working-directory: bindings/ts
+        run: npm run lint
+
+      - name: Determine publish settings
+        id: publish_settings
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # inputs.release_channel is only set when triggered via workflow_call;
+          # GITHUB_EVENT_NAME is inherited from the caller (always "push" for
+          # tag-triggered releases), so we cannot use it to distinguish a
+          # workflow_call invocation from a direct branch push.
+          if [[ -n "${{ inputs.release_channel }}" ]]; then
+            channel="${{ inputs.release_channel }}"
+          else
+            channel="dev"
+          fi
+
+          case "${channel}" in
+            dev)
+              echo "channel=dev" >> "${GITHUB_OUTPUT}"
+              echo "dist_tag=dev" >> "${GITHUB_OUTPUT}"
+              ;;
+            prod)
+              echo "channel=prod" >> "${GITHUB_OUTPUT}"
+              echo "dist_tag=prod" >> "${GITHUB_OUTPUT}"
+              ;;
+            *)
+              echo "Unsupported release channel: ${channel}" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Set bindings package version
+        id: package_version
+        working-directory: bindings/ts
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          channel="${{ steps.publish_settings.outputs.channel }}"
+          package_name="$(node -p 'require("./package.json").name')"
+          current_version="$(node -p 'require("./package.json").version')"
+
+          if [[ "${channel}" == "prod" ]]; then
+            requested_version="${{ inputs.version }}"
+            requested_version="${requested_version#v}"
+            if [[ -z "${requested_version}" ]]; then
+              echo "Production release requires an explicit version input." >&2
+              exit 1
+            fi
+            next_version="${requested_version}"
+          else
+            published_versions_json="$(npm view "${package_name}" versions --json 2>/dev/null || echo '[]')"
+
+            next_version="$(
+              CURRENT_VERSION="${current_version}" \
+              PUBLISHED_VERSIONS_JSON="${published_versions_json}" \
+              node <<'NODE'
+              function parse(version) {
+                const match = /^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?$/.exec(version);
+                if (!match) return null;
+                return {
+                  major: Number(match[1]),
+                  minor: Number(match[2]),
+                  patch: Number(match[3]),
+                  prerelease: match[4] ? match[4].split('.') : [],
+                };
+              }
+
+              function compareIdentifiers(a, b) {
+                const aNumeric = /^\d+$/.test(a);
+                const bNumeric = /^\d+$/.test(b);
+                if (aNumeric && bNumeric) return Number(a) - Number(b);
+                if (aNumeric) return -1;
+                if (bNumeric) return 1;
+                return a.localeCompare(b);
+              }
+
+              function compareVersions(left, right) {
+                const a = parse(left);
+                const b = parse(right);
+                if (!a || !b) return 0;
+                if (a.major !== b.major) return a.major - b.major;
+                if (a.minor !== b.minor) return a.minor - b.minor;
+                if (a.patch !== b.patch) return a.patch - b.patch;
+                if (a.prerelease.length === 0 && b.prerelease.length === 0) return 0;
+                if (a.prerelease.length === 0) return 1;
+                if (b.prerelease.length === 0) return -1;
+                const len = Math.max(a.prerelease.length, b.prerelease.length);
+                for (let i = 0; i < len; i += 1) {
+                  if (a.prerelease[i] === undefined) return -1;
+                  if (b.prerelease[i] === undefined) return 1;
+                  const diff = compareIdentifiers(a.prerelease[i], b.prerelease[i]);
+                  if (diff !== 0) return diff;
+                }
+                return 0;
+              }
+
+              const currentVersion = process.env.CURRENT_VERSION;
+              const publishedRaw = JSON.parse(process.env.PUBLISHED_VERSIONS_JSON || "[]");
+              const publishedVersions = Array.isArray(publishedRaw)
+                ? publishedRaw
+                : typeof publishedRaw === "string"
+                  ? [publishedRaw]
+                  : [];
+              const validPublished = publishedVersions.filter((version) => parse(version));
+              const latestPublished = validPublished.sort(compareVersions).at(-1) || currentVersion;
+              const latest = parse(latestPublished);
+
+              if (!latest) {
+                throw new Error("Could not determine latest published package version");
+              }
+
+              let nextVersion;
+              if (latest.prerelease[0] === "dev" && /^\d+$/.test(latest.prerelease[1] || "")) {
+                nextVersion = `${latest.major}.${latest.minor}.${latest.patch}-dev.${Number(latest.prerelease[1]) + 1}`;
+              } else {
+                nextVersion = `${latest.major}.${latest.minor}.${latest.patch + 1}-dev.0`;
+              }
+
+              process.stdout.write(nextVersion);
+              NODE
+            )"
+          fi
+
+          npm version "${next_version}" --no-git-tag-version --allow-same-version
+          echo "version=${next_version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Publish bindings package to npm
+        if: github.event_name == 'push' || inputs.publish
+        working-directory: bindings/ts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --tag ${{ steps.publish_settings.outputs.dist_tag }}
+
+      - name: Promote production release to latest
+        if: (github.event_name == 'push' || inputs.publish) && steps.publish_settings.outputs.channel == 'prod'
+        working-directory: bindings/ts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm dist-tag add runmat@${{ steps.package_version.outputs.version }} latest

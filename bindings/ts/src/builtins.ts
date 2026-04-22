@@ -38,9 +38,9 @@ export type BuiltinDoc = {
   categoryPath: string[];
   keywords: string[];
   summary: string;
+  hero_image?: string;
   references?: string[];
   description?: string;
-  hero_image?: string;
   behaviors?: string[];
   examples?: BuiltinDocExample[];
   faqs?: BuiltinDocFAQ[];

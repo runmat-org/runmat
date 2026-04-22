@@ -373,6 +373,37 @@ fn test_kernel_command_help() {
 }
 
 #[test]
+fn test_project_command_help_includes_fs_namespace() {
+    let output = run_runmat(&["project", "--help"]);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("fs"));
+    assert!(stdout.contains("members"));
+    assert!(stdout.contains("retention"));
+}
+
+#[test]
+fn test_project_fs_command_help() {
+    let output = run_runmat(&["project", "fs", "--help"]);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("read"));
+    assert!(stdout.contains("write"));
+    assert!(stdout.contains("ls"));
+}
+
+#[test]
+fn test_remote_run_help_mentions_remote_script_path() {
+    let output = run_runmat(&["remote", "run", "--help"]);
+    assert!(output.status.success());
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Remote script path"));
+}
+
+#[test]
 fn test_log_level_configurations() {
     let log_levels = ["error", "warn", "info", "debug", "trace"];
 
@@ -419,6 +450,7 @@ fn test_script_with_syntax_error() {
 
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("error") || stderr.contains("failed"));
+    assert!(!stderr.contains("Error: command failed"));
 }
 
 #[test]
@@ -445,7 +477,8 @@ fn test_command_output_is_structured() {
     assert!(stdout.contains("Version:"));
     assert!(stdout.contains("Runtime Configuration:"));
     assert!(stdout.contains("Environment:"));
-    assert!(stdout.contains("Available Commands:"));
+    assert!(stdout.contains("Help:"));
+    assert!(stdout.contains("runmat --help"));
 }
 
 #[test]
