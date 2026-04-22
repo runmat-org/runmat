@@ -418,7 +418,10 @@ impl FigureMetadata {
         Self {
             title: figure.title.clone(),
             sg_title: figure.sg_title.clone(),
-            sg_title_style: Some(figure.sg_title_style.clone().into()),
+            sg_title_style: figure
+                .sg_title
+                .as_ref()
+                .map(|_| figure.sg_title_style.clone().into()),
             x_label: figure.x_label.clone(),
             y_label: figure.y_label.clone(),
             grid_enabled: figure.grid_enabled,
@@ -1600,6 +1603,22 @@ mod tests {
         assert_eq!(snapshot.plots.len(), 1);
         assert_eq!(snapshot.plots[0].axes_index, 1);
         assert!(!snapshot.metadata.grid_enabled);
+    }
+
+    #[test]
+    fn sg_title_style_omitted_when_sg_title_absent() {
+        let figure = Figure::new().with_title("Only regular title");
+        let snapshot = FigureSnapshot::capture(&figure);
+        assert!(snapshot.metadata.sg_title.is_none());
+        assert!(
+            snapshot.metadata.sg_title_style.is_none(),
+            "sgTitleStyle must be None when sgTitle is absent"
+        );
+        let json = serde_json::to_string(&snapshot.metadata).unwrap();
+        assert!(
+            !json.contains("sgTitleStyle"),
+            "sgTitleStyle must not appear in serialized JSON when sgTitle is absent"
+        );
     }
 
     #[test]
