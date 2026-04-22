@@ -561,6 +561,19 @@ impl PlotOverlay {
         self.compute_subplot_plot_rects_impl(outer, plot_renderer, font_scale, true)
     }
 
+    /// Like [`compute_subplot_plot_rects`] but lets the caller control whether the
+    /// super-title band is reserved. Pass `show_title: false` when the overlay is
+    /// rendered without titles so that GPU viewports and hit-rects stay aligned.
+    pub fn compute_subplot_plot_rects_explicit(
+        &self,
+        outer: Rect,
+        plot_renderer: &PlotRenderer,
+        font_scale: f32,
+        show_title: bool,
+    ) -> Vec<Rect> {
+        self.compute_subplot_plot_rects_impl(outer, plot_renderer, font_scale, show_title)
+    }
+
     pub fn snap_rect_to_pixels(rect: Rect, pixels_per_point: f32) -> Rect {
         let ppp = pixels_per_point.max(0.5);
         let min_x = (rect.min.x * ppp).round() / ppp;
@@ -636,6 +649,23 @@ impl PlotOverlay {
         pixels_per_point: f32,
     ) -> Vec<Rect> {
         self.compute_subplot_plot_rects_impl(outer, plot_renderer, font_scale, true)
+            .into_iter()
+            .map(|rect| Self::snap_rect_to_pixels(rect, pixels_per_point))
+            .collect()
+    }
+
+    /// Like [`compute_subplot_plot_rects_snapped`] but lets the caller control whether
+    /// the super-title band is reserved. Pass `show_title: false` when the overlay is
+    /// rendered without titles so that GPU viewports stay aligned with the drawn area.
+    pub fn compute_subplot_plot_rects_snapped_explicit(
+        &self,
+        outer: Rect,
+        plot_renderer: &PlotRenderer,
+        font_scale: f32,
+        pixels_per_point: f32,
+        show_title: bool,
+    ) -> Vec<Rect> {
+        self.compute_subplot_plot_rects_impl(outer, plot_renderer, font_scale, show_title)
             .into_iter()
             .map(|rect| Self::snap_rect_to_pixels(rect, pixels_per_point))
             .collect()
