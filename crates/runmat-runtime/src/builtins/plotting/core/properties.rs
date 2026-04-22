@@ -4,8 +4,8 @@ use runmat_plot::plots::{LegendStyle, TextStyle};
 use super::state::{
     axes_handle_exists, axes_handles_for_figure, axes_metadata_snapshot, axes_state_snapshot,
     current_axes_handle_for_figure, decode_axes_handle, decode_plot_object_handle,
-    figure_handle_exists, figure_has_super_title, legend_entries_snapshot,
-    select_axes_for_figure, set_legend_for_axes, set_super_title_properties_for_figure,
+    figure_handle_exists, figure_has_super_title, legend_entries_snapshot, select_axes_for_figure,
+    set_legend_for_axes, set_super_title_properties_for_figure,
     set_text_annotation_properties_for_axes, set_text_properties_for_axes, FigureHandle,
     PlotObjectKind,
 };

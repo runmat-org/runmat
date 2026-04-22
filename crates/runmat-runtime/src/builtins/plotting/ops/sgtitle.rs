@@ -203,9 +203,11 @@ mod tests {
     fn sgtitle_float_numeric_title() {
         let _guard = setup();
         let current = current_figure_handle();
-        sgtitle_builtin(vec![Value::Num(3.14)]).unwrap();
+        let pi = std::f64::consts::PI;
+        sgtitle_builtin(vec![Value::Num(pi)]).unwrap();
         let fig = clone_figure(current).unwrap();
-        assert_eq!(fig.super_title.as_deref(), Some("3.14"));
+        let expected = format!("{pi}");
+        assert_eq!(fig.super_title.as_deref(), Some(expected.as_str()));
     }
 
     #[test]
@@ -232,8 +234,11 @@ mod tests {
             "expected 1 child (axes) before sgtitle, got {children_before}"
         );
 
-        sgtitle_builtin(vec![Value::Num(fig_handle), Value::String("Now it exists".into())])
-            .unwrap();
+        sgtitle_builtin(vec![
+            Value::Num(fig_handle),
+            Value::String("Now it exists".into()),
+        ])
+        .unwrap();
         let children_after = figure_children_count(fig_handle);
         assert_eq!(
             children_after, 2,
