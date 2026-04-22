@@ -5,7 +5,9 @@ pub(crate) mod cummax;
 pub(crate) mod cummin;
 pub(crate) mod cumprod;
 pub(crate) mod cumsum;
+pub(crate) mod cumtrapz;
 pub(crate) mod diff;
+pub(crate) mod integration_common;
 pub(crate) mod max;
 pub(crate) mod mean;
 pub(crate) mod median;
@@ -14,6 +16,7 @@ pub(crate) mod nnz;
 pub(crate) mod prod;
 pub(crate) mod std;
 pub(crate) mod sum;
+pub(crate) mod trapz;
 pub(crate) mod type_resolvers;
 pub(crate) mod var;
 
