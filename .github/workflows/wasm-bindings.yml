@@ -66,7 +66,6 @@ jobs:
     environment: ${{ inputs.release_channel == 'prod' && 'Production' || 'Dev' }}
     env:
       RUST_BACKTRACE: 1
-      RUSTFLAGS: "-Copt-level=1"
     steps:
       - name: Checkout
         uses: actions/checkout@v4
