@@ -2807,8 +2807,13 @@ fn apply_figure_text_alias(
     builtin: &'static str,
 ) -> BuiltinResult<()> {
     if let Some(text) = value_as_text_string(value) {
-        set_super_title_properties_for_figure(handle, Some(text), None)
-            .map_err(|err| map_figure_error(builtin, err))?;
+        match kind {
+            PlotObjectKind::SuperTitle => {
+                set_super_title_properties_for_figure(handle, Some(text), None)
+                    .map_err(|err| map_figure_error(builtin, err))?;
+            }
+            _ => unreachable!(),
+        }
         return Ok(());
     }
 
