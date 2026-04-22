@@ -103,10 +103,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" || "${GITHUB_EVENT_NAME}" == "push" ]]; then
-            channel="dev"
-          else
+          # inputs.release_channel is only set when triggered via workflow_call;
+          # GITHUB_EVENT_NAME is inherited from the caller (always "push" for
+          # tag-triggered releases), so we cannot use it to distinguish a
+          # workflow_call invocation from a direct branch push.
+          if [[ -n "${{ inputs.release_channel }}" ]]; then
             channel="${{ inputs.release_channel }}"
+          else
+            channel="dev"
           fi
 
           case "${channel}" in
