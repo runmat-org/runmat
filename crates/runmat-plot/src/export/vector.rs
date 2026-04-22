@@ -177,6 +177,48 @@ impl VectorExporter {
             })
             .collect();
 
+        // Render per-axes titles from AxesMetadata (set by title(), not sgtitle()).
+        // This must happen before the plot elements loop to avoid duplicate rendering.
+        for ax in 0..(rows * cols) {
+            if let Some(meta) = figure.axes_metadata.get(ax) {
+                let title_text = meta
+                    .title
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|t| !t.is_empty());
+                if let Some(title) = title_text {
+                    let vp = axes_vps[ax];
+                    let style = &meta.title_style;
+                    let fs = style.font_size.map(|s| s.max(10.0)).unwrap_or(14.0);
+                    let fill = style
+                        .color
+                        .map(|c| self.color_to_hex(&c.to_array()))
+                        .unwrap_or_else(|| "#000000".to_string());
+                    let weight = if style
+                        .font_weight
+                        .as_deref()
+                        .map(|w| w.eq_ignore_ascii_case("bold"))
+                        .unwrap_or(false)
+                    {
+                        " font-weight=\"bold\""
+                    } else {
+                        ""
+                    };
+                    writeln!(
+                        &mut svg,
+                        "  <text x=\"{}\" y=\"{}\" text-anchor=\"middle\" font-size=\"{}\" fill=\"{}\" font-family=\"sans-serif\"{}>{}</text>",
+                        vp.0 + vp.2 * 0.5,
+                        vp.1 + fs + 2.0,
+                        fs,
+                        fill,
+                        weight,
+                        xml_escape(title)
+                    )
+                    .map_err(|e| format!("SVG write error: {e}"))?;
+                }
+            }
+        }
+
         let axes_map = figure.plot_axes_indices().to_vec();
         let rds = figure.render_data();
         for (i, rd) in rds.iter().enumerate() {
