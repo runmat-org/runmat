@@ -2575,9 +2575,12 @@ impl PlotRenderer {
             .unwrap_or(self.figure_show_box)
     }
     pub fn overlay_title(&self) -> Option<&String> {
+        self.figure_title.as_ref()
+    }
+    pub fn overlay_super_title(&self) -> Option<&String> {
         self.figure_super_title.as_ref()
     }
-    pub fn overlay_title_style(&self) -> &TextStyle {
+    pub fn overlay_super_title_style(&self) -> &TextStyle {
         &self.figure_super_title_style
     }
     pub fn overlay_title_for_axes(&self, axes_index: usize) -> Option<&String> {

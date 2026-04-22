@@ -493,7 +493,7 @@ impl PlotOverlay {
         plot_renderer: &PlotRenderer,
         scale: f32,
     ) -> (Rect, Option<Rect>) {
-        let Some(title) = plot_renderer.overlay_title().map(String::as_str) else {
+        let Some(title) = plot_renderer.overlay_super_title().map(String::as_str) else {
             return (outer, None);
         };
         if !Self::has_visible_text(Some(title)) {
@@ -946,12 +946,12 @@ impl PlotOverlay {
         let plot_area_rect = plot_rect;
 
         if let Some(title_rect) = super_title_rect {
-            if let Some(title) = plot_renderer.overlay_title() {
+            if let Some(title) = plot_renderer.overlay_super_title() {
                 self.draw_title_in_rect(
                     ui,
                     title_rect,
                     title,
-                    Some(plot_renderer.overlay_title_style()),
+                    Some(plot_renderer.overlay_super_title_style()),
                     config.font_scale,
                 );
             }
