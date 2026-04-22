@@ -97,6 +97,16 @@ mod tests {
         reset_hold_state_for_run,
     };
 
+    fn figure_children_count(handle: f64) -> usize {
+        let children =
+            get_builtin(vec![Value::Num(handle), Value::String("Children".into())]).unwrap();
+        match children {
+            Value::Num(_) => 1,
+            Value::Tensor(t) => t.data.len(),
+            _ => 0,
+        }
+    }
+
     fn setup() -> crate::builtins::plotting::state::PlotTestLockGuard {
         let guard = lock_plot_registry();
         ensure_plot_test_env();
@@ -207,5 +217,27 @@ mod tests {
         sgtitle_builtin(vec![Value::Num(7.0), Value::String("Seven".into())]).unwrap();
         let fig = clone_figure(FigureHandle::from(7)).unwrap();
         assert_eq!(fig.super_title.as_deref(), Some("Seven"));
+    }
+
+    #[test]
+    fn figure_children_excludes_super_title_handle_before_sgtitle_called() {
+        // Before sgtitle is invoked the Children array must contain only the axes handles,
+        // not a spurious super-title text object.
+        let _guard = setup();
+        let fig_handle = figure_builtin(vec![Value::Num(50.0)]).unwrap();
+        let children_before = figure_children_count(fig_handle);
+        // Default figure has exactly one axes.
+        assert_eq!(
+            children_before, 1,
+            "expected 1 child (axes) before sgtitle, got {children_before}"
+        );
+
+        sgtitle_builtin(vec![Value::Num(fig_handle), Value::String("Now it exists".into())])
+            .unwrap();
+        let children_after = figure_children_count(fig_handle);
+        assert_eq!(
+            children_after, 2,
+            "expected 2 children (axes + super-title) after sgtitle, got {children_after}"
+        );
     }
 }

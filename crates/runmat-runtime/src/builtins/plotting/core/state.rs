@@ -1869,6 +1869,14 @@ pub fn clone_figure(handle: FigureHandle) -> Option<Figure> {
     reg.figures.get(&handle).map(|state| state.figure.clone())
 }
 
+pub fn figure_has_super_title(handle: FigureHandle) -> bool {
+    let reg = registry();
+    reg.figures
+        .get(&handle)
+        .map(|state| state.figure.super_title.is_some())
+        .unwrap_or(false)
+}
+
 pub fn import_figure(figure: Figure) -> FigureHandle {
     let mut reg = registry();
     let handle = reg.next_handle;

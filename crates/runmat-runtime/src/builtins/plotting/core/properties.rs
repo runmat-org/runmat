@@ -4,9 +4,10 @@ use runmat_plot::plots::{LegendStyle, TextStyle};
 use super::state::{
     axes_handle_exists, axes_handles_for_figure, axes_metadata_snapshot, axes_state_snapshot,
     current_axes_handle_for_figure, decode_axes_handle, decode_plot_object_handle,
-    figure_handle_exists, legend_entries_snapshot, select_axes_for_figure, set_legend_for_axes,
-    set_super_title_properties_for_figure, set_text_annotation_properties_for_axes,
-    set_text_properties_for_axes, FigureHandle, PlotObjectKind,
+    figure_handle_exists, figure_has_super_title, legend_entries_snapshot,
+    select_axes_for_figure, set_legend_for_axes, set_super_title_properties_for_figure,
+    set_text_annotation_properties_for_axes, set_text_properties_for_axes, FigureHandle,
+    PlotObjectKind,
 };
 use super::style::{
     parse_color_value, value_as_bool, value_as_f64, value_as_string, LineStyleParseOptions,
@@ -237,6 +238,7 @@ fn get_figure_property(
         current_axes_handle_for_figure(handle).map_err(|err| map_figure_error(builtin, err))?;
     let super_title_handle =
         super::state::encode_plot_object_handle(handle, 0, PlotObjectKind::SuperTitle);
+    let has_super_title = figure_has_super_title(handle);
     match property.map(canonical_property_name) {
         None => {
             let mut st = StructValue::new();
@@ -245,7 +247,9 @@ fn get_figure_property(
             st.insert("Type", Value::String("figure".into()));
             st.insert("CurrentAxes", Value::Num(current_axes));
             let mut children = axes;
-            children.push(super_title_handle);
+            if has_super_title {
+                children.push(super_title_handle);
+            }
             st.insert("Children", handles_value(children));
             st.insert("Parent", Value::Num(f64::NAN));
             st.insert("Name", Value::String(format!("Figure {}", handle.as_u32())));
@@ -257,7 +261,9 @@ fn get_figure_property(
         Some("currentaxes") => Ok(Value::Num(current_axes)),
         Some("children") => Ok(handles_value({
             let mut children = axes;
-            children.push(super_title_handle);
+            if has_super_title {
+                children.push(super_title_handle);
+            }
             children
         })),
         Some("parent") => Ok(Value::Num(f64::NAN)),
