@@ -12376,49 +12376,67 @@ impl WgpuProvider {
         let mut reduced_shape = shape.clone();
         reduced_shape[dim_index] = 1;
 
-        let a1 = self.gather_linear_exec(lhs, &comp1, &reduced_shape)?;
-        let a2 = self.gather_linear_exec(lhs, &comp2, &reduced_shape)?;
-        let a3 = self.gather_linear_exec(lhs, &comp3, &reduced_shape)?;
-        let b1 = self.gather_linear_exec(rhs, &comp1, &reduced_shape)?;
-        let b2 = self.gather_linear_exec(rhs, &comp2, &reduced_shape)?;
-        let b3 = self.gather_linear_exec(rhs, &comp3, &reduced_shape)?;
+        // Track every intermediate handle outside the computation closure so that
+        // handles allocated before a failing `?` are still freed on error.
+        let mut to_free: Vec<GpuTensorHandle> = Vec::with_capacity(15);
 
-        let a2b3 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a2, &b3)?;
-        let a3b2 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a3, &b2)?;
-        let c1 =
-            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a2b3, &a3b2)?;
+        let compute_result: Result<GpuTensorHandle> = (|| {
+            let a1 = self.gather_linear_exec(lhs, &comp1, &reduced_shape)?;
+            to_free.push(a1.clone());
+            let a2 = self.gather_linear_exec(lhs, &comp2, &reduced_shape)?;
+            to_free.push(a2.clone());
+            let a3 = self.gather_linear_exec(lhs, &comp3, &reduced_shape)?;
+            to_free.push(a3.clone());
+            let b1 = self.gather_linear_exec(rhs, &comp1, &reduced_shape)?;
+            to_free.push(b1.clone());
+            let b2 = self.gather_linear_exec(rhs, &comp2, &reduced_shape)?;
+            to_free.push(b2.clone());
+            let b3 = self.gather_linear_exec(rhs, &comp3, &reduced_shape)?;
+            to_free.push(b3.clone());
 
-        let a3b1 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a3, &b1)?;
-        let a1b3 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a1, &b3)?;
-        let c2 =
-            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a3b1, &a1b3)?;
+            let a2b3 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a2, &b3)?;
+            to_free.push(a2b3.clone());
+            let a3b2 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a3, &b2)?;
+            to_free.push(a3b2.clone());
+            let c1 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a2b3, &a3b2)?;
+            to_free.push(c1.clone());
 
-        let a1b2 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a1, &b2)?;
-        let a2b1 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a2, &b1)?;
-        let c3 =
-            self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a1b2, &a2b1)?;
+            let a3b1 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a3, &b1)?;
+            to_free.push(a3b1.clone());
+            let a1b3 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a1, &b3)?;
+            to_free.push(a1b3.clone());
+            let c2 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a3b1, &a1b3)?;
+            to_free.push(c2.clone());
 
-        let out = self.zeros_exec(&shape)?;
-        let scatter_result = (|| -> Result<()> {
-            self.scatter_linear_exec(&out, &comp1, &c1)?;
-            self.scatter_linear_exec(&out, &comp2, &c2)?;
-            self.scatter_linear_exec(&out, &comp3, &c3)?;
-            Ok(())
+            let a1b2 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a1, &b2)?;
+            to_free.push(a1b2.clone());
+            let a2b1 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a2, &b1)?;
+            to_free.push(a2b1.clone());
+            let c3 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a1b2, &a2b1)?;
+            to_free.push(c3.clone());
+
+            let out = self.zeros_exec(&shape)?;
+            let scatter_result = (|| -> Result<()> {
+                self.scatter_linear_exec(&out, &comp1, &c1)?;
+                self.scatter_linear_exec(&out, &comp2, &c2)?;
+                self.scatter_linear_exec(&out, &comp3, &c3)?;
+                Ok(())
+            })();
+
+            match scatter_result {
+                Ok(()) => Ok(out),
+                Err(err) => {
+                    let _ = self.free(&out);
+                    Err(err)
+                }
+            }
         })();
 
-        for handle in [
-            &a1, &a2, &a3, &b1, &b2, &b3, &a2b3, &a3b2, &c1, &a3b1, &a1b3, &c2, &a1b2, &a2b1, &c3,
-        ] {
-            let _ = self.free(handle);
+        for h in &to_free {
+            let _ = self.free(h);
         }
 
-        match scatter_result {
-            Ok(()) => Ok(out),
-            Err(err) => {
-                let _ = self.free(&out);
-                Err(err)
-            }
-        }
+        compute_result
     }
 
     pub(crate) fn elem_eq_exec(
