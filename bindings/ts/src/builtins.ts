@@ -30,6 +30,13 @@ export type BuiltinDocJsonEncodeOption = {
   description: string;
 };
 
+export type BuiltinDocValidation = {
+  summary: string;
+  implementation?: BuiltinDocLink;
+  parity_test?: BuiltinDocLink;
+  tolerance?: string;
+};
+
 export type BuiltinDoc = {
   key: string;
   title: string;
@@ -55,6 +62,7 @@ export type BuiltinDoc = {
   fusion?: Record<string, unknown>;
   requires_feature?: string | null;
   tested?: Record<string, string | string[] | null>;
+  validation?: BuiltinDocValidation;
 };
 
 export type BuiltinManifestEntry = Pick<
