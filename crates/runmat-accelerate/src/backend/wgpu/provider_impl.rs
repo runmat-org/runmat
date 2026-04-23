@@ -12394,25 +12394,34 @@ impl WgpuProvider {
             let b3 = self.gather_linear_exec(rhs, &comp3, &reduced_shape)?;
             to_free.push(b3.clone());
 
-            let a2b3 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a2, &b3)?;
+            let a2b3 =
+                self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a2, &b3)?;
             to_free.push(a2b3.clone());
-            let a3b2 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a3, &b2)?;
+            let a3b2 =
+                self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a3, &b2)?;
             to_free.push(a3b2.clone());
-            let c1 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a2b3, &a3b2)?;
+            let c1 =
+                self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a2b3, &a3b2)?;
             to_free.push(c1.clone());
 
-            let a3b1 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a3, &b1)?;
+            let a3b1 =
+                self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a3, &b1)?;
             to_free.push(a3b1.clone());
-            let a1b3 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a1, &b3)?;
+            let a1b3 =
+                self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a1, &b3)?;
             to_free.push(a1b3.clone());
-            let c2 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a3b1, &a1b3)?;
+            let c2 =
+                self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a3b1, &a1b3)?;
             to_free.push(c2.clone());
 
-            let a1b2 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a1, &b2)?;
+            let a1b2 =
+                self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a1, &b2)?;
             to_free.push(a1b2.clone());
-            let a2b1 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a2, &b1)?;
+            let a2b1 =
+                self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Mul, &a2, &b1)?;
             to_free.push(a2b1.clone());
-            let c3 = self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a1b2, &a2b1)?;
+            let c3 =
+                self.binary_op_exec(crate::backend::wgpu::types::BinaryOpCode::Sub, &a1b2, &a2b1)?;
             to_free.push(c3.clone());
 
             let out = self.zeros_exec(&shape)?;
