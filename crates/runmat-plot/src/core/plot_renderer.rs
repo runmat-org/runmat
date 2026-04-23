@@ -40,6 +40,8 @@ pub struct PlotRenderer {
 
     // Cached figure metadata for overlay
     figure_title: Option<String>,
+    figure_sg_title: Option<String>,
+    figure_sg_title_style: TextStyle,
     figure_x_label: Option<String>,
     figure_y_label: Option<String>,
     figure_z_label: Option<String>,
@@ -237,6 +239,8 @@ impl PlotRenderer {
             data_bounds: None,
             needs_update: true,
             figure_title: None,
+            figure_sg_title: None,
+            figure_sg_title_style: TextStyle::default(),
             figure_x_label: None,
             figure_y_label: None,
             figure_z_label: None,
@@ -564,6 +568,8 @@ impl PlotRenderer {
     /// Cache figure metadata for overlay consumption
     fn cache_figure_meta(&mut self, figure: &Figure) {
         self.figure_title = figure.title.clone();
+        self.figure_sg_title = figure.sg_title.clone();
+        self.figure_sg_title_style = figure.sg_title_style.clone();
         self.figure_x_label = figure.x_label.clone();
         self.figure_y_label = figure.y_label.clone();
         self.figure_z_label = figure.z_label.clone();
@@ -2571,6 +2577,12 @@ impl PlotRenderer {
     pub fn overlay_title(&self) -> Option<&String> {
         self.figure_title.as_ref()
     }
+    pub fn overlay_sg_title(&self) -> Option<&String> {
+        self.figure_sg_title.as_ref()
+    }
+    pub fn overlay_sg_title_style(&self) -> &TextStyle {
+        &self.figure_sg_title_style
+    }
     pub fn overlay_title_for_axes(&self, axes_index: usize) -> Option<&String> {
         self.last_figure
             .as_ref()
@@ -2872,6 +2884,8 @@ impl PlotRenderer {
         // As a strict fallback, produce an empty figure with current metadata only
         let mut fig = crate::plots::Figure::new();
         fig.title = self.figure_title.clone();
+        fig.sg_title = self.figure_sg_title.clone();
+        fig.sg_title_style = self.figure_sg_title_style.clone();
         fig.x_label = self.figure_x_label.clone();
         fig.y_label = self.figure_y_label.clone();
         fig.legend_enabled = self.figure_show_legend;

@@ -487,13 +487,46 @@ impl PlotOverlay {
         }
     }
 
-    pub fn compute_subplot_plot_rects(
+    fn reserve_sg_title_band(
+        &self,
+        outer: Rect,
+        plot_renderer: &PlotRenderer,
+        scale: f32,
+    ) -> (Rect, Option<Rect>) {
+        let Some(title) = plot_renderer.overlay_sg_title().map(String::as_str) else {
+            return (outer, None);
+        };
+        if !Self::has_visible_text(Some(title)) {
+            return (outer, None);
+        }
+
+        let scale = scale.max(0.75);
+        let band_h = (30.0 * scale).min(outer.height().max(1.0) * 0.14);
+        let gap = 4.0 * scale;
+        let title_max_y = (outer.min.y + band_h).min(outer.max.y);
+        let content_min_y = (title_max_y + gap).min(outer.max.y);
+        (
+            Rect::from_min_max(egui::pos2(outer.min.x, content_min_y), outer.max),
+            Some(Rect::from_min_max(
+                outer.min,
+                egui::pos2(outer.max.x, title_max_y),
+            )),
+        )
+    }
+
+    fn compute_subplot_plot_rects_impl(
         &self,
         outer: Rect,
         plot_renderer: &PlotRenderer,
         font_scale: f32,
+        show_title: bool,
     ) -> Vec<Rect> {
         let plot_area = Self::outer_plot_area_for_axes(outer, plot_renderer);
+        let (plot_area, _) = if show_title {
+            self.reserve_sg_title_band(plot_area, plot_renderer, font_scale)
+        } else {
+            (plot_area, None)
+        };
         let (rows, cols) = plot_renderer.figure_axes_grid();
         if rows * cols <= 1 {
             vec![
@@ -517,6 +550,28 @@ impl PlotOverlay {
                 })
                 .collect()
         }
+    }
+
+    pub fn compute_subplot_plot_rects(
+        &self,
+        outer: Rect,
+        plot_renderer: &PlotRenderer,
+        font_scale: f32,
+    ) -> Vec<Rect> {
+        self.compute_subplot_plot_rects_impl(outer, plot_renderer, font_scale, true)
+    }
+
+    /// Like [`compute_subplot_plot_rects`] but lets the caller control whether the
+    /// super-title band is reserved. Pass `show_title: false` when the overlay is
+    /// rendered without titles so that GPU viewports and hit-rects stay aligned.
+    pub fn compute_subplot_plot_rects_explicit(
+        &self,
+        outer: Rect,
+        plot_renderer: &PlotRenderer,
+        font_scale: f32,
+        show_title: bool,
+    ) -> Vec<Rect> {
+        self.compute_subplot_plot_rects_impl(outer, plot_renderer, font_scale, show_title)
     }
 
     pub fn snap_rect_to_pixels(rect: Rect, pixels_per_point: f32) -> Rect {
@@ -593,7 +648,24 @@ impl PlotOverlay {
         font_scale: f32,
         pixels_per_point: f32,
     ) -> Vec<Rect> {
-        self.compute_subplot_plot_rects(outer, plot_renderer, font_scale)
+        self.compute_subplot_plot_rects_impl(outer, plot_renderer, font_scale, true)
+            .into_iter()
+            .map(|rect| Self::snap_rect_to_pixels(rect, pixels_per_point))
+            .collect()
+    }
+
+    /// Like [`compute_subplot_plot_rects_snapped`] but lets the caller control whether
+    /// the super-title band is reserved. Pass `show_title: false` when the overlay is
+    /// rendered without titles so that GPU viewports stay aligned with the drawn area.
+    pub fn compute_subplot_plot_rects_snapped_explicit(
+        &self,
+        outer: Rect,
+        plot_renderer: &PlotRenderer,
+        font_scale: f32,
+        pixels_per_point: f32,
+        show_title: bool,
+    ) -> Vec<Rect> {
+        self.compute_subplot_plot_rects_impl(outer, plot_renderer, font_scale, show_title)
             .into_iter()
             .map(|rect| Self::snap_rect_to_pixels(rect, pixels_per_point))
             .collect()
@@ -907,10 +979,27 @@ impl PlotOverlay {
 
         let (rows, cols) = plot_renderer.figure_axes_grid();
         let plot_rect = Self::outer_plot_area_for_axes(available_rect, plot_renderer);
+        let (plot_rect, sg_title_rect) = if config.show_title {
+            self.reserve_sg_title_band(plot_rect, plot_renderer, config.font_scale)
+        } else {
+            (plot_rect, None)
+        };
 
         // Use full available rectangular plot area (do not force square);
         // camera fitting and axis_equal settings will control aspect.
         let plot_area_rect = plot_rect;
+
+        if let Some(title_rect) = sg_title_rect {
+            if let Some(title) = plot_renderer.overlay_sg_title() {
+                self.draw_title_in_rect(
+                    ui,
+                    title_rect,
+                    title,
+                    Some(plot_renderer.overlay_sg_title_style()),
+                    config.font_scale,
+                );
+            }
+        }
 
         if rows * cols > 1 {
             let rects = self.compute_subplot_rects(
@@ -961,6 +1050,7 @@ impl PlotOverlay {
                                 ui,
                                 panel_layout.title_rect,
                                 title,
+                                None,
                                 config.font_scale,
                             );
                         }
@@ -1000,6 +1090,7 @@ impl PlotOverlay {
                             ui,
                             panel_layout.title_rect,
                             title,
+                            None,
                             config.font_scale,
                         );
                     }
@@ -1072,7 +1163,13 @@ impl PlotOverlay {
                     .overlay_title_for_axes(0)
                     .or(config.title.as_ref())
                 {
-                    self.draw_title_in_rect(ui, panel_layout.title_rect, title, config.font_scale);
+                    self.draw_title_in_rect(
+                        ui,
+                        panel_layout.title_rect,
+                        title,
+                        None,
+                        config.font_scale,
+                    );
                 }
             }
             if matches!(
@@ -1956,15 +2053,25 @@ impl PlotOverlay {
         draw_axis(Vec3::Z, col_z);
     }
 
-    fn draw_title_in_rect(&self, ui: &mut egui::Ui, rect: Rect, title: &str, scale: f32) {
+    fn draw_title_in_rect(
+        &self,
+        ui: &mut egui::Ui,
+        rect: Rect,
+        title: &str,
+        style: Option<&TextStyle>,
+        scale: f32,
+    ) {
         let scale = scale.max(0.75);
-        let text_color = self.theme_text_color();
-        ui.painter().text(
+        let style = style.cloned().unwrap_or_default();
+        Self::paint_styled_text(
+            ui.painter(),
             rect.center(),
             Align2::CENTER_CENTER,
             title,
-            FontId::proportional(16.0 * scale),
-            text_color,
+            Self::style_font_size(&style, 16.0, scale),
+            Self::style_color(&style, self.theme_text_color()),
+            Self::style_is_bold(&style),
+            110,
         );
     }
 

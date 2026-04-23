@@ -38,7 +38,7 @@ RunMat includes 40+ plotting builtins with GPU-first rendering, interactive 3D c
 
 **Log-scale:** `semilogx`, `semilogy`, `loglog`
 
-**Figure management:** `figure`, `subplot`, `hold`, `clf`, `cla`, `close`, `title`, `xlabel`, `ylabel`, `zlabel`, `legend`, `colorbar`, `colormap`, `axis`, `grid`, `box`, `shading`, `view`, `drawnow`, `pause`
+**Figure management:** `figure`, `subplot`, `hold`, `clf`, `cla`, `close`, `title`, `sgtitle`, `xlabel`, `ylabel`, `zlabel`, `legend`, `colorbar`, `colormap`, `axis`, `grid`, `box`, `shading`, `view`, `drawnow`, `pause`
 
 **Handle graphics:** `get`, `set`
 
@@ -121,4 +121,3 @@ The fastest way to find out:
 Your code stays local. Nothing is sent to a server.
 
 If something doesn't work, [open an issue](https://github.com/runmat-org/runmat/issues) with a minimal reproducer and we'll add a conformance test.
-
