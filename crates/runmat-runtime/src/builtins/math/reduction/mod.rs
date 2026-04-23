@@ -6,6 +6,7 @@ pub(crate) mod cummin;
 pub(crate) mod cumprod;
 pub(crate) mod cumsum;
 pub(crate) mod diff;
+pub(crate) mod gradient;
 pub(crate) mod max;
 pub(crate) mod mean;
 pub(crate) mod median;
@@ -18,6 +19,9 @@ pub(crate) mod type_resolvers;
 pub(crate) mod var;
 
 pub use self::diff::diff_tensor_host;
+pub use self::gradient::{
+    gradient_complex_tensor_host, gradient_real_tensor_host, matlab_gradient_shape,
+};
 pub use self::median::compute_median_inplace;
 pub use cummax::evaluate as evaluate_cummax;
 pub use cummin::evaluate as evaluate_cummin;
