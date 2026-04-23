@@ -73,6 +73,48 @@ jobs:
           fetch-depth: 0
           ref: ${{ inputs.ref || github.ref_name }}
 
+      - name: Validate Rust toolchain (Linux self-hosted)
+        shell: bash
+        env:
+          RUST_TOOLCHAIN: 1.90.0-x86_64-unknown-linux-gnu
+          RUST_COMPONENTS: rustfmt clippy
+        run: |
+          set -euo pipefail
+
+          toolchain="${RUST_TOOLCHAIN}"
+          cargo_home="${CARGO_HOME:-${HOME}/.cargo}"
+          rustup_home="${RUSTUP_HOME:-${HOME}/.rustup}"
+          cargo_bin="${cargo_home}/bin"
+          rustup="${cargo_bin}/rustup"
+          cargo="${cargo_bin}/cargo"
+
+          if [[ ! -x "${rustup}" ]]; then
+            echo "Missing rustup at ${rustup}. Provision the runner with infra/scripts/bootstrap-linux-runner.sh." >&2
+            exit 1
+          fi
+          if [[ ! -x "${cargo}" ]]; then
+            echo "Missing cargo at ${cargo}. Provision the runner with infra/scripts/bootstrap-linux-runner.sh." >&2
+            exit 1
+          fi
+
+          {
+            echo "CARGO_HOME=${cargo_home}"
+            echo "RUSTUP_HOME=${rustup_home}"
+            echo "RUSTUP_TOOLCHAIN=${toolchain}"
+          } >> "${GITHUB_ENV}"
+          echo "${cargo_bin}" >> "${GITHUB_PATH}"
+
+          "${rustup}" which --toolchain "${toolchain}" cargo >/dev/null
+          installed_components="$("${rustup}" component list --toolchain "${toolchain}" --installed)"
+          for component in ${RUST_COMPONENTS}; do
+            if ! grep -q "^${component}-" <<<"${installed_components}"; then
+              echo "Missing Rust component '${component}' for toolchain ${toolchain}. Provision the runner with infra/scripts/bootstrap-linux-runner.sh." >&2
+              exit 1
+            fi
+          done
+          "${cargo}" -V
+          "${cargo_bin}/rustc" -V
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
