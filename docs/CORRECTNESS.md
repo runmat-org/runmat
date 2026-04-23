@@ -177,7 +177,7 @@ What we do to ensure this:
 
 - Every numerical builtin has a reference implementation and an automated test that compares representative evaluation cases against it, typically including positive, negative, and edge cases.
 - Reference implementations are measured to the target numeric type's maximum floating-point precision and documented inline in the test source.
-- CI/CD gates releases and verifies that all tests execute and resolve within their tolerance limits. CI/CD tests run on macOS, Windows (Intel CPU + NVIDIA GPU), Linux (Intel CPU + NVIDIA GPU), and Linux (ARM CPU + GPU).
+- CI/CD gates releases and verifies that all tests execute and resolve within their tolerance limits. CI/CD tests run on macOS, Windows (Intel CPU + NVIDIA GPU), and Linux (Intel CPU + NVIDIA GPU).
 
 See also: [Design Philosophy](/docs/design-philosophy).
 
