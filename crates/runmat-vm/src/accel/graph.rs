@@ -1133,4 +1133,56 @@ mod tests {
             })
         );
     }
+
+    #[test]
+    fn accel_graph_trapz_is_not_classified_as_generic_reduction() {
+        let instructions = vec![Instr::LoadVar(0), Instr::CallBuiltin("trapz".into(), 1)];
+        let var_types = vec![Type::Tensor {
+            shape: Some(vec![Some(1), Some(3)]),
+        }];
+        let graph = build_accel_graph(&instructions, &var_types);
+
+        let node = graph
+            .nodes
+            .iter()
+            .find(|node| {
+                matches!(
+                    &node.label,
+                    AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("trapz")
+                )
+            })
+            .expect("trapz node");
+
+        assert_eq!(node.category, AccelOpCategory::Other);
+        assert!(!node
+            .tags
+            .iter()
+            .any(|tag| matches!(tag, AccelGraphTag::Reduction)));
+    }
+
+    #[test]
+    fn accel_graph_cumtrapz_is_not_classified_as_generic_reduction() {
+        let instructions = vec![Instr::LoadVar(0), Instr::CallBuiltin("cumtrapz".into(), 1)];
+        let var_types = vec![Type::Tensor {
+            shape: Some(vec![Some(1), Some(3)]),
+        }];
+        let graph = build_accel_graph(&instructions, &var_types);
+
+        let node = graph
+            .nodes
+            .iter()
+            .find(|node| {
+                matches!(
+                    &node.label,
+                    AccelNodeLabel::Builtin { name } if name.eq_ignore_ascii_case("cumtrapz")
+                )
+            })
+            .expect("cumtrapz node");
+
+        assert_eq!(node.category, AccelOpCategory::Other);
+        assert!(!node
+            .tags
+            .iter()
+            .any(|tag| matches!(tag, AccelGraphTag::Reduction)));
+    }
 }
