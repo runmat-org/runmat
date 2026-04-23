@@ -585,9 +585,7 @@ GNU Octave is better if the goal is reusing existing `.m` files; Octave preserve
 
 RunMat and GNU Octave are the best options for reuse. RunMat offers faster JIT execution and GPU acceleration, while Octave is more mature.
 
-### Can I run MATLAB code in the browser for free?
 
-Yes. RunMat allows you to run MATLAB-syntax code directly in the browser using WebAssembly and WebGPU, with no login or license required.
 
 ### Do any free MATLAB alternatives include built-in version control?
 
