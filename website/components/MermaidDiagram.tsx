@@ -102,10 +102,7 @@ export function MermaidDiagram({ chart, className }: MermaidDiagramProps) {
       }
     };
 
-    // Add a small delay to ensure DOM is ready
-    const timeoutId = setTimeout(renderChart, 100);
-    
-    return () => clearTimeout(timeoutId);
+    void renderChart();
   }, [chart, theme, mounted]);
 
   // Don't render anything during SSR

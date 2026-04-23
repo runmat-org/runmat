@@ -427,6 +427,14 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
       tags={post.frontmatter.tags}
       rightAside={<HeadingsNav source={post.content} />}
     >
+      {post.frontmatter.image && (
+        <link
+          rel="preload"
+          as="image"
+          href={post.frontmatter.image}
+          fetchPriority="high"
+        />
+      )}
       {jsonLdString && (
         <script
           type="application/ld+json"

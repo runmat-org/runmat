@@ -73,6 +73,8 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
+        <link rel="preconnect" href="https://web.runmatstatic.com" crossOrigin="" />
+        <link rel="dns-prefetch" href="https://web.runmatstatic.com" />
         <link
           rel="preload"
           as="image"
